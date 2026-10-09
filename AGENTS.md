@@ -10,9 +10,12 @@ Rules for AI agents and human contributors. Read this file, then
   its plugins. If unsure about a source, stop and ask.
 - **No secrets** in code, logs, tests, commits or issues. Passwords come from the
   environment or the OS keychain. `ConnectParams` has a redacting `Debug`; keep it.
-- **No personal data** about maintainers or users in the repository: no names,
-  emails, machine paths, internal hostnames, or links to private sessions.
-  Committer identity in this repository is the neutral project identity.
+- **No personal data** in the repository files: no personal names or emails in
+  docs, machine paths, employer or internal hostnames, or links to private
+  sessions. The commit author is the maintainer's normal git identity.
+- **No conversation history in docs.** Describe the project as it is: what and
+  why, never who asked for it, who decided, or what was discussed with an AI
+  assistant. Decisions go into ADRs as neutral context, decision and consequences.
 - Public text (code, comments, docs, commits, issues) is in English.
 - No unrelated refactors. Keep changes small and reviewable.
 
