@@ -1057,6 +1057,7 @@ async fn transactions_manual_and_auto() {
     assert_eq!(row(&*conn, "SELECT 5", &[]).await[0], Value::Int(5));
     conn.rollback().await.unwrap();
 
+    conn.set_tx_mode(TxMode::Auto).await.unwrap();
     exec(&*conn, "DROP TABLE pxpg_tx").await;
 }
 
@@ -1117,6 +1118,7 @@ async fn manual_mode_early_close_keeps_the_transaction() {
         Value::Int(6)
     );
 
+    conn.set_tx_mode(TxMode::Auto).await.unwrap();
     exec(&*conn, "DROP TABLE pxpg_manual").await;
 }
 
@@ -1911,20 +1913,35 @@ async fn introspection_of_a_test_schema() {
             .is_empty()
     );
 
+    // the same answers in a manual-commit session, where results are paged
+    // through SQL cursors
+    let expected_objects = meta.objects("pxpg_intro", &[]).await.unwrap();
+    let expected_columns = meta.columns("pxpg_intro", "Child Table").await.unwrap();
+    let expected_constraints = meta.constraints("pxpg_intro", "Child Table").await.unwrap();
+    drop(meta);
+    conn.set_tx_mode(TxMode::Manual).await.unwrap();
+    let meta = introspector(&*conn);
+    assert_eq!(
+        meta.objects("pxpg_intro", &[]).await.unwrap(),
+        expected_objects
+    );
+    assert_eq!(
+        meta.columns("pxpg_intro", "Child Table").await.unwrap(),
+        expected_columns
+    );
+    assert_eq!(
+        meta.constraints("pxpg_intro", "Child Table").await.unwrap(),
+        expected_constraints
+    );
+    drop(meta);
+    conn.rollback().await.unwrap();
+    conn.set_tx_mode(TxMode::Auto).await.unwrap();
+
     exec(&*conn, "DROP SCHEMA pxpg_intro CASCADE").await;
 }
 
-/// Measurement: `cargo test --release -p db-postgres -- --ignored bench_fetch_100k --nocapture`
-#[tokio::test]
-#[ignore]
-async fn bench_fetch_100k() {
-    let started = Instant::now();
-    let conn = connect().await;
-    let connect_time = started.elapsed();
-
-    // warm up the type and statement paths with a throw-away query
-    conn.query("SELECT 1", &[], 1).await.unwrap();
-
+/// Fetch 100,000 rows in pages of 500; returns (first page, total) times.
+async fn fetch_100k(conn: &dyn Connection) -> (Duration, Duration) {
     let sql = "SELECT g::int4, 'row number ' || g, \
                TIMESTAMPTZ '2026-01-01 00:00:00+00' + g * INTERVAL '1 second', \
                (g * 1.25)::numeric(20,4) \
@@ -1949,11 +1966,35 @@ async fn bench_fetch_100k() {
         }
         total += page.len();
     }
-    let elapsed = started.elapsed();
     assert_eq!(total, 100_000);
-    let rows_per_second = total as f64 / elapsed.as_secs_f64();
+    (first_page, started.elapsed())
+}
+
+/// Measurement: `cargo test --release -p db-postgres -- --ignored bench_fetch_100k --nocapture`
+#[tokio::test]
+#[ignore]
+async fn bench_fetch_100k() {
+    let started = Instant::now();
+    let conn = connect().await;
+    let connect_time = started.elapsed();
+
+    // warm up the type and statement paths with a throw-away query
+    conn.query("SELECT 1", &[], 1).await.unwrap();
+
+    let (first_page, elapsed) = fetch_100k(&*conn).await;
+    let rows_per_second = 100_000_f64 / elapsed.as_secs_f64();
     println!("connect:              {connect_time:?}");
     println!("first page (500):     {first_page:?}");
     println!("100000 rows total:    {elapsed:?}");
     println!("throughput:           {rows_per_second:.0} rows/s");
+
+    // a manual-commit session pages through an SQL cursor (one FETCH per page)
+    conn.set_tx_mode(TxMode::Manual).await.unwrap();
+    fetch_100k(&*conn).await;
+    let (first_page, elapsed) = fetch_100k(&*conn).await;
+    let rows_per_second = 100_000_f64 / elapsed.as_secs_f64();
+    println!("manual mode, first page (500):  {first_page:?}");
+    println!("manual mode, 100000 rows total: {elapsed:?}");
+    println!("manual mode, throughput:        {rows_per_second:.0} rows/s");
+    conn.rollback().await.unwrap();
 }
