@@ -1,6 +1,6 @@
 //! The connection: statements, transactions, cancel and close.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -20,9 +20,11 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 use crate::bind;
 use crate::cancel::{self, Target};
 use crate::cursor::{CursorCore, PgCursor};
+use crate::declared_cursor::DeclaredCore;
 use crate::decode::column_info;
 use crate::error::{self, Phase, map_scrubbed};
 use crate::stmt::{self, TxEffect};
+use crate::stream_cursor::StreamCore;
 
 /// State shared by the connection and its cursor.
 pub(crate) struct Inner {
@@ -37,7 +39,8 @@ pub(crate) struct Inner {
     pub(crate) released: Notify,
     tx_mode: Mutex<TxMode>,
     in_tx: AtomicBool,
-    active: Mutex<Option<Weak<CursorCore>>>,
+    active: Mutex<Option<Weak<dyn CursorCore>>>,
+    cursor_seq: AtomicU64,
     version: tokio::sync::OnceCell<String>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -62,6 +65,7 @@ impl Inner {
             tx_mode: Mutex::new(TxMode::Auto),
             in_tx: AtomicBool::new(false),
             active: Mutex::new(None),
+            cursor_seq: AtomicU64::new(0),
             version: tokio::sync::OnceCell::new(),
             task: Mutex::new(Some(task)),
         })
@@ -160,7 +164,7 @@ impl Inner {
 
     async fn run_statement(
         self: &Arc<Self>,
-        client: &Client,
+        client: &Arc<Client>,
         sql: &str,
         params: &[Value],
         opts: &ExecOptions,
@@ -186,13 +190,39 @@ impl Inner {
             return Ok(Outcome::Affected(affected));
         }
 
+        let columns: Vec<_> = stmt.columns().iter().map(column_info).collect();
+
+        // In a manual-commit session the user's transaction must survive an
+        // early close, so a query is paged through an SQL cursor, which is
+        // closed without a cancel. Everything else streams.
+        if self.mode() == TxMode::Manual && stmt::is_declarable(sql) {
+            let name = format!("pxpg_c{}", self.cursor_seq.fetch_add(1, Ordering::Relaxed));
+            let declare = client
+                .prepare(&format!("DECLARE {name} NO SCROLL CURSOR FOR {sql}"))
+                .await
+                .map_err(|e| self.map(&e))?;
+            let binds = bind::convert_all(params, declare.params())?;
+            client
+                .execute_raw(&declare, &binds)
+                .await
+                .map_err(|e| self.map(&e))?;
+            let core = DeclaredCore::new(
+                Arc::clone(self),
+                Arc::clone(client),
+                name,
+                guard,
+                opts.max_value_bytes,
+            );
+            let exhausted = core.prefetch(opts.fetch_size.max(1)).await?;
+            return Ok(self.open_cursor(core, columns, opts, exhausted));
+        }
+
         let stream = client
             .query_raw(&stmt, &binds)
             .await
             .map_err(|e| self.map(&e))?;
         self.note_statement(sql);
-        let columns: Vec<_> = stmt.columns().iter().map(column_info).collect();
-        let core = CursorCore::new(
+        let core = StreamCore::new(
             Arc::clone(self),
             stream,
             guard,
@@ -200,15 +230,26 @@ impl Inner {
             opts.max_value_bytes,
         );
         let exhausted = core.prefetch().await?;
+        Ok(self.open_cursor(core, columns, opts, exhausted))
+    }
+
+    /// Register `core` as the open cursor and hand out its handle.
+    fn open_cursor(
+        &self,
+        core: Arc<dyn CursorCore>,
+        columns: Vec<db_core::Column>,
+        opts: &ExecOptions,
+        exhausted: bool,
+    ) -> Outcome {
         if let Ok(mut slot) = self.active.lock() {
             *slot = Some(Arc::downgrade(&core));
         }
-        Ok(Outcome::Rows(Box::new(PgCursor::new(
+        Outcome::Rows(Box::new(PgCursor::new(
             core,
             columns,
             opts.timeout,
             exhausted,
-        ))))
+        )))
     }
 
     /// Several commands in one text cannot be prepared; run them through the

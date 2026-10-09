@@ -1,19 +1,27 @@
 //! PostgreSQL backend in pure Rust (tokio-postgres, rustls with ring).
 //!
 //! [`PostgresDriver`] opens [`PostgresConnection`]s that implement the
-//! `db-core` contract: typed binary decoding, true incremental paging with a
-//! streaming cursor, server-side cancel, per-call timeouts and transaction
-//! modes.
+//! `db-core` contract: typed binary decoding, incremental paging, server-side
+//! cancel, per-call timeouts and transaction modes.
+//!
+//! Results are read through a cursor. In auto-commit sessions that is a
+//! streaming result which is stopped with a cancel request when the cursor is
+//! closed early. In manual-commit sessions queries are paged through an SQL
+//! cursor (`DECLARE`/`FETCH`/`CLOSE`) instead, because a cancel would abort the
+//! user's open transaction. `ExecOptions::fetch_size` sets the size of the
+//! first `FETCH` there; streaming results ignore it.
 
 mod bind;
 mod cancel;
 mod conn;
 mod cursor;
+mod declared_cursor;
 mod decode;
 mod error;
 mod interval;
 mod numeric;
 mod stmt;
+mod stream_cursor;
 mod tls;
 
 use std::time::Duration;
