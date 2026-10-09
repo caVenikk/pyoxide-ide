@@ -2,11 +2,11 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 7%** `█░░░░░░░░░░░░░░░░░░░`
+**Overall parity: 17%** `███░░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 18% `██░░░░░░░░` | 2 | 3 | 18 |
+| database | 50% `█████░░░░░` | 5 | 10 | 8 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -27,25 +27,25 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Oracle connection (thin driver) | must | db-oracle-thin |
 | ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi |
 | ⬜ | PostgreSQL connection | must | MVP |
-| ⬜ | SQLite connection | must | MVP |
-| 🟡 | Run SQL and view results | must | CLI only |
-| ⬜ | Typed result values | must |  |
-| 🟡 | Schema introspection (tables / views / columns) | must | Oracle tables and columns |
-| ⬜ | Indexes constraints sequences procedures | should |  |
-| ⬜ | Connection profiles with keychain secrets | must |  |
+| ✅ | SQLite connection | must | db-sqlite (bundled SQLite) |
+| 🟡 | Run SQL and view results | must | CLI and db.query command |
+| 🟡 | Typed result values | must | SQLite done; Oracle and PostgreSQL in progress |
+| 🟡 | Schema introspection (tables / views / columns) | must | SQLite full; Oracle tables and columns |
+| 🟡 | Indexes constraints sequences procedures | should | SQLite indexes, constraints, triggers |
+| ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
 | ⬜ | Password storage in KeePass (kdbx) | should | IDE password settings model |
 | ⬜ | TLS and wallets | should |  |
-| ⬜ | Query timeout and cancel | must |  |
-| 🟡 | Paginated results | must | row cap only |
+| 🟡 | Query timeout and cancel | must | SQLite done |
+| 🟡 | Paginated results | must | cursor paging: SQLite done |
 | ⬜ | Export results (CSV / JSON) | should |  |
-| ⬜ | Connection diagnostics (own) | should | own feature |
-| ⬜ | Test connection (server and driver version) | must | Pro |
-| ⬜ | Bind parameters | should |  |
-| ⬜ | Transaction mode (auto / manual) | should | Pro |
-| ⬜ | Read-only connections | should | Pro |
+| ✅ | Connection diagnostics (own) | should | pyoxide-db diagnose |
+| ✅ | Test connection (server and driver version) | must | pyoxide-db test / db.connection.test |
+| 🟡 | Bind parameters | should | SQLite done |
+| 🟡 | Transaction mode (auto / manual) | should | SQLite done |
+| 🟡 | Read-only connections | should | SQLite done |
 | ⬜ | Oracle TNS alias and connect descriptors | should | Oracle Client backend |
 | ⬜ | Schema and object filters | could | Pro |
-| ⬜ | Object source and DDL | should | Pro |
+| 🟡 | Object source and DDL | should | SQLite done |
 | ⬜ | SSH tunnel | could | Pro; after MVP |
 | ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
 
@@ -121,7 +121,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Command registry and palette (own) | must | own architecture |
+| 🟡 | Command registry and palette (own) | must | registry and JSON channel; no palette yet |
 | ⬜ | Plugin API (WASM) | could |  |
 
 ## packaging

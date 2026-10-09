@@ -2,25 +2,25 @@ feature,area,priority,original,clone,notes
 Oracle connection (thin driver),database,must,yes,yes,db-oracle-thin
 Oracle connection (Oracle Client / ODPI-C),database,should,yes,yes,db-oracle-odpi
 PostgreSQL connection,database,must,yes,no,MVP
-SQLite connection,database,must,yes,no,MVP
-Run SQL and view results,database,must,yes,partial,CLI only
-Typed result values,database,must,yes,no,
-Schema introspection (tables / views / columns),database,must,yes,partial,Oracle tables and columns
-Indexes constraints sequences procedures,database,should,yes,no,
-Connection profiles with keychain secrets,database,must,yes,no,
+SQLite connection,database,must,yes,yes,db-sqlite (bundled SQLite)
+Run SQL and view results,database,must,yes,partial,CLI and db.query command
+Typed result values,database,must,yes,partial,SQLite done; Oracle and PostgreSQL in progress
+Schema introspection (tables / views / columns),database,must,yes,partial,SQLite full; Oracle tables and columns
+Indexes constraints sequences procedures,database,should,yes,partial,"SQLite indexes, constraints, triggers"
+Connection profiles with keychain secrets,database,must,yes,yes,"TOML profiles, OS credential store, env, prompt"
 Password storage in KeePass (kdbx),database,should,yes,no,IDE password settings model
 TLS and wallets,database,should,yes,no,
-Query timeout and cancel,database,must,yes,no,
-Paginated results,database,must,yes,partial,row cap only
+Query timeout and cancel,database,must,yes,partial,SQLite done
+Paginated results,database,must,yes,partial,cursor paging: SQLite done
 Export results (CSV / JSON),database,should,yes,no,
-Connection diagnostics,database,should,no,no,own feature
-Test connection (server and driver version),database,must,yes,no,Pro
-Bind parameters,database,should,yes,no,
-Transaction mode (auto / manual),database,should,yes,no,Pro
-Read-only connections,database,should,yes,no,Pro
+Connection diagnostics,database,should,no,yes,pyoxide-db diagnose
+Test connection (server and driver version),database,must,yes,yes,pyoxide-db test / db.connection.test
+Bind parameters,database,should,yes,partial,SQLite done
+Transaction mode (auto / manual),database,should,yes,partial,SQLite done
+Read-only connections,database,should,yes,partial,SQLite done
 Oracle TNS alias and connect descriptors,database,should,yes,no,Oracle Client backend
 Schema and object filters,database,could,yes,no,Pro
-Object source and DDL,database,should,yes,no,Pro
+Object source and DDL,database,should,yes,partial,SQLite done
 SSH tunnel,database,could,yes,no,Pro; after MVP
 Startup script / keep-alive / auto-disconnect,database,could,yes,no,Pro
 Database explorer tree,db-gui,must,yes,no,Pro
@@ -56,7 +56,7 @@ Git status and diff,vcs,must,yes,no,
 Commit and branches,vcs,must,yes,no,
 Blame and history,vcs,should,yes,no,
 Docker containers and images,docker,should,yes,no,
-Command registry and palette,platform,must,no,no,own architecture
+Command registry and palette,platform,must,no,partial,registry and JSON channel; no palette yet
 Plugin API (WASM),platform,could,yes,no,
 Windows / macOS / Linux builds,packaging,must,yes,partial,CI builds all three
 Signed installers,packaging,should,yes,no,
