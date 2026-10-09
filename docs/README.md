@@ -6,5 +6,6 @@
 - [clean-room.md](clean-room.md): allowed and forbidden sources
 - [theme-formats.md](theme-formats.md): PyCharm theme and colour-scheme formats the importer must read
 - [agent-workflow.md](agent-workflow.md): how AI agents work in this repository
+- [testing-databases.md](testing-databases.md): integration tests against Docker databases
 - [adr/](adr/): architecture decision records
 - [PROGRESS.md](PROGRESS.md): generated feature-parity status, overall and per feature

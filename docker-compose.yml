@@ -1,7 +1,10 @@
-# Local Oracle for development and integration tests.
+# Local databases for development and integration tests.
+# Host ports avoid the defaults so they do not clash with databases already
+# running on a developer machine. Tests read the same values (see
+# docs/testing-databases.md).
 services:
   oracle:
-    image: gvenzl/oracle-free:slim-faststart
+    image: gvenzl/oracle-free:23-slim-faststart
     ports:
       - "1521:1521"
     environment:
@@ -11,5 +14,19 @@ services:
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 10s
+      timeout: 5s
+      retries: 30
+
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: pyoxide
+      POSTGRES_PASSWORD: ${PYOXIDE_DB_PASSWORD:-pyoxide}
+      POSTGRES_DB: pyoxide
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pyoxide -d pyoxide"]
+      interval: 5s
       timeout: 5s
       retries: 30

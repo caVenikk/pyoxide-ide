@@ -10,13 +10,18 @@
    concrete driver.
 
 ## Current crates
-- `db-core`: `Driver` and `Connection` traits, result model, introspection SQL
-  (Oracle data dictionary), text table renderer.
+- `commands`: the command registry (ADR 0001).
+- `db-core`: `Driver`, `Connection` and `Cursor` traits, typed values,
+  cancel/timeout policy, errors, introspection model and per-dialect SQL,
+  text table renderer (ADR 0002).
 - `db-oracle-thin`: pure Rust Oracle driver (`oracle-rs`, TNS protocol).
 - `db-oracle-odpi`: Oracle via an installed Oracle Client (ODPI-C), fallback for
   environments the thin driver cannot reach (Kerberos, LDAP naming, native
   network encryption, ...). Client libraries are loaded at runtime.
-- `db-cli`: `pyoxide-db`.
+- `db-postgres`, `db-sqlite`: PostgreSQL and SQLite drivers (ADR 0003).
+- `db-service`: connection profiles and secrets (ADR 0004), driver dispatch,
+  diagnostics, `db.*` commands.
+- `db-cli`: `pyoxide-db`, a thin front-end over `db-service`.
 
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
