@@ -1,32 +1,32 @@
 feature,area,priority,original,clone,notes
 Oracle connection (thin driver),database,must,yes,yes,db-oracle-thin
 Oracle connection (Oracle Client / ODPI-C),database,should,yes,yes,"db-oracle-odpi: cancel, call timeouts, TNS/wallets/NNE/Kerberos; integration tests need Oracle Instant Client"
-PostgreSQL connection,database,must,yes,no,MVP
+PostgreSQL connection,database,must,yes,yes,"db-postgres (tokio-postgres, rustls)"
 SQLite connection,database,must,yes,yes,db-sqlite (bundled SQLite)
 Run SQL and view results,database,must,yes,partial,CLI and db.query command
-Typed result values,database,must,yes,partial,SQLite and Oracle Client done; thin and PostgreSQL in progress
-Schema introspection (tables / views / columns),database,must,yes,partial,SQLite full; Oracle tables and columns
-Indexes constraints sequences procedures,database,should,yes,partial,"SQLite indexes, constraints, triggers"
+Typed result values,database,must,yes,partial,"SQLite, PostgreSQL, Oracle Client done; thin in progress"
+Schema introspection (tables / views / columns),database,must,yes,partial,SQLite and PostgreSQL full; Oracle in progress
+Indexes constraints sequences procedures,database,should,yes,partial,"SQLite, PostgreSQL; Oracle in progress"
 Connection profiles with keychain secrets,database,must,yes,yes,"TOML profiles, OS credential store, env, prompt"
 Password storage in KeePass (kdbx),database,should,yes,yes,"secrets: KDBX 4 store, master password in OS store / env / prompt"
-TLS and wallets,database,should,yes,partial,"Oracle Client (tcps, wallets); diagnose TLS probe"
-Query timeout and cancel,database,must,yes,partial,"SQLite, Oracle Client"
-Paginated results,database,must,yes,partial,"cursor paging: SQLite, Oracle Client"
+TLS and wallets,database,should,yes,partial,PostgreSQL all modes and mutual TLS; Oracle Client tcps and wallets; thin in progress
+Query timeout and cancel,database,must,yes,partial,"SQLite, PostgreSQL, Oracle Client; thin in progress"
+Paginated results,database,must,yes,partial,"cursor paging: SQLite, PostgreSQL, Oracle Client; thin in progress"
 Export results (CSV / JSON),database,should,yes,no,
 Connection diagnostics,database,should,no,yes,pyoxide-db diagnose
 Test connection (server and driver version),database,must,yes,yes,pyoxide-db test / db.connection.test
-Bind parameters,database,should,yes,partial,"SQLite, Oracle Client"
-Transaction mode (auto / manual),database,should,yes,partial,"SQLite, Oracle Client"
-Read-only connections,database,should,yes,partial,SQLite; Oracle Client best effort
+Bind parameters,database,should,yes,partial,"SQLite, PostgreSQL, Oracle Client"
+Transaction mode (auto / manual),database,should,yes,partial,"SQLite, PostgreSQL, Oracle Client"
+Read-only connections,database,should,yes,partial,"SQLite, PostgreSQL; Oracle best effort"
 Oracle TNS alias and connect descriptors,database,should,yes,partial,Oracle Client backend (dsn); thin in progress
 Schema and object filters,database,should,yes,no,Pro
-Object source and DDL,database,should,yes,partial,SQLite done
+Object source and DDL,database,should,yes,partial,"SQLite, PostgreSQL"
 SSH tunnel,database,should,yes,no,Pro; after MVP; must never block the UI (feedback)
 Startup script / keep-alive / auto-disconnect,database,could,yes,no,Pro
 Large values: capped fetch of LOB / JSON / long text,database,must,yes,partial,max_value_bytes and Value::Truncated; lazy full fetch todo
 Persistent schema cache across restarts,database,should,yes,no,feedback: introspection slow or forgotten
 Cancellable scoped introspection with progress,database,should,yes,no,feedback
-PostgreSQL Unix-socket connections,database,could,yes,no,feedback
+PostgreSQL Unix-socket connections,database,could,yes,partial,"implemented, untested"
 External secret provider (command / password manager CLI),database,could,no,no,own feature; feedback
 Database explorer tree,db-gui,must,yes,no,Pro
 Data grid with paging,db-gui,must,yes,no,"Pro; virtualized, renders visible cells only (feedback: grid freezes)"

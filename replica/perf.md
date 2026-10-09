@@ -55,6 +55,13 @@ Pyoxide later.
 Measured with the `db-bench` example (`cargo run --release -p db-service
 --example db-bench -- <profile>`) against the Docker databases.
 
-| date | machine | backend | metric | value | notes |
-|---|---|---|---|---|---|
-| | | | | | |
+Machine `mac-1`: Apple M5 (10 cores), 16 GB, macOS 27.0.1, Rust 1.99.0,
+release build; databases in Docker (OrbStack) on the same machine. 100,000
+rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
+
+| date | machine | backend | connect | first page | fetch 100k | rows/s | notes |
+|---|---|---|---|---|---|---|---|
+| 2026-10-09 | mac-1 | postgres 18.6 | 3.6 ms | 3.3 ms | 33.8 ms | 2.96 M | auto-commit streaming cursor; manual mode (SQL cursor) about 75 ms |
+| 2026-10-09 | mac-1 | sqlite 3.53.2 | 0.1 ms | 0.2 ms | 28.6 ms | 3.50 M | `:memory:`, generated rows; table scan of a file about 14 ms |
+| 2026-10-09 | mac-1 | oracle-thin (Free 23) | | | | | pending #3 |
+| | | oracle-odpi | | | | | needs Oracle Instant Client |

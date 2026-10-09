@@ -2,11 +2,11 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 19%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 21%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 51% `█████░░░░░` | 6 | 13 | 8 |
+| database | 56% `██████░░░░` | 7 | 14 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -26,32 +26,32 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|
 | ✅ | Oracle connection (thin driver) | must | db-oracle-thin |
 | ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi: cancel, call timeouts, TNS/wallets/NNE/Kerberos; integration tests need Oracle Instant Client |
-| ⬜ | PostgreSQL connection | must | MVP |
+| ✅ | PostgreSQL connection | must | db-postgres (tokio-postgres, rustls) |
 | ✅ | SQLite connection | must | db-sqlite (bundled SQLite) |
 | 🟡 | Run SQL and view results | must | CLI and db.query command |
-| 🟡 | Typed result values | must | SQLite and Oracle Client done; thin and PostgreSQL in progress |
-| 🟡 | Schema introspection (tables / views / columns) | must | SQLite full; Oracle tables and columns |
-| 🟡 | Indexes constraints sequences procedures | should | SQLite indexes, constraints, triggers |
+| 🟡 | Typed result values | must | SQLite, PostgreSQL, Oracle Client done; thin in progress |
+| 🟡 | Schema introspection (tables / views / columns) | must | SQLite and PostgreSQL full; Oracle in progress |
+| 🟡 | Indexes constraints sequences procedures | should | SQLite, PostgreSQL; Oracle in progress |
 | ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
 | ✅ | Password storage in KeePass (kdbx) | should | secrets: KDBX 4 store, master password in OS store / env / prompt |
-| 🟡 | TLS and wallets | should | Oracle Client (tcps, wallets); diagnose TLS probe |
-| 🟡 | Query timeout and cancel | must | SQLite, Oracle Client |
-| 🟡 | Paginated results | must | cursor paging: SQLite, Oracle Client |
+| 🟡 | TLS and wallets | should | PostgreSQL all modes and mutual TLS; Oracle Client tcps and wallets; thin in progress |
+| 🟡 | Query timeout and cancel | must | SQLite, PostgreSQL, Oracle Client; thin in progress |
+| 🟡 | Paginated results | must | cursor paging: SQLite, PostgreSQL, Oracle Client; thin in progress |
 | ⬜ | Export results (CSV / JSON) | should |  |
 | ✅ | Connection diagnostics (own) | should | pyoxide-db diagnose |
 | ✅ | Test connection (server and driver version) | must | pyoxide-db test / db.connection.test |
-| 🟡 | Bind parameters | should | SQLite, Oracle Client |
-| 🟡 | Transaction mode (auto / manual) | should | SQLite, Oracle Client |
-| 🟡 | Read-only connections | should | SQLite; Oracle Client best effort |
+| 🟡 | Bind parameters | should | SQLite, PostgreSQL, Oracle Client |
+| 🟡 | Transaction mode (auto / manual) | should | SQLite, PostgreSQL, Oracle Client |
+| 🟡 | Read-only connections | should | SQLite, PostgreSQL; Oracle best effort |
 | 🟡 | Oracle TNS alias and connect descriptors | should | Oracle Client backend (dsn); thin in progress |
 | ⬜ | Schema and object filters | should | Pro |
-| 🟡 | Object source and DDL | should | SQLite done |
+| 🟡 | Object source and DDL | should | SQLite, PostgreSQL |
 | ⬜ | SSH tunnel | should | Pro; after MVP; must never block the UI (feedback) |
 | ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
 | 🟡 | Large values: capped fetch of LOB / JSON / long text | must | max_value_bytes and Value::Truncated; lazy full fetch todo |
 | ⬜ | Persistent schema cache across restarts | should | feedback: introspection slow or forgotten |
 | ⬜ | Cancellable scoped introspection with progress | should | feedback |
-| ⬜ | PostgreSQL Unix-socket connections | could | feedback |
+| 🟡 | PostgreSQL Unix-socket connections | could | implemented, untested |
 | ⬜ | External secret provider (command / password manager CLI) (own) | could | own feature; feedback |
 
 ## db-gui
