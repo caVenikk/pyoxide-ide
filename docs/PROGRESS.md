@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 9%** `██░░░░░░░░░░░░░░░░░░`
+**Overall parity: 8%** `██░░░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -15,6 +15,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
+| python-env | 0% `░░░░░░░░░░` | 0 | 0 | 9 |
 
 ✅ done · 🟡 partial · ⬜ not started. Features marked (own) are additions beyond the reference and are not part of the parity score.
 
@@ -109,3 +110,17 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|
 | 🟡 | Windows / macOS / Linux builds | must | CI builds all three |
 | ⬜ | Signed installers | should |  |
+
+## python-env
+
+| | Feature | Priority | Notes |
+|---|---|---|---|
+| ⬜ | uv: create virtualenv from the IDE | must | uv venv; choose Python version |
+| ⬜ | uv: project init and sync (pyproject.toml / uv.lock) | must | uv init / uv sync / uv lock |
+| ⬜ | uv: install and manage Python versions | should | uv python install |
+| ⬜ | Package manager panel (list / install / upgrade / remove) | must | uv pip backend; pip fallback |
+| ⬜ | Package search and version picker | should | PyPI index |
+| ⬜ | Dependency groups and extras in pyproject.toml | should |  |
+| ⬜ | uv run as run configuration | should |  |
+| ⬜ | PEP 723 inline script dependencies | could |  |
+| ⬜ | Other managers (poetry / conda / pipenv / pip) | should | after uv |

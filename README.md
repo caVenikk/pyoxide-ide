@@ -29,7 +29,7 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 9%** `██░░░░░░░░░░░░░░░░░░`
+**Overall parity: 8%** `██░░░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -42,6 +42,7 @@ the same engine.
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
+| python-env | 0% `░░░░░░░░░░` | 0 | 0 | 9 |
 
 Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 <!-- progress:end -->

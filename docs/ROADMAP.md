@@ -13,6 +13,10 @@ with the skill loop described in [agent-workflow.md](agent-workflow.md).
 - [ ] **M2 Editor core**: text buffer, tree-sitter Python highlighting, UI toolkit
       decision (ADR + measurements), tabs, file tree, project and virtualenv
       discovery (venv, uv, poetry, conda)
+- [ ] **M2b Python environments (uv-first)**: native uv integration: create
+      virtualenvs, `uv init/sync/lock`, Python version management, package manager
+      panel (list, install, upgrade, remove, search) on top of uv with a pip
+      fallback, `uv run` run configurations; poetry/conda/pipenv afterwards
 - [ ] **M3 Python intelligence**: LSP client; ruff (lint, format); type checker
       choice (ty, basedpyright or pyrefly) by ADR; completion, hover, go to
       definition, find usages, rename, code actions

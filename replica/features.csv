@@ -46,3 +46,12 @@ Command registry and palette,platform,must,no,no,own architecture
 Plugin API (WASM),platform,could,yes,no,
 Windows / macOS / Linux builds,packaging,must,yes,partial,CI builds all three
 Signed installers,packaging,should,yes,no,
+uv: create virtualenv from the IDE,python-env,must,yes,no,uv venv; choose Python version
+uv: project init and sync (pyproject.toml / uv.lock),python-env,must,yes,no,uv init / uv sync / uv lock
+uv: install and manage Python versions,python-env,should,yes,no,uv python install
+Package manager panel (list / install / upgrade / remove),python-env,must,yes,no,uv pip backend; pip fallback
+Package search and version picker,python-env,should,yes,no,PyPI index
+Dependency groups and extras in pyproject.toml,python-env,should,yes,no,
+uv run as run configuration,python-env,should,yes,no,
+PEP 723 inline script dependencies,python-env,could,yes,no,
+Other managers (poetry / conda / pipenv / pip),python-env,should,yes,no,after uv
