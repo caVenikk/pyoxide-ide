@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: an introspection model file, which the importer skips. -->
+<dataSource name="billing">
+  <database-model serializer="dbm" dbms="ORACLE" family-id="ORACLE" format-version="4.53">
+    <root id="1">
+      <ServerVersion>19.0.0.0</ServerVersion>
+    </root>
+    <schema id="2" parent="1" name="APP_USER" />
+  </database-model>
+</dataSource>
