@@ -15,7 +15,8 @@ use db_service::ops;
 use db_service::profiles::{self, Profile, TlsProfile};
 use db_service::secrets::SecretKind;
 use db_service::{DbService, Target};
-use secrets::{KeyringStore, Prompter};
+use secrets::config::{KeePassConfig, MasterPasswordSource, StoreKind};
+use secrets::{KeyringStore, LazyStore, Prompter, SecretStore, SecretsConfig};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -154,6 +155,12 @@ enum Cmd {
         #[arg(long)]
         try_all: bool,
     },
+    /// Choose where passwords are kept: OS credential store, KeePass, memory.
+    #[command(subcommand, name = "secret-store")]
+    SecretStore(SecretStoreCmd),
+    /// Import connections from another IDE.
+    #[command(subcommand)]
+    Import(ImportCmd),
     /// List all registered commands.
     Commands,
     /// Invoke a registered command with JSON arguments (from the argument or stdin).
@@ -177,6 +184,61 @@ enum ProfileCmd {
     },
     Remove {
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SecretStoreCmd {
+    /// Show the configured store.
+    Show,
+    /// Switch the store. For KeePass the master password is asked once and
+    /// kept in the OS credential store unless --master says otherwise.
+    Use {
+        /// keychain | keepass | memory
+        kind: String,
+        /// KeePass database file (.kdbx).
+        #[arg(long)]
+        path: Option<String>,
+        /// KeePass key file.
+        #[arg(long)]
+        key_file: Option<String>,
+        /// Where the KeePass master password comes from: keychain | env | prompt.
+        #[arg(long, default_value = "keychain")]
+        master: String,
+        /// Create the KeePass database if it does not exist.
+        #[arg(long)]
+        create: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCmd {
+    /// Data sources of a PyCharm project, with passwords from PyCharm's
+    /// credential store (its KeePass file, or the OS store with --allow-keychain).
+    Pycharm {
+        /// Project directory (or its .idea directory).
+        project: PathBuf,
+        /// Show what would be imported; write nothing, print no secrets.
+        #[arg(long)]
+        dry_run: bool,
+        /// PyCharm configuration directory (default: the newest found).
+        #[arg(long)]
+        ide_config: Option<PathBuf>,
+        /// Read passwords PyCharm keeps in the OS credential store (the OS may ask).
+        #[arg(long)]
+        allow_keychain: bool,
+        /// Subsystem part of PyCharm's credential names (default DB).
+        #[arg(long)]
+        naming_subsystem: Option<String>,
+        /// Key part of PyCharm's credential names: uuid (default) or name.
+        #[arg(long, default_value = "uuid")]
+        naming_key: String,
+        /// Replace profiles that already exist.
+        #[arg(long)]
+        overwrite: bool,
+        /// Import profiles only.
+        #[arg(long)]
+        no_passwords: bool,
     },
 }
 
@@ -323,12 +385,49 @@ async fn main() -> ExitCode {
 }
 
 fn service(cli: &Cli, prompter: Option<Arc<dyn Prompter>>) -> DbService {
+    let env = secrets::process_env();
     DbService::new(
         cli.profiles.clone().unwrap_or_else(profiles::default_path),
-        Arc::new(KeyringStore),
+        configured_store(prompter.clone(), env.clone()),
         prompter,
-        secrets::process_env(),
+        env,
     )
+}
+
+/// The store chosen in the secret settings, opened on first use.
+fn configured_store(
+    prompter: Option<Arc<dyn Prompter>>,
+    env: secrets::EnvLookup,
+) -> Arc<dyn SecretStore> {
+    let path = secrets::config::config_path(&env);
+    let config = match SecretsConfig::load(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = e.to_string();
+            return Arc::new(LazyStore::new("secret settings", move || {
+                Err(secrets::SecretError::new(
+                    secrets::SecretErrorKind::Format,
+                    "secret settings",
+                    msg,
+                ))
+            }));
+        }
+    };
+    let name = match config.store {
+        StoreKind::Keychain => KeyringStore.name().to_owned(),
+        StoreKind::Memory => "memory (not saved)".to_owned(),
+        StoreKind::KeePass => format!(
+            "KeePass database {}",
+            config
+                .keepass
+                .as_ref()
+                .map(|k| k.path.as_str())
+                .unwrap_or("?")
+        ),
+    };
+    Arc::new(LazyStore::new(name, move || {
+        secrets::open_store(&config, prompter.as_deref(), &env)
+    }))
 }
 
 fn print_json<T: Serialize>(v: &T) {
@@ -506,6 +605,42 @@ async fn run(cli: Cli) -> Result<ExitCode, Error> {
             }
             if report.result == Status::Fail {
                 return Ok(ExitCode::FAILURE);
+            }
+        }
+        Cmd::SecretStore(cmd) => secret_store_cmd(cmd)?,
+        Cmd::Import(ImportCmd::Pycharm {
+            project,
+            dry_run,
+            ide_config,
+            allow_keychain,
+            naming_subsystem,
+            naming_key,
+            overwrite,
+            no_passwords,
+        }) => {
+            let args = db_service::import::PycharmImportArgs {
+                project: project.clone(),
+                ide_config: ide_config.clone(),
+                allow_os_store: *allow_keychain,
+                naming_subsystem: naming_subsystem.clone(),
+                naming_by_name: match naming_key.as_str() {
+                    "uuid" => false,
+                    "name" => true,
+                    other => {
+                        return Err(Error::config(format!(
+                            "--naming-key must be uuid or name, got {other:?}"
+                        )));
+                    }
+                },
+                dry_run: *dry_run,
+                overwrite: *overwrite,
+                no_passwords: *no_passwords,
+            };
+            let report = db_service::import::import_pycharm(&svc, &args)?;
+            if json {
+                print_json(&report);
+            } else {
+                println!("{}", db_service::import::render(&report));
             }
         }
         Cmd::Commands => {
@@ -741,6 +876,68 @@ fn profile_cmd(cli: &Cli, svc: &DbService, cmd: &ProfileCmd) -> Result<(), Error
             } else {
                 return Err(Error::config(format!("no profile named {name:?}")));
             }
+        }
+    }
+    Ok(())
+}
+
+fn secret_store_cmd(cmd: &SecretStoreCmd) -> Result<(), Error> {
+    let env = secrets::process_env();
+    let path = secrets::config::config_path(&env);
+    let cfg_err = |e: secrets::SecretError| Error::config(e.to_string());
+    match cmd {
+        SecretStoreCmd::Show => {
+            let config = SecretsConfig::load(&path).map_err(cfg_err)?;
+            println!("settings: {}", path.display());
+            print!("{}", config.to_toml().map_err(cfg_err)?);
+        }
+        SecretStoreCmd::Use {
+            kind,
+            path: kp_path,
+            key_file,
+            master,
+            create,
+        } => {
+            let mut config = SecretsConfig::load(&path).map_err(cfg_err)?;
+            config.store = serde_json::from_value(serde_json::Value::String(kind.clone()))
+                .map_err(|_| Error::config("store must be keychain, keepass or memory"))?;
+            if config.store == StoreKind::KeePass {
+                let file = kp_path
+                    .clone()
+                    .or_else(|| config.keepass.as_ref().map(|k| k.path.clone()))
+                    .ok_or_else(|| Error::config("keepass needs --path to a .kdbx file"))?;
+                let mut kp = KeePassConfig::new(file);
+                kp.key_file = key_file.clone();
+                kp.create = *create;
+                kp.master_password =
+                    serde_json::from_value(serde_json::Value::String(master.clone()))
+                        .map_err(|_| Error::config("--master must be keychain, env or prompt"))?;
+                if kp.master_password == MasterPasswordSource::Keychain {
+                    let account = kp.master_password_account();
+                    let known = KeyringStore
+                        .get(secrets::config::KEEPASS_MASTER_SERVICE, &account)
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if !known {
+                        let master = TerminalPrompter
+                            .secret(&format!(
+                                "KeePass master password ({}): ",
+                                kp.db_path().display()
+                            ))
+                            .ok_or_else(|| Error::config("no master password entered"))?;
+                        KeyringStore
+                            .set(secrets::config::KEEPASS_MASTER_SERVICE, &account, &master)
+                            .map_err(|e| Error::config(e.to_string()))?;
+                    }
+                }
+                config.keepass = Some(kp);
+            }
+            // Open it once so mistakes show up now, not at the next connect.
+            let prompter = TerminalPrompter;
+            secrets::open_store(&config, Some(&prompter), &env).map_err(cfg_err)?;
+            config.save(&path).map_err(cfg_err)?;
+            println!("secret store: {kind} (settings in {})", path.display());
         }
     }
     Ok(())

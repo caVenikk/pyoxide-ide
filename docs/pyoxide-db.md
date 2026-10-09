@@ -42,6 +42,40 @@ pyoxide-db secret status reporting         # where it would come from
 
 Passwords are never accepted as arguments and never printed.
 
+Where stored passwords live is an IDE-wide setting (`secrets.toml` in the
+user config directory, `PYOXIDE_SECRETS_CONFIG` overrides it):
+
+```bash
+pyoxide-db secret-store show
+pyoxide-db secret-store use keychain                       # default: OS credential store
+pyoxide-db secret-store use keepass --path ~/secrets/ide.kdbx --create
+pyoxide-db secret-store use memory                         # forget on exit
+```
+
+With KeePass the master password is asked once and kept in the OS credential
+store (`--master keychain`), read from `PYOXIDE_KEEPASS_PASSWORD`
+(`--master env`) or asked every time (`--master prompt`). An optional
+`--key-file` works as in KeePass.
+
+## Import from PyCharm
+
+```bash
+pyoxide-db import pycharm ~/projects/app --dry-run
+pyoxide-db import pycharm ~/projects/app
+pyoxide-db import pycharm ~/projects/app --allow-keychain   # PyCharm keeps passwords in the OS store
+```
+
+Data sources from `.idea/dataSources.xml` (and `dataSources.local.xml`)
+become profiles: Oracle (service name, SID, TNS alias, descriptor),
+PostgreSQL (incl. `sslmode`) and SQLite; other drivers are listed as skipped.
+Passwords are read from the credential store PyCharm uses: its KeePass
+database (`c.kdbx`, unlocked with the key PyCharm saved, or the master
+password when asked), or the OS credential store with `--allow-keychain`,
+where the OS may ask for permission per entry. They are written to the
+configured secret store, never to the profiles file. `--dry-run` writes
+nothing and only reports whether a password was found. Existing profiles are
+kept unless `--overwrite` is given.
+
 ## Everyday commands
 
 ```bash

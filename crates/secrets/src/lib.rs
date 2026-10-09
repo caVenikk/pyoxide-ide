@@ -182,6 +182,64 @@ impl SecretStore for MemoryStore {
     }
 }
 
+/// Opens the real store on first use, so commands that never touch a
+/// secret never unlock a KeePass database or ask for its master password.
+pub struct LazyStore {
+    name: String,
+    opener: Mutex<Option<Opener>>,
+    store: std::sync::OnceLock<std::result::Result<Arc<dyn SecretStore>, SecretError>>,
+}
+
+type Opener = Box<dyn FnOnce() -> Result<Arc<dyn SecretStore>> + Send>;
+
+impl LazyStore {
+    pub fn new(
+        name: impl Into<String>,
+        open: impl FnOnce() -> Result<Arc<dyn SecretStore>> + Send + 'static,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            opener: Mutex::new(Some(Box::new(open))),
+            store: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn inner(&self) -> Result<&Arc<dyn SecretStore>> {
+        self.store
+            .get_or_init(|| {
+                let open = self.opener.lock().expect("poisoned").take();
+                match open {
+                    Some(open) => open(),
+                    None => Err(SecretError::new(
+                        SecretErrorKind::Unavailable,
+                        &self.name,
+                        "opening the store failed earlier",
+                    )),
+                }
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+}
+
+impl SecretStore for LazyStore {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn get(&self, service: &str, account: &str) -> Result<Option<Secret>> {
+        self.inner()?.get(service, account)
+    }
+
+    fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
+        self.inner()?.set(service, account, secret)
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        self.inner()?.delete(service, account)
+    }
+}
+
 /// Reads environment variables; replaceable in tests.
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -209,6 +267,22 @@ mod tests {
         assert!(s.get("other", "a").unwrap().is_none());
         assert!(s.delete("svc", "a").unwrap());
         assert!(!s.delete("svc", "a").unwrap());
+    }
+
+    #[test]
+    fn lazy_store_opens_once_on_first_use() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let opened = Arc::new(AtomicUsize::new(0));
+        let counter = opened.clone();
+        let lazy = LazyStore::new("lazy", move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(Arc::new(MemoryStore::default()) as Arc<dyn SecretStore>)
+        });
+        assert_eq!(lazy.name(), "lazy");
+        assert_eq!(opened.load(Ordering::SeqCst), 0);
+        lazy.set("s", "a", &Secret::new("x")).unwrap();
+        assert_eq!(lazy.get("s", "a").unwrap().unwrap().expose(), "x");
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
     }
 
     /// Touches the real OS store: `cargo test -p secrets -- --ignored`.

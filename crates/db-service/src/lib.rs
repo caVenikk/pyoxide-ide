@@ -4,6 +4,7 @@
 
 pub mod diagnose;
 pub mod hints;
+pub mod import;
 pub mod ops;
 pub mod profiles;
 pub mod redact;

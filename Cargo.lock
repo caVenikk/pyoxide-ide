@@ -767,6 +767,7 @@ dependencies = [
  "secrets",
  "serde",
  "serde_json",
+ "settings-import",
  "tempfile",
  "tokio",
  "tokio-rustls",

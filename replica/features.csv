@@ -8,7 +8,7 @@ Typed result values,database,must,yes,partial,SQLite and Oracle Client done; thi
 Schema introspection (tables / views / columns),database,must,yes,partial,SQLite full; Oracle tables and columns
 Indexes constraints sequences procedures,database,should,yes,partial,"SQLite indexes, constraints, triggers"
 Connection profiles with keychain secrets,database,must,yes,yes,"TOML profiles, OS credential store, env, prompt"
-Password storage in KeePass (kdbx),database,should,yes,no,IDE password settings model
+Password storage in KeePass (kdbx),database,should,yes,yes,"secrets: KDBX 4 store, master password in OS store / env / prompt"
 TLS and wallets,database,should,yes,partial,"Oracle Client (tcps, wallets); diagnose TLS probe"
 Query timeout and cancel,database,must,yes,partial,"SQLite, Oracle Client"
 Paginated results,database,must,yes,partial,"cursor paging: SQLite, Oracle Client"
@@ -50,7 +50,7 @@ Keymap import,settings-import,must,yes,no,
 Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,no,
 UI theme import (.theme.json),settings-import,must,yes,no,
-Import data sources and passwords from PyCharm,settings-import,should,no,no,own feature; dataSources.xml + credential store
+Import data sources and passwords from PyCharm,settings-import,should,no,partial,pyoxide-db import pycharm; IDE credential naming to confirm on a real setup
 Interpreter and virtualenv discovery,python-intel,must,yes,no,venv uv poetry conda
 Completion,python-intel,must,yes,no,LSP
 Go to definition and find usages,python-intel,must,yes,no,LSP

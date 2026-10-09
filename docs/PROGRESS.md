@@ -2,11 +2,11 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 18%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 19%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 48% `█████░░░░░` | 5 | 13 | 9 |
+| database | 51% `█████░░░░░` | 6 | 13 | 8 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -33,7 +33,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Schema introspection (tables / views / columns) | must | SQLite full; Oracle tables and columns |
 | 🟡 | Indexes constraints sequences procedures | should | SQLite indexes, constraints, triggers |
 | ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
-| ⬜ | Password storage in KeePass (kdbx) | should | IDE password settings model |
+| ✅ | Password storage in KeePass (kdbx) | should | secrets: KDBX 4 store, master password in OS store / env / prompt |
 | 🟡 | TLS and wallets | should | Oracle Client (tcps, wallets); diagnose TLS probe |
 | 🟡 | Query timeout and cancel | must | SQLite, Oracle Client |
 | 🟡 | Paginated results | must | cursor paging: SQLite, Oracle Client |
@@ -90,7 +90,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Code style import | should |  |
 | ⬜ | Editor colour scheme import (.icls) | must |  |
 | ⬜ | UI theme import (.theme.json) | must |  |
-| ⬜ | Import data sources and passwords from PyCharm (own) | should | own feature; dataSources.xml + credential store |
+| 🟡 | Import data sources and passwords from PyCharm (own) | should | pyoxide-db import pycharm; IDE credential naming to confirm on a real setup |
 
 ## python-intel
 

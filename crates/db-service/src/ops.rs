@@ -634,6 +634,24 @@ pub fn register(registry: &mut Registry, svc: Arc<DbService>) {
             async move { schema_source(&s, &a).await.map_err(command_error) }
         },
     ));
+    let s = svc.clone();
+    registry.register(typed(
+        meta!(
+            "db.import.pycharm",
+            "Import PyCharm Data Sources",
+            "Creates profiles from a PyCharm project's data sources and moves their passwords into the secret store; dry_run reports only.",
+            r#"{"project": "/path/to/project", "dry_run": true, "allow_os_store": false}"#
+        ),
+        move |a: crate::import::PycharmImportArgs| {
+            let s = s.clone();
+            async move {
+                tokio::task::spawn_blocking(move || crate::import::import_pycharm(&s, &a))
+                    .await
+                    .map_err(|e| CommandError::new("internal", e.to_string()))?
+                    .map_err(command_error)
+            }
+        },
+    ));
     let s = svc;
     registry.register(typed(
         meta!("db.diagnose", "Diagnose Connection", "Checks a connection step by step and explains the first failure; never prints secrets.", r#"{"profile": "local-pg", "deep": false, "share": true, "try_all": false}"#),

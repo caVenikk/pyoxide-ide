@@ -14,6 +14,7 @@ db-oracle-odpi.workspace = true
 db-postgres.workspace = true
 db-sqlite.workspace = true
 secrets.workspace = true
+settings-import.workspace = true
 dirs = "7"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
