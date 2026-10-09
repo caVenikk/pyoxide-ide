@@ -1,0 +1,17 @@
+[package]
+name = "settings-import"
+description = "Import of settings from other IDEs into Pyoxide IDE (PyCharm data sources)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+quick-xml.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+dirs = "7"
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3"

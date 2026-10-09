@@ -10,6 +10,7 @@ members = [
     "crates/db-service",
     "crates/db-cli",
     "crates/secrets",
+    "crates/settings-import",
 ]
 
 [workspace.package]
@@ -36,3 +37,4 @@ db-postgres = { path = "crates/db-postgres" }
 db-sqlite = { path = "crates/db-sqlite" }
 db-service = { path = "crates/db-service" }
 secrets = { path = "crates/secrets" }
+settings-import = { path = "crates/settings-import" }

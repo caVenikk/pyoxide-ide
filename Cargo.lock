@@ -2000,6 +2000,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings-import"
+version = "0.0.1"
+dependencies = [
+ "dirs",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: every name, path and UUID is invented. -->
+<project version="4">
+  <component name="dataSourceStorageLocal" created-in="PY-000.0000.00">
+    <data-source name="app" uuid="6a2f56c3-4423-4b48-9741-8d3a98d38c19">
+      <database-info product="SQLite" version="3.45.1" jdbc-version="4.2" driver-name="SQLite JDBC" driver-version="3.45.1.0" dbms="SQLITE" exact-version="3.45.1" exact-driver-version="3.45">
+        <identifier-quote-string>"</identifier-quote-string>
+      </database-info>
+      <case-sensitivity plain-identifiers="mixed" quoted-identifiers="mixed" />
+      <auth-provider>no-auth</auth-provider>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="schema" qname="@" />
+        </introspection-scope>
+      </schema-mapping>
+    </data-source>
+    <data-source name="inventory_win" uuid="0f3c2a71-5d1e-4b8a-9c47-2e6b8d1f7a90">
+      <auth-provider>no-auth</auth-provider>
+    </data-source>
+  </component>
+</project>

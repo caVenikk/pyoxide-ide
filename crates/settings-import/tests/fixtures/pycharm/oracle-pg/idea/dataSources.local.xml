@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: every name, host, user and UUID is invented. -->
+<project version="4">
+  <component name="dataSourceStorageLocal" created-in="PY-000.0000.00">
+    <data-source name="billing" uuid="937fe348-db15-4a11-b8ca-eaf20d71ef36">
+      <database-info product="Oracle" version="19.0.0.0.0" jdbc-version="4.2" driver-name="Oracle JDBC driver" driver-version="23.0.0.0.0" dbms="ORACLE" exact-version="19.0.0" exact-driver-version="23.0">
+        <extra-name-characters>$#</extra-name-characters>
+        <identifier-quote-string>"</identifier-quote-string>
+      </database-info>
+      <case-sensitivity plain-identifiers="upper" quoted-identifiers="exact" />
+      <secret-storage>master_key</secret-storage>
+      <user-name>app_user</user-name>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="schema" qname="@" />
+        </introspection-scope>
+      </schema-mapping>
+    </data-source>
+    <data-source name="legacy-sid" uuid="43d34cc4-5b79-413e-9376-347d5bc984c0">
+      <database-info product="Oracle" version="12.2.0.1.0" dbms="ORACLE" />
+      <secret-storage>master_key</secret-storage>
+      <user-name>legacy_owner</user-name>
+    </data-source>
+    <data-source name="reports-tns" uuid="681c9f64-85e4-4f9f-b6dd-f8b7afdec4c4">
+      <secret-storage>master_key</secret-storage>
+      <user-name>report_reader</user-name>
+    </data-source>
+    <data-source name="warehouse" uuid="bb5e2e3a-0119-4ccd-b74b-b03098d88533">
+      <secret-storage>master_key</secret-storage>
+      <user-name>dwh_reader</user-name>
+    </data-source>
+    <data-source name="app-pg" uuid="2840d347-dda4-4121-a53c-087ad27281eb">
+      <database-info product="PostgreSQL" version="16.4" jdbc-version="4.2" driver-name="PostgreSQL JDBC Driver" driver-version="42.7.3" dbms="POSTGRES" exact-version="16.4" exact-driver-version="42.7">
+        <identifier-quote-string>"</identifier-quote-string>
+      </database-info>
+      <case-sensitivity plain-identifiers="lower" quoted-identifiers="exact" />
+      <secret-storage>master_key</secret-storage>
+      <user-name>app_user</user-name>
+      <auto-commit>false</auto-commit>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="database" qname="@">
+            <node kind="schema" qname="@" />
+          </node>
+        </introspection-scope>
+      </schema-mapping>
+    </data-source>
+    <data-source name="pg-ha" uuid="97cb3ebe-bb3b-4519-b9f1-5bda800d99f5">
+      <secret-storage>master_key</secret-storage>
+    </data-source>
+    <data-source name="shop-mysql" uuid="42baa296-931f-4f8f-9fca-7722f6323b04">
+      <secret-storage>master_key</secret-storage>
+      <user-name>shop</user-name>
+    </data-source>
+  </component>
+</project>
