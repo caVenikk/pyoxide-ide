@@ -9,7 +9,12 @@ rust-version.workspace = true
 [dependencies]
 db-core.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
+tokio.workspace = true
 oracle-rs = "0.1.7"
+# Only to install a process-wide crypto provider before oracle-rs builds its
+# TLS configuration; oracle-rs already pulls rustls with aws-lc-rs.
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
 
 [dev-dependencies]
 tokio.workspace = true
