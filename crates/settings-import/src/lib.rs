@@ -1,7 +1,9 @@
-//! Import of settings from other IDEs, starting with PyCharm data sources.
+//! Import of settings from other IDEs, starting with PyCharm data sources
+//! and their saved passwords (see the crate README).
 //!
-//! Output is plain data; turning it into Pyoxide profiles is up to the
-//! caller. Only the user's own files are read.
+//! Output is plain data; turning it into Pyoxide profiles and storing the
+//! passwords is up to the caller. Only the user's own files are read, and
+//! secret values only travel as [`secrets::Secret`].
 
 use std::path::PathBuf;
 
