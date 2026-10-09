@@ -2,12 +2,12 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 19%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 18%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 54% `█████░░░░░` | 5 | 12 | 6 |
-| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
+| database | 48% `█████░░░░░` | 5 | 13 | 9 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
@@ -44,20 +44,30 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Transaction mode (auto / manual) | should | SQLite, Oracle Client |
 | 🟡 | Read-only connections | should | SQLite; Oracle Client best effort |
 | 🟡 | Oracle TNS alias and connect descriptors | should | Oracle Client backend (dsn); thin in progress |
-| ⬜ | Schema and object filters | could | Pro |
+| ⬜ | Schema and object filters | should | Pro |
 | 🟡 | Object source and DDL | should | SQLite done |
-| ⬜ | SSH tunnel | could | Pro; after MVP |
+| ⬜ | SSH tunnel | should | Pro; after MVP; must never block the UI (feedback) |
 | ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
+| 🟡 | Large values: capped fetch of LOB / JSON / long text | must | max_value_bytes and Value::Truncated; lazy full fetch todo |
+| ⬜ | Persistent schema cache across restarts | should | feedback: introspection slow or forgotten |
+| ⬜ | Cancellable scoped introspection with progress | should | feedback |
+| ⬜ | PostgreSQL Unix-socket connections | could | feedback |
+| ⬜ | External secret provider (command / password manager CLI) (own) | could | own feature; feedback |
 
 ## db-gui
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ⬜ | Database explorer tree | must | Pro |
-| ⬜ | Data grid with paging | must | Pro |
+| ⬜ | Data grid with paging | must | Pro; virtualized, renders visible cells only (feedback: grid freezes) |
 | ⬜ | SQL console with history | should |  |
 | ⬜ | Result table editing | could |  |
 | ⬜ | Explain plan | could | Pro |
+| ⬜ | Run a SQL file as a run configuration with results | should | feedback: top open request |
+| ⬜ | Open a SQLite file directly | should | feedback |
+| ⬜ | Date and number formats for grid, import and export | should | feedback |
+| ⬜ | SQL*Plus commands in the Oracle console (DESCRIBE / EXEC) (own) | should | own feature; feedback |
+| ⬜ | psql / sqlite3 meta-commands in the console (subset) (own) | could | own feature; feedback |
 
 ## editor
 

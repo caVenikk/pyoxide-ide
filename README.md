@@ -29,12 +29,12 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 19%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 18%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 54% `█████░░░░░` | 5 | 12 | 6 |
-| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
+| database | 48% `█████░░░░░` | 5 | 13 | 9 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |

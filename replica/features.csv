@@ -19,15 +19,25 @@ Bind parameters,database,should,yes,partial,"SQLite, Oracle Client"
 Transaction mode (auto / manual),database,should,yes,partial,"SQLite, Oracle Client"
 Read-only connections,database,should,yes,partial,SQLite; Oracle Client best effort
 Oracle TNS alias and connect descriptors,database,should,yes,partial,Oracle Client backend (dsn); thin in progress
-Schema and object filters,database,could,yes,no,Pro
+Schema and object filters,database,should,yes,no,Pro
 Object source and DDL,database,should,yes,partial,SQLite done
-SSH tunnel,database,could,yes,no,Pro; after MVP
+SSH tunnel,database,should,yes,no,Pro; after MVP; must never block the UI (feedback)
 Startup script / keep-alive / auto-disconnect,database,could,yes,no,Pro
+Large values: capped fetch of LOB / JSON / long text,database,must,yes,partial,max_value_bytes and Value::Truncated; lazy full fetch todo
+Persistent schema cache across restarts,database,should,yes,no,feedback: introspection slow or forgotten
+Cancellable scoped introspection with progress,database,should,yes,no,feedback
+PostgreSQL Unix-socket connections,database,could,yes,no,feedback
+External secret provider (command / password manager CLI),database,could,no,no,own feature; feedback
 Database explorer tree,db-gui,must,yes,no,Pro
-Data grid with paging,db-gui,must,yes,no,Pro
+Data grid with paging,db-gui,must,yes,no,"Pro; virtualized, renders visible cells only (feedback: grid freezes)"
 SQL console with history,db-gui,should,yes,no,
 Result table editing,db-gui,could,yes,no,
 Explain plan,db-gui,could,yes,no,Pro
+Run a SQL file as a run configuration with results,db-gui,should,yes,no,feedback: top open request
+Open a SQLite file directly,db-gui,should,yes,no,feedback
+"Date and number formats for grid, import and export",db-gui,should,yes,no,feedback
+SQL*Plus commands in the Oracle console (DESCRIBE / EXEC),db-gui,should,no,no,own feature; feedback
+psql / sqlite3 meta-commands in the console (subset),db-gui,could,no,no,own feature; feedback
 Text buffer and editing,editor,must,yes,no,
 Python syntax highlighting,editor,must,yes,no,
 Tabs and split views,editor,must,yes,no,
