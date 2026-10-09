@@ -3,8 +3,9 @@
 //!
 //! Backends mirror the usual IDE choices: the OS credential store (default),
 //! a KeePass database file ([`keepass`]), or memory only (forget on exit).
-//! [`config`] reads the IDE-wide choice and opens the store. Secret values
-//! only travel as [`Secret`]: redacted in `Debug`, wiped on drop.
+//! [`config`] reads the IDE-wide choice and opens the store; [`intellij`]
+//! reads a JetBrains IDE's credential store for import. Secret values only
+//! travel as [`Secret`]: redacted in `Debug`, wiped on drop.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,6 +14,7 @@ use zeroize::Zeroize;
 
 pub mod config;
 mod fsutil;
+pub mod intellij;
 pub mod keepass;
 #[cfg(test)]
 mod test_kdbx3;

@@ -1890,11 +1890,13 @@ dependencies = [
  "dirs",
  "keepass",
  "keyring",
+ "quick-xml",
  "serde",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "toml",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
