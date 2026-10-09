@@ -51,7 +51,16 @@ fn provider() -> Arc<CryptoProvider> {
 }
 
 /// Build the connector for a connection (also used for cancel requests).
-pub(crate) fn connector(params: &TlsParams) -> Result<MakeRustlsConnect> {
+pub(crate) async fn connector(params: &TlsParams) -> Result<MakeRustlsConnect> {
+    if verification(params.mode) != Verification::None {
+        // The first use reads the OS trust store, which can take over 100 ms;
+        // keep that off the async worker threads.
+        let _ = tokio::task::spawn_blocking(native_roots).await;
+    }
+    build(params)
+}
+
+fn build(params: &TlsParams) -> Result<MakeRustlsConnect> {
     let provider = provider();
     let verifier: Arc<dyn ServerCertVerifier> = match verification(params.mode) {
         Verification::None => Arc::new(NoVerify {
@@ -430,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn connector_builds_for_every_mode_and_reads_a_ca_file() {
+    fn the_connector_builds_for_every_mode_and_reads_a_ca_file() {
         let pki = make_pki("db.example.test");
         let dir = std::env::temp_dir().join(format!("pxpg_tls_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -449,7 +458,7 @@ mod tests {
                 ca_file: Some(ca_path.clone()),
                 ..TlsParams::default()
             };
-            connector(&params).unwrap_or_else(|e| panic!("{mode:?}: {e}"));
+            build(&params).unwrap_or_else(|e| panic!("{mode:?}: {e}"));
         }
 
         let missing = TlsParams {
@@ -457,7 +466,7 @@ mod tests {
             ca_file: Some(dir.join("missing.pem")),
             ..TlsParams::default()
         };
-        assert_eq!(connector(&missing).err().unwrap().kind, ErrorKind::Config);
+        assert_eq!(build(&missing).err().unwrap().kind, ErrorKind::Config);
 
         let empty = dir.join("empty.pem");
         std::fs::write(&empty, "not a certificate").unwrap();
@@ -466,7 +475,7 @@ mod tests {
             ca_file: Some(empty),
             ..TlsParams::default()
         };
-        assert_eq!(connector(&params).err().unwrap().kind, ErrorKind::Config);
+        assert_eq!(build(&params).err().unwrap().kind, ErrorKind::Config);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -478,6 +487,6 @@ mod tests {
             client_cert: Some("client.pem".into()),
             ..TlsParams::default()
         };
-        assert_eq!(connector(&params).err().unwrap().kind, ErrorKind::Config);
+        assert_eq!(build(&params).err().unwrap().kind, ErrorKind::Config);
     }
 }

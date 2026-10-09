@@ -33,6 +33,8 @@ pub use conn::PostgresConnection;
 
 const DEFAULT_APPLICATION_NAME: &str = "pyoxide";
 
+/// Opens PostgreSQL connections.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PostgresDriver;
 
 #[async_trait]
@@ -47,7 +49,9 @@ impl Driver for PostgresDriver {
 
     async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Connection>> {
         let secret = params.password.expose();
-        let tls = tls::connector(&params.tls).map_err(|e| e.scrub(secret))?;
+        let tls = tls::connector(&params.tls)
+            .await
+            .map_err(|e| e.scrub(secret))?;
 
         // `[::1]` is the URL spelling of an IPv6 address; the socket layer
         // wants the bare address.
