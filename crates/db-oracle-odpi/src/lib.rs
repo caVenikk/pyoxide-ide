@@ -15,11 +15,17 @@ use db_core::{
 #[allow(dead_code)]
 mod binds;
 #[allow(dead_code)]
+mod conn;
+#[allow(dead_code)]
 mod connect_string;
 #[allow(dead_code)]
 mod errors;
 #[allow(dead_code)]
+mod link;
+#[allow(dead_code)]
 mod sqltext;
+#[cfg(test)]
+mod testing;
 #[allow(dead_code)]
 mod tx;
 #[allow(dead_code)]
