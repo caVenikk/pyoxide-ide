@@ -12,6 +12,19 @@ use db_core::{
     Outcome, Result, TxMode, Value, ValueKind, VecCursor,
 };
 
+#[allow(dead_code)]
+mod binds;
+#[allow(dead_code)]
+mod connect_string;
+#[allow(dead_code)]
+mod errors;
+#[allow(dead_code)]
+mod sqltext;
+#[allow(dead_code)]
+mod tx;
+#[allow(dead_code)]
+mod values;
+
 pub struct OdpiDriver;
 
 pub struct OdpiConnection {
