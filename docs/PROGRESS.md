@@ -2,11 +2,12 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 8%** `██░░░░░░░░░░░░░░░░░░`
+**Overall parity: 7%** `█░░░░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 25% `██░░░░░░░░` | 2 | 3 | 10 |
+| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
@@ -35,10 +36,27 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | TLS and wallets | should |  |
 | ⬜ | Query timeout and cancel | must |  |
 | 🟡 | Paginated results | must | row cap only |
-| ⬜ | SQL console with history | should |  |
-| ⬜ | Result table editing | could |  |
 | ⬜ | Export results (CSV / JSON) | should |  |
 | ⬜ | Connection diagnostics (own) | should | own feature |
+| ⬜ | Test connection (server and driver version) | must | Pro |
+| ⬜ | Bind parameters | should |  |
+| ⬜ | Transaction mode (auto / manual) | should | Pro |
+| ⬜ | Read-only connections | should | Pro |
+| ⬜ | Oracle TNS alias and connect descriptors | should | Oracle Client backend |
+| ⬜ | Schema and object filters | could | Pro |
+| ⬜ | Object source and DDL | should | Pro |
+| ⬜ | SSH tunnel | could | Pro; after MVP |
+| ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
+
+## db-gui
+
+| | Feature | Priority | Notes |
+|---|---|---|---|
+| ⬜ | Database explorer tree | must | Pro |
+| ⬜ | Data grid with paging | must | Pro |
+| ⬜ | SQL console with history | should |  |
+| ⬜ | Result table editing | could |  |
+| ⬜ | Explain plan | could | Pro |
 
 ## editor
 

@@ -11,10 +11,22 @@ Connection profiles with keychain secrets,database,must,yes,no,
 TLS and wallets,database,should,yes,no,
 Query timeout and cancel,database,must,yes,no,
 Paginated results,database,must,yes,partial,row cap only
-SQL console with history,database,should,yes,no,
-Result table editing,database,could,yes,no,
 Export results (CSV / JSON),database,should,yes,no,
 Connection diagnostics,database,should,no,no,own feature
+Test connection (server and driver version),database,must,yes,no,Pro
+Bind parameters,database,should,yes,no,
+Transaction mode (auto / manual),database,should,yes,no,Pro
+Read-only connections,database,should,yes,no,Pro
+Oracle TNS alias and connect descriptors,database,should,yes,no,Oracle Client backend
+Schema and object filters,database,could,yes,no,Pro
+Object source and DDL,database,should,yes,no,Pro
+SSH tunnel,database,could,yes,no,Pro; after MVP
+Startup script / keep-alive / auto-disconnect,database,could,yes,no,Pro
+Database explorer tree,db-gui,must,yes,no,Pro
+Data grid with paging,db-gui,must,yes,no,Pro
+SQL console with history,db-gui,should,yes,no,
+Result table editing,db-gui,could,yes,no,
+Explain plan,db-gui,could,yes,no,Pro
 Text buffer and editing,editor,must,yes,no,
 Python syntax highlighting,editor,must,yes,no,
 Tabs and split views,editor,must,yes,no,

@@ -29,11 +29,12 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 8%** `██░░░░░░░░░░░░░░░░░░`
+**Overall parity: 7%** `█░░░░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 25% `██░░░░░░░░` | 2 | 3 | 10 |
+| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
@@ -51,9 +52,13 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 
 | Crate | Purpose |
 |---|---|
-| `db-core` | Backend-agnostic traits, result model, schema introspection SQL |
+| `commands` | Command registry shared by the UI, the CLI and the agent control channel |
+| `db-core` | Backend-agnostic traits, typed values, cursors, cancel/timeouts, schema introspection |
 | `db-oracle-thin` | Oracle over pure Rust (`oracle-rs`), no Oracle Client needed |
 | `db-oracle-odpi` | Oracle through an installed Oracle Client (ODPI-C), fallback |
+| `db-postgres` | PostgreSQL (`tokio-postgres`, rustls) |
+| `db-sqlite` | SQLite (`rusqlite`, bundled) |
+| `db-service` | Connection profiles, secrets, diagnostics, `db.*` commands |
 | `db-cli` | `pyoxide-db`, a command-line database client |
 
 ## Getting started
