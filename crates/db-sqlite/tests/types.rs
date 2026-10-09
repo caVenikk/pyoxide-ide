@@ -283,3 +283,57 @@ async fn bind_errors() {
     let rs = rows(&conn, "SELECT ?1 IS NULL", &[Value::Null]).await;
     assert_eq!(rs.rows[0][0], Value::Int(1));
 }
+
+#[tokio::test]
+async fn null_empty_text_and_empty_blob_stay_distinct() {
+    let conn = memory().await;
+    run(&conn, "CREATE TABLE t(s TEXT, b BLOB, n INTEGER)").await;
+    run(
+        &conn,
+        "INSERT INTO t VALUES (NULL, NULL, NULL), ('', X'', 0), ('NULL', X'00', 9223372036854775807)",
+    )
+    .await;
+    let rs = rows(&conn, "SELECT * FROM t ORDER BY rowid", &[]).await;
+    assert_eq!(rs.rows[0], vec![Value::Null, Value::Null, Value::Null]);
+    assert_eq!(
+        rs.rows[1],
+        vec![
+            Value::Text(String::new()),
+            Value::Bytes(vec![]),
+            Value::Int(0)
+        ]
+    );
+    assert_eq!(
+        rs.rows[2],
+        vec![
+            Value::Text("NULL".into()),
+            Value::Bytes(vec![0]),
+            Value::Int(i64::MAX)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn pragma_and_explain_return_rows() {
+    let conn = memory().await;
+    run(
+        &conn,
+        "CREATE TABLE t(a INTEGER PRIMARY KEY, b TEXT NOT NULL)",
+    )
+    .await;
+    let rs = rows(&conn, "PRAGMA table_info(t)", &[]).await;
+    let names: Vec<_> = rs.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["cid", "name", "type", "notnull", "dflt_value", "pk"]
+    );
+    assert_eq!(rs.rows.len(), 2);
+    assert_eq!(rs.rows[1][1], Value::Text("b".into()));
+    // Foreign keys are on for every connection.
+    assert_eq!(
+        common::scalar(&conn, "PRAGMA foreign_keys").await,
+        Value::Int(1)
+    );
+    let plan = rows(&conn, "EXPLAIN QUERY PLAN SELECT * FROM t WHERE a = 1", &[]).await;
+    assert!(!plan.rows.is_empty());
+}
