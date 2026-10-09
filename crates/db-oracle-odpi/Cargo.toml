@@ -1,0 +1,13 @@
+[package]
+name = "db-oracle-odpi"
+description = "Oracle backend through an installed Oracle Client (ODPI-C), fallback for setups the thin driver cannot reach"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+db-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+oracle = "0.6"

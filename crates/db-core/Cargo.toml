@@ -1,0 +1,11 @@
+[package]
+name = "db-core"
+description = "Backend-agnostic database client interface for Pyoxide IDE"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true

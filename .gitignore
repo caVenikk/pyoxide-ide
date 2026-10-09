@@ -1,0 +1,15 @@
+# build
+/target
+# local agent installs and personal notes (never committed)
+/.claude/
+/.private/
+# reference material that is not ours to publish
+/replica/screens/
+/replica/reviews.csv
+/tests/fixtures/themes-local/
+# misc
+.env
+*.log
+.idea/
+.vscode/
+.DS_Store

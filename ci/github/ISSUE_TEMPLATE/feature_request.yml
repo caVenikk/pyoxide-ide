@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [database, editor, python-intelligence, run-debug, vcs, docker, settings-import, themes, performance, packaging, other]
+    validations: {required: true}
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do and what gets in the way?
+    validations: {required: true}
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Describe it in your own words. Link public documentation if the behaviour should match another tool; do not paste text or screenshots of proprietary software.
+    validations: {required: true}
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and the roadmap
+          required: true
+        - label: I did not use proprietary or decompiled material for this proposal
+          required: true

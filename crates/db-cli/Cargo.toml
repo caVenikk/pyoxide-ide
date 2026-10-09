@@ -1,0 +1,18 @@
+[package]
+name = "db-cli"
+description = "Command-line database client for Pyoxide IDE (first vertical slice)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "pyoxide-db"
+path = "src/main.rs"
+
+[dependencies]
+db-core.workspace = true
+db-oracle-thin.workspace = true
+db-oracle-odpi.workspace = true
+tokio.workspace = true
+clap = { version = "4", features = ["derive", "env"] }

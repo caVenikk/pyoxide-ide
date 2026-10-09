@@ -1,0 +1,15 @@
+# Local Oracle for development and integration tests.
+services:
+  oracle:
+    image: gvenzl/oracle-free:slim-faststart
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: ${PYOXIDE_DB_PASSWORD:-pyoxide}
+      APP_USER: pyoxide
+      APP_USER_PASSWORD: ${PYOXIDE_DB_PASSWORD:-pyoxide}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

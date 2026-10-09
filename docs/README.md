@@ -1,0 +1,9 @@
+# Documentation
+
+- [ROADMAP.md](ROADMAP.md): milestones and status
+- [architecture.md](architecture.md): crates, layering, command registry, external processes
+- [performance.md](performance.md): performance budgets and how they are measured
+- [clean-room.md](clean-room.md): allowed and forbidden sources
+- [theme-formats.md](theme-formats.md): PyCharm theme and colour-scheme formats the importer must read
+- [agent-workflow.md](agent-workflow.md): how AI agents work in this repository
+- [adr/](adr/): architecture decision records

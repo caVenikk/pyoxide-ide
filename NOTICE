@@ -1,0 +1,24 @@
+Pyoxide IDE
+Copyright (c) 2026 Pyoxide IDE contributors
+
+Licensed under MIT OR Apache-2.0 (see LICENSE-MIT, LICENSE-APACHE).
+
+Third-party code and tooling
+----------------------------
+Rust dependencies keep their own licenses (see Cargo.lock).
+
+If code or substantial structure is ever taken from an open-source project
+(for example IntelliJ Community / PyCharm Community, Apache-2.0), record it
+here with: source URL, commit, file(s), license, and what was changed.
+
+- skills/replica-*  (Replica skill pack, MIT, (c) 2026 Jake Schincariol)
+  Source: https://github.com/Jakeschincariol/replica-skill @ 77c9436
+  License text: skills/LICENSE-replica-skill. Modified: a "Pyoxide override"
+  block in each SKILL.md, skills/PYOXIDE.md, and replica-brand/sweep.py
+  (--allow, skips target/). Development tooling only (not shipped).
+
+Trademarks
+----------
+PyCharm and IntelliJ are trademarks of JetBrains s.r.o. Python is a trademark of
+the Python Software Foundation. Oracle is a trademark of Oracle Corporation.
+This project is independent and not affiliated with or endorsed by them.

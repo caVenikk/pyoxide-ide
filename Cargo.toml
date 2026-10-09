@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/db-core",
+    "crates/db-oracle-thin",
+    "crates/db-oracle-odpi",
+    "crates/db-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/OWNER/pyoxide-ide"
+rust-version = "1.85"
+
+[workspace.dependencies]
+async-trait = "0.1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+db-core = { path = "crates/db-core" }
+db-oracle-thin = { path = "crates/db-oracle-thin" }
+db-oracle-odpi = { path = "crates/db-oracle-odpi" }

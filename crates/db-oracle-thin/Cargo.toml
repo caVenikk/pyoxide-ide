@@ -1,0 +1,15 @@
+[package]
+name = "db-oracle-thin"
+description = "Oracle backend in pure Rust (no Oracle Client needed), via the oracle-rs crate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+db-core.workspace = true
+async-trait.workspace = true
+oracle-rs = "0.1.7"
+
+[dev-dependencies]
+tokio.workspace = true
