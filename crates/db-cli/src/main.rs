@@ -1,7 +1,9 @@
 //! `pyoxide-db`: first vertical slice of the Pyoxide IDE database client.
 
 use clap::{Parser, Subcommand, ValueEnum};
-use db_core::{ConnectParams, Connection, Driver, introspection, render_table};
+use db_core::{
+    Column, ConnectParams, Connection, ResultSet, Secret, Value, ValueKind, render_table, schema,
+};
 
 #[derive(Copy, Clone, ValueEnum)]
 enum Backend {
@@ -54,14 +56,16 @@ async fn connect(cli: &Cli) -> db_core::Result<Box<dyn Connection>> {
     let p = ConnectParams {
         host: cli.host.clone(),
         port: cli.port,
-        service: cli.service.clone(),
+        database: cli.service.clone(),
         user: cli.user.clone(),
-        password: cli.password.clone(),
+        password: Secret::new(cli.password.clone()),
+        ..Default::default()
     };
-    match cli.backend {
-        Backend::Thin => db_oracle_thin::ThinDriver::connect(&p).await,
-        Backend::Odpi => db_oracle_odpi::OdpiDriver::connect(&p).await,
-    }
+    let backend = match cli.backend {
+        Backend::Thin => db_core::Backend::OracleThin,
+        Backend::Odpi => db_core::Backend::OracleOdpi,
+    };
+    db_service::driver(backend).connect(&p).await
 }
 
 #[tokio::main]
@@ -80,16 +84,62 @@ async fn main() {
 
 async fn run(cli: &Cli) -> db_core::Result<()> {
     let conn = connect(cli).await?;
-    let sql = match &cli.cmd {
-        Cmd::Ping => "SELECT 'pong' AS reply FROM dual".to_string(),
-        Cmd::Query { sql } => sql.clone(),
-        Cmd::Tables => introspection::ORACLE_LIST_TABLES.to_string(),
-        Cmd::Describe { owner, table } => introspection::oracle_describe_table(owner, table)
-            .ok_or_else(|| db_core::Error::Query("invalid owner/table name".into()))?,
+    let rs = match &cli.cmd {
+        Cmd::Ping => {
+            conn.query("SELECT 'pong' AS reply FROM dual", &[], 1)
+                .await?
+        }
+        Cmd::Query { sql } => conn.query(sql, &[], cli.max_rows).await?,
+        Cmd::Tables => {
+            let intro = schema::introspector(conn.as_ref());
+            let owner = intro.current_schema().await?;
+            let objects = intro.objects(&owner, &[schema::ObjectKind::Table]).await?;
+            text_table(
+                &["OWNER", "TABLE_NAME"],
+                objects
+                    .into_iter()
+                    .map(|o| vec![o.schema, o.name])
+                    .collect(),
+            )
+        }
+        Cmd::Describe { owner, table } => {
+            let intro = schema::introspector(conn.as_ref());
+            let cols = intro.columns(owner, table).await?;
+            text_table(
+                &["COLUMN_NAME", "DATA_TYPE", "NULLABLE"],
+                cols.into_iter()
+                    .map(|c| {
+                        vec![
+                            c.name,
+                            c.data_type,
+                            if c.nullable { "Y" } else { "N" }.into(),
+                        ]
+                    })
+                    .collect(),
+            )
+        }
     };
-    let rs = conn.query(&sql, cli.max_rows).await?;
     println!("[{}]", conn.backend());
     println!("{}", render_table(&rs));
     conn.close().await.ok();
     Ok(())
+}
+
+fn text_table(names: &[&str], rows: Vec<Vec<String>>) -> ResultSet {
+    ResultSet {
+        columns: names
+            .iter()
+            .map(|n| Column {
+                name: (*n).into(),
+                type_name: "TEXT".into(),
+                kind: ValueKind::Text,
+                nullable: true,
+            })
+            .collect(),
+        rows: rows
+            .into_iter()
+            .map(|r| r.into_iter().map(Value::Text).collect())
+            .collect(),
+        ..Default::default()
+    }
 }

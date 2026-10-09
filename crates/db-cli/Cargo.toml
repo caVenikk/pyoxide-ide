@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 db-core.workspace = true
-db-oracle-thin.workspace = true
-db-oracle-odpi.workspace = true
+db-service.workspace = true
 tokio.workspace = true
 clap = { version = "4", features = ["derive", "env"] }

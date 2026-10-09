@@ -184,6 +184,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -252,6 +253,17 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "commands"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
 
 [[package]]
 name = "const-oid"
@@ -325,8 +337,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "db-core",
- "db-oracle-odpi",
- "db-oracle-thin",
+ "db-service",
  "tokio",
 ]
 
@@ -335,7 +346,12 @@ name = "db-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -356,6 +372,34 @@ dependencies = [
  "db-core",
  "oracle-rs",
  "tokio",
+]
+
+[[package]]
+name = "db-postgres"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "db-core",
+]
+
+[[package]]
+name = "db-service"
+version = "0.0.1"
+dependencies = [
+ "commands",
+ "db-core",
+ "db-oracle-odpi",
+ "db-oracle-thin",
+ "db-postgres",
+ "db-sqlite",
+]
+
+[[package]]
+name = "db-sqlite"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "db-core",
 ]
 
 [[package]]

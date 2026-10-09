@@ -1,0 +1,15 @@
+[package]
+name = "db-service"
+description = "Database engine service for Pyoxide IDE: connection profiles, secrets, driver dispatch, diagnostics and the db.* commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+commands.workspace = true
+db-core.workspace = true
+db-oracle-thin.workspace = true
+db-oracle-odpi.workspace = true
+db-postgres.workspace = true
+db-sqlite.workspace = true
