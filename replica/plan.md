@@ -30,15 +30,16 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | issue | owner | crates / files | depends on | status |
 |---|---|---|---|---|
 | #1 PostgreSQL backend | sub-agent pg | `crates/db-postgres`, `db-core/src/schema/postgres.rs` | contracts | in progress |
-| #2 SQLite backend | sub-agent sqlite | `crates/db-sqlite`, `db-core/src/schema/sqlite.rs` | contracts | in progress |
+| #2 SQLite backend | sub-agent sqlite | `crates/db-sqlite`, `db-core/src/schema/sqlite.rs` | contracts | merged |
 | #3 Oracle thin backend and introspection | sub-agent oracle-thin | `crates/db-oracle-thin`, `db-core/src/schema/oracle.rs`, `db-core/src/oracle_net.rs` | contracts | in progress |
-| #4 Oracle Client backend | sub-agent oracle-odpi | `crates/db-oracle-odpi` | contracts | in progress |
-| #5 db-service and CLI | lead | `crates/db-service`, `crates/db-cli`, `crates/secrets` (store trait) | contracts | in progress |
-| #6 diagnose | lead | `crates/db-service/src/diagnose.rs`, `hints.rs`, `tls_probe.rs` | #5 | in progress |
-| #7 KeePass store and PyCharm import | sub-agent secrets | `crates/secrets` (KeePass, config, IDE store), `crates/settings-import` | #5 store trait | in progress |
-| #8 CI integration job and binaries | lead | `.github/workflows` | #1-#4 | todo |
+| #4 Oracle Client backend | sub-agent oracle-odpi | `crates/db-oracle-odpi` | contracts | merged (integration tests need Oracle Instant Client) |
+| #5 db-service and CLI | lead | `crates/db-service`, `crates/db-cli`, `crates/secrets` (store trait) | contracts | done |
+| #6 diagnose | lead | `crates/db-service/src/diagnose.rs`, `hints.rs`, `tls_probe.rs` | #5 | done |
+| #7 KeePass store and PyCharm import | sub-agent secrets | `crates/secrets` (KeePass, config, IDE store), `crates/settings-import` | #5 store trait | merged (IDE credential naming to confirm) |
+| #8 CI integration job and binaries | lead | `.github/workflows` | #1-#4 | written, runs after push |
 | #9 Real Oracle 19c verification | maintainer | diagnose report | #3, #4, #6 | todo |
 | #10 oracle-rs cancel upstream | open | upstream | #3 | todo |
+| #16 Deduplicate driver plumbing, conformance test kit | lead | `db-core` (worker, value helpers, Oracle SQL text, tx state), new `db-testkit` | #1, #3 merged | next |
 
 ## Next areas (not started)
 - M2 editor: #11 reference baseline (first), #12 UI toolkit ADR with measured
