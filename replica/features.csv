@@ -1,0 +1,48 @@
+feature,area,priority,original,clone,notes
+Oracle connection (thin driver),database,must,yes,yes,db-oracle-thin
+Oracle connection (Oracle Client / ODPI-C),database,should,yes,yes,db-oracle-odpi
+PostgreSQL connection,database,must,yes,no,MVP
+SQLite connection,database,must,yes,no,MVP
+Run SQL and view results,database,must,yes,partial,CLI only
+Typed result values,database,must,yes,no,
+Schema introspection (tables / views / columns),database,must,yes,partial,Oracle tables and columns
+Indexes constraints sequences procedures,database,should,yes,no,
+Connection profiles with keychain secrets,database,must,yes,no,
+TLS and wallets,database,should,yes,no,
+Query timeout and cancel,database,must,yes,no,
+Paginated results,database,must,yes,partial,row cap only
+SQL console with history,database,should,yes,no,
+Result table editing,database,could,yes,no,
+Export results (CSV / JSON),database,should,yes,no,
+Connection diagnostics,database,should,no,no,own feature
+Text buffer and editing,editor,must,yes,no,
+Python syntax highlighting,editor,must,yes,no,
+Tabs and split views,editor,must,yes,no,
+File tree and project model,editor,must,yes,no,
+Search in file and project,editor,must,yes,no,
+Multi-cursor and column selection,editor,should,yes,no,
+Code folding,editor,should,yes,no,
+Live templates,editor,should,yes,no,
+Keymap import,settings-import,must,yes,no,
+Code style import,settings-import,should,yes,no,
+Editor colour scheme import (.icls),settings-import,must,yes,no,
+UI theme import (.theme.json),settings-import,must,yes,no,
+Interpreter and virtualenv discovery,python-intel,must,yes,no,venv uv poetry conda
+Completion,python-intel,must,yes,no,LSP
+Go to definition and find usages,python-intel,must,yes,no,LSP
+Hover and signature help,python-intel,must,yes,no,LSP
+Rename and refactorings,python-intel,should,yes,no,
+Lint and format (ruff),python-intel,must,yes,no,
+Type checking,python-intel,must,yes,no,ty / basedpyright / pyrefly by ADR
+Run configurations,run-debug,must,yes,no,
+Debugger (breakpoints / stepping / variables),run-debug,must,yes,no,DAP / debugpy
+Test runner (pytest),run-debug,should,yes,no,
+Integrated terminal,run-debug,must,yes,no,
+Git status and diff,vcs,must,yes,no,
+Commit and branches,vcs,must,yes,no,
+Blame and history,vcs,should,yes,no,
+Docker containers and images,docker,should,yes,no,
+Command registry and palette,platform,must,no,no,own architecture
+Plugin API (WASM),platform,could,yes,no,
+Windows / macOS / Linux builds,packaging,must,yes,partial,CI builds all three
+Signed installers,packaging,should,yes,no,

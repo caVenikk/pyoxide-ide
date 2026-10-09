@@ -4,6 +4,7 @@
 
 ## Checks
 - [ ] `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` pass
+- [ ] `replica/features.csv` updated and `python3 scripts/progress.py` run (if a feature changed)
 - [ ] Tests added or updated; external-service tests are `#[ignore]` and documented
 - [ ] No secrets, personal data or machine-specific paths
 - [ ] **Clean-room:** I did not use decompiled, disassembled or otherwise extracted code or assets from proprietary software (docs/clean-room.md)

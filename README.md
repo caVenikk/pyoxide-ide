@@ -26,6 +26,26 @@ the same engine.
   permissively licensed code and observed behaviour only. See
   [docs/clean-room.md](docs/clean-room.md).
 
+## Progress
+
+<!-- progress:start -->
+**Overall parity: 9%** `██░░░░░░░░░░░░░░░░░░`
+
+| Area | Parity | Done | Partial | Todo |
+|---|---|---|---|---|
+| database | 25% `██░░░░░░░░` | 2 | 3 | 10 |
+| editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
+| settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
+| python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
+| run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
+| vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
+| docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
+| platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
+| packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
+
+Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
+<!-- progress:end -->
+
 ## Workspace
 
 | Crate | Purpose |

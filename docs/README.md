@@ -7,3 +7,4 @@
 - [theme-formats.md](theme-formats.md): PyCharm theme and colour-scheme formats the importer must read
 - [agent-workflow.md](agent-workflow.md): how AI agents work in this repository
 - [adr/](adr/): architecture decision records
+- [PROGRESS.md](PROGRESS.md): generated feature-parity status, overall and per feature
