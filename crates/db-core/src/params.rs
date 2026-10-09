@@ -125,8 +125,15 @@ pub mod opt {
     pub const ORACLE_DSN: &str = "oracle.dsn";
     /// PostgreSQL `application_name`.
     pub const APPLICATION_NAME: &str = "application_name";
+    /// Oracle Client only: directory with the Oracle Client libraries.
+    pub const ORACLE_LIB_DIR: &str = "oracle.lib_dir";
+    /// Oracle Client only: directory with `tnsnames.ora` and `sqlnet.ora`.
+    pub const ORACLE_CONFIG_DIR: &str = "oracle.config_dir";
     /// SQLite: create the file if it does not exist (`"true"`).
     pub const SQLITE_CREATE: &str = "sqlite.create";
+    /// SQLite: how long to wait for a lock held by another connection, in
+    /// milliseconds (default 5000).
+    pub const SQLITE_BUSY_TIMEOUT_MS: &str = "sqlite.busy_timeout_ms";
 }
 
 /// Everything needed to open a connection.

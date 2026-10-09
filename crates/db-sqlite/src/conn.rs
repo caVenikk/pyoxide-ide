@@ -16,7 +16,7 @@ use crate::worker::{ExecReply, ExecRequest, OpenSettings, Page, Reply, Request, 
 
 /// Backend option: how long a statement waits for a lock held by another
 /// connection, in milliseconds (default 5000).
-pub const OPT_BUSY_TIMEOUT_MS: &str = "sqlite.busy_timeout_ms";
+pub const OPT_BUSY_TIMEOUT_MS: &str = opt::SQLITE_BUSY_TIMEOUT_MS;
 
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

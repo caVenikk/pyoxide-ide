@@ -2,11 +2,11 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 17%** `███░░░░░░░░░░░░░░░░░`
+**Overall parity: 19%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 50% `█████░░░░░` | 5 | 10 | 8 |
+| database | 54% `█████░░░░░` | 5 | 12 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -25,25 +25,25 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ✅ | Oracle connection (thin driver) | must | db-oracle-thin |
-| ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi |
+| ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi: cancel, call timeouts, TNS/wallets/NNE/Kerberos; integration tests need Oracle Instant Client |
 | ⬜ | PostgreSQL connection | must | MVP |
 | ✅ | SQLite connection | must | db-sqlite (bundled SQLite) |
 | 🟡 | Run SQL and view results | must | CLI and db.query command |
-| 🟡 | Typed result values | must | SQLite done; Oracle and PostgreSQL in progress |
+| 🟡 | Typed result values | must | SQLite and Oracle Client done; thin and PostgreSQL in progress |
 | 🟡 | Schema introspection (tables / views / columns) | must | SQLite full; Oracle tables and columns |
 | 🟡 | Indexes constraints sequences procedures | should | SQLite indexes, constraints, triggers |
 | ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
 | ⬜ | Password storage in KeePass (kdbx) | should | IDE password settings model |
-| ⬜ | TLS and wallets | should |  |
-| 🟡 | Query timeout and cancel | must | SQLite done |
-| 🟡 | Paginated results | must | cursor paging: SQLite done |
+| 🟡 | TLS and wallets | should | Oracle Client (tcps, wallets); diagnose TLS probe |
+| 🟡 | Query timeout and cancel | must | SQLite, Oracle Client |
+| 🟡 | Paginated results | must | cursor paging: SQLite, Oracle Client |
 | ⬜ | Export results (CSV / JSON) | should |  |
 | ✅ | Connection diagnostics (own) | should | pyoxide-db diagnose |
 | ✅ | Test connection (server and driver version) | must | pyoxide-db test / db.connection.test |
-| 🟡 | Bind parameters | should | SQLite done |
-| 🟡 | Transaction mode (auto / manual) | should | SQLite done |
-| 🟡 | Read-only connections | should | SQLite done |
-| ⬜ | Oracle TNS alias and connect descriptors | should | Oracle Client backend |
+| 🟡 | Bind parameters | should | SQLite, Oracle Client |
+| 🟡 | Transaction mode (auto / manual) | should | SQLite, Oracle Client |
+| 🟡 | Read-only connections | should | SQLite; Oracle Client best effort |
+| 🟡 | Oracle TNS alias and connect descriptors | should | Oracle Client backend (dsn); thin in progress |
 | ⬜ | Schema and object filters | could | Pro |
 | 🟡 | Object source and DDL | should | SQLite done |
 | ⬜ | SSH tunnel | could | Pro; after MVP |

@@ -5,11 +5,11 @@ use db_core::{ConnectParams, Error, Result, TlsMode, opt};
 
 /// Option key: directory with the Oracle Client libraries (Instant Client).
 /// Only effective before the client is first loaded in the process.
-pub const OPT_LIB_DIR: &str = "oracle.lib_dir";
+pub const OPT_LIB_DIR: &str = db_core::opt::ORACLE_LIB_DIR;
 /// Option key: directory with `tnsnames.ora`, `sqlnet.ora` and wallets,
 /// the equivalent of `TNS_ADMIN`. Only effective before the client is first
 /// loaded in the process.
-pub const OPT_CONFIG_DIR: &str = "oracle.config_dir";
+pub const OPT_CONFIG_DIR: &str = db_core::opt::ORACLE_CONFIG_DIR;
 
 const MAX_CONNECT_TIMEOUT_SECS: u64 = 3600;
 const DEFAULT_PORT: u16 = 1521;

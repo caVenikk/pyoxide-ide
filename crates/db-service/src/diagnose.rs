@@ -286,8 +286,7 @@ async fn run(
     }
 
     // Client side.
-    let driver = crate::driver(profile.backend);
-    match driver.availability() {
+    match crate::availability_for(&profile) {
         Ok(v) => d.ok("client", format!("{}: {v}", profile.backend), None),
         Err(e) => {
             d.fail_err("client", Some(dialect), &e, None);
