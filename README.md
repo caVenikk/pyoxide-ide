@@ -96,20 +96,25 @@ is a registered command that agents can call.
 
 ## Contributing
 
-Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
-Please read the clean-room rules before sending code.
+Issues and pull requests follow [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[clean-room rules](docs/clean-room.md).
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your
-option (the usual Rust convention: you may use the code under either license).
-Third-party notices are in [NOTICE](NOTICE).
+Licensed under either of
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this project, as defined in the Apache-2.0 license, shall be
-dual-licensed as above, without any additional terms or conditions.
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
 
-Pyoxide IDE is an independent project. It is not affiliated with, sponsored by
-or endorsed by JetBrains s.r.o., the Python Software Foundation or Oracle
+at the licensee's option. This is the common licensing of the Rust ecosystem:
+Apache-2.0 carries an explicit patent grant, MIT keeps compatibility with
+GPL-2.0 projects. Contributions submitted for inclusion are licensed under the
+same terms, without additional conditions. Third-party notices are in
+[NOTICE](NOTICE).
+
+## Trademarks
+
+Pyoxide IDE is an independent project, not affiliated with, sponsored by or
+endorsed by JetBrains s.r.o., the Python Software Foundation or Oracle
 Corporation. PyCharm, IntelliJ, JetBrains, Python and Oracle are trademarks of
 their respective owners and are used only to describe compatibility.

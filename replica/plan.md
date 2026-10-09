@@ -24,22 +24,26 @@ errors, introspection model), `commands` (registry), ADRs 0001-0004,
 skeleton crates, `docker-compose.yml` (Oracle Free, PostgreSQL),
 `docs/testing-databases.md`.
 
-| work package | owner | crates / files | depends on | status |
-|---|---|---|---|---|
-| WP1 PostgreSQL backend | sub-agent pg | `crates/db-postgres`, `db-core/src/schema/postgres.rs` | contracts | todo |
-| WP2 SQLite backend | sub-agent sqlite | `crates/db-sqlite`, `db-core/src/schema/sqlite.rs` | contracts | todo |
-| WP3 Oracle backends | sub-agent oracle | `crates/db-oracle-thin`, `crates/db-oracle-odpi`, `db-core/src/schema/oracle.rs` | contracts | todo |
-| WP4 Service and CLI | lead | `crates/db-service`, `crates/db-cli` | contracts | todo |
-| WP5 Integration, CI, measurements | lead | `.github/workflows`, `replica/perf.md` | WP1-WP4 | todo |
+Work is tracked in GitHub issues (milestone "M1 Database layer"); commits
+reference them with `Refs #N`, pull requests with `Closes #N`.
 
-WP4 scope: profiles (TOML), secrets (env, OS keychain, prompt), driver
-dispatch, `db.*` commands, `pyoxide-db diagnose`, `--share` redaction,
-`db-bench` example.
+| issue | owner | crates / files | depends on | status |
+|---|---|---|---|---|
+| #1 PostgreSQL backend | sub-agent pg | `crates/db-postgres`, `db-core/src/schema/postgres.rs` | contracts | in progress |
+| #2 SQLite backend | sub-agent sqlite | `crates/db-sqlite`, `db-core/src/schema/sqlite.rs` | contracts | in progress |
+| #3 Oracle thin backend and introspection | sub-agent oracle-thin | `crates/db-oracle-thin`, `db-core/src/schema/oracle.rs`, `db-core/src/oracle_net.rs` | contracts | in progress |
+| #4 Oracle Client backend | sub-agent oracle-odpi | `crates/db-oracle-odpi` | contracts | in progress |
+| #5 db-service and CLI | lead | `crates/db-service`, `crates/db-cli`, `crates/secrets` (store trait) | contracts | in progress |
+| #6 diagnose | lead | `crates/db-service/src/diagnose.rs`, `hints.rs`, `tls_probe.rs` | #5 | in progress |
+| #7 KeePass store and PyCharm import | sub-agent secrets | `crates/secrets` (KeePass, config, IDE store), `crates/settings-import` | #5 store trait | in progress |
+| #8 CI integration job and binaries | lead | `.github/workflows` | #1-#4 | todo |
+| #9 Real Oracle 19c verification | maintainer | diagnose report | #3, #4, #6 | todo |
+| #10 oracle-rs cancel upstream | open | upstream | #3 | todo |
 
 ## Next areas (not started)
-- M2 editor: UI toolkit ADR with measured spikes, text buffer, highlighting.
-  Needs the reference baseline in `replica/perf.md` first.
-- M2b python-env: uv integration.
-- Themes: `.icls` / `.theme.json` importer and `docs/theme-mapping.md`
-  (settings-import area, can run in parallel with M2 once the theme token
-  format exists).
+- M2 editor: #11 reference baseline (first), #12 UI toolkit ADR with measured
+  spikes, #13 control channel and headless UI tests; then text buffer and
+  highlighting.
+- M2b python-env: #15 uv integration.
+- Themes: #14 `.icls` / `.theme.json` importer and `docs/theme-mapping.md`
+  (can run in parallel with M2 once the theme token format exists).
