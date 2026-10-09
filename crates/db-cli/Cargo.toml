@@ -1,6 +1,6 @@
 [package]
 name = "db-cli"
-description = "Command-line database client for Pyoxide IDE (first vertical slice)"
+description = "pyoxide-db: command-line front-end of the Pyoxide database engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,12 @@ name = "pyoxide-db"
 path = "src/main.rs"
 
 [dependencies]
+commands.workspace = true
 db-core.workspace = true
 db-service.workspace = true
+secrets.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
+rpassword = "7"
