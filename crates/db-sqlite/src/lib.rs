@@ -1,21 +1,14 @@
 //! SQLite backend (rusqlite, bundled SQLite).
+//!
+//! Every connection owns a worker thread that owns the `rusqlite` connection;
+//! the async side sends requests over a channel and awaits the replies, so no
+//! call blocks a runtime thread. Result sets are read incrementally: the
+//! worker keeps the prepared statement open and steps only as many rows as
+//! each `next_page` asks for.
 
-use async_trait::async_trait;
-use db_core::{Backend, ConnectParams, Connection, Driver, Error, ErrorKind, Result};
+mod conn;
+mod convert;
+mod error;
+mod worker;
 
-pub struct SqliteDriver;
-
-#[async_trait]
-impl Driver for SqliteDriver {
-    fn backend(&self) -> Backend {
-        Backend::Sqlite
-    }
-
-    fn availability(&self) -> Result<String> {
-        Err(Error::new(ErrorKind::Unavailable, "not implemented yet"))
-    }
-
-    async fn connect(&self, _params: &ConnectParams) -> Result<Box<dyn Connection>> {
-        Err(Error::new(ErrorKind::Unavailable, "not implemented yet"))
-    }
-}
+pub use conn::{OPT_BUSY_TIMEOUT_MS, SqliteConnection, SqliteDriver};
