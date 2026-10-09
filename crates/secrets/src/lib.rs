@@ -3,18 +3,21 @@
 //!
 //! Backends mirror the usual IDE choices: the OS credential store (default),
 //! a KeePass database file ([`keepass`]), or memory only (forget on exit).
-//! Secret values only travel as [`Secret`]: redacted in `Debug`, wiped on drop.
+//! [`config`] reads the IDE-wide choice and opens the store. Secret values
+//! only travel as [`Secret`]: redacted in `Debug`, wiped on drop.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use zeroize::Zeroize;
 
+pub mod config;
 mod fsutil;
 pub mod keepass;
 #[cfg(test)]
 mod test_kdbx3;
 
+pub use config::{SecretsConfig, open_store};
 pub use keepass::{KeePassKey, KeePassOptions, KeePassStore};
 
 /// A secret string (password, passphrase, token). Never printed, never

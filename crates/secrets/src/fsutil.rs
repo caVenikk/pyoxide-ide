@@ -50,6 +50,17 @@ pub(crate) fn atomic_write(path: &Path, data: &[u8], private: bool) -> io::Resul
     result
 }
 
+/// Expand a leading `~` to the home directory.
+pub(crate) fn expand_home(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix('~')
+        && (rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'))
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest.trim_start_matches(['/', '\\']));
+    }
+    PathBuf::from(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +83,13 @@ mod tests {
             let mode = fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn expands_home() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(expand_home("~/x.kdbx"), home.join("x.kdbx"));
+        assert_eq!(expand_home("/abs/x.kdbx"), PathBuf::from("/abs/x.kdbx"));
+        assert_eq!(expand_home("~other/x"), PathBuf::from("~other/x"));
     }
 }

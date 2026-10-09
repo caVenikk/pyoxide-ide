@@ -1887,11 +1887,14 @@ dependencies = [
  "base64 0.23.1",
  "cbc 0.2.1",
  "chacha20",
+ "dirs",
  "keepass",
  "keyring",
+ "serde",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
+ "toml",
  "zeroize",
 ]
 
