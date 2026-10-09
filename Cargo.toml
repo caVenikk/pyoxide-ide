@@ -9,6 +9,7 @@ members = [
     "crates/db-sqlite",
     "crates/db-service",
     "crates/db-cli",
+    "crates/secrets",
 ]
 
 [workspace.package]
@@ -33,3 +34,4 @@ db-oracle-odpi = { path = "crates/db-oracle-odpi" }
 db-postgres = { path = "crates/db-postgres" }
 db-sqlite = { path = "crates/db-sqlite" }
 db-service = { path = "crates/db-service" }
+secrets = { path = "crates/secrets" }

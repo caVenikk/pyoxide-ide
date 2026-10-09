@@ -1,5 +1,9 @@
-//! Database engine service: picks the driver for a backend. Profiles,
-//! secrets, diagnostics and the `db.*` commands live here as well.
+//! Database engine service: connection profiles and their secrets, driver
+//! dispatch, diagnostics and the `db.*` commands. The CLI and the IDE call
+//! the same functions.
+
+pub mod profiles;
+pub mod secrets;
 
 use std::sync::Arc;
 

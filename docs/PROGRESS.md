@@ -6,7 +6,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
+| database | 18% `██░░░░░░░░` | 2 | 3 | 18 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -33,6 +33,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Schema introspection (tables / views / columns) | must | Oracle tables and columns |
 | ⬜ | Indexes constraints sequences procedures | should |  |
 | ⬜ | Connection profiles with keychain secrets | must |  |
+| ⬜ | Password storage in KeePass (kdbx) | should | IDE password settings model |
 | ⬜ | TLS and wallets | should |  |
 | ⬜ | Query timeout and cancel | must |  |
 | 🟡 | Paginated results | must | row cap only |
@@ -79,6 +80,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Code style import | should |  |
 | ⬜ | Editor colour scheme import (.icls) | must |  |
 | ⬜ | UI theme import (.theme.json) | must |  |
+| ⬜ | Import data sources and passwords from PyCharm (own) | should | own feature; dataSources.xml + credential store |
 
 ## python-intel
 

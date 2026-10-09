@@ -33,7 +33,7 @@ the same engine.
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
+| database | 18% `██░░░░░░░░` | 2 | 3 | 18 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
