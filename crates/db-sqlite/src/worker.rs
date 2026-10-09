@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -19,6 +19,7 @@ pub(crate) enum Request {
     Exec(ExecRequest),
     /// Read rows from the open cursor.
     Fetch {
+        id: u64,
         max_rows: usize,
         reply: Reply<Page>,
     },
@@ -45,6 +46,8 @@ pub(crate) enum Request {
 }
 
 pub(crate) struct ExecRequest {
+    /// Number of the request, see [`Shared::next_id`].
+    pub id: u64,
     pub sql: String,
     pub params: Vec<Value>,
     pub max_value_bytes: usize,
@@ -68,6 +71,10 @@ pub(crate) struct Page {
 
 /// State shared between the async side and the worker thread.
 pub(crate) struct Shared {
+    /// Numbers the requests that can be cancelled, in the order they are sent.
+    last_id: AtomicU64,
+    /// Every request up to this number was cancelled before it could finish.
+    cancelled_upto: AtomicU64,
     /// `true` while the worker runs a request that can be cancelled.
     running: Mutex<bool>,
     /// Read by the progress and busy handlers on the worker thread.
@@ -79,15 +86,26 @@ pub(crate) struct Shared {
 impl Shared {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
+            last_id: AtomicU64::new(0),
+            cancelled_upto: AtomicU64::new(0),
             running: Mutex::new(false),
             cancel: Arc::new(AtomicBool::new(false)),
             manual: AtomicBool::new(false),
         })
     }
 
-    /// Stop the request that is running right now. A no-op when the worker is
-    /// idle, so a late cancel never affects the next statement.
+    /// A number for the next cancellable request.
+    pub(crate) fn next_id(&self) -> u64 {
+        self.last_id.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Cancel what was asked of the worker so far: the request that runs now
+    /// is interrupted, and requests still queued fail without starting. A
+    /// no-op when nothing is outstanding, so a late cancel never affects the
+    /// next statement.
     pub(crate) fn cancel(&self) {
+        self.cancelled_upto
+            .fetch_max(self.last_id.load(Ordering::SeqCst), Ordering::SeqCst);
         let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         if *running {
             self.cancel.store(true, Ordering::SeqCst);
@@ -108,6 +126,11 @@ impl Shared {
 
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
+    }
+
+    /// The request was cancelled while it waited for the worker.
+    fn cancelled_before_start(&self, id: u64) -> bool {
+        self.cancelled_upto.load(Ordering::SeqCst) >= id
     }
 }
 
@@ -245,6 +268,8 @@ enum Flow {
     Continue,
     /// Stop serving; reply once the database is closed.
     Close(Reply<()>),
+    /// Run this request next; a cursor was abandoned for it.
+    Run(Request),
 }
 
 struct Worker {
@@ -256,9 +281,14 @@ struct Worker {
 impl Worker {
     fn run(self) {
         let mut closing = None;
+        let mut next = None;
         loop {
-            let Ok(request) = self.requests.recv() else {
-                break;
+            let request = match next.take() {
+                Some(request) => request,
+                None => match self.requests.recv() {
+                    Ok(request) => request,
+                    Err(_) => break,
+                },
             };
             let flow = match request {
                 Request::Exec(e) => self.exec(e),
@@ -274,9 +304,13 @@ impl Worker {
                 }
                 other => self.simple(other),
             };
-            if let Flow::Close(reply) = flow {
-                closing = Some(reply);
-                break;
+            match flow {
+                Flow::Continue => {}
+                Flow::Close(reply) => {
+                    closing = Some(reply);
+                    break;
+                }
+                Flow::Run(request) => next = Some(request),
             }
         }
         let Worker { conn, .. } = self;
@@ -356,6 +390,7 @@ impl Worker {
 
     fn exec(&self, request: ExecRequest) -> Flow {
         let ExecRequest {
+            id,
             sql,
             params,
             max_value_bytes,
@@ -363,6 +398,10 @@ impl Worker {
         } = request;
         if reply.is_closed() {
             // The caller gave up while the request was queued.
+            return Flow::Continue;
+        }
+        if self.shared.cancelled_before_start(id) {
+            let _ = reply.send(Err(Error::cancelled()));
             return Flow::Continue;
         }
         let scope = OpScope::begin(&self.shared);
@@ -465,18 +504,29 @@ impl Worker {
         })
     }
 
-    /// Serve the open cursor until it ends. Executes are refused (the async
-    /// side checks the busy flag first; this is the backstop).
+    /// Serve the open cursor until it ends. The async side only sends an
+    /// execute once no cursor object is alive (its busy flag), so an execute
+    /// arriving here means the cursor was abandoned, for instance when the
+    /// call that created it was dropped before it got the cursor: it is
+    /// closed and the statement runs.
     fn serve_cursor(&self, mut cursor: CursorState<'_>) -> Flow {
         loop {
             let Ok(request) = self.requests.recv() else {
                 return Flow::Continue;
             };
             match request {
-                Request::Fetch { max_rows, reply } => {
+                Request::Fetch {
+                    id,
+                    max_rows,
+                    reply,
+                } => {
                     if reply.is_closed() {
                         // The caller dropped the call; keep the position.
                         continue;
+                    }
+                    if self.shared.cancelled_before_start(id) {
+                        let _ = reply.send(Err(Error::cancelled()));
+                        return Flow::Continue;
                     }
                     let scope = OpScope::begin(&self.shared);
                     let page = cursor.fetch(max_rows.max(1));
@@ -503,9 +553,7 @@ impl Worker {
                     }
                     return Flow::Continue;
                 }
-                Request::Exec(e) => {
-                    let _ = e.reply.send(Err(Error::busy()));
-                }
+                Request::Exec(e) => return Flow::Run(Request::Exec(e)),
                 other => {
                     if let Flow::Close(reply) = self.simple(other) {
                         return Flow::Close(reply);

@@ -168,6 +168,43 @@ async fn cancel_stops_a_running_statement_quickly() {
 }
 
 #[tokio::test]
+async fn cancel_covers_a_statement_that_has_not_started_yet() {
+    let conn = memory().await;
+    // The request is sent when the first future is polled, the cancel right
+    // after: whether or not the worker has picked the statement up by then,
+    // it must not run to the end.
+    let started = Instant::now();
+    let opts = ExecOptions::default();
+    let (result, ()) = tokio::join!(conn.execute(SLOW_COUNT, &[], &opts), async {
+        conn.cancel().await.unwrap()
+    });
+    assert_eq!(result.unwrap_err().kind, ErrorKind::Cancelled);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(scalar(&conn, "SELECT 10").await, Value::Int(10));
+}
+
+#[tokio::test]
+async fn a_cursor_nobody_received_does_not_block_the_connection() {
+    let conn = memory().await;
+    let opts = ExecOptions::default();
+    let mut call = Box::pin(conn.execute(HUNDRED_THOUSAND, &[], &opts));
+    // Poll once so the request goes out, then give up before the answer is
+    // read: the worker holds a cursor that no object refers to.
+    tokio::select! {
+        biased;
+        _ = &mut call => panic!("the statement cannot be answered yet"),
+        () = std::future::ready(()) => {}
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(call);
+    assert_eq!(scalar(&conn, "SELECT 11").await, Value::Int(11));
+}
+
+#[tokio::test]
 async fn cancel_stops_a_slow_fetch_and_ends_the_cursor() {
     let conn = memory().await;
     let mut cursor = rows_outcome(&*conn, SLOW_SECOND_ROW).await;

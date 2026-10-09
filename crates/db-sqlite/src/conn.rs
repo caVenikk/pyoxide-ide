@@ -63,13 +63,19 @@ impl Driver for SqliteDriver {
         let (ready_tx, ready_rx) = oneshot::channel();
         spawn(settings, shared.clone(), requests, ready_tx)
             .map_err(|e| Error::internal(format!("cannot start the SQLite worker thread: {e}")))?;
-        let opened = match tokio::time::timeout(params.connect_timeout, ready_rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(worker_gone()),
-            Err(_) => Err(Error::new(
-                ErrorKind::Connect,
-                "timed out opening the SQLite database",
-            )),
+        // A zero timeout means no limit.
+        let limit = (!params.connect_timeout.is_zero()).then_some(params.connect_timeout);
+        let ready = async { ready_rx.await.unwrap_or_else(|_| Err(worker_gone())) };
+        let opened = match limit {
+            None => ready.await,
+            Some(limit) => tokio::time::timeout(limit, ready)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(Error::new(
+                        ErrorKind::Connect,
+                        "timed out opening the SQLite database",
+                    ))
+                }),
         };
         opened?;
         Ok(Box::new(SqliteConnection {
@@ -93,10 +99,11 @@ impl SqliteConnection {
     async fn call<T>(
         &self,
         timeout: Option<Duration>,
-        build: impl FnOnce(Reply<T>) -> Request,
+        build: impl FnOnce(Reply<T>, u64) -> Request,
     ) -> Result<T> {
         let (reply, rx) = oneshot::channel();
-        self.tx.send(build(reply)).map_err(|_| worker_gone())?;
+        let id = self.shared.next_id();
+        self.tx.send(build(reply, id)).map_err(|_| worker_gone())?;
         wait(&self.shared, timeout, rx).await
     }
 }
@@ -149,8 +156,9 @@ impl Connection for SqliteConnection {
         // One statement or cursor at a time per connection.
         let guard = self.busy.acquire()?;
         let reply = self
-            .call(opts.timeout, |reply| {
+            .call(opts.timeout, |reply, id| {
                 Request::Exec(ExecRequest {
+                    id,
                     sql: sql.to_owned(),
                     params: params.to_vec(),
                     max_value_bytes: opts.max_value_bytes,
@@ -185,7 +193,7 @@ impl Connection for SqliteConnection {
     }
 
     async fn ping(&self) -> Result<()> {
-        self.call(None, |reply| Request::Ping { reply }).await
+        self.call(None, |reply, _| Request::Ping { reply }).await
     }
 
     async fn tx_mode(&self) -> TxMode {
@@ -201,7 +209,7 @@ impl Connection for SqliteConnection {
     /// writes and lasts until `commit` or `rollback`; reads do not start one,
     /// so an idle session never holds a lock.
     async fn set_tx_mode(&self, mode: TxMode) -> Result<()> {
-        self.call(None, |reply| Request::SetTxMode {
+        self.call(None, |reply, _| Request::SetTxMode {
             manual: mode == TxMode::Manual,
             reply,
         })
@@ -209,11 +217,12 @@ impl Connection for SqliteConnection {
     }
 
     async fn commit(&self) -> Result<()> {
-        self.call(None, |reply| Request::Commit { reply }).await
+        self.call(None, |reply, _| Request::Commit { reply }).await
     }
 
     async fn rollback(&self) -> Result<()> {
-        self.call(None, |reply| Request::Rollback { reply }).await
+        self.call(None, |reply, _| Request::Rollback { reply })
+            .await
     }
 
     /// Stops a running statement, closes the database and ends the worker.
@@ -273,7 +282,13 @@ impl Cursor for SqliteCursor {
             State::Open => {}
         }
         let (reply, rx) = oneshot::channel();
-        if self.tx.send(Request::Fetch { max_rows, reply }).is_err() {
+        let id = self.shared.next_id();
+        let sent = self.tx.send(Request::Fetch {
+            id,
+            max_rows,
+            reply,
+        });
+        if sent.is_err() {
             self.state = State::Dead;
             self.guard = None;
             return Err(worker_gone());
