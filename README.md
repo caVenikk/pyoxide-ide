@@ -7,8 +7,8 @@ in one lightweight app, with no JVM and no web view. Offline, open source, and
 scriptable: every action is a command, so the UI, the CLI and AI agents drive
 the same engine.
 
-> **Status: pre-alpha.** Only the database client slice exists today
-> (`pyoxide-db`). See the [roadmap](docs/ROADMAP.md) for what is planned and
+> **Status: pre-alpha.** Only the database engine exists today, usable through
+> the `pyoxide-db` command line. See the [roadmap](docs/ROADMAP.md) for what is planned and
 > how far along it is.
 
 ## Goals
@@ -64,26 +64,30 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 ## Getting started
 
 ```bash
-git clone <repository-url> && cd pyoxide-ide
-docker compose up -d            # local Oracle Free for development (wait until healthy)
+git clone https://github.com/caVenikk/pyoxide-ide && cd pyoxide-ide
+docker compose up -d            # PostgreSQL 18 and Oracle Free 23 for development
 export PYOXIDE_DB_PASSWORD=pyoxide
-cargo run -p db-cli -- --service FREEPDB1 --user pyoxide ping
-cargo run -p db-cli -- --service FREEPDB1 --user pyoxide query "select * from dual"
-cargo run -p db-cli -- --backend odpi --service FREEPDB1 --user pyoxide ping   # needs Oracle Client
+cargo run -p db-cli -- --service FREEPDB1 --user pyoxide test
+cargo run -p db-cli -- --backend postgres --port 55432 --database pyoxide --user pyoxide query "select now()"
+cargo run -p db-cli -- --path :memory: query "select sqlite_version()"
+cargo run -p db-cli -- --service FREEPDB1 --user pyoxide diagnose
 ```
 
-The password is read only from `PYOXIDE_DB_PASSWORD`, never from arguments.
+Passwords come from the environment, the OS credential store or a prompt,
+never from arguments. Profiles, secrets and diagnostics:
+[docs/pyoxide-db.md](docs/pyoxide-db.md).
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-PYOXIDE_TEST_ORACLE=1 cargo test -p db-oracle-thin -- --ignored   # needs docker compose up
+cargo test -p db-postgres -p db-oracle-thin -- --ignored   # needs docker compose up
 ```
 
 ## Documentation
 
 - [Roadmap](docs/ROADMAP.md) · [Architecture](docs/architecture.md) · [Performance](docs/performance.md)
+- [pyoxide-db](docs/pyoxide-db.md) · [Testing against databases](docs/testing-databases.md) · [Decisions (ADR)](docs/adr/)
 - [Clean-room rules](docs/clean-room.md) · [Theme formats](docs/theme-formats.md)
 - [Contributing](CONTRIBUTING.md) · [Agent workflow](docs/agent-workflow.md) · [AGENTS.md](AGENTS.md)
 
