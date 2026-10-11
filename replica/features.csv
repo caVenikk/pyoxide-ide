@@ -50,7 +50,7 @@ Keymap import,settings-import,must,yes,no,
 Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,no,
 UI theme import (.theme.json),settings-import,must,yes,no,
-Import data sources and passwords from PyCharm,settings-import,should,no,partial,pyoxide-db import pycharm; IDE credential naming to confirm on a real setup
+Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
 Interpreter and virtualenv discovery,python-intel,must,yes,no,venv uv poetry conda
 Completion,python-intel,must,yes,no,LSP
 Go to definition and find usages,python-intel,must,yes,no,LSP

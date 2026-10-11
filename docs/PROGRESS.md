@@ -90,7 +90,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Code style import | should |  |
 | ⬜ | Editor colour scheme import (.icls) | must |  |
 | ⬜ | UI theme import (.theme.json) | must |  |
-| 🟡 | Import data sources and passwords from PyCharm (own) | should | pyoxide-db import pycharm; IDE credential naming to confirm on a real setup |
+| ✅ | Import data sources and passwords from PyCharm (own) | should | own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data |
 
 ## python-intel
 
