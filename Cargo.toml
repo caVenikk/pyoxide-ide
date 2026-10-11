@@ -13,6 +13,8 @@ members = [
     "crates/platform/secrets",
     "crates/platform/settings-import",
     "crates/platform/themes",
+    "crates/python/py-env",
+    "crates/python/pyoxide-cli",
 ]
 
 [workspace.package]
@@ -44,3 +46,4 @@ db-testkit = { path = "crates/platform/db-testkit" }
 secrets = { path = "crates/platform/secrets" }
 settings-import = { path = "crates/platform/settings-import" }
 themes = { path = "crates/platform/themes" }
+py-env = { path = "crates/python/py-env" }
