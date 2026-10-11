@@ -446,6 +446,44 @@ mod tests {
         assert!(keys.ui.contains("ScrollBar.thumbColor"));
     }
 
+    /// `docs/theme-mapping.md` must mention every key and role the tables use.
+    #[test]
+    fn the_mapping_document_lists_every_key_and_role() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/theme-mapping.md"
+        );
+        let doc = std::fs::read_to_string(path).expect("docs/theme-mapping.md exists");
+        let mut missing: Vec<String> = Vec::new();
+        let mut need = |text: String| {
+            if !doc.contains(&text) {
+                missing.push(text);
+            }
+        };
+        let keys = known_keys();
+        for key in keys.ui.iter().chain(&keys.colors).chain(&keys.attributes) {
+            need(format!("`{key}`"));
+        }
+        for role in UiRole::ALL {
+            need(format!("`ui.{role}`"));
+        }
+        for role in TextRole::ALL {
+            need(format!("`syntax.{role}`"));
+        }
+        for metric in Metric::ALL {
+            need(format!("`metrics.{metric}`"));
+        }
+        for theme in super::super::known::KNOWN_THEMES {
+            need(format!("`{}`", theme.id));
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "missing from docs/theme-mapping.md: {missing:?}"
+        );
+    }
+
     #[test]
     fn text_roles_with_sources_name_known_python_keys() {
         for key in [

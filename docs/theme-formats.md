@@ -36,6 +36,32 @@ group `"*"` provides defaults for all components. Group and key names refer to
 Swing components (`Button.background` and so on): import the ones that have an
 equivalent widget here and list the rest in the report.
 
+## Details the importer relies on
+- Theme files in plugins are usually `*.theme.json`, but some plugins name them
+  `*.json` inside a `themes/` folder. A JSON file there counts as a UI theme when
+  it has a `ui` object, an `editorScheme` or `parentTheme` string, or a `name` and
+  a boolean `dark`. The files under `themes/metadata/` are lists of known UI
+  keys, not themes.
+- `editorScheme` is either a path inside the plugin (`/themes/Name.xml`) or the
+  name of a scheme (`Darcula`). A theme without it uses the default scheme of
+  its brightness.
+- The base schemes `Default` and `Darcula` are defined in
+  `DefaultColorSchemesManager.xml` of the IDE, which holds several `<scheme>`
+  elements. The importer reads it when it is passed as context (the importer
+  never ships it); without it, values a scheme leaves to its parent are filled
+  from the built-in theme and the report says so.
+- Colours: scheme XML writes `RRGGBB` or `RRGGBBAA` without `#` (shorter values
+  are hex numbers, `0` is black); `.theme.json` writes `#RRGGBB` or `#RRGGBBAA`
+  or a name from `colors`.
+- In `ui`, the group `*` holds wildcards (`*.background`); a value can be an
+  object of platform variants (`os.default`, `os.windows`, ...).
+- Scheme attributes may be written as `baseAttributes="OTHER_KEY"` instead of
+  a `<value>`; an empty `<value />` replaces the parent's entry.
+- `EFFECT_TYPE` values seen: 0 box, 1 line, 2 wave, 3 strikeout, 4 bold line,
+  5 bold dotted.
+
+The key by key mapping is in [theme-mapping.md](theme-mapping.md).
+
 ## Acceptance criteria
 - Load a UI theme and its editor scheme via `editorScheme`.
 - Resolve both chains; import partially and report when a parent is missing.
