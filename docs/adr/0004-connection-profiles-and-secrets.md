@@ -36,15 +36,25 @@ macOS, `%APPDATA%` on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux).
 **Secrets** are looked up in this order:
 1. The environment variable named by the profile's `password_env`, else
    `PYOXIDE_DB_PASSWORD`.
-2. The OS credential store through the `keyring` crate (macOS Keychain,
-   Windows Credential Manager, Secret Service on Linux), service
-   `pyoxide-db`, account = profile name; wallet passwords use
-   `<profile>/wallet`.
+2. The configured secret store (crate `secrets`), service `pyoxide-db`,
+   account = profile name; wallet passwords use `<profile>/wallet`. Stores:
+   - the OS credential store through the `keyring` crate (macOS Keychain,
+     Windows Credential Manager, Secret Service on Linux), the default;
+   - a KeePass database (KDBX 4) protected by a master password, the same
+     model as the IDE password settings users know, so existing databases
+     can be read and shared between machines;
+   - memory only (forget on exit).
 3. An interactive prompt without echo (CLI only, when stdin is a terminal).
 
 Passwords are never accepted as command-line arguments. `pyoxide-db secret set
 <profile>` reads the password from a prompt or stdin and stores it in the OS
 store.
+
+**Import.** Data sources defined in a PyCharm project (`.idea/dataSources.xml`
+and `dataSources.local.xml`, the user's own configuration files) are imported
+as profiles; their passwords are read from the user's own credential store
+used by that IDE (OS store or KeePass file) when the user allows it, and are
+saved into the configured Pyoxide store, never into the profiles file.
 
 ## Consequences
 - Profiles can be committed or shared; secrets stay per machine.

@@ -1,0 +1,22 @@
+[package]
+name = "settings-import"
+description = "Import of settings from other IDEs into Pyoxide IDE (PyCharm data sources and their passwords)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+secrets.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+dirs = "7"
+
+[dev-dependencies]
+serde_json.workspace = true
+aes = "0.9"
+base64 = "0.23"
+cbc = { version = "0.2", features = ["alloc", "block-padding"] }
+keepass = { version = "0.15", features = ["save_kdbx4"] }
+tempfile = "3"

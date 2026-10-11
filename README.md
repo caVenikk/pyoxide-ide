@@ -7,8 +7,8 @@ in one lightweight app, with no JVM and no web view. Offline, open source, and
 scriptable: every action is a command, so the UI, the CLI and AI agents drive
 the same engine.
 
-> **Status: pre-alpha.** Only the database client slice exists today
-> (`pyoxide-db`). See the [roadmap](docs/ROADMAP.md) for what is planned and
+> **Status: pre-alpha.** Only the database engine exists today, usable through
+> the `pyoxide-db` command line. See the [roadmap](docs/ROADMAP.md) for what is planned and
 > how far along it is.
 
 ## Goals
@@ -29,12 +29,12 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 7%** `█░░░░░░░░░░░░░░░░░░░`
+**Overall parity: 21%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
-| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
+| database | 56% `██████░░░░` | 7 | 14 | 6 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
@@ -64,26 +64,30 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 ## Getting started
 
 ```bash
-git clone <repository-url> && cd pyoxide-ide
-docker compose up -d            # local Oracle Free for development (wait until healthy)
+git clone https://github.com/caVenikk/pyoxide-ide && cd pyoxide-ide
+docker compose up -d            # PostgreSQL 18 and Oracle Free 23 for development
 export PYOXIDE_DB_PASSWORD=pyoxide
-cargo run -p db-cli -- --service FREEPDB1 --user pyoxide ping
-cargo run -p db-cli -- --service FREEPDB1 --user pyoxide query "select * from dual"
-cargo run -p db-cli -- --backend odpi --service FREEPDB1 --user pyoxide ping   # needs Oracle Client
+cargo run -p db-cli -- --service FREEPDB1 --user pyoxide test
+cargo run -p db-cli -- --backend postgres --port 55432 --database pyoxide --user pyoxide query "select now()"
+cargo run -p db-cli -- --path :memory: query "select sqlite_version()"
+cargo run -p db-cli -- --service FREEPDB1 --user pyoxide diagnose
 ```
 
-The password is read only from `PYOXIDE_DB_PASSWORD`, never from arguments.
+Passwords come from the environment, the OS credential store or a prompt,
+never from arguments. Profiles, secrets and diagnostics:
+[docs/pyoxide-db.md](docs/pyoxide-db.md).
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-PYOXIDE_TEST_ORACLE=1 cargo test -p db-oracle-thin -- --ignored   # needs docker compose up
+cargo test -p db-postgres -p db-oracle-thin -- --ignored   # needs docker compose up
 ```
 
 ## Documentation
 
 - [Roadmap](docs/ROADMAP.md) · [Architecture](docs/architecture.md) · [Performance](docs/performance.md)
+- [pyoxide-db](docs/pyoxide-db.md) · [Testing against databases](docs/testing-databases.md) · [Decisions (ADR)](docs/adr/)
 - [Clean-room rules](docs/clean-room.md) · [Theme formats](docs/theme-formats.md)
 - [Contributing](CONTRIBUTING.md) · [Agent workflow](docs/agent-workflow.md) · [AGENTS.md](AGENTS.md)
 
@@ -96,20 +100,25 @@ is a registered command that agents can call.
 
 ## Contributing
 
-Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
-Please read the clean-room rules before sending code.
+Issues and pull requests follow [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[clean-room rules](docs/clean-room.md).
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your
-option (the usual Rust convention: you may use the code under either license).
-Third-party notices are in [NOTICE](NOTICE).
+Licensed under either of
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this project, as defined in the Apache-2.0 license, shall be
-dual-licensed as above, without any additional terms or conditions.
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
 
-Pyoxide IDE is an independent project. It is not affiliated with, sponsored by
-or endorsed by JetBrains s.r.o., the Python Software Foundation or Oracle
+at the licensee's option. This is the common licensing of the Rust ecosystem:
+Apache-2.0 carries an explicit patent grant, MIT keeps compatibility with
+GPL-2.0 projects. Contributions submitted for inclusion are licensed under the
+same terms, without additional conditions. Third-party notices are in
+[NOTICE](NOTICE).
+
+## Trademarks
+
+Pyoxide IDE is an independent project, not affiliated with, sponsored by or
+endorsed by JetBrains s.r.o., the Python Software Foundation or Oracle
 Corporation. PyCharm, IntelliJ, JetBrains, Python and Oracle are trademarks of
 their respective owners and are used only to describe compatibility.

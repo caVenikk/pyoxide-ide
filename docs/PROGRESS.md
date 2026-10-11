@@ -2,12 +2,12 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 7%** `█░░░░░░░░░░░░░░░░░░░`
+**Overall parity: 21%** `████░░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 19% `██░░░░░░░░` | 2 | 3 | 17 |
-| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 5 |
+| database | 56% `██████░░░░` | 7 | 14 | 6 |
+| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
@@ -25,38 +25,49 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ✅ | Oracle connection (thin driver) | must | db-oracle-thin |
-| ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi |
-| ⬜ | PostgreSQL connection | must | MVP |
-| ⬜ | SQLite connection | must | MVP |
-| 🟡 | Run SQL and view results | must | CLI only |
-| ⬜ | Typed result values | must |  |
-| 🟡 | Schema introspection (tables / views / columns) | must | Oracle tables and columns |
-| ⬜ | Indexes constraints sequences procedures | should |  |
-| ⬜ | Connection profiles with keychain secrets | must |  |
-| ⬜ | TLS and wallets | should |  |
-| ⬜ | Query timeout and cancel | must |  |
-| 🟡 | Paginated results | must | row cap only |
+| ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi: cancel, call timeouts, TNS/wallets/NNE/Kerberos; integration tests need Oracle Instant Client |
+| ✅ | PostgreSQL connection | must | db-postgres (tokio-postgres, rustls) |
+| ✅ | SQLite connection | must | db-sqlite (bundled SQLite) |
+| 🟡 | Run SQL and view results | must | CLI and db.query command |
+| 🟡 | Typed result values | must | SQLite, PostgreSQL, Oracle Client done; thin in progress |
+| 🟡 | Schema introspection (tables / views / columns) | must | SQLite and PostgreSQL full; Oracle in progress |
+| 🟡 | Indexes constraints sequences procedures | should | SQLite, PostgreSQL; Oracle in progress |
+| ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
+| ✅ | Password storage in KeePass (kdbx) | should | secrets: KDBX 4 store, master password in OS store / env / prompt |
+| 🟡 | TLS and wallets | should | PostgreSQL all modes and mutual TLS; Oracle Client tcps and wallets; thin in progress |
+| 🟡 | Query timeout and cancel | must | SQLite, PostgreSQL, Oracle Client; thin in progress |
+| 🟡 | Paginated results | must | cursor paging: SQLite, PostgreSQL, Oracle Client; thin in progress |
 | ⬜ | Export results (CSV / JSON) | should |  |
-| ⬜ | Connection diagnostics (own) | should | own feature |
-| ⬜ | Test connection (server and driver version) | must | Pro |
-| ⬜ | Bind parameters | should |  |
-| ⬜ | Transaction mode (auto / manual) | should | Pro |
-| ⬜ | Read-only connections | should | Pro |
-| ⬜ | Oracle TNS alias and connect descriptors | should | Oracle Client backend |
-| ⬜ | Schema and object filters | could | Pro |
-| ⬜ | Object source and DDL | should | Pro |
-| ⬜ | SSH tunnel | could | Pro; after MVP |
+| ✅ | Connection diagnostics (own) | should | pyoxide-db diagnose |
+| ✅ | Test connection (server and driver version) | must | pyoxide-db test / db.connection.test |
+| 🟡 | Bind parameters | should | SQLite, PostgreSQL, Oracle Client |
+| 🟡 | Transaction mode (auto / manual) | should | SQLite, PostgreSQL, Oracle Client |
+| 🟡 | Read-only connections | should | SQLite, PostgreSQL; Oracle best effort |
+| 🟡 | Oracle TNS alias and connect descriptors | should | Oracle Client backend (dsn); thin in progress |
+| ⬜ | Schema and object filters | should | Pro |
+| 🟡 | Object source and DDL | should | SQLite, PostgreSQL |
+| ⬜ | SSH tunnel | should | Pro; after MVP; must never block the UI (feedback) |
 | ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
+| 🟡 | Large values: capped fetch of LOB / JSON / long text | must | max_value_bytes and Value::Truncated; lazy full fetch todo |
+| ⬜ | Persistent schema cache across restarts | should | feedback: introspection slow or forgotten |
+| ⬜ | Cancellable scoped introspection with progress | should | feedback |
+| 🟡 | PostgreSQL Unix-socket connections | could | implemented, untested |
+| ⬜ | External secret provider (command / password manager CLI) (own) | could | own feature; feedback |
 
 ## db-gui
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ⬜ | Database explorer tree | must | Pro |
-| ⬜ | Data grid with paging | must | Pro |
+| ⬜ | Data grid with paging | must | Pro; virtualized, renders visible cells only (feedback: grid freezes) |
 | ⬜ | SQL console with history | should |  |
 | ⬜ | Result table editing | could |  |
 | ⬜ | Explain plan | could | Pro |
+| ⬜ | Run a SQL file as a run configuration with results | should | feedback: top open request |
+| ⬜ | Open a SQLite file directly | should | feedback |
+| ⬜ | Date and number formats for grid, import and export | should | feedback |
+| ⬜ | SQL*Plus commands in the Oracle console (DESCRIBE / EXEC) (own) | should | own feature; feedback |
+| ⬜ | psql / sqlite3 meta-commands in the console (subset) (own) | could | own feature; feedback |
 
 ## editor
 
@@ -79,6 +90,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Code style import | should |  |
 | ⬜ | Editor colour scheme import (.icls) | must |  |
 | ⬜ | UI theme import (.theme.json) | must |  |
+| 🟡 | Import data sources and passwords from PyCharm (own) | should | pyoxide-db import pycharm; IDE credential naming to confirm on a real setup |
 
 ## python-intel
 
@@ -119,7 +131,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Command registry and palette (own) | must | own architecture |
+| 🟡 | Command registry and palette (own) | must | registry and JSON channel; no palette yet |
 | ⬜ | Plugin API (WASM) | could |  |
 
 ## packaging

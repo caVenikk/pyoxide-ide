@@ -65,6 +65,9 @@ parameters. Both Oracle drivers share the same SQL.
 ## Consequences
 - Drivers stay small: they map types and errors and implement paging/cancel.
 - The data grid can show the first page immediately and fetch on scroll.
-- A second connection is needed for metadata while a grid is open.
+- A second connection is needed for metadata while a grid is open. SQLite
+  `:memory:` databases are per connection: share one through a
+  `file:name?mode=memory&cache=shared` URI, or introspect on the same
+  connection after closing its cursor.
 - Backends that cannot cancel (see ADR 0003) rely on dropping the call and
   reconnecting; the contract makes that safe.

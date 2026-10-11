@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 jobs:
   check:
     strategy:
@@ -19,8 +20,71 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
   progress:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/progress.py --check
+
+  # Ignored tests against real databases (docs/testing-databases.md). The
+  # Oracle Client backend is excluded: it needs Oracle Instant Client.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: pyoxide
+          POSTGRES_PASSWORD: pyoxide
+          POSTGRES_DB: pyoxide
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pyoxide -d pyoxide"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      oracle:
+        image: gvenzl/oracle-free:23-slim-faststart
+        env:
+          ORACLE_PASSWORD: pyoxide
+          APP_USER: pyoxide
+          APP_USER_PASSWORD: pyoxide
+        ports: ["1521:1521"]
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    env:
+      PYOXIDE_DB_PASSWORD: pyoxide
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p db-postgres -p db-sqlite -p db-oracle-thin -p db-service -- --ignored --skip bench_
+
+  # Downloadable pyoxide-db builds (workflow artifacts), e.g. to run
+  # `pyoxide-db diagnose` on a machine without a Rust toolchain.
+  binaries:
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: pyoxide-db-windows-x86_64
+            file: pyoxide-db.exe
+          - os: macos-latest
+            name: pyoxide-db-macos-aarch64
+            file: pyoxide-db
+          - os: ubuntu-latest
+            name: pyoxide-db-linux-x86_64
+            file: pyoxide-db
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p db-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/release/${{ matrix.file }}
+          if-no-files-found: error

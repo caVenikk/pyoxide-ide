@@ -5,25 +5,34 @@
 use crate::{Error, ErrorKind};
 
 /// First Oracle-style error code in a message: `ORA-01017`, `TNS-12514`,
-/// `DPI-1047`. ORA- and TNS- codes are normalized to five digits.
+/// `DPI-1047`. The code that appears first wins (`DPI-1067: ... ORA-03136`
+/// is a DPI-1067). ORA- and TNS- codes are normalized to five digits.
 pub fn error_code(message: &str) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
     for prefix in ["ORA-", "TNS-", "DPI-"] {
-        let mut rest = message;
-        while let Some(pos) = rest.find(prefix) {
-            let after = &rest[pos + prefix.len()..];
+        let mut from = 0;
+        while let Some(rel) = message[from..].find(prefix) {
+            let pos = from + rel;
+            let after = &message[pos + prefix.len()..];
             let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
             if !digits.is_empty() {
-                return Some(if prefix == "DPI-" {
+                let code = if prefix == "DPI-" {
                     format!("DPI-{digits}")
                 } else {
-                    let n: u32 = digits.parse().ok()?;
-                    format!("ORA-{n:05}")
-                });
+                    match digits.parse::<u32>() {
+                        Ok(n) => format!("ORA-{n:05}"),
+                        Err(_) => break,
+                    }
+                };
+                if best.as_ref().is_none_or(|(p, _)| pos < *p) {
+                    best = Some((pos, code));
+                }
+                break;
             }
-            rest = after;
+            from = pos + prefix.len();
         }
     }
-    None
+    best.map(|(_, code)| code)
 }
 
 /// Error kind for an Oracle error code (`ORA-12514`, `DPI-1047`).
@@ -90,6 +99,10 @@ mod tests {
             Some("ORA-03113")
         );
         assert_eq!(error_code("connection refused"), None);
+        assert_eq!(
+            error_code("DPI-1067: call timeout of 1000 ms exceeded with ORA-03136").as_deref(),
+            Some("DPI-1067")
+        );
         assert_eq!(error_code("ORA-: nothing"), None);
     }
 

@@ -9,3 +9,15 @@ rust-version.workspace = true
 [dependencies]
 db-core.workspace = true
 async-trait.workspace = true
+bytes = "1"
+chrono.workspace = true
+futures-util = { version = "0.3", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+tokio.workspace = true
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring"] }
+
+[dev-dependencies]
+rcgen = "0.14"
+tokio = { workspace = true, features = ["test-util"] }

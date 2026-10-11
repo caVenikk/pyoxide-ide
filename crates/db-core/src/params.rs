@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+
+pub use secrets::Secret;
 
 /// A concrete driver implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -75,41 +76,6 @@ pub enum Dialect {
     Sqlite,
 }
 
-/// A secret string (password, wallet password). Never printed, never
-/// serialized, wiped from memory on drop.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct Secret(String);
-
-impl Secret {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl Drop for Secret {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.0.is_empty() {
-            "<empty>"
-        } else {
-            "<redacted>"
-        })
-    }
-}
-
 /// How strictly to use TLS. Names follow PostgreSQL's `sslmode`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -159,8 +125,15 @@ pub mod opt {
     pub const ORACLE_DSN: &str = "oracle.dsn";
     /// PostgreSQL `application_name`.
     pub const APPLICATION_NAME: &str = "application_name";
+    /// Oracle Client only: directory with the Oracle Client libraries.
+    pub const ORACLE_LIB_DIR: &str = "oracle.lib_dir";
+    /// Oracle Client only: directory with `tnsnames.ora` and `sqlnet.ora`.
+    pub const ORACLE_CONFIG_DIR: &str = "oracle.config_dir";
     /// SQLite: create the file if it does not exist (`"true"`).
     pub const SQLITE_CREATE: &str = "sqlite.create";
+    /// SQLite: how long to wait for a lock held by another connection, in
+    /// milliseconds (default 5000).
+    pub const SQLITE_BUSY_TIMEOUT_MS: &str = "sqlite.busy_timeout_ms";
 }
 
 /// Everything needed to open a connection.

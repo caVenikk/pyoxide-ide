@@ -9,5 +9,6 @@ rust-version.workspace = true
 [dependencies]
 db-core.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 tokio.workspace = true
 oracle = "0.6"
