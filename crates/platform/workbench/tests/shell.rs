@@ -57,8 +57,8 @@ fn the_chrome_is_drawn(cx: &mut TestAppContext) {
     }
     let toolbar = cx.debug_bounds("toolbar").unwrap();
     let status = cx.debug_bounds("status-bar").unwrap();
-    assert_eq!(toolbar.size.height, gpui::px(40.0));
-    assert_eq!(status.size.height, gpui::px(30.0));
+    assert_eq!(toolbar.size.height, gpui::px(42.5));
+    assert_eq!(status.size.height, gpui::px(31.0));
     assert!(toolbar.origin.y < status.origin.y);
 }
 

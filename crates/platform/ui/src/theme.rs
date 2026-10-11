@@ -111,9 +111,9 @@ impl ThemeExt for App {
     }
 }
 
-/// Installs the built-in theme of `kind`.
+/// Installs the default theme of `kind`.
 pub fn init(cx: &mut App, kind: ThemeKind) {
-    set(cx, themes::builtin::theme(kind));
+    set(cx, themes::builtin::default_theme(kind));
 }
 
 /// Makes `theme` the current theme and redraws every window.
@@ -141,7 +141,7 @@ mod tests {
                 a: 1.0
             }
         );
-        assert_eq!(theme.metric(Metric::ToolbarHeight), px(40.0));
+        assert_eq!(theme.metric(Metric::ToolbarHeight), px(42.5));
         assert_eq!(theme.mono_family().as_ref(), "JetBrains Mono");
         // Inter is not in the list: the first family is used as is.
         assert_eq!(theme.ui_family().as_ref(), "Inter");

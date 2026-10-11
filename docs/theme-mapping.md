@@ -27,7 +27,8 @@ A theme assigns a value to every role of three kinds, plus fonts:
 Themes are TOML files. A file can `extends` another theme and then lists only
 what it changes; colours can refer to entries of a `[palette]` table with
 `"$name"`. The built-in themes `pyoxide-dark` and `pyoxide-light` define every
-role; the importers always start from one of them.
+role; the importers always start from one of them. The default themes of the
+IDE are `islands-dark` and `islands-light` (see "Built-in themes").
 
 ```toml
 [theme]
@@ -45,11 +46,42 @@ accent = "$rust"
 keyword = { fg = "$rust", bold = true }
 ```
 
+## Built-in themes
+
+| Id | Name | Colours |
+|---|---|---|
+| `islands-dark` | Islands Dark | default dark theme, generated from the IntelliJ Platform Community New UI files |
+| `islands-light` | Islands Light | default light theme, generated the same way |
+| `pyoxide-dark` | Pyoxide Dark | original colours; base of every import |
+| `pyoxide-light` | Pyoxide Light | original colours; base of every import |
+
+The islands themes are produced by this importer from the IntelliJ Platform
+Community repository (Apache-2.0, see NOTICE): the Islands UI themes with
+their parent themes, the editor schemes they name, the base schemes and the
+Python attribute lists. The generated files are committed
+(`crates/platform/themes/themes/islands-*.toml`; their header names the
+commit and the files) and are regenerated, not edited:
+
+```sh
+git clone --filter=blob:none --no-checkout https://github.com/JetBrains/intellij-community.git ic
+cd ic && git sparse-checkout set --no-cone \
+  /platform/platform-resources/src/themes/ \
+  /platform/platform-resources/src/DefaultColorSchemesManager.xml \
+  /python/pluginResources/colorSchemes/
+git checkout <commit> && cd -
+cargo run -p themes --example builtin_islands -- ic <commit>
+```
+
+Roles the Community files do not define, the metrics and the fonts come from
+the pyoxide themes, so layout changes go into `pyoxide-*.toml` first and the
+islands themes are regenerated afterwards.
+
 ## What is read
 
 | Input | How it is used |
 |---|---|
 | `*.icls` and scheme `*.xml` | `<scheme name version parent_scheme>` with `<colors>`, `<attributes>`, font options and `<font>`, `<console-font>` |
+| language attribute lists (`*.xml` whose root is `<list>`) | `<option name>` attribute entries that a language adds to a base scheme; the base is named by the end of the file name (`...Darcula.xml` for `Darcula`, `...Default.xml` for `Default`). They apply below that scheme's own entries, to every scheme that inherits from it, also when the base scheme itself is not among the inputs |
 | `*.theme.json`, and `*.json` under `themes/` | `name`, `dark`, `author`, `parentTheme`, `editorScheme`, `colors`, `ui`; other sections are only counted |
 | `*.jar`, `*.zip` | only the entries recognised by name below are opened |
 | a directory | searched recursively (symbolic links are not followed); archives up to two folders down are opened |
@@ -59,7 +91,7 @@ name says it is theme data, decided before the entry is touched:
 
 - `*.theme.json` anywhere, except under `META-INF/`;
 - `*.json` under a `themes/` folder (not `metadata/`, not `*.themeMetadata.json`);
-- `*.icls` anywhere, and `*.xml` under a `themes/` folder;
+- `*.icls` anywhere, and `*.xml` under a `themes/` or `colorSchemes/` folder;
 - `DefaultColorSchemesManager.xml` (the base schemes), wherever it is;
 - a `.xml` or `.icls` that a theme names in `editorScheme` by path.
 
@@ -158,7 +190,7 @@ report says which parent was missing.
 | `ui.tab-hover` | `EditorTabs.hoverBackground`, `EditorTabs.hoverColor`, `DefaultTabs.hoverBackground` | Hovered editor tab |
 | `ui.tab-active-text` | `EditorTabs.underlinedTabForeground`, `EditorTabs.selectedForeground`, `DefaultTabs.underlinedTabForeground` | Title of the selected tab |
 | `ui.tab-inactive-text` | `EditorTabs.foreground`, `TabbedPane.foreground` | Title of other tabs |
-| `ui.tab-underline` | `EditorTabs.underlineColor`, `DefaultTabs.underlineColor`, `TabbedPane.underlineColor` | Indicator under the selected tab |
+| `ui.tab-underline` | `EditorTabs.underlinedBorderColor`, `EditorTabs.underlineColor`, `DefaultTabs.underlineColor`, `TabbedPane.underlineColor` | Indicator of the selected tab (the outline of its rounded background in the New UI with islands) |
 | `ui.scrollbar` | `ScrollBar.thumbColor` (UI theme or scheme color), `ScrollBar.Transparent.thumbColor` (UI theme or scheme color), `ScrollBar.Mac.thumbColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.thumbColor` (UI theme or scheme color) | Scrollbar thumb |
 | `ui.scrollbar-hover` | `ScrollBar.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Transparent.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Mac.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.hoverThumbColor` (UI theme or scheme color) | Hovered scrollbar thumb |
 | `ui.scrollbar-track` | `ScrollBar.trackColor` (UI theme or scheme color), `ScrollBar.Transparent.trackColor` (UI theme or scheme color), `ScrollBar.Mac.trackColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.trackColor` (UI theme or scheme color) | Scrollbar track |
@@ -172,7 +204,7 @@ report says which parent was missing.
 |---|---|---|
 | `ui.editor-background` | `TEXT` background, `Editor.background` | Editor background |
 | `ui.editor-text` | `TEXT` foreground, `Editor.foreground` | Default editor text |
-| `ui.gutter` | `GUTTER_BACKGROUND` (scheme color), `EDITOR_GUTTER_BACKGROUND` (scheme color) | Gutter background |
+| `ui.gutter` | `EDITOR_GUTTER_BACKGROUND` (scheme color) | Gutter background; the New UI reads only this key (`GUTTER_BACKGROUND` of older schemes is not used), and an empty value means the editor background |
 | `ui.line-number` | `LINE_NUMBERS_COLOR` (scheme color) | Line numbers |
 | `ui.line-number-active` | `LINE_NUMBER_ON_CARET_ROW_COLOR` (scheme color) | Line number of the caret row |
 | `ui.caret` | `CARET_COLOR` (scheme color) | Text caret |

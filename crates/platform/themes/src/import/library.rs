@@ -277,7 +277,10 @@ impl Library {
             }
         } else {
             (0..self.schemes.len())
-                .filter(|&i| self.schemes[i].data.name == reference)
+                .filter(|&i| {
+                    let s = &self.schemes[i].data;
+                    s.name == reference && !s.additional
+                })
                 .collect()
         };
         pick_nearest(&candidates, near, |i| &self.schemes[i].data.origin)
@@ -285,7 +288,10 @@ impl Library {
 
     fn find_scheme_by_name(&self, name: &str, near: &str) -> Option<usize> {
         let candidates: Vec<usize> = (0..self.schemes.len())
-            .filter(|&i| self.schemes[i].data.name == name)
+            .filter(|&i| {
+                let s = &self.schemes[i].data;
+                s.name == name && !s.additional
+            })
             .collect();
         pick_nearest(&candidates, near, |i| &self.schemes[i].data.origin)
     }
@@ -356,8 +362,18 @@ impl Library {
         (layers, warnings, known_dark)
     }
 
+    /// Additional attributes that languages add to the base scheme `name`.
+    fn additional_for<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a Scheme> + 'a {
+        let name = name.to_owned();
+        self.schemes
+            .iter()
+            .map(|s| &s.data)
+            .filter(move |s| s.additional && s.name == name)
+    }
+
     fn scheme_chain<'a>(&'a self, start: &'a Scheme) -> (Vec<&'a Scheme>, Vec<Warning>) {
         let mut layers = vec![start];
+        layers.extend(self.additional_for(&start.name));
         let mut warnings = Vec::new();
         let mut current = start;
         while let Some(parent) = current.parent.as_deref() {
@@ -375,9 +391,13 @@ impl Library {
                         break;
                     }
                     layers.push(next);
+                    layers.extend(self.additional_for(&next.name));
                     current = next;
                 }
                 None => {
+                    // Language attributes for a base scheme that is not
+                    // among the inputs still apply.
+                    layers.extend(self.additional_for(parent));
                     let known = known_scheme(parent).is_some();
                     warnings.push(Warning {
                         level: if known { Level::Info } else { Level::Warning },
@@ -522,7 +542,7 @@ impl Library {
             out.push(imported);
         }
         for (index, stored) in self.schemes.iter().enumerate() {
-            if stored.primary && !used_schemes.contains(&index) {
+            if stored.primary && !stored.data.additional && !used_schemes.contains(&index) {
                 out.push(self.import_scheme(&stored.data));
             }
         }

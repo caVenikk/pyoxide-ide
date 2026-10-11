@@ -76,13 +76,13 @@ pub fn init(cx: &mut App, product: &Product) {
             MenuItem::action(
                 "Light Theme",
                 SetTheme {
-                    id: themes::builtin::LIGHT_ID.into(),
+                    id: themes::builtin::ISLANDS_LIGHT_ID.into(),
                 },
             ),
             MenuItem::action(
                 "Dark Theme",
                 SetTheme {
-                    id: themes::builtin::DARK_ID.into(),
+                    id: themes::builtin::ISLANDS_DARK_ID.into(),
                 },
             ),
             MenuItem::separator(),

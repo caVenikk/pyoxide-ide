@@ -15,8 +15,8 @@ description: >-
 ## Pyoxide override (read first; see `../PYOXIDE.md`)
 
 - Output is a **theme** (`replica/design/tokens.json` -> theme files the UI toolkit loads), not CSS/Tailwind. Roles: surface, text, accent, selection, diagnostics, syntax tokens, git/diff colours.
-- Colours/fonts/icons must be our own or openly licensed (record in NOTICE). Do not use JetBrains/PyCharm icons, logos or the JetBrains Mono name; check fonts' licenses.
-- **Requirement:** the internal theme format must be able to hold imports of PyCharm colour schemes (`.icls`) and UI themes (`.theme.json`), including those packed in plugin jars (data files only, never `.class`). Keep a mapping table `docs/theme-mapping.md`; report what could not be mapped. Imported third-party themes are not shipped as defaults.
+- Assets follow `docs/clean-room.md` ("Visual fidelity"): icons, themes, metric constants and UI strings of the open-source IntelliJ Platform Community (Apache-2.0) may be used with a NOTICE entry (source, commit, files, changes); assets, logos and product names of proprietary products and plugins never. Fonts are used under their own licenses (for example Inter and JetBrains Mono, SIL OFL 1.1), unmodified, with the license next to them.
+- **Requirement:** the internal theme format must be able to hold imports of PyCharm colour schemes (`.icls`) and UI themes (`.theme.json`), including those packed in plugin jars (data files only, never `.class`). Keep a mapping table `docs/theme-mapping.md`; report what could not be mapped. Default themes may be generated from the Community theme files by the importer (see the "Built-in themes" section of `docs/theme-mapping.md`); other imported third-party themes are not shipped.
 - Run `python3 contrast.py` on every theme (dark and light); layout metrics (row heights, gutter, panel padding) go into tokens too.
 - Reference screenshots stay in `replica/screens/` (git-ignored).
 

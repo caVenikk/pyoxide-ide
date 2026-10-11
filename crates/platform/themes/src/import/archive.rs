@@ -27,7 +27,8 @@ const MAX_ARCHIVE_DEPTH: usize = 2;
 pub(crate) enum DataKind {
     /// `*.theme.json`, or a JSON file under a `themes` directory.
     UiTheme,
-    /// `*.icls`, or an XML file under a `themes` directory.
+    /// `*.icls`, or an XML file under a `themes` or `colorSchemes`
+    /// directory (schemes and language attribute lists).
     Scheme,
 }
 
@@ -60,6 +61,7 @@ pub(crate) fn classify(path: &str) -> Option<DataKind> {
         return None;
     }
     let in_themes = components.contains(&"themes");
+    let in_color_schemes = components.contains(&"colorschemes");
     let in_metadata = components.contains(&"metadata");
     if file.ends_with(".thememetadata.json") {
         return None;
@@ -73,7 +75,9 @@ pub(crate) fn classify(path: &str) -> Option<DataKind> {
     if file.ends_with(".icls") {
         return Some(DataKind::Scheme);
     }
-    if file.ends_with(".xml") && (in_themes || file == "defaultcolorschemesmanager.xml") {
+    if file.ends_with(".xml")
+        && (in_themes || in_color_schemes || file == "defaultcolorschemesmanager.xml")
+    {
         return Some(DataKind::Scheme);
     }
     None
@@ -337,6 +341,9 @@ mod tests {
             ("themes/expUI/expUI_dark.theme.json", Some(UiTheme)),
             ("colors/user.icls", Some(Scheme)),
             ("DefaultColorSchemesManager.xml", Some(Scheme)),
+            ("colorSchemes/PythonDarcula.xml", Some(Scheme)),
+            ("plugin/colorSchemes/x.xml", Some(Scheme)),
+            ("other/PythonDarcula.xml", None),
             ("themes/metadata/IntelliJPlatform.themeMetadata.json", None),
             ("themes/metadata/other.json", None),
             ("META-INF/plugin.xml", None),

@@ -793,3 +793,57 @@ fn reports_render_and_serialize() {
     );
     assert!(json["mapped"].as_array().unwrap().len() > 10);
 }
+
+// ---- language attributes ------------------------------------------------
+
+/// A language plugin's `<list>` of attributes for a base scheme applies to
+/// every scheme that inherits from that base; the scheme's own entries win.
+#[test]
+fn language_attribute_lists_extend_their_base_scheme() {
+    let dir = tempfile::tempdir().unwrap();
+    let colors = dir.path().join("colorSchemes");
+    std::fs::create_dir(&colors).unwrap();
+    let write = |name: &str, text: &str| std::fs::write(colors.join(name), text).unwrap();
+    write(
+        "LangDarcula.xml",
+        r#"<list>
+  <option name="PY.BUILTIN_NAME"><value><option name="FOREGROUND" value="a1b2c3"/></value></option>
+  <option name="PY.KEYWORD_ARGUMENT"><value><option name="FOREGROUND" value="111111"/></value></option>
+</list>"#,
+    );
+    write(
+        "Evening.xml",
+        r#"<scheme name="Evening" version="142" parent_scheme="Darcula">
+  <colors><option name="CARET_ROW_COLOR" value="202020"/></colors>
+  <attributes>
+    <option name="TEXT"><value><option name="FOREGROUND" value="dddddd"/><option name="BACKGROUND" value="101010"/></value></option>
+    <option name="PY.KEYWORD_ARGUMENT"><value><option name="FOREGROUND" value="222222"/></value></option>
+  </attributes>
+</scheme>"#,
+    );
+    let mut library = Library::new();
+    library.add_path(dir.path(), true).unwrap();
+    let all = library.import_all();
+    // The attribute list is not a theme of its own.
+    let names: Vec<_> = all.iter().map(|i| i.theme.name.clone()).collect();
+    assert_eq!(names, ["Evening"]);
+    let t = &all[0].theme;
+    assert_eq!(t.text[TextRole::Builtin].fg, Some(rgba("#a1b2c3")));
+    assert_eq!(t.text[TextRole::KeywordArgument].fg, Some(rgba("#222222")));
+
+    // A list whose file name names no known base scheme is skipped.
+    write(
+        "LangUnknown.xml",
+        r#"<list><option name="PY.NUMBER"/></list>"#,
+    );
+    let mut library = Library::new();
+    library.add_path(dir.path(), true).unwrap();
+    assert!(
+        library
+            .skipped()
+            .iter()
+            .any(|s| s.path.ends_with("LangUnknown.xml")),
+        "{:?}",
+        library.skipped()
+    );
+}

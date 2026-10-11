@@ -371,7 +371,8 @@ impl Focusable for Workbench {
 impl Render for Workbench {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let gap = cx.theme().metric(Metric::IslandGap);
-        let frame = cx.theme().color(UiRole::TitleBar);
+        // The frame around the islands has the toolbar colour.
+        let frame = cx.theme().color(UiRole::Toolbar);
         let first_frame = (!self.first_frame_reported).then(|| {
             self.first_frame_reported = true;
             canvas(

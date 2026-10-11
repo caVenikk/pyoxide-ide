@@ -1,25 +1,39 @@
-//! The themes that ship with the IDE. Their colours are original to this
-//! project and are not derived from any other product.
+//! The themes that ship with the IDE.
+//!
+//! - `islands-dark` and `islands-light`, the defaults: the colours of the New
+//!   UI with islands, generated from the IntelliJ Platform Community theme
+//!   files (Apache-2.0, see NOTICE) by the `builtin_islands` example.
+//! - `pyoxide-dark` and `pyoxide-light`: colours original to this project.
+//!   They define every role and are the base of every import (also of the
+//!   islands themes), so metrics and fonts are kept here.
 
 use crate::model::{Theme, ThemeFile, ThemeKind};
 use crate::registry::Registry;
 
 pub const DARK_ID: &str = "pyoxide-dark";
 pub const LIGHT_ID: &str = "pyoxide-light";
+pub const ISLANDS_DARK_ID: &str = "islands-dark";
+pub const ISLANDS_LIGHT_ID: &str = "islands-light";
 
 const DARK_TOML: &str = include_str!("../themes/pyoxide-dark.toml");
 const LIGHT_TOML: &str = include_str!("../themes/pyoxide-light.toml");
+const ISLANDS_DARK_TOML: &str = include_str!("../themes/islands-dark.toml");
+const ISLANDS_LIGHT_TOML: &str = include_str!("../themes/islands-light.toml");
 
-/// The built-in theme files, dark first.
+/// The built-in theme files: the base themes, then the defaults.
 pub fn files() -> Vec<ThemeFile> {
-    vec![
-        ThemeFile::from_toml(DARK_TOML, "pyoxide-dark.toml").expect("built-in dark theme parses"),
-        ThemeFile::from_toml(LIGHT_TOML, "pyoxide-light.toml")
-            .expect("built-in light theme parses"),
+    [
+        (DARK_TOML, "pyoxide-dark.toml"),
+        (LIGHT_TOML, "pyoxide-light.toml"),
+        (ISLANDS_DARK_TOML, "islands-dark.toml"),
+        (ISLANDS_LIGHT_TOML, "islands-light.toml"),
     ]
+    .into_iter()
+    .map(|(text, origin)| ThemeFile::from_toml(text, origin).expect("built-in theme parses"))
+    .collect()
 }
 
-/// Id of the built-in theme for a kind.
+/// Id of the base theme for a kind (the base of imports).
 pub const fn id_for(kind: ThemeKind) -> &'static str {
     match kind {
         ThemeKind::Dark => DARK_ID,
@@ -27,10 +41,27 @@ pub const fn id_for(kind: ThemeKind) -> &'static str {
     }
 }
 
-/// The built-in theme for a kind, fully resolved.
+/// Id of the default theme for a kind.
+pub const fn default_id_for(kind: ThemeKind) -> &'static str {
+    match kind {
+        ThemeKind::Dark => ISLANDS_DARK_ID,
+        ThemeKind::Light => ISLANDS_LIGHT_ID,
+    }
+}
+
+/// The base theme for a kind, fully resolved.
 pub fn theme(kind: ThemeKind) -> Theme {
+    resolve(id_for(kind))
+}
+
+/// The default theme for a kind, fully resolved.
+pub fn default_theme(kind: ThemeKind) -> Theme {
+    resolve(default_id_for(kind))
+}
+
+fn resolve(id: &str) -> Theme {
     Registry::with_builtin()
-        .resolve(id_for(kind))
+        .resolve(id)
         .expect("built-in themes are complete")
 }
 

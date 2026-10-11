@@ -66,6 +66,10 @@ pub struct Scheme {
     /// Options directly under `<scheme>` that are not fonts.
     pub other_options: Vec<String>,
     pub fonts: SchemeFonts,
+    /// Additional text attributes of a language for the base scheme named
+    /// `name` (a `<list>` file such as the Python plugin's attributes for
+    /// `Darcula`), not a scheme of its own: it is merged below that scheme.
+    pub additional: bool,
 }
 
 impl Scheme {
@@ -76,12 +80,47 @@ impl Scheme {
         let mut nodes = Vec::new();
         root.descendants_named("scheme", &mut nodes);
         if nodes.is_empty() {
+            if let Some(list) = additional_list(&root) {
+                return Self::parse_additional(list, origin, entry_path).map(|s| vec![s]);
+            }
             return Err("no <scheme> element".into());
         }
         Ok(nodes
             .into_iter()
             .map(|node| Scheme::from_element(node, origin, entry_path))
             .collect())
+    }
+
+    /// A `<list>` of attribute options that a language adds to a base
+    /// scheme. The base scheme is named by the end of the file name, as the
+    /// language plugins name these files (`...Darcula.xml`, `...Default.xml`).
+    fn parse_additional(list: &Element, origin: &str, entry_path: &str) -> Result<Scheme, String> {
+        let file = entry_path.rsplit('/').next().unwrap_or(entry_path);
+        let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+        let target = ["Darcula", "Default"]
+            .into_iter()
+            .find(|base| stem.ends_with(base) && stem.len() > base.len())
+            .ok_or_else(|| {
+                format!(
+                    "additional attributes for an unknown scheme (file `{file}`; \
+                     expected a name ending in Darcula or Default)"
+                )
+            })?;
+        let mut scheme = Scheme {
+            name: target.to_owned(),
+            origin: origin.to_owned(),
+            entry_path: entry_path.to_owned(),
+            additional: true,
+            ..Scheme::default()
+        };
+        for option in list.children_named("option") {
+            if let Some(name) = option.attr("name")
+                && let Some(attribute) = parse_attribute(option)
+            {
+                scheme.attributes.insert(name.to_owned(), attribute);
+            }
+        }
+        Ok(scheme)
     }
 
     fn from_element(node: &Element, origin: &str, entry_path: &str) -> Scheme {
@@ -158,6 +197,14 @@ impl Scheme {
 enum FontScope {
     Editor,
     Console,
+}
+
+/// The root `<list>` element of an additional attributes file.
+fn additional_list(root: &Element) -> Option<&Element> {
+    if root.name == "list" {
+        return Some(root);
+    }
+    root.child("list")
 }
 
 fn parse_attribute(option: &Element) -> Option<Attribute> {
