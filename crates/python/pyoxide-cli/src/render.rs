@@ -39,7 +39,13 @@ pub fn table(headers: &[&str], rows: &[Vec<String>]) -> String {
 pub fn commands(metas: &[&CommandMeta]) -> String {
     let rows: Vec<Vec<String>> = metas
         .iter()
-        .map(|m| vec![m.id.to_owned(), m.summary.to_owned(), m.args_example.to_owned()])
+        .map(|m| {
+            vec![
+                m.id.to_owned(),
+                m.summary.to_owned(),
+                m.args_example.to_owned(),
+            ]
+        })
         .collect();
     table(&["COMMAND", "SUMMARY", "EXAMPLE ARGS"], &rows)
 }
@@ -64,7 +70,10 @@ pub fn interpreters(report: &DiscoveryReport) -> String {
         out.push_str("No Python interpreters found.\n");
     } else {
         let rows: Vec<_> = report.interpreters.iter().map(interpreter_row).collect();
-        out.push_str(&table(&["VERSION", "KIND", "IMPLEMENTATION", "SOURCE", "PATH"], &rows));
+        out.push_str(&table(
+            &["VERSION", "KIND", "IMPLEMENTATION", "SOURCE", "PATH"],
+            &rows,
+        ));
         out.push('\n');
     }
     out.push_str("\nTools:\n");
@@ -87,12 +96,18 @@ fn tool_line(t: &ToolStatus) -> String {
             "  {:<7} {}{}",
             t.name,
             p.display(),
-            t.version.as_ref().map(|v| format!(" ({v})")).unwrap_or_default()
+            t.version
+                .as_ref()
+                .map(|v| format!(" ({v})"))
+                .unwrap_or_default()
         ),
         _ => format!(
             "  {:<7} not installed{}",
             t.name,
-            t.note.as_ref().map(|n| format!(". {n}")).unwrap_or_default()
+            t.note
+                .as_ref()
+                .map(|n| format!(". {n}"))
+                .unwrap_or_default()
         ),
     }
 }
@@ -117,19 +132,37 @@ fn pyproject_summary(p: &PyProject, out: &mut String) {
         }
     }
     for (name, deps) in &p.optional_dependencies {
-        let _ = writeln!(out, "  optional-dependencies.{name} ({}): {}", deps.len(), deps.join(", "));
+        let _ = writeln!(
+            out,
+            "  optional-dependencies.{name} ({}): {}",
+            deps.len(),
+            deps.join(", ")
+        );
     }
     for (name, g) in &p.dependency_groups {
         let mut parts = g.requirements.clone();
         parts.extend(g.includes.iter().map(|i| format!("(include {i})")));
-        let _ = writeln!(out, "  dependency-groups.{name} ({}): {}", parts.len(), parts.join(", "));
+        let _ = writeln!(
+            out,
+            "  dependency-groups.{name} ({}): {}",
+            parts.len(),
+            parts.join(", ")
+        );
     }
     if let Some(uv) = &p.uv {
         if !uv.dev_dependencies.is_empty() {
-            let _ = writeln!(out, "  tool.uv.dev-dependencies: {}", uv.dev_dependencies.join(", "));
+            let _ = writeln!(
+                out,
+                "  tool.uv.dev-dependencies: {}",
+                uv.dev_dependencies.join(", ")
+            );
         }
         if !uv.workspace_members.is_empty() {
-            let _ = writeln!(out, "  tool.uv.workspace members: {}", uv.workspace_members.join(", "));
+            let _ = writeln!(
+                out,
+                "  tool.uv.workspace members: {}",
+                uv.workspace_members.join(", ")
+            );
         }
         if !uv.sources.is_empty() {
             let _ = writeln!(out, "  tool.uv.sources: {}", uv.sources.join(", "));
@@ -160,7 +193,12 @@ pub fn project(info: &ProjectInfo) -> String {
         let _ = writeln!(out, "lock file: {}", l.display());
     }
     for r in &info.requirements_files {
-        let _ = writeln!(out, "{}: {} requirements", r.path.display(), r.requirements.len());
+        let _ = writeln!(
+            out,
+            "{}: {} requirements",
+            r.path.display(),
+            r.requirements.len()
+        );
     }
     if let Some(v) = &info.python_version_file {
         let _ = writeln!(out, ".python-version: {v}");
@@ -169,7 +207,9 @@ pub fn project(info: &ProjectInfo) -> String {
         Some(v) => {
             let _ = writeln!(out, "environment: {}", v.display());
         }
-        None => out.push_str("environment: none (create one with `pyoxide env venv` or `pyoxide env sync`)\n"),
+        None => out.push_str(
+            "environment: none (create one with `pyoxide env venv` or `pyoxide env sync`)\n",
+        ),
     }
     if !info.managers.is_empty() {
         let names: Vec<String> = info
@@ -196,7 +236,12 @@ pub fn project(info: &ProjectInfo) -> String {
 
 pub fn packages(list: &PackageList) -> String {
     let outdated = list.packages.iter().any(|p| p.latest_version.is_some());
-    let mut out = format!("{} packages in {} (via {})\n", list.packages.len(), list.python.display(), list.backend.as_str());
+    let mut out = format!(
+        "{} packages in {} (via {})\n",
+        list.packages.len(),
+        list.python.display(),
+        list.backend.as_str()
+    );
     if list.packages.is_empty() {
         return out.trim_end().to_owned();
     }
@@ -257,7 +302,11 @@ pub fn venv(v: &VenvCreated) -> String {
         Some(i) => format!("{} {}", i.implementation, i.version),
         None => "Python".to_owned(),
     };
-    format!("created {} with {what}\ninterpreter: {}", v.path.display(), v.python.display())
+    format!(
+        "created {} with {what}\ninterpreter: {}",
+        v.path.display(),
+        v.python.display()
+    )
 }
 
 pub fn search(p: &IndexProject, versions: usize) -> String {
@@ -290,14 +339,20 @@ pub fn search(p: &IndexProject, versions: usize) -> String {
             vec![
                 v.version.clone(),
                 v.requires_python.clone().unwrap_or_default(),
-                v.uploaded.as_deref().map(|u| u.get(..10).unwrap_or(u).to_owned()).unwrap_or_default(),
+                v.uploaded
+                    .as_deref()
+                    .map(|u| u.get(..10).unwrap_or(u).to_owned())
+                    .unwrap_or_default(),
                 flags.join(", "),
             ]
         })
         .collect();
     if !rows.is_empty() {
         let _ = writeln!(out, "\nversions ({} of {}):", rows.len(), p.versions.len());
-        out.push_str(&table(&["VERSION", "REQUIRES-PYTHON", "UPLOADED", ""], &rows));
+        out.push_str(&table(
+            &["VERSION", "REQUIRES-PYTHON", "UPLOADED", ""],
+            &rows,
+        ));
     }
     out.trim_end().to_owned()
 }
@@ -313,14 +368,20 @@ mod tests {
     fn tables_align_columns() {
         let t = table(
             &["A", "LONGER"],
-            &[vec!["x".into(), "1".into()], vec!["yyyy".into(), "22".into()]],
+            &[
+                vec!["x".into(), "1".into()],
+                vec!["yyyy".into(), "22".into()],
+            ],
         );
         assert_eq!(t, "A     LONGER\nx     1\nyyyy  22");
     }
 
     #[test]
     fn short_commands_drop_the_directory() {
-        assert_eq!(short_command("/home/u/.local/bin/uv add -- requests"), "uv add -- requests");
+        assert_eq!(
+            short_command("/home/u/.local/bin/uv add -- requests"),
+            "uv add -- requests"
+        );
         assert_eq!(short_command("C:\\bin\\uv.exe sync"), "uv.exe sync");
         assert_eq!(short_command("uv"), "uv");
     }
@@ -390,7 +451,10 @@ mod tests {
             skipped: vec![],
         };
         let text = interpreters(&report);
-        assert!(text.contains("3.12.4  venv"), "{text}");
+        assert!(
+            text.contains("3.12.4   venv  cpython         .venv   /p/.venv/bin/python"),
+            "{text}"
+        );
         assert!(text.contains("/p/.venv/bin/python"));
         assert!(text.contains("uv      /bin/uv (0.11.25)"));
         assert!(text.contains("poetry  not installed. Poetry environments are not listed."));

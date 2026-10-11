@@ -10,8 +10,8 @@ use db_service::DbService;
 use db_service::profiles;
 use secrets::config::{StoreKind, config_path};
 use secrets::{
-    EnvLookup, KeyringStore, LazyStore, Prompter, Secret, SecretError, SecretErrorKind, SecretStore,
-    SecretsConfig,
+    EnvLookup, KeyringStore, LazyStore, Prompter, Secret, SecretError, SecretErrorKind,
+    SecretStore, SecretsConfig,
 };
 
 /// Asks on the terminal without echo; `None` when stdin is not a terminal.
@@ -45,7 +45,11 @@ fn configured_store(prompter: Option<Arc<dyn Prompter>>, env: EnvLookup) -> Arc<
         Err(e) => {
             let msg = e.to_string();
             return Arc::new(LazyStore::new("secret settings", move || {
-                Err(SecretError::new(SecretErrorKind::Format, "secret settings", msg))
+                Err(SecretError::new(
+                    SecretErrorKind::Format,
+                    "secret settings",
+                    msg,
+                ))
             }));
         }
     };
@@ -54,7 +58,11 @@ fn configured_store(prompter: Option<Arc<dyn Prompter>>, env: EnvLookup) -> Arc<
         StoreKind::Memory => "memory (not saved)".to_owned(),
         StoreKind::KeePass => format!(
             "KeePass database {}",
-            config.keepass.as_ref().map(|k| k.path.as_str()).unwrap_or("?")
+            config
+                .keepass
+                .as_ref()
+                .map(|k| k.path.as_str())
+                .unwrap_or("?")
         ),
     };
     Arc::new(LazyStore::new(name, move || {

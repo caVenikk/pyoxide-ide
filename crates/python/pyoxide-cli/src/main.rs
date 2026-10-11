@@ -16,7 +16,8 @@ use std::sync::Arc;
 use clap::{Args, Parser, Subcommand};
 use commands::{CommandError, Registry};
 use py_env::ops::{
-    self, AddArgs, InterpretersArgs, PackagesArgs, PathArgs, PythonInstallArgs, RemoveArgs, SearchArgs,
+    self, AddArgs, InterpretersArgs, PackagesArgs, PathArgs, PythonInstallArgs, RemoveArgs,
+    SearchArgs,
 };
 use py_env::uv::{InitKind, InitRequest, LockRequest, SyncRequest, TreeRequest, VenvRequest};
 use py_env::{CancellationToken, EnvError, EnvService, ErrorKind, RunContext};
@@ -399,7 +400,16 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
             project,
             outdated,
         } => {
-            let list = ops::packages_list(&svc, PackagesArgs { venv, project, outdated }, &ctx).await?;
+            let list = ops::packages_list(
+                &svc,
+                PackagesArgs {
+                    venv,
+                    project,
+                    outdated,
+                },
+                &ctx,
+            )
+            .await?;
             emit(json, &list, || render::packages(&list));
         }
         EnvCmd::Add {
@@ -498,8 +508,19 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
             let tree = ops::project_tree(&svc, req, &ctx).await?;
             emit(json, &tree, || tree.text.trim_end().to_owned());
         }
-        EnvCmd::PythonInstall { versions, reinstall } => {
-            let done = ops::python_install(&svc, PythonInstallArgs { versions, reinstall }, &ctx).await?;
+        EnvCmd::PythonInstall {
+            versions,
+            reinstall,
+        } => {
+            let done = ops::python_install(
+                &svc,
+                PythonInstallArgs {
+                    versions,
+                    reinstall,
+                },
+                &ctx,
+            )
+            .await?;
             emit(json, &done, || render::changed(&done));
         }
         EnvCmd::Search { name, versions } => {
@@ -529,18 +550,37 @@ mod tests {
             &["pyoxide", "env", "venv"],
             &["pyoxide", "env", "venv", "--python", "3.12", "path/.venv"],
             &["pyoxide", "env", "packages", "--venv", ".venv"],
-            &["pyoxide", "env", "add", "requests", "rich>=13", "--group", "dev"],
-            &["pyoxide", "env", "add", "requests", "--venv", ".venv", "-r", "req.txt"],
+            &[
+                "pyoxide", "env", "add", "requests", "rich>=13", "--group", "dev",
+            ],
+            &[
+                "pyoxide", "env", "add", "requests", "--venv", ".venv", "-r", "req.txt",
+            ],
             &["pyoxide", "env", "remove", "requests"],
             &["pyoxide", "env", "sync"],
-            &["pyoxide", "env", "sync", "--all-groups", "--extra", "a", "--extra", "b"],
+            &[
+                "pyoxide",
+                "env",
+                "sync",
+                "--all-groups",
+                "--extra",
+                "a",
+                "--extra",
+                "b",
+            ],
             &["pyoxide", "env", "lock", "--upgrade"],
             &["pyoxide", "env", "python-install", "3.13"],
             &["pyoxide", "env", "search", "requests"],
             &["pyoxide", "env", "init", "--lib", "demo"],
             &["pyoxide", "env", "tree", "--depth", "2"],
             &["pyoxide", "commands"],
-            &["pyoxide", "--json", "call", "env.package.search", "{\"name\": \"x\"}"],
+            &[
+                "pyoxide",
+                "--json",
+                "call",
+                "env.package.search",
+                "{\"name\": \"x\"}",
+            ],
         ] {
             Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
