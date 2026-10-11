@@ -27,6 +27,12 @@ as is (rules, formats, scripts).
    `.theme.json`, code styles, live templates) as an import format. Plugin jars
    may be opened only to extract such data files, never `.class` files.
 
+## Visual fidelity
+The goal is a UI that matches PyCharm's current UI closely, down to small
+details (see `docs/clean-room.md`, "Visual fidelity"): reproduce layout and
+metrics from observation; Community-edition assets (Apache-2.0) only with a
+NOTICE entry; never proprietary assets, logos or product names.
+
 ## Forbidden (hard)
 Decompiling, disassembling or reading bytecode/binaries/jars of PyCharm or any
 Pro plugin, in any form; proprietary assets, icons, strings, names; pasting any
