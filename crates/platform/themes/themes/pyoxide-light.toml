@@ -1,0 +1,244 @@
+# Pyoxide Light: the default light theme. The colours are original to this
+# project (a warm off-white base with an oxidised copper accent).
+
+[theme]
+format = 1
+id = "pyoxide-light"
+name = "Pyoxide Light"
+kind = "light"
+description = "Default light theme"
+
+[palette]
+# Surfaces
+bg-editor = "#fcfbf9"
+bg-white = "#ffffff"
+bg-panel = "#f1efeb"
+bg-side = "#f6f4f1"
+bg-hover = "#e6e3de"
+bg-pressed = "#dbd7d1"
+bg-selected = "#c9dcf5"
+bg-selected-inactive = "#dde4ee"
+bg-current-line = "#f3f1ec"
+line = "#d8d4cd"
+line-strong = "#857f75"
+# Text
+fg = "#1f242b"
+fg-bright = "#0f1318"
+fg-muted = "#58616e"
+fg-dim = "#7b838f"
+fg-gutter = "#667080"
+# Hues
+copper = "#b4511d"
+copper-soft = "#b0501c"
+copper-light = "#9f4515"
+gold = "#8a6200"
+sand = "#7a5a1f"
+green = "#3d7a1f"
+leaf = "#1f7a3d"
+teal = "#0b7a6e"
+teal-light = "#0f766e"
+cyan = "#0a6f94"
+blue = "#0b62d6"
+blue-code = "#1a5fc4"
+steel = "#3a5f8f"
+violet = "#7a3fc2"
+rose = "#b83a63"
+red = "#c62f2f"
+amber = "#946000"
+
+[ui]
+surface = "$bg-panel"
+surface-alt = "$bg-side"
+surface-raised = "$bg-white"
+input = "$bg-white"
+border = "$line"
+border-input = "$line-strong"
+divider = "#e2dfd9"
+text = "$fg"
+text-muted = "$fg-muted"
+text-disabled = "$fg-dim"
+text-link = "$blue"
+accent = "$copper"
+on-accent = "#ffffff"
+focus = "$copper"
+hover = "$bg-hover"
+pressed = "$bg-pressed"
+selection = "$bg-selected"
+selection-text = "$fg-bright"
+selection-inactive = "$bg-selected-inactive"
+danger = "$red"
+warning = "$amber"
+success = "$leaf"
+info = "$blue"
+danger-bg = "#fbe3e3"
+warning-bg = "#fbefd2"
+success-bg = "#ddf1e3"
+info-bg = "#dbe9fb"
+
+title-bar = "#e9e6e1"
+toolbar = "$bg-panel"
+status-bar = "#e9e6e1"
+status-bar-text = "$fg-muted"
+tool-window = "$bg-panel"
+tool-window-header = "#eae7e2"
+tool-window-stripe = "$bg-side"
+tab-bar = "#e9e6e1"
+tab-active = "$bg-editor"
+tab-inactive = "#e9e6e1"
+tab-hover = "#dfdcd6"
+tab-active-text = "$fg-bright"
+tab-inactive-text = "$fg-muted"
+tab-underline = "$copper"
+scrollbar = "#58616e59"
+scrollbar-hover = "#58616e8c"
+scrollbar-track = "#00000000"
+progress = "$copper"
+progress-track = "$line"
+notification = "$bg-white"
+
+editor-background = "$bg-editor"
+editor-text = "$fg"
+gutter = "$bg-editor"
+line-number = "$fg-gutter"
+line-number-active = "#2c333c"
+caret = "$fg-bright"
+current-line = "$bg-current-line"
+editor-selection = "#3b6aa433"
+search-match = "#f2c14e73"
+search-match-active = "#f2a43ea6"
+indent-guide = "#00000014"
+indent-guide-active = "#00000038"
+right-margin = "#00000014"
+whitespace = "#0000003d"
+completion-popup = "#ffffff"
+completion-selection = "#d7e5f8"
+completion-match = "$copper-light"
+documentation-popup = "#ffffff"
+breakpoint = "#c62f2f2e"
+execution-point = "#f2c14e66"
+bookmark = "$amber"
+
+gutter-added = "#2f8f4e"
+gutter-modified = "$blue"
+gutter-deleted = "$red"
+diff-added = "#dff3e5"
+diff-removed = "#fbe0e0"
+diff-changed = "#dfeafa"
+diff-conflict = "#faeccb"
+git-added = "$leaf"
+git-modified = "$blue"
+git-deleted = "$red"
+git-renamed = "$violet"
+git-untracked = "$amber"
+git-ignored = "$fg-dim"
+git-conflict = "#b8431c"
+
+diagnostic-error = "$red"
+diagnostic-warning = "#c47f00"
+diagnostic-info = "$blue"
+diagnostic-hint = "$fg-muted"
+
+terminal-background = "$bg-editor"
+terminal-foreground = "$fg"
+terminal-black = "#2c333c"
+terminal-red = "$red"
+terminal-green = "$leaf"
+terminal-yellow = "$amber"
+terminal-blue = "$blue"
+terminal-magenta = "$violet"
+terminal-cyan = "$teal"
+terminal-white = "#5f6877"
+terminal-bright-black = "#4b5360"
+terminal-bright-red = "#b02020"
+terminal-bright-green = "#176b33"
+terminal-bright-yellow = "#7d5200"
+terminal-bright-blue = "#0950b0"
+terminal-bright-magenta = "#6a2fb0"
+terminal-bright-cyan = "#066276"
+terminal-bright-white = "#454c58"
+
+[syntax]
+keyword = { fg = "$copper-soft" }
+constant-builtin = { fg = "$copper-light" }
+string = { fg = "$green" }
+string-escape = { fg = "$teal" }
+string-escape-invalid = { fg = "$red", underline = "wavy", underline-color = "$red" }
+number = { fg = "$cyan" }
+comment = { fg = "#69727f", italic = true }
+docstring = { fg = "#4f7a5c", italic = true }
+docstring-tag = { fg = "#3d6b4b", italic = true, bold = true }
+todo = { fg = "$amber", bold = true }
+function-decl = { fg = "$blue-code" }
+function-call = { fg = "$steel" }
+method-decl = { fg = "$blue-code" }
+method-call = { fg = "$steel" }
+class = { fg = "$gold" }
+class-decl = { fg = "$gold", bold = true }
+parameter = { fg = "$sand" }
+self = { fg = "$rose", italic = true }
+keyword-argument = { fg = "#7a5d2a" }
+variable-reassigned = { underline = "single" }
+constant = { fg = "#8a3fb5" }
+attribute = { fg = "#4b5a73" }
+builtin = { fg = "$teal" }
+decorator = { fg = "#7a3fc2" }
+annotation = { fg = "$teal-light" }
+dunder = { fg = "#0b6b78", italic = true }
+fstring-expression = { bg = "#0000000a" }
+fstring-brace = { fg = "$amber" }
+operator = { fg = "#4a5361" }
+punctuation = { fg = "#5b6472" }
+bracket = { fg = "#4f5866" }
+tag = { fg = "$copper-soft" }
+tag-attribute = { fg = "$gold" }
+property-key = { fg = "$blue-code" }
+link = { fg = "$blue", underline = "single" }
+
+diagnostic-error = { underline = "wavy", underline-color = "$red" }
+diagnostic-warning = { underline = "wavy", underline-color = "#c47f00" }
+diagnostic-info = { underline = "dotted", underline-color = "$blue" }
+diagnostic-hint = { underline = "dotted", underline-color = "$fg-muted" }
+diagnostic-unresolved = { fg = "$red", underline = "wavy", underline-color = "$red" }
+diagnostic-unused = { fg = "#7b838f" }
+diagnostic-deprecated = { strikethrough = true }
+typo = { underline = "wavy", underline-color = "#2f8f4e" }
+matching-bracket = { bg = "#0b62d633", bold = true }
+unmatched-bracket = { bg = "#c62f2f33" }
+identifier-read = { bg = "#0b62d61f" }
+identifier-write = { bg = "#c47f0029" }
+folded-text = { fg = "$fg-muted", bg = "#0000000f" }
+inlay-hint = { fg = "#5f6877", bg = "#0000000a", italic = true }
+console-error = { fg = "$red" }
+console-input = { fg = "$teal-light" }
+
+[font]
+ui-family = ["Inter", "system-ui", "Segoe UI", "Helvetica Neue", "sans-serif"]
+ui-size = 13.0
+editor-family = ["Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+editor-size = 13.0
+editor-line-spacing = 1.2
+editor-ligatures = false
+terminal-family = ["Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+terminal-size = 13.0
+
+[metrics]
+row-height = 24.0
+row-height-compact = 20.0
+tab-height = 32.0
+toolbar-height = 40.0
+status-bar-height = 24.0
+tool-window-header-height = 28.0
+gutter-width = 48.0
+gutter-padding = 8.0
+indent-guide-width = 1.0
+caret-width = 2.0
+panel-padding = 8.0
+padding-small = 4.0
+padding = 8.0
+padding-large = 16.0
+corner-radius = 6.0
+corner-radius-small = 3.0
+border-width = 1.0
+focus-width = 2.0
+scrollbar-width = 10.0
+icon-size = 16.0

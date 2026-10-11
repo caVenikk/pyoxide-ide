@@ -1,0 +1,74 @@
+{
+  "name": "Nightfall",
+  "dark": true,
+  "author": "Fixture Author",
+  "parentTheme": "ExperimentalDark",
+  "editorScheme": "/themes/Nightfall.xml",
+  "colors": {
+    "deep": "#0a1722",
+    "panel": "#142433",
+    "raised": "#1b3147",
+    "ink": "#cfdbe8",
+    "mist": "#86a0b8",
+    "flame": "#e3702d",
+    "alias": "deep"
+  },
+  "ui": {
+    "*": {
+      "background": "panel",
+      "foreground": "ink",
+      "selectionBackground": "#2d5a87",
+      "selectionInactiveBackground": "#243f58",
+      "borderColor": "#2a4259",
+      "arc": 10,
+      "disabledForeground": "#5c7287",
+      "infoForeground": "mist",
+      "hoverBackground": "#1f3a52cc"
+    },
+    "Panel": {
+      "background": "deep"
+    },
+    "Popup": {
+      "background": "raised"
+    },
+    "Button": {
+      "arc": 8,
+      "default": {
+        "startBackground": "flame",
+        "foreground": "#10100f"
+      }
+    },
+    "Tree": {
+      "rowHeight": 26,
+      "background": "alias"
+    },
+    "Component": {
+      "focusColor": "#ffb347",
+      "arc": 12
+    },
+    "Link": {
+      "activeForeground": "#5fb0ff"
+    },
+    "StatusBar": {
+      "background": "#0e1f2e",
+      "foreground": "mist"
+    },
+    "Label": {
+      "errorForeground": "#ff6b6b",
+      "warningForeground": "no-such-name"
+    },
+    "Quirky": {
+      "flag": true,
+      "list": [1, 2],
+      "Deep": {
+        "value": "#123456"
+      }
+    }
+  },
+  "icons": {
+    "ColorPalette": {
+      "Fixture.a": "#101010",
+      "Fixture.b": "#202020"
+    }
+  }
+}

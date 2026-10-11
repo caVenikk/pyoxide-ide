@@ -1,0 +1,10 @@
+{
+  "name": "Plain",
+  "dark": true,
+  "editorScheme": "Nightfall",
+  "ui": {
+    "Editor": {
+      "background": "#050f18"
+    }
+  }
+}

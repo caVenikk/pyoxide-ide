@@ -1,0 +1,52 @@
+<component name="DefaultColorSchemesManager">
+  <scheme name="Default" default_scheme="true" version="1">
+    <colors>
+      <option name="SELECTION_BACKGROUND" value="c2d4e8" />
+      <option name="CARET_ROW_COLOR" value="eef3f8" />
+    </colors>
+    <attributes>
+      <option name="TEXT">
+        <value>
+          <option name="FOREGROUND" value="1a1f24" />
+          <option name="BACKGROUND" value="fbfcfd" />
+        </value>
+      </option>
+      <option name="DEFAULT_KEYWORD">
+        <value>
+          <option name="FOREGROUND" value="993300" />
+          <option name="FONT_TYPE" value="1" />
+        </value>
+      </option>
+    </attributes>
+  </scheme>
+  <scheme name="Darcula" version="1" parent_scheme="Default" default_scheme="true">
+    <colors>
+      <option name="SELECTION_BACKGROUND" value="2c4a66" />
+      <option name="CARET_ROW_COLOR" value="0f2234" />
+      <option name="LINE_NUMBERS_COLOR" value="62809a" />
+    </colors>
+    <attributes>
+      <option name="TEXT">
+        <value>
+          <option name="FOREGROUND" value="c4d0dc" />
+          <option name="BACKGROUND" value="0a1520" />
+        </value>
+      </option>
+      <option name="DEFAULT_KEYWORD">
+        <value>
+          <option name="FOREGROUND" value="d9822f" />
+        </value>
+      </option>
+      <option name="DEFAULT_NUMBER">
+        <value>
+          <option name="FOREGROUND" value="5fb3c9" />
+        </value>
+      </option>
+      <option name="DEFAULT_STRING">
+        <value>
+          <option name="FOREGROUND" value="85b96a" />
+        </value>
+      </option>
+    </attributes>
+  </scheme>
+</component>

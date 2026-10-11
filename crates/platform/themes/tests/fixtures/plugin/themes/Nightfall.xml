@@ -1,0 +1,30 @@
+<scheme name="Nightfall" version="142" parent_scheme="Darcula">
+  <colors>
+    <option name="GUTTER_BACKGROUND" value="0d1d2c" />
+    <option name="LINE_NUMBERS_COLOR" value="5f7c96" />
+    <option name="CARET_ROW_COLOR" value="10253a" />
+  </colors>
+  <attributes>
+    <option name="TEXT">
+      <value>
+        <option name="FOREGROUND" value="cdd9e6" />
+        <option name="BACKGROUND" value="0c1b29" />
+      </value>
+    </option>
+    <option name="DEFAULT_KEYWORD">
+      <value>
+        <option name="FOREGROUND" value="e8793a" />
+      </value>
+    </option>
+    <option name="DEFAULT_STRING">
+      <value>
+        <option name="FOREGROUND" value="9acd6f" />
+      </value>
+    </option>
+    <option name="PY.BUILTIN_NAME">
+      <value>
+        <option name="FOREGROUND" value="52c7b8" />
+      </value>
+    </option>
+  </attributes>
+</scheme>

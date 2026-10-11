@@ -1,0 +1,13 @@
+{
+  "name": "Dusk",
+  "parentTheme": "Nightfall",
+  "colors": {
+    "deep": "#1a0f2e"
+  },
+  "ui": {
+    "StatusBar": {
+      "background": "#2a1a45"
+    },
+    "Label.disabledForeground": "#7a6a99"
+  }
+}

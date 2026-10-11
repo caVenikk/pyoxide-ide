@@ -1,0 +1,20 @@
+[package]
+name = "themes"
+description = "Theme model of Pyoxide IDE (UI colour roles, editor syntax tokens, metrics), TOML theme files and importers for PyCharm colour schemes and UI themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# zip only selects the flate2 API; this picks its pure Rust backend.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,11 @@
+{
+  "name": "Orphan",
+  "dark": false,
+  "parentTheme": "Mystery",
+  "ui": {
+    "*": {
+      "background": "#f4efe6",
+      "foreground": "#2b2723"
+    }
+  }
+}

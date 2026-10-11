@@ -1,0 +1,4 @@
+<idea-plugin>
+  <id>fixture.plugin</id>
+  <name>Fixture Plugin</name>
+</idea-plugin>

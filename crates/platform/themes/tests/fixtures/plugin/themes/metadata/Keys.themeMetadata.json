@@ -1,0 +1,6 @@
+{
+  "name": "Fixture metadata, not a theme",
+  "ui": [
+    { "key": "Panel.background", "description": "Metadata files must be ignored" }
+  ]
+}
