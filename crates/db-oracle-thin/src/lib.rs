@@ -32,12 +32,13 @@ mod sql;
 mod types;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use db_core::timeout::with_timeout;
+use db_core::transaction::TxState;
 use db_core::{
     Backend, BusyFlag, ConnectParams, Connection, Driver, Error, ErrorKind, ExecOptions, Outcome,
     Result, TxMode, Value,
@@ -267,10 +268,8 @@ pub struct ThinConnection {
     session: Mutex<Arc<Session>>,
     renew: tokio::sync::Mutex<()>,
     busy: BusyFlag,
-    /// 0 = auto, 1 = manual.
-    tx_mode: AtomicU8,
-    /// Manual mode: changes may be pending.
-    dirty: AtomicBool,
+    /// Transaction mode; open = manual mode with changes that may be pending.
+    tx: Mutex<TxState>,
     /// `ALTER SESSION` statements to replay on a renewed session.
     session_sql: Mutex<Vec<String>>,
     closed: AtomicBool,
@@ -286,8 +285,7 @@ impl ThinConnection {
             session: Mutex::new(Arc::new(session)),
             renew: tokio::sync::Mutex::new(()),
             busy: BusyFlag::default(),
-            tx_mode: AtomicU8::new(0),
-            dirty: AtomicBool::new(false),
+            tx: Mutex::new(TxState::default()),
             session_sql: Mutex::new(Vec::new()),
             closed: AtomicBool::new(false),
             renewals: std::sync::atomic::AtomicU32::new(0),
@@ -308,8 +306,22 @@ impl ThinConnection {
         Ok(())
     }
 
+    fn tx(&self) -> TxState {
+        self.tx
+            .lock()
+            .map(|t| *t)
+            .unwrap_or_else(|p| *p.into_inner())
+    }
+
+    fn update_tx(&self, f: impl FnOnce(&mut TxState)) {
+        match self.tx.lock() {
+            Ok(mut tx) => f(&mut tx),
+            Err(p) => f(&mut p.into_inner()),
+        }
+    }
+
     fn auto(&self) -> bool {
-        self.tx_mode.load(Ordering::Acquire) == 0
+        self.tx().is_auto()
     }
 
     /// How many times the session was renewed because of the server cursor
@@ -339,7 +351,7 @@ impl ThinConnection {
         if s.cursors() + cost + CURSOR_RESERVE <= s.cursor_limit {
             return Ok(s);
         }
-        if !self.auto() && self.dirty.load(Ordering::Acquire) {
+        if !self.auto() && self.tx().is_open() {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 format!(
@@ -390,7 +402,7 @@ impl ThinConnection {
                 self.open_native(&session, &sql, opts, guard).await
             };
             if outcome.is_ok() && !self.auto() && sql::has_for_update(&sql) {
-                self.dirty.store(true, Ordering::Release);
+                self.update_tx(TxState::begun);
             }
             return outcome;
         }
@@ -430,14 +442,14 @@ impl ThinConnection {
         };
         match kind {
             StmtKind::Ddl | StmtKind::PlsqlDdl | StmtKind::Commit | StmtKind::Rollback => {
-                self.dirty.store(false, Ordering::Release);
+                self.update_tx(TxState::ended);
             }
             StmtKind::AlterSession => {
                 if let Ok(mut v) = self.session_sql.lock() {
                     v.push(sql.clone());
                 }
             }
-            _ if !self.auto() => self.dirty.store(true, Ordering::Release),
+            _ if !self.auto() => self.update_tx(TxState::begun),
             _ => {}
         }
         Ok(Outcome::Affected(if kind == StmtKind::Dml { n } else { 0 }))
@@ -667,21 +679,16 @@ impl Connection for ThinConnection {
     }
 
     async fn tx_mode(&self) -> TxMode {
-        if self.auto() {
-            TxMode::Auto
-        } else {
-            TxMode::Manual
-        }
+        self.tx().mode()
     }
 
     async fn set_tx_mode(&self, mode: TxMode) -> Result<()> {
         self.ensure_open()?;
-        if mode == TxMode::Auto && !self.auto() && self.dirty.load(Ordering::Acquire) {
+        if self.tx().switch_commits(mode) {
             // Like JDBC: switching to auto-commit commits pending work.
             self.commit().await?;
         }
-        self.tx_mode
-            .store(if mode == TxMode::Auto { 0 } else { 1 }, Ordering::Release);
+        self.update_tx(|tx| tx.set_mode(mode));
         Ok(())
     }
 
@@ -689,7 +696,7 @@ impl Connection for ThinConnection {
         self.ensure_open()?;
         let s = self.current();
         s.call(s.conn.commit()).await?;
-        self.dirty.store(false, Ordering::Release);
+        self.update_tx(TxState::ended);
         Ok(())
     }
 
@@ -697,7 +704,7 @@ impl Connection for ThinConnection {
         self.ensure_open()?;
         let s = self.current();
         s.call(s.conn.rollback()).await?;
-        self.dirty.store(false, Ordering::Release);
+        self.update_tx(TxState::ended);
         Ok(())
     }
 
