@@ -411,7 +411,7 @@ impl ThinConnection {
         } else {
             let sql = substitute(&sql, params)?;
             session.check_request(&sql)?;
-            let n = if matches!(kind, StmtKind::Plsql | StmtKind::PlsqlDdl) {
+            let n = if matches!(kind, StmtKind::Plsql | StmtKind::PlsqlDdl | StmtKind::Call) {
                 session
                     .call(session.conn.execute_plsql(&sql, &[]))
                     .await?
@@ -635,7 +635,7 @@ impl Connection for ThinConnection {
         self.ensure_open()?;
         self.busy.check()?;
         let kind = sql::classify(sql);
-        let text = sql::normalize(sql, kind);
+        let text = sql::normalize(sql, kind).to_owned();
         if text.is_empty() {
             return Err(Error::query("empty statement"));
         }
