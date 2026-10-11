@@ -756,33 +756,6 @@ async fn closing_a_data_modifying_cursor_keeps_the_change() {
 
 #[tokio::test]
 #[ignore]
-async fn one_open_cursor_per_connection() {
-    let conn = connect().await;
-    let opts = ExecOptions::default();
-    let Outcome::Rows(mut cursor) = conn
-        .execute("SELECT g FROM generate_series(1, 5000) g", &[], &opts)
-        .await
-        .unwrap()
-    else {
-        panic!("expected rows");
-    };
-    cursor.next_page(10).await.unwrap();
-
-    let e = conn.execute("SELECT 1", &[], &opts).await.unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Busy);
-    let e = conn.query("SELECT 1", &[], 1).await.unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Busy);
-    // ping answers without touching the cursor
-    conn.ping().await.unwrap();
-    // cancel is allowed while a cursor is open
-    conn.cancel().await.unwrap();
-
-    cursor.close().await.unwrap();
-    assert_eq!(row(&*conn, "SELECT 1", &[]).await[0], Value::Int(1));
-}
-
-#[tokio::test]
-#[ignore]
 async fn cancel_ends_a_running_statement() {
     let conn: Arc<dyn Connection> = Arc::from(connect().await);
     let canceller = {

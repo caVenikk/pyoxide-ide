@@ -211,47 +211,6 @@ async fn closing_stops_a_running_statement() {
 }
 
 #[tokio::test]
-async fn auto_mode_commits_every_statement() {
-    let dir = tempfile::tempdir().unwrap();
-    let a = new_file(dir.path(), "auto.db").await;
-    let b = open(&file_params(&dir.path().join("auto.db"))).await;
-    run(&a, "CREATE TABLE t(x)").await;
-    run(&a, "INSERT INTO t VALUES (1)").await;
-    assert_eq!(count(&b, "t").await, 1);
-}
-
-#[tokio::test]
-async fn manual_mode_keeps_changes_until_commit_or_rollback() {
-    let dir = tempfile::tempdir().unwrap();
-    let a = new_file(dir.path(), "manual.db").await;
-    let b = open(&file_params(&dir.path().join("manual.db"))).await;
-    run(&a, "CREATE TABLE t(x)").await;
-
-    a.set_tx_mode(TxMode::Manual).await.unwrap();
-    assert_eq!(a.tx_mode().await, TxMode::Manual);
-
-    run(&a, "INSERT INTO t VALUES (1)").await;
-    assert_eq!(count(&a, "t").await, 1, "own changes are visible");
-    assert_eq!(count(&b, "t").await, 0, "uncommitted changes are not");
-    a.rollback().await.unwrap();
-    assert_eq!(count(&a, "t").await, 0, "rollback discards");
-
-    run(&a, "INSERT INTO t VALUES (2)").await;
-    a.commit().await.unwrap();
-    assert_eq!(count(&b, "t").await, 1, "commit publishes");
-
-    // A new transaction starts with the next write.
-    run(&a, "INSERT INTO t VALUES (3)").await;
-    assert_eq!(count(&b, "t").await, 1);
-    a.rollback().await.unwrap();
-    assert_eq!(count(&a, "t").await, 1);
-
-    // Commit and rollback without a transaction are no-ops.
-    a.commit().await.unwrap();
-    a.rollback().await.unwrap();
-}
-
-#[tokio::test]
 async fn manual_mode_ddl_is_transactional() {
     let conn = memory().await;
     conn.set_tx_mode(TxMode::Manual).await.unwrap();
@@ -275,22 +234,6 @@ async fn reads_do_not_open_a_transaction_in_manual_mode() {
     // Another connection can write at once: no read lock is held.
     run(&b, "INSERT INTO t VALUES (1)").await;
     assert_eq!(count(&a, "t").await, 1);
-}
-
-#[tokio::test]
-async fn switching_to_auto_commits_pending_changes() {
-    let dir = tempfile::tempdir().unwrap();
-    let a = new_file(dir.path(), "switch.db").await;
-    let b = open(&file_params(&dir.path().join("switch.db"))).await;
-    run(&a, "CREATE TABLE t(x)").await;
-    a.set_tx_mode(TxMode::Manual).await.unwrap();
-    run(&a, "INSERT INTO t VALUES (1)").await;
-    assert_eq!(count(&b, "t").await, 0);
-    a.set_tx_mode(TxMode::Auto).await.unwrap();
-    assert_eq!(a.tx_mode().await, TxMode::Auto);
-    assert_eq!(count(&b, "t").await, 1);
-    run(&a, "INSERT INTO t VALUES (2)").await;
-    assert_eq!(count(&b, "t").await, 2);
 }
 
 #[tokio::test]

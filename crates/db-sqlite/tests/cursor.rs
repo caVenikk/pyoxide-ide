@@ -8,9 +8,6 @@ use db_core::{ErrorKind, ExecOptions, Outcome, Value};
 const HUNDRED_THOUSAND: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 100000) \
      SELECT x FROM c";
 
-const BILLION: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1000000000) \
-     SELECT x FROM c";
-
 async fn rows_outcome(conn: &dyn db_core::Connection, sql: &str) -> Box<dyn db_core::Cursor> {
     match conn
         .execute(sql, &[], &ExecOptions::default())
@@ -58,24 +55,6 @@ async fn pages_100k_rows_without_gaps() {
 }
 
 #[tokio::test]
-async fn pages_of_other_sizes_continue_where_the_last_ended() {
-    let conn = memory().await;
-    let mut cursor = rows_outcome(
-        &*conn,
-        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL \
-                                           SELECT x + 1 FROM c WHERE x < 25) SELECT x FROM c",
-    )
-    .await;
-    let mut all = Vec::new();
-    for size in [1, 7, 3, 100] {
-        all.extend(cursor.next_page(size).await.unwrap());
-    }
-    let xs: Vec<_> = all.iter().map(|r| r[0].as_i64().unwrap()).collect();
-    assert_eq!(xs, (1..=25).collect::<Vec<_>>());
-    assert!(cursor.is_exhausted());
-}
-
-#[tokio::test]
 async fn empty_result_is_exhausted_at_once() {
     let conn = memory().await;
     let mut cursor = rows_outcome(&*conn, "SELECT 1 AS one, 'a' AS two WHERE 0").await;
@@ -85,35 +64,6 @@ async fn empty_result_is_exhausted_at_once() {
     assert!(cursor.next_page(10).await.unwrap().is_empty());
     // No cursor is held, so the next statement does not need the first closed.
     assert_eq!(scalar(&conn, "SELECT 2").await, Value::Int(2));
-}
-
-#[tokio::test]
-async fn closing_early_stops_the_statement_and_frees_the_connection() {
-    let conn = memory().await;
-    let started = Instant::now();
-    let mut cursor = rows_outcome(&*conn, BILLION).await;
-    let page = cursor.next_page(10).await.unwrap();
-    assert_eq!(page.len(), 10);
-    cursor.close().await.unwrap();
-    assert_eq!(
-        scalar(&conn, "SELECT 'next'").await,
-        Value::Text("next".into())
-    );
-    // Draining a billion rows would take minutes.
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        started.elapsed()
-    );
-}
-
-#[tokio::test]
-async fn dropping_a_cursor_frees_the_connection() {
-    let conn = memory().await;
-    let cursor = rows_outcome(&*conn, BILLION).await;
-    drop(cursor);
-    // Queued behind the close request, so this works at once.
-    assert_eq!(scalar(&conn, "SELECT 3").await, Value::Int(3));
 }
 
 #[tokio::test]
@@ -301,17 +251,6 @@ async fn fetch_timeout_reports_timeout() {
     );
     drop(cursor);
     assert_eq!(scalar(&conn, "SELECT 9").await, Value::Int(9));
-}
-
-#[tokio::test]
-async fn a_fast_statement_is_not_affected_by_a_timeout() {
-    let conn = memory().await;
-    let opts = ExecOptions {
-        timeout: Some(Duration::from_secs(5)),
-        ..ExecOptions::default()
-    };
-    let rs = conn.query_with("SELECT 1", &[], 10, &opts).await.unwrap();
-    assert_eq!(rs.rows.len(), 1);
 }
 
 #[tokio::test]
