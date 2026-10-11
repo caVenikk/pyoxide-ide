@@ -35,6 +35,9 @@ Rules for AI agents and human contributors. Read this file, then
 - Before every commit: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test --workspace`.
 - Layering: `db-core` has no driver dependencies; UI crates depend on traits only.
+  Platform crates (`crates/platform/`) know no specific language and never
+  depend on product crates (`crates/python/`, ...); see ADR 0005,
+  checked by `python3 scripts/check-layers.py`.
 - Every user-visible action is a command in the command registry (UI, CLI and
   agent control channel call the same functions).
 - Integration tests that need external services are `#[ignore]` and documented.

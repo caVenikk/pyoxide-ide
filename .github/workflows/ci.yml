@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/progress.py --check
+      - run: python3 scripts/check-layers.py
 
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.

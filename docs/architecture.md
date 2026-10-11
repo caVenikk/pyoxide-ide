@@ -23,6 +23,11 @@
   diagnostics, `db.*` commands.
 - `db-cli`: `pyoxide-db`, a thin front-end over `db-service`.
 
+## Platform and products
+One repository, one Cargo workspace: a language-agnostic platform layer and
+one product layer per language, composed at compile time into one binary per
+product (ADR 0005). Pyoxide is the Python product.
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (toolkit chosen by ADR) -> `app`. Decisions are
