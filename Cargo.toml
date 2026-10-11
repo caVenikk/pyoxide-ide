@@ -8,6 +8,7 @@ members = [
     "crates/db-postgres",
     "crates/db-sqlite",
     "crates/db-service",
+    "crates/db-testkit",
     "crates/db-cli",
     "crates/secrets",
     "crates/settings-import",
@@ -36,5 +37,6 @@ db-oracle-odpi = { path = "crates/db-oracle-odpi" }
 db-postgres = { path = "crates/db-postgres" }
 db-sqlite = { path = "crates/db-sqlite" }
 db-service = { path = "crates/db-service" }
+db-testkit = { path = "crates/db-testkit" }
 secrets = { path = "crates/secrets" }
 settings-import = { path = "crates/settings-import" }

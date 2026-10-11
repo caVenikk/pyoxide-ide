@@ -19,5 +19,6 @@ tokio-postgres = "0.7"
 tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
+db-testkit.workspace = true
 rcgen = "0.14"
 tokio = { workspace = true, features = ["test-util"] }
