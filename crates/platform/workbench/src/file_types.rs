@@ -23,6 +23,17 @@ pub struct FileType {
     /// A line ending with one of these characters is followed by one more
     /// indentation level.
     pub indent_after: &'static [char],
+    /// A line starting with one of these words is followed by one level
+    /// less of indentation.
+    pub dedent_after: &'static [&'static str],
+    /// Line comment prefix with its trailing space (`"# "`).
+    pub line_comment: Option<&'static str>,
+    /// Quotes closed automatically when typed.
+    pub quotes: &'static [char],
+    /// Three quotes open a triple-quoted string.
+    pub triple_quotes: bool,
+    /// Letters allowed as a string prefix right before a quote.
+    pub string_prefixes: &'static [char],
     pub highlighter: Option<HighlighterFactory>,
 }
 
@@ -47,8 +58,19 @@ impl FileType {
             file_names: &[],
             icon,
             indent_after: &[],
+            dedent_after: &[],
+            line_comment: None,
+            quotes: &[],
+            triple_quotes: false,
+            string_prefixes: &[],
             highlighter: None,
         }
+    }
+
+    /// The same type with a line comment prefix.
+    pub const fn with_comment(mut self, prefix: &'static str) -> Self {
+        self.line_comment = Some(prefix);
+        self
     }
 
     pub fn matches(&self, path: &Path) -> bool {
@@ -69,6 +91,11 @@ impl FileType {
     pub fn editor_config(&self) -> EditorConfig {
         EditorConfig {
             indent_after: self.indent_after.to_vec(),
+            dedent_after: self.dedent_after.iter().map(|w| w.to_string()).collect(),
+            line_comment: self.line_comment.map(str::to_string),
+            quotes: self.quotes.to_vec(),
+            triple_quotes: self.triple_quotes,
+            string_prefixes: self.string_prefixes.to_vec(),
             ..EditorConfig::default()
         }
     }
@@ -79,8 +106,8 @@ pub fn platform_types() -> Vec<FileType> {
     vec![
         FileType::plain("Text", &["txt", "text", "log"], IconName::FILE_TEXT),
         FileType::plain("JSON", &["json", "jsonc"], IconName("fileTypes/json")),
-        FileType::plain("TOML", &["toml"], IconName("fileTypes/toml")),
-        FileType::plain("YAML", &["yaml", "yml"], IconName("fileTypes/yaml")),
+        FileType::plain("TOML", &["toml"], IconName("fileTypes/toml")).with_comment("# "),
+        FileType::plain("YAML", &["yaml", "yml"], IconName("fileTypes/yaml")).with_comment("# "),
         FileType::plain(
             "Markdown",
             &["md", "markdown"],
@@ -94,19 +121,22 @@ pub fn platform_types() -> Vec<FileType> {
             "JavaScript",
             &["js", "mjs", "cjs", "ts"],
             IconName("fileTypes/javaScript"),
-        ),
+        )
+        .with_comment("// "),
         FileType::plain(
             "Shell Script",
             &["sh", "bash", "zsh"],
             IconName("fileTypes/shell"),
-        ),
+        )
+        .with_comment("# "),
         FileType::plain("CSV", &["csv", "tsv"], IconName("fileTypes/csv")),
-        FileType::plain("SQL", &["sql"], IconName("fileTypes/sql")),
+        FileType::plain("SQL", &["sql"], IconName("fileTypes/sql")).with_comment("-- "),
         FileType::plain(
             "Config",
             &["ini", "cfg", "conf", "env", "properties"],
             IconName("fileTypes/config"),
-        ),
+        )
+        .with_comment("# "),
         FileType::plain(
             "Image",
             &["png", "jpg", "jpeg", "gif", "ico", "webp"],
@@ -120,10 +150,12 @@ pub fn platform_types() -> Vec<FileType> {
         FileType {
             file_names: &["Dockerfile", "Containerfile"],
             ..FileType::plain("Dockerfile", &["dockerfile"], IconName("fileTypes/docker"))
+                .with_comment("# ")
         },
         FileType {
             file_names: &[".gitignore", ".dockerignore"],
             ..FileType::plain("Ignore File", &[], IconName("fileTypes/gitignore"))
+                .with_comment("# ")
         },
     ]
 }

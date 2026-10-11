@@ -154,6 +154,8 @@ impl IntoElement for EditorElement {
 /// What prepaint computed for paint.
 pub(crate) struct Prepaint {
     hitbox: Hitbox,
+    /// The text area without the gutter and the scrollbar (I-beam cursor).
+    text_hitbox: Hitbox,
     layout: LayoutInfo,
     gutter_width: Pixels,
     numbers: Vec<(ShapedLine, gpui::Point<Pixels>)>,
@@ -406,7 +408,7 @@ impl Element for EditorElement {
     ) -> Prepaint {
         let theme = cx.theme();
         let m = metrics(theme, window);
-        let colors = Colors {
+        let mut colors = Colors {
             background: theme.color(UiRole::EditorBackground),
             gutter: theme.color(UiRole::Gutter),
             current_line: theme.color(UiRole::CurrentLine),
@@ -415,6 +417,7 @@ impl Element for EditorElement {
             scrollbar: theme.color(UiRole::Scrollbar),
             scrollbar_hover: theme.color(UiRole::ScrollbarHover),
         };
+        let input_color = theme.color(UiRole::Input);
         let number_color = theme.color(UiRole::LineNumber);
         let number_active = theme.color(UiRole::LineNumberActive);
         let text_color = theme.color(UiRole::EditorText);
@@ -424,13 +427,24 @@ impl Element for EditorElement {
 
         // Gutter: line numbers right-aligned in a column wide enough for the
         // largest number.
-        let (len_lines, tab_size) = {
+        let (len_lines, tab_size, single_line) = {
             let e = self.editor.read(cx);
-            (e.buffer.len_lines(), e.config().tab_size)
+            (e.buffer.len_lines(), e.config().tab_size, e.single_line)
         };
+        if single_line {
+            colors.background = input_color;
+            colors.gutter = input_color;
+        }
         let digits = len_lines.to_string().len().max(2);
-        let gutter_width = px(GUTTER_LEFT + GUTTER_RIGHT) + m.number_width * digits as f32;
-        let text_x = bounds.left() + gutter_width + px(TEXT_LEFT);
+        let (gutter_width, text_left) = if single_line {
+            (px(0.0), px(0.0))
+        } else {
+            (
+                px(GUTTER_LEFT + GUTTER_RIGHT) + m.number_width * digits as f32,
+                px(TEXT_LEFT),
+            )
+        };
+        let text_x = bounds.left() + gutter_width + text_left;
         let text_width = (bounds.right() - text_x).max(px(0.0));
         let viewport_lines = (bounds.size.height / lh).floor().max(1.0) as usize;
 
@@ -455,6 +469,12 @@ impl Element for EditorElement {
                 } else if x + margin > e.scroll.x + text_width {
                     e.scroll.x = x + margin - text_width;
                 }
+            }
+            if e.center_caret {
+                // Go to Line: the caret line in the middle of the view.
+                e.center_caret = false;
+                let line = e.buffer.char_to_line(e.selections.primary().head);
+                e.scroll.y = lh * line as f32 - (bounds.size.height - lh) / 2.0;
             }
             e.scroll.y = e.scroll.y.clamp(px(0.0), max_y);
             e.scroll.x = e.scroll.x.max(px(0.0));
@@ -571,7 +591,7 @@ impl Element for EditorElement {
             }
         }
         // The caret line is highlighted when nothing is selected.
-        let current_lines = if editor.selections.iter().all(|s| s.is_empty()) {
+        let current_lines = if !single_line && editor.selections.iter().all(|s| s.is_empty()) {
             caret_lines
                 .iter()
                 .filter(|l| visible.contains(l))
@@ -585,6 +605,7 @@ impl Element for EditorElement {
         let numbers_right = bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32;
         let numbers = visible
             .clone()
+            .filter(|_| !single_line)
             .map(|line| {
                 let label = SharedString::from((line + 1).to_string());
                 let color = if caret_lines.contains(&line) {
@@ -611,7 +632,7 @@ impl Element for EditorElement {
         // Vertical scrollbar when the text is taller than the view; the view
         // can scroll until the last line is at the top.
         let content = lh * (len_lines.saturating_sub(1)) as f32 + bounds.size.height;
-        let scrollbar = (len_lines > viewport_lines).then(|| {
+        let scrollbar = (!single_line && len_lines > viewport_lines).then(|| {
             let track = Bounds::new(
                 point(bounds.right() - scrollbar_width, bounds.top()),
                 size(scrollbar_width, bounds.size.height),
@@ -634,6 +655,14 @@ impl Element for EditorElement {
         });
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let text_right = scrollbar.map_or(bounds.right(), |s| s.track.left());
+        let text_hitbox = window.insert_hitbox(
+            Bounds::from_corners(
+                point(bounds.left() + gutter_width, bounds.top()),
+                point(text_right, bounds.bottom()),
+            ),
+            HitboxBehavior::Normal,
+        );
         let layout = LayoutInfo {
             bounds,
             text_x,
@@ -648,6 +677,7 @@ impl Element for EditorElement {
         self.editor.update(cx, |e, _| e.layout = Some(stored));
         Prepaint {
             hitbox,
+            text_hitbox,
             layout,
             gutter_width,
             numbers,
@@ -680,7 +710,9 @@ impl Element for EditorElement {
             point(bounds.left() + p.gutter_width, bounds.top()),
             bounds.bottom_right(),
         );
-        window.set_cursor_style(CursorStyle::IBeam, &p.hitbox);
+        // Arrow over the gutter and the scrollbar, I-beam over the text.
+        window.set_cursor_style(CursorStyle::Arrow, &p.hitbox);
+        window.set_cursor_style(CursorStyle::IBeam, &p.text_hitbox);
 
         window.paint_quad(fill(bounds, p.colors.background));
         window.paint_quad(fill(

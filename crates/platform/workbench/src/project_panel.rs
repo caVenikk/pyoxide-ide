@@ -28,6 +28,8 @@ ui::ui_commands! {
     OpenSelected => "project.tree.open", "Open",
         "Opens the selected file, or expands or collapses the selected folder.";
     CollapseAll => "project.tree.collapse-all", "Collapse All", "Collapses every folder.";
+    ExpandAll => "project.tree.expand-all", "Expand All",
+        "Expands the selected folder and the folders below it that are listed.";
     Reveal { path: String } => "project.tree.reveal", "Select in Project",
         "Expands the folders above a path and selects it.", r#"{"path": "src/app.py"}"#;
 }
@@ -292,6 +294,31 @@ impl ProjectPanel {
         }
     }
 
+    fn expand_all(&mut self, _: &ExpandAll, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(tree) = &self.tree else { return };
+        let start = self
+            .selected
+            .filter(|&s| tree.node(s).entry.is_dir())
+            .unwrap_or(FileTree::ROOT);
+        // Folders that are listed already, below the start; excluded ones
+        // stay closed.
+        let mut stack = vec![start];
+        let mut to_expand = Vec::new();
+        while let Some(id) = stack.pop() {
+            let node = tree.node(id);
+            if !node.entry.is_dir() || (node.entry.excluded && id != start) {
+                continue;
+            }
+            to_expand.push(id);
+            if let Some(children) = &node.children {
+                stack.extend(children.iter().copied());
+            }
+        }
+        for id in to_expand {
+            self.expand(id, cx);
+        }
+    }
+
     fn reveal_action(&mut self, a: &Reveal, _: &mut Window, cx: &mut Context<Self>) {
         let Some(project) = &self.project else { return };
         let path = Path::new(&a.path);
@@ -453,6 +480,7 @@ panel_actions! {
     CollapseOrParent => collapse_or_parent,
     OpenSelected => open_selected,
     CollapseAll => collapse_all,
+    ExpandAll => expand_all,
     Reveal => reveal_action,
 }
 

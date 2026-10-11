@@ -11,6 +11,7 @@ pub mod chrome;
 pub mod commands;
 pub mod env;
 pub mod file_types;
+pub mod keymap;
 pub mod project_panel;
 mod shot;
 pub mod workbench;

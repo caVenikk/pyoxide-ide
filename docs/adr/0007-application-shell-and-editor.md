@@ -125,9 +125,31 @@ same handler:
 
 Keymaps are our own TOML files that bind keystrokes (GPUI syntax,
 `cmd-shift-z`) to command ids with optional arguments, per key context
-(`Editor`, `ProjectTree`, `Workbench`). Two default keymaps ship, macOS and
-Windows/Linux, following the reference IDE's default keymaps (keystrokes
-taken from the open-source IntelliJ Platform keymap files, see NOTICE).
+(`Editor`, `ProjectTree`, `GoToLine > Editor`, or global). Two default
+keymaps ship, macOS and Windows/Linux, following the reference IDE's
+default keymaps (keystrokes taken from the open-source IntelliJ Platform
+keymap files, see NOTICE). A test presses every binding of both keymaps as
+a real keystroke in a headless window and checks that it resolves to its
+command in its context and has the command's effect; a binding without
+such a check fails the test.
+
+Language-specific editing is data of the product's file type, not code in
+the editor: the block opener (`:`), block-ending words (`return`, ...),
+the line comment prefix (`# `), paired quotes, triple quotes and string
+prefixes. Extend Selection asks the file type's highlighter for the syntax
+nodes around the selection, so a language with a tree-sitter grammar gets
+syntax-aware selection without more code.
+
+### Build and run
+The IDE runs with `cargo run --release -p pyoxide-ide [folder or files]`;
+measurements and manual checks use release builds. Debug builds compile
+the dependencies (GPUI, tree-sitter, ropey, ...) with `opt-level = 2`
+(`[profile.dev.package."*"]` in the workspace manifest): GPUI's layout and
+text shaping and the parser run far slower without optimization, and a
+debug build should stay responsive enough for manual checks, while the
+workspace crates keep fast incremental builds and full debug information.
+Headless tests run faster too. The cost is a longer first build of the
+dependencies.
 
 ### Look
 The shell reproduces the reference IDE's current New UI ("Islands") layout
@@ -141,6 +163,13 @@ icons are the New UI icons of the IntelliJ Platform Community repository
 - Seven new crates; GPUI adds about 350 crates to the build graph of the
   workspace, and Linux CI needs the X11, Wayland, xkbcommon and fontconfig
   development packages.
+- On Linux `libc` is pinned to 0.2.189 (in the `ui` crate): GPUI 0.2.2
+  depends on `xattr` 0.2.3, which uses `libc::ENOATTR`, removed in libc
+  0.2.190. The pin goes away with a GPUI release that no longer pulls in
+  that `xattr`.
+- On macOS the main toolbar sits in a transparent title bar: dragging the
+  toolbar moves the window and a double click zooms it (checked by hand;
+  the test platform has no window server).
 - Every new UI feature starts with its command declaration; widgets hold no
   logic beyond calling commands.
 - `editor` and `workbench` tests run headless in `TestAppContext` (no

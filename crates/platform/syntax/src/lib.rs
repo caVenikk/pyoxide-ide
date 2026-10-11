@@ -109,6 +109,23 @@ pub fn parse(
     parser.parse_with_options(&mut input, old, Some(options))
 }
 
+/// Byte ranges of the nodes of `tree` that contain `range`, innermost
+/// first, without repeats (a parent with the same extent as its child).
+pub fn enclosing_nodes(tree: &Tree, range: Range<usize>) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut node = tree
+        .root_node()
+        .descendant_for_byte_range(range.start, range.end);
+    while let Some(n) = node {
+        let r = n.byte_range();
+        if r.start <= range.start && range.end <= r.end && out.last() != Some(&r) {
+            out.push(r);
+        }
+        node = n.parent();
+    }
+    out
+}
+
 /// The tree-sitter form of an applied edit.
 pub fn input_edit(e: &AppliedEdit) -> InputEdit {
     let point = |(row, column): (usize, usize)| Point { row, column };

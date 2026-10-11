@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
-    WindowBounds, WindowHandle, WindowOptions, point, px, size,
+    App, AppContext as _, Application, Bounds, Menu, MenuItem, TitlebarOptions, WindowBounds,
+    WindowHandle, WindowOptions, point, px, size,
 };
 use ui::command::CommandError;
 use ui::icons::{IconName, IconSvg};
@@ -54,6 +54,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::init(cx, env::theme_kind());
     ui::icons::register(cx, product.icons);
     ui::command::register(cx, commands::COMMANDS);
+    ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
     editor::init(cx);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
@@ -110,13 +111,9 @@ pub fn init(cx: &mut App, product: &Product) {
         Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).text().into())),
     );
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.bind_keys([
-        KeyBinding::new("secondary-q", Quit, None),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-1", ToggleProject, None),
-        #[cfg(not(target_os = "macos"))]
-        KeyBinding::new("alt-1", ToggleProject, None),
-    ]);
+    for error in crate::keymap::bind(cx, &crate::keymap::Keymap::platform_default()) {
+        eprintln!("keymap: {error}");
+    }
     cx.set_menus(vec![Menu {
         name: product.name.into(),
         items: vec![

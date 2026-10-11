@@ -66,3 +66,10 @@ ui = { path = "crates/platform/ui" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
 py-syntax = { path = "crates/python/py-syntax" }
+
+# Dependencies (GPUI, tree-sitter, ropey, ...) are optimized in debug builds
+# as well: a debug build of the IDE stays responsive enough to use, while
+# the workspace crates keep fast incremental builds and full debug info
+# (ADR 0007). Release builds are unaffected.
+[profile.dev.package."*"]
+opt-level = 2

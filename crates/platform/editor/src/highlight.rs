@@ -49,6 +49,12 @@ pub trait Highlighter: 'static {
     fn is_current(&self) -> bool {
         true
     }
+
+    /// Char ranges of the syntax nodes that contain `range`, innermost
+    /// first (for Extend Selection); empty without a syntax tree.
+    fn enclosing_ranges(&self, _buffer: &Buffer, _range: Range<usize>) -> Vec<Range<usize>> {
+        Vec::new()
+    }
 }
 
 /// Highlighting with a tree-sitter grammar of the `syntax` crate.
@@ -177,5 +183,17 @@ impl Highlighter for SyntaxHighlighter {
 
     fn is_current(&self) -> bool {
         !self.dirty && self.running.is_none() && self.tree.is_some()
+    }
+
+    fn enclosing_ranges(&self, buffer: &Buffer, range: Range<usize>) -> Vec<Range<usize>> {
+        let Some(tree) = &self.tree else {
+            return Vec::new();
+        };
+        let bytes = buffer.char_to_byte(range.start)..buffer.char_to_byte(range.end);
+        let len = buffer.len_bytes();
+        syntax::enclosing_nodes(tree, bytes)
+            .into_iter()
+            .map(|r| buffer.byte_to_char(r.start.min(len))..buffer.byte_to_char(r.end.min(len)))
+            .collect()
     }
 }

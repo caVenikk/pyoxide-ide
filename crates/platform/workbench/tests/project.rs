@@ -270,3 +270,114 @@ fn tree_keyboard_commands(cx: &mut TestAppContext) {
         json!(true)
     );
 }
+
+#[gpui::test]
+fn toolbar_shows_the_active_file_path(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": root.display().to_string()}),
+    );
+    assert_eq!(state(cx, window)["title_path"], json!(null));
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "src/app.py"}),
+    );
+    let full = root.join("src").join("app.py");
+    let relative = Path::new("src").join("app.py");
+    let expected = format!("{} [{}]", relative.display(), full.display());
+    assert_eq!(state(cx, window)["title_path"], json!(expected));
+    // It follows the active tab.
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "README.md"}),
+    );
+    let expected = format!("README.md [{}]", root.join("README.md").display());
+    assert_eq!(state(cx, window)["title_path"], json!(expected));
+
+    // Centred in the toolbar right of the space for the window buttons.
+    let cx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    let toolbar = cx.debug_bounds("toolbar").unwrap();
+    let widget = cx.debug_bounds("file-path-widget").unwrap();
+    let inset = if cfg!(target_os = "macos") {
+        workbench::chrome::TRAFFIC_LIGHTS_INSET
+    } else {
+        8.0
+    };
+    let expected_centre = (f32::from(toolbar.left()) + inset + f32::from(toolbar.right())) / 2.0;
+    let centre = f32::from(widget.center().x);
+    assert!(
+        (centre - expected_centre).abs() < 1.0,
+        "centre {centre}, expected {expected_centre}"
+    );
+}
+
+#[gpui::test]
+fn dragging_the_splitter_resizes_the_project_tool_window(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let width = |cx: &mut TestAppContext| {
+        state(cx, window)["tool_windows"]["project"]["width"]
+            .as_f64()
+            .unwrap() as f32
+    };
+    let before = width(cx);
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    let splitter = vcx.debug_bounds("project-splitter").unwrap();
+    let from = splitter.center();
+    let to = gpui::point(from.x + gpui::px(50.0), from.y);
+    vcx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
+    vcx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+    vcx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    assert_eq!(width(cx), before + 50.0);
+    // It does not get narrower than its minimum.
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    let from = gpui::point(from.x + gpui::px(50.0), from.y);
+    let to = gpui::point(gpui::px(0.0), from.y);
+    vcx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
+    vcx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+    vcx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    assert_eq!(width(cx), 120.0);
+}
+
+#[gpui::test]
+fn go_to_line_field_closes_when_it_loses_the_focus(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path().display().to_string()}),
+    );
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "src/app.py"}),
+    );
+    // Focus events reach listeners only in the active window (test windows
+    // start inactive).
+    cx.update_window(window.into(), |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+    invoke(cx, window, "workbench.go-to-line", json!(null));
+    assert_eq!(state(cx, window)["go_to_line"], json!("1:1"));
+    // Text that is not a line number keeps the field open.
+    cx.simulate_input(window.into(), "x");
+    invoke(cx, window, "go-to-line.confirm", json!(null));
+    assert_eq!(state(cx, window)["go_to_line"], json!("x"));
+    invoke(cx, window, "workbench.focus-editor", json!(null));
+    assert_eq!(state(cx, window)["go_to_line"], json!(null));
+}

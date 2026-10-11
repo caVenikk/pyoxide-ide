@@ -97,6 +97,27 @@ ui::ui_commands! {
     Copy => "editor.copy", "Copy", "Copies the selection, or the caret line when nothing is selected.";
     Cut => "editor.cut", "Cut", "Cuts the selection, or the caret line when nothing is selected.";
     Paste => "editor.paste", "Paste", "Pastes the clipboard at the carets.";
+    ShrinkSelection => "editor.shrink-selection", "Shrink Selection",
+        "Goes back to the selection before the last Extend Selection.";
+    Escape => "editor.escape", "Escape", "Drops the selection and extra carets.";
+    DeleteToLineStart => "editor.delete-to-line-start", "Delete to Line Start",
+        "Deletes from the start of the line to the caret.";
+    DeleteToLineEnd => "editor.delete-to-line-end", "Delete to Line End",
+        "Deletes from the caret to the end of the line.";
+    MoveLineUp => "editor.move-line-up", "Move Line Up",
+        "Moves the caret line or the selected lines up by one line.";
+    MoveLineDown => "editor.move-line-down", "Move Line Down",
+        "Moves the caret line or the selected lines down by one line.";
+    MoveStatementUp => "editor.move-statement-up", "Move Statement Up",
+        "Moves the statement at the caret (with its indented block) above the previous one.";
+    MoveStatementDown => "editor.move-statement-down", "Move Statement Down",
+        "Moves the statement at the caret (with its indented block) below the next one.";
+    JoinLines => "editor.join-lines", "Join Lines",
+        "Joins the next line to the caret line, or the selected lines.";
+    ToggleComment => "editor.toggle-comment", "Comment with Line Comment",
+        "Comments or uncomments the caret line or the selected lines.";
+    GoToLine { line: usize, column: Option<usize> } => "editor.go-to-line", "Go to Line:Column",
+        "Moves the caret to a one-based line and optional column.", r#"{"line": 10, "column": 1}"#;
     ScrollToLine { line: usize } => "editor.scroll-to", "Scroll to Line",
         "Scrolls so that a zero-based line is at the top of the view.", r#"{"line": 100}"#;
 }

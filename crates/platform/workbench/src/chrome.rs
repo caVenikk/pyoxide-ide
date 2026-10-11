@@ -86,6 +86,34 @@ pub fn project_widget(name: Option<&str>, cx: &App) -> Stateful<Div> {
         .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
 }
 
+/// The active file in the middle of the main toolbar: file type icon, the
+/// path relative to the project with the full path in brackets, chevron.
+/// The text is cut short with an ellipsis when the widget is narrowed.
+pub fn file_path_widget(icon: IconName, text: String, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    toolbar_widget("file-path-widget", cx)
+        .debug_selector(|| "file-path-widget".into())
+        .flex_shrink()
+        .min_w(px(0.0))
+        .text_color(theme.color(UiRole::Text))
+        .child(Icon::new(icon))
+        .child(
+            div()
+                .ml(px(6.0))
+                .min_w(px(0.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(text),
+        )
+        .child(
+            div()
+                .flex_none()
+                .ml(px(4.0))
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0))),
+        )
+}
+
 /// The run configuration widget and the run buttons. Run configurations
 /// arrive with the run area; until then the widget is a placeholder.
 pub fn run_widgets(cx: &App) -> impl IntoElement {

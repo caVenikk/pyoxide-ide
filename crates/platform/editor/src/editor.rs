@@ -32,6 +32,20 @@ pub struct EditorConfig {
     /// A line ending (before trailing spaces) with one of these characters
     /// gets one more level of indentation on the next line (`:` for Python).
     pub indent_after: Vec<char>,
+    /// A line starting with one of these words ends its block: the next
+    /// line gets one level less (`return`, `pass`, ... for Python).
+    pub dedent_after: Vec<String>,
+    /// Prefix of a line comment with the space after it (`"# "`).
+    pub line_comment: Option<String>,
+    /// Bracket pairs that are closed when the opening one is typed.
+    pub brackets: Vec<(char, char)>,
+    /// Quote characters that are closed when typed.
+    pub quotes: Vec<char>,
+    /// A third quote typed after an empty pair opens a triple-quoted string.
+    pub triple_quotes: bool,
+    /// Letters that may precede an opening quote as a string prefix (`f`,
+    /// `r`, `b` ...); after other word characters a quote is not paired.
+    pub string_prefixes: Vec<char>,
 }
 
 impl Default for EditorConfig {
@@ -40,8 +54,36 @@ impl Default for EditorConfig {
             tab_size: 4,
             indent: 4,
             indent_after: Vec::new(),
+            dedent_after: Vec::new(),
+            line_comment: None,
+            brackets: vec![('(', ')'), ('[', ']'), ('{', '}')],
+            quotes: Vec::new(),
+            triple_quotes: false,
+            string_prefixes: Vec::new(),
         }
     }
+}
+
+/// Moves a position (chars, before `edits`) to where it is after them.
+/// Insertions at the position do not move it; a deletion around it pulls
+/// it to the deletion's start.
+fn map_through(edits: &[Edit], pos: usize) -> usize {
+    let mut delta: isize = 0;
+    for e in edits {
+        let (start, end) = (e.range.start, e.range.end);
+        if start >= pos {
+            continue;
+        }
+        let removed = pos.min(end) - start;
+        delta -= removed as isize;
+        delta += e.text.chars().count() as isize;
+    }
+    (pos as isize + delta).max(0) as usize
+}
+
+/// Width of the leading whitespace of `text` in chars.
+fn leading_ws(text: &str) -> usize {
+    text.chars().take_while(|c| *c == ' ' || *c == '\t').count()
 }
 
 /// What happened in an editor, for its observers (tabs, status bar,
@@ -93,6 +135,15 @@ pub struct Editor {
     /// The highlighter's background job in flight.
     highlight_task: Option<Task<()>>,
     word_stop: WordStop,
+    /// Selections before each Extend Selection, for Shrink Selection.
+    extend_stack: Vec<SelectionSet>,
+    /// The selections the last Extend or Shrink Selection produced; any
+    /// other change of the selections forgets the stack.
+    extend_last: Option<SelectionSet>,
+    /// Center the caret line on the next frame (Go to Line).
+    pub(crate) center_caret: bool,
+    /// A one-line text field (no gutter, no scrollbar).
+    pub(crate) single_line: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -134,8 +185,17 @@ impl Editor {
             blink_task: None,
             highlight_task: None,
             word_stop: WordStop::platform(),
+            extend_stack: Vec::new(),
+            extend_last: None,
+            center_caret: false,
+            single_line: false,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Makes this editor a one-line text field (dialogs, search fields).
+    pub fn set_single_line(&mut self, single_line: bool) {
+        self.single_line = single_line;
     }
 
     // ---- state ------------------------------------------------------------
@@ -646,30 +706,84 @@ impl Editor {
         self.set_selections(SelectionSet::single(Selection::new(0, len)), cx);
     }
 
-    /// Word, then line, then the whole file.
+    /// Extend Selection: the word at the caret, then the enclosing syntax
+    /// nodes (when the file type has a syntax tree), then the text of the
+    /// lines, the whole lines and the whole file; always the smallest range
+    /// that is larger than the selection.
     fn select_word(&mut self, _: &SelectWord, _: &mut Window, cx: &mut Context<Self>) {
+        if self.extend_last.as_ref() != Some(&self.selections) {
+            self.extend_stack.clear();
+        }
         let s = *self.selections.primary();
-        let word = movement::word_range(&self.buffer, s.head);
-        let line = self.buffer.char_to_line(s.start());
-        let line_range = self.buffer.line_start(line)..self.buffer.line_end(line);
-        let next = if s.range() != word
-            && word.start <= s.start()
-            && s.end() <= word.end
-            && !word.is_empty()
-        {
-            word
-        } else if s.range() != line_range
-            && line_range.start <= s.start()
-            && s.end() <= line_range.end
-        {
-            line_range
+        let range = s.range();
+        let mut candidates = vec![movement::word_range(&self.buffer, s.head)];
+        if let Some(h) = &self.highlighter {
+            candidates.extend(h.enclosing_ranges(&self.buffer, range.clone()));
+        }
+        let lines = self.selected_lines(&s);
+        let first_start = self.buffer.line_start(lines.start);
+        let last_end = self.buffer.line_end(lines.end - 1);
+        let first_text = self.buffer.line_text(lines.start);
+        let last_text = self.buffer.line_text(lines.end - 1);
+        let content_start = first_start + leading_ws(&first_text);
+        let content_end =
+            last_end - (last_text.chars().count() - last_text.trim_end().chars().count());
+        candidates.push(content_start..content_end.max(content_start));
+        candidates.push(first_start..last_end);
+        let after_last = if lines.end < self.buffer.len_lines() {
+            self.buffer.line_start(lines.end)
         } else {
-            0..self.buffer.len_chars()
+            self.buffer.len_chars()
         };
+        candidates.push(first_start..after_last);
+        candidates.push(0..self.buffer.len_chars());
+        let Some(next) = candidates
+            .into_iter()
+            .filter(|c| c.start <= range.start && range.end <= c.end && c.len() > range.len())
+            .min_by_key(|c| c.len())
+        else {
+            return;
+        };
+        self.extend_stack.push(self.selections.clone());
         self.set_selections(
             SelectionSet::single(Selection::new(next.start, next.end)),
             cx,
         );
+        self.extend_last = Some(self.selections.clone());
+    }
+
+    fn shrink_selection(&mut self, _: &ShrinkSelection, _: &mut Window, cx: &mut Context<Self>) {
+        if self.extend_last.as_ref() != Some(&self.selections) {
+            self.extend_stack.clear();
+            return;
+        }
+        if let Some(previous) = self.extend_stack.pop() {
+            self.set_selections(previous, cx);
+            self.extend_last = Some(self.selections.clone());
+        }
+    }
+
+    fn escape(&mut self, _: &Escape, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selections.len() == 1 && self.selections.primary().is_empty() {
+            cx.propagate();
+            return;
+        }
+        let head = self.selections.primary().head;
+        self.set_selections(SelectionSet::caret(head), cx);
+    }
+
+    fn go_to_line(&mut self, a: &GoToLine, _: &mut Window, cx: &mut Context<Self>) {
+        self.go_to(a.line, a.column, cx);
+    }
+
+    /// Moves the caret to a one-based line and column (both clamped) and
+    /// centers the line in the view.
+    pub fn go_to(&mut self, line: usize, column: Option<usize>, cx: &mut Context<Self>) {
+        let line = (line.max(1) - 1).min(self.buffer.len_lines() - 1);
+        let column = column.unwrap_or(1).max(1) - 1;
+        let pos = self.buffer.line_start(line) + column.min(self.buffer.line_len(line));
+        self.set_selections(SelectionSet::caret(pos), cx);
+        self.center_caret = true;
     }
 
     fn set_selection(&mut self, a: &SetSelection, _: &mut Window, cx: &mut Context<Self>) {
@@ -688,7 +802,125 @@ impl Editor {
     // ---- editing --------------------------------------------------------------
 
     fn type_text(&mut self, a: &Type, _: &mut Window, cx: &mut Context<Self>) {
-        self.insert(&a.text, cx);
+        self.type_str(&a.text, cx);
+    }
+
+    /// Typed text: a single character goes through bracket and quote
+    /// pairing, anything else is inserted as it is.
+    pub(crate) fn type_str(&mut self, text: &str, cx: &mut Context<Self>) {
+        let mut chars = text.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) if self.marked.is_none() => self.type_char(c, cx),
+            _ => self.insert(text, cx),
+        }
+    }
+
+    /// The caret is between an opening bracket or quote and its closing one.
+    fn is_empty_pair_at(&self, pos: usize) -> bool {
+        let (Some(prev), Some(next)) = (
+            pos.checked_sub(1).and_then(|p| self.buffer.char_at(p)),
+            self.buffer.char_at(pos),
+        ) else {
+            return false;
+        };
+        self.config.brackets.contains(&(prev, next))
+            || (prev == next && self.config.quotes.contains(&prev))
+    }
+
+    fn closing_bracket(&self, c: char) -> Option<char> {
+        self.config.brackets.iter().find(|b| b.0 == c).map(|b| b.1)
+    }
+
+    /// Types one character at the caret: wraps a selection in brackets or
+    /// quotes, types over a closing bracket or quote, closes an opening
+    /// one, and turns a third quote into a triple-quoted pair.
+    fn type_char(&mut self, c: char, cx: &mut Context<Self>) {
+        let is_quote = self.config.quotes.contains(&c);
+        let closing = self.closing_bracket(c).or(is_quote.then_some(c));
+        let is_closer = is_quote || self.config.brackets.iter().any(|b| b.1 == c);
+        if self.selections.len() != 1 || (closing.is_none() && !is_closer) {
+            self.insert(&c.to_string(), cx);
+            return;
+        }
+        let s = *self.selections.primary();
+        if !s.is_empty() {
+            match closing {
+                Some(close) => {
+                    let text = format!("{c}{}{close}", self.buffer.slice(s.range()));
+                    let after = Selection::new(s.anchor + 1, s.head + 1);
+                    self.edit(
+                        vec![Edit::new(s.range(), text)],
+                        EditKind::Other,
+                        CaretPlacement::Explicit(SelectionSet::single(after)),
+                        cx,
+                    );
+                }
+                None => self.insert(&c.to_string(), cx),
+            }
+            return;
+        }
+        let pos = s.head;
+        let next = self.buffer.char_at(pos);
+        let prev = pos.checked_sub(1).and_then(|p| self.buffer.char_at(p));
+        let line = self.buffer.char_to_line(pos);
+        let before = self.buffer.slice(self.buffer.line_start(line)..pos);
+        // A third quote right after an empty pair: a triple-quoted string.
+        if is_quote && self.config.triple_quotes {
+            let tail: Vec<char> = before.chars().rev().take(3).collect();
+            if tail.len() >= 2 && tail[0] == c && tail[1] == c && tail.get(2) != Some(&c) {
+                let text: String = std::iter::repeat_n(c, 4).collect();
+                let caret = pos + 1;
+                self.edit(
+                    vec![Edit::insert(pos, text)],
+                    EditKind::Typing,
+                    CaretPlacement::Explicit(SelectionSet::caret(caret)),
+                    cx,
+                );
+                return;
+            }
+        }
+        // Inside a string of this quote: an odd count of it before the caret.
+        let inside = is_quote && before.chars().filter(|q| *q == c).count() % 2 == 1;
+        // Type over the closing bracket or quote.
+        if is_closer && next == Some(c) && (!is_quote || inside) {
+            self.buffer.break_undo_group();
+            self.set_selections(SelectionSet::caret(pos + 1), cx);
+            return;
+        }
+        let Some(close) = closing else {
+            self.insert(&c.to_string(), cx);
+            return;
+        };
+        let next_allows = next.is_none_or(|n| {
+            n.is_whitespace()
+                || self.config.brackets.iter().any(|b| b.1 == n)
+                || matches!(n, ',' | ';' | ':')
+        });
+        let quote_allowed = !is_quote || {
+            // Not inside a string already and not right after a word, unless
+            // the word is a string prefix.
+            let word: String = before
+                .chars()
+                .rev()
+                .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+                .collect();
+            let prefix_ok = word.is_empty()
+                || (word.chars().count() <= 2
+                    && word
+                        .chars()
+                        .all(|ch| self.config.string_prefixes.contains(&ch)));
+            !inside && prefix_ok && prev != Some(c)
+        };
+        if next_allows && quote_allowed {
+            self.edit(
+                vec![Edit::insert(pos, format!("{c}{close}"))],
+                EditKind::Typing,
+                CaretPlacement::Explicit(SelectionSet::caret(pos + 1)),
+                cx,
+            );
+        } else {
+            self.insert(&c.to_string(), cx);
+        }
     }
 
     /// Leading whitespace of the line of `pos`, up to `pos`.
@@ -703,21 +935,59 @@ impl Editor {
             .collect()
     }
 
-    fn newline_text(&self, pos: usize) -> String {
-        let mut text = String::from("\n");
-        text.push_str(&self.indent_at(pos));
+    /// Indentation of a new line started at `pos`: the indentation of the
+    /// line, one level more after a block opener (`:` in Python) or an
+    /// unclosed bracket, one level less after a block-ending word.
+    fn new_line_indent(&self, pos: usize) -> String {
+        let mut indent = self.indent_at(pos);
         let line = self.buffer.char_to_line(pos);
         let start = self.buffer.line_start(line);
         let before: String = self.buffer.slice(start..pos);
-        if let Some(last) = before.trim_end().chars().last()
-            && self.config.indent_after.contains(&last)
-        {
-            text.push_str(&" ".repeat(self.config.indent));
+        let trimmed = before.trim();
+        let last = trimmed.chars().last();
+        let opens_block = last.is_some_and(|c| {
+            self.config.indent_after.contains(&c) || self.config.brackets.iter().any(|b| b.0 == c)
+        });
+        let first_word: String = trimmed
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if opens_block {
+            indent.push_str(&" ".repeat(self.config.indent));
+        } else if !first_word.is_empty() && self.config.dedent_after.contains(&first_word) {
+            let width = indent.chars().count();
+            let keep = width.saturating_sub(self.config.indent);
+            indent = indent.chars().take(keep).collect();
         }
-        text
+        indent
+    }
+
+    fn newline_text(&self, pos: usize) -> String {
+        format!("\n{}", self.new_line_indent(pos))
     }
 
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        // Enter between an empty bracket pair puts the closing bracket on a
+        // line of its own below the caret line.
+        if self.selections.len() == 1 && self.selections.primary().is_empty() {
+            let pos = self.selections.primary().head;
+            let prev = pos.checked_sub(1).and_then(|p| self.buffer.char_at(p));
+            let next = self.buffer.char_at(pos);
+            if let (Some(p), Some(n)) = (prev, next)
+                && self.config.brackets.contains(&(p, n))
+            {
+                let inner = self.newline_text(pos);
+                let outer = format!("\n{}", self.indent_at(pos));
+                let caret = pos + inner.chars().count();
+                self.edit(
+                    vec![Edit::insert(pos, format!("{inner}{outer}"))],
+                    EditKind::Other,
+                    CaretPlacement::Explicit(SelectionSet::caret(caret)),
+                    cx,
+                );
+                return;
+            }
+        }
         let edits = self
             .selections
             .iter()
@@ -837,6 +1107,9 @@ impl Editor {
             .map(|s| {
                 if !s.is_empty() {
                     return Edit::delete(s.range());
+                }
+                if self.is_empty_pair_at(s.head) {
+                    return Edit::delete(s.head - 1..s.head + 1);
                 }
                 let p = self.buffer.offset_to_point(s.head);
                 let line_start = s.head - p.column;
@@ -980,6 +1253,349 @@ impl Editor {
                 cx,
             );
         }
+    }
+
+    fn delete_to_line_start(
+        &mut self,
+        _: &DeleteToLineStart,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let edits = self
+            .selections
+            .iter()
+            .map(|s| {
+                if !s.is_empty() {
+                    return Edit::delete(s.range());
+                }
+                let start = self.buffer.line_start(self.buffer.char_to_line(s.head));
+                // At the line start: join with the previous line.
+                Edit::delete(if start == s.head {
+                    s.head.saturating_sub(1)..s.head
+                } else {
+                    start..s.head
+                })
+            })
+            .collect();
+        self.edit(edits, EditKind::Other, CaretPlacement::AfterEachEdit, cx);
+    }
+
+    fn delete_to_line_end(&mut self, _: &DeleteToLineEnd, _: &mut Window, cx: &mut Context<Self>) {
+        let edits = self
+            .selections
+            .iter()
+            .map(|s| {
+                if !s.is_empty() {
+                    return Edit::delete(s.range());
+                }
+                let end = self.buffer.line_end(self.buffer.char_to_line(s.head));
+                // At the line end: join with the next line.
+                Edit::delete(if end == s.head {
+                    s.head..(s.head + 1).min(self.buffer.len_chars())
+                } else {
+                    s.head..end
+                })
+            })
+            .collect();
+        self.edit(edits, EditKind::Other, CaretPlacement::AfterEachEdit, cx);
+    }
+
+    /// Lines covered by all selections.
+    fn all_selected_lines(&self) -> Range<usize> {
+        let mut lines = self.selected_lines(self.selections.primary());
+        for s in self.selections.iter() {
+            let l = self.selected_lines(s);
+            lines.start = lines.start.min(l.start);
+            lines.end = lines.end.max(l.end);
+        }
+        lines
+    }
+
+    fn line_texts(&self, lines: Range<usize>) -> Vec<String> {
+        lines
+            .map(|l| self.buffer.line_text(l).into_owned())
+            .collect()
+    }
+
+    /// Replaces whole lines `region` with `lines` and moves every
+    /// selection by `shift` chars.
+    fn replace_lines(
+        &mut self,
+        region: Range<usize>,
+        lines: Vec<String>,
+        shift: isize,
+        cx: &mut Context<Self>,
+    ) {
+        let start = self.buffer.line_start(region.start);
+        let end = self.buffer.line_end(region.end - 1);
+        let moved = |p: usize| (p as isize + shift).max(0) as usize;
+        let after = SelectionSet::from_vec(
+            self.selections
+                .iter()
+                .map(|s| Selection::new(moved(s.anchor), moved(s.head)))
+                .collect(),
+        );
+        self.edit(
+            vec![Edit::new(start..end, lines.join("\n"))],
+            EditKind::Other,
+            CaretPlacement::Explicit(after),
+            cx,
+        );
+    }
+
+    /// Swaps the lines `block` with the line above or below.
+    fn move_lines(&mut self, block: Range<usize>, up: bool, cx: &mut Context<Self>) {
+        let n = self.buffer.len_lines();
+        if (up && block.start == 0) || (!up && block.end >= n) {
+            return;
+        }
+        let mut lines = self.line_texts(block.clone());
+        if up {
+            let above = self.buffer.line_text(block.start - 1).into_owned();
+            let shift = -(above.chars().count() as isize + 1);
+            lines.push(above);
+            self.replace_lines(block.start - 1..block.end, lines, shift, cx);
+        } else {
+            let below = self.buffer.line_text(block.end).into_owned();
+            let shift = below.chars().count() as isize + 1;
+            lines.insert(0, below);
+            self.replace_lines(block.start..block.end + 1, lines, shift, cx);
+        }
+    }
+
+    fn move_line_up(&mut self, _: &MoveLineUp, _: &mut Window, cx: &mut Context<Self>) {
+        let block = self.all_selected_lines();
+        self.move_lines(block, true, cx);
+    }
+
+    fn move_line_down(&mut self, _: &MoveLineDown, _: &mut Window, cx: &mut Context<Self>) {
+        let block = self.all_selected_lines();
+        self.move_lines(block, false, cx);
+    }
+
+    /// Indentation width of a line, `None` for a blank line.
+    fn line_indent(&self, line: usize) -> Option<usize> {
+        let text = self.buffer.line_text(line);
+        let tab = self.config.tab_size;
+        if text.trim().is_empty() {
+            return None;
+        }
+        let mut width = 0;
+        for c in text.chars() {
+            match c {
+                ' ' => width += 1,
+                '\t' => width += tab - width % tab,
+                _ => break,
+            }
+        }
+        Some(width)
+    }
+
+    fn starts_with_closer(&self, line: usize) -> bool {
+        let text = self.buffer.line_text(line);
+        let first = text.trim_start().chars().next();
+        first.is_some_and(|c| self.config.brackets.iter().any(|b| b.1 == c))
+    }
+
+    /// End (exclusive) of the statement starting at `line`: the line and
+    /// the following lines indented deeper (or closing a bracket at the same
+    /// indentation), without trailing blank lines.
+    fn statement_end(&self, line: usize) -> usize {
+        let Some(indent) = self.line_indent(line) else {
+            return line + 1;
+        };
+        let mut end = line + 1;
+        for l in line + 1..self.buffer.len_lines() {
+            match self.line_indent(l) {
+                None => continue,
+                Some(i) if i > indent || (i == indent && self.starts_with_closer(l)) => end = l + 1,
+                Some(_) => break,
+            }
+        }
+        end
+    }
+
+    /// Start of the statement before `line` at the same indentation.
+    fn previous_statement(&self, line: usize, indent: usize) -> Option<usize> {
+        for l in (0..line).rev() {
+            match self.line_indent(l) {
+                None => continue,
+                Some(i) if i > indent || (i == indent && self.starts_with_closer(l)) => continue,
+                Some(i) if i == indent => return Some(l),
+                Some(_) => return None,
+            }
+        }
+        None
+    }
+
+    /// Start of the statement after the one ending at `end`.
+    fn next_statement(&self, end: usize, indent: usize) -> Option<usize> {
+        (end..self.buffer.len_lines())
+            .find_map(|l| self.line_indent(l).map(|i| (l, i)))
+            .and_then(|(l, i)| (i == indent).then_some(l))
+    }
+
+    /// Swaps the statement at the caret (with its block) with the previous
+    /// or next statement of the same indentation; blank lines between them
+    /// stay where they are. On a blank line it moves the line.
+    fn move_statement(&mut self, up: bool, cx: &mut Context<Self>) {
+        let lines = self.all_selected_lines();
+        let Some(indent) = self.line_indent(lines.start) else {
+            self.move_lines(lines, up, cx);
+            return;
+        };
+        let end = self.statement_end(lines.start).max(lines.end);
+        let block = self.line_texts(lines.start..end);
+        if up {
+            let Some(prev) = self.previous_statement(lines.start, indent) else {
+                return;
+            };
+            let prev_end = self.statement_end(prev);
+            let other = self.line_texts(prev..prev_end);
+            let gap = self.line_texts(prev_end..lines.start);
+            let shift = -(self.buffer.line_start(lines.start) as isize
+                - self.buffer.line_start(prev) as isize);
+            let mut out = block;
+            out.extend(gap);
+            out.extend(other);
+            self.replace_lines(prev..end, out, shift, cx);
+        } else {
+            let Some(next) = self.next_statement(end, indent) else {
+                return;
+            };
+            let next_end = self.statement_end(next);
+            let other = self.line_texts(next..next_end);
+            let gap = self.line_texts(end..next);
+            let moved: usize = other
+                .iter()
+                .chain(&gap)
+                .map(|l| l.chars().count() + 1)
+                .sum();
+            let mut out = other;
+            out.extend(gap);
+            out.extend(block);
+            self.replace_lines(lines.start..next_end, out, moved as isize, cx);
+        }
+    }
+
+    fn move_statement_up(&mut self, _: &MoveStatementUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_statement(true, cx);
+    }
+
+    fn move_statement_down(
+        &mut self,
+        _: &MoveStatementDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_statement(false, cx);
+    }
+
+    /// Joins the next line to the caret line, or all selected lines: the
+    /// line break and the indentation after it become one space (none
+    /// next to brackets or blank lines).
+    fn join_lines(&mut self, _: &JoinLines, _: &mut Window, cx: &mut Context<Self>) {
+        let lines = self.selected_lines(self.selections.primary());
+        let last = if lines.len() > 1 {
+            lines.end - 1
+        } else {
+            lines.start + 1
+        };
+        if last >= self.buffer.len_lines() {
+            return;
+        }
+        let mut edits = Vec::new();
+        for l in lines.start..last {
+            let text = self.buffer.line_text(l);
+            let next = self.buffer.line_text(l + 1);
+            let trimmed = text.trim_end();
+            let cut_start = self.buffer.line_start(l) + trimmed.chars().count();
+            let next_start = self.buffer.line_start(l + 1);
+            let cut_end = next_start + leading_ws(&next);
+            let opens = trimmed
+                .chars()
+                .last()
+                .is_some_and(|c| self.closing_bracket(c).is_some());
+            let closes = next
+                .trim_start()
+                .chars()
+                .next()
+                .is_some_and(|c| self.config.brackets.iter().any(|b| b.1 == c));
+            let sep =
+                if trimmed.trim_start().is_empty() || next.trim().is_empty() || opens || closes {
+                    ""
+                } else {
+                    " "
+                };
+            edits.push(Edit::new(cut_start..cut_end, sep));
+        }
+        let first = &edits[0];
+        let caret = first.range.start;
+        let caret = SelectionSet::caret(caret);
+        self.edit(edits, EditKind::Other, CaretPlacement::Explicit(caret), cx);
+    }
+
+    /// Comments the selected lines (or the caret line) with the file type's
+    /// line comment at their smallest indentation, or uncomments them when
+    /// every non-blank line is commented. Without a selection the caret
+    /// moves to the next line.
+    fn toggle_comment(&mut self, _: &ToggleComment, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(prefix) = self.config.line_comment.clone() else {
+            return;
+        };
+        let marker = prefix.trim_end().to_string();
+        let lines = self.all_selected_lines();
+        let texts: Vec<(usize, String)> = lines
+            .clone()
+            .map(|l| (l, self.buffer.line_text(l).into_owned()))
+            .collect();
+        let code: Vec<&(usize, String)> =
+            texts.iter().filter(|(_, t)| !t.trim().is_empty()).collect();
+        let commented = !code.is_empty()
+            && code
+                .iter()
+                .all(|(_, t)| t.trim_start().starts_with(&marker));
+        let mut edits = Vec::new();
+        if commented {
+            for (l, t) in &code {
+                let at = self.buffer.line_start(*l) + leading_ws(t);
+                let rest = &t.trim_start()[marker.len()..];
+                let space = usize::from(rest.starts_with(' ') && prefix.ends_with(' '));
+                edits.push(Edit::delete(at..at + marker.chars().count() + space));
+            }
+        } else {
+            let targets: Vec<&(usize, String)> = if code.is_empty() {
+                texts.iter().collect()
+            } else {
+                code
+            };
+            let indent = targets
+                .iter()
+                .map(|(_, t)| leading_ws(t))
+                .min()
+                .unwrap_or(0);
+            for (l, _) in targets {
+                edits.push(Edit::insert(self.buffer.line_start(*l) + indent, &prefix));
+            }
+        }
+        let single_caret = self.selections.len() == 1 && self.selections.primary().is_empty();
+        let after = if single_caret && lines.end < self.buffer.len_lines() {
+            // The caret goes down one line, keeping its column.
+            let column = self.caret_point().column;
+            let next_start = map_through(&edits, self.buffer.line_start(lines.end));
+            let next_len = self.buffer.line_len(lines.end);
+            SelectionSet::caret(next_start + column.min(next_len))
+        } else {
+            SelectionSet::from_vec(
+                self.selections
+                    .iter()
+                    .map(|s| {
+                        Selection::new(map_through(&edits, s.anchor), map_through(&edits, s.head))
+                    })
+                    .collect(),
+            )
+        };
+        self.edit(edits, EditKind::Other, CaretPlacement::Explicit(after), cx);
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -1266,13 +1882,28 @@ editor_actions! {
     Copy => copy,
     Cut => cut,
     Paste => paste,
+    ShrinkSelection => shrink_selection,
+    Escape => escape,
+    DeleteToLineStart => delete_to_line_start,
+    DeleteToLineEnd => delete_to_line_end,
+    MoveLineUp => move_line_up,
+    MoveLineDown => move_line_down,
+    MoveStatementUp => move_statement_up,
+    MoveStatementDown => move_statement_down,
+    JoinLines => join_lines,
+    ToggleComment => toggle_comment,
+    GoToLine => go_to_line,
     ScrollToLine => scroll_to_line,
 }
 
 impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let el = div()
-            .key_context("Editor")
+            .key_context(if self.single_line {
+                "Editor single_line"
+            } else {
+                "Editor"
+            })
             .track_focus(&self.focus)
             .size_full()
             .child(EditorElement::new(cx.entity()));

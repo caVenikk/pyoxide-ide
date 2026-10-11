@@ -6,9 +6,10 @@ use std::rc::Rc;
 
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    FontWeight, Hsla, IntoElement, PathPromptOptions, Pixels, Render, SharedString, Subscription,
-    Window, canvas, div, prelude::*, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, Entity, FocusHandle,
+    Focusable, FontWeight, Hsla, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    PathPromptOptions, Pixels, Render, SharedString, Subscription, Window, canvas, div, prelude::*,
+    px,
 };
 use project::Project;
 use serde_json::json;
@@ -34,6 +35,31 @@ const TAB_H_OFFSET: f32 = 4.0;
 const TAB_PADDING: f32 = 8.0;
 /// Opacity of the titles of tabs that are not selected.
 const INACTIVE_TAB_ALPHA: f32 = 0.75;
+/// Narrowest project tool window when resizing it.
+const MIN_PROJECT_WIDTH: f32 = 120.0;
+/// Narrowest editor area left when widening the project tool window.
+const MIN_EDITOR_WIDTH: f32 = 200.0;
+/// Room kept on each side of the file path in the middle of the toolbar
+/// for the widgets at the toolbar's ends; a longer path is cut short.
+const TOOLBAR_SIDE_ROOM: f32 = 320.0;
+/// Width of the Go to Line popup and its distance below the toolbar.
+const GO_TO_LINE_WIDTH: f32 = 320.0;
+const GO_TO_LINE_TOP: f32 = 80.0;
+
+/// `line[:column]` as typed in the Go to Line field (one-based).
+pub fn parse_line_column(text: &str) -> Option<(usize, Option<usize>)> {
+    let text = text.trim();
+    let (line, column) = match text.split_once([':', ',']) {
+        Some((l, c)) => (l.trim(), Some(c.trim())),
+        None => (text, None),
+    };
+    let line = line.parse::<usize>().ok().filter(|l| *l > 0)?;
+    let column = match column {
+        Some(c) if !c.is_empty() => Some(c.parse::<usize>().ok().filter(|c| *c > 0)?),
+        _ => None,
+    };
+    Some((line, column))
+}
 
 /// An open file.
 struct Tab {
@@ -58,6 +84,10 @@ pub struct Workbench {
     pending: usize,
     /// Last error or notice, shown in the status bar.
     message: Option<SharedString>,
+    /// The Go to Line field while it is open, and its blur subscription.
+    go_to_line: Option<(Entity<Editor>, Subscription)>,
+    /// Resizing the project tool window: mouse x and width at the start.
+    resizing: Option<(Pixels, Pixels)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -91,12 +121,40 @@ impl Workbench {
             active: None,
             pending: 0,
             message: None,
+            go_to_line: None,
+            resizing: None,
             _subscriptions: subscriptions,
         }
     }
 
     pub fn project_visible(&self) -> bool {
         self.project_visible
+    }
+
+    pub fn project_width(&self) -> Pixels {
+        self.project_width
+    }
+
+    /// The Go to Line field, while it is open.
+    pub fn go_to_line_field(&self) -> Option<&Entity<Editor>> {
+        self.go_to_line.as_ref().map(|(field, _)| field)
+    }
+
+    /// The path shown in the middle of the toolbar: relative to the project,
+    /// then the full path in brackets.
+    pub fn title_path(&self, cx: &App) -> Option<String> {
+        let path = self.active_editor()?.read(cx).path()?.clone();
+        let full = path.display().to_string();
+        let relative = self
+            .project(cx)
+            .and_then(|p| p.relative(&path))
+            .map(|r| r.display().to_string())
+            .unwrap_or_else(|| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
+        Some(format!("{relative} [{full}]"))
     }
 
     pub fn panel(&self) -> &Entity<ProjectPanel> {
@@ -139,7 +197,12 @@ impl Workbench {
                 "root": p.root().display().to_string(),
             })),
             "tree": self.panel.read(cx).state_json(),
-            "tool_windows": { "project": { "visible": self.project_visible } },
+            "tool_windows": { "project": {
+                "visible": self.project_visible,
+                "width": f32::from(self.project_width),
+            } },
+            "title_path": self.title_path(cx),
+            "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
             "tabs": self.tabs.iter().map(|t| json!({
                 "path": rel(&t.path),
                 "modified": t.editor.read(cx).is_modified(),
@@ -332,11 +395,90 @@ impl Workbench {
         cx.notify();
     }
 
+    fn hide_tool_window(
+        &mut self,
+        _: &HideToolWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.project_visible = false;
+        self.focus_editor(&FocusEditor, window, cx);
+        cx.notify();
+    }
+
+    fn locate_file(&mut self, _: &LocateFile, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .active_editor()
+            .and_then(|e| e.read(cx).path().cloned())
+        else {
+            return;
+        };
+        self.project_visible = true;
+        self.panel.update(cx, |panel, cx| panel.reveal(&path, cx));
+        window.focus(&self.panel.focus_handle(cx));
+        cx.notify();
+    }
+
     fn focus_editor(&mut self, _: &FocusEditor, window: &mut Window, cx: &mut Context<Self>) {
         match self.active_editor() {
             Some(e) => window.focus(&e.focus_handle(cx)),
             None => window.focus(&self.focus),
         }
+    }
+
+    fn show_go_to_line(&mut self, _: &ShowGoToLine, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor() else {
+            return;
+        };
+        let p = editor.read(cx).caret_point();
+        let text = format!("{}:{}", p.line + 1, p.column + 1);
+        let field = cx.new(|cx| {
+            let mut field = Editor::new(text::Buffer::new(&text), window, cx);
+            field.set_single_line(true);
+            let len = field.buffer().len_chars();
+            field.set_selections(text::SelectionSet::single(text::Selection::new(0, len)), cx);
+            field
+        });
+        let handle = field.focus_handle(cx);
+        window.focus(&handle);
+        let blur = cx.on_blur(&handle, window, |this, _, cx| {
+            this.go_to_line = None;
+            cx.notify();
+        });
+        self.go_to_line = Some((field, blur));
+        cx.notify();
+    }
+
+    fn confirm_go_to_line(
+        &mut self,
+        _: &ConfirmGoToLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(field) = self.go_to_line_field() else {
+            return;
+        };
+        // Text that is not a line number keeps the field open.
+        let Some((line, column)) = parse_line_column(&field.read(cx).text()) else {
+            return;
+        };
+        self.go_to_line = None;
+        if let Some(editor) = self.active_editor().cloned() {
+            editor.update(cx, |e, cx| e.go_to(line, column, cx));
+        }
+        self.focus_editor(&FocusEditor, window, cx);
+        cx.notify();
+    }
+
+    fn cancel_go_to_line(
+        &mut self,
+        _: &CancelGoToLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.go_to_line = None;
+        self.focus_editor(&FocusEditor, window, cx);
+        cx.notify();
     }
 
     fn set_theme(&mut self, action: &SetTheme, _: &mut Window, cx: &mut Context<Self>) {
@@ -390,8 +532,8 @@ impl Workbench {
         self.save_all(cx);
     }
 
-    fn close_tab_action(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(i) = self.active {
+    fn close_tab_action(&mut self, a: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = a.index.or(self.active) {
             self.close_tab(i, window, cx);
         }
     }
@@ -414,7 +556,7 @@ impl Workbench {
 
     // ---- drawing --------------------------------------------------------------
 
-    fn render_toolbar(&self, cx: &App) -> impl IntoElement {
+    fn render_toolbar(&self, window_width: Pixels, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let height = theme.metric(Metric::ToolbarHeight);
         let button = theme.metric(Metric::ToolbarButtonSize);
@@ -424,9 +566,31 @@ impl Workbench {
             px(8.0)
         };
         let project = self.project(cx);
+        // The active file's path, centered in the toolbar right of the
+        // window buttons.
+        let path_widget = self.title_path(cx).map(|text| {
+            let icon = self
+                .active_editor()
+                .and_then(|e| e.read(cx).path().map(|p| self.file_types.icon(p)))
+                .unwrap_or(IconName::FILE_UNKNOWN);
+            let room = window_width - left - px(2.0 * TOOLBAR_SIDE_ROOM);
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(left)
+                .right_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(room > px(80.0), |d| {
+                    d.child(chrome::file_path_widget(icon, text, cx).max_w(room))
+                })
+        });
         div()
             .id("toolbar")
             .debug_selector(|| "toolbar".into())
+            .relative()
             .flex()
             .flex_row()
             .flex_none()
@@ -441,10 +605,11 @@ impl Workbench {
                     window.titlebar_double_click();
                 }
             })
-            .child(chrome::project_widget(
-                project.as_ref().map(|p| p.name()),
-                cx,
-            ))
+            .child(
+                chrome::project_widget(project.as_ref().map(|p| p.name()), cx).on_click(
+                    |_, window, cx| window.dispatch_action(Box::new(OpenFolder { path: None }), cx),
+                ),
+            )
             .child(div().flex_1())
             .child(chrome::run_widgets(cx))
             .child(div().w(px(8.0)))
@@ -456,6 +621,7 @@ impl Workbench {
                 icon_button("settings", IconName::SETTINGS, button, px(20.0), false, cx)
                     .tooltip(Tooltip::text("Settings", None)),
             )
+            .children(path_widget)
     }
 
     fn render_left_stripe(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -473,11 +639,11 @@ impl Workbench {
             cx,
         )
         .on_click(cx.listener(|this, _, window, cx| {
-            this.project_visible = !this.project_visible;
             if this.project_visible {
-                window.focus(&this.panel.focus_handle(cx));
+                this.hide_tool_window(&HideToolWindow, window, cx);
+            } else {
+                this.toggle_project(&ToggleProject, window, cx);
             }
-            cx.notify();
         }))
         .into_any_element();
         let top = vec![
@@ -542,6 +708,11 @@ impl Workbench {
         let action = |id: &'static str, icon: IconName, title: &'static str| {
             icon_button(id, icon, px(24.0), px(16.0), false, cx).tooltip(Tooltip::text(title, None))
         };
+        let command = |action: Box<dyn gpui::Action>| {
+            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                window.dispatch_action(action.boxed_clone(), cx)
+            }
+        };
         let header = div()
             .flex()
             .flex_row()
@@ -566,23 +737,27 @@ impl Workbench {
                     .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0))),
             )
             .child(div().flex_1())
-            .child(action(
-                "project-locate",
-                IconName::LOCATE,
-                "Select Opened File",
-            ))
-            .child(action("project-expand", IconName::EXPAND_ALL, "Expand All"))
-            .child(action(
-                "project-collapse",
-                IconName::COLLAPSE_ALL,
-                "Collapse All",
-            ))
+            .child(
+                action("project-locate", IconName::LOCATE, "Select Opened File")
+                    .on_click(command(Box::new(LocateFile))),
+            )
+            .child(
+                action("project-expand", IconName::EXPAND_ALL, "Expand All")
+                    .on_click(command(Box::new(project_panel::ExpandAll))),
+            )
+            .child(
+                action("project-collapse", IconName::COLLAPSE_ALL, "Collapse All")
+                    .on_click(command(Box::new(project_panel::CollapseAll))),
+            )
             .child(action(
                 "project-options",
                 IconName::MORE_VERTICAL,
                 "Options",
             ))
-            .child(action("project-hide", IconName::HIDE, "Hide"));
+            .child(
+                action("project-hide", IconName::HIDE, "Hide")
+                    .on_click(command(Box::new(HideToolWindow))),
+            );
         island(cx, UiRole::ToolWindow)
             .id("project-tool-window")
             .debug_selector(|| "project-tool-window".into())
@@ -591,6 +766,84 @@ impl Workbench {
             .h_full()
             .child(header)
             .child(self.panel.clone())
+    }
+
+    /// The gap between the project tool window and the editor; dragging it
+    /// resizes the tool window.
+    fn render_splitter(&self, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("project-splitter")
+            .debug_selector(|| "project-splitter".into())
+            .flex_none()
+            .w(width)
+            .h_full()
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                    this.resizing = Some((e.position.x, this.project_width));
+                    cx.stop_propagation();
+                }),
+            )
+    }
+
+    fn resize_project(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((x0, w0)) = self.resizing else {
+            return;
+        };
+        if e.pressed_button != Some(MouseButton::Left) {
+            self.resizing = None;
+            cx.notify();
+            return;
+        }
+        let max = (window.viewport_size().width - px(MIN_EDITOR_WIDTH)).max(px(MIN_PROJECT_WIDTH));
+        self.project_width = (w0 + e.position.x - x0).clamp(px(MIN_PROJECT_WIDTH), max);
+        cx.notify();
+    }
+
+    fn render_go_to_line(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let field = self.go_to_line_field()?.clone();
+        let theme = cx.theme();
+        let top = theme.metric(Metric::ToolbarHeight) + px(GO_TO_LINE_TOP);
+        let popup = div()
+            .id("go-to-line")
+            .debug_selector(|| "go-to-line".into())
+            .key_context("GoToLine")
+            .occlude()
+            .on_action(cx.listener(Self::confirm_go_to_line))
+            .on_action(cx.listener(Self::cancel_go_to_line))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .w(px(GO_TO_LINE_WIDTH))
+            .p(px(12.0))
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.color(UiRole::Border))
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .shadow_lg()
+            .child(div().child("Go to Line:Column"))
+            .child(
+                div()
+                    .h(px(30.0))
+                    .px(px(6.0))
+                    .py(px(4.0))
+                    .rounded(px(4.0))
+                    .border_1()
+                    .border_color(theme.color(UiRole::Focus))
+                    .bg(theme.color(UiRole::Input))
+                    .child(field),
+            );
+        Some(
+            div()
+                .absolute()
+                .top(top)
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(popup),
+        )
     }
 
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -841,8 +1094,9 @@ impl Focusable for Workbench {
 }
 
 impl Render for Workbench {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let gap = cx.theme().metric(Metric::IslandGap);
+        let window_width = window.viewport_size().width;
         // The frame around the islands has the toolbar colour.
         let frame = cx.theme().color(UiRole::Toolbar);
         let first_frame = (!self.first_frame_reported).then(|| {
@@ -868,6 +1122,8 @@ impl Render for Workbench {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::toggle_project))
             .on_action(cx.listener(Self::focus_editor))
+            .on_action(cx.listener(Self::hide_tool_window))
+            .on_action(cx.listener(Self::locate_file))
             .on_action(cx.listener(Self::set_theme))
             .on_action(cx.listener(Self::open_folder_action))
             .on_action(cx.listener(Self::open_file_action))
@@ -876,7 +1132,17 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::close_tab_action))
             .on_action(cx.listener(Self::select_tab))
             .on_action(cx.listener(Self::next_tab))
-            .on_action(cx.listener(Self::previous_tab));
+            .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::show_go_to_line))
+            .on_mouse_move(cx.listener(Self::resize_project))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.resizing.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            );
         // Editor and tree commands reach the active editor and the tree
         // when another component has the focus.
         if let Some(editor) = self.active_editor() {
@@ -886,7 +1152,7 @@ impl Render for Workbench {
         root.flex()
             .flex_col()
             .bg(frame)
-            .child(self.render_toolbar(cx))
+            .child(self.render_toolbar(window_width, cx))
             .child(
                 div()
                     .flex()
@@ -902,13 +1168,29 @@ impl Render for Workbench {
                             .min_w(px(0.0))
                             .h_full()
                             .pl(px(0.5))
-                            .gap(gap)
-                            .when(self.project_visible, |d| d.child(self.render_project(cx)))
+                            .when(self.project_visible, |d| {
+                                d.child(self.render_project(cx))
+                                    .child(self.render_splitter(gap, cx))
+                            })
                             .child(self.render_editor_area(cx)),
                     )
                     .child(self.render_right_stripe(cx)),
             )
             .child(self.render_status_bar(cx))
+            .children(self.render_go_to_line(cx))
             .children(first_frame)
+            // While resizing, the resize cursor stays wherever the mouse is.
+            .when(self.resizing.is_some(), |d| {
+                d.child(
+                    canvas(
+                        |_, _, _| (),
+                        |_, _, window, _| {
+                            window.set_window_cursor_style(CursorStyle::ResizeLeftRight)
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
     }
 }

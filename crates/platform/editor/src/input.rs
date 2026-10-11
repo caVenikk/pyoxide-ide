@@ -47,7 +47,7 @@ impl Editor {
             }
             None => {
                 let start = self.selections.primary().start();
-                self.insert(text, cx);
+                self.type_str(text, cx);
                 let end = self.selections.primary().head;
                 Some(start.min(end)..end)
             }

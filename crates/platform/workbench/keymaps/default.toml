@@ -1,0 +1,100 @@
+# Default keymap of Pyoxide on Windows and Linux. Keystrokes follow the
+# reference IDE's default keymap (IntelliJ Platform Community keymap files,
+# Apache-2.0, see NOTICE); commands are Pyoxide's own (ADR 0007).
+#
+# A section applies where its key context matches (GPUI predicates); a
+# deeper context wins, and of two bindings for the same context the later
+# one wins.
+
+[[context]]
+[context.bindings]
+"alt-1" = "workbench.toggle-project"
+"ctrl-s" = "workbench.save-all"
+"ctrl-f4" = "tabs.close"
+"alt-right" = "tabs.next"
+"alt-left" = "tabs.previous"
+
+[[context]]
+name = "ProjectTree"
+[context.bindings]
+"up" = "project.tree.up"
+"down" = "project.tree.down"
+"right" = "project.tree.expand"
+"left" = "project.tree.collapse"
+"enter" = "project.tree.open"
+"f4" = "project.tree.open"
+"ctrl--" = "project.tree.collapse-all"
+"ctrl-=" = "project.tree.expand-all"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+[[context]]
+name = "Editor"
+[context.bindings]
+# Caret movement
+"left" = "editor.move-left"
+"right" = "editor.move-right"
+"up" = "editor.move-up"
+"down" = "editor.move-down"
+"ctrl-left" = "editor.move-word-left"
+"ctrl-right" = "editor.move-word-right"
+"home" = "editor.move-line-start"
+"end" = "editor.move-line-end"
+"ctrl-home" = "editor.move-document-start"
+"ctrl-end" = "editor.move-document-end"
+"pageup" = "editor.page-up"
+"pagedown" = "editor.page-down"
+"ctrl-g" = "workbench.go-to-line"
+# Selection
+"shift-left" = "editor.select-left"
+"shift-right" = "editor.select-right"
+"shift-up" = "editor.select-up"
+"shift-down" = "editor.select-down"
+"ctrl-shift-left" = "editor.select-word-left"
+"ctrl-shift-right" = "editor.select-word-right"
+"shift-home" = "editor.select-line-start"
+"shift-end" = "editor.select-line-end"
+"ctrl-shift-home" = "editor.select-document-start"
+"ctrl-shift-end" = "editor.select-document-end"
+"shift-pageup" = "editor.select-page-up"
+"shift-pagedown" = "editor.select-page-down"
+"ctrl-a" = "editor.select-all"
+"ctrl-w" = "editor.select-word"
+"ctrl-shift-w" = "editor.shrink-selection"
+"escape" = "editor.escape"
+# Editing
+"enter" = "editor.newline"
+"shift-enter" = "editor.start-new-line"
+"tab" = "editor.tab"
+"shift-tab" = "editor.unindent"
+"backspace" = "editor.backspace"
+"shift-backspace" = "editor.backspace"
+"delete" = "editor.delete"
+"ctrl-backspace" = "editor.delete-word-left"
+"ctrl-delete" = "editor.delete-word-right"
+"ctrl-y" = "editor.delete-line"
+"ctrl-d" = "editor.duplicate"
+"alt-shift-up" = "editor.move-line-up"
+"alt-shift-down" = "editor.move-line-down"
+"ctrl-shift-up" = "editor.move-statement-up"
+"ctrl-shift-down" = "editor.move-statement-down"
+"ctrl-shift-j" = "editor.join-lines"
+"ctrl-/" = "editor.toggle-comment"
+"ctrl-z" = "editor.undo"
+"alt-backspace" = "editor.undo"
+"ctrl-shift-z" = "editor.redo"
+"alt-shift-backspace" = "editor.redo"
+# Clipboard
+"ctrl-c" = "editor.copy"
+"ctrl-insert" = "editor.copy"
+"ctrl-x" = "editor.cut"
+"shift-delete" = "editor.cut"
+"ctrl-v" = "editor.paste"
+"shift-insert" = "editor.paste"
+
+# The Go to Line field is a one-line editor: Enter and Escape close it.
+[[context]]
+name = "GoToLine > Editor"
+[context.bindings]
+"enter" = "go-to-line.confirm"
+"escape" = "go-to-line.cancel"
