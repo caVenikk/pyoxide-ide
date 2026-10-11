@@ -13,6 +13,7 @@ mod params;
 mod render;
 pub mod schema;
 pub mod timeout;
+pub mod transaction;
 mod value;
 pub mod worker;
 
