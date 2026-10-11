@@ -29,14 +29,14 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 34%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
+| settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
@@ -65,6 +65,7 @@ Crates live in `crates/platform/` (language-agnostic) and, once they exist,
 | `db-testkit` | Conformance suite every database driver runs |
 | `secrets` | Secret stores: OS credential store, KeePass, memory |
 | `settings-import` | Import of PyCharm project settings (data sources) |
+| `themes` | Theme model, default themes, import of PyCharm colour schemes and UI themes |
 | `py-env` (python) | Interpreters, virtualenvs, uv and pip integration, `env.*` commands |
 | `pyoxide-cli` (python) | `pyoxide`, the Python product's command line (`env`, plus all `db.*` commands) |
 | `db-cli` | `pyoxide-db`, a command-line database client |

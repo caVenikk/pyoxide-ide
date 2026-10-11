@@ -2,14 +2,14 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 34%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
+| settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
@@ -88,8 +88,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|
 | ⬜ | Keymap import | must |  |
 | ⬜ | Code style import | should |  |
-| ⬜ | Editor colour scheme import (.icls) | must |  |
-| ⬜ | UI theme import (.theme.json) | must |  |
+| 🟡 | Editor colour scheme import (.icls) | must | themes crate: schemes with parents and baseAttributes, report; no settings UI yet |
+| 🟡 | UI theme import (.theme.json) | must | themes crate: theme.json and plugin jars (data files only), report; no settings UI yet |
 | ✅ | Import data sources and passwords from PyCharm (own) | should | own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data |
 
 ## python-intel

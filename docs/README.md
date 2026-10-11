@@ -4,6 +4,7 @@
 - [architecture.md](architecture.md): crates, layering, command registry, external processes
 - [performance.md](performance.md): performance budgets and how they are measured
 - [clean-room.md](clean-room.md): allowed and forbidden sources
+- [theme-mapping.md](theme-mapping.md): PyCharm colour scheme and UI theme keys mapped to Pyoxide tokens
 - [theme-formats.md](theme-formats.md): PyCharm theme and colour-scheme formats the importer must read
 - [agent-workflow.md](agent-workflow.md): how AI agents work in this repository
 - [pyoxide-db.md](pyoxide-db.md): the database command line: profiles, passwords, diagnostics

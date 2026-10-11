@@ -48,8 +48,8 @@ Code folding,editor,should,yes,no,
 Live templates,editor,should,yes,no,
 Keymap import,settings-import,must,yes,no,
 Code style import,settings-import,should,yes,no,
-Editor colour scheme import (.icls),settings-import,must,yes,no,
-UI theme import (.theme.json),settings-import,must,yes,no,
+Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
+UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
 Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; no UI yet"
 Completion,python-intel,must,yes,no,LSP
