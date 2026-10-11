@@ -15,7 +15,7 @@ Pyoxide later.
 ### Machines
 | id | machine | CPU | RAM | OS | storage |
 |---|---|---|---|---|---|
-| mac-1 | (fill in) | Apple Silicon | | macOS | SSD |
+| mac-1 | laptop | Apple M5, 10 cores | 16 GB | macOS 27.0.1 | SSD |
 | win-1 | (fill in) | | | Windows 11 | SSD |
 
 ### Test projects
@@ -44,10 +44,25 @@ Pyoxide later.
 | First page | `SELECT * FROM bench_rows` (100,000 rows, see `docs/testing-databases.md`), time from Execute to the first page shown. |
 | Fetch all | Same query with the page limit disabled, time to the last row shown. |
 
+### Automated measurement (macOS)
+`python3 scripts/perf/pycharm_baseline.py --work <empty dir>` runs the
+installed IDE on a temporary copy of the user's configuration (own cache and
+log directories, real profile untouched) and reads the IDE's log: "ready" is
+the first exit from dumb mode for the project (editor usable), "indexed" the
+exit after which no dumb mode follows for 15 s. Times are from JVM start (the
+launcher adds about 0.3 s). Test projects: a generated 200-line project and
+Flask 3.1.0 (shallow clone), no interpreter configured. Typing latency and the
+10 MB file are not covered by the script yet.
+
 ### Results (reference)
 | date | machine | version | metric | median | worst | notes |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | small project, first open, fresh caches: indexed | 8.0 s | - | 1 run; includes attaching bundled shared indexes |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | small project, warm start: ready | 3.46 s | 5.51 s | 5 runs |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, first open (IDE caches warm): ready / indexed | 1.7 s / 5.6 s | - | 1 run |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, warm start: ready | 2.60 s | 3.42 s | 3 runs |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, idle 2 min after indexing: memory | 812 MB RSS (process tree), 643 MB JVM heap used | - | -Xmx2048m |
+| | | | keystroke to paint, 10 MB file, completion | | | not measured yet |
 
 ## 2. Pyoxide
 
