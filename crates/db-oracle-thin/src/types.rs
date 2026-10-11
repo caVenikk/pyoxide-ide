@@ -160,9 +160,7 @@ fn base_kind(t: OracleType, number: NumberShape) -> ValueKind {
             ValueKind::Text
         }
         OracleType::Raw | OracleType::LongRaw | OracleType::Blob => ValueKind::Bytes,
-        OracleType::Date | OracleType::Timestamp | OracleType::TimestampLtz => {
-            ValueKind::Timestamp
-        }
+        OracleType::Date | OracleType::Timestamp | OracleType::TimestampLtz => ValueKind::Timestamp,
         OracleType::TimestampTz => ValueKind::TimestampTz,
         OracleType::IntervalYm | OracleType::IntervalDs => ValueKind::Interval,
         OracleType::Json => ValueKind::Json,
@@ -212,14 +210,12 @@ pub fn column(info: &ColumnInfo) -> (Column, ColPlan) {
         Some(t) => (t.type_name().to_owned(), t.kind()),
         None => {
             let base = base_type_name(info.oracle_type);
-            let type_name = if info.oracle_type == OracleType::Number
-                && info.precision > 0
-                && scale == -127
-            {
-                "FLOAT".to_owned()
-            } else {
-                base.to_owned()
-            };
+            let type_name =
+                if info.oracle_type == OracleType::Number && info.precision > 0 && scale == -127 {
+                    "FLOAT".to_owned()
+                } else {
+                    base.to_owned()
+                };
             (type_name, base_kind(info.oracle_type, number))
         }
     };
@@ -320,7 +316,10 @@ fn parse_time_part(s: &str) -> Option<NaiveTime> {
 pub fn parse_timestamp_text(s: &str) -> Option<NaiveDateTime> {
     let s = s.trim();
     let (date, time) = s.rsplit_once(' ')?;
-    Some(NaiveDateTime::new(parse_date_part(date)?, parse_time_part(time)?))
+    Some(NaiveDateTime::new(
+        parse_date_part(date)?,
+        parse_time_part(time)?,
+    ))
 }
 
 /// `SYYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM`.
@@ -395,12 +394,10 @@ pub fn cell(plan: &ColPlan, v: oracle_rs::Value, max: usize) -> Cell {
                 Some(t) => Value::TimestampTz(t),
                 None => other("TIMESTAMP WITH TIME ZONE", s),
             },
-            (Tag::Timestamp | Tag::TimestampLtz, O::String(s)) => {
-                match parse_timestamp_text(&s) {
-                    Some(t) => Value::Timestamp(t),
-                    None => other(tag.type_name(), s),
-                }
-            }
+            (Tag::Timestamp | Tag::TimestampLtz, O::String(s)) => match parse_timestamp_text(&s) {
+                Some(t) => Value::Timestamp(t),
+                None => other(tag.type_name(), s),
+            },
             (Tag::Rowid | Tag::Urowid | Tag::Bfile, O::String(s)) => other(tag.type_name(), s),
             (Tag::Object, O::String(s)) => {
                 let name = s.trim_start_matches('(').trim_end_matches(')').to_owned();
@@ -447,8 +444,8 @@ pub fn cell(plan: &ColPlan, v: oracle_rs::Value, max: usize) -> Cell {
             match (naive, plan.oracle_type) {
                 (Some(n), OracleType::TimestampTz) => {
                     // The wire value is UTC plus the offset of the value.
-                    let secs = i32::from(ts.tz_hour_offset) * 3600
-                        + i32::from(ts.tz_minute_offset) * 60;
+                    let secs =
+                        i32::from(ts.tz_hour_offset) * 3600 + i32::from(ts.tz_minute_offset) * 60;
                     match FixedOffset::east_opt(secs) {
                         Some(off) => Value::TimestampTz(off.from_utc_datetime(&n)),
                         None => Value::Timestamp(n),
@@ -515,23 +512,43 @@ mod tests {
         let (col, plan) = column(&info("ID", OracleType::Number, 10, 0, 22));
         assert_eq!(col.kind, ValueKind::Int);
         assert_eq!(col.type_name, "NUMBER");
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("42".into()), 100)), Value::Int(42));
         assert_eq!(
-            ready(cell(&plan, oracle_rs::Value::String("12345678901234567890".into()), 100)),
+            ready(cell(&plan, oracle_rs::Value::String("42".into()), 100)),
+            Value::Int(42)
+        );
+        assert_eq!(
+            ready(cell(
+                &plan,
+                oracle_rs::Value::String("12345678901234567890".into()),
+                100
+            )),
             Value::Decimal("12345678901234567890".into())
         );
 
         let (col, plan) = column(&info("AMOUNT", OracleType::Number, 12, 2, 22));
         assert_eq!(col.kind, ValueKind::Decimal);
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("12".into()), 100)), Value::Decimal("12".into()));
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("-0.25".into()), 100)), Value::Decimal("-0.25".into()));
+        assert_eq!(
+            ready(cell(&plan, oracle_rs::Value::String("12".into()), 100)),
+            Value::Decimal("12".into())
+        );
+        assert_eq!(
+            ready(cell(&plan, oracle_rs::Value::String("-0.25".into()), 100)),
+            Value::Decimal("-0.25".into())
+        );
 
         // Expressions: precision 0, scale -127 stored as 129.
         let (col, plan) = column(&info("X", OracleType::Number, 0, 129, 22));
         assert_eq!(col.kind, ValueKind::Decimal);
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("42".into()), 100)), Value::Int(42));
         assert_eq!(
-            ready(cell(&plan, oracle_rs::Value::String("12345678901234567890.0123456789".into()), 100)),
+            ready(cell(&plan, oracle_rs::Value::String("42".into()), 100)),
+            Value::Int(42)
+        );
+        assert_eq!(
+            ready(cell(
+                &plan,
+                oracle_rs::Value::String("12345678901234567890.0123456789".into()),
+                100
+            )),
             Value::Decimal("12345678901234567890.0123456789".into())
         );
 
@@ -547,41 +564,72 @@ mod tests {
         assert_eq!(col.name, "BD");
         assert_eq!(col.type_name, "BINARY_DOUBLE");
         assert_eq!(col.kind, ValueKind::Float);
-        let v = ready(cell(&plan, oracle_rs::Value::Bytes(1.5f64.to_be_bytes().to_vec()), 100));
+        let v = ready(cell(
+            &plan,
+            oracle_rs::Value::Bytes(1.5f64.to_be_bytes().to_vec()),
+            100,
+        ));
         assert_eq!(v, Value::Float(1.5));
 
         let (_, plan) = column(&info("BF#PXT=BINARY_FLOAT", OracleType::Raw, 0, 0, 4));
-        let v = ready(cell(&plan, oracle_rs::Value::Bytes(2.25f32.to_be_bytes().to_vec()), 100));
+        let v = ready(cell(
+            &plan,
+            oracle_rs::Value::Bytes(2.25f32.to_be_bytes().to_vec()),
+            100,
+        ));
         assert_eq!(v, Value::Float(2.25));
 
         let (col, plan) = column(&info("I#PXT=INTERVAL_YM", OracleType::Varchar, 0, 0, 6));
         assert_eq!(col.kind, ValueKind::Interval);
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("+01-02".into()), 100)), Value::Interval("+01-02".into()));
+        assert_eq!(
+            ready(cell(&plan, oracle_rs::Value::String("+01-02".into()), 100)),
+            Value::Interval("+01-02".into())
+        );
 
         let (col, plan) = column(&info("T#PXT=TSTZ", OracleType::Varchar, 0, 0, 40));
         assert_eq!(col.kind, ValueKind::TimestampTz);
-        let v = ready(cell(&plan, oracle_rs::Value::String(" 2026-01-02 03:04:05.500000000 +03:00".into()), 100));
-        assert_eq!(v, Value::TimestampTz(DateTime::parse_from_rfc3339("2026-01-02T03:04:05.5+03:00").unwrap()));
+        let v = ready(cell(
+            &plan,
+            oracle_rs::Value::String(" 2026-01-02 03:04:05.500000000 +03:00".into()),
+            100,
+        ));
+        assert_eq!(
+            v,
+            Value::TimestampTz(
+                DateTime::parse_from_rfc3339("2026-01-02T03:04:05.5+03:00").unwrap()
+            )
+        );
 
         let (_, plan) = column(&info("T#PXT=TS", OracleType::Varchar, 0, 0, 40));
-        let v = ready(cell(&plan, oracle_rs::Value::String("2026-01-02 03:04:05.123456789".into()), 100));
+        let v = ready(cell(
+            &plan,
+            oracle_rs::Value::String("2026-01-02 03:04:05.123456789".into()),
+            100,
+        ));
         assert_eq!(v.to_string(), "2026-01-02 03:04:05.123456789");
 
         let (col, plan) = column(&info("R#PXT=ROWID", OracleType::Varchar, 0, 0, 18));
         assert_eq!(col.kind, ValueKind::Other);
         assert_eq!(
             ready(cell(&plan, oracle_rs::Value::String("AAAA".into()), 100)),
-            Value::Other { type_name: "ROWID".into(), text: "AAAA".into() }
+            Value::Other {
+                type_name: "ROWID".into(),
+                text: "AAAA".into()
+            }
         );
 
         let (_, plan) = column(&info("N#PXT=NULL", OracleType::Varchar, 0, 0, 1));
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("x".into()), 100)), Value::Null);
+        assert_eq!(
+            ready(cell(&plan, oracle_rs::Value::String("x".into()), 100)),
+            Value::Null
+        );
     }
 
     #[test]
     fn timestamps_and_dates() {
         let (_, plan) = column(&info("TZ", OracleType::TimestampTz, 0, 6, 13));
-        let ts = oracle_rs::types::OracleTimestamp::with_timezone(2026, 1, 2, 0, 4, 5, 500_000, 3, 0);
+        let ts =
+            oracle_rs::types::OracleTimestamp::with_timezone(2026, 1, 2, 0, 4, 5, 500_000, 3, 0);
         // Wire value is UTC 00:04:05 with +03:00: local 03:04:05.
         let v = ready(cell(&plan, oracle_rs::Value::Timestamp(ts), 100));
         assert_eq!(v.to_string(), "2026-01-02 03:04:05.500 +03:00");
@@ -590,10 +638,14 @@ mod tests {
         assert_eq!(col.kind, ValueKind::Timestamp);
         let d = oracle_rs::types::OracleDate::new(-4000, 1, 1, 0, 0, 0);
         let v = ready(cell(&plan, oracle_rs::Value::Date(d), 100));
-        assert!(matches!(v, Value::Timestamp(t) if t.date() == NaiveDate::from_ymd_opt(-4000, 1, 1).unwrap()));
+        assert!(
+            matches!(v, Value::Timestamp(t) if t.date() == NaiveDate::from_ymd_opt(-4000, 1, 1).unwrap())
+        );
 
         assert_eq!(
-            parse_timestamp_text("-4712-01-01 00:00:00.000000000").unwrap().date(),
+            parse_timestamp_text("-4712-01-01 00:00:00.000000000")
+                .unwrap()
+                .date(),
             NaiveDate::from_ymd_opt(-4712, 1, 1).unwrap()
         );
         assert!(parse_timestamp_tz_text("2026-01-02 03:04:05.5 -08:00").is_some());
@@ -604,19 +656,38 @@ mod tests {
     fn booleans_text_and_truncation() {
         let (col, plan) = column(&info("B", OracleType::Boolean, 0, 0, 1));
         assert_eq!(col.kind, ValueKind::Bool);
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("\u{1}\u{1}".into()), 10)), Value::Bool(true));
-        assert_eq!(ready(cell(&plan, oracle_rs::Value::String("\0".into()), 10)), Value::Bool(false));
+        assert_eq!(
+            ready(cell(
+                &plan,
+                oracle_rs::Value::String("\u{1}\u{1}".into()),
+                10
+            )),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            ready(cell(&plan, oracle_rs::Value::String("\0".into()), 10)),
+            Value::Bool(false)
+        );
 
         let (_, plan) = column(&info("S", OracleType::Varchar, 0, 0, 100));
         let v = ready(cell(&plan, oracle_rs::Value::String("héllo".into()), 2));
         assert_eq!(
             v,
-            Value::Truncated { prefix: Box::new(Value::Text("h".into())), full_len: Some(6) }
+            Value::Truncated {
+                prefix: Box::new(Value::Text("h".into())),
+                full_len: Some(6)
+            }
         );
         assert_eq!(
             truncate_bytes(vec![1, 2, 3], 2, Some(10)),
-            Value::Truncated { prefix: Box::new(Value::Bytes(vec![1, 2])), full_len: Some(10) }
+            Value::Truncated {
+                prefix: Box::new(Value::Bytes(vec![1, 2])),
+                full_len: Some(10)
+            }
         );
-        assert_eq!(truncate_bytes(vec![1, 2], 2, Some(2)), Value::Bytes(vec![1, 2]));
+        assert_eq!(
+            truncate_bytes(vec![1, 2], 2, Some(2)),
+            Value::Bytes(vec![1, 2])
+        );
     }
 }

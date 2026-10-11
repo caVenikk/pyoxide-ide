@@ -87,132 +87,74 @@ fn bind_calls(binds: &[BlockBind]) -> String {
 }
 
 const QUERY_BLOCK: &str = r#"DECLARE
-  c INTEGER;
-  cnt INTEGER;
-  d DBMS_SQL.DESC_TAB3;
-  s DBMS_SQL.VARCHAR2A;
-  r DBMS_SQL.VARCHAR2A;
-  l SYS.ODCIVARCHAR2LIST := SYS.ODCIVARCHAR2LIST();
-  sq CLOB;
-  fu VARCHAR2(32767);
-  e VARCHAR2(32767);
-  t VARCHAR2(30);
-  nm VARCHAR2(4000);
-  need BOOLEAN := FALSE;
-  lob BOOLEAN := FALSE;
-  ecode NUMBER;
-  emsg VARCHAR2(4000);
+c INTEGER;n INTEGER;k NUMBER;d DBMS_SQL.DESC_TAB3;s DBMS_SQL.VARCHAR2A;r DBMS_SQL.VARCHAR2A;
+l SYS.ODCIVARCHAR2LIST:=SYS.ODCIVARCHAR2LIST();q CLOB;f VARCHAR2(32767);e VARCHAR2(32767);
+t VARCHAR2(30);m VARCHAR2(4000);x VARCHAR2(4000);w BOOLEAN:=FALSE;b BOOLEAN:=FALSE;
 /*DECLS*/
-  PROCEDURE px_add(x VARCHAR2) IS BEGIN r(r.COUNT + 1) := x; END;
-  PROCEDURE px_chunk(x VARCHAR2) IS
-    rest VARCHAR2(32767) := x;
-  BEGIN
-    WHILE rest IS NOT NULL LOOP
-      l.EXTEND;
-      l(l.COUNT) := LPAD(TO_CHAR(l.COUNT), 6, '0') || SUBSTR(rest, 1, 900);
-      rest := SUBSTR(rest, 901);
-    END LOOP;
-  END;
+PROCEDURE a(v VARCHAR2)IS BEGIN r(r.COUNT+1):=v;END;
 BEGIN
 /*INIT*/
 /*PIECES*/
 /*TAIL*/
-  c := DBMS_SQL.OPEN_CURSOR;
-  DBMS_SQL.PARSE(c, s, 1, s.COUNT, FALSE, DBMS_SQL.NATIVE);
+c:=DBMS_SQL.OPEN_CURSOR;
+DBMS_SQL.PARSE(c,s,1,s.COUNT,FALSE,DBMS_SQL.NATIVE);
 /*BINDS*/
-  DBMS_SQL.DESCRIBE_COLUMNS3(c, cnt, d);
-  DBMS_SQL.CLOSE_CURSOR(c);
-  px_add('WITH PX$Q (');
-  FOR i IN 1 .. cnt LOOP
-    px_add(CASE WHEN i > 1 THEN ',' END || 'PX$' || i);
-  END LOOP;
-  px_add(') AS (' || CHR(10));
-  FOR i IN 1 .. s.COUNT LOOP px_add(s(i)); END LOOP;
-  px_add(CHR(10) || ') SELECT ');
-  FOR i IN 1 .. cnt LOOP
-    e := 'PX$' || i;
-    t := NULL;
-    IF d(i).col_type IN (8, 24) THEN
-      RAISE_APPLICATION_ERROR(-20901, 'column ' || d(i).col_name || ': LONG and LONG RAW values cannot be fetched by the thin driver; convert them in SQL, use a *_VC dictionary column or the oracle-odpi backend');
-    ELSIF d(i).col_type IN (1, 96) AND d(i).col_charsetform = 2 THEN
-      e := 'TO_CHAR(' || e || ')';
-      t := CASE d(i).col_type WHEN 1 THEN 'NVARCHAR2' ELSE 'NCHAR' END;
-    ELSIF d(i).col_type IN (1, 96, 23) AND d(i).col_max_len = 0 THEN
-      e := 'CAST(' || e || ' AS VARCHAR2(1))';
-      t := 'NULL';
-    ELSIF d(i).col_type = 100 THEN
-      e := 'UTL_RAW.CAST_FROM_BINARY_FLOAT(' || e || ')';
-      t := 'BINARY_FLOAT';
-    ELSIF d(i).col_type = 101 THEN
-      e := 'UTL_RAW.CAST_FROM_BINARY_DOUBLE(' || e || ')';
-      t := 'BINARY_DOUBLE';
-    ELSIF d(i).col_type = 182 THEN
-      e := 'TO_CHAR(' || e || ')';
-      t := 'INTERVAL_YM';
-    ELSIF d(i).col_type = 183 THEN
-      e := 'TO_CHAR(' || e || ')';
-      t := 'INTERVAL_DS';
-    ELSIF d(i).col_type = 181 THEN
-      e := 'TO_CHAR(' || e || ', ''SYYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM'')';
-      t := 'TSTZ';
-    ELSIF d(i).col_type = 231 THEN
-      e := 'TO_CHAR(' || e || ', ''SYYYY-MM-DD HH24:MI:SS.FF9'')';
-      t := 'TSLTZ';
-    ELSIF d(i).col_type = 180 AND d(i).col_scale > 6 THEN
-      e := 'TO_CHAR(' || e || ', ''SYYYY-MM-DD HH24:MI:SS.FF9'')';
-      t := 'TS';
-    ELSIF d(i).col_type IN (11, 69) THEN
-      e := 'ROWIDTOCHAR(' || e || ')';
-      t := 'ROWID';
-    ELSIF d(i).col_type = 208 THEN
-      e := 'CAST(' || e || ' AS VARCHAR2(4000))';
-      t := 'UROWID';
-    ELSIF d(i).col_type = 112 AND d(i).col_charsetform = 2 THEN
-      e := 'TO_CLOB(' || e || ')';
-      t := 'NCLOB';
-      lob := TRUE;
-    ELSIF d(i).col_type IN (112, 113, 119, 127) THEN
-      lob := TRUE;
-    ELSIF d(i).col_type = 109 AND d(i).col_type_name = 'XMLTYPE' THEN
-      e := 'XMLSERIALIZE(CONTENT ' || e || ' AS CLOB)';
-      t := 'XMLTYPE';
-      lob := TRUE;
-    ELSIF d(i).col_type = 114 THEN
-      e := 'CASE WHEN ' || e || ' IS NULL THEN NULL ELSE ''(BFILE)'' END';
-      t := 'BFILE';
-    ELSIF d(i).col_type IN (102, 109, 110, 111, 121, 122, 123) THEN
-      e := 'CASE WHEN ' || e || ' IS NULL THEN NULL ELSE ''(' || REPLACE(d(i).col_schema_name || '.' || d(i).col_type_name, '''', '''''') || ')'' END';
-      t := 'OBJECT';
-    END IF;
-    IF t IS NOT NULL THEN
-      need := TRUE;
-      nm := SUBSTRB(d(i).col_name, 1, 128 - LENGTHB(t) - 5) || '#PXT=' || t;
-    ELSE
-      nm := d(i).col_name;
-    END IF;
-    px_add(CASE WHEN i > 1 THEN ',' END || e || ' AS "' || REPLACE(nm, '"', '') || '"');
-  END LOOP;
-  px_add(CHR(10) || 'FROM PX$Q');
-  IF NOT need THEN
-    r := s;
-  END IF;
-  IF fu IS NOT NULL THEN
-    px_add(CHR(10) || fu);
-  END IF;
-  IF lob THEN
-    FOR i IN 1 .. r.COUNT LOOP px_chunk(r(i)); END LOOP;
-    OPEN :rc FOR SELECT COLUMN_VALUE AS "PYOXIDE$NATIVE" FROM TABLE(l);
-  ELSE
-    FOR i IN 1 .. r.COUNT LOOP sq := sq || r(i); END LOOP;
-    OPEN :rc FOR sq/*USING*/;
-  END IF;
+DBMS_SQL.DESCRIBE_COLUMNS3(c,n,d);
+DBMS_SQL.CLOSE_CURSOR(c);
+a('WITH PX$Q(');
+FOR i IN 1..n LOOP a(CASE WHEN i>1 THEN ',' END||'PX$'||i);END LOOP;
+a(') AS ('||CHR(10));
+FOR i IN 1..s.COUNT LOOP a(s(i));END LOOP;
+a(CHR(10)||')SELECT ');
+FOR i IN 1..n LOOP
+k:=d(i).col_type;
+IF k IN(8,24)THEN
+RAISE_APPLICATION_ERROR(-20901,'column '||d(i).col_name||': LONG and LONG RAW values cannot be fetched by the thin driver; convert them in SQL, use a *_VC dictionary column or the oracle-odpi backend');
+END IF;
+t:=CASE WHEN k IN(1,96)AND d(i).col_charsetform=2 THEN CASE k WHEN 1 THEN 'NVARCHAR2' ELSE 'NCHAR' END
+WHEN k IN(1,96,23)AND d(i).col_max_len=0 THEN 'NULL'
+WHEN k=100 THEN 'BINARY_FLOAT' WHEN k=101 THEN 'BINARY_DOUBLE'
+WHEN k=182 THEN 'INTERVAL_YM' WHEN k=183 THEN 'INTERVAL_DS'
+WHEN k=181 THEN 'TSTZ' WHEN k=231 THEN 'TSLTZ' WHEN k=180 AND d(i).col_scale>6 THEN 'TS'
+WHEN k IN(11,69)THEN 'ROWID' WHEN k=208 THEN 'UROWID'
+WHEN k=112 AND d(i).col_charsetform=2 THEN 'NCLOB'
+WHEN k=109 AND d(i).col_type_name='XMLTYPE' THEN 'XMLTYPE' WHEN k=114 THEN 'BFILE'
+WHEN k IN(102,109,110,111,121,122,123)THEN 'OBJECT' END;
+e:=REPLACE(CASE t WHEN 'NVARCHAR2' THEN 'TO_CHAR(#)' WHEN 'NCHAR' THEN 'TO_CHAR(#)'
+WHEN 'NULL' THEN 'CAST(# AS VARCHAR2(1))'
+WHEN 'BINARY_FLOAT' THEN 'UTL_RAW.CAST_FROM_BINARY_FLOAT(#)'
+WHEN 'BINARY_DOUBLE' THEN 'UTL_RAW.CAST_FROM_BINARY_DOUBLE(#)'
+WHEN 'INTERVAL_YM' THEN 'TO_CHAR(#)' WHEN 'INTERVAL_DS' THEN 'TO_CHAR(#)'
+WHEN 'TSTZ' THEN 'TO_CHAR(#,''SYYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM'')'
+WHEN 'TSLTZ' THEN 'TO_CHAR(#,''SYYYY-MM-DD HH24:MI:SS.FF9'')'
+WHEN 'TS' THEN 'TO_CHAR(#,''SYYYY-MM-DD HH24:MI:SS.FF9'')'
+WHEN 'ROWID' THEN 'ROWIDTOCHAR(#)' WHEN 'UROWID' THEN 'CAST(# AS VARCHAR2(4000))'
+WHEN 'NCLOB' THEN 'TO_CLOB(#)' WHEN 'XMLTYPE' THEN 'XMLSERIALIZE(CONTENT # AS CLOB)'
+WHEN 'BFILE' THEN 'CASE WHEN # IS NULL THEN NULL ELSE ''(BFILE)'' END'
+WHEN 'OBJECT' THEN 'CASE WHEN # IS NULL THEN NULL ELSE ''('||REPLACE(d(i).col_schema_name||'.'||d(i).col_type_name,'''','''''')||')'' END'
+ELSE '#' END,'#','PX$'||i);
+IF k IN(112,113,119,127)OR t IN('NCLOB','XMLTYPE')THEN b:=TRUE;END IF;
+IF t IS NOT NULL THEN w:=TRUE;m:=SUBSTRB(d(i).col_name,1,123-LENGTHB(t))||'#PXT='||t;
+ELSE m:=d(i).col_name;END IF;
+a(CASE WHEN i>1 THEN ',' END||e||' AS "'||REPLACE(m,'"')||'"');
+END LOOP;
+a(CHR(10)||'FROM PX$Q');
+IF NOT w THEN r:=s;END IF;
+IF f IS NOT NULL THEN a(CHR(10)||f);END IF;
+IF b THEN
+FOR i IN 1..r.COUNT LOOP
+e:=r(i);
+WHILE e IS NOT NULL LOOP l.EXTEND;l(l.COUNT):=LPAD(l.COUNT,6,'0')||SUBSTR(e,1,900);e:=SUBSTR(e,901);END LOOP;
+END LOOP;
+OPEN :rc FOR SELECT COLUMN_VALUE AS "PYOXIDE$NATIVE" FROM TABLE(l);
+ELSE
+FOR i IN 1..r.COUNT LOOP q:=q||r(i);END LOOP;
+OPEN :rc FOR q/*USING*/;
+END IF;
 EXCEPTION WHEN OTHERS THEN
-  ecode := SQLCODE;
-  emsg := SUBSTR(DBMS_UTILITY.FORMAT_ERROR_STACK, 1, 4000);
-  IF c IS NOT NULL THEN
-    IF DBMS_SQL.IS_OPEN(c) THEN DBMS_SQL.CLOSE_CURSOR(c); END IF;
-  END IF;
-  OPEN :rc FOR SELECT ecode AS "PYOXIDE$ERROR", emsg AS "PYOXIDE$MESSAGE" FROM dual;
+k:=SQLCODE;x:=SUBSTR(DBMS_UTILITY.FORMAT_ERROR_STACK,1,4000);
+IF c IS NOT NULL THEN IF DBMS_SQL.IS_OPEN(c)THEN DBMS_SQL.CLOSE_CURSOR(c);END IF;END IF;
+OPEN :rc FOR SELECT k AS "PYOXIDE$ERROR",x AS "PYOXIDE$MESSAGE" FROM dual;
 END;"#;
 
 const EXEC_BLOCK: &str = r#"DECLARE
@@ -289,7 +231,7 @@ pub fn query_block(
     occurrences: &[usize],
 ) -> Result<String> {
     let tail = match tail {
-        Some(t) => format!("  fu := {};\n", quote(t)),
+        Some(t) => format!("f:={};\n", quote(t)),
         None => String::new(),
     };
     let using = if occurrences.is_empty() {
@@ -427,8 +369,8 @@ mod tests {
         )
         .unwrap();
         assert!(b.contains("  pxb1 NUMBER := 7;\n"), "{b}");
-        assert!(b.contains("OPEN :rc FOR sq USING pxb1, pxb2, pxb1;"), "{b}");
-        assert!(b.contains("  fu := 'FOR UPDATE';\n"), "{b}");
+        assert!(b.contains("OPEN :rc FOR q USING pxb1, pxb2, pxb1;"), "{b}");
+        assert!(b.contains("f:='FOR UPDATE';\n"), "{b}");
         assert!(
             b.contains("s(1) := 'SELECT :1, :name, :1 FROM t WHERE x = ''it''''s''';"),
             "{b}"
@@ -437,7 +379,10 @@ mod tests {
         // The only bind of the block itself is the OUT cursor.
         assert!(outer_binds(&b).iter().all(|n| n == "RC"));
         let plain = query_block("SELECT 1 FROM dual", None, &[], &[]).unwrap();
-        assert!(plain.contains("OPEN :rc FOR sq;"), "{plain}");
+        assert!(plain.contains("OPEN :rc FOR q;"), "{plain}");
+        // Small enough for servers that negotiate an 8 KiB packet size.
+        assert!(plain.len() < 4096, "{}", plain.len());
+        assert!(probe_block(1, 1).len() < 4096);
     }
 
     #[test]

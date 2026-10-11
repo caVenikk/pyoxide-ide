@@ -15,6 +15,10 @@ use oracle_rs::Error as OraError;
 pub const LARGE_FETCH_BUDGET: usize = 54 * 1024;
 /// Budget when the server negotiated a small (8 KiB) SDU.
 pub const SMALL_FETCH_BUDGET: usize = 6 * 1024;
+/// oracle-rs also sends every request in one packet: the largest request
+/// (statement text, wrapper and inline values) for each case.
+pub const LARGE_REQUEST: usize = 65_000;
+pub const SMALL_REQUEST: usize = 7_800;
 
 /// An open oracle-rs connection and what the driver tracks about it.
 pub struct Session {
@@ -32,6 +36,8 @@ pub struct Session {
     pub dbms_sql: bool,
     /// Bytes per fetch round trip (see [`LARGE_FETCH_BUDGET`]).
     pub fetch_budget: usize,
+    /// Largest request in bytes (see [`LARGE_REQUEST`]).
+    pub max_request: usize,
 }
 
 impl Session {
@@ -45,7 +51,18 @@ impl Session {
             banner: String::new(),
             dbms_sql: true,
             fetch_budget: SMALL_FETCH_BUDGET,
+            max_request: SMALL_REQUEST,
         }
+    }
+
+    /// Set the fetch budget and the matching request limit.
+    pub fn set_budget(&mut self, fetch_budget: usize) {
+        self.fetch_budget = fetch_budget;
+        self.max_request = if fetch_budget >= LARGE_FETCH_BUDGET {
+            LARGE_REQUEST
+        } else {
+            SMALL_REQUEST
+        };
     }
 
     pub fn is_broken(&self) -> bool {
@@ -71,9 +88,23 @@ impl Session {
         if !self.broken.swap(true, Ordering::AcqRel)
             && let Ok(mut r) = self.reason.lock()
         {
-            *r = Some(format!("the connection is no longer usable: {reason}; reconnect"));
+            *r = Some(format!(
+                "the connection is no longer usable: {reason}; reconnect"
+            ));
         }
         self.conn.mark_closed();
+    }
+
+    /// Refuse a request that does not fit into one network packet.
+    pub fn check_request(&self, text: &str) -> Result<()> {
+        if text.len() > self.max_request {
+            return Err(Error::unsupported(format!(
+                "the statement with its bind values needs a {} KiB request, but the thin driver can send at most {} KiB (oracle-rs 0.1.7 sends each request in one network packet of the negotiated size); shorten it or use the oracle-odpi backend",
+                text.len().div_ceil(1024),
+                self.max_request / 1024
+            )));
+        }
+        Ok(())
     }
 
     pub fn add_cursors(&self, n: u32) {
@@ -114,8 +145,9 @@ struct CallGuard<'a> {
 impl Drop for CallGuard<'_> {
     fn drop(&mut self) {
         if self.armed {
-            self.session
-                .mark_broken("a call was abandoned before the server answered (timeout or cancellation)");
+            self.session.mark_broken(
+                "a call was abandoned before the server answered (timeout or cancellation)",
+            );
         }
     }
 }
@@ -150,10 +182,7 @@ pub fn map_call_error(e: OraError) -> (Error, bool) {
         OraError::ConnectionClosed | OraError::ConnectionNotReady => {
             (Error::connection_lost("the connection is closed"), true)
         }
-        OraError::Io(io) => (
-            Error::connection_lost(format!("network error: {io}")),
-            true,
-        ),
+        OraError::Io(io) => (Error::connection_lost(format!("network error: {io}")), true),
         OraError::ConnectionTimeout(d) => (
             Error::connection_lost(format!("network timeout after {d:?}")),
             true,
@@ -294,33 +323,57 @@ mod tests {
             code: 942,
             message: "table or view does not exist".into(),
         });
-        assert_eq!((e.kind, e.code.as_deref(), broken), (ErrorKind::Query, Some("ORA-00942"), false));
+        assert_eq!(
+            (e.kind, e.code.as_deref(), broken),
+            (ErrorKind::Query, Some("ORA-00942"), false)
+        );
         let (e, broken) = map_call_error(OraError::OracleError {
             code: 3113,
             message: "end-of-file on communication channel".into(),
         });
         assert_eq!((e.kind, broken), (ErrorKind::ConnectionLost, true));
-        let (e, broken) = map_call_error(OraError::BufferUnderflow { needed: 4, available: 1 });
+        let (e, broken) = map_call_error(OraError::BufferUnderflow {
+            needed: 4,
+            available: 1,
+        });
         assert_eq!((e.kind, broken), (ErrorKind::Internal, true));
         let (e, broken) = map_call_error(OraError::ConnectionClosedByServer("x".into()));
         assert_eq!((e.kind, broken), (ErrorKind::ConnectionLost, true));
-        let (e, _) = map_call_error(OraError::OracleError { code: 0, message: "x".into() });
+        let (e, _) = map_call_error(OraError::OracleError {
+            code: 0,
+            message: "x".into(),
+        });
         assert_eq!(e.kind, ErrorKind::ConnectionLost);
     }
 
     #[test]
     fn maps_connect_errors() {
         let refused = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-        assert_eq!(map_connect_error(OraError::Io(refused), false).kind, ErrorKind::Network);
+        assert_eq!(
+            map_connect_error(OraError::Io(refused), false).kind,
+            ErrorKind::Network
+        );
         let tls = std::io::Error::other("invalid peer certificate: UnknownIssuer");
-        assert_eq!(map_connect_error(OraError::Io(tls), true).kind, ErrorKind::Tls);
+        assert_eq!(
+            map_connect_error(OraError::Io(tls), true).kind,
+            ErrorKind::Tls
+        );
         let e = map_connect_error(OraError::InvalidCredentials, false);
-        assert_eq!((e.kind, e.code.as_deref()), (ErrorKind::Auth, Some("ORA-01017")));
+        assert_eq!(
+            (e.kind, e.code.as_deref()),
+            (ErrorKind::Auth, Some("ORA-01017"))
+        );
         let e = map_connect_error(
-            OraError::ConnectionRefused { error_code: Some(12514), message: Some("no service".into()) },
+            OraError::ConnectionRefused {
+                error_code: Some(12514),
+                message: Some("no service".into()),
+            },
             false,
         );
-        assert_eq!((e.kind, e.code.as_deref()), (ErrorKind::Connect, Some("ORA-12514")));
+        assert_eq!(
+            (e.kind, e.code.as_deref()),
+            (ErrorKind::Connect, Some("ORA-12514"))
+        );
         let e = map_connect_error(OraError::NativeNetworkEncryptionRequired, false);
         assert_eq!(e.code.as_deref(), Some("ORA-12660"));
         let e = map_connect_error(OraError::Internal("bad wallet".into()), true);

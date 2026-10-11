@@ -14,7 +14,9 @@ pub fn env(key: &str, default: &str) -> String {
 pub fn params() -> ConnectParams {
     ConnectParams {
         host: env("PYOXIDE_TEST_ORACLE_HOST", "localhost"),
-        port: env("PYOXIDE_TEST_ORACLE_PORT", "1521").parse().unwrap_or(1521),
+        port: env("PYOXIDE_TEST_ORACLE_PORT", "1521")
+            .parse()
+            .unwrap_or(1521),
         database: env("PYOXIDE_TEST_ORACLE_SERVICE", "FREEPDB1"),
         user: "pyoxide".into(),
         password: Secret::new(env("PYOXIDE_DB_PASSWORD", "pyoxide")),

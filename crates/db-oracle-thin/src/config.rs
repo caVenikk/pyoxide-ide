@@ -62,7 +62,7 @@ fn path_str(p: &Path, what: &str) -> Result<String> {
 /// than one provider is compiled in and none is installed.
 pub fn ensure_crypto_provider() {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 }
 
@@ -119,7 +119,10 @@ fn tls_config(p: &ConnectParams, from_dsn: Option<&OracleAddress>) -> Result<Tls
     }
     match (&p.tls.client_cert, &p.tls.client_key) {
         (Some(c), Some(k)) => {
-            t = t.with_client_cert(path_str(c, "client certificate")?, path_str(k, "client key")?);
+            t = t.with_client_cert(
+                path_str(c, "client certificate")?,
+                path_str(k, "client key")?,
+            );
         }
         (None, None) => {}
         _ => {
@@ -133,11 +136,16 @@ fn tls_config(p: &ConnectParams, from_dsn: Option<&OracleAddress>) -> Result<Tls
         None => from_dsn.and_then(|a| a.wallet_dir.clone()),
     };
     if let Some(w) = wallet {
-        let pw = (!p.tls.wallet_password.is_empty())
-            .then(|| p.tls.wallet_password.expose().to_owned());
+        let pw =
+            (!p.tls.wallet_password.is_empty()).then(|| p.tls.wallet_password.expose().to_owned());
         t = t.with_wallet(w, pw);
     }
-    if let Some(name) = p.tls.server_name.as_deref().filter(|n| !n.trim().is_empty()) {
+    if let Some(name) = p
+        .tls
+        .server_name
+        .as_deref()
+        .filter(|n| !n.trim().is_empty())
+    {
         if name.contains('=') {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -222,7 +230,8 @@ mod tests {
         let mut p = params();
         p.options.insert(
             opt::ORACLE_DSN.into(),
-            "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=other)(PORT=1600))(CONNECT_DATA=(SID=XE)))".into(),
+            "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=other)(PORT=1600))(CONNECT_DATA=(SID=XE)))"
+                .into(),
         );
         let (cfg, t) = build(&p).unwrap();
         assert_eq!((t.host.as_str(), t.port), ("other", 1600));

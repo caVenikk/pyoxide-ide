@@ -15,6 +15,23 @@ use db_core::{Error, Result, Value};
 const PLSQL_PIECE: usize = 30_000;
 /// Longest escaped text in one SQL literal (the limit is 4000 bytes).
 const SQL_PIECE: usize = 3_900;
+/// Longest text a VARCHAR2 bind may carry into SQL (`MAX_STRING_SIZE =
+/// STANDARD`); longer values become temporary CLOBs.
+pub const MAX_VARCHAR_BIND: usize = 4000;
+/// Longest RAW bind in SQL; longer values become temporary BLOBs.
+pub const MAX_RAW_BIND: usize = 2000;
+
+/// Whether a query must carry this value as a literal: a temporary LOB
+/// bound to a query dies with the wrapper block before the rows are
+/// fetched.
+pub fn needs_inline_for_query(v: &Value) -> Result<bool> {
+    match v {
+        Value::Bytes(b) if b.len() > MAX_RAW_BIND => Err(Error::unsupported(format!(
+            "binary bind values over {MAX_RAW_BIND} bytes are not supported in queries by the thin driver"
+        ))),
+        _ => Ok(text_of(v).is_some_and(|s| s.len() > MAX_VARCHAR_BIND)),
+    }
+}
 
 /// Split `s` into pieces whose escaped length stays under `max_bytes`,
 /// never inside a character.
@@ -204,9 +221,11 @@ pub fn plsql_bind(var: &str, v: &Value) -> Result<PlsqlBind> {
         return Ok(PlsqlBind::simple(format!("{ty} := {expr}")));
     }
     if let Some(s) = text_of(v) {
-        let escaped_len: usize = s.len() + s.matches('\'').count();
-        if escaped_len <= PLSQL_PIECE {
-            return Ok(PlsqlBind::simple(format!("VARCHAR2(32767) := {}", quote(s))));
+        if s.len() <= MAX_VARCHAR_BIND {
+            return Ok(PlsqlBind::simple(format!(
+                "VARCHAR2(32767) := {}",
+                quote(s)
+            )));
         }
         let mut init = vec![format!("DBMS_LOB.CREATETEMPORARY({var}, TRUE);")];
         for p in pieces(s, PLSQL_PIECE) {
@@ -223,7 +242,7 @@ pub fn plsql_bind(var: &str, v: &Value) -> Result<PlsqlBind> {
     }
     if let Value::Bytes(b) = v {
         const RAW_CHUNK: usize = PLSQL_PIECE / 2;
-        if b.len() <= RAW_CHUNK {
+        if b.len() <= MAX_RAW_BIND {
             return Ok(PlsqlBind {
                 decl: format!("RAW(32767) := HEXTORAW('{}')", hex(b)),
                 init: Vec::new(),
@@ -316,19 +335,42 @@ mod tests {
             assert!(decimal_literal(ok).is_ok(), "{ok}");
         }
         assert_eq!(decimal_literal("+3").unwrap(), "3");
-        for bad in ["", "-", ".", "1e", "1.2.3", "1; DROP TABLE t", "0x10", "1e+"] {
+        for bad in [
+            "",
+            "-",
+            ".",
+            "1e",
+            "1.2.3",
+            "1; DROP TABLE t",
+            "0x10",
+            "1e+",
+        ] {
             assert!(decimal_literal(bad).is_err(), "{bad}");
         }
     }
 
     #[test]
     fn renders_plsql_binds() {
-        assert_eq!(plsql_bind("b1", &Value::Int(-5)).unwrap().decl, "NUMBER := -5");
-        assert_eq!(plsql_bind("b1", &Value::Null).unwrap().decl, "VARCHAR2(1) := NULL");
-        assert_eq!(plsql_bind("b1", &Value::Bool(true)).unwrap().decl, "NUMBER := 1");
-        assert_eq!(plsql_bind("b1", &Value::Float(1.5)).unwrap().decl, "BINARY_DOUBLE := 1.5e0d");
         assert_eq!(
-            plsql_bind("b1", &Value::Float(f64::NEG_INFINITY)).unwrap().decl,
+            plsql_bind("b1", &Value::Int(-5)).unwrap().decl,
+            "NUMBER := -5"
+        );
+        assert_eq!(
+            plsql_bind("b1", &Value::Null).unwrap().decl,
+            "VARCHAR2(1) := NULL"
+        );
+        assert_eq!(
+            plsql_bind("b1", &Value::Bool(true)).unwrap().decl,
+            "NUMBER := 1"
+        );
+        assert_eq!(
+            plsql_bind("b1", &Value::Float(1.5)).unwrap().decl,
+            "BINARY_DOUBLE := 1.5e0d"
+        );
+        assert_eq!(
+            plsql_bind("b1", &Value::Float(f64::NEG_INFINITY))
+                .unwrap()
+                .decl,
             "BINARY_DOUBLE := -BINARY_DOUBLE_INFINITY"
         );
         assert_eq!(
@@ -344,15 +386,19 @@ mod tests {
             "DATE := TO_DATE('2026-01-02', 'SYYYY-MM-DD')"
         );
         let ts = d.and_hms_nano_opt(3, 4, 5, 123_456_789).unwrap();
-        assert!(plsql_bind("b1", &Value::Timestamp(ts))
-            .unwrap()
-            .decl
-            .contains("'2026-01-02 03:04:05.123456789'"));
+        assert!(
+            plsql_bind("b1", &Value::Timestamp(ts))
+                .unwrap()
+                .decl
+                .contains("'2026-01-02 03:04:05.123456789'")
+        );
         let tz = DateTime::parse_from_rfc3339("2026-01-02T03:04:05.5+03:00").unwrap();
-        assert!(plsql_bind("b1", &Value::TimestampTz(tz))
-            .unwrap()
-            .decl
-            .contains("'2026-01-02 03:04:05.500000000 +03:00'"));
+        assert!(
+            plsql_bind("b1", &Value::TimestampTz(tz))
+                .unwrap()
+                .decl
+                .contains("'2026-01-02 03:04:05.500000000 +03:00'")
+        );
         assert!(plsql_bind("b1", &Value::Decimal("1;x".into())).is_err());
         assert!(plsql_bind("b1", &Value::Array(vec![])).is_err());
     }
@@ -374,8 +420,15 @@ mod tests {
         assert_eq!(sql_literal(&Value::Int(-5)).unwrap(), "(-5)");
         assert_eq!(sql_literal(&Value::Text("a'b".into())).unwrap(), "'a''b'");
         assert_eq!(sql_literal(&Value::Null).unwrap(), "NULL");
-        assert_eq!(sql_literal(&Value::Bytes(vec![1])).unwrap(), "HEXTORAW('01')");
-        assert!(sql_literal(&Value::Text("y".repeat(5000))).unwrap().starts_with("(TO_CLOB("));
+        assert_eq!(
+            sql_literal(&Value::Bytes(vec![1])).unwrap(),
+            "HEXTORAW('01')"
+        );
+        assert!(
+            sql_literal(&Value::Text("y".repeat(5000)))
+                .unwrap()
+                .starts_with("(TO_CLOB(")
+        );
         assert!(sql_literal(&Value::Bytes(vec![0; 3000])).is_err());
     }
 }

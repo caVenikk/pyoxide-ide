@@ -53,10 +53,7 @@ fn scan_code(sql: &str, mut on_code: impl FnMut(usize, usize)) {
             Some(find_seq(b, i + 2, b"*/").map_or(n, |p| p + 2))
         } else if c == b'"' {
             Some(memchr(b, i + 1, b'"').map_or(n, |p| p + 1))
-        } else if (c == b'q' || c == b'Q')
-            && i + 2 < n
-            && b[i + 1] == b'\''
-            && !prev_is_ident(b, i)
+        } else if (c == b'q' || c == b'Q') && i + 2 < n && b[i + 1] == b'\'' && !prev_is_ident(b, i)
         {
             Some(skip_q_quote(b, i + 2))
         } else if (c == b'n' || c == b'N')
@@ -96,7 +93,10 @@ fn is_ident_byte(c: u8) -> bool {
 }
 
 fn memchr(b: &[u8], from: usize, needle: u8) -> Option<usize> {
-    b.get(from..)?.iter().position(|&c| c == needle).map(|p| p + from)
+    b.get(from..)?
+        .iter()
+        .position(|&c| c == needle)
+        .map(|p| p + from)
 }
 
 fn find_seq(b: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
@@ -190,7 +190,14 @@ pub fn classify(sql: &str) -> StmtKind {
             while let Some(&m) = rest.peek() {
                 if matches!(
                     m,
-                    "EDITIONABLE" | "NONEDITIONABLE" | "EDITIONING" | "AND" | "COMPILE" | "RESOLVE" | "NOFORCE" | "FORCE"
+                    "EDITIONABLE"
+                        | "NONEDITIONABLE"
+                        | "EDITIONING"
+                        | "AND"
+                        | "COMPILE"
+                        | "RESOLVE"
+                        | "NOFORCE"
+                        | "FORCE"
                 ) {
                     rest.next();
                 } else {
@@ -273,11 +280,13 @@ pub fn normalize(sql: &str, kind: StmtKind) -> String {
         }
         break;
     }
-    if !matches!(kind, StmtKind::Plsql | StmtKind::PlsqlDdl) {
-        while let Some(stripped) = s.trim_end().strip_suffix(';') {
-            s = stripped.trim_end().to_owned();
-        }
-    } else if kind == StmtKind::Plsql && classify_first(&s) == "CALL" {
+    // CALL is SQL: no semicolon, unlike anonymous blocks and PL/SQL units.
+    let keeps_semicolon = match kind {
+        StmtKind::PlsqlDdl => true,
+        StmtKind::Plsql => classify_first(&s) != "CALL",
+        _ => false,
+    };
+    if !keeps_semicolon {
         while let Some(stripped) = s.trim_end().strip_suffix(';') {
             s = stripped.trim_end().to_owned();
         }
@@ -354,7 +363,9 @@ pub fn bind_plan(found: &[Placeholder], param_count: usize) -> Result<Vec<(Strin
         }
         return Ok(Vec::new());
     }
-    let numeric = distinct.iter().all(|n| n.bytes().all(|c| c.is_ascii_digit()));
+    let numeric = distinct
+        .iter()
+        .all(|n| n.bytes().all(|c| c.is_ascii_digit()));
     if numeric {
         let mut plan = Vec::with_capacity(distinct.len());
         let mut used = vec![false; param_count];
@@ -397,20 +408,44 @@ mod tests {
     #[test]
     fn classifies_statements() {
         assert_eq!(classify("  SELECT 1 FROM dual"), StmtKind::Query);
-        assert_eq!(classify("with x as (select 1 from dual) select * from x"), StmtKind::Query);
-        assert_eq!(classify("-- c\n/* block */ ( (SELECT 1 FROM dual) )"), StmtKind::Query);
+        assert_eq!(
+            classify("with x as (select 1 from dual) select * from x"),
+            StmtKind::Query
+        );
+        assert_eq!(
+            classify("-- c\n/* block */ ( (SELECT 1 FROM dual) )"),
+            StmtKind::Query
+        );
         assert_eq!(classify("select*from dual"), StmtKind::Query);
         assert_eq!(classify("update t set a = 1"), StmtKind::Dml);
         assert_eq!(classify("MERGE INTO t USING s ON (1=1)"), StmtKind::Dml);
         assert_eq!(classify("begin null; end;"), StmtKind::Plsql);
-        assert_eq!(classify("DECLARE x NUMBER; BEGIN NULL; END;"), StmtKind::Plsql);
+        assert_eq!(
+            classify("DECLARE x NUMBER; BEGIN NULL; END;"),
+            StmtKind::Plsql
+        );
         assert_eq!(classify("call p()"), StmtKind::Plsql);
         assert_eq!(classify("create table t (a number)"), StmtKind::Ddl);
-        assert_eq!(classify("CREATE OR REPLACE EDITIONABLE PROCEDURE p AS BEGIN NULL; END;"), StmtKind::PlsqlDdl);
-        assert_eq!(classify("create or replace package body p as end;"), StmtKind::PlsqlDdl);
-        assert_eq!(classify("CREATE TYPE t AS OBJECT (a NUMBER)"), StmtKind::PlsqlDdl);
-        assert_eq!(classify("create or replace and compile java source named x as ..."), StmtKind::PlsqlDdl);
-        assert_eq!(classify("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY'"), StmtKind::AlterSession);
+        assert_eq!(
+            classify("CREATE OR REPLACE EDITIONABLE PROCEDURE p AS BEGIN NULL; END;"),
+            StmtKind::PlsqlDdl
+        );
+        assert_eq!(
+            classify("create or replace package body p as end;"),
+            StmtKind::PlsqlDdl
+        );
+        assert_eq!(
+            classify("CREATE TYPE t AS OBJECT (a NUMBER)"),
+            StmtKind::PlsqlDdl
+        );
+        assert_eq!(
+            classify("create or replace and compile java source named x as ..."),
+            StmtKind::PlsqlDdl
+        );
+        assert_eq!(
+            classify("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY'"),
+            StmtKind::AlterSession
+        );
         assert_eq!(classify("alter table t add c number"), StmtKind::Ddl);
         assert_eq!(classify("COMMIT"), StmtKind::Commit);
         assert_eq!(classify("rollback"), StmtKind::Rollback);
@@ -438,11 +473,17 @@ mod tests {
     #[test]
     fn plans_binds() {
         let p = placeholders("SELECT :2, :1, :2 FROM dual");
-        assert_eq!(bind_plan(&p, 2).unwrap(), vec![("2".into(), 1), ("1".into(), 0)]);
+        assert_eq!(
+            bind_plan(&p, 2).unwrap(),
+            vec![("2".into(), 1), ("1".into(), 0)]
+        );
         assert!(bind_plan(&p, 1).is_err());
         assert!(bind_plan(&p, 3).is_err());
         let p = placeholders("SELECT :b, :a, :b FROM dual");
-        assert_eq!(bind_plan(&p, 2).unwrap(), vec![("B".into(), 0), ("A".into(), 1)]);
+        assert_eq!(
+            bind_plan(&p, 2).unwrap(),
+            vec![("B".into(), 0), ("A".into(), 1)]
+        );
         assert!(bind_plan(&p, 3).is_err());
         assert!(bind_plan(&[], 1).is_err());
         assert!(bind_plan(&[], 0).unwrap().is_empty());
@@ -450,15 +491,30 @@ mod tests {
 
     #[test]
     fn normalizes_terminators() {
-        assert_eq!(normalize(" SELECT 1 FROM dual ; ", StmtKind::Query), "SELECT 1 FROM dual");
-        assert_eq!(normalize("BEGIN NULL; END;\n/\n", StmtKind::Plsql), "BEGIN NULL; END;");
         assert_eq!(
-            normalize("CREATE PROCEDURE p AS BEGIN NULL; END;\n/", StmtKind::PlsqlDdl),
+            normalize(" SELECT 1 FROM dual ; ", StmtKind::Query),
+            "SELECT 1 FROM dual"
+        );
+        assert_eq!(
+            normalize("BEGIN NULL; END;\n/\n", StmtKind::Plsql),
+            "BEGIN NULL; END;"
+        );
+        assert_eq!(
+            normalize(
+                "CREATE PROCEDURE p AS BEGIN NULL; END;\n/",
+                StmtKind::PlsqlDdl
+            ),
             "CREATE PROCEDURE p AS BEGIN NULL; END;"
         );
         assert_eq!(normalize("CALL p();", StmtKind::Plsql), "CALL p()");
-        assert_eq!(normalize("SELECT 4/2 FROM dual", StmtKind::Query), "SELECT 4/2 FROM dual");
-        assert_eq!(normalize("insert into t values (1);;", StmtKind::Dml), "insert into t values (1)");
+        assert_eq!(
+            normalize("SELECT 4/2 FROM dual", StmtKind::Query),
+            "SELECT 4/2 FROM dual"
+        );
+        assert_eq!(
+            normalize("insert into t values (1);;", StmtKind::Dml),
+            "insert into t values (1)"
+        );
     }
 
     #[test]
@@ -467,7 +523,9 @@ mod tests {
         assert!(has_for_update("select * from t for  update nowait"));
         assert!(!has_for_update("SELECT 'for update' FROM t"));
         assert!(!has_for_update("SELECT * FROM t -- for update"));
-        assert!(!has_for_update("SELECT * FROM (SELECT * FROM t FOR UPDATE)"));
+        assert!(!has_for_update(
+            "SELECT * FROM (SELECT * FROM t FOR UPDATE)"
+        ));
         assert!(!has_for_update("SELECT before_update FROM t"));
         let (body, tail) = split_for_update("SELECT ROWID, t.* FROM t\nFOR UPDATE NOWAIT");
         assert_eq!(body, "SELECT ROWID, t.* FROM t");

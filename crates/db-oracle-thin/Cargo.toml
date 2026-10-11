@@ -13,8 +13,8 @@ chrono.workspace = true
 tokio.workspace = true
 oracle-rs = "0.1.7"
 # Only to install a process-wide crypto provider before oracle-rs builds its
-# TLS configuration; oracle-rs already pulls rustls with aws-lc-rs.
-rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
+# TLS configuration (ring, as everywhere else; see ADR 0003).
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 
 [dev-dependencies]
 tokio.workspace = true

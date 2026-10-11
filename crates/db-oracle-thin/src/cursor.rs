@@ -33,7 +33,10 @@ pub enum Source {
     /// A REF CURSOR returned by the wrapper block.
     Ref(RefCursor),
     /// A cursor opened by oracle-rs `query` (statements with LOB columns).
-    Native { cursor_id: u16, columns: Vec<ColumnInfo> },
+    Native {
+        cursor_id: u16,
+        columns: Vec<ColumnInfo>,
+    },
 }
 
 pub struct ThinCursor {
@@ -79,13 +82,12 @@ impl ThinCursor {
 
     /// Rows to ask for in one round trip.
     fn trip_rows(&self, want: usize) -> usize {
-        let per_row: usize = 8
-            + self
-                .plans
-                .iter()
-                .zip(&self.observed)
-                .map(|(p, &seen)| estimate(p.declared_bytes, seen))
-                .sum::<usize>();
+        let per_row: usize = 8 + self
+            .plans
+            .iter()
+            .zip(&self.observed)
+            .map(|(p, &seen)| estimate(p.declared_bytes, seen))
+            .sum::<usize>();
         let fit = (self.session.fetch_budget / per_row.max(1)).max(1);
         fit.min(want).min(self.opts.fetch_size.max(1)).max(1)
     }

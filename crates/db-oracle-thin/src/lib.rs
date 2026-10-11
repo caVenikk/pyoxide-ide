@@ -90,14 +90,17 @@ async fn open_session(p: &ConnectParams) -> Result<Session> {
     let scrub = |e: Error| e.scrub(&secret).scrub(p.tls.wallet_password.expose());
     let (cfg, target) = config::build(p).map_err(scrub)?;
     let key = target.describe();
-    let cached = budget_cache().lock().ok().and_then(|c| c.get(&key).copied());
+    let cached = budget_cache()
+        .lock()
+        .ok()
+        .and_then(|c| c.get(&key).copied());
 
     let mut session = Session::new(connect_raw(&cfg, &target, p).await.map_err(scrub)?);
     let probed = probe(&mut session, if cached.is_some() { 1 } else { PROBE_ROWS }).await;
     match (probed, cached) {
-        (Ok(()), Some(budget)) => session.fetch_budget = budget,
+        (Ok(()), Some(budget)) => session.set_budget(budget),
         (Ok(()), None) => {
-            session.fetch_budget = LARGE_FETCH_BUDGET;
+            session.set_budget(LARGE_FETCH_BUDGET);
             remember(&key, LARGE_FETCH_BUDGET);
         }
         (Err(e), _) if session.is_broken() && e.kind != ErrorKind::ConnectionLost => {
@@ -105,7 +108,7 @@ async fn open_session(p: &ConnectParams) -> Result<Session> {
             // small SDU. Reconnect and remember that.
             let mut small = Session::new(connect_raw(&cfg, &target, p).await.map_err(scrub)?);
             probe(&mut small, 1).await.map_err(scrub)?;
-            small.fetch_budget = SMALL_FETCH_BUDGET;
+            small.set_budget(SMALL_FETCH_BUDGET);
             remember(&key, SMALL_FETCH_BUDGET);
             session = small;
         }
@@ -130,15 +133,28 @@ async fn connect_raw(
     } else {
         p.connect_timeout
     };
-    match tokio::time::timeout(limit, oracle_rs::Connection::connect_with_config(cfg.clone())).await
+    match tokio::time::timeout(
+        limit,
+        oracle_rs::Connection::connect_with_config(cfg.clone()),
+    )
+    .await
     {
         Err(_) => Err(Error::new(
             ErrorKind::Network,
-            format!("connecting to {} timed out after {limit:?}", target.describe()),
+            format!(
+                "connecting to {} timed out after {limit:?}",
+                target.describe()
+            ),
         )),
         Ok(Ok(conn)) => Ok(conn),
         Ok(Err(e)) => {
-            let refused = matches!(e, oracle_rs::Error::ConnectionRefused { error_code: None, .. });
+            let refused = matches!(
+                e,
+                oracle_rs::Error::ConnectionRefused {
+                    error_code: None,
+                    ..
+                }
+            );
             let mut err = session::map_connect_error(e, target.tls);
             if refused
                 && !target.tls
@@ -172,7 +188,9 @@ async fn refusal_code(cfg: &oracle_rs::Config, limit: Duration) -> Option<u32> {
     let exchange = async {
         let msg = oracle_rs::messages::ConnectMessage::from_config(cfg);
         let (packet, continuation) = msg.build_with_continuation().ok()?;
-        let mut stream = tokio::net::TcpStream::connect(cfg.socket_addr()).await.ok()?;
+        let mut stream = tokio::net::TcpStream::connect(cfg.socket_addr())
+            .await
+            .ok()?;
         stream.write_all(&packet).await.ok()?;
         if let Some(c) = continuation {
             stream.write_all(&c).await.ok()?;
@@ -203,7 +221,7 @@ fn cursor_out(values: Vec<oracle_rs::Value>) -> Result<RefCursor> {
     }
 }
 
-fn text(v: Option<&oracle_rs::Value>) -> Option<String> {
+fn string_value(v: Option<&oracle_rs::Value>) -> Option<String> {
     match v {
         Some(oracle_rs::Value::String(s)) => Some(s.clone()),
         _ => None,
@@ -215,7 +233,11 @@ fn text(v: Option<&oracle_rs::Value>) -> Option<String> {
 async fn probe(session: &mut Session, rows: u32) -> Result<()> {
     let block = plsql::probe_block(rows, if rows > 1 { PROBE_PAD } else { 1 });
     let r = session
-        .call(session.conn.execute_plsql(&block, &[BindParam::output_cursor()]))
+        .call(
+            session
+                .conn
+                .execute_plsql(&block, &[BindParam::output_cursor()]),
+        )
         .await?;
     session.add_cursors(2);
     let rc = cursor_out(r.out_values)?;
@@ -227,11 +249,11 @@ async fn probe(session: &mut Session, rows: u32) -> Result<()> {
         .first()
         .ok_or_else(|| Error::internal("the connect probe returned no rows"))?;
     let values = first.values();
-    session.dbms_sql = text(values.first()).as_deref() == Some("Y");
-    session.cursor_limit = text(values.get(1))
+    session.dbms_sql = string_value(values.first()).as_deref() == Some("Y");
+    session.cursor_limit = string_value(values.get(1))
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(DEFAULT_OPEN_CURSORS);
-    session.banner = text(values.get(2))
+    session.banner = string_value(values.get(2))
         .map(|b| b.split_whitespace().collect::<Vec<_>>().join(" "))
         .unwrap_or_else(|| "Oracle Database (version not visible to this user)".into());
     Ok(())
@@ -350,7 +372,13 @@ impl ThinConnection {
         Ok(fresh)
     }
 
-    async fn run(&self, kind: StmtKind, sql: String, params: &[Value], opts: &ExecOptions) -> Result<Outcome> {
+    async fn run(
+        &self,
+        kind: StmtKind,
+        sql: String,
+        params: &[Value],
+        opts: &ExecOptions,
+    ) -> Result<Outcome> {
         if kind.returns_rows() {
             let guard = self.busy.acquire()?;
             let session = self.session_for(3).await?;
@@ -371,22 +399,27 @@ impl ThinConnection {
             let binds = block_binds(kind, &sql, params)?;
             let commit = self.auto() && !matches!(kind, StmtKind::Commit | StmtKind::Rollback);
             let block = plsql::exec_block(&sql, &binds, commit)?;
+            session.check_request(&block)?;
             let r = session
                 .call(session.conn.execute_plsql(&block, &[status_out()]))
                 .await?;
             session.add_cursors(1);
-            let status = text(r.out_values.first())
+            let status = string_value(r.out_values.first())
                 .ok_or_else(|| Error::internal("the wrapper block returned no status"))?;
             plsql::parse_exec_status(&status)?
         } else {
             let sql = substitute(&sql, params)?;
+            session.check_request(&sql)?;
             let n = if matches!(kind, StmtKind::Plsql | StmtKind::PlsqlDdl) {
                 session
                     .call(session.conn.execute_plsql(&sql, &[]))
                     .await?
                     .rows_affected
             } else {
-                session.call(session.conn.execute(&sql, &[])).await?.rows_affected
+                session
+                    .call(session.conn.execute(&sql, &[]))
+                    .await?
+                    .rows_affected
             };
             session.add_cursors(1);
             if self.auto() {
@@ -417,8 +450,36 @@ impl ThinConnection {
         opts: &ExecOptions,
         guard: db_core::BusyGuard,
     ) -> Result<Outcome> {
-        let (body, tail) = sql::split_for_update(sql);
-        let binds = block_binds(StmtKind::Query, sql, params)?;
+        // Long text values go into the statement as literals: a temporary
+        // LOB bound here would be freed with the block before the fetch.
+        let found = sql::placeholders(sql);
+        let plan = sql::bind_plan(&found, params.len())?;
+        let mut inline = Vec::new();
+        for (name, idx) in &plan {
+            if literal::needs_inline_for_query(&params[*idx])? {
+                inline.push((name.clone(), *idx));
+            }
+        }
+        let mut text = sql.to_owned();
+        for p in found.iter().rev() {
+            if let Some((_, idx)) = inline.iter().find(|(n, _)| *n == p.name) {
+                text.replace_range(
+                    p.start..p.end,
+                    &format!(" {} ", literal::sql_literal(&params[*idx])?),
+                );
+            }
+        }
+        let mut binds = Vec::new();
+        for (name, idx) in plan
+            .iter()
+            .filter(|(n, _)| !inline.iter().any(|(m, _)| m == n))
+        {
+            binds.push(BlockBind {
+                placeholder: name.clone(),
+                bind: literal::plsql_bind(&format!("pxb{}", binds.len() + 1), &params[*idx])?,
+            });
+        }
+        let (body, tail) = sql::split_for_update(&text);
         let occurrences = sql::placeholders(body)
             .iter()
             .map(|p| {
@@ -429,8 +490,13 @@ impl ThinConnection {
             })
             .collect::<Result<Vec<_>>>()?;
         let block = plsql::query_block(body, tail, &binds, &occurrences)?;
+        session.check_request(&block)?;
         let r = session
-            .call(session.conn.execute_plsql(&block, &[BindParam::output_cursor()]))
+            .call(
+                session
+                    .conn
+                    .execute_plsql(&block, &[BindParam::output_cursor()]),
+            )
             .await?;
         session.add_cursors(2);
         let rc = cursor_out(r.out_values)?;
@@ -441,10 +507,12 @@ impl ThinConnection {
                 .await?;
             let row = res.rows.first();
             let code = row
-                .and_then(|r| text(r.values().first()))
+                .and_then(|r| string_value(r.values().first()))
                 .and_then(|c| c.trim().parse::<i64>().ok())
                 .unwrap_or(0);
-            let msg = row.and_then(|r| text(r.values().get(1))).unwrap_or_default();
+            let msg = row
+                .and_then(|r| string_value(r.values().get(1)))
+                .unwrap_or_default();
             return Err(plsql::trapped_error(code, &msg));
         }
         if first_name == plsql::NATIVE_COLUMN {
@@ -454,12 +522,16 @@ impl ThinConnection {
                     .call(session.conn.fetch_cursor_with_size(&rc, 8))
                     .await?;
                 let n = res.rows.len();
-                chunks.extend(res.rows.iter().filter_map(|r| text(r.values().first())));
+                chunks.extend(
+                    res.rows
+                        .iter()
+                        .filter_map(|r| string_value(r.values().first())),
+                );
                 if n < 8 {
                     break;
                 }
             }
-            let native = substitute(&plsql::join_native_chunks(&chunks), params)?;
+            let native = substitute_plan(&plsql::join_native_chunks(&chunks), &plan, params)?;
             return self.open_native(session, &native, opts, guard).await;
         }
         let columns = rc.columns().to_vec();
@@ -483,6 +555,7 @@ impl ThinConnection {
         opts: &ExecOptions,
         guard: db_core::BusyGuard,
     ) -> Result<Outcome> {
+        session.check_request(sql)?;
         let res = session.call(session.conn.query(sql, &[])).await?;
         session.add_cursors(1);
         let done = res.rows.len() < NATIVE_PREFETCH;
@@ -529,19 +602,24 @@ fn block_binds(kind: StmtKind, sql: &str, params: &[Value]) -> Result<Vec<BlockB
 /// Replace placeholders with SQL literals (LOB path and sessions without
 /// DBMS_SQL).
 fn substitute(sql: &str, params: &[Value]) -> Result<String> {
-    let found = sql::placeholders(sql);
-    let plan = sql::bind_plan(&found, params.len())?;
-    if plan.is_empty() {
-        return Ok(sql.to_owned());
-    }
+    let plan = sql::bind_plan(&sql::placeholders(sql), params.len())?;
+    substitute_plan(sql, &plan, params)
+}
+
+/// [`substitute`] with a bind plan computed earlier (the text may have
+/// fewer placeholders than the plan).
+fn substitute_plan(sql: &str, plan: &[(String, usize)], params: &[Value]) -> Result<String> {
     let mut out = sql.to_owned();
-    for p in found.iter().rev() {
+    for p in sql::placeholders(sql).iter().rev() {
         let idx = plan
             .iter()
             .find(|(name, _)| *name == p.name)
             .map(|(_, i)| *i)
-            .ok_or_else(|| Error::internal("placeholder without a bind value"))?;
-        out.replace_range(p.start..p.end, &format!(" {} ", literal::sql_literal(&params[idx])?));
+            .ok_or_else(|| Error::query(format!("placeholder :{} has no value", p.name)))?;
+        out.replace_range(
+            p.start..p.end,
+            &format!(" {} ", literal::sql_literal(&params[idx])?),
+        );
     }
     Ok(out)
 }
@@ -645,14 +723,26 @@ mod tests {
         let out = substitute(sql, &[Value::Int(-5), Value::Text("o'k".into())]).unwrap();
         assert_eq!(out, "SELECT  (-5) , ':1',  'o''k'  FROM t WHERE a =  (-5) ");
         assert!(substitute("SELECT :1 FROM dual", &[]).is_err());
-        assert_eq!(substitute("SELECT 1 FROM dual", &[]).unwrap(), "SELECT 1 FROM dual");
+        assert_eq!(
+            substitute("SELECT 1 FROM dual", &[]).unwrap(),
+            "SELECT 1 FROM dual"
+        );
     }
 
     #[test]
     fn ddl_takes_no_binds() {
         assert!(block_binds(StmtKind::Ddl, "CREATE TABLE t (a NUMBER)", &[Value::Int(1)]).is_err());
-        assert!(block_binds(StmtKind::Ddl, "CREATE TABLE t (a NUMBER)", &[]).unwrap().is_empty());
-        let b = block_binds(StmtKind::Dml, "UPDATE t SET a = :1 WHERE b = :1", &[Value::Int(1)]).unwrap();
+        assert!(
+            block_binds(StmtKind::Ddl, "CREATE TABLE t (a NUMBER)", &[])
+                .unwrap()
+                .is_empty()
+        );
+        let b = block_binds(
+            StmtKind::Dml,
+            "UPDATE t SET a = :1 WHERE b = :1",
+            &[Value::Int(1)],
+        )
+        .unwrap();
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].placeholder, "1");
     }
