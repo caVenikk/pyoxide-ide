@@ -251,16 +251,25 @@ impl Workbench {
             return;
         }
         self.pending += 1;
+        // Reading, decoding and building the rope all happen off the UI
+        // thread.
         let read = cx.background_spawn({
             let path = path.clone();
-            async move { project::read_document(&path) }
+            async move {
+                project::read_document(&path).map(|loaded| {
+                    let read_only = loaded.read_only || loaded.decoded.lossy;
+                    let mut buffer = text::Buffer::from_decoded(loaded.decoded);
+                    buffer.set_read_only(read_only);
+                    buffer
+                })
+            }
         });
         cx.spawn_in(window, async move |this, cx| {
             let loaded = read.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.pending -= 1;
                 match loaded {
-                    Ok(loaded) => this.add_tab(path, loaded, window, cx),
+                    Ok(buffer) => this.add_tab(path, buffer, window, cx),
                     Err(e) => {
                         this.message = Some(format!("Cannot open {}: {e}", path.display()).into())
                     }
@@ -274,7 +283,7 @@ impl Workbench {
     fn add_tab(
         &mut self,
         path: PathBuf,
-        loaded: project::Loaded,
+        buffer: text::Buffer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -283,9 +292,6 @@ impl Workbench {
             return;
         }
         let file_type = self.file_types.for_path(&path).cloned();
-        let read_only = loaded.read_only || loaded.decoded.lossy;
-        let mut buffer = text::Buffer::from_decoded(loaded.decoded);
-        buffer.set_read_only(read_only);
         let editor = cx.new(|cx| {
             let mut editor = Editor::new(buffer, window, cx);
             editor.set_path(Some(path.clone()));
@@ -1095,6 +1101,10 @@ impl Focusable for Workbench {
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bench = env::bench().is_some();
+        if bench {
+            crate::bench::frame_started();
+        }
         let gap = cx.theme().metric(Metric::IslandGap);
         let window_width = window.viewport_size().width;
         // The frame around the islands has the toolbar colour.
@@ -1107,7 +1117,7 @@ impl Render for Workbench {
                     let ms = env::since_main_ms();
                     cx.defer(move |cx| {
                         env::marker(&format!("first_frame main_ms={ms:.1}"));
-                        if env::bench() == Some(env::Bench::Startup) {
+                        if env::bench() == Some(&env::Bench::Startup) {
                             cx.quit();
                         }
                     });
@@ -1179,6 +1189,18 @@ impl Render for Workbench {
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
             .children(first_frame)
+            // Measurements: the end of the frame's paint.
+            .when(bench, |d| {
+                let editor = self.active_editor().cloned();
+                d.child(
+                    canvas(
+                        |_, _, _| (),
+                        move |_, _, _, cx| crate::bench::frame_painted(editor.as_ref(), cx),
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
             // While resizing, the resize cursor stays wherever the mouse is.
             .when(self.resizing.is_some(), |d| {
                 d.child(

@@ -1,18 +1,21 @@
-//! `PYOXIDE_SHOT=<path>`: a PNG of the application's own window.
+//! Native window helpers (macOS; no-ops elsewhere): drawing a frame now,
+//! keeping a window visible during measurements, and `PYOXIDE_SHOT=<path>`,
+//! a PNG of the application's own window.
 //!
 //! GPUI 0.2.2 cannot read back a rendered frame (the Metal renderer is
-//! private, the test platform does not render). On macOS this asks the
-//! window server for the current image of our own window
+//! private, the test platform does not render). On macOS the screenshot
+//! asks the window server for the current image of our own window
 //! (`CGWindowListCreateImage` with only that window; no Screen Recording
 //! permission is needed for the app's own windows), which shows exactly
 //! what GPUI presented on screen.
 
 use std::path::Path;
 
-/// Asks Core Animation to redraw the window's layer. GPUI stops its display
-/// link while a window is fully covered (automated runs open windows in the
-/// background), so a screenshot would show a stale frame; the layer's
-/// display callback renders one frame synchronously.
+/// Asks Core Animation to redraw the window's layer: GPUI draws and presents
+/// a frame at the end of the current run loop pass, without waiting for the
+/// display link. Used after keystrokes (typed text is ready for the next
+/// refresh) and before screenshots (GPUI stops its display link while a
+/// window is fully covered, so a screenshot would show a stale frame).
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
 pub fn request_display(window: &gpui::Window) {
@@ -38,6 +41,42 @@ pub fn request_display(window: &gpui::Window) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn request_display(_: &gpui::Window) {}
+
+/// Measurements: keeps the window above normal windows on every Space,
+/// without activating the app or taking the focus, so that it is not
+/// covered and its display link keeps producing frames.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn keep_visible(window: &gpui::Window) {
+    use objc::runtime::Object;
+    use objc::{msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// NSFloatingWindowLevel.
+    const FLOATING: isize = 3;
+    /// NSWindowCollectionBehaviorCanJoinAllSpaces | FullScreenAuxiliary.
+    const ALL_SPACES: usize = 1 | 256;
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    let view = appkit.ns_view.as_ptr() as *mut Object;
+    // SAFETY: `view` is the live NSView of this window, on the main thread.
+    unsafe {
+        let ns_window: *mut Object = msg_send![view, window];
+        if ns_window.is_null() {
+            return;
+        }
+        let _: () = msg_send![ns_window, setLevel: FLOATING];
+        let _: () = msg_send![ns_window, setCollectionBehavior: ALL_SPACES];
+        let _: () = msg_send![ns_window, orderFrontRegardless];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn keep_visible(_: &gpui::Window) {}
 
 /// Save the window's on-screen image; returns its size in pixels.
 #[cfg(target_os = "macos")]

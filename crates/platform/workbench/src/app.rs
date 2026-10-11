@@ -177,6 +177,12 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     let product = Rc::new(product);
     Application::new().run(move |cx| {
         init(cx, &product);
+        // Frames follow the display's refresh. After a keystroke the window
+        // draws at once instead: the typed text is then ready for the next
+        // refresh rather than the one after (ADR 0007, replica/perf.md).
+        // Only real windows (the test platform has no native window).
+        cx.observe_keystrokes(|_, window, _| crate::shot::request_display(window))
+            .detach();
         let window = open_main_window(cx, product.clone());
         // A folder opens as the project, files open in tabs.
         for path in paths {
@@ -198,6 +204,7 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         if let Some(path) = env::shot_path() {
             save_shot_and_quit(window, path, cx);
         }
+        crate::bench::start(window, cx);
         if !env::background() {
             cx.activate(true);
         }

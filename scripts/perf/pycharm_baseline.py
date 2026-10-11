@@ -40,7 +40,9 @@ def running():
     return bool(out.strip())
 
 
-def make_projects(work: Path, mid_tag: str):
+def make_files(work: Path):
+    # The generated test projects: a 200-line file, a 100,000-line file and a
+    # 10 MB file (also used by pycharm_typing.py and pyoxide_bench.py).
     small = work / "projects/small"
     small.mkdir(parents=True, exist_ok=True)
     (small / "main.py").write_text("".join(
@@ -55,11 +57,16 @@ def make_projects(work: Path, mid_tag: str):
     huge.mkdir(parents=True, exist_ok=True)
     row = "x = " + "'" + "a" * 90 + "'\n"
     (huge / "huge.py").write_text(row * (10 * 1024 * 1024 // len(row)))
+    return {"small": small, "bigfile": big, "hugefile": huge}
+
+
+def make_projects(work: Path, mid_tag: str):
+    projects = make_files(work)
     mid = work / "projects/flask"
     if not mid.exists():
         subprocess.run(["git", "clone", "--quiet", "--depth", "1", "--branch", mid_tag,
                         "https://github.com/pallets/flask.git", str(mid)], check=True)
-    return {"small": small, "bigfile": big, "hugefile": huge, "mid": mid}
+    return {**projects, "mid": mid}
 
 
 def prepare_profile(work: Path, app: Path, user_config: Path):
@@ -271,4 +278,5 @@ def measure(a, app, prof, vm, projects, work):
     print(json.dumps(summary, indent=2))
 
 
-main()
+if __name__ == "__main__":
+    main()

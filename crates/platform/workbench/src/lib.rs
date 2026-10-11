@@ -7,6 +7,7 @@
 //! describes itself with a [`Product`] and calls [`run`].
 
 pub mod app;
+mod bench;
 pub mod chrome;
 pub mod commands;
 pub mod env;

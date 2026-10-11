@@ -6,6 +6,8 @@
 //! | `PYOXIDE_THEME=light` | start with the light theme (default dark) |
 //! | `PYOXIDE_SHOT=<file.png>` | save an image of the main window after it settled, then quit (macOS) |
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
+//! | `PYOXIDE_BENCH=typing` | type 3 x 200 keys at line 50,000 of the open file, print key-to-frame times, quit |
+//! | `PYOXIDE_BENCH=open:<file>` | open a file, print the time to its first painted text and to highlighting, scroll it, quit |
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -32,18 +34,30 @@ pub fn shot_path() -> Option<std::path::PathBuf> {
     std::env::var_os("PYOXIDE_SHOT").map(Into::into)
 }
 
-/// The measurement requested with `PYOXIDE_BENCH`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The measurement requested with `PYOXIDE_BENCH` (see `bench.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Bench {
     /// Print `PYOXIDE first_frame` and quit.
     Startup,
+    /// Typing latency in the open file.
+    Typing,
+    /// Opening a file of the open project, then scrolling it.
+    Open(std::path::PathBuf),
 }
 
-pub fn bench() -> Option<Bench> {
-    match std::env::var("PYOXIDE_BENCH").ok()?.as_str() {
-        "startup" => Some(Bench::Startup),
-        _ => None,
-    }
+/// The requested measurement (read once).
+pub fn bench() -> Option<&'static Bench> {
+    static BENCH: OnceLock<Option<Bench>> = OnceLock::new();
+    BENCH
+        .get_or_init(|| {
+            let value = std::env::var("PYOXIDE_BENCH").ok()?;
+            match value.as_str() {
+                "startup" => Some(Bench::Startup),
+                "typing" => Some(Bench::Typing),
+                _ => value.strip_prefix("open:").map(|p| Bench::Open(p.into())),
+            }
+        })
+        .as_ref()
 }
 
 static MAIN: OnceLock<Instant> = OnceLock::new();

@@ -51,8 +51,20 @@ log directories, real profile untouched) and reads the IDE's log: "ready" is
 the first exit from dumb mode for the project (editor usable), "indexed" the
 exit after which no dumb mode follows for 15 s. Times are from JVM start (the
 launcher adds about 0.3 s). Test projects: a generated 200-line project and
-Flask 3.1.0 (shallow clone), no interpreter configured. Typing latency and the
-10 MB file are not covered by the script yet.
+Flask 3.1.0 (shallow clone), no interpreter configured.
+
+`python3 scripts/perf/pycharm_typing.py --work <dir> --kind typing|open` covers
+typing and the 10 MB file with the IDE's bundled performance-testing plugin: a
+script of commands runs when the project opens (`%waitForSmart`,
+`%openFile -file big.py -unwfca`, `%goto 50000 1`, `%sleep 3000`, then three
+times `%delayType 50|<200 characters of a comment>` and `%sleep 2000`, then
+`%exitApp true`; for the 10 MB file `%openFile -file huge.py -unwfca`), and the
+IDE writes its spans to an OpenTelemetry JSON file
+(`-Didea.diagnostic.opentelemetry.file`). The typing numbers are the IDE's own
+typing latency spans: from the key event to the end of the editor's paint for
+it, without waiting for the display. The 10 MB number is the `openFile` span.
+Runs: the IDE frontmost, on a temporary copy of the configuration, load average
+about 3.
 
 ### Results (reference)
 | date | machine | version | metric | median | worst | notes |
@@ -62,7 +74,9 @@ Flask 3.1.0 (shallow clone), no interpreter configured. Typing latency and the
 | 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, first open (IDE caches warm): ready / indexed | 1.7 s / 5.6 s | - | 1 run |
 | 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, warm start: ready | 2.60 s | 3.42 s | 3 runs |
 | 2026-10-11 | mac-1 | PyCharm 2026.1.3 | Flask, idle 2 min after indexing: memory | 812 MB RSS (process tree), 643 MB JVM heap used | - | -Xmx2048m |
-| | | | keystroke to paint, 10 MB file, completion | | | not measured yet |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | typing in the 100k-line file at line 50,000, 3 runs x 200 keys (key to end of paint) | p90 2 / 1 / 2 ms, mean 1 / 1 / 1 ms | max 9 / 7 / 4 ms | per run; `pycharm_typing.py --kind typing` |
+| 2026-10-11 | mac-1 | PyCharm 2026.1.3 | open the 10 MB file (`huge.py`, 10,485,700 bytes): `openFile` span | 617 ms | 625 ms | runs 570 / 625 / 617 ms; the very first open took 1031 ms |
+| | | | completion | | | not measured yet |
 
 ## 2. Pyoxide
 
@@ -80,3 +94,69 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 | 2026-10-09 | mac-1 | sqlite 3.53.2 | 0.1 ms | 0.2 ms | 28.6 ms | 3.50 M | `:memory:`, generated rows; table scan of a file about 14 ms |
 | 2026-10-11 | mac-1 | oracle-thin (Free 23) | 39.1 ms | 2.7 ms | 276.6 ms | 0.36 M | PL/SQL wrapper and REF CURSOR fetch around oracle-rs bugs; 64 KiB packets |
 | | | oracle-odpi | | | | | needs Oracle Instant Client |
+
+### Editor and shell
+Measured with `python3 scripts/perf/pyoxide_bench.py --work <dir> --runs 3` on
+the files `pycharm_baseline.py` generates (the same as the reference runs). It
+runs the release binary (`cargo build --release -p pyoxide-ide`) with
+`PYOXIDE_BENCH`; the measurement itself runs inside the application
+(`crates/platform/workbench/src/bench.rs`):
+
+- Typing: the 100,000-line file opens, the caret goes to line 50,000,
+  column 1, after 3 s the same 200 characters as the reference run are typed
+  three times, one key every 50 ms plus a pseudo-random 0-16 ms (so keys do
+  not keep one phase to the display's frames), 2 s between runs. Keys go
+  through the window's own key dispatch, the path of a key event from the
+  platform. Frame start is the start of the root view's render, frame end
+  the end of the paint of a canvas painted last; the scene is then handed
+  to the GPU (Metal encoding and presentation are not included).
+- Two numbers per key:
+  1. **Budget metric, key to frame**: from the moment the key is due to the
+     end of the paint of the first frame that shows it. It includes timer
+     lateness, key handling, any wait for the frame and the frame's own
+     work.
+  2. **App work, comparable to the reference**: the key handling plus the
+     layout and paint of that frame, without the wait between them.
+- Open: the 10 MB file is opened from the open project (3 s after the tree
+  is listed); time from the open command to the end of the first frame
+  that paints its text, and to the first frame painted with its
+  highlighting current. Then the view scrolls 3 lines every 8 ms for 5 s:
+  frame work and the gaps between frames.
+- The window opens without taking the focus (`PYOXIDE_BACKGROUND=1`) and is
+  kept above other windows while measuring, so it is not covered (a covered
+  window gets no frames from the display; the measurement reports
+  `"frames": "forced"` when it has to draw frames itself, and those runs do
+  not count for the budget metric).
+
+Machine `mac-1` (Apple M5, 10 cores, 16 GB, macOS 27.0.1), Rust 1.99.0,
+release build. Load average about 3 at the start of each run (no build
+running). The display refreshed at 60 Hz during these runs (median frame gap
+16.7 ms while scrolling).
+
+| date | machine | metric | median | worst | notes |
+|---|---|---|---|---|---|
+| 2026-10-11 | mac-1 | start to first frame (warm, small project) | 116 ms | 133 ms | 3 runs, from `main` to the end of the first frame's paint |
+| 2026-10-11 | mac-1 | typing, 100k-line file, key to frame (budget metric) | p50 3.06 ms, p90 4.34 ms, p99 5.75 ms | max 6.35 ms | 3 runs x 600 keys; per run p99 5.70 / 5.80 / 5.75 ms |
+| 2026-10-11 | mac-1 | typing, 100k-line file, app work (comparable to the reference) | p50 1.15 ms, p90 1.37 ms, p99 1.97 ms | max 3.92 ms | per run p90 1.35 / 1.37 / 1.37 ms, mean 1.18 / 1.19 / 1.16 ms, max 3.92 / 3.47 / 3.39 ms; key handling alone p50 0.05 ms |
+| 2026-10-11 | mac-1 | open the 10 MB file: first painted text | 24.3 ms | 24.9 ms | 3 runs; reading, decoding and building the rope run off the UI thread |
+| 2026-10-11 | mac-1 | open the 10 MB file: highlighting current | 252.4 ms | 252.7 ms | the first full parse runs in the background; the text is usable before |
+| 2026-10-11 | mac-1 | scrolling the 10 MB file, 3 lines per frame | frame work p50 3.4 ms, p99 4.4 ms | max 6.8 ms | 300 frames in 5 s at 60 Hz, no gap over 1.5x the median |
+| 2026-10-11 | mac-1 | memory after typing (100k-line file open) | 182 MB RSS | 182 MB | single process |
+| 2026-10-11 | mac-1 | memory after opening and scrolling the 10 MB file | 265 MB RSS | 266 MB | |
+
+Against the budgets of docs/performance.md: keystroke to paint p99 5.8 ms
+(budget 16 ms); 10 MB file 24 ms to the first text (budget 200 ms), no dropped
+frames while scrolling; start-up 116 ms (budget 300 ms, measured warm). The
+app's work per key is about the reference IDE's (p90 1.4 ms against 1-2 ms,
+max 3-4 ms against 4-9 ms).
+
+Frames normally follow the display's refresh. Drawing only at the next
+refresh after a key gives, at 60 Hz, key-to-frame p50 11.0 ms, p90 18.0 ms,
+p99 19.5 ms, max 20.6 ms (3 runs, same app work): the wait for the refresh
+dominates and the budget is missed. The window therefore draws at once after
+every keystroke (macOS: the layer's display callback), so the typed text is
+ready for the next refresh; the table above is measured that way.
+
+Not measured yet: idle memory of a mid-size project (no indexing exists yet
+to compare with the reference's 812 MB), cold start after purging the file
+caches, Windows.
