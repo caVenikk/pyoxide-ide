@@ -1,0 +1,26 @@
+[package]
+name = "pyoxide-ide"
+description = "pyoxide-ide: the Pyoxide Python IDE application, composing the platform workbench with Python support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "pyoxide-ide"
+path = "src/main.rs"
+
+[features]
+default = ["runtime-shaders"]
+# Compile the Metal shaders at start-up instead of at build time (no Xcode
+# needed). Release builds made with Xcode turn it off (ADR 0007).
+runtime-shaders = ["gpui/runtime_shaders"]
+
+[dependencies]
+gpui.workspace = true
+themes.workspace = true
+ui.workspace = true
+workbench.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

@@ -357,6 +357,8 @@ pub(crate) fn metric_sources(metric: Metric) -> (&'static [&'static str], f32) {
     match metric {
         Metric::RowHeight => (&["Tree.rowHeight", "List.rowHeight"], 1.0),
         Metric::CornerRadius => (&["Component.arc", "Button.arc"], 0.5),
+        Metric::ButtonRadius => (&["MainToolbar.Button.arc"], 0.5),
+        Metric::IslandRadius => (&["Island.arc"], 0.5),
         Metric::FocusWidth => (&["Component.focusWidth"], 1.0),
         _ => (&[], 1.0),
     }

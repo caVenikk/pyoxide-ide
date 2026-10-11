@@ -19,7 +19,7 @@ A theme assigns a value to every role of three kinds, plus fonts:
   `underline` (`single`, `double`, `wavy`, `dotted`, `dashed`, `thick`) with
   `underline-color`, `strikethrough` and a `border` colour. Unset attributes
   inherit from the editor defaults.
-- **Metrics** (`metrics.*`, 20): layout numbers in logical pixels (row height,
+- **Metrics** (`metrics.*`, 28): layout numbers in logical pixels (row height,
   gutter width, paddings, radii, ...).
 - **Fonts** (`font.*`): UI, editor and terminal families (a list, first match
   wins), sizes, editor line spacing and ligatures.
@@ -383,10 +383,15 @@ editor.
 |---|---|---|
 | `metrics.row-height` | `Tree.rowHeight`, `List.rowHeight` | Height of a list, tree or table row |
 | `metrics.row-height-compact` | none, taken from the base theme | Row height in compact mode |
+| `metrics.tree-indent` | none, taken from the base theme | Indentation of one tree level |
 | `metrics.tab-height` | none, taken from the base theme | Height of an editor tab |
+| `metrics.tab-selection-height` | none, taken from the base theme | Height of the rounded background of the selected or hovered tab |
 | `metrics.toolbar-height` | none, taken from the base theme | Height of the main toolbar |
+| `metrics.toolbar-button-size` | none, taken from the base theme | Size of an icon button in the main toolbar |
 | `metrics.status-bar-height` | none, taken from the base theme | Height of the status bar |
 | `metrics.tool-window-header-height` | none, taken from the base theme | Height of a tool window title strip |
+| `metrics.stripe-width` | none, taken from the base theme | Width of a tool window stripe |
+| `metrics.stripe-button-size` | none, taken from the base theme | Size of a tool window stripe button |
 | `metrics.gutter-width` | none, taken from the base theme | Minimum width of the editor gutter |
 | `metrics.gutter-padding` | none, taken from the base theme | Horizontal padding inside the gutter |
 | `metrics.indent-guide-width` | none, taken from the base theme | Thickness of indent guides |
@@ -395,8 +400,11 @@ editor.
 | `metrics.padding-small` | none, taken from the base theme | Small gap between related elements |
 | `metrics.padding` | none, taken from the base theme | Standard gap between elements |
 | `metrics.padding-large` | none, taken from the base theme | Gap between groups of elements |
+| `metrics.island-gap` | none, taken from the base theme | Gap between the island panels of the main window and around them |
 | `metrics.corner-radius` | `Component.arc`, `Button.arc` (half of the value: an arc is a diameter) | Radius of buttons, inputs and popups |
 | `metrics.corner-radius-small` | none, taken from the base theme | Radius of small elements such as tags |
+| `metrics.button-radius` | `MainToolbar.Button.arc` (half of the value) | Radius of the hover and selection backgrounds of toolbar, stripe and tab buttons |
+| `metrics.island-radius` | `Island.arc` (half of the value) | Radius of the island panels of the main window |
 | `metrics.border-width` | none, taken from the base theme | Thickness of borders |
 | `metrics.focus-width` | `Component.focusWidth` | Thickness of the focus ring |
 | `metrics.scrollbar-width` | none, taken from the base theme | Width of scrollbars |

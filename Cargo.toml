@@ -13,8 +13,11 @@ members = [
     "crates/platform/secrets",
     "crates/platform/settings-import",
     "crates/platform/themes",
+    "crates/platform/ui",
+    "crates/platform/workbench",
     "crates/python/py-env",
     "crates/python/pyoxide-cli",
+    "crates/python/pyoxide-ide",
 ]
 
 [workspace.package]
@@ -35,6 +38,10 @@ toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 zeroize = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
+gpui = "=0.2.2"
+# Same major version as GPUI uses, for colour icons at device scale.
+resvg = { version = "0.45", default-features = false }
 commands = { path = "crates/platform/commands" }
 db-core = { path = "crates/platform/db-core" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
@@ -46,4 +53,6 @@ db-testkit = { path = "crates/platform/db-testkit" }
 secrets = { path = "crates/platform/secrets" }
 settings-import = { path = "crates/platform/settings-import" }
 themes = { path = "crates/platform/themes" }
+ui = { path = "crates/platform/ui" }
+workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }

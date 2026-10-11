@@ -1,0 +1,29 @@
+[package]
+name = "workbench"
+description = "Main window of Pyoxide IDE: toolbar, tool window stripes, project tool window, editor tabs, status bar, keymaps and application start-up"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+commands.workspace = true
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+themes.workspace = true
+ui.workspace = true
+
+# Window screenshots (PYOXIDE_SHOT) ask the window server for an image of
+# the app's own window; these crates are already in GPUI's dependency tree.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+image = { version = "0.25", default-features = false, features = ["png"] }
+objc = "0.2"
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

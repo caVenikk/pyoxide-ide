@@ -35,6 +35,36 @@ here with: source URL, commit, file(s), license, and what was changed.
   supported; a single entry with a matching title is used when no entry
   matches the user name.
 
+- crates/platform/ui/assets/icons/, crates/python/pyoxide-ide/assets/icons/
+  New UI icons of the IntelliJ Platform Community (Apache-2.0, license text in
+  LICENSE-APACHE), https://github.com/JetBrains/intellij-community @
+  f5a0bddb9cee9135c700de9a67534e11cdf61c07. Files (light `name.svg` and dark
+  `name_dark.svg` variants): platform/icons/src/expui/{general,run,nodes,
+  fileTypes,toolwindows,windows}/... (the subset under the same relative
+  paths in assets/icons/), platform/icons/src/vcs/branch.svg,
+  plugins/terminal/resources/icons/expui/toolwindow/terminal@20x20.svg,
+  python/python-parser/resources/icons/com/jetbrains/python/parser/expui/python.svg,
+  python/pluginResources/icons/com/jetbrains/pythonCore/python/expui/
+  pythonPackages@20x20.svg and pythonConsoleToolWindow@20x20.svg.
+  Unchanged copies; the Python icons are renamed by dropping their folders.
+
+- crates/platform/themes/themes/*.toml (metrics), docs/theme-mapping.md
+  Layout metrics of the New UI with islands taken from the IntelliJ Platform
+  Community (Apache-2.0) @ f5a0bddb9cee9135c700de9a67534e11cdf61c07:
+  platform/platform-resources/src/themes/islands/ManyIslandsDark.theme.json
+  (Island.arc, Tree.rowHeight, TabbedPane.tabHeight, MainToolbar.Icon.insets),
+  platform/util/ui/src/com/intellij/util/ui/JBUI.java (header, toolbar and
+  stripe defaults), platform/platform-resources/src/themes/darcula.theme.json
+  (tree indents), platform/platform-impl/src/com/intellij/openapi/application/
+  impl/islands/IslandsTabPainter.kt (tab highlight height and radius).
+  Only numbers are used; no code is copied.
+
+- crates/platform/ui/assets/fonts/
+  Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,
+  and JetBrains Mono 2.304 (c) 2020 The JetBrains Mono Project Authors,
+  https://github.com/JetBrains/JetBrainsMono; both SIL Open Font License 1.1,
+  license texts next to the fonts. Unchanged.
+
 Trademarks
 ----------
 PyCharm and IntelliJ are trademarks of JetBrains s.r.o. Python is a trademark of

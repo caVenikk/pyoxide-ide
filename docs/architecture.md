@@ -22,6 +22,17 @@
 - `db-service`: connection profiles and secrets (ADR 0004), driver dispatch,
   diagnostics, `db.*` commands.
 - `db-cli`: `pyoxide-db`, a thin front-end over `db-service`.
+- `themes`: theme model (UI roles, text roles, metrics, fonts), built-in
+  themes, importers of colour schemes and UI themes.
+- `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
+  metrics, bundled fonts, colour icons rasterized at device scale, common
+  components, the UI command index (`ui_commands!`, `command::invoke`).
+- `workbench`: the main window (toolbar, stripes, tool windows, editor
+  area, status bar), application start-up and environment switches.
+- `pyoxide-ide` (python): the `pyoxide-ide` GUI binary.
+
+The application shell and editor are described in ADR 0007, including the
+crates still to come (`text`, `syntax`, `project`, `editor`, `py-syntax`).
 
 ## Platform and products
 One repository, one Cargo workspace: a language-agnostic platform layer and

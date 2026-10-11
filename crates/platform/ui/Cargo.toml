@@ -1,0 +1,25 @@
+[package]
+name = "ui"
+description = "Component layer of Pyoxide IDE on GPUI: theme tokens, fonts, icons, common components and the UI command index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+commands.workspace = true
+gpui.workspace = true
+image = { version = "0.25", default-features = false }
+resvg.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smallvec = "1"
+themes.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+# Metal shaders are compiled at start-up on machines without Xcode
+# (ADR 0007); the product binary enables the same feature by default.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

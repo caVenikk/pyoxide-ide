@@ -13,6 +13,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
+      # fontconfig on Linux; tests use its headless test platform.
+      - name: Linux packages for GPUI
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
