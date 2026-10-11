@@ -64,7 +64,6 @@ impl Lifecycle {
         if let Ok(mut guard) = self.guard.lock() {
             guard.take();
         }
-        self.inner.released.notify_waiters();
     }
 
     pub(crate) fn mark_timed_out(&self) {
@@ -84,7 +83,7 @@ impl Lifecycle {
 }
 
 /// Run `terminate` in the background, for `Drop`. New statements on the
-/// connection wait for it (see `Inner::acquire_guard`).
+/// connection wait for it (see `BusyFlag::acquire_after_cleanup`).
 pub(crate) fn spawn_terminate(core: Arc<dyn CursorCore>) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         // No runtime to run the cleanup on. tokio-postgres still discards
@@ -92,12 +91,10 @@ pub(crate) fn spawn_terminate(core: Arc<dyn CursorCore>) {
         core.life().finish();
         return;
     };
-    let inner = Arc::clone(core.life().inner());
-    inner.cleanups.fetch_add(1, Ordering::AcqRel);
+    let cleanup = core.life().inner().busy.begin_cleanup();
     handle.spawn(async move {
         core.terminate().await;
-        inner.cleanups.fetch_sub(1, Ordering::AcqRel);
-        inner.released.notify_waiters();
+        drop(cleanup);
     });
 }
 

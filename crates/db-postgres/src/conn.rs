@@ -1,6 +1,6 @@
 //! The connection: statements, transactions, cancel and close.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -10,7 +10,6 @@ use db_core::{
     Backend, BusyFlag, BusyGuard, Connection, Error, ExecOptions, Outcome, Result, Secret, TxMode,
     Value,
 };
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
@@ -33,10 +32,9 @@ pub(crate) struct Inner {
     target: Target,
     tls: MakeRustlsConnect,
     secret: Secret,
-    busy: BusyFlag,
-    /// Cursors being stopped in the background (see `Cursor` drop).
-    pub(crate) cleanups: AtomicUsize,
-    pub(crate) released: Notify,
+    /// Cursors stopped in the background count as cleanups (see `Cursor`
+    /// drop); new statements wait for them.
+    pub(crate) busy: BusyFlag,
     tx_mode: Mutex<TxMode>,
     in_tx: AtomicBool,
     active: Mutex<Option<Weak<dyn CursorCore>>>,
@@ -60,8 +58,6 @@ impl Inner {
             tls,
             secret,
             busy: BusyFlag::default(),
-            cleanups: AtomicUsize::new(0),
-            released: Notify::new(),
             tx_mode: Mutex::new(TxMode::Auto),
             in_tx: AtomicBool::new(false),
             active: Mutex::new(None),
@@ -108,23 +104,7 @@ impl Inner {
     /// Claim the connection for a statement. A cursor that is being stopped
     /// in the background is waited for; an open cursor is `Busy`.
     async fn acquire_guard(&self) -> Result<BusyGuard> {
-        let deadline = tokio::time::Instant::now() + CANCEL_GRACE * 2;
-        loop {
-            let notified = self.released.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            match self.busy.acquire() {
-                Ok(guard) => return Ok(guard),
-                Err(e) => {
-                    if self.cleanups.load(Ordering::Acquire) == 0 {
-                        return Err(e);
-                    }
-                }
-            }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return Err(Error::busy());
-            }
-        }
+        self.busy.acquire_after_cleanup(CANCEL_GRACE * 2).await
     }
 
     /// Stop the open cursor, if any (before commit, rollback and close).
