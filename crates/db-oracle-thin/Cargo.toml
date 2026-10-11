@@ -17,4 +17,5 @@ oracle-rs = "0.1.7"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 
 [dev-dependencies]
+db-testkit.workspace = true
 tokio.workspace = true

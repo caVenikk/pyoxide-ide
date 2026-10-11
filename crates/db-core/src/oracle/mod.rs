@@ -1,6 +1,8 @@
 //! Oracle helpers shared by the thin and the Oracle Client drivers: error
 //! code extraction and classification (codes from the public Oracle Database
-//! Error Messages reference).
+//! Error Messages reference), and statement text helpers in [`sql`].
+
+pub mod sql;
 
 use crate::{Error, ErrorKind};
 

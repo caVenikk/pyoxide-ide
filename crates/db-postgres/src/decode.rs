@@ -7,7 +7,7 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta};
-use db_core::{Column, Value, ValueKind};
+use db_core::{Column, Value, ValueKind, convert};
 use tokio_postgres::types::{FromSql, Kind, Type};
 
 use crate::{interval, numeric};
@@ -191,7 +191,7 @@ fn decode(ty: &Type, raw: &[u8], limit: usize) -> Option<Value> {
     match ty.kind() {
         Kind::Array(elem) => return decode_array(elem, raw, limit),
         Kind::Domain(base) => return decode(base, raw, limit),
-        Kind::Enum(_) => return Some(text_value(raw, limit)),
+        Kind::Enum(_) => return Some(convert::text_from_utf8(raw, limit)),
         Kind::Range(sub) => return decode_range(sub, raw).map(|t| other(ty, t)),
         Kind::Multirange(sub) => return decode_multirange(sub, raw).map(|t| other(ty, t)),
         Kind::Composite(fields) => {
@@ -232,18 +232,18 @@ fn decode(ty: &Type, raw: &[u8], limit: usize) -> Option<Value> {
             },
         },
         oid::TEXT | oid::VARCHAR | oid::BPCHAR | oid::NAME | oid::UNKNOWN | oid::XML => {
-            text_value(raw, limit)
+            convert::text_from_utf8(raw, limit)
         }
         oid::CHAR => Value::Text(String::from_utf8_lossy(raw).into_owned()),
-        oid::BYTEA => bytes_value(raw, limit),
+        oid::BYTEA => convert::bytes_from_slice(raw, limit),
         oid::UUID => Value::Uuid(uuid_text(raw)?),
-        oid::JSON => json_value(raw, limit),
+        oid::JSON => convert::json_from_utf8(raw, limit),
         oid::JSONB => {
             let (version, body) = raw.split_first()?;
             if *version != 1 {
                 return None;
             }
-            json_value(body, limit)
+            convert::json_from_utf8(body, limit)
         }
         oid::DATE => {
             let days = i32::from_be_bytes(raw.try_into().ok()?);
@@ -319,7 +319,7 @@ fn decode(ty: &Type, raw: &[u8], limit: usize) -> Option<Value> {
             other(ty, String::from_utf8(body.to_vec()).ok()?)
         }
         oid::RECORD => other(ty, decode_composite(None, raw)?),
-        _ if ty.name() == "citext" => text_value(raw, limit),
+        _ if ty.name() == "citext" => convert::text_from_utf8(raw, limit),
         _ => return None,
     })
 }
@@ -366,46 +366,6 @@ fn shortest_f32(f: f32) -> f64 {
     } else {
         f64::from(f)
     }
-}
-
-fn utf8_cut(raw: &[u8], limit: usize) -> usize {
-    let mut cut = limit.min(raw.len());
-    while cut > 0 && cut < raw.len() && (raw[cut] & 0xC0) == 0x80 {
-        cut -= 1;
-    }
-    cut
-}
-
-fn truncated(prefix: Value, full_len: usize) -> Value {
-    Value::Truncated {
-        prefix: Box::new(prefix),
-        full_len: Some(full_len as u64),
-    }
-}
-
-fn text_value(raw: &[u8], limit: usize) -> Value {
-    if raw.len() > limit {
-        let cut = utf8_cut(raw, limit);
-        let prefix = String::from_utf8_lossy(&raw[..cut]).into_owned();
-        return truncated(Value::Text(prefix), raw.len());
-    }
-    Value::Text(String::from_utf8_lossy(raw).into_owned())
-}
-
-fn json_value(raw: &[u8], limit: usize) -> Value {
-    if raw.len() > limit {
-        let cut = utf8_cut(raw, limit);
-        let prefix = String::from_utf8_lossy(&raw[..cut]).into_owned();
-        return truncated(Value::Json(prefix), raw.len());
-    }
-    Value::Json(String::from_utf8_lossy(raw).into_owned())
-}
-
-fn bytes_value(raw: &[u8], limit: usize) -> Value {
-    if raw.len() > limit {
-        return truncated(Value::Bytes(raw[..limit].to_vec()), raw.len());
-    }
-    Value::Bytes(raw.to_vec())
 }
 
 fn uuid_text(raw: &[u8]) -> Option<String> {

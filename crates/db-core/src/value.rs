@@ -30,8 +30,13 @@ pub enum Value {
     /// JSON document as text, exactly as the server returned it.
     Json(String),
     Array(Vec<Value>),
-    /// A value cut to `ExecOptions::max_value_bytes`. `full_len` is the full
-    /// length in bytes when the backend reports it.
+    /// A value cut to `ExecOptions::max_value_bytes` (the prefix is at most
+    /// that many bytes, cut on a character boundary for text). `full_len` is
+    /// the full length when the backend reports it, in the backend's own
+    /// length unit: bytes in general, but for Oracle CLOB and NCLOB values
+    /// it can be the LOB length in characters (UTF-16 code units, as Oracle
+    /// counts them), which is what the server reports without reading the
+    /// whole value.
     Truncated {
         prefix: Box<Value>,
         full_len: Option<u64>,

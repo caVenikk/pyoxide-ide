@@ -1,0 +1,13 @@
+[package]
+name = "db-testkit"
+description = "Conformance suite of the db-core contract that every database driver runs (development tooling)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+db-core.workspace = true
+chrono.workspace = true
+tokio.workspace = true

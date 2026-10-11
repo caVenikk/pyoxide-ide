@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::io::Read;
 
 use chrono::{FixedOffset, NaiveDate, TimeZone};
-use db_core::{Column, Error, Result, Value, ValueKind};
+use db_core::{Column, Error, Result, Value, ValueKind, convert};
 use oracle::sql_type::{
     Blob, Clob, InnerValue, IntervalDS, IntervalYM, Lob, Nclob, OracleType, Timestamp,
 };
@@ -154,85 +154,16 @@ fn number_kind(prec: u8, scale: i8) -> ValueKind {
     }
 }
 
-/// Plain decimal notation for the text form of an Oracle NUMBER: no exponent,
-/// a `0` before a leading point, no trailing fractional zeros, `-` for
-/// negatives. `None` for text that is not a finite number (`~` is the Oracle
-/// infinity).
-pub(crate) fn normalize_number(text: &str) -> Option<String> {
-    let t = text.trim();
-    let (negative, t) = match t.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, t.strip_prefix('+').unwrap_or(t)),
-    };
-    let (mantissa, exponent) = match t.find(['e', 'E']) {
-        Some(i) => (&t[..i], t[i + 1..].parse::<i32>().ok()?),
-        None => (t, 0),
-    };
-    let (int_part, frac_part) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    if int_part.is_empty() && frac_part.is_empty() {
-        return None;
-    }
-    if !int_part
-        .bytes()
-        .chain(frac_part.bytes())
-        .all(|b| b.is_ascii_digit())
-    {
-        return None;
-    }
-    // Oracle's exponent range is far below this; it only bounds the expansion.
-    if exponent.abs() > 1000 {
-        return None;
-    }
-    let all_digits = format!("{int_part}{frac_part}");
-    let leading_zeros = all_digits.bytes().take_while(|&b| b == b'0').count();
-    let digits = all_digits[leading_zeros..].trim_end_matches('0');
-    if digits.is_empty() {
-        return Some("0".into());
-    }
-    // Digits to the left of the decimal point.
-    let point = int_part.len() as i64 + i64::from(exponent) - leading_zeros as i64;
-    let mut out = String::with_capacity(digits.len() + 4);
-    if negative {
-        out.push('-');
-    }
-    if point <= 0 {
-        out.push_str("0.");
-        out.extend(std::iter::repeat_n('0', (-point) as usize));
-        out.push_str(digits);
-    } else if point as usize >= digits.len() {
-        out.push_str(digits);
-        out.extend(std::iter::repeat_n('0', point as usize - digits.len()));
-    } else {
-        out.push_str(&digits[..point as usize]);
-        out.push('.');
-        out.push_str(&digits[point as usize..]);
-    }
-    Some(out)
-}
-
-/// Pad the fraction of a normalized number to `scale` digits (`5` -> `5.00`).
-pub(crate) fn pad_scale(plain: &str, scale: usize) -> String {
-    if scale == 0 {
-        return plain.to_owned();
-    }
-    let (int_part, frac) = plain.split_once('.').unwrap_or((plain, ""));
-    let mut out = String::with_capacity(plain.len() + scale + 1);
-    out.push_str(int_part);
-    out.push('.');
-    out.push_str(frac);
-    out.extend(std::iter::repeat_n('0', scale.saturating_sub(frac.len())));
-    out
-}
-
 pub(crate) fn number_value(text: &str, shape: NumberShape) -> Value {
-    let Some(plain) = normalize_number(text) else {
+    // `~` (the Oracle infinity) is not a finite number.
+    let Some(plain) = convert::normalize_decimal(text) else {
         return Value::Other {
             type_name: "NUMBER".into(),
             text: text.trim().to_owned(),
         };
     };
     match shape {
-        NumberShape::Fixed(scale) => Value::Decimal(pad_scale(&plain, scale)),
+        NumberShape::Fixed(scale) => Value::Decimal(convert::pad_decimal_scale(&plain, scale)),
         NumberShape::Whole => {
             if plain.contains('.') {
                 Value::Decimal(plain)
@@ -292,36 +223,6 @@ pub(crate) fn interval_ds_text(i: &IntervalDS) -> String {
 // Size limits and LOBs
 // ----------------------------------------------------------------------------
 
-/// Text longer than `max` bytes becomes a `Truncated` prefix (cut at a
-/// character boundary) with the full byte length.
-pub(crate) fn cut_text(mut s: String, max: usize) -> Value {
-    if s.len() <= max {
-        return Value::Text(s);
-    }
-    let full = s.len() as u64;
-    let mut end = max;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-    Value::Truncated {
-        prefix: Box::new(Value::Text(s)),
-        full_len: Some(full),
-    }
-}
-
-pub(crate) fn cut_bytes(mut b: Vec<u8>, max: usize) -> Value {
-    if b.len() <= max {
-        return Value::Bytes(b);
-    }
-    let full = b.len() as u64;
-    b.truncate(max);
-    Value::Truncated {
-        prefix: Box::new(Value::Bytes(b)),
-        full_len: Some(full),
-    }
-}
-
 fn utf8_lossy(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
@@ -340,7 +241,7 @@ pub(crate) fn read_text_lob<L: Read + Lob>(lob: &mut L, max_bytes: usize) -> Res
     if size <= (max_bytes as u64).saturating_mul(WHOLE_READ_FACTOR) {
         let mut bytes = Vec::new();
         lob.read_to_end(&mut bytes).map_err(io_err)?;
-        return Ok(cut_text(utf8_lossy(bytes), max_bytes));
+        return Ok(convert::truncate_text(utf8_lossy(bytes), max_bytes));
     }
     let want = HUGE_CLOB_PREFIX_BYTES.min(max_bytes);
     let mut sample = Vec::with_capacity(want + SAFE_CHAR_READ_BYTES);
@@ -352,14 +253,9 @@ pub(crate) fn read_text_lob<L: Read + Lob>(lob: &mut L, max_bytes: usize) -> Res
         }
         sample.extend_from_slice(&buf[..n]);
     }
-    let prefix = match cut_text(utf8_lossy(sample), max_bytes.min(want)) {
-        Value::Truncated { prefix, .. } => *prefix,
-        other => other,
-    };
-    Ok(Value::Truncated {
-        prefix: Box::new(prefix),
-        full_len: Some(size),
-    })
+    let mut prefix = utf8_lossy(sample);
+    prefix.truncate(convert::floor_char_boundary(&prefix, max_bytes.min(want)));
+    Ok(convert::truncated(Value::Text(prefix), size))
 }
 
 /// BLOB as bytes, at most `max_bytes` of it; `full_len` is the exact size.
@@ -380,10 +276,7 @@ pub(crate) fn read_bytes_lob<L: Read + Lob>(lob: &mut L, max_bytes: usize) -> Re
     }
     buf.truncate(filled);
     Ok(if size > max_bytes as u64 {
-        Value::Truncated {
-            prefix: Box::new(Value::Bytes(buf)),
-            full_len: Some(size),
-        }
+        convert::truncated(Value::Bytes(buf), size)
     } else {
         Value::Bytes(buf)
     })
@@ -405,7 +298,9 @@ fn number_cell(sv: &oracle::SqlValue<'_>, shape: NumberShape) -> Result<Value> {
     Ok(match sv.as_inner_value().map_err(oerr)? {
         InnerValue::Int64(i) => match shape {
             NumberShape::Whole => Value::Int(i),
-            NumberShape::Fixed(scale) => Value::Decimal(pad_scale(&i.to_string(), scale)),
+            NumberShape::Fixed(scale) => {
+                Value::Decimal(convert::pad_decimal_scale(&i.to_string(), scale))
+            }
         },
         InnerValue::UInt64(u) => number_value(&u.to_string(), shape),
         InnerValue::Float(f) => Value::Float(float32_value(f)),
@@ -440,8 +335,8 @@ pub(crate) fn convert_cell(
                 _ => sv.get::<String>().map_err(oerr)?,
             };
             Ok(match ty {
-                OracleType::Json => json_value(text, max),
-                _ => cut_text(text, max),
+                OracleType::Json => convert::truncate_json(text, max),
+                _ => convert::truncate_text(text, max),
             })
         }
         OracleType::Number(_, scale) => number_cell(sv, number_shape(*scale)),
@@ -450,8 +345,11 @@ pub(crate) fn convert_cell(
         }
         OracleType::BinaryFloat | OracleType::BinaryDouble => number_cell(sv, NumberShape::Whole),
         OracleType::Raw(_) | OracleType::LongRaw => match sv.as_inner_value().map_err(oerr)? {
-            InnerValue::Raw(b) => Ok(cut_bytes(b.to_vec(), max)),
-            _ => Ok(cut_bytes(sv.get::<Vec<u8>>().map_err(oerr)?, max)),
+            InnerValue::Raw(b) => Ok(convert::bytes_from_slice(b, max)),
+            _ => Ok(convert::truncate_bytes(
+                sv.get::<Vec<u8>>().map_err(oerr)?,
+                max,
+            )),
         },
         OracleType::Date | OracleType::Timestamp(_) => {
             let ts: Timestamp = sv.get().map_err(oerr)?;
@@ -502,23 +400,6 @@ pub(crate) fn convert_cell(
             type_name: column_type_name(ty),
             text: sv.get::<String>().map_err(oerr)?,
         }),
-    }
-}
-
-fn json_value(text: String, max: usize) -> Value {
-    match cut_text(text, max) {
-        Value::Text(t) => Value::Json(t),
-        Value::Truncated { prefix, full_len } => match *prefix {
-            Value::Text(t) => Value::Truncated {
-                prefix: Box::new(Value::Json(t)),
-                full_len,
-            },
-            other => Value::Truncated {
-                prefix: Box::new(other),
-                full_len,
-            },
-        },
-        other => other,
     }
 }
 
@@ -635,60 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_plain_numbers() {
-        let n = |s: &str| normalize_number(s);
-        assert_eq!(n("0").as_deref(), Some("0"));
-        assert_eq!(n("1").as_deref(), Some("1"));
-        assert_eq!(n("-1").as_deref(), Some("-1"));
-        assert_eq!(n("12.5").as_deref(), Some("12.5"));
-        assert_eq!(n("-12.50").as_deref(), Some("-12.5"));
-        assert_eq!(n(".5").as_deref(), Some("0.5"));
-        assert_eq!(n("-.5").as_deref(), Some("-0.5"));
-        assert_eq!(n("0.05").as_deref(), Some("0.05"));
-        assert_eq!(n("000123").as_deref(), Some("123"));
-        assert_eq!(n("+7").as_deref(), Some("7"));
-        assert_eq!(n("  42 ").as_deref(), Some("42"));
-        assert_eq!(n("100").as_deref(), Some("100"));
-        assert_eq!(n("0.000").as_deref(), Some("0"));
-        assert_eq!(n("-0").as_deref(), Some("0"));
-    }
-
-    #[test]
-    fn removes_exponents() {
-        let n = |s: &str| normalize_number(s);
-        assert_eq!(n("1E+2").as_deref(), Some("100"));
-        assert_eq!(n("1e2").as_deref(), Some("100"));
-        assert_eq!(n("1.5E+3").as_deref(), Some("1500"));
-        assert_eq!(n("1.5E-5").as_deref(), Some("0.000015"));
-        assert_eq!(n("-2.5E-1").as_deref(), Some("-0.25"));
-        assert_eq!(n("1.2345E+2").as_deref(), Some("123.45"));
-        assert_eq!(n("0E+5").as_deref(), Some("0"));
-        assert_eq!(
-            n("1E+38").as_deref(),
-            Some("100000000000000000000000000000000000000")
-        );
-        assert_eq!(n("-1.5E-10").as_deref(), Some("-0.00000000015"));
-        // 38 significant digits are kept exactly.
-        assert_eq!(
-            n("12345678901234567890123456789012345678").as_deref(),
-            Some("12345678901234567890123456789012345678")
-        );
-        assert_eq!(
-            n("1.2345678901234567890123456789012345678E+10").as_deref(),
-            Some("12345678901.234567890123456789012345678")
-        );
-    }
-
-    #[test]
-    fn rejects_non_numbers() {
-        for s in [
-            "", "-", "~", "-~", "NaN", "1.2.3", "1e", "1e+x", "abc", "1,5", ".", "1E+99999",
-        ] {
-            assert_eq!(normalize_number(s), None, "{s:?}");
-        }
-    }
-
-    #[test]
     fn whole_numbers_are_int_when_they_fit() {
         let v = |s| number_value(s, NumberShape::Whole);
         assert_eq!(v("42"), Value::Int(42));
@@ -792,52 +619,6 @@ mod tests {
         assert_eq!(interval_ym_text(&ym), "+01-02");
         let ym = IntervalYM::new(-10, -11).unwrap().and_prec(2).unwrap();
         assert_eq!(interval_ym_text(&ym), "-10-11");
-    }
-
-    #[test]
-    fn text_is_cut_at_a_character_boundary() {
-        assert_eq!(cut_text("abc".into(), 3), Value::Text("abc".into()));
-        let cut = cut_text("abcdef".into(), 4);
-        assert_eq!(
-            cut,
-            Value::Truncated {
-                prefix: Box::new(Value::Text("abcd".into())),
-                full_len: Some(6)
-            }
-        );
-        // 'é' is two bytes; 3 bytes of "ééé" keep one character.
-        match cut_text("ééé".into(), 3) {
-            Value::Truncated { prefix, full_len } => {
-                assert_eq!(*prefix, Value::Text("é".into()));
-                assert_eq!(full_len, Some(6));
-            }
-            other => panic!("{other:?}"),
-        }
-        // A limit inside the first character leaves an empty prefix.
-        match cut_text("ééé".into(), 1) {
-            Value::Truncated { prefix, .. } => assert_eq!(*prefix, Value::Text(String::new())),
-            other => panic!("{other:?}"),
-        }
-        assert_eq!(cut_bytes(vec![1, 2, 3], 3), Value::Bytes(vec![1, 2, 3]));
-        assert_eq!(
-            cut_bytes(vec![1, 2, 3, 4], 2),
-            Value::Truncated {
-                prefix: Box::new(Value::Bytes(vec![1, 2])),
-                full_len: Some(4)
-            }
-        );
-    }
-
-    #[test]
-    fn json_keeps_its_kind_when_cut() {
-        assert_eq!(json_value("{}".into(), 10), Value::Json("{}".into()));
-        match json_value("{\"a\":1}".into(), 3) {
-            Value::Truncated { prefix, full_len } => {
-                assert_eq!(*prefix, Value::Json("{\"a".into()));
-                assert_eq!(full_len, Some(7));
-            }
-            other => panic!("{other:?}"),
-        }
     }
 
     /// A LOB in memory that behaves like the `oracle` crate's `Clob` for the

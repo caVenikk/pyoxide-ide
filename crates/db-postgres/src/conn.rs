@@ -1,16 +1,16 @@
 //! The connection: statements, transactions, cancel and close.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use db_core::timeout::{CANCEL_GRACE, with_timeout};
+use db_core::transaction::TxState;
 use db_core::{
     Backend, BusyFlag, BusyGuard, Connection, Error, ExecOptions, Outcome, Result, Secret, TxMode,
     Value,
 };
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
@@ -33,12 +33,10 @@ pub(crate) struct Inner {
     target: Target,
     tls: MakeRustlsConnect,
     secret: Secret,
-    busy: BusyFlag,
-    /// Cursors being stopped in the background (see `Cursor` drop).
-    pub(crate) cleanups: AtomicUsize,
-    pub(crate) released: Notify,
-    tx_mode: Mutex<TxMode>,
-    in_tx: AtomicBool,
+    /// Cursors stopped in the background count as cleanups (see `Cursor`
+    /// drop); new statements wait for them.
+    pub(crate) busy: BusyFlag,
+    tx: Mutex<TxState>,
     active: Mutex<Option<Weak<dyn CursorCore>>>,
     cursor_seq: AtomicU64,
     version: tokio::sync::OnceCell<String>,
@@ -60,10 +58,7 @@ impl Inner {
             tls,
             secret,
             busy: BusyFlag::default(),
-            cleanups: AtomicUsize::new(0),
-            released: Notify::new(),
-            tx_mode: Mutex::new(TxMode::Auto),
-            in_tx: AtomicBool::new(false),
+            tx: Mutex::new(TxState::default()),
             active: Mutex::new(None),
             cursor_seq: AtomicU64::new(0),
             version: tokio::sync::OnceCell::new(),
@@ -88,8 +83,18 @@ impl Inner {
         Ok(client)
     }
 
+    fn tx(&self) -> TxState {
+        self.tx.lock().map(|t| *t).unwrap_or_default()
+    }
+
+    fn update_tx(&self, f: impl FnOnce(&mut TxState)) {
+        if let Ok(mut tx) = self.tx.lock() {
+            f(&mut tx);
+        }
+    }
+
     fn mode(&self) -> TxMode {
-        self.tx_mode.lock().map(|m| *m).unwrap_or_default()
+        self.tx().mode()
     }
 
     /// Ask the server to stop the running statement.
@@ -108,23 +113,7 @@ impl Inner {
     /// Claim the connection for a statement. A cursor that is being stopped
     /// in the background is waited for; an open cursor is `Busy`.
     async fn acquire_guard(&self) -> Result<BusyGuard> {
-        let deadline = tokio::time::Instant::now() + CANCEL_GRACE * 2;
-        loop {
-            let notified = self.released.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            match self.busy.acquire() {
-                Ok(guard) => return Ok(guard),
-                Err(e) => {
-                    if self.cleanups.load(Ordering::Acquire) == 0 {
-                        return Err(e);
-                    }
-                }
-            }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return Err(Error::busy());
-            }
-        }
+        self.busy.acquire_after_cleanup(CANCEL_GRACE * 2).await
     }
 
     /// Stop the open cursor, if any (before commit, rollback and close).
@@ -141,23 +130,20 @@ impl Inner {
     }
 
     async fn begin_if_needed(&self, client: &Client, sql: &str) -> Result<()> {
-        if self.mode() == TxMode::Manual
-            && !self.in_tx.load(Ordering::Acquire)
-            && stmt::needs_implicit_begin(sql)
-        {
+        if self.tx().needs_begin(stmt::needs_implicit_begin(sql)) {
             client
                 .batch_execute("BEGIN")
                 .await
                 .map_err(|e| self.map(&e))?;
-            self.in_tx.store(true, Ordering::Release);
+            self.update_tx(TxState::begun);
         }
         Ok(())
     }
 
     fn note_statement(&self, sql: &str) {
         match stmt::tx_effect(sql) {
-            TxEffect::Begin => self.in_tx.store(true, Ordering::Release),
-            TxEffect::End => self.in_tx.store(false, Ordering::Release),
+            TxEffect::Begin => self.update_tx(TxState::begun),
+            TxEffect::End => self.update_tx(TxState::ended),
             TxEffect::None => {}
         }
     }
@@ -269,13 +255,13 @@ impl Inner {
 
     async fn end_transaction(&self, sql: &str) -> Result<()> {
         let client = self.client()?;
-        if !self.in_tx.load(Ordering::Acquire) {
+        if !self.tx().is_open() {
             // Nothing pending (always the case in auto-commit mode).
             return Ok(());
         }
         // A transaction ends its portals, so the open cursor ends with it.
         self.abort_active().await;
-        self.in_tx.store(false, Ordering::Release);
+        self.update_tx(TxState::ended);
         client.batch_execute(sql).await.map_err(|e| self.map(&e))?;
         Ok(())
     }
@@ -351,15 +337,17 @@ impl Connection for PostgresConnection {
     }
 
     async fn set_tx_mode(&self, mode: TxMode) -> Result<()> {
-        let previous = {
-            let mut slot = self
+        let commit = {
+            let mut tx = self
                 .inner
-                .tx_mode
+                .tx
                 .lock()
                 .map_err(|_| Error::internal("connection state is poisoned"))?;
-            std::mem::replace(&mut *slot, mode)
+            let commit = tx.switch_commits(mode);
+            tx.set_mode(mode);
+            commit
         };
-        if previous == TxMode::Manual && mode == TxMode::Auto {
+        if commit {
             // Leaving manual mode commits what is pending, like JDBC does.
             self.inner.end_transaction("COMMIT").await?;
         }

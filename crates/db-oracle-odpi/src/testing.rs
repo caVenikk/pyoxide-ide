@@ -1,14 +1,15 @@
-//! A scripted session for testing the connection protocol without a database.
+//! A scripted session for testing how the connection is wired to the
+//! `db_core::worker` thread, without a database. The page protocol itself is
+//! tested in `db_core::worker`.
 
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use db_core::{Column, Error, ErrorKind, Result, Row, TxMode, Value, ValueKind};
+use db_core::worker::{ExecArgs, Executed, Interrupt, Rows, Session, Worker};
+use db_core::{Error, ErrorKind, Result, TxMode};
 
-use crate::conn::OdpiConnection;
-use crate::link::{Breaker, ExecArgs, ExecReply, FetchArgs, Link, Page, Session};
+use crate::conn::{OdpiConnection, worker_config};
 
 /// What happened to the scripted session, observable from the test.
 #[derive(Default)]
@@ -31,64 +32,32 @@ impl Script {
 
 pub(crate) struct MockBreaker(pub Arc<Script>);
 
-impl Breaker for MockBreaker {
-    fn break_execution(&self) -> Result<()> {
+impl Interrupt for MockBreaker {
+    fn interrupt(&self) -> Result<()> {
         self.0.breaks.fetch_add(1, Ordering::SeqCst);
         self.0.break_requested.store(true, Ordering::SeqCst);
         Ok(())
     }
-}
 
-struct MockCursor {
-    rows: VecDeque<i64>,
-    next: i64,
-    fail_at: Option<i64>,
+    fn may_block(&self) -> bool {
+        true
+    }
 }
 
 /// Statements understood by the script:
-/// - `rows N [fail_at K]`: a cursor of N rows `[Int(i)]`, failing at row K;
 /// - `affected`: a DML statement that changed 3 rows;
 /// - `block`: runs until the breaker is used, then fails like ORA-01013;
 /// - `lost`: fails like a dead session (ORA-03114);
 /// - anything else: a query error.
 pub(crate) struct MockSession {
     script: Arc<Script>,
-    cursor: Option<MockCursor>,
-}
-
-impl MockSession {
-    pub fn new(script: &Arc<Script>) -> Self {
-        MockSession {
-            script: script.clone(),
-            cursor: None,
-        }
-    }
 }
 
 impl Session for MockSession {
-    fn execute(&mut self, args: ExecArgs) -> Result<ExecReply> {
+    fn execute(&self, args: ExecArgs, _rows: Rows<'_, Self>) -> Result<Executed> {
         self.script.log(format!("execute {}", args.sql));
-        if let Some(spec) = args.sql.strip_prefix("rows ") {
-            let mut parts = spec.split_whitespace();
-            let n: i64 = parts.next().unwrap().parse().unwrap();
-            let fail_at = match (parts.next(), parts.next()) {
-                (Some("fail_at"), Some(k)) => Some(k.parse().unwrap()),
-                _ => None,
-            };
-            self.cursor = Some(MockCursor {
-                rows: (0..n).collect(),
-                next: 0,
-                fail_at,
-            });
-            return Ok(ExecReply::Rows(vec![Column {
-                name: "N".into(),
-                type_name: "NUMBER".into(),
-                kind: ValueKind::Int,
-                nullable: false,
-            }]));
-        }
         match args.sql.as_str() {
-            "affected" => Ok(ExecReply::Affected(3)),
+            "affected" => Ok(Executed::affected(3)),
             "block" => {
                 while !self.script.break_requested.swap(false, Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(2));
@@ -106,87 +75,51 @@ impl Session for MockSession {
         }
     }
 
-    fn fetch(&mut self, args: FetchArgs) -> Result<Page> {
-        let Some(cursor) = self.cursor.as_mut() else {
-            return Ok(Page {
-                rows: vec![],
-                exhausted: true,
-            });
-        };
-        let mut rows: Vec<Row> = Vec::new();
-        while rows.len() < args.max_rows {
-            let Some(i) = cursor.rows.pop_front() else {
-                break;
-            };
-            if cursor.fail_at == Some(i) {
-                self.cursor = None;
-                self.script.log("fetch failed");
-                return Err(Error::query("boom"));
-            }
-            cursor.next = i + 1;
-            rows.push(vec![Value::Int(i)]);
-        }
-        let exhausted = rows.len() < args.max_rows;
-        if exhausted {
-            self.cursor = None;
-        }
-        self.script.log(format!("fetch {}", rows.len()));
-        Ok(Page { rows, exhausted })
-    }
-
-    fn close_cursor(&mut self) -> Result<()> {
-        if self.cursor.take().is_some() {
-            self.script.log("close_cursor");
-        }
-        Ok(())
-    }
-
-    fn ping(&mut self) -> Result<()> {
+    fn ping(&self) -> Result<()> {
         self.script.log("ping");
         Ok(())
     }
 
-    fn server_version(&mut self) -> Result<String> {
+    fn server_version(&self) -> Result<String> {
         Ok("Oracle Mock 1.0".into())
     }
 
-    fn set_tx_mode(&mut self, mode: TxMode) -> Result<()> {
+    fn set_tx_mode(&self, mode: TxMode) -> Result<()> {
         self.script.log(format!("tx {mode:?}"));
         Ok(())
     }
 
-    fn commit(&mut self) -> Result<()> {
+    fn commit(&self) -> Result<()> {
         self.script.log("commit");
         Ok(())
     }
 
-    fn rollback(&mut self) -> Result<()> {
+    fn rollback(&self) -> Result<()> {
         self.script.log("rollback");
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
-        self.cursor = None;
+    fn close(self) -> Result<()> {
         self.script.closed.store(true, Ordering::SeqCst);
         self.script.log("close");
         Ok(())
     }
 }
 
-pub(crate) fn mock_link(call_timeout_supported: bool) -> (Arc<Link>, Arc<Script>) {
+/// A connection on a scripted session, configured as `connect` configures
+/// a real one. Without client-side call timeouts, so the async timer is
+/// exact.
+pub(crate) async fn mock_connection() -> (OdpiConnection, Arc<Script>) {
     let script = Arc::new(Script::default());
-    let link = Link::spawn(
-        MockSession::new(&script),
+    let session = MockSession {
+        script: script.clone(),
+    };
+    let worker = Worker::start(
+        worker_config(false),
         Arc::new(MockBreaker(script.clone())),
-        call_timeout_supported,
+        move || Ok(session),
     )
+    .await
     .unwrap();
-    (link, script)
-}
-
-/// A connection on a scripted session. Without client-side call timeouts, so
-/// the async timer is exact.
-pub(crate) fn mock_connection() -> (OdpiConnection, Arc<Script>) {
-    let (link, script) = mock_link(false);
-    (OdpiConnection::new(link), script)
+    (OdpiConnection::new(worker), script)
 }

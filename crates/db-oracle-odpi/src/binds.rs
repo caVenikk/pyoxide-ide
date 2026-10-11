@@ -1,11 +1,9 @@
 //! `Value` parameters as Oracle bind variables.
 
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDateTime, Timelike};
-use db_core::{Error, Result, Value};
+use db_core::{Error, Result, Value, convert};
 use oracle::sql_type::{OracleType, Timestamp, ToSql};
 use oracle::{Connection, SqlValue};
-
-use crate::values::normalize_number;
 
 /// One bound parameter, with the Oracle type it is sent as.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,7 +47,7 @@ pub(crate) fn bind_from_value(v: &Value) -> Result<Bind> {
         Value::Int(i) => Bind::Int(*i),
         Value::Float(f) => Bind::Float(*f),
         Value::Decimal(s) => Bind::Decimal(
-            normalize_number(s)
+            convert::normalize_decimal(s)
                 .ok_or_else(|| Error::query(format!("{s:?} is not a decimal number")))?,
         ),
         Value::Text(s) | Value::Interval(s) | Value::Uuid(s) | Value::Json(s) => {

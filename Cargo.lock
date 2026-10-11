@@ -784,6 +784,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "db-core",
+ "db-testkit",
  "oracle",
  "tokio",
 ]
@@ -795,6 +796,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "db-core",
+ "db-testkit",
  "oracle-rs",
  "rustls",
  "tokio",
@@ -808,6 +810,7 @@ dependencies = [
  "bytes",
  "chrono",
  "db-core",
+ "db-testkit",
  "futures-util",
  "rcgen",
  "rustls",
@@ -847,10 +850,20 @@ dependencies = [
  "async-trait",
  "chrono",
  "db-core",
+ "db-testkit",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "db-testkit"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "db-core",
  "tokio",
 ]
 

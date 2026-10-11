@@ -610,24 +610,6 @@ async fn busy_rule() {
 
 #[tokio::test]
 #[ignore]
-async fn early_close_then_new_query() {
-    let c = connect().await;
-    let Outcome::Rows(mut cur) = c
-        .execute(PAGING_SQL, &[], &ExecOptions::default())
-        .await
-        .unwrap()
-    else {
-        panic!("expected rows");
-    };
-    assert_eq!(cur.next_page(500).await.unwrap().len(), 500);
-    assert!(!cur.is_exhausted());
-    cur.close().await.unwrap();
-    let rs = query(&*c, "SELECT COUNT(*) FROM dual CONNECT BY LEVEL <= 10", &[]).await;
-    assert_eq!(rs.rows[0][0], Value::Int(10));
-}
-
-#[tokio::test]
-#[ignore]
 async fn timeout_marks_connection_lost() {
     let c = connect().await;
     let opts = ExecOptions {
@@ -654,43 +636,6 @@ async fn timeout_marks_connection_lost() {
         single(&*fresh, "SELECT 1 FROM dual", &[]).await,
         Value::Int(1)
     );
-}
-
-#[tokio::test]
-#[ignore]
-async fn transactions_auto_and_manual() {
-    let a = connect().await;
-    let b = connect().await;
-    let t = format!("{}T", prefix("tx"));
-    try_exec(&*a, &format!("DROP TABLE {t} PURGE")).await;
-    exec(&*a, &format!("CREATE TABLE {t} (id NUMBER)"), &[]).await;
-    let count = format!("SELECT COUNT(*) FROM {t}");
-
-    exec(&*a, &format!("INSERT INTO {t} VALUES (1)"), &[]).await;
-    assert_eq!(
-        single(&*b, &count, &[]).await,
-        Value::Int(1),
-        "auto commits"
-    );
-
-    a.set_tx_mode(TxMode::Manual).await.unwrap();
-    assert_eq!(a.tx_mode().await, TxMode::Manual);
-    exec(&*a, &format!("INSERT INTO {t} VALUES (2)"), &[]).await;
-    assert_eq!(single(&*a, &count, &[]).await, Value::Int(2));
-    assert_eq!(single(&*b, &count, &[]).await, Value::Int(1));
-    a.rollback().await.unwrap();
-    assert_eq!(single(&*a, &count, &[]).await, Value::Int(1));
-    exec(&*a, &format!("INSERT INTO {t} VALUES (3)"), &[]).await;
-    a.commit().await.unwrap();
-    assert_eq!(single(&*b, &count, &[]).await, Value::Int(2));
-    exec(&*a, &format!("UPDATE {t} SET id = id + 10"), &[]).await;
-    a.set_tx_mode(TxMode::Auto).await.unwrap();
-    assert_eq!(
-        single(&*b, &format!("SELECT MIN(id) FROM {t}"), &[]).await,
-        Value::Int(11),
-        "switching to auto commits"
-    );
-    exec(&*a, &format!("DROP TABLE {t} PURGE"), &[]).await;
 }
 
 #[tokio::test]

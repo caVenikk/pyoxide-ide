@@ -5,7 +5,7 @@ use crate::sqltext::{allowed_when_read_only, commits_in_auto_mode};
 
 /// Transaction mode and read-only handling of one session, without any
 /// database access: the session asks what to do and does it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct TxState {
     mode: TxMode,
     read_only: bool,

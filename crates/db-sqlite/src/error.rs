@@ -130,10 +130,6 @@ pub(crate) fn map_open_error(e: &rusqlite::Error, path: &str) -> Error {
     }
 }
 
-pub(crate) fn worker_gone() -> Error {
-    Error::connection_lost("the SQLite connection is closed or its worker thread has stopped")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

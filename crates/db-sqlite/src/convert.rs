@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use db_core::{Error, Result, Row, Value, ValueKind};
+use db_core::{Error, Result, Row, Value, ValueKind, convert};
 use rusqlite::types::{ToSqlOutput, ValueRef};
 
 use crate::error::map_error;
@@ -137,10 +137,7 @@ impl Converter {
 
     fn text(&self, decl: Decl, bytes: &[u8]) -> Value {
         if bytes.len() > self.max_bytes {
-            return Value::Truncated {
-                prefix: Box::new(Value::Text(utf8_prefix(bytes, self.max_bytes).into_owned())),
-                full_len: Some(bytes.len() as u64),
-            };
+            return convert::text_from_utf8(bytes, self.max_bytes);
         }
         let text = match std::str::from_utf8(bytes) {
             Ok(s) => Cow::Borrowed(s),
@@ -159,10 +156,7 @@ impl Converter {
 
     fn blob(&self, decl: Decl, bytes: &[u8]) -> Value {
         if bytes.len() > self.max_bytes {
-            return Value::Truncated {
-                prefix: Box::new(Value::Bytes(bytes[..self.max_bytes].to_vec())),
-                full_len: Some(bytes.len() as u64),
-            };
+            return convert::bytes_from_slice(bytes, self.max_bytes);
         }
         if decl == Decl::Uuid
             && let Ok(raw) = <[u8; 16]>::try_from(bytes)
@@ -170,19 +164,6 @@ impl Converter {
             return Value::Uuid(uuid_from_bytes(&raw));
         }
         Value::Bytes(bytes.to_vec())
-    }
-}
-
-/// The longest valid UTF-8 prefix of at most `max` bytes.
-fn utf8_prefix(bytes: &[u8], max: usize) -> Cow<'_, str> {
-    let slice = &bytes[..max.min(bytes.len())];
-    match std::str::from_utf8(slice) {
-        Ok(s) => Cow::Borrowed(s),
-        Err(e) if e.error_len().is_none() => {
-            // A multi-byte character cut in half at the limit.
-            Cow::Borrowed(std::str::from_utf8(&slice[..e.valid_up_to()]).unwrap_or(""))
-        }
-        Err(_) => String::from_utf8_lossy(slice),
     }
 }
 
@@ -461,13 +442,6 @@ mod tests {
             Some(text)
         );
         assert_eq!(canonical_uuid_text("not-a-uuid"), None);
-    }
-
-    #[test]
-    fn utf8_prefix_cuts_on_a_character_boundary() {
-        let s = "aé"; // 'é' is two bytes
-        assert_eq!(utf8_prefix(s.as_bytes(), 2), "a");
-        assert_eq!(utf8_prefix(s.as_bytes(), 3), "aé");
     }
 
     #[test]

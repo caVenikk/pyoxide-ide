@@ -85,13 +85,6 @@ async fn drop_table(conn: &dyn Connection, name: &str) {
         .await;
 }
 
-async fn count(conn: &dyn Connection, table: &str) -> i64 {
-    scalar(conn, &format!("SELECT COUNT(*) FROM {table}"), &[])
-        .await
-        .as_i64()
-        .unwrap()
-}
-
 fn col(rs: &ResultSet, name: &str) -> usize {
     rs.columns
         .iter()
@@ -574,60 +567,6 @@ async fn pages_of_100k_rows_are_continuous() {
 }
 
 #[tokio::test]
-#[ignore = "needs an Oracle Client and the oracle container"]
-async fn a_second_statement_while_a_cursor_is_open_is_busy() {
-    let conn = connect().await;
-    let Outcome::Rows(cursor) =
-        run(&*conn, "SELECT LEVEL FROM DUAL CONNECT BY LEVEL <= 1000").await
-    else {
-        panic!("rows expected");
-    };
-    let e = conn
-        .execute("SELECT 1 FROM DUAL", &[], &ExecOptions::default())
-        .await
-        .unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Busy);
-    // These still work with a cursor open.
-    conn.ping().await.unwrap();
-    conn.commit().await.unwrap();
-    conn.rollback().await.unwrap();
-    conn.cancel().await.unwrap();
-    drop(cursor);
-    assert_eq!(
-        scalar(&*conn, "SELECT 1 FROM DUAL", &[]).await.as_i64(),
-        Some(1)
-    );
-    conn.close().await.unwrap();
-}
-
-#[tokio::test]
-#[ignore = "needs an Oracle Client and the oracle container"]
-async fn closing_a_cursor_early_frees_the_connection_at_once() {
-    let conn = connect().await;
-    let Outcome::Rows(mut cursor) = run(
-        &*conn,
-        "SELECT LEVEL FROM DUAL CONNECT BY LEVEL <= 100000000",
-    )
-    .await
-    else {
-        panic!("rows expected");
-    };
-    assert_eq!(cursor.next_page(500).await.unwrap().len(), 500);
-    let started = Instant::now();
-    cursor.close().await.unwrap();
-    assert_eq!(
-        scalar(&*conn, "SELECT 2 FROM DUAL", &[]).await.as_i64(),
-        Some(2)
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "closing must not read the rest: {:?}",
-        started.elapsed()
-    );
-    conn.close().await.unwrap();
-}
-
-#[tokio::test]
 #[ignore = "needs an Oracle Client and the oracle container (12c+ for DBMS_SESSION.SLEEP)"]
 async fn cancel_from_another_task_ends_a_sleeping_statement() {
     let conn: Arc<dyn Connection> = Arc::from(connect().await);
@@ -721,41 +660,6 @@ async fn statement_timeout_reports_timeout() {
         Some(4)
     );
     conn.close().await.unwrap();
-}
-
-#[tokio::test]
-#[ignore = "needs an Oracle Client and the oracle container"]
-async fn transaction_modes() {
-    let a = connect().await;
-    let b = connect().await;
-    let t = unique("TX");
-    drop_table(&*a, &t).await;
-    run(&*a, &format!("CREATE TABLE {t} (n NUMBER)")).await;
-    // Auto: committed at once, visible to another session.
-    assert_eq!(a.tx_mode().await, TxMode::Auto);
-    run(&*a, &format!("INSERT INTO {t} VALUES (1)")).await;
-    assert_eq!(count(&*b, &t).await, 1);
-
-    // Manual: invisible until commit, gone after rollback.
-    a.set_tx_mode(TxMode::Manual).await.unwrap();
-    assert_eq!(a.tx_mode().await, TxMode::Manual);
-    run(&*a, &format!("INSERT INTO {t} VALUES (2)")).await;
-    assert_eq!(count(&*a, &t).await, 2);
-    assert_eq!(count(&*b, &t).await, 1);
-    a.rollback().await.unwrap();
-    assert_eq!(count(&*a, &t).await, 1);
-    run(&*a, &format!("INSERT INTO {t} VALUES (3)")).await;
-    a.commit().await.unwrap();
-    assert_eq!(count(&*b, &t).await, 2);
-
-    // Leaving manual mode ends the open transaction.
-    run(&*a, &format!("INSERT INTO {t} VALUES (4)")).await;
-    a.set_tx_mode(TxMode::Auto).await.unwrap();
-    assert_eq!(count(&*b, &t).await, 3);
-
-    drop_table(&*a, &t).await;
-    a.close().await.unwrap();
-    b.close().await.unwrap();
 }
 
 #[tokio::test]

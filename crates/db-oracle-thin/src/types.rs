@@ -6,7 +6,7 @@
 //! (see `plsql.rs`) and arrives here as text or RAW with a tag.
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use db_core::{Column, Value, ValueKind};
+use db_core::{Column, Value, ValueKind, convert};
 use oracle_rs::{ColumnInfo, LobLocator, LobValue, OracleType, OracleVector, VectorData};
 
 use crate::plsql::split_tag;
@@ -241,39 +241,34 @@ pub enum Cell {
     Lob(LobLocator),
 }
 
-/// Cut text to `max` bytes on a character boundary.
+/// Cut text to `max` bytes on a character boundary. `full_len` is the
+/// length the server reports for a LOB (in characters for CLOBs); the value
+/// is `Truncated` when the text is longer than `max` or shorter than that.
 pub fn truncate_text(s: String, max: usize, full_len: Option<u64>) -> Value {
+    let Some(full) = full_len else {
+        return convert::truncate_text(s, max);
+    };
     if s.len() <= max {
-        return match full_len {
-            Some(n) if n > s.chars().count() as u64 => Value::Truncated {
-                prefix: Box::new(Value::Text(s)),
-                full_len: Some(n),
-            },
-            _ => Value::Text(s),
+        return if full > s.chars().count() as u64 {
+            convert::truncated(Value::Text(s), full)
+        } else {
+            Value::Text(s)
         };
     }
-    let mut cut = max;
-    while !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let full = full_len.unwrap_or(s.len() as u64);
-    Value::Truncated {
-        prefix: Box::new(Value::Text(s[..cut].to_owned())),
-        full_len: Some(full),
-    }
+    let cut = convert::floor_char_boundary(&s, max);
+    convert::truncated(Value::Text(s[..cut].to_owned()), full)
 }
 
-/// Cut bytes to `max`.
+/// Cut bytes to `max`. `full_len` as for [`truncate_text`] (in bytes).
 pub fn truncate_bytes(mut b: Vec<u8>, max: usize, full_len: Option<u64>) -> Value {
-    let full = full_len.unwrap_or(b.len() as u64);
+    let Some(full) = full_len else {
+        return convert::truncate_bytes(b, max);
+    };
     if b.len() <= max && full <= b.len() as u64 {
         return Value::Bytes(b);
     }
     b.truncate(max);
-    Value::Truncated {
-        prefix: Box::new(Value::Bytes(b)),
-        full_len: Some(full),
-    }
+    convert::truncated(Value::Bytes(b), full)
 }
 
 /// NUMBER text (`-12.5`, `12345678901234567890`) to Int or Decimal.
