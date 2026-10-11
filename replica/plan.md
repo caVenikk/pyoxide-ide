@@ -47,10 +47,11 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | issue | owner | crates / files | depends on | status |
 |---|---|---|---|---|
 | #11 Reference baseline | lead | `scripts/perf/`, `replica/perf.md` | - | startup, indexing, memory done; typing latency and large files open |
-| #12 UI toolkit decision (spikes + ADR 0006) | sub-agent ui | `spikes/` (outside the workspace), `docs/adr/0006-ui-toolkit.md` | - | in progress (resumed) |
+| #12 UI toolkit decision (prototypes + ADR 0006) | sub-agent ui | `docs/adr/0006-ui-toolkit.md` | - | done: GPUI (ADR 0006); prototypes not kept |
 | #13 Control channel and headless UI tests | - | - | #12 | todo |
 | #14 Theme import and Pyoxide theme model | sub-agent themes | `crates/platform/themes`, `docs/theme-mapping.md` | - | merged (importer; settings UI later) |
 | #15 Python environments engine (uv) | sub-agent py-env | `crates/python/py-env`, `crates/python/pyoxide-cli` | - | merged (engine and CLI; UI later) |
 
-Next after #12: application shell, text buffer, tree-sitter highlighting,
-tabs, file tree; typing latency measured for the reference and Pyoxide.
+| #18 Application shell and editor MVP on GPUI | - | - | #12 | next |
+
+Typing latency is measured for the reference and Pyoxide together with #18.

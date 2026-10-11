@@ -30,8 +30,11 @@ Release: `/replica-brand` (sweep for trademarked names), `/replica-launch`,
    interfaces stabilise.
 4. Each sub-agent runs the skill loop for its area and finishes with
    `cargo fmt`, `clippy`, `test`, measurements and a short report.
-5. The lead reviews diffs, runs the whole workspace, merges and updates the plan,
-   `features.csv` and the roadmap.
+5. The lead reviews the sub-agent's branch, opens a pull request that
+   references the issue, waits for CI on Windows, macOS and Linux, squash-merges
+   it and updates the plan, `features.csv` and the roadmap.
+6. Prototypes built to compare options stay out of `main`: their conclusions and
+   numbers go into the ADR, raw data into the issue.
 
 ## Hygiene
 Public files are English and contain no personal data. Reference screenshots and

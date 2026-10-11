@@ -7,6 +7,8 @@
 /replica/screens/
 /replica/reviews.csv
 /tests/fixtures/themes-local/
+# throwaway prototypes and their build output
+/spikes/
 # misc
 .env
 *.log

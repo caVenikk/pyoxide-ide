@@ -44,6 +44,14 @@ Rules for AI agents and human contributors. Read this file, then
 - Windows, macOS and Linux must keep building; gate platform-specific code with `cfg`.
 - Commits: conventional style (`feat(db-core): ...`). Keep a `NOTICE` entry for
   anything copied or closely adapted from open-source code.
+- Changes land through pull requests: one branch per issue, CI green on all
+  three platforms, squash merge with `Closes #N`. Work-in-progress commits stay
+  in the branch.
+- The repository holds sources and the assets the application ships (fonts,
+  icons) with their licenses. Not committed: screenshots, raw measurement
+  output, generated files, throwaway prototypes and their lock files. Results
+  go into `replica/perf.md` or an ADR as tables; raw data, if worth keeping, is
+  attached to the issue.
 
 ## Skills (development method)
 `skills/` holds the Replica skill pack (MIT, modified, see [NOTICE](NOTICE)).
