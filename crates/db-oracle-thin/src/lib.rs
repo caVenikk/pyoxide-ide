@@ -44,6 +44,7 @@ use db_core::{
 };
 use oracle_rs::{BindParam, OracleType, RefCursor};
 
+pub use crate::config::SDU_OPTION;
 use crate::cursor::{NATIVE_PREFETCH, Source, ThinCursor};
 use crate::plsql::BlockBind;
 use crate::session::{LARGE_FETCH_BUDGET, SMALL_FETCH_BUDGET, Session};
@@ -89,7 +90,7 @@ async fn open_session(p: &ConnectParams) -> Result<Session> {
     let secret = p.password.expose().to_owned();
     let scrub = |e: Error| e.scrub(&secret).scrub(p.tls.wallet_password.expose());
     let (cfg, target) = config::build(p).map_err(scrub)?;
-    let key = target.describe();
+    let key = target.cache_key();
     let cached = budget_cache()
         .lock()
         .ok()

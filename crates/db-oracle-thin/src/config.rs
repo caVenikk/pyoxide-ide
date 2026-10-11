@@ -30,6 +30,11 @@ use oracle_rs::{Config, TlsConfig};
 /// largest SDU the server accepts is the most useful.
 pub const REQUESTED_SDU: u32 = 65_535;
 
+/// Thin-driver option: the session data unit to request, in bytes
+/// (512..=65535; default 65535). Mainly for testing servers that negotiate a
+/// small SDU.
+pub const SDU_OPTION: &str = "oracle.sdu";
+
 /// Where and how to connect.
 #[derive(Debug, Clone)]
 pub struct Target {
@@ -38,16 +43,35 @@ pub struct Target {
     pub service: Option<String>,
     pub sid: Option<String>,
     pub tls: bool,
+    /// Requested SDU.
+    pub sdu: u32,
 }
 
 impl Target {
-    /// `host:port/service` for messages and caches (never secrets).
+    /// `host:port/service` for messages (never secrets).
     pub fn describe(&self) -> String {
         match (&self.service, &self.sid) {
             (Some(s), _) => format!("{}:{}/{}", self.host, self.port, s),
             (None, Some(s)) => format!("{}:{}:{}", self.host, self.port, s),
             _ => format!("{}:{}", self.host, self.port),
         }
+    }
+
+    /// Key for per-address caches: the address and the requested SDU.
+    pub fn cache_key(&self) -> String {
+        format!("{}#{}", self.describe(), self.sdu)
+    }
+}
+
+fn requested_sdu(p: &ConnectParams) -> Result<u32> {
+    match p.option(SDU_OPTION) {
+        None => Ok(REQUESTED_SDU),
+        Some(v) => v
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|n| (512..=65_535).contains(n))
+            .ok_or_else(|| Error::config(format!("{SDU_OPTION} must be 512..=65535, got `{v}`"))),
     }
 }
 
@@ -78,6 +102,7 @@ pub fn target(p: &ConnectParams) -> Result<(Target, Option<OracleAddress>)> {
                 service: a.service.clone(),
                 sid: a.sid.clone(),
                 tls,
+                sdu: requested_sdu(p)?,
             },
             Some(a),
         ));
@@ -107,6 +132,7 @@ pub fn target(p: &ConnectParams) -> Result<(Target, Option<OracleAddress>)> {
             service,
             sid,
             tls: p.tls.mode.is_enabled(),
+            sdu: requested_sdu(p)?,
         },
         None,
     ))
@@ -176,7 +202,7 @@ pub fn build(p: &ConnectParams) -> Result<(Config, Target)> {
         (None, None) => return Err(Error::config("no service name or SID")),
     };
     cfg = cfg
-        .sdu(REQUESTED_SDU)
+        .sdu(target.sdu)
         .stmtcachesize(0)
         .connect_timeout(if p.connect_timeout.is_zero() {
             Duration::from_secs(10)
@@ -257,6 +283,13 @@ mod tests {
         p.tls.mode = TlsMode::Require;
         p.tls.client_cert = Some("/nonexistent/c.pem".into());
         assert_eq!(build(&p).unwrap_err().kind, ErrorKind::Config);
+        let mut p = params();
+        p.options.insert(SDU_OPTION.into(), "100".into());
+        assert_eq!(build(&p).unwrap_err().kind, ErrorKind::Config);
+        p.options.insert(SDU_OPTION.into(), "8192".into());
+        let (cfg, t) = build(&p).unwrap();
+        assert_eq!((cfg.sdu, t.sdu), (8192, 8192));
+        assert!(t.cache_key().ends_with("#8192"));
     }
 
     #[test]

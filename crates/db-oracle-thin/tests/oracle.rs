@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, NaiveDate};
 use common::*;
 use db_core::{Connection, Driver, ErrorKind, ExecOptions, Outcome, TxMode, Value, ValueKind, opt};
-use db_oracle_thin::{ThinConnection, ThinDriver};
+use db_oracle_thin::{SDU_OPTION, ThinConnection, ThinDriver};
 
 fn ts(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, nanos: u32) -> chrono::NaiveDateTime {
     NaiveDate::from_ymd_opt(y, mo, d)
@@ -954,4 +954,36 @@ async fn renews_the_session_before_open_cursors_runs_out() {
     );
     c.set_tx_mode(TxMode::Auto).await.unwrap();
     exec(&c, &format!("DROP TABLE {t} PURGE"), &[]).await;
+}
+
+/// Servers that negotiate an 8 KiB session data unit (the documented server
+/// default) get smaller fetches and a request size limit.
+#[tokio::test]
+#[ignore]
+async fn small_packets_still_work() {
+    let mut p = params();
+    p.options.insert(SDU_OPTION.into(), "8192".into());
+    let c = ThinDriver.connect(&p).await.unwrap();
+    let rs = query(
+        &*c,
+        "SELECT 42, CAST(1.5 AS BINARY_DOUBLE), TIMESTAMP '2026-01-02 03:04:05.5 +03:00', NULL FROM dual",
+        &[],
+    )
+    .await;
+    assert_eq!(rs.rows[0][0], Value::Int(42));
+    assert_eq!(rs.rows[0][1], Value::Float(1.5));
+    let rs = query(&*c, &PAGING_SQL.replace("100000", "20000"), &[]).await;
+    assert_eq!(rs.rows.len(), 20_000);
+    assert_eq!(rs.rows[19_999][0], Value::Int(20_000));
+    let rs = query(
+        &*c,
+        "SELECT LEVEL n, RPAD(TO_CHAR(LEVEL), 4000, 'x') s FROM dual CONNECT BY LEVEL <= 40",
+        &[],
+    )
+    .await;
+    assert_eq!(rs.rows.len(), 40);
+    let long = format!("SELECT 1 FROM dual WHERE 'x' <> '{}'", "y".repeat(10_000));
+    let e = c.query(&long, &[], 1).await.unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Unsupported, "{e:?}");
+    assert_eq!(single(&*c, "SELECT 2 FROM dual", &[]).await, Value::Int(2));
 }
