@@ -79,6 +79,14 @@ parameters. Both Oracle drivers share the same SQL.
 
 ## Consequences
 - Drivers stay small: they map types and errors and implement paging/cancel.
+  What they have in common lives in `db-core`: `db_core::worker` runs
+  drivers over blocking client libraries (SQLite, the Oracle Client) on a
+  connection thread with the paging protocol, cancel, timeouts and abandoned
+  calls; `convert` (size limit, exact decimals), `oracle::sql` (statement
+  kind, terminators) and `transaction::TxState` are shared helpers.
+- Every driver runs the conformance suite of `crates/db-testkit` against
+  this contract: SQLite in every test run, the server backends against the
+  containers of `docker-compose.yml`.
 - The data grid can show the first page immediately and fetch on scroll.
 - A second connection is needed for metadata while a grid is open. SQLite
   `:memory:` databases are per connection: share one through a

@@ -3,6 +3,11 @@
 //! Drivers (`db-oracle-thin`, `db-oracle-odpi`, `db-postgres`, `db-sqlite`)
 //! implement [`Driver`], [`Connection`] and [`Cursor`]; the IDE, the CLI and
 //! commands only talk to these traits. This crate has no driver dependencies.
+//!
+//! Shared driver building blocks: [`worker`] (a connection thread for
+//! blocking client libraries), [`convert`] (value size limit, exact
+//! decimals), [`transaction`] (transaction bookkeeping), [`oracle`] (Oracle
+//! error codes and statement text) and [`timeout`].
 
 mod connection;
 pub mod convert;
