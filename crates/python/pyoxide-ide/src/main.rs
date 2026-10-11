@@ -3,7 +3,7 @@
 //! interpreter widget).
 
 use ui::icons::{IconName, IconSvg};
-use workbench::{Product, StripeItem};
+use workbench::{FileType, Product, StripeItem};
 
 /// Icons of the Python product (IntelliJ Platform Community, Apache-2.0,
 /// see NOTICE).
@@ -29,9 +29,23 @@ const ICONS: &[IconSvg] = &[
     },
 ];
 
+/// Python source files.
+fn python() -> FileType {
+    FileType {
+        name: "Python",
+        extensions: &["py", "pyi", "pyw"],
+        file_names: &[],
+        icon: IconName("python/file"),
+        // A block opens after a colon at the end of a line.
+        indent_after: &[':'],
+        highlighter: None,
+    }
+}
+
 fn product() -> Product {
     Product {
         name: "Pyoxide",
+        file_types: vec![python()],
         icons: ICONS,
         left_stripe_bottom: vec![
             StripeItem {

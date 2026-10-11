@@ -10,8 +10,11 @@ pub mod app;
 pub mod chrome;
 pub mod commands;
 pub mod env;
+pub mod file_types;
+pub mod project_panel;
 mod shot;
 pub mod workbench;
 
 pub use app::{Product, StripeItem, init, open_main_window, run};
+pub use file_types::{FileType, HighlighterFactory};
 pub use workbench::Workbench;

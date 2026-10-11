@@ -13,6 +13,8 @@ use ui::icons::{IconName, IconSvg};
 
 use crate::commands::{self, Quit, SetTheme, ToggleProject};
 use crate::env;
+use crate::file_types::FileType;
+use crate::project_panel;
 use crate::workbench::Workbench;
 
 /// A tool window button of a stripe that a product adds.
@@ -26,6 +28,9 @@ pub struct StripeItem {
 /// What a product tells the workbench about itself.
 #[derive(Debug, Clone, Default)]
 pub struct Product {
+    /// File types of the product's languages (icons, indentation,
+    /// highlighting); they take precedence over the platform's.
+    pub file_types: Vec<FileType>,
     /// Name shown in the window title and the application menu.
     pub name: &'static str,
     /// Icons of the product (file types, tool windows).
@@ -49,17 +54,38 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::init(cx, env::theme_kind());
     ui::icons::register(cx, product.icons);
     ui::command::register(cx, commands::COMMANDS);
+    ui::command::register(cx, project_panel::COMMANDS);
     editor::init(cx);
+    fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
+        window
+            .root::<Workbench>()
+            .flatten()
+            .ok_or_else(|| CommandError::new("not_available", "not a main window"))
+    }
+    fn active_editor(
+        window: &mut gpui::Window,
+        cx: &App,
+    ) -> Result<gpui::Entity<editor::Editor>, CommandError> {
+        workbench(window)?
+            .read(cx)
+            .active_editor()
+            .cloned()
+            .ok_or_else(|| CommandError::new("not_available", "no editor is open"))
+    }
     ui::command::register_query(
         cx,
         "workbench.state",
-        Rc::new(|_, window, cx| {
-            let workbench = window
-                .root::<Workbench>()
-                .flatten()
-                .ok_or_else(|| CommandError::new("not_available", "not a main window"))?;
-            Ok(workbench.read(cx).state(cx))
-        }),
+        Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).state(cx))),
+    );
+    ui::command::register_query(
+        cx,
+        "editor.state",
+        Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).state_json())),
+    );
+    ui::command::register_query(
+        cx,
+        "editor.text",
+        Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).text().into())),
     );
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([
@@ -133,9 +159,15 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     Application::new().run(move |cx| {
         init(cx, &product);
         let window = open_main_window(cx, product.clone());
-        if let Some(path) = paths.into_iter().next() {
+        // A folder opens as the project, files open in tabs.
+        for path in paths {
             let _ = window.update(cx, |workbench, window, cx| {
-                workbench.open_file(path, window, cx)
+                if path.is_dir() {
+                    workbench.open_folder(path, window, cx)
+                } else {
+                    let path = std::fs::canonicalize(&path).unwrap_or(path);
+                    workbench.open_file(path, window, cx)
+                }
             });
         }
         cx.on_window_closed(|cx| {

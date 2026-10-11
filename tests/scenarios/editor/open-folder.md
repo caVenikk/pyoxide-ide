@@ -13,8 +13,9 @@
 - The project tool window is open and shows the folder as the root row,
   expanded, with its absolute path in muted text after the name.
 - Folders come before files, both sorted by name, case-insensitively.
-- `.git` is not shown; `.venv` and `__pycache__` are shown (as excluded or
-  ignored folders) but never expanded automatically.
+- `.git` and `__pycache__` are not shown (the default list of ignored files
+  and folders); `.venv` is shown as an excluded folder and never expanded
+  automatically; folders named in `.gitignore` are shown as excluded.
 - Expanding `src` shows `app.py` with a Python file icon.
 - Opening a folder of 50,000 files shows the tree at once; the UI keeps
   responding while folders load.

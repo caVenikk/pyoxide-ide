@@ -150,6 +150,17 @@ impl History {
         !self.redo.is_empty()
     }
 
+    /// Ends the current group and returns the id of the newest transaction.
+    pub fn save_point(&mut self) -> u64 {
+        self.seal();
+        self.top_id()
+    }
+
+    /// The state with this newest transaction is what is on disk.
+    pub fn mark_saved_at(&mut self, id: u64) {
+        self.saved = Some(id);
+    }
+
     pub fn mark_saved(&mut self) {
         self.seal();
         self.saved = Some(self.top_id());

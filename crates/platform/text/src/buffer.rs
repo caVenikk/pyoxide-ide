@@ -69,6 +69,10 @@ pub struct AppliedEdit {
     pub new_end_position: (usize, usize),
 }
 
+/// The state of a buffer when a write started ([`Buffer::begin_save`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SavePoint(u64);
+
 /// Where carets go after [`Buffer::transact`].
 #[derive(Debug, Clone)]
 pub enum CaretPlacement {
@@ -426,6 +430,17 @@ impl Buffer {
         self.history.mark_saved();
     }
 
+    /// Starts writing the current text: ends the undo group and returns the
+    /// point to pass to [`Buffer::mark_saved_at`] once the write succeeded.
+    /// Edits made while the write runs keep the buffer modified.
+    pub fn begin_save(&mut self) -> SavePoint {
+        SavePoint(self.history.save_point())
+    }
+
+    pub fn mark_saved_at(&mut self, point: SavePoint) {
+        self.history.mark_saved_at(point.0);
+    }
+
     /// Replaces the whole text (reload from disk) and forgets the history.
     pub fn reset(&mut self, decoded: Decoded) {
         let version = self.version + 1;
@@ -577,6 +592,31 @@ mod tests {
         );
         assert!(b.is_modified());
         assert!(!b.can_redo());
+    }
+
+    #[test]
+    fn edits_during_a_write_keep_the_buffer_modified() {
+        let mut b = Buffer::new("a");
+        let mut sel = set(1);
+        b.transact(
+            &mut sel,
+            vec![Edit::insert(1, "b")],
+            EditKind::Typing,
+            CaretPlacement::AfterEachEdit,
+        );
+        let point = b.begin_save();
+        // Typing while the write runs: a new group, not merged into the saved one.
+        b.transact(
+            &mut sel,
+            vec![Edit::insert(2, "c")],
+            EditKind::Typing,
+            CaretPlacement::AfterEachEdit,
+        );
+        b.mark_saved_at(point);
+        assert!(b.is_modified());
+        b.undo();
+        assert_eq!(b.text(), "ab");
+        assert!(!b.is_modified());
     }
 
     #[test]

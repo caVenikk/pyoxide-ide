@@ -4,13 +4,41 @@ ui::ui_commands! {
     COMMANDS, scope = "Workbench";
     /// Quit the application.
     Quit => "app.quit", "Quit", "Closes all windows and quits the application.";
-    /// Show or hide the project tool window.
+    /// Show, focus or hide the project tool window.
     ToggleProject => "workbench.toggle-project", "Project",
-        "Shows or hides the project tool window.";
+        "Shows and focuses the project tool window; hides it when it has the focus.";
+    /// Move the focus to the editor.
+    FocusEditor => "workbench.focus-editor", "Focus Editor",
+        "Moves the keyboard focus to the active editor.";
     /// Switch the theme.
     SetTheme { id: String } => "workbench.set-theme", "Switch Theme",
-        "Switches to a built-in theme by id.", r#"{"id": "pyoxide-light"}"#;
+        "Switches to a built-in theme by id.", r#"{"id": "islands-light"}"#;
     /// Describe the window.
     State => "workbench.state", "Workbench State",
-        "Returns the state of the main window as JSON (project, tool windows, theme).";
+        "Returns the state of the main window as JSON (project, tree, tabs, active editor).";
+    /// Open a folder as the project.
+    OpenFolder { path: Option<String> } => "project.open-folder", "Open Folder…",
+        "Opens a folder as the project; without a path a folder chooser is shown.",
+        r#"{"path": "/path/to/project"}"#;
+    /// Open a file in a tab.
+    OpenFile { path: String } => "project.open-file", "Open File",
+        "Opens a file in an editor tab (a path relative to the project or absolute).",
+        r#"{"path": "src/app.py"}"#;
+    /// Save the active file.
+    Save => "editor.save", "Save", "Writes the active file to disk.";
+    /// Save every modified file.
+    SaveAll => "workbench.save-all", "Save All", "Writes every modified file to disk.";
+    /// Close the active tab.
+    CloseTab => "tabs.close", "Close Tab",
+        "Closes the active editor tab; a modified file is saved first.";
+    /// Select a tab.
+    SelectTab { index: usize } => "tabs.select", "Select Tab",
+        "Makes the tab at a zero-based index active.", r#"{"index": 0}"#;
+    NextTab => "tabs.next", "Select Next Tab", "Makes the tab to the right active.";
+    PreviousTab => "tabs.previous", "Select Previous Tab", "Makes the tab to the left active.";
+    /// The active editor's state.
+    EditorState => "editor.state", "Editor State",
+        "Returns the active editor's state as JSON (path, caret, selections, modified).";
+    /// The active editor's text.
+    EditorText => "editor.text", "Editor Text", "Returns the whole text of the active editor.";
 }

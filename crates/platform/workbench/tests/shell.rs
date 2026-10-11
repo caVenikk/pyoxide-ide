@@ -77,6 +77,10 @@ fn toggles_the_project_tool_window_by_command(cx: &mut TestAppContext) {
     assert_eq!(state["product"], json!("Test IDE"));
     let narrow = editor_width(cx);
 
+    // The first press focuses the visible tool window, the second hides it.
+    invoke(cx, window, "workbench.toggle-project", json!(null));
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
     invoke(cx, window, "workbench.toggle-project", json!(null));
     let state = invoke(cx, window, "workbench.state", json!(null));
     assert_eq!(state["tool_windows"]["project"]["visible"], json!(false));

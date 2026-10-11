@@ -12,7 +12,7 @@ mod history;
 pub mod movement;
 mod selection;
 
-pub use buffer::{AppliedEdit, Buffer, CaretPlacement, Edit, Point};
+pub use buffer::{AppliedEdit, Buffer, CaretPlacement, Edit, Point, SavePoint};
 pub use encoding::{
     DecodeError, Decoded, Encoding, LineEnding, decode, encode, normalize_line_endings,
 };
