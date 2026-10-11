@@ -39,6 +39,7 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #8 CI integration job and binaries | lead | `.github/workflows` | #1-#4 | written, runs after push |
 | #9 Real Oracle 19c verification | maintainer | diagnose report | #3, #4, #6 | todo |
 | #10 oracle-rs cancel upstream | open | upstream | #3 | todo |
+| #17 Move crates into platform / product layout (ADR 0005) | lead | `crates/` | #3 merged | next, right after #3 |
 | #16 Deduplicate driver plumbing, conformance test kit | lead | `db-core` (worker, value helpers, Oracle SQL text, tx state), new `db-testkit` | #1, #3 merged | next, starts on request |
 
 ## Next areas (not started)
