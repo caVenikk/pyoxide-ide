@@ -11,13 +11,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use db_core::worker::Worker;
 use db_core::{Backend, ConnectParams, Connection, Driver, Error, ErrorKind, Result, Secret};
 
 mod binds;
 mod conn;
 mod connect_string;
 mod errors;
-mod link;
 mod session;
 mod sqltext;
 #[cfg(test)]
@@ -28,8 +28,8 @@ mod values;
 pub use conn::OdpiConnection;
 pub use connect_string::{OPT_CONFIG_DIR, OPT_LIB_DIR};
 
+use conn::worker_config;
 use connect_string::ConnectPlan;
-use link::Link;
 use session::{OracleBreaker, OracleSession};
 
 /// Time allowed beyond `connect_timeout` before a connect that has not
@@ -76,8 +76,15 @@ impl Driver for OdpiDriver {
                 }
             }
         };
-        let link = joined.map_err(|e| Error::internal(format!("connect task failed: {e}")))??;
-        Ok(Box::new(OdpiConnection::new(link)))
+        let (session, breaker, call_timeout_supported) =
+            joined.map_err(|e| Error::internal(format!("connect task failed: {e}")))??;
+        let worker = Worker::start(
+            worker_config(call_timeout_supported),
+            Arc::new(breaker),
+            move || Ok(session),
+        )
+        .await?;
+        Ok(Box::new(OdpiConnection::new(worker)))
     }
 }
 
@@ -121,8 +128,9 @@ pub fn init_client(lib_dir: Option<&Path>, config_dir: Option<&Path>) -> Result<
         .map_err(|e| errors::map_error(&e))
 }
 
-/// Blocking: load the client, connect, start the connection thread.
-fn open(plan: ConnectPlan, password: Secret) -> Result<Arc<Link>> {
+/// Blocking: load the client and connect. Returns the session, its breaker
+/// and whether the client supports call timeouts.
+fn open(plan: ConnectPlan, password: Secret) -> Result<(OracleSession, OracleBreaker, bool)> {
     init_client(plan.lib_dir.as_deref(), plan.config_dir.as_deref())?;
     let mut connector = oracle::Connector::new(
         plan.username.as_str(),
@@ -139,15 +147,11 @@ fn open(plan: ConnectPlan, password: Secret) -> Result<Arc<Link>> {
     // Best effort: helps a DBA recognise the session in V$SESSION.
     let _ = conn.set_module("Pyoxide IDE");
     // Call timeouts need a client of 18c or later; with an older one the
-    // timer in `link` breaks the call itself.
+    // worker's timer breaks the call itself.
     let call_timeout_supported = conn.set_call_timeout(None).is_ok();
     let conn = Arc::new(conn);
     let session = OracleSession::new(conn.clone(), plan.read_only, call_timeout_supported);
-    Link::spawn(
-        session,
-        Arc::new(OracleBreaker(conn)),
-        call_timeout_supported,
-    )
+    Ok((session, OracleBreaker(conn), call_timeout_supported))
 }
 
 #[cfg(test)]

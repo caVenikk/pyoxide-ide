@@ -118,7 +118,8 @@ ordinary one and fails with `ORA-01005`.
 ## Behaviour
 
 - **Threading.** Every connection owns one thread that makes all client
-  calls; async callers wait on a channel. Cancel breaks the running call from
+  calls (`db_core::worker`, shared with the SQLite backend); async callers
+  wait on a channel. Cancel breaks the running call from
   another thread (`ORA-01013` becomes `ErrorKind::Cancelled`), and does
   nothing when no statement is running. A future dropped while a call is in
   flight breaks the call and marks the connection broken
