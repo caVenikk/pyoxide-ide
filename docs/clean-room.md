@@ -26,3 +26,14 @@ Forbidden:
 When behaviour is unclear, write the *question* and an observation script
 (scenario -> expected output) in `tests/scenarios/`, never the internals of
 the other tool.
+
+## Visual fidelity
+The UI aims to match the reference IDE's current UI closely, down to small
+details, so its users keep their habits: layout, metrics, fonts, behaviour and
+keyboard. Look and metrics are reproduced from observation of a licensed copy.
+Icons, themes, metric constants and UI strings may be taken from the
+open-source IntelliJ Platform Community code base (Apache-2.0), with a
+`NOTICE` entry naming the source, commit and files. Assets, strings and code of
+proprietary products and plugins (for example the database tools) are never
+copied; their look is rebuilt from observation with original assets. Logos and
+product names of the reference products never appear in the UI.
