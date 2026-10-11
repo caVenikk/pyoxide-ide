@@ -39,6 +39,10 @@ ui::ui_commands! {
     /// The active editor's state.
     EditorState => "editor.state", "Editor State",
         "Returns the active editor's state as JSON (path, caret, selections, modified).";
+    /// Highlighting of one line of the active editor.
+    EditorHighlights { line: usize } => "editor.highlights", "Editor Highlights",
+        "Returns the highlight spans (columns and text roles) of a zero-based line of the active editor.",
+        r#"{"line": 0}"#;
     /// The active editor's text.
     EditorText => "editor.text", "Editor Text", "Returns the whole text of the active editor.";
 }

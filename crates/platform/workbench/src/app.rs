@@ -84,6 +84,28 @@ pub fn init(cx: &mut App, product: &Product) {
     );
     ui::command::register_query(
         cx,
+        "editor.highlights",
+        Rc::new(|args, window, cx| {
+            let line = args
+                .get("line")
+                .and_then(|l| l.as_u64())
+                .ok_or_else(|| CommandError::invalid_args("editor.highlights: missing `line`"))?;
+            let editor = active_editor(window, cx)?;
+            let (spans, current) = editor.update(cx, |e, _| {
+                (e.highlights(line as usize), e.highlighting_current())
+            });
+            Ok(serde_json::json!({
+                "current": current,
+                "spans": spans.iter().map(|(r, role)| serde_json::json!({
+                    "start": r.start,
+                    "end": r.end,
+                    "role": role.name(),
+                })).collect::<Vec<_>>(),
+            }))
+        }),
+    );
+    ui::command::register_query(
+        cx,
         "editor.text",
         Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).text().into())),
     );

@@ -12,7 +12,7 @@ mod input;
 
 pub use editor::{BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, forward_actions, new_editor};
 pub use element::LONG_LINE;
-pub use highlight::{Highlighter, Span};
+pub use highlight::{Highlighter, Job, JobResult, Span, SyntaxHighlighter};
 
 /// Registers the editor commands with the command index.
 pub fn init(cx: &mut gpui::App) {

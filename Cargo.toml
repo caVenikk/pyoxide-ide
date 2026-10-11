@@ -14,11 +14,13 @@ members = [
     "crates/platform/editor",
     "crates/platform/secrets",
     "crates/platform/settings-import",
+    "crates/platform/syntax",
     "crates/platform/text",
     "crates/platform/themes",
     "crates/platform/ui",
     "crates/platform/workbench",
     "crates/python/py-env",
+    "crates/python/py-syntax",
     "crates/python/pyoxide-cli",
     "crates/python/pyoxide-ide",
 ]
@@ -57,8 +59,10 @@ db-testkit = { path = "crates/platform/db-testkit" }
 project = { path = "crates/platform/project" }
 secrets = { path = "crates/platform/secrets" }
 settings-import = { path = "crates/platform/settings-import" }
+syntax = { path = "crates/platform/syntax" }
 text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
+py-syntax = { path = "crates/python/py-syntax" }

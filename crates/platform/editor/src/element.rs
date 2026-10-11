@@ -458,6 +458,12 @@ impl Element for EditorElement {
             }
             e.scroll.y = e.scroll.y.clamp(px(0.0), max_y);
             e.scroll.x = e.scroll.x.max(px(0.0));
+            // Highlight spans for the lines about to be painted.
+            let first = ((e.scroll.y / lh).floor() as usize).min(len_lines - 1);
+            let last = (first + viewport_lines + 2).min(len_lines);
+            if let Some(h) = &mut e.highlighter {
+                h.prepare(&e.buffer, first..last);
+            }
         });
 
         let editor = self.editor.read(cx);

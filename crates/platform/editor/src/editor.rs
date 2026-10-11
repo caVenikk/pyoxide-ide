@@ -90,6 +90,8 @@ pub struct Editor {
     pub(crate) highlighter: Option<Box<dyn Highlighter>>,
     blink_epoch: usize,
     blink_task: Option<Task<()>>,
+    /// The highlighter's background job in flight.
+    highlight_task: Option<Task<()>>,
     word_stop: WordStop,
     _subscriptions: Vec<Subscription>,
 }
@@ -130,6 +132,7 @@ impl Editor {
             highlighter: None,
             blink_epoch: 0,
             blink_task: None,
+            highlight_task: None,
             word_stop: WordStop::platform(),
             _subscriptions: subscriptions,
         }
@@ -188,10 +191,57 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         self.highlighter = highlighter;
+        self.highlight_task = None;
         if let Some(h) = &mut self.highlighter {
             h.reset(&self.buffer);
         }
+        self.schedule_highlighting(cx);
         cx.notify();
+    }
+
+    /// Highlight spans of one line as the highlighter has them now (empty
+    /// while the first parse runs).
+    pub fn highlights(&mut self, line: usize) -> Vec<crate::highlight::Span> {
+        let mut out = Vec::new();
+        if line < self.buffer.len_lines()
+            && let Some(h) = &mut self.highlighter
+        {
+            h.prepare(&self.buffer, line..line + 1);
+            h.line_spans(line, &mut out);
+        }
+        out
+    }
+
+    /// Highlighting reflects the current text.
+    pub fn highlighting_current(&self) -> bool {
+        self.highlighter.as_ref().is_none_or(|h| h.is_current())
+    }
+
+    /// Runs the highlighter's next job on the background executor; the
+    /// result is applied on the UI thread and the next job follows.
+    fn schedule_highlighting(&mut self, cx: &mut Context<Self>) {
+        if self.highlight_task.is_some() {
+            return;
+        }
+        let Some(job) = self
+            .highlighter
+            .as_mut()
+            .and_then(|h| h.next_job(&self.buffer))
+        else {
+            return;
+        };
+        let work = cx.background_spawn(async move { job() });
+        self.highlight_task = Some(cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.highlight_task = None;
+                if let Some(h) = &mut this.highlighter {
+                    h.job_done(result, &this.buffer);
+                }
+                this.schedule_highlighting(cx);
+                cx.notify();
+            });
+        }));
     }
 
     pub fn highlighter(&self) -> Option<&dyn Highlighter> {
@@ -295,6 +345,7 @@ impl Editor {
         if let Some(h) = &mut self.highlighter {
             h.edited(&self.buffer, &applied);
         }
+        self.schedule_highlighting(cx);
         self.autoscroll = true;
         self.caret_visible = true;
         self.blink_epoch += 1;
@@ -340,6 +391,8 @@ impl Editor {
         if let Some(h) = &mut self.highlighter {
             h.reset(&self.buffer);
         }
+        self.highlight_task = None;
+        self.schedule_highlighting(cx);
         cx.emit(EditorEvent::SelectionsChanged);
         cx.notify();
     }

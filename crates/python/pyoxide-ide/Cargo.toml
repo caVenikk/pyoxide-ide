@@ -17,10 +17,18 @@ default = ["runtime-shaders"]
 runtime-shaders = ["gpui/runtime_shaders"]
 
 [dependencies]
+editor.workspace = true
 gpui.workspace = true
+py-syntax.workspace = true
 themes.workspace = true
 ui.workspace = true
 workbench.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+tempfile = "3"
+text.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

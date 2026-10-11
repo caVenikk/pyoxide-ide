@@ -1,0 +1,13 @@
+[package]
+name = "syntax"
+description = "Language-agnostic syntax layer of Pyoxide IDE: incremental tree-sitter parsing and highlight spans resolved to theme text roles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ropey = "1.6"
+text.workspace = true
+themes.workspace = true
+tree-sitter = "0.25"
