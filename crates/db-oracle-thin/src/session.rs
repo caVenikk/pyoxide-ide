@@ -12,7 +12,7 @@ use oracle_rs::Error as OraError;
 /// How large one server response may be. oracle-rs 0.1.7 reads a single
 /// network packet per call, so every fetch must fit into one packet of the
 /// negotiated session data unit (SDU).
-pub const LARGE_FETCH_BUDGET: usize = 54 * 1024;
+pub const LARGE_FETCH_BUDGET: usize = 58 * 1024;
 /// Budget when the server negotiated a small (8 KiB) SDU.
 pub const SMALL_FETCH_BUDGET: usize = 6 * 1024;
 /// oracle-rs also sends every request in one packet: the largest request

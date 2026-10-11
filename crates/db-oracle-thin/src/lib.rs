@@ -56,7 +56,7 @@ const CURSOR_RESERVE: u32 = 10;
 const DEFAULT_OPEN_CURSORS: u32 = 50;
 
 /// Rows and row size of the packet-size probe run after connecting.
-const PROBE_ROWS: u32 = 14;
+const PROBE_ROWS: u32 = 15;
 const PROBE_PAD: u32 = 4000;
 
 /// The thin driver.
