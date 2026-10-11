@@ -2,11 +2,11 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 21%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 26%** `█████░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 56% `██████░░░░` | 7 | 14 | 6 |
+| database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -24,28 +24,28 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ✅ | Oracle connection (thin driver) | must | db-oracle-thin |
+| ✅ | Oracle connection (thin driver) | must | db-oracle-thin over oracle-rs with a PL/SQL wrapper (works around oracle-rs bugs); no NNE, no cancel |
 | ✅ | Oracle connection (Oracle Client / ODPI-C) | should | db-oracle-odpi: cancel, call timeouts, TNS/wallets/NNE/Kerberos; integration tests need Oracle Instant Client |
 | ✅ | PostgreSQL connection | must | db-postgres (tokio-postgres, rustls) |
 | ✅ | SQLite connection | must | db-sqlite (bundled SQLite) |
 | 🟡 | Run SQL and view results | must | CLI and db.query command |
-| 🟡 | Typed result values | must | SQLite, PostgreSQL, Oracle Client done; thin in progress |
-| 🟡 | Schema introspection (tables / views / columns) | must | SQLite and PostgreSQL full; Oracle in progress |
-| 🟡 | Indexes constraints sequences procedures | should | SQLite, PostgreSQL; Oracle in progress |
+| ✅ | Typed result values | must | all four backends |
+| ✅ | Schema introspection (tables / views / columns) | must | Oracle (ALL_* views, 19c-safe), PostgreSQL, SQLite |
+| ✅ | Indexes constraints sequences procedures | should | Oracle, PostgreSQL, SQLite |
 | ✅ | Connection profiles with keychain secrets | must | TOML profiles, OS credential store, env, prompt |
 | ✅ | Password storage in KeePass (kdbx) | should | secrets: KDBX 4 store, master password in OS store / env / prompt |
-| 🟡 | TLS and wallets | should | PostgreSQL all modes and mutual TLS; Oracle Client tcps and wallets; thin in progress |
-| 🟡 | Query timeout and cancel | must | SQLite, PostgreSQL, Oracle Client; thin in progress |
-| 🟡 | Paginated results | must | cursor paging: SQLite, PostgreSQL, Oracle Client; thin in progress |
+| 🟡 | TLS and wallets | should | PostgreSQL all modes; Oracle Client tcps and wallets; thin: TCPS with ewallet.pem, no cwallet.sso; TCPS untested live |
+| 🟡 | Query timeout and cancel | must | timeouts everywhere; cancel on SQLite, PostgreSQL, Oracle Client (not thin) |
+| ✅ | Paginated results | must | incremental cursors on all backends |
 | ⬜ | Export results (CSV / JSON) | should |  |
 | ✅ | Connection diagnostics (own) | should | pyoxide-db diagnose |
 | ✅ | Test connection (server and driver version) | must | pyoxide-db test / db.connection.test |
-| 🟡 | Bind parameters | should | SQLite, PostgreSQL, Oracle Client |
-| 🟡 | Transaction mode (auto / manual) | should | SQLite, PostgreSQL, Oracle Client |
-| 🟡 | Read-only connections | should | SQLite, PostgreSQL; Oracle best effort |
-| 🟡 | Oracle TNS alias and connect descriptors | should | Oracle Client backend (dsn); thin in progress |
+| ✅ | Bind parameters | should | all four backends |
+| ✅ | Transaction mode (auto / manual) | should | all four backends |
+| 🟡 | Read-only connections | should | SQLite, PostgreSQL; Oracle client-side best effort |
+| ✅ | Oracle TNS alias and connect descriptors | should | Oracle Client (dsn as is); thin via oracle_net (Easy Connect, descriptors, tnsnames.ora) |
 | ⬜ | Schema and object filters | should | Pro |
-| 🟡 | Object source and DDL | should | SQLite, PostgreSQL |
+| ✅ | Object source and DDL | should | Oracle (ALL_SOURCE, DBMS_METADATA), PostgreSQL, SQLite |
 | ⬜ | SSH tunnel | should | Pro; after MVP; must never block the UI (feedback) |
 | ⬜ | Startup script / keep-alive / auto-disconnect | could | Pro |
 | 🟡 | Large values: capped fetch of LOB / JSON / long text | must | max_value_bytes and Value::Truncated; lazy full fetch todo |

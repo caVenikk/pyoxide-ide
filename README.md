@@ -29,11 +29,11 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 21%** `████░░░░░░░░░░░░░░░░`
+**Overall parity: 26%** `█████░░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
-| database | 56% `██████░░░░` | 7 | 14 | 6 |
+| database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |

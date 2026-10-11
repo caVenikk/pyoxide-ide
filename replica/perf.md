@@ -63,5 +63,5 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 |---|---|---|---|---|---|---|---|
 | 2026-10-09 | mac-1 | postgres 18.6 | 3.6 ms | 3.3 ms | 33.8 ms | 2.96 M | auto-commit streaming cursor; manual mode (SQL cursor) about 75 ms |
 | 2026-10-09 | mac-1 | sqlite 3.53.2 | 0.1 ms | 0.2 ms | 28.6 ms | 3.50 M | `:memory:`, generated rows; table scan of a file about 14 ms |
-| 2026-10-09 | mac-1 | oracle-thin (Free 23) | | | | | pending #3 |
+| 2026-10-11 | mac-1 | oracle-thin (Free 23) | 39.1 ms | 2.7 ms | 276.6 ms | 0.36 M | PL/SQL wrapper and REF CURSOR fetch around oracle-rs bugs; 64 KiB packets |
 | | | oracle-odpi | | | | | needs Oracle Instant Client |

@@ -31,7 +31,7 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 |---|---|---|---|---|
 | #1 PostgreSQL backend | sub-agent pg | `crates/db-postgres`, `db-core/src/schema/postgres.rs` | contracts | merged |
 | #2 SQLite backend | sub-agent sqlite | `crates/db-sqlite`, `db-core/src/schema/sqlite.rs` | contracts | merged |
-| #3 Oracle thin backend and introspection | sub-agent oracle-thin | `crates/db-oracle-thin`, `db-core/src/schema/oracle.rs`, `db-core/src/oracle_net.rs` | contracts | in progress |
+| #3 Oracle thin backend and introspection | sub-agent oracle-thin | `crates/db-oracle-thin`, `db-core/src/schema/oracle.rs`, `db-core/src/oracle_net.rs` | contracts | merged |
 | #4 Oracle Client backend | sub-agent oracle-odpi | `crates/db-oracle-odpi` | contracts | merged (integration tests need Oracle Instant Client) |
 | #5 db-service and CLI | lead | `crates/db-service`, `crates/db-cli`, `crates/secrets` (store trait) | contracts | done |
 | #6 diagnose | lead | `crates/db-service/src/diagnose.rs`, `hints.rs`, `tls_probe.rs` | #5 | done |
