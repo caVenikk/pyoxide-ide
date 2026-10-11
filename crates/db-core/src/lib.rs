@@ -7,6 +7,7 @@
 mod connection;
 mod error;
 pub mod oracle;
+pub mod oracle_net;
 mod params;
 mod render;
 pub mod schema;
