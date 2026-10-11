@@ -10,18 +10,33 @@
    concrete driver.
 
 ## Current crates
+Platform (`crates/platform/`, language-agnostic):
 - `commands`: the command registry (ADR 0001).
 - `db-core`: `Driver`, `Connection` and `Cursor` traits, typed values,
   cancel/timeout policy, errors, introspection model and per-dialect SQL,
-  text table renderer (ADR 0002).
+  shared driver building blocks (blocking-driver worker, value conversion,
+  Oracle statement text, transaction state), text table renderer (ADR 0002).
 - `db-oracle-thin`: pure Rust Oracle driver (`oracle-rs`, TNS protocol).
 - `db-oracle-odpi`: Oracle via an installed Oracle Client (ODPI-C), fallback for
   environments the thin driver cannot reach (Kerberos, LDAP naming, native
   network encryption, ...). Client libraries are loaded at runtime.
 - `db-postgres`, `db-sqlite`: PostgreSQL and SQLite drivers (ADR 0003).
-- `db-service`: connection profiles and secrets (ADR 0004), driver dispatch,
-  diagnostics, `db.*` commands.
+- `db-testkit`: the conformance suite every database driver runs.
+- `db-service`: connection profiles (ADR 0004), driver dispatch, diagnostics,
+  import of PyCharm data sources, `db.*` commands.
 - `db-cli`: `pyoxide-db`, a thin front-end over `db-service`.
+- `secrets`: secret stores (OS credential store, KeePass, memory), their
+  settings and the reader of a JetBrains IDE credential store for import.
+- `settings-import`: PyCharm project settings (data sources, JDBC URLs).
+- `themes`: theme model and tokens, default themes, import of PyCharm colour
+  schemes and UI themes.
+
+Python product (`crates/python/`):
+- `py-env`: interpreter and virtualenv discovery, project model
+  (`pyproject.toml`, `uv.lock`, PEP 723), uv and pip operations, `env.*`
+  commands.
+- `pyoxide-cli`: `pyoxide`, the product's command line over the platform and
+  Python command registries.
 
 ## Platform and products
 One repository, one Cargo workspace: a language-agnostic platform layer and
@@ -30,8 +45,8 @@ product (ADR 0005). Pyoxide is the Python product.
 
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
-Docker, DB, terminal) -> `ui` (toolkit chosen by ADR) -> `app`. Decisions are
-recorded in [adr/](adr/).
+Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded
+in [adr/](adr/).
 
 ## External processes
 Python interpreter, ruff, a type checker, debugpy. Discovered and version-checked
