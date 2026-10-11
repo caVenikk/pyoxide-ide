@@ -7,9 +7,12 @@ in one lightweight app, with no JVM and no web view. Offline, open source, and
 scriptable: every action is a command, so the UI, the CLI and AI agents drive
 the same engine.
 
-> **Status: pre-alpha.** Only the database engine exists today, usable through
-> the `pyoxide-db` command line. See the [roadmap](docs/ROADMAP.md) for what is planned and
-> how far along it is.
+> **Status: pre-alpha.** No editor window yet: the engines exist and are usable
+> from the command line: the database client (`pyoxide-db`, Oracle,
+> PostgreSQL, SQLite), Python environments on top of uv (`pyoxide env`) and
+> import of PyCharm colour schemes, UI themes and data sources. The application
+> shell on GPUI is next. See the [roadmap](docs/ROADMAP.md) for what is planned
+> and how far along it is.
 
 ## Goals
 
@@ -85,6 +88,21 @@ cargo run -p db-cli -- --service FREEPDB1 --user pyoxide diagnose
 Passwords come from the environment, the OS credential store or a prompt,
 never from arguments. Profiles, secrets and diagnostics:
 [docs/pyoxide-db.md](docs/pyoxide-db.md).
+
+Python environments (needs [uv](https://docs.astral.sh/uv/); details in
+[docs/python-environments.md](docs/python-environments.md)):
+
+```bash
+cargo run -p pyoxide-cli -- env interpreters
+cargo run -p pyoxide-cli -- env info .
+cargo run -p pyoxide-cli -- commands
+```
+
+Import report for a PyCharm colour scheme, UI theme or theme plugin:
+
+```bash
+cargo run -p themes --example import -- path/to/theme.jar
+```
 
 ```bash
 cargo fmt --all --check
