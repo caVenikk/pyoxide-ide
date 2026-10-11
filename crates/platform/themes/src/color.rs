@@ -60,26 +60,20 @@ impl Rgba {
     /// missing high digits are zero (`0` is black). Leading `#` is accepted.
     pub fn parse_scheme(text: &str) -> Result<Self, ColorParseError> {
         let hex = text.trim().trim_start_matches('#');
-        if matches!(hex.len(), 1 | 2 | 4 | 5 | 7) && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            let value =
-                u32::from_str_radix(hex, 16).map_err(|_| ColorParseError(text.to_owned()))?;
-            return Ok(Self::rgb(
-                (value >> 16) as u8,
-                (value >> 8) as u8,
-                value as u8,
-            ));
+        let err = || ColorParseError(text.to_owned());
+        match hex.len() {
+            // A number, not the CSS shorthand: `f` is blue, `abc` is 0x000abc.
+            1..=5 if hex.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                let value = u32::from_str_radix(hex, 16).map_err(|_| err())?;
+                Ok(Self::rgb(
+                    (value >> 16) as u8,
+                    (value >> 8) as u8,
+                    value as u8,
+                ))
+            }
+            6 | 8 => Self::parse(hex),
+            _ => Err(err()),
         }
-        if hex.len() == 3 {
-            // Three digits are a number too, not the CSS shorthand.
-            let value =
-                u32::from_str_radix(hex, 16).map_err(|_| ColorParseError(text.to_owned()))?;
-            return Ok(Self::rgb(
-                (value >> 16) as u8,
-                (value >> 8) as u8,
-                value as u8,
-            ));
-        }
-        Self::parse(hex)
     }
 
     /// `#rrggbb`, or `#rrggbbaa` when not opaque.

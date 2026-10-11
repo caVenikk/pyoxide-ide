@@ -3,6 +3,9 @@
 
 use quick_xml::events::{BytesStart, Event};
 
+/// Deepest nesting accepted; scheme files are about five levels deep.
+const MAX_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Element {
     pub name: String,
@@ -66,7 +69,12 @@ pub(crate) fn parse(text: &str) -> Result<Element, String> {
             .read_event()
             .map_err(|e| format!("{e} (at byte {})", reader.error_position()))?;
         match event {
-            Event::Start(s) => stack.push(element(&s)?),
+            Event::Start(s) => {
+                if stack.len() >= MAX_DEPTH {
+                    return Err(format!("elements are nested deeper than {MAX_DEPTH}"));
+                }
+                stack.push(element(&s)?);
+            }
             Event::Empty(s) => {
                 let e = element(&s)?;
                 match stack.last_mut() {
@@ -121,6 +129,14 @@ mod tests {
         root.descendants_named("scheme", &mut found);
         let names: Vec<_> = found.iter().map(|e| e.attr("n").unwrap()).collect();
         assert_eq!(names, ["1", "2"]);
+    }
+
+    #[test]
+    fn absurd_nesting_is_refused() {
+        let deep = "<a>".repeat(10_000);
+        assert!(parse(&deep).unwrap_err().contains("nested"));
+        let fine = format!("{}{}", "<a>".repeat(60), "</a>".repeat(60));
+        assert!(parse(&fine).is_ok());
     }
 
     #[test]
