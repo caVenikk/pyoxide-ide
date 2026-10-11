@@ -17,6 +17,7 @@ pub mod import;
 mod model;
 mod registry;
 mod roles;
+mod token_names;
 
 pub use color::{ColorParseError, ColorRef, Rgba, contrast_ratio};
 pub use model::{
