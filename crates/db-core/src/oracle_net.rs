@@ -85,9 +85,8 @@ pub fn resolve(connect: &str) -> Result<OracleAddress> {
             connect.trim()
         ))
     })?;
-    let text = std::fs::read_to_string(&path).map_err(|e| {
-        Error::config(format!("cannot read {}: {e}", path.display()))
-    })?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| Error::config(format!("cannot read {}: {e}", path.display())))?;
     resolve_with(connect, Some(&text))
 }
 
@@ -98,7 +97,9 @@ pub fn resolve_with(connect: &str, tnsnames_text: Option<&str>) -> Result<Oracle
     }
     let alias = connect.trim();
     let text = tnsnames_text.ok_or_else(|| {
-        Error::config(format!("`{alias}` looks like a TNS alias, but no tnsnames.ora is available"))
+        Error::config(format!(
+            "`{alias}` looks like a TNS alias, but no tnsnames.ora is available"
+        ))
     })?;
     let target = resolve_alias(text, alias)
         .ok_or_else(|| Error::config(format!("TNS alias `{alias}` not found in tnsnames.ora")))?;
@@ -118,7 +119,12 @@ pub fn tnsnames_candidates(tns_admin: Option<&str>, oracle_home: Option<&str>) -
         out.push(Path::new(dir).join("tnsnames.ora"));
     }
     if let Some(home) = oracle_home.filter(|d| !d.trim().is_empty()) {
-        out.push(Path::new(home).join("network").join("admin").join("tnsnames.ora"));
+        out.push(
+            Path::new(home)
+                .join("network")
+                .join("admin")
+                .join("tnsnames.ora"),
+        );
     }
     out
 }
@@ -382,7 +388,10 @@ fn parse_host_list(s: &str) -> Result<Vec<HostPort>> {
             let mut parts = after.splitn(2, ':');
             let p = parts.next().unwrap_or("");
             port = Some(parse_port(p)?);
-            legacy_sid = parts.next().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+            legacy_sid = parts
+                .next()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty());
         } else if !after.is_empty() {
             return Err(Error::config(format!("unexpected `{after}` after host")));
         }
@@ -533,7 +542,9 @@ impl<'a> NvParser<'a> {
                 self.pos += 1;
             }
             if self.pos >= self.s.len() {
-                return Err(Error::config("malformed connect descriptor: unterminated quote"));
+                return Err(Error::config(
+                    "malformed connect descriptor: unterminated quote",
+                ));
             }
             let v = self.text[start..self.pos].to_owned();
             self.pos += 1;
@@ -638,7 +649,10 @@ fn parse_descriptor(text: &str) -> Result<Vec<OracleAddress>> {
 
     let mut out = Vec::new();
     for a in address_nodes {
-        let protocol = a.child_atom("PROTOCOL").unwrap_or("TCP").to_ascii_uppercase();
+        let protocol = a
+            .child_atom("PROTOCOL")
+            .unwrap_or("TCP")
+            .to_ascii_uppercase();
         let tcps = match protocol.as_str() {
             "TCP" => false,
             "TCPS" => true,
@@ -693,7 +707,9 @@ mod tests {
         assert_eq!(a.port, DEFAULT_PORT);
         assert_eq!(a.service.as_deref(), Some("svc.example.com"));
 
-        let a = addr("tcps://secure.example.com:2484/prod?wallet_location=/w&ssl_server_cert_dn=\"CN=db\"");
+        let a = addr(
+            "tcps://secure.example.com:2484/prod?wallet_location=/w&ssl_server_cert_dn=\"CN=db\"",
+        );
         assert!(a.protocol_tcps);
         assert_eq!(a.port, 2484);
         assert_eq!(a.wallet_dir.as_deref(), Some("/w"));
@@ -719,7 +735,16 @@ mod tests {
 
     #[test]
     fn easy_connect_errors() {
-        for bad in ["", "dbhost", "dbhost:1521", "h:0/s", "h:x/s", "ftp://h/s", "ldap://dir/cn=orcl", "[::1/s"] {
+        for bad in [
+            "",
+            "dbhost",
+            "dbhost:1521",
+            "h:0/s",
+            "h:x/s",
+            "ftp://h/s",
+            "ldap://dir/cn=orcl",
+            "[::1/s",
+        ] {
             let e = parse_connect_string(bad).unwrap_err();
             assert_eq!(e.kind, ErrorKind::Config, "{bad}");
         }
@@ -750,7 +775,10 @@ mod tests {
 
         let list = "(DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS=(HOST=x)(PORT=1600))(CONNECT_DATA=(SERVICE_NAME=s1)))(DESCRIPTION=(ADDRESS=(HOST=y))(CONNECT_DATA=(SERVICE_NAME=s2))))";
         let a = addr(list);
-        assert_eq!((a.host.as_str(), a.port, a.service.as_deref()), ("x", 1600, Some("s1")));
+        assert_eq!(
+            (a.host.as_str(), a.port, a.service.as_deref()),
+            ("x", 1600, Some("s1"))
+        );
     }
 
     #[test]
@@ -790,7 +818,10 @@ IFILE = /etc/other/tnsnames.ora
         assert!(resolve_alias(TNSNAMES, "PROD_ALT").is_some());
         // First label match when the alias has no domain.
         assert!(resolve_alias(TNSNAMES, "DEV").unwrap().contains("dev-db"));
-        assert_eq!(resolve_alias(TNSNAMES, "EZ").as_deref(), Some("ez-host:1600/ezsvc"));
+        assert_eq!(
+            resolve_alias(TNSNAMES, "EZ").as_deref(),
+            Some("ez-host:1600/ezsvc")
+        );
         assert_eq!(resolve_alias(TNSNAMES, "missing"), None);
         assert_eq!(resolve_alias(TNSNAMES, "dev.other.com"), None);
 
@@ -803,8 +834,14 @@ IFILE = /etc/other/tnsnames.ora
         assert_eq!(a.port, 1600);
         // Not an alias: parsed directly, the file is not needed.
         assert_eq!(resolve_with("h:1/s", None).unwrap().port, 1);
-        assert_eq!(resolve_with("prod", None).unwrap_err().kind, ErrorKind::Config);
-        assert_eq!(resolve_with("nope", Some(TNSNAMES)).unwrap_err().kind, ErrorKind::Config);
+        assert_eq!(
+            resolve_with("prod", None).unwrap_err().kind,
+            ErrorKind::Config
+        );
+        assert_eq!(
+            resolve_with("nope", Some(TNSNAMES)).unwrap_err().kind,
+            ErrorKind::Config
+        );
     }
 
     #[test]
@@ -824,7 +861,10 @@ IFILE = /etc/other/tnsnames.ora
             c,
             vec![
                 PathBuf::from("/tns").join("tnsnames.ora"),
-                PathBuf::from("/oh").join("network").join("admin").join("tnsnames.ora"),
+                PathBuf::from("/oh")
+                    .join("network")
+                    .join("admin")
+                    .join("tnsnames.ora"),
             ]
         );
         assert_eq!(tnsnames_candidates(None, Some("")), Vec::<PathBuf>::new());
