@@ -5,6 +5,7 @@
 //! commands only talk to these traits. This crate has no driver dependencies.
 
 mod connection;
+pub mod convert;
 mod error;
 pub mod oracle;
 pub mod oracle_net;
