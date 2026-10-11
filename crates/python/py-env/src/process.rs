@@ -167,7 +167,9 @@ pub(crate) async fn run(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| spawn_error(tool, &spec, &e))?;
+    let mut child = spawn(&mut cmd)
+        .await
+        .map_err(|e| spawn_error(tool, &spec, &e))?;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
     let sink = ctx.progress.clone();
@@ -228,6 +230,24 @@ pub(crate) async fn run_ok(
         Ok(done)
     } else {
         Err(EnvError::from_failure(tool, done.code, &done.stderr))
+    }
+}
+
+/// Linux refuses to execute a file that another process still holds open for
+/// writing (ETXTBSY). That happens when an executable was written a moment
+/// ago and a concurrent fork inherited the descriptor until its exec; it
+/// clears within milliseconds, so retry a few times.
+async fn spawn(cmd: &mut Command) -> std::io::Result<tokio::process::Child> {
+    const ETXTBSY: i32 = 26;
+    let mut attempt = 0u64;
+    loop {
+        match cmd.spawn() {
+            Err(e) if cfg!(unix) && e.raw_os_error() == Some(ETXTBSY) && attempt < 5 => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(10 * attempt)).await;
+            }
+            other => return other,
+        }
     }
 }
 
