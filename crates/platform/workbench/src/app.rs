@@ -49,6 +49,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::init(cx, env::theme_kind());
     ui::icons::register(cx, product.icons);
     ui::command::register(cx, commands::COMMANDS);
+    editor::init(cx);
     ui::command::register_query(
         cx,
         "workbench.state",
@@ -124,13 +125,19 @@ pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Work
     .expect("open the main window")
 }
 
-/// Runs the application with the main window until it quits.
-pub fn run(product: Product) {
+/// Runs the application with the main window until it quits; `paths`
+/// are opened in it.
+pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     env::mark_main();
     let product = Rc::new(product);
     Application::new().run(move |cx| {
         init(cx, &product);
         let window = open_main_window(cx, product.clone());
+        if let Some(path) = paths.into_iter().next() {
+            let _ = window.update(cx, |workbench, window, cx| {
+                workbench.open_file(path, window, cx)
+            });
+        }
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -151,7 +158,13 @@ pub fn run(product: Product) {
 fn save_shot_and_quit(window: WindowHandle<Workbench>, path: std::path::PathBuf, cx: &mut App) {
     cx.spawn(async move |cx| {
         cx.background_executor()
-            .timer(Duration::from_millis(1500))
+            .timer(Duration::from_millis(1200))
+            .await;
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            crate::shot::request_display(window)
+        });
+        cx.background_executor()
+            .timer(Duration::from_millis(300))
             .await;
         let _ = cx.update_window(window.into(), |_, window, _| {
             match crate::shot::save(window, &path) {

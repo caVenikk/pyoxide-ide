@@ -50,7 +50,8 @@ fn product() -> Product {
 }
 
 fn main() {
-    workbench::run(product());
+    let paths = std::env::args_os().skip(1).map(Into::into).collect();
+    workbench::run(product(), paths);
 }
 
 #[cfg(test)]

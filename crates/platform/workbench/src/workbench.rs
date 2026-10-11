@@ -1,10 +1,13 @@
 //! The main window's root view.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
+use editor::Editor;
+
 use gpui::{
-    App, Context, FocusHandle, Focusable, FontWeight, IntoElement, Pixels, Render, SharedString,
-    Window, canvas, div, prelude::*, px,
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement, Pixels,
+    Render, SharedString, Window, canvas, div, prelude::*, px,
 };
 use serde_json::json;
 use themes::{Metric, UiRole};
@@ -28,6 +31,7 @@ pub struct Workbench {
     project_visible: bool,
     project_width: Pixels,
     first_frame_reported: bool,
+    editor: Option<Entity<Editor>>,
 }
 
 impl Workbench {
@@ -40,7 +44,45 @@ impl Workbench {
             project_visible: true,
             project_width: px(PROJECT_WIDTH),
             first_frame_reported: false,
+            editor: None,
         }
+    }
+
+    /// The editor of the open file, if any.
+    pub fn active_editor(&self) -> Option<&Entity<Editor>> {
+        self.editor.as_ref()
+    }
+
+    /// Reads a file off the UI thread and shows it in the editor.
+    pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let read = cx.background_spawn({
+            let path = path.clone();
+            async move { std::fs::read(&path) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let bytes = read.await;
+            let r = this.update_in(cx, |this, window, cx| match bytes {
+                Ok(bytes) => match text::decode(&bytes) {
+                    Ok(decoded) => {
+                        let buffer = text::Buffer::from_decoded(decoded);
+                        let editor = cx.new(|cx| {
+                            let mut editor = Editor::new(buffer, window, cx);
+                            editor.set_path(Some(path.clone()));
+                            editor
+                        });
+                        window.focus(&editor.focus_handle(cx));
+                        this.editor = Some(editor);
+                        cx.notify();
+                    }
+                    Err(_) => eprintln!("{} is not a text file", path.display()),
+                },
+                Err(e) => eprintln!("cannot read {}: {e}", path.display()),
+            });
+            if let Err(e) = r {
+                eprintln!("open_file: {e}");
+            }
+        })
+        .detach();
     }
 
     pub fn project_visible(&self) -> bool {
@@ -251,6 +293,16 @@ impl Workbench {
 
     fn render_editor_area(&self, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
+        if let Some(editor) = &self.editor {
+            return island(cx, UiRole::EditorBackground)
+                .id("editor-area")
+                .debug_selector(|| "editor-area".into())
+                .flex_1()
+                .min_w(px(0.0))
+                .h_full()
+                .child(editor.clone())
+                .into_any_element();
+        }
         let muted = theme.color(UiRole::TextMuted);
         let hint = |text: &'static str, keys: Option<&'static str>| {
             div()
@@ -277,6 +329,7 @@ impl Workbench {
             .child(hint("Open a folder to start", None))
             .child(hint("Project tool window", Some(project_keys)))
             .child(hint("Drop files here to open them", None))
+            .into_any_element()
     }
 
     fn render_status_bar(&self, cx: &App) -> impl IntoElement {

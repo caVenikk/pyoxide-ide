@@ -9,6 +9,36 @@
 
 use std::path::Path;
 
+/// Asks Core Animation to redraw the window's layer. GPUI stops its display
+/// link while a window is fully covered (automated runs open windows in the
+/// background), so a screenshot would show a stale frame; the layer's
+/// display callback renders one frame synchronously.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn request_display(window: &gpui::Window) {
+    use objc::runtime::Object;
+    use objc::{msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    let view = appkit.ns_view.as_ptr() as *mut Object;
+    // SAFETY: `view` is the live NSView of this window, on the main thread.
+    unsafe {
+        let layer: *mut Object = msg_send![view, layer];
+        if !layer.is_null() {
+            let _: () = msg_send![layer, setNeedsDisplay];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_display(_: &gpui::Window) {}
+
 /// Save the window's on-screen image; returns its size in pixels.
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own

@@ -1,0 +1,13 @@
+[package]
+name = "text"
+description = "Text buffer of Pyoxide IDE: rope storage, selections, edit transactions, undo and redo, line separator and encoding handling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ropey = "1.6"
+serde.workspace = true
+unicode-segmentation = "1"
+unicode-width = "0.2"
