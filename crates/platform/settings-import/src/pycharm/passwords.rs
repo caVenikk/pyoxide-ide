@@ -149,15 +149,10 @@ fn lookup_one(
                 },
                 None => PasswordLookup::NotFound,
             },
-            Opened::Os(store) => match user {
-                None => PasswordLookup::Error(
-                    "no user name: the OS store is searched by service and user".into(),
-                ),
-                Some(u) => match intellij::read_os_store(*store, &service_name, u) {
-                    Ok(Some(p)) if !p.is_empty() => PasswordLookup::Found(p),
-                    Ok(_) => PasswordLookup::NotFound,
-                    Err(e) => PasswordLookup::Error(e.to_string()),
-                },
+            Opened::Os(store) => match intellij::read_os_store(*store, &service_name, user) {
+                Ok(Some(p)) if !p.is_empty() => PasswordLookup::Found(p),
+                Ok(_) => PasswordLookup::NotFound,
+                Err(e) => PasswordLookup::Error(e.to_string()),
             },
         }
     };
@@ -450,6 +445,22 @@ mod tests {
     }
 
     #[test]
+    fn os_store_entry_without_account() {
+        // The IDE saves database passwords with no account on macOS.
+        let store = Arc::new(MemoryStore::default());
+        let all = sources();
+        let naming = CredentialNaming::default();
+        store
+            .set(&naming.service_name(&all[0]), "", &Secret::new("pg-secret"))
+            .unwrap();
+        let source = IdeCredentialSource::OsStore(store);
+        let results = lookup_passwords(&all, &source, &naming);
+        assert!(
+            matches!(&results[0].lookup, PasswordLookup::Found(p) if p.expose() == "pg-secret")
+        );
+    }
+
+    #[test]
     fn os_store_lookup_and_dry_run() {
         let store = Arc::new(MemoryStore::default());
         let all = sources();
@@ -467,9 +478,8 @@ mod tests {
             matches!(&results[0].lookup, PasswordLookup::Found(p) if p.expose() == "pg-secret")
         );
         assert!(matches!(results[1].lookup, PasswordLookup::NotNeeded));
-        assert!(
-            matches!(&results[2].lookup, PasswordLookup::Error(m) if m.contains("no user name"))
-        );
+        // No user name and nothing stored under the service: not found.
+        assert!(matches!(results[2].lookup, PasswordLookup::NotFound));
 
         let report = dry_run(&all, &source, &naming);
         assert_eq!(report.found(), 1);

@@ -99,6 +99,13 @@ pub trait SecretStore: Send + Sync {
     fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()>;
     /// `true` if something was deleted.
     fn delete(&self, service: &str, account: &str) -> Result<bool>;
+
+    /// A secret stored under `service` with any account, or with none. Used
+    /// to read entries other applications created without an account.
+    /// Stores that cannot search that way return `Ok(None)`.
+    fn get_any_account(&self, _service: &str) -> Result<Option<Secret>> {
+        Ok(None)
+    }
 }
 
 /// Asks the person at the keyboard. Provided by the front-end (terminal,
@@ -152,6 +159,51 @@ impl SecretStore for KeyringStore {
             Err(e) => Err(keyring_err(e)),
         }
     }
+
+    #[cfg(target_os = "macos")]
+    fn get_any_account(&self, service: &str) -> Result<Option<Secret>> {
+        macos::find_by_service(service)
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit, SearchResult};
+
+    use super::{KEYRING, Result, Secret, SecretError, SecretErrorKind};
+
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+    const ERR_SEC_USER_CANCELED: i32 = -128;
+    const ERR_SEC_AUTH_FAILED: i32 = -25293;
+
+    /// First generic password item with this service, whatever its account.
+    pub(super) fn find_by_service(service: &str) -> Result<Option<Secret>> {
+        let found = ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(service)
+            .load_data(true)
+            .limit(Limit::Max(1))
+            .search();
+        match found {
+            Ok(results) => Ok(results.into_iter().find_map(|r| match r {
+                SearchResult::Data(mut bytes) => {
+                    let secret = String::from_utf8(std::mem::take(&mut bytes)).ok();
+                    zeroize::Zeroize::zeroize(&mut bytes);
+                    secret.map(Secret::new)
+                }
+                _ => None,
+            })),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+            Err(e) => {
+                let kind = if matches!(e.code(), ERR_SEC_USER_CANCELED | ERR_SEC_AUTH_FAILED) {
+                    SecretErrorKind::Locked
+                } else {
+                    SecretErrorKind::Io
+                };
+                Err(SecretError::new(kind, KEYRING, e.to_string()))
+            }
+        }
+    }
 }
 
 /// Memory only: secrets are forgotten when the process exits.
@@ -179,6 +231,13 @@ impl SecretStore for MemoryStore {
         Ok(map
             .remove(&(service.to_owned(), account.to_owned()))
             .is_some())
+    }
+
+    fn get_any_account(&self, service: &str) -> Result<Option<Secret>> {
+        let map = self.0.lock().expect("poisoned");
+        let mut found: Vec<_> = map.iter().filter(|((s, _), _)| s == service).collect();
+        found.sort_by(|a, b| a.0.1.cmp(&b.0.1));
+        Ok(found.first().map(|(_, v)| (*v).clone()))
     }
 }
 
@@ -237,6 +296,10 @@ impl SecretStore for LazyStore {
 
     fn delete(&self, service: &str, account: &str) -> Result<bool> {
         self.inner()?.delete(service, account)
+    }
+
+    fn get_any_account(&self, service: &str) -> Result<Option<Secret>> {
+        self.inner()?.get_any_account(service)
     }
 }
 

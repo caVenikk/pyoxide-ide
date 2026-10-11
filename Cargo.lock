@@ -2360,6 +2360,7 @@ dependencies = [
  "keepass",
  "keyring",
  "quick-xml",
+ "security-framework 3.7.0",
  "serde",
  "sha2 0.11.0",
  "tempfile",

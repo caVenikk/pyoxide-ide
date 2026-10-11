@@ -682,18 +682,22 @@ pub fn os_store_support(platform: Platform) -> std::result::Result<(), String> {
 /// Read one IDE password from the OS credential store (pass
 /// [`KeyringStore`](crate::KeyringStore); the OS may ask the user to allow
 /// access). Only call this when the user asked for the import.
+///
+/// The entry is looked up by service and account first. The IDE stores an
+/// account only when the caller passes a user name; database passwords have
+/// none, and the IDE itself finds them by service alone, so that is the
+/// fallback.
 pub fn read_os_store(
     store: &dyn SecretStore,
     service_name: &str,
-    account: &str,
+    account: Option<&str>,
 ) -> Result<Option<Secret>> {
-    if account.is_empty() {
-        return Err(err(
-            SecretErrorKind::Unavailable,
-            "the OS store lookup needs the user name",
-        ));
+    if let Some(account) = account.filter(|a| !a.is_empty())
+        && let Some(secret) = store.get(service_name, account)?
+    {
+        return Ok(Some(secret));
     }
-    store.get(service_name, account)
+    store.get_any_account(service_name)
 }
 
 #[cfg(test)]
@@ -1082,16 +1086,38 @@ pub(crate) mod tests {
         let service = generate_service_name("DB", "uuid-1");
         store.set(&service, "app_user", &Secret::new("pw")).unwrap();
         assert_eq!(
-            read_os_store(&store, &service, "app_user")
+            read_os_store(&store, &service, Some("app_user"))
                 .unwrap()
                 .unwrap()
                 .expose(),
             "pw"
         );
-        assert!(read_os_store(&store, &service, "other").unwrap().is_none());
+        // A different user name still finds the entry by service alone.
         assert_eq!(
-            read_os_store(&store, &service, "").unwrap_err().kind,
-            SecretErrorKind::Unavailable
+            read_os_store(&store, &service, Some("other"))
+                .unwrap()
+                .unwrap()
+                .expose(),
+            "pw"
+        );
+        // Entries the IDE saved without an account (database passwords).
+        let no_account = generate_service_name("DB", "uuid-2");
+        store.set(&no_account, "", &Secret::new("pw2")).unwrap();
+        assert_eq!(
+            read_os_store(&store, &no_account, None)
+                .unwrap()
+                .unwrap()
+                .expose(),
+            "pw2"
+        );
+        assert!(
+            read_os_store(
+                &store,
+                &generate_service_name("DB", "nope"),
+                Some("app_user")
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(os_store_support(Platform::MacOs).is_ok());
         assert!(os_store_support(Platform::Linux).is_err());
