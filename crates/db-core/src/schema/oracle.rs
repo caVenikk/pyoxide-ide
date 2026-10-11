@@ -38,8 +38,8 @@ SELECT u.username, u.oracle_maintained, \
 FROM all_users u \
 ORDER BY u.username";
 
-/// One branch of the objects query per kind: `(kinds, SQL with one `{}`
-/// placeholder for the owner bind)`. Columns: name, kind code, parent,
+/// One objects query per kind: `(kinds, SQL with `{}` where the owner
+/// bind goes)`. Columns: name, kind code, parent,
 /// comment.
 const OBJECT_BRANCHES: &[(&[ObjectKind], &str)] = &[
     (
@@ -114,15 +114,15 @@ fn object_kind(code: &str) -> Option<ObjectKind> {
     })
 }
 
-/// The UNION ALL of the wanted branches; each branch binds the owner once
-/// (`:1`, `:2`, ...). Returns the SQL and the number of binds.
-fn objects_sql(kinds: &[ObjectKind]) -> Option<(String, usize)> {
-    let mut branches = Vec::new();
-    for (branch_kinds, sql) in OBJECT_BRANCHES {
-        if branch_kinds.iter().any(|k| wants(kinds, *k)) {
-            branches.push(sql.replace("{}", &format!(":{}", branches.len() + 1)));
-        }
-    }
+/// One query per wanted branch, each binding the owner as `:1`. (A UNION
+/// ALL of the dictionary views gets a much slower plan than the branches
+/// on their own.)
+fn objects_sql(kinds: &[ObjectKind]) -> Vec<String> {
+    let mut out: Vec<String> = OBJECT_BRANCHES
+        .iter()
+        .filter(|(branch_kinds, _)| branch_kinds.iter().any(|k| wants(kinds, *k)))
+        .map(|(_, sql)| sql.replace("{}", ":1"))
+        .collect();
     let types: Vec<String> = [
         ObjectKind::Procedure,
         ObjectKind::Function,
@@ -136,19 +136,17 @@ fn objects_sql(kinds: &[ObjectKind]) -> Option<(String, usize)> {
     .map(|t| format!("'{t}'"))
     .collect();
     if !types.is_empty() {
-        branches.push(format!(
+        out.push(format!(
             "SELECT o.object_name, o.object_type, NULL, NULL FROM all_objects o \
-             WHERE o.owner = :{} AND o.object_type IN ({}) AND o.generated = 'N' \
+             WHERE o.owner = :1 AND o.object_type IN ({}) AND o.generated = 'N' \
                AND o.object_name NOT LIKE 'BIN$%'",
-            branches.len() + 1,
             types.join(", ")
         ));
     }
-    if branches.is_empty() {
-        return None;
+    for sql in &mut out {
+        sql.push_str(" ORDER BY 1");
     }
-    let n = branches.len();
-    Some((format!("{} ORDER BY 1, 2", branches.join(" UNION ALL ")), n))
+    out
 }
 
 /// `DATA_DEFAULT` is LONG: the function copies it into a VARCHAR2.
@@ -253,24 +251,24 @@ impl Introspector for OracleIntrospector<'_> {
     }
 
     async fn objects(&self, schema: &str, kinds: &[ObjectKind]) -> Result<Vec<ObjectInfo>> {
-        let Some((sql, binds)) = objects_sql(kinds) else {
-            return Ok(Vec::new());
-        };
-        let params = vec![Value::from(schema); binds];
-        let rows = fetch_all(self.conn, &sql, &params).await?;
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let kind = object_kind(&text(&r[1]))?;
-                wants(kinds, kind).then(|| ObjectInfo {
-                    schema: schema.to_owned(),
-                    name: text(&r[0]),
-                    kind,
-                    parent: opt_text(&r[2]),
-                    comment: opt_text(&r[3]),
-                })
-            })
-            .collect())
+        let mut out = Vec::new();
+        for sql in objects_sql(kinds) {
+            for r in fetch_all(self.conn, &sql, &[Value::from(schema)]).await? {
+                let Some(kind) = object_kind(&text(&r[1])) else {
+                    continue;
+                };
+                if wants(kinds, kind) {
+                    out.push(ObjectInfo {
+                        schema: schema.to_owned(),
+                        name: text(&r[0]),
+                        kind,
+                        parent: opt_text(&r[2]),
+                        comment: opt_text(&r[3]),
+                    });
+                }
+            }
+        }
+        Ok(out)
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
@@ -652,20 +650,23 @@ mod tests {
     }
 
     #[test]
-    fn builds_objects_sql_with_one_bind_per_branch() {
-        let (sql, n) = objects_sql(&[]).unwrap();
-        assert_eq!(n, 7);
-        for i in 1..=7 {
-            assert_eq!(sql.matches(&format!(":{i} ")).count(), 1, "{sql}");
+    fn builds_one_query_per_branch() {
+        let all = objects_sql(&[]);
+        assert_eq!(all.len(), 7);
+        for sql in &all {
+            assert_eq!(sql.matches(":1").count(), 1, "{sql}");
+            assert!(!sql.contains(":2") && !sql.contains("{}"), "{sql}");
         }
-        assert!(!sql.contains("{}"));
-        let (sql, n) = objects_sql(&[ObjectKind::Table, ObjectKind::View]).unwrap();
-        assert_eq!(n, 2);
-        assert!(sql.contains("all_tables") && sql.contains("all_views"));
-        assert!(!sql.contains("all_objects"));
-        let (sql, n) = objects_sql(&[ObjectKind::Package, ObjectKind::Synonym]).unwrap();
-        assert_eq!(n, 1);
-        assert!(sql.contains("IN ('PACKAGE', 'SYNONYM')"), "{sql}");
+        let some = objects_sql(&[ObjectKind::Table, ObjectKind::View]);
+        assert_eq!(some.len(), 2);
+        assert!(some[0].contains("all_tables") && some[1].contains("all_views"));
+        let plsql = objects_sql(&[ObjectKind::Package, ObjectKind::Synonym]);
+        assert_eq!(plsql.len(), 1);
+        assert!(
+            plsql[0].contains("IN ('PACKAGE', 'SYNONYM')"),
+            "{}",
+            plsql[0]
+        );
     }
 
     #[test]
