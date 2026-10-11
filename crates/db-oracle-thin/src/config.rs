@@ -30,10 +30,9 @@ use oracle_rs::{Config, TlsConfig};
 /// largest SDU the server accepts is the most useful.
 pub const REQUESTED_SDU: u32 = 65_535;
 
-/// Thin-driver option: the session data unit to request, in bytes
-/// (512..=65535; default 65535). Mainly for testing servers that negotiate a
-/// small SDU.
-pub const SDU_OPTION: &str = "oracle.sdu";
+/// Thin-driver option: the session data unit to request (see
+/// [`opt::ORACLE_SDU`]).
+pub const SDU_OPTION: &str = opt::ORACLE_SDU;
 
 /// Where and how to connect.
 #[derive(Debug, Clone)]

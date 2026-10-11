@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 
 use crate::{Backend, ConnectParams, Dialect, Error, Result, TxMode, Value, ValueKind};
 
@@ -83,6 +84,14 @@ impl std::fmt::Debug for Outcome {
 ///   the connection.
 /// - Closing a cursor before it is exhausted stops the server-side work
 ///   (cancel or close the server cursor); it must not silently read the rest.
+/// - Dropping a cursor may release the connection asynchronously: the driver
+///   stops the server work in the background, and an `execute` issued right
+///   after the drop may wait briefly for that cleanup (see
+///   [`BusyFlag::acquire_after_cleanup`]) instead of failing with `Busy`.
+///   `close` releases it before it returns.
+/// - `commit` and `rollback` may end an open cursor (ending a transaction
+///   closes PostgreSQL portals). Read a cursor to the end or close it before
+///   ending the transaction it runs in.
 /// - Dropping any future returned by a cursor or connection method leaves the
 ///   connection usable or marks it broken (later calls fail with
 ///   `ErrorKind::ConnectionLost`). It never leaves it half-way in the protocol.
@@ -92,6 +101,12 @@ pub trait Cursor: Send {
 
     /// Fetch up to `max_rows` more rows. An empty page means the cursor is
     /// exhausted.
+    ///
+    /// Errors: when the backend reports an error after rows of the page were
+    /// read (for example while reading ahead to detect the end), a driver may
+    /// return those rows first and the error on the next call; a driver that
+    /// cannot keep them returns the error at once. Treat an error as the end
+    /// of the cursor: later calls report an error again.
     async fn next_page(&mut self, max_rows: usize) -> Result<Vec<Row>>;
 
     /// `true` once the backend has signalled the end of the rows.
@@ -209,14 +224,34 @@ pub async fn collect(
     })
 }
 
+#[derive(Debug, Default)]
+struct BusyState {
+    busy: AtomicBool,
+    /// Dropped cursors whose server work is still being stopped.
+    cleanups: AtomicUsize,
+    /// Signalled when the flag is cleared or a cleanup ends.
+    released: Notify,
+}
+
+impl BusyState {
+    fn release(&self) {
+        self.busy.store(false, Ordering::Release);
+        self.released.notify_waiters();
+    }
+}
+
 /// Enforces "one open cursor per connection". The connection owns the flag;
 /// each cursor holds a [`BusyGuard`] that clears it on drop.
+///
+/// A driver that stops a dropped cursor in the background marks that with
+/// [`BusyFlag::begin_cleanup`]; [`BusyFlag::acquire_after_cleanup`] then
+/// waits for the cleanup instead of failing with `Busy` at once.
 #[derive(Debug, Clone, Default)]
-pub struct BusyFlag(Arc<AtomicBool>);
+pub struct BusyFlag(Arc<BusyState>);
 
 impl BusyFlag {
     pub fn is_busy(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.busy.load(Ordering::Acquire)
     }
 
     /// Fails with `ErrorKind::Busy` if a cursor is already open.
@@ -231,18 +266,65 @@ impl BusyFlag {
     /// Mark a cursor as open.
     pub fn acquire(&self) -> Result<BusyGuard> {
         self.0
+            .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| Error::busy())?;
         Ok(BusyGuard(self.0.clone()))
     }
+
+    /// A dropped cursor is being stopped in the background; the connection
+    /// counts as "being released" until the returned guard is dropped.
+    pub fn begin_cleanup(&self) -> CleanupGuard {
+        self.0.cleanups.fetch_add(1, Ordering::AcqRel);
+        CleanupGuard(self.0.clone())
+    }
+
+    /// Whether a dropped cursor is still being stopped in the background.
+    pub fn cleanup_in_progress(&self) -> bool {
+        self.0.cleanups.load(Ordering::Acquire) > 0
+    }
+
+    /// [`BusyFlag::acquire`], but while a background cleanup is in progress
+    /// wait up to `max_wait` for it to free the connection. Fails with
+    /// `ErrorKind::Busy` when a cursor is open and nothing is being cleaned
+    /// up, or when the wait runs out.
+    pub async fn acquire_after_cleanup(&self, max_wait: Duration) -> Result<BusyGuard> {
+        let deadline = tokio::time::Instant::now() + max_wait;
+        loop {
+            // Registered before the check, so a release in between is seen.
+            let notified = self.0.released.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            match self.acquire() {
+                Ok(guard) => return Ok(guard),
+                Err(e) if !self.cleanup_in_progress() => return Err(e),
+                Err(_) => {}
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return Err(Error::busy());
+            }
+        }
+    }
 }
 
+/// Clears the [`BusyFlag`] on drop.
 #[derive(Debug)]
-pub struct BusyGuard(Arc<AtomicBool>);
+pub struct BusyGuard(Arc<BusyState>);
 
 impl Drop for BusyGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        self.0.release();
+    }
+}
+
+/// Ends a background cleanup (see [`BusyFlag::begin_cleanup`]) on drop.
+#[derive(Debug)]
+pub struct CleanupGuard(Arc<BusyState>);
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        self.0.cleanups.fetch_sub(1, Ordering::AcqRel);
+        self.0.released.notify_waiters();
     }
 }
 
@@ -330,5 +412,53 @@ mod tests {
         drop(g);
         assert!(flag.check().is_ok());
         assert!(flag.acquire().is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn acquire_after_cleanup_waits_only_for_a_cleanup() {
+        let flag = BusyFlag::default();
+        // Free: at once.
+        drop(
+            flag.acquire_after_cleanup(Duration::from_secs(1))
+                .await
+                .unwrap(),
+        );
+
+        // Busy without a cleanup: Busy at once.
+        let held = flag.acquire().unwrap();
+        let e = flag
+            .acquire_after_cleanup(Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind, crate::ErrorKind::Busy);
+
+        // Busy while a dropped cursor is cleaned up: waits for the release.
+        let cleanup = flag.begin_cleanup();
+        assert!(flag.cleanup_in_progress());
+        let releaser = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            drop(held);
+            drop(cleanup);
+        });
+        let started = tokio::time::Instant::now();
+        let g = flag
+            .acquire_after_cleanup(Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        releaser.await.unwrap();
+        assert!(!flag.cleanup_in_progress());
+        drop(g);
+
+        // A cleanup that never frees the connection: Busy after the wait.
+        let _held = flag.acquire().unwrap();
+        let _cleanup = flag.begin_cleanup();
+        let started = tokio::time::Instant::now();
+        let e = flag
+            .acquire_after_cleanup(Duration::from_millis(500))
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind, crate::ErrorKind::Busy);
+        assert!(started.elapsed() >= Duration::from_millis(500));
     }
 }

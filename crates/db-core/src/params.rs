@@ -129,6 +129,10 @@ pub mod opt {
     pub const ORACLE_LIB_DIR: &str = "oracle.lib_dir";
     /// Oracle Client only: directory with `tnsnames.ora` and `sqlnet.ora`.
     pub const ORACLE_CONFIG_DIR: &str = "oracle.config_dir";
+    /// Oracle thin driver only: the session data unit to request, in bytes
+    /// (512..=65535; default 65535). Mainly for testing servers that
+    /// negotiate a small SDU.
+    pub const ORACLE_SDU: &str = "oracle.sdu";
     /// SQLite: create the file if it does not exist (`"true"`).
     pub const SQLITE_CREATE: &str = "sqlite.create";
     /// SQLite: how long to wait for a lock held by another connection, in

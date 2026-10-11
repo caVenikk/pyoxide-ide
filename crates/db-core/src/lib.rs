@@ -15,8 +15,8 @@ pub mod timeout;
 mod value;
 
 pub use connection::{
-    BusyFlag, BusyGuard, Column, Connection, Cursor, Driver, ExecOptions, Outcome, ResultSet, Row,
-    VecCursor, collect,
+    BusyFlag, BusyGuard, CleanupGuard, Column, Connection, Cursor, Driver, ExecOptions, Outcome,
+    ResultSet, Row, VecCursor, collect,
 };
 pub use error::{Error, ErrorKind, Result};
 pub use params::{Backend, ConnectParams, Dialect, Secret, TlsMode, TlsParams, TxMode, opt};
