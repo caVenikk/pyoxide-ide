@@ -50,6 +50,9 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 
 ## Workspace
 
+Crates live in `crates/platform/` (language-agnostic) and, once they exist,
+`crates/python/` (the Python product); see ADR 0005.
+
 | Crate | Purpose |
 |---|---|
 | `commands` | Command registry shared by the UI, the CLI and the agent control channel |
@@ -58,7 +61,10 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 | `db-oracle-odpi` | Oracle through an installed Oracle Client (ODPI-C), fallback |
 | `db-postgres` | PostgreSQL (`tokio-postgres`, rustls) |
 | `db-sqlite` | SQLite (`rusqlite`, bundled) |
-| `db-service` | Connection profiles, secrets, diagnostics, `db.*` commands |
+| `db-service` | Connection profiles, diagnostics, PyCharm import, `db.*` commands |
+| `db-testkit` | Conformance suite every database driver runs |
+| `secrets` | Secret stores: OS credential store, KeePass, memory |
+| `settings-import` | Import of PyCharm project settings (data sources) |
 | `db-cli` | `pyoxide-db`, a command-line database client |
 
 ## Getting started

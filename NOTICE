@@ -17,7 +17,7 @@ here with: source URL, commit, file(s), license, and what was changed.
   block in each SKILL.md, skills/PYOXIDE.md, and replica-brand/sweep.py
   (--allow, skips target/). Development tooling only (not shipped).
 
-- crates/secrets/src/intellij.rs, crates/settings-import (README)
+- crates/platform/secrets/src/intellij.rs, crates/platform/settings-import (README)
   Closely adapted from IntelliJ Platform Community (Apache-2.0),
   https://github.com/JetBrains/intellij-community @ fdafcf9ebe91959acb3d81110fc13ff490cf91ac
   Files: platform/credential-store-impl/src/credentialStore/EncryptionSupport.kt,

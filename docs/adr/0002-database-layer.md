@@ -84,7 +84,7 @@ parameters. Both Oracle drivers share the same SQL.
   connection thread with the paging protocol, cancel, timeouts and abandoned
   calls; `convert` (size limit, exact decimals), `oracle::sql` (statement
   kind, terminators) and `transaction::TxState` are shared helpers.
-- Every driver runs the conformance suite of `crates/db-testkit` against
+- Every driver runs the conformance suite of `crates/platform/db-testkit` against
   this contract: SQLite in every test run, the server backends against the
   containers of `docker-compose.yml`.
 - The data grid can show the first page immediately and fetch on scroll.
