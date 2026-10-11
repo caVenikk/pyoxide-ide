@@ -137,9 +137,7 @@ impl Scheme {
         let value = value.map(str::trim).filter(|v| !v.is_empty());
         let fonts = &mut self.fonts;
         match (scope, name) {
-            (FontScope::Editor, "EDITOR_FONT_NAME") => {
-                fonts.editor_name = value.map(str::to_owned)
-            }
+            (FontScope::Editor, "EDITOR_FONT_NAME") => fonts.editor_name = value.map(str::to_owned),
             (FontScope::Editor, "EDITOR_FONT_SIZE") => {
                 fonts.editor_size = value.and_then(|v| v.parse().ok())
             }

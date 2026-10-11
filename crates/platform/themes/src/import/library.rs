@@ -132,10 +132,11 @@ impl Library {
         entry: &str,
         primary: bool,
     ) -> Result<(), ImportError> {
-        let data = UiThemeData::parse(text, origin, entry).map_err(|message| ImportError::Parse {
-            origin: origin.to_owned(),
-            message,
-        })?;
+        let data =
+            UiThemeData::parse(text, origin, entry).map_err(|message| ImportError::Parse {
+                origin: origin.to_owned(),
+                message,
+            })?;
         self.themes.push(Stored { data, primary });
         Ok(())
     }
@@ -201,7 +202,9 @@ impl Library {
     ) {
         let result = match kind {
             DataKind::UiTheme => self.add_ui_theme_json(text, origin, entry, primary),
-            DataKind::Scheme => self.add_scheme_xml(text, origin, entry, primary).map(|_| ()),
+            DataKind::Scheme => self
+                .add_scheme_xml(text, origin, entry, primary)
+                .map(|_| ()),
         };
         if let Err(e) = result {
             let reason = match e {
@@ -247,7 +250,7 @@ impl Library {
                     || stem(t) == id.to_ascii_lowercase()
             })
             .collect();
-        pick_nearest(&candidates, near, |&i| &self.themes[i].data.origin).copied()
+        pick_nearest(&candidates, near, |i| &self.themes[i].data.origin)
     }
 
     /// Finds a scheme by the `editorScheme` value of a theme: a path inside
@@ -277,73 +280,78 @@ impl Library {
                 .filter(|&i| self.schemes[i].data.name == reference)
                 .collect()
         };
-        pick_nearest(&candidates, near, |&i| &self.schemes[i].data.origin).copied()
+        pick_nearest(&candidates, near, |i| &self.schemes[i].data.origin)
     }
 
     fn find_scheme_by_name(&self, name: &str, near: &str) -> Option<usize> {
         let candidates: Vec<usize> = (0..self.schemes.len())
             .filter(|&i| self.schemes[i].data.name == name)
             .collect();
-        pick_nearest(&candidates, near, |&i| &self.schemes[i].data.origin).copied()
+        pick_nearest(&candidates, near, |i| &self.schemes[i].data.origin)
     }
 
     // ---- chains -----------------------------------------------------
 
     /// The theme and the ancestors that are available (nearest first), notes
     /// about the ones that are not, and the `dark` flag the table knows for
-    /// the first missing ancestor.
-    fn ui_chain<'a>(&'a self, start: &'a UiThemeData) -> (Vec<&'a UiThemeData>, Vec<Warning>, Option<bool>) {
+    /// the first missing ancestor. A missing ancestor does not end the walk:
+    /// the table of known themes names its parent, which may be available.
+    fn ui_chain<'a>(
+        &'a self,
+        start: &'a UiThemeData,
+    ) -> (Vec<&'a UiThemeData>, Vec<Warning>, Option<bool>) {
         let mut layers = vec![start];
         let mut warnings = Vec::new();
         let mut known_dark = None;
-        let mut current = start;
-        while let Some(parent_id) = current.parent.as_deref() {
-            match self.find_theme(parent_id, &current.origin) {
-                Some(index) => {
-                    let parent = &self.themes[index].data;
-                    if layers.iter().any(|l| std::ptr::eq(*l, parent)) {
-                        warnings.push(Warning {
-                            level: Level::Warning,
-                            kind: WarningKind::InheritanceCycle {
-                                id: parent_id.to_owned(),
-                            },
-                            message: format!("parentTheme `{parent_id}` leads back to a theme already in the chain"),
-                        });
-                        break;
-                    }
-                    layers.push(parent);
-                    current = parent;
-                }
-                None => {
-                    if let Some(known) = known_theme(parent_id) {
-                        known_dark = Some(known.dark);
-                        let chain: Vec<String> =
-                            known_chain(parent_id).into_iter().map(str::to_owned).collect();
-                        warnings.push(Warning {
-                            level: Level::Info,
-                            kind: WarningKind::ParentThemeUnavailable {
-                                id: parent_id.to_owned(),
-                                chain: chain.clone(),
-                            },
-                            message: format!(
-                                "parent theme `{parent_id}` ({}) is not among the inputs; its values are not imported",
-                                chain.join(" -> ")
-                            ),
-                        });
-                    } else {
-                        warnings.push(Warning {
-                            level: Level::Warning,
-                            kind: WarningKind::UnknownParentTheme {
-                                id: parent_id.to_owned(),
-                            },
-                            message: format!(
-                                "parentTheme `{parent_id}` is not a known theme id and no available theme matches it"
-                            ),
-                        });
-                    }
+        let mut noted: Vec<&'static str> = Vec::new();
+        let mut near = start.origin.clone();
+        let mut next_id = start.parent.clone();
+        while let Some(id) = next_id.take() {
+            if let Some(index) = self.find_theme(&id, &near) {
+                let parent = &self.themes[index].data;
+                if layers.iter().any(|l| std::ptr::eq(*l, parent)) {
+                    warnings.push(Warning {
+                        level: Level::Warning,
+                        kind: WarningKind::InheritanceCycle { id: id.clone() },
+                        message: format!(
+                            "parentTheme `{id}` leads back to a theme already in the chain"
+                        ),
+                    });
                     break;
                 }
+                near = parent.origin.clone();
+                next_id = parent.parent.clone();
+                layers.push(parent);
+                continue;
             }
+            let Some(known) = known_theme(&id) else {
+                warnings.push(Warning {
+                    level: Level::Warning,
+                    kind: WarningKind::UnknownParentTheme { id: id.clone() },
+                    message: format!(
+                        "parentTheme `{id}` is not a known theme id and no available theme matches it"
+                    ),
+                });
+                break;
+            };
+            known_dark.get_or_insert(known.dark);
+            if !noted.contains(&known.id) {
+                let chain = known_chain(&id);
+                noted.extend(chain.iter().copied());
+                let chain: Vec<String> = chain.into_iter().map(str::to_owned).collect();
+                warnings.push(Warning {
+                    level: Level::Info,
+                    kind: WarningKind::ParentThemeUnavailable {
+                        id: id.clone(),
+                        chain: chain.clone(),
+                    },
+                    message: format!(
+                        "parent theme `{id}` is not among the inputs (known chain: {}); its values are not imported",
+                        chain.join(" -> ")
+                    ),
+                });
+            }
+            next_id = known.parent.map(str::to_owned);
         }
         (layers, warnings, known_dark)
     }
@@ -402,34 +410,56 @@ impl Library {
 
     fn import_ui_theme_with_scheme(&self, theme: &UiThemeData) -> (Imported, Option<usize>) {
         let (ui_layers, mut warnings, known_dark) = self.ui_chain(theme);
-        let reference = ui_layers.iter().find_map(|l| {
+        let dark_hint = ui_layers.iter().find_map(|l| l.dark).or(known_dark);
+        let mut reference = ui_layers.iter().find_map(|l| {
             l.editor_scheme
                 .as_deref()
-                .map(|r| (r, l.origin.as_str()))
+                .map(|r| (r.to_owned(), l.origin.clone()))
         });
+        // A theme that names no scheme gets the IDE's default scheme for its
+        // brightness, when that scheme is among the inputs.
+        let mut assumed = false;
+        if reference.is_none()
+            && let Some(dark) = dark_hint
+        {
+            reference = Some((
+                if dark { "Darcula" } else { "Default" }.to_owned(),
+                theme.origin.clone(),
+            ));
+            assumed = true;
+        }
         let mut scheme_index = None;
         let mut scheme_layers = Vec::new();
         if let Some((reference, near)) = reference {
-            match self.find_scheme_ref(reference, near) {
+            match self.find_scheme_ref(&reference, &near) {
                 Some(index) => {
                     scheme_index = Some(index);
                     let (layers, more) = self.scheme_chain(&self.schemes[index].data);
                     scheme_layers = layers;
+                    if assumed {
+                        warnings.push(Warning {
+                            level: Level::Info,
+                            kind: WarningKind::SchemeAssumed {
+                                name: reference.clone(),
+                            },
+                            message: format!(
+                                "the theme names no editor scheme; the default scheme `{reference}` is used"
+                            ),
+                        });
+                    }
                     warnings.extend(more);
                 }
+                None if assumed => {}
                 None => warnings.push(Warning {
                     level: Level::Warning,
                     kind: WarningKind::SchemeNotFound {
-                        reference: reference.to_owned(),
+                        reference: reference.clone(),
                     },
                     message: format!("editorScheme `{reference}` is not among the inputs"),
                 }),
             }
         }
-        let dark = ui_layers
-            .iter()
-            .find_map(|l| l.dark)
-            .or(known_dark)
+        let dark = dark_hint
             .or_else(|| scheme_is_dark(&scheme_layers))
             .unwrap_or(true);
         let mut sources: Vec<String> = Vec::new();
@@ -459,15 +489,16 @@ impl Library {
     pub fn import_scheme(&self, scheme: &Scheme) -> Imported {
         let (scheme_layers, warnings) = self.scheme_chain(scheme);
         let dark = scheme_is_dark(&scheme_layers).unwrap_or(true);
-        let sources = scheme_layers.iter().map(|s| s.origin.clone()).fold(
-            Vec::new(),
-            |mut acc, origin| {
-                if !acc.contains(&origin) {
-                    acc.push(origin);
-                }
-                acc
-            },
-        );
+        let sources =
+            scheme_layers
+                .iter()
+                .map(|s| s.origin.clone())
+                .fold(Vec::new(), |mut acc, origin| {
+                    if !acc.contains(&origin) {
+                        acc.push(origin);
+                    }
+                    acc
+                });
         convert(Inputs {
             name: scheme.name.clone(),
             kind: SourceKind::Scheme,
@@ -524,16 +555,17 @@ fn looks_like_path(reference: &str) -> bool {
 
 /// Among `candidates` the one that sits in the same archive or folder as
 /// `near`, else the first.
-fn pick_nearest<'a, T>(
-    candidates: &'a [T],
+fn pick_nearest<'a>(
+    candidates: &[usize],
     near: &str,
-    origin_of: impl Fn(&T) -> &str,
-) -> Option<&'a T> {
+    origin_of: impl Fn(usize) -> &'a str,
+) -> Option<usize> {
     let container = container_of(near);
     candidates
         .iter()
-        .find(|c| container_of(origin_of(c)) == container)
-        .or_else(|| candidates.first())
+        .copied()
+        .find(|&c| container_of(origin_of(c)) == container)
+        .or_else(|| candidates.first().copied())
 }
 
 /// The archive part of `archive!entry`, else the folder of a file path.
@@ -541,9 +573,7 @@ fn container_of(origin: &str) -> &str {
     if let Some((archive, _)) = origin.split_once('!') {
         return archive;
     }
-    origin
-        .rfind(['/', '\\'])
-        .map_or("", |end| &origin[..end])
+    origin.rfind(['/', '\\']).map_or("", |end| &origin[..end])
 }
 
 /// Looks for the scheme file a theme file refers to, beside the theme file or
@@ -601,10 +631,10 @@ mod tests {
 
     #[test]
     fn nearest_prefers_the_same_container() {
-        let items = ["a.jar!x", "b.jar!y", "b.jar!z"];
-        let pick = |near: &str| pick_nearest(&items, near, |s| s).copied();
-        assert_eq!(pick("b.jar!theme"), Some("b.jar!y"));
-        assert_eq!(pick("c.jar!theme"), Some("a.jar!x"));
+        let origins = ["a.jar!x", "b.jar!y", "b.jar!z"];
+        let pick = |near: &str| pick_nearest(&[0, 1, 2], near, |i| origins[i]);
+        assert_eq!(pick("b.jar!theme"), Some(1));
+        assert_eq!(pick("c.jar!theme"), Some(0));
         assert_eq!(container_of("/dir/sub/file.json"), "/dir/sub");
         assert_eq!(container_of("file.json"), "");
     }

@@ -11,7 +11,9 @@ use crate::model::{Theme, ThemeKind, UnderlineStyle};
 use crate::roles::{Metric, TextRole, UiRole};
 use crate::{TextStyle, TextStyles, UiColors};
 
-use super::mapping::{self, Src, known_keys, metric_sources, text_sources, ui_sources, wildcard_property};
+use super::mapping::{
+    self, Src, known_keys, metric_sources, text_sources, ui_sources, wildcard_property,
+};
 use super::report::{
     Approximation, Defaulted, ImportReport, KeySource, Level, MappedKey, SourceKind, UnmappedKey,
     Warning, WarningKind,
@@ -102,6 +104,15 @@ struct Converter<'a> {
     warned: HashSet<String>,
 }
 
+/// A colour found for a UI role.
+struct Hit {
+    color: Rgba,
+    source: KeySource,
+    key: String,
+    /// Reached through the `*.property` form of the key.
+    wildcard: bool,
+}
+
 #[derive(Clone, Copy)]
 enum Part {
     Fg,
@@ -127,16 +138,18 @@ impl<'a> Converter<'a> {
     /// Finds a `ui` key. Each layer is searched for the key and then for its
     /// wildcard form before the next ancestor is consulted, so a wildcard of
     /// a child theme beats a specific key of its parent.
-    fn ui_lookup(&self, key: &str) -> Option<(&'a Value, String)> {
+    fn ui_lookup(&self, key: &str) -> Option<(&'a Value, String, bool)> {
         let wildcard = wildcard_property(key).map(|p| format!("*.{p}"));
         for layer in &self.ui_layers {
-            for candidate in std::iter::once(key).chain(wildcard.as_deref()) {
+            for (is_wildcard, candidate) in
+                std::iter::once((false, key)).chain(wildcard.as_deref().map(|w| (true, w)))
+            {
                 if let Some(value) = layer.ui.get(candidate) {
-                    return Some((value, candidate.to_owned()));
+                    return Some((value, candidate.to_owned(), is_wildcard));
                 }
                 let platform_default = format!("{candidate}.os.default");
                 if let Some(value) = layer.ui.get(&platform_default) {
-                    return Some((value, platform_default));
+                    return Some((value, platform_default, is_wildcard));
                 }
             }
         }
@@ -172,7 +185,9 @@ impl<'a> Converter<'a> {
             Ok(color) => Some(color),
             Err(_) => {
                 let looks_like_name = !text.starts_with('#')
-                    && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+                    && text
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | ' '));
                 if looks_like_name && current == text {
                     if self.warned.insert(format!("palette:{text}")) {
                         self.report.warn(
@@ -181,7 +196,9 @@ impl<'a> Converter<'a> {
                                 key: key.to_owned(),
                                 name: text.clone(),
                             },
-                            format!("`{key}` refers to `{text}`, which is not in the theme's colors"),
+                            format!(
+                                "`{key}` refers to `{text}`, which no available theme defines in its colors (a parent theme may be missing)"
+                            ),
                         );
                     }
                 } else {
@@ -202,19 +219,29 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn eval_ui(&mut self, key: &str) -> Option<(Rgba, KeySource, String)> {
-        let (value, effective) = self.ui_lookup(key)?;
+    fn eval_ui(&mut self, key: &str) -> Option<Hit> {
+        let (value, effective, wildcard) = self.ui_lookup(key)?;
         let color = self.ui_color(&effective, value)?;
-        Some((color, KeySource::UiTheme, effective))
+        Some(Hit {
+            color,
+            source: KeySource::UiTheme,
+            key: effective,
+            wildcard,
+        })
     }
 
-    fn eval_color(&mut self, key: &str) -> Option<(Rgba, KeySource, String)> {
+    fn eval_color(&mut self, key: &str) -> Option<Hit> {
         let raw = self.chain.color(key)?.to_owned();
         let color = self.scheme_color(key, &raw)?;
-        Some((color, KeySource::SchemeColor, key.to_owned()))
+        Some(Hit {
+            color,
+            source: KeySource::SchemeColor,
+            key: key.to_owned(),
+            wildcard: false,
+        })
     }
 
-    fn eval_attr(&mut self, key: &str, part: Part) -> Option<(Rgba, KeySource, String)> {
+    fn eval_attr(&mut self, key: &str, part: Part) -> Option<Hit> {
         let attribute = self.chain.attribute(key)?;
         let raw = match part {
             Part::Fg => attribute.foreground,
@@ -224,10 +251,15 @@ impl<'a> Converter<'a> {
         }?;
         let label = format!("{key}.{}", part.name());
         let color = self.scheme_color(&label, &raw)?;
-        Some((color, KeySource::SchemeAttribute, label))
+        Some(Hit {
+            color,
+            source: KeySource::SchemeAttribute,
+            key: label,
+            wildcard: false,
+        })
     }
 
-    fn eval(&mut self, src: Src) -> Option<(Rgba, KeySource, String)> {
+    fn eval(&mut self, src: Src) -> Option<Hit> {
         match src {
             Src::Ui(key) => self.eval_ui(key),
             Src::Color(key) => self.eval_color(key),
@@ -245,21 +277,37 @@ impl<'a> Converter<'a> {
         let mut direct: Vec<Option<Rgba>> = vec![None; UiRole::COUNT];
         for &role in UiRole::ALL {
             let target = format!("ui.{role}");
-            let mut taken = false;
+            // A key the theme sets for this very component beats a wildcard
+            // reached through an earlier source.
+            let mut hits: Vec<Hit> = Vec::new();
             for &src in ui_sources(role) {
-                let Some((color, source, key)) = self.eval(src) else {
+                let Some(hit) = self.eval(src) else {
                     continue;
                 };
-                self.report.mapped.push(MappedKey {
-                    source,
-                    key,
-                    target: target.clone(),
-                    used: !taken,
-                });
-                if !taken {
-                    direct[role.index()] = Some(color);
-                    taken = true;
+                // Several sources of a role can end at the same wildcard key.
+                if hits
+                    .iter()
+                    .any(|h| h.source == hit.source && h.key == hit.key)
+                {
+                    continue;
                 }
+                hits.push(hit);
+            }
+            let winner = hits
+                .iter()
+                .position(|h| !h.wildcard)
+                .or(if hits.is_empty() { None } else { Some(0) });
+            for (i, hit) in hits.into_iter().enumerate() {
+                let used = Some(i) == winner;
+                if used {
+                    direct[role.index()] = Some(hit.color);
+                }
+                self.report.mapped.push(MappedKey {
+                    source: hit.source,
+                    key: hit.key,
+                    target: target.clone(),
+                    used,
+                });
             }
         }
         for &role in UiRole::ALL {
@@ -298,7 +346,7 @@ impl<'a> Converter<'a> {
 
     fn style_of(&mut self, key: &str, attribute: &Attribute, target: &str) -> TextStyle {
         let mut style = TextStyle::default();
-        let mut parse = |cx: &mut Self, part: Part, raw: &Option<String>| {
+        let parse = |cx: &mut Self, part: Part, raw: &Option<String>| {
             raw.as_deref()
                 .and_then(|r| cx.scheme_color(&format!("{key}.{}", part.name()), r))
         };
@@ -314,7 +362,7 @@ impl<'a> Converter<'a> {
                 Err(_) => self.warn_invalid(&format!("{key}.FONT_TYPE"), raw),
             }
         }
-        let mut note = |cx: &mut Self, text: String| {
+        let note = |cx: &mut Self, text: String| {
             cx.report.approximations.push(Approximation {
                 key: key.to_owned(),
                 target: target.to_owned(),
@@ -324,7 +372,10 @@ impl<'a> Converter<'a> {
         match attribute.effect_type.as_deref().map(str::parse::<u32>) {
             None => {
                 if effect_color.is_some() {
-                    note(self, "EFFECT_COLOR without EFFECT_TYPE is ignored".to_owned());
+                    note(
+                        self,
+                        "EFFECT_COLOR without EFFECT_TYPE is ignored".to_owned(),
+                    );
                 }
             }
             Some(Ok(kind)) => {
@@ -347,7 +398,10 @@ impl<'a> Converter<'a> {
                     }
                     4 => underline(&mut style, UnderlineStyle::Thick),
                     5 => underline(&mut style, UnderlineStyle::Dotted),
-                    other => note(self, format!("EFFECT_TYPE {other} is not supported and is ignored")),
+                    other => note(
+                        self,
+                        format!("EFFECT_TYPE {other} is not supported and is ignored"),
+                    ),
                 }
             }
             Some(Err(_)) => {
@@ -429,7 +483,7 @@ impl<'a> Converter<'a> {
             let target = format!("metrics.{metric}");
             let mut taken = false;
             for &key in keys {
-                let Some((value, effective)) = self.ui_lookup(key) else {
+                let Some((value, effective, _)) = self.ui_lookup(key) else {
                     continue;
                 };
                 let number = match value {
@@ -459,7 +513,7 @@ impl<'a> Converter<'a> {
     }
 
     fn fill_fonts(&mut self, theme: &mut Theme) {
-        let mut note = |cx: &mut Self, key: &str, target: &str| {
+        let note = |cx: &mut Self, key: &str, target: &str| {
             cx.report.mapped.push(MappedKey {
                 source: KeySource::SchemeOption,
                 key: key.to_owned(),
@@ -473,7 +527,14 @@ impl<'a> Converter<'a> {
             && let Some(name) = &s.fonts.editor_name
         {
             let mut family = vec![name.clone()];
-            family.extend(theme.fonts.editor_family.iter().filter(|f| *f != name).cloned());
+            family.extend(
+                theme
+                    .fonts
+                    .editor_family
+                    .iter()
+                    .filter(|f| *f != name)
+                    .cloned(),
+            );
             theme.fonts.editor_family = family;
             note(self, "EDITOR_FONT_NAME", "editor-family");
         }
@@ -499,7 +560,14 @@ impl<'a> Converter<'a> {
             && let Some(name) = &s.fonts.console_name
         {
             let mut family = vec![name.clone()];
-            family.extend(theme.fonts.terminal_family.iter().filter(|f| *f != name).cloned());
+            family.extend(
+                theme
+                    .fonts
+                    .terminal_family
+                    .iter()
+                    .filter(|f| *f != name)
+                    .cloned(),
+            );
             theme.fonts.terminal_family = family;
             note(self, "console font name", "terminal-family");
         }
@@ -531,7 +599,9 @@ impl<'a> Converter<'a> {
         for layer in &self.chain.layers {
             for key in layer.colors.keys() {
                 if !known.colors.contains(key.as_str()) {
-                    *counts.entry((KeySource::SchemeColor, key.clone())).or_default() += 1;
+                    *counts
+                        .entry((KeySource::SchemeColor, key.clone()))
+                        .or_default() += 1;
                 }
             }
             for key in layer.attributes.keys() {
@@ -542,7 +612,9 @@ impl<'a> Converter<'a> {
                 }
             }
             for key in &layer.other_options {
-                *counts.entry((KeySource::SchemeOption, key.clone())).or_default() += 1;
+                *counts
+                    .entry((KeySource::SchemeOption, key.clone()))
+                    .or_default() += 1;
             }
         }
         self.report.unmapped = counts
@@ -602,7 +674,10 @@ mod tests {
     #[test]
     fn slugs() {
         assert_eq!(slug("Dracula Colorful"), "dracula-colorful");
-        assert_eq!(slug("Monokai Pro (Filter Octagon)"), "monokai-pro-filter-octagon");
+        assert_eq!(
+            slug("Monokai Pro (Filter Octagon)"),
+            "monokai-pro-filter-octagon"
+        );
         assert_eq!(slug("  "), "imported");
         assert_eq!(slug("A--B"), "a-b");
     }

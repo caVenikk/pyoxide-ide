@@ -88,13 +88,19 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Ui("Tree.selectionBackground"),
             Ui("Table.selectionBackground"),
         ],
-        SelectionText => &[Ui("List.selectionForeground"), Ui("Tree.selectionForeground")],
+        SelectionText => &[
+            Ui("List.selectionForeground"),
+            Ui("Tree.selectionForeground"),
+        ],
         SelectionInactive => &[
             Ui("List.selectionInactiveBackground"),
             Ui("Tree.selectionInactiveBackground"),
         ],
         Danger => &[Ui("Label.errorForeground"), Ui("Component.errorFocusColor")],
-        Warning => &[Ui("Label.warningForeground"), Ui("Component.warningFocusColor")],
+        Warning => &[
+            Ui("Label.warningForeground"),
+            Ui("Component.warningFocusColor"),
+        ],
         Success => &[Ui("Label.successForeground")],
         Info => &[Ui("Notification.informativeBorderColor")],
         DangerBg => &[
@@ -113,7 +119,10 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         TitleBar => &[Ui("TitlePane.background")],
         Toolbar => &[Ui("MainToolbar.background"), Ui("Toolbar.background")],
         StatusBar => &[Ui("StatusBar.background")],
-        StatusBarText => &[Ui("StatusBar.foreground"), Ui("StatusBar.Widget.foreground")],
+        StatusBarText => &[
+            Ui("StatusBar.foreground"),
+            Ui("StatusBar.Widget.foreground"),
+        ],
         ToolWindow => &[Ui("ToolWindow.background")],
         ToolWindowHeader => &[Ui("ToolWindow.Header.background")],
         ToolWindowStripe => &[Ui("ToolWindow.Stripe.background")],
@@ -160,17 +169,26 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         ],
         Progress => &[Ui("ProgressBar.progressColor")],
         ProgressTrack => &[Ui("ProgressBar.trackColor")],
-        Notification => &[Color("NOTIFICATION_BACKGROUND"), Ui("Notification.background")],
+        Notification => &[
+            Color("NOTIFICATION_BACKGROUND"),
+            Ui("Notification.background"),
+        ],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],
         EditorText => &[Fg("TEXT"), Ui("Editor.foreground")],
-        Gutter => &[Color("GUTTER_BACKGROUND"), Color("EDITOR_GUTTER_BACKGROUND")],
+        Gutter => &[
+            Color("GUTTER_BACKGROUND"),
+            Color("EDITOR_GUTTER_BACKGROUND"),
+        ],
         LineNumber => &[Color("LINE_NUMBERS_COLOR")],
         LineNumberActive => &[Color("LINE_NUMBER_ON_CARET_ROW_COLOR")],
         Caret => &[Color("CARET_COLOR")],
         CurrentLine => &[Color("CARET_ROW_COLOR")],
         EditorSelection => &[Color("SELECTION_BACKGROUND")],
-        SearchMatch => &[Bg("TEXT_SEARCH_RESULT_ATTRIBUTES"), Ui("SearchMatch.startBackground")],
+        SearchMatch => &[
+            Bg("TEXT_SEARCH_RESULT_ATTRIBUTES"),
+            Ui("SearchMatch.startBackground"),
+        ],
         SearchMatchActive => &[Bg("SEARCH_RESULT_ATTRIBUTES")],
         IndentGuide => &[Color("INDENT_GUIDE")],
         IndentGuideActive => &[Color("SELECTED_INDENT_GUIDE")],
@@ -217,7 +235,10 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Stripe("INFO_ATTRIBUTES"),
             Fg("INFO_ATTRIBUTES"),
         ],
-        DiagnosticHint => &[Effect("INFORMATION_ATTRIBUTES"), Stripe("INFORMATION_ATTRIBUTES")],
+        DiagnosticHint => &[
+            Effect("INFORMATION_ATTRIBUTES"),
+            Stripe("INFORMATION_ATTRIBUTES"),
+        ],
 
         TerminalBackground => &[Color("CONSOLE_BACKGROUND_KEY")],
         TerminalForeground => &[Fg("CONSOLE_NORMAL_OUTPUT")],
@@ -251,7 +272,11 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         StringEscape => &["DEFAULT_VALID_STRING_ESCAPE"],
         StringEscapeInvalid => &["DEFAULT_INVALID_STRING_ESCAPE"],
         Number => &["PY.NUMBER", "DEFAULT_NUMBER"],
-        Comment => &["PY.LINE_COMMENT", "DEFAULT_LINE_COMMENT", "DEFAULT_BLOCK_COMMENT"],
+        Comment => &[
+            "PY.LINE_COMMENT",
+            "DEFAULT_LINE_COMMENT",
+            "DEFAULT_BLOCK_COMMENT",
+        ],
         Docstring => &["PY.DOC_COMMENT", "DEFAULT_DOC_COMMENT"],
         DocstringTag => &["PY.DOC_COMMENT_TAG", "DEFAULT_DOC_COMMENT_TAG"],
         Todo => &["TODO_DEFAULT_ATTRIBUTES", "TODO_ATTRIBUTES"],
@@ -265,7 +290,10 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         SelfParameter => &["PY.SELF_PARAMETER"],
         KeywordArgument => &["PY.KEYWORD_ARGUMENT"],
         Variable => &["DEFAULT_LOCAL_VARIABLE", "DEFAULT_IDENTIFIER"],
-        VariableReassigned => &["DEFAULT_REASSIGNED_LOCAL_VARIABLE", "DEFAULT_REASSIGNED_PARAMETER"],
+        VariableReassigned => &[
+            "DEFAULT_REASSIGNED_LOCAL_VARIABLE",
+            "DEFAULT_REASSIGNED_PARAMETER",
+        ],
         Constant => &["DEFAULT_CONSTANT"],
         Attribute => &["DEFAULT_INSTANCE_FIELD", "DEFAULT_STATIC_FIELD"],
         Builtin => &["PY.BUILTIN_NAME"],
@@ -296,7 +324,11 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
             "DEFAULT_BRACES",
         ],
         Tag => &["HTML_TAG_NAME", "XML_TAG_NAME", "DEFAULT_TAG"],
-        TagAttribute => &["HTML_ATTRIBUTE_NAME", "XML_ATTRIBUTE_NAME", "DEFAULT_ATTRIBUTE"],
+        TagAttribute => &[
+            "HTML_ATTRIBUTE_NAME",
+            "XML_ATTRIBUTE_NAME",
+            "DEFAULT_ATTRIBUTE",
+        ],
         PropertyKey => &["JSON.PROPERTY_KEY", "YAML_SCALAR_KEY", "PROPERTIES.KEY"],
         Link => &["HYPERLINK_ATTRIBUTES"],
 

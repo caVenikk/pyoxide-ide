@@ -97,7 +97,8 @@ mod tests {
 
     #[test]
     fn parses_nested_elements_and_attributes() {
-        let doc = "<?xml version=\"1.0\"?>\n<!-- c --><a x=\"1 &amp; 2\"><b/><c y=\"z\"><d/></c></a>";
+        let doc =
+            "<?xml version=\"1.0\"?>\n<!-- c --><a x=\"1 &amp; 2\"><b/><c y=\"z\"><d/></c></a>";
         let root = parse(doc).unwrap();
         assert_eq!(root.name, "a");
         assert_eq!(root.attr("x"), Some("1 & 2"));

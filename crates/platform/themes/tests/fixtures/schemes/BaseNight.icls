@@ -1,0 +1,24 @@
+<scheme name="Base Night" version="142">
+  <colors>
+    <option name="CARET_ROW_COLOR" value="0f2031" />
+    <option name="INDENT_GUIDE" value="2b4157" />
+  </colors>
+  <attributes>
+    <option name="DEFAULT_KEYWORD">
+      <value>
+        <option name="FOREGROUND" value="aa3300" />
+      </value>
+    </option>
+    <option name="DEFAULT_NUMBER">
+      <value>
+        <option name="FOREGROUND" value="66c2d6" />
+      </value>
+    </option>
+    <option name="DEFAULT_CLASS_NAME">
+      <value>
+        <option name="FOREGROUND" value="e8cf7a" />
+        <option name="FONT_TYPE" value="1" />
+      </value>
+    </option>
+  </attributes>
+</scheme>

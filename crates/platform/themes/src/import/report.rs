@@ -95,6 +95,9 @@ pub enum WarningKind {
     ParentSchemeUnavailable { name: String, known: bool },
     /// `editorScheme` cannot be found.
     SchemeNotFound { reference: String },
+    /// The theme names no editor scheme; the default scheme of the IDE for its
+    /// brightness was used.
+    SchemeAssumed { name: String },
     /// A value that should be a colour or number is not.
     InvalidValue { key: String, value: String },
     /// A palette name that is not defined.
@@ -205,7 +208,13 @@ impl ImportReport {
         let _ = writeln!(
             out,
             "  mapped {} keys ({} shadowed), unmapped {} keys ({} occurrences), {} approximations, {} filled from base, {} warnings",
-            s.mapped, s.shadowed, s.unmapped_keys, s.unmapped_total, s.approximations, s.defaulted, s.warnings
+            s.mapped,
+            s.shadowed,
+            s.unmapped_keys,
+            s.unmapped_total,
+            s.approximations,
+            s.defaulted,
+            s.warnings
         );
         for w in &self.warnings {
             let tag = match w.level {

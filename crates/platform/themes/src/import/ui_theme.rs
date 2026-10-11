@@ -46,10 +46,11 @@ impl UiThemeData {
         let Value::Object(root) = value else {
             return Err("not a JSON object".into());
         };
-        let looks_like_theme = root.contains_key("ui")
-            || root.contains_key("editorScheme")
-            || root.contains_key("parentTheme")
-            || (root.contains_key("name") && root.contains_key("dark"));
+        let is_string = |key: &str| root.get(key).is_some_and(Value::is_string);
+        let looks_like_theme = matches!(root.get("ui"), Some(Value::Object(_)))
+            || is_string("editorScheme")
+            || is_string("parentTheme")
+            || (is_string("name") && root.get("dark").is_some_and(Value::is_boolean));
         if !looks_like_theme {
             return Err("not a UI theme (no ui, editorScheme or parentTheme)".into());
         }
@@ -140,7 +141,10 @@ mod tests {
         assert_eq!(t.palette["bg"], "#112233");
         assert_eq!(t.ui["*.background"], Value::from("bg"));
         assert_eq!(t.ui["*.arc"], Value::from(6));
-        assert_eq!(t.ui["*.selectionBackground.os.default"], Value::from("#445566"));
+        assert_eq!(
+            t.ui["*.selectionBackground.os.default"],
+            Value::from("#445566")
+        );
         assert_eq!(t.ui["Button.default.foreground"], Value::from("fg"));
         assert_eq!(t.ui["Tree.rowHeight"], Value::from(22));
         assert_eq!(t.other["icons"], 2);
@@ -158,5 +162,7 @@ mod tests {
         assert!(UiThemeData::parse("[]", "x", "x").is_err());
         assert!(UiThemeData::parse(r#"{"key": "a", "description": "b"}"#, "x", "x").is_err());
         assert!(UiThemeData::parse("{", "x", "x").is_err());
+        // The key list shipped next to themes has a `ui` array.
+        assert!(UiThemeData::parse(r#"{"name": "Keys", "ui": [{"key": "a"}]}"#, "x", "x").is_err());
     }
 }
