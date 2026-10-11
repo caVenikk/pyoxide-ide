@@ -7,6 +7,9 @@
 3. Focus the project tree and press Escape.
 4. Hover the toolbar buttons and stripe buttons.
 5. Switch between the dark and light theme.
+6. Drag the gap between the project tool window and the editor.
+7. Use the tool window header buttons (Select Opened File, Expand All,
+   Collapse All, Hide) and Shift+Escape in the tree.
 
 ## Expected
 - The main toolbar sits in the title bar area (macOS window buttons on its
@@ -20,9 +23,16 @@
 - Step 4: buttons get a rounded hover background and a tooltip with the
   action name and shortcut after a short delay.
 - Step 5: every colour of the chrome and the editor changes at once.
+- Step 6: the pointer is a left-right resize pointer over the gap; the tool
+  window follows the mouse, no narrower than its minimum and leaving room
+  for the editor.
+- Step 7: each button runs its action; Hide and Shift+Escape hide the tool
+  window and move the focus to the editor.
 
 ## Commands
 `workbench.toggle-project`, `workbench.focus-editor`,
+`workbench.hide-tool-window`, `project.tree.locate`,
+`project.tree.expand-all`, `project.tree.collapse-all`,
 `workbench.set-theme {"id": ...}`, `workbench.state`.
 
 ## Source

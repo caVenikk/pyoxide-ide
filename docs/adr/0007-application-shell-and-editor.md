@@ -1,6 +1,6 @@
 # 0007. Application shell and editor
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-11
 
 ## Context
@@ -94,7 +94,15 @@ executor; results come back to the UI thread through the task that started
 them and are applied only if the document version still matches. Dropping
 a task cancels it. Nothing on the UI thread is proportional to the file
 size: rendering, highlighting lookup and caret movement work on the visible
-lines.
+lines; opening a file reads, decodes and builds the rope in the background.
+The syntax tree is told about every edit at once, so highlighting stays in
+place while the incremental reparse runs.
+
+Frames follow the display's refresh (GPUI's display link). After a
+keystroke the main window draws at once instead (macOS: the layer's display
+callback), so the typed text is ready for the next refresh rather than the
+one after; at 60 Hz this takes keystroke-to-frame p99 from about 19.5 ms to
+about 6 ms (replica/perf.md).
 
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a
@@ -140,6 +148,22 @@ prefixes. Extend Selection asks the file type's highlighter for the syntax
 nodes around the selection, so a language with a tree-sitter grammar gets
 syntax-aware selection without more code.
 
+### Tests and measurements
+- Headless tests run the real workbench in GPUI's `TestAppContext`. The
+  test platform draws only when a test asks (`window.draw`), its windows
+  start inactive (focus listeners need `activate_window`), and query
+  commands are invoked through `update_window` on the window handle (the
+  root view must not be leased while a query reads it).
+- Keystrokes are tested as keystrokes (`simulate_keystrokes`), mouse input
+  as simulated mouse events; behaviour that the reference IDE defines is
+  written down first in `tests/scenarios/`.
+- Measurements run inside the release binary (`PYOXIDE_BENCH`, see
+  `crates/platform/workbench/src/bench.rs` and replica/perf.md): keys go
+  through the window's key dispatch; frame start and end come from the
+  workbench's own render and paint. The window stays above other windows
+  without taking the focus while measuring, because a covered window gets
+  no frames from the display.
+
 ### Build and run
 The IDE runs with `cargo run --release -p pyoxide-ide [folder or files]`;
 measurements and manual checks use release builds. Debug builds compile
@@ -160,7 +184,7 @@ icons are the New UI icons of the IntelliJ Platform Community repository
 (Apache-2.0, NOTICE).
 
 ## Consequences
-- Seven new crates; GPUI adds about 350 crates to the build graph of the
+- Eight new crates; GPUI adds about 350 crates to the build graph of the
   workspace, and Linux CI needs the X11, Wayland, xkbcommon and fontconfig
   development packages.
 - On Linux `libc` is pinned to 0.2.189 (in the `ui` crate): GPUI 0.2.2

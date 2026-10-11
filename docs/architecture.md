@@ -28,13 +28,23 @@ Platform (`crates/platform/`, language-agnostic):
 - `secrets`: secret stores (OS credential store, KeePass, memory), their
   settings and the reader of a JetBrains IDE credential store for import.
 - `settings-import`: PyCharm project settings (data sources, JDBC URLs).
+- `text`: the text model (ADR 0007): rope buffer, selections, undoable
+  transactions, caret movement, encoding and line separator of the file.
+- `syntax`: tree-sitter parsing off the UI thread and highlight spans as
+  theme text roles; grammars and queries come from the products.
+- `project`: an opened folder, its lazily listed file tree with ignore
+  rules, reading and writing documents.
+- `editor`: the code editor entity and element (virtualized painting,
+  carets, selections, clipboard, input method, highlighting, editing
+  commands).
 - `themes`: theme model and tokens, default themes, import of PyCharm colour
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
   metrics, bundled fonts, colour icons rasterized at device scale, common
   components, the UI command index (`ui_commands!`, `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
-  area, status bar), application start-up and environment switches.
+  area, status bar), keymaps, application start-up, environment switches
+  and in-app measurements.
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model
@@ -42,10 +52,12 @@ Python product (`crates/python/`):
   commands.
 - `pyoxide-cli`: `pyoxide`, the product's command line over the platform and
   Python command registries.
-- `pyoxide-ide`: `pyoxide-ide`, the product's GUI application.
+- `py-syntax`: the Python grammar and highlight query for `syntax`.
+- `pyoxide-ide`: `pyoxide-ide`, the product's GUI application: the
+  workbench with Python file types. Run it with
+  `cargo run --release -p pyoxide-ide [folder] [files]`.
 
-The application shell and editor are described in ADR 0007, including the
-crates still to come (`text`, `syntax`, `project`, `editor`, `py-syntax`).
+The application shell and editor are described in ADR 0007.
 
 ## Platform and products
 One repository, one Cargo workspace: a language-agnostic platform layer and
