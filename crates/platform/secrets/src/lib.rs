@@ -16,6 +16,7 @@ pub mod config;
 mod fsutil;
 pub mod intellij;
 pub mod keepass;
+pub mod terminal;
 #[cfg(test)]
 mod test_kdbx3;
 

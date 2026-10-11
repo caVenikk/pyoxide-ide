@@ -69,6 +69,19 @@ impl DbService {
         }
     }
 
+    /// The service as the command-line front-ends set it up: the profiles
+    /// file (default location unless given), the secret store chosen in the
+    /// secret settings, the process environment and the given prompter.
+    pub fn configured(profiles_path: Option<PathBuf>, prompter: Option<Arc<dyn Prompter>>) -> Self {
+        let env = secrets::process_env();
+        Self::new(
+            profiles_path.unwrap_or_else(crate::profiles::default_path),
+            secrets::config::configured_store(prompter.clone(), env.clone()),
+            prompter,
+            env,
+        )
+    }
+
     pub fn profiles(&self) -> Result<ProfilesFile> {
         ProfilesFile::load(&self.profiles_path)
     }

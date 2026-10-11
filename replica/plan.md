@@ -50,7 +50,7 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #12 UI toolkit decision (spikes + ADR 0006) | sub-agent ui | `spikes/` (outside the workspace), `docs/adr/0006-ui-toolkit.md` | - | in progress (resumed) |
 | #13 Control channel and headless UI tests | - | - | #12 | todo |
 | #14 Theme import and Pyoxide theme model | sub-agent themes | `crates/platform/themes`, `docs/theme-mapping.md` | - | in progress (resumed) |
-| #15 Python environments engine (uv) | sub-agent py-env | `crates/python/py-env`, `crates/python/pyoxide-cli` | - | in progress (resumed) |
+| #15 Python environments engine (uv) | sub-agent py-env | `crates/python/py-env`, `crates/python/pyoxide-cli` | - | merged (engine and CLI; UI later) |
 
 Next after #12: application shell, text buffer, tree-sitter highlighting,
 tabs, file tree; typing latency measured for the reference and Pyoxide.

@@ -51,7 +51,7 @@ Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,no,
 UI theme import (.theme.json),settings-import,must,yes,no,
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
-Interpreter and virtualenv discovery,python-intel,must,yes,no,venv uv poetry conda
+Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; no UI yet"
 Completion,python-intel,must,yes,no,LSP
 Go to definition and find usages,python-intel,must,yes,no,LSP
 Hover and signature help,python-intel,must,yes,no,LSP
@@ -70,12 +70,12 @@ Command registry and palette,platform,must,no,partial,registry and JSON channel;
 Plugin API (WASM),platform,could,yes,no,
 Windows / macOS / Linux builds,packaging,must,yes,partial,CI builds all three
 Signed installers,packaging,should,yes,no,
-uv: create virtualenv from the IDE,python-env,must,yes,no,uv venv; choose Python version
-uv: project init and sync (pyproject.toml / uv.lock),python-env,must,yes,no,uv init / uv sync / uv lock
-uv: install and manage Python versions,python-env,should,yes,no,uv python install
-Package manager panel (list / install / upgrade / remove),python-env,must,yes,no,uv pip backend; pip fallback
-Package search and version picker,python-env,should,yes,no,PyPI index
-Dependency groups and extras in pyproject.toml,python-env,should,yes,no,
+uv: create virtualenv from the IDE,python-env,must,yes,partial,engine and pyoxide CLI (env venv); no UI yet
+uv: project init and sync (pyproject.toml / uv.lock),python-env,must,yes,partial,engine and CLI (env init/sync/lock); no UI yet
+uv: install and manage Python versions,python-env,should,yes,partial,engine and CLI (env python-install); no UI yet
+Package manager panel (list / install / upgrade / remove),python-env,must,yes,partial,"engine and CLI (env packages/add/remove, outdated); panel UI todo"
+Package search and version picker,python-env,should,yes,partial,PyPI lookup (env search); picker UI todo
+Dependency groups and extras in pyproject.toml,python-env,should,yes,partial,read and edit via uv add --group/--optional; no UI yet
 uv run as run configuration,python-env,should,yes,no,
-PEP 723 inline script dependencies,python-env,could,yes,no,
-Other managers (poetry / conda / pipenv / pip),python-env,should,yes,no,after uv
+PEP 723 inline script dependencies,python-env,could,yes,partial,parsed by the project model
+Other managers (poetry / conda / pipenv / pip),python-env,should,yes,partial,"discovery of Poetry/conda/Pipenv, pip fallback for packages"

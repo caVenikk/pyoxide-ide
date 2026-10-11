@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 26%** `█████░░░░░░░░░░░░░░░`
+**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -10,13 +10,13 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
-| python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
+| python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 0% `░░░░░░░░░░` | 0 | 0 | 9 |
+| python-env | 45% `████░░░░░░` | 0 | 8 | 1 |
 
 ✅ done · 🟡 partial · ⬜ not started. Features marked (own) are additions beyond the reference and are not part of the parity score.
 
@@ -96,7 +96,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Interpreter and virtualenv discovery | must | venv uv poetry conda |
+| 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; no UI yet |
 | ⬜ | Completion | must | LSP |
 | ⬜ | Go to definition and find usages | must | LSP |
 | ⬜ | Hover and signature help | must | LSP |
@@ -145,12 +145,12 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | uv: create virtualenv from the IDE | must | uv venv; choose Python version |
-| ⬜ | uv: project init and sync (pyproject.toml / uv.lock) | must | uv init / uv sync / uv lock |
-| ⬜ | uv: install and manage Python versions | should | uv python install |
-| ⬜ | Package manager panel (list / install / upgrade / remove) | must | uv pip backend; pip fallback |
-| ⬜ | Package search and version picker | should | PyPI index |
-| ⬜ | Dependency groups and extras in pyproject.toml | should |  |
+| 🟡 | uv: create virtualenv from the IDE | must | engine and pyoxide CLI (env venv); no UI yet |
+| 🟡 | uv: project init and sync (pyproject.toml / uv.lock) | must | engine and CLI (env init/sync/lock); no UI yet |
+| 🟡 | uv: install and manage Python versions | should | engine and CLI (env python-install); no UI yet |
+| 🟡 | Package manager panel (list / install / upgrade / remove) | must | engine and CLI (env packages/add/remove, outdated); panel UI todo |
+| 🟡 | Package search and version picker | should | PyPI lookup (env search); picker UI todo |
+| 🟡 | Dependency groups and extras in pyproject.toml | should | read and edit via uv add --group/--optional; no UI yet |
 | ⬜ | uv run as run configuration | should |  |
-| ⬜ | PEP 723 inline script dependencies | could |  |
-| ⬜ | Other managers (poetry / conda / pipenv / pip) | should | after uv |
+| 🟡 | PEP 723 inline script dependencies | could | parsed by the project model |
+| 🟡 | Other managers (poetry / conda / pipenv / pip) | should | discovery of Poetry/conda/Pipenv, pip fallback for packages |

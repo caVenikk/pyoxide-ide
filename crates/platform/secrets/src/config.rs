@@ -226,6 +226,36 @@ pub fn open_store_with(
     }
 }
 
+/// The store chosen in the settings file, opened on first use (see
+/// [`crate::LazyStore`]), so commands that never touch a secret never unlock
+/// a KeePass database. A broken settings file surfaces on first use.
+pub fn configured_store(
+    prompter: Option<Arc<dyn Prompter>>,
+    env: EnvLookup,
+) -> Arc<dyn SecretStore> {
+    let config = match SecretsConfig::load(&config_path(&env)) {
+        Ok(c) => c,
+        Err(e) => {
+            return Arc::new(crate::LazyStore::new(SETTINGS, move || Err(e)));
+        }
+    };
+    let name = match config.store {
+        StoreKind::Keychain => KeyringStore.name().to_owned(),
+        StoreKind::Memory => MemoryStore::default().name().to_owned(),
+        StoreKind::KeePass => format!(
+            "KeePass database {}",
+            config
+                .keepass
+                .as_ref()
+                .map(|k| k.path.as_str())
+                .unwrap_or("?")
+        ),
+    };
+    Arc::new(crate::LazyStore::new(name, move || {
+        open_store(&config, prompter.as_deref(), &env)
+    }))
+}
+
 /// Find the KeePass master password as configured.
 pub fn keepass_master_password(
     kp: &KeePassConfig,

@@ -1,7 +1,7 @@
 //! `pyoxide-db`: the command-line front-end of the Pyoxide database engine.
 //! Every sub-command calls the same functions as the `db.*` commands.
 
-use std::io::{BufRead, IsTerminal, Read};
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -9,14 +9,15 @@ use std::sync::Arc;
 use clap::{Args, Parser, Subcommand};
 use commands::Registry;
 use db_core::schema::ObjectKind;
-use db_core::{Backend, Column, Error, ResultSet, Secret, TlsMode, Value, ValueKind, render_table};
+use db_core::{Backend, Column, Error, ResultSet, TlsMode, Value, ValueKind, render_table};
 use db_service::diagnose::{DiagnoseOptions, Status};
 use db_service::ops;
 use db_service::profiles::{self, Profile, TlsProfile};
 use db_service::secrets::SecretKind;
 use db_service::{DbService, Target};
 use secrets::config::{KeePassConfig, MasterPasswordSource, StoreKind};
-use secrets::{KeyringStore, LazyStore, Prompter, SecretStore, SecretsConfig};
+use secrets::terminal::{StdinPrompter, TerminalPrompter};
+use secrets::{KeyringStore, Prompter, SecretStore, SecretsConfig};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -278,29 +279,6 @@ fn parse_kind(s: &str) -> Result<ObjectKind, String> {
         .map_err(|_| format!("unknown object kind {s:?}"))
 }
 
-/// Asks on the terminal without echo; `None` when stdin is not a terminal.
-struct TerminalPrompter;
-
-impl Prompter for TerminalPrompter {
-    fn secret(&self, prompt: &str) -> Option<Secret> {
-        if !std::io::stdin().is_terminal() {
-            return None;
-        }
-        rpassword::prompt_password(prompt).ok().map(Secret::new)
-    }
-}
-
-/// Secret from one line of stdin, for `secret set --stdin`.
-struct StdinPrompter;
-
-impl Prompter for StdinPrompter {
-    fn secret(&self, _: &str) -> Option<Secret> {
-        let mut line = String::new();
-        std::io::stdin().lock().read_line(&mut line).ok()?;
-        Some(Secret::new(line.trim_end_matches(['\r', '\n'])))
-    }
-}
-
 impl ConnArgs {
     fn is_inline(&self) -> bool {
         self.backend.is_some()
@@ -385,49 +363,7 @@ async fn main() -> ExitCode {
 }
 
 fn service(cli: &Cli, prompter: Option<Arc<dyn Prompter>>) -> DbService {
-    let env = secrets::process_env();
-    DbService::new(
-        cli.profiles.clone().unwrap_or_else(profiles::default_path),
-        configured_store(prompter.clone(), env.clone()),
-        prompter,
-        env,
-    )
-}
-
-/// The store chosen in the secret settings, opened on first use.
-fn configured_store(
-    prompter: Option<Arc<dyn Prompter>>,
-    env: secrets::EnvLookup,
-) -> Arc<dyn SecretStore> {
-    let path = secrets::config::config_path(&env);
-    let config = match SecretsConfig::load(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = e.to_string();
-            return Arc::new(LazyStore::new("secret settings", move || {
-                Err(secrets::SecretError::new(
-                    secrets::SecretErrorKind::Format,
-                    "secret settings",
-                    msg,
-                ))
-            }));
-        }
-    };
-    let name = match config.store {
-        StoreKind::Keychain => KeyringStore.name().to_owned(),
-        StoreKind::Memory => "memory (not saved)".to_owned(),
-        StoreKind::KeePass => format!(
-            "KeePass database {}",
-            config
-                .keepass
-                .as_ref()
-                .map(|k| k.path.as_str())
-                .unwrap_or("?")
-        ),
-    };
-    Arc::new(LazyStore::new(name, move || {
-        secrets::open_store(&config, prompter.as_deref(), &env)
-    }))
+    DbService::configured(cli.profiles.clone(), prompter)
 }
 
 fn print_json<T: Serialize>(v: &T) {

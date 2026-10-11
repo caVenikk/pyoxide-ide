@@ -29,7 +29,7 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 26%** `█████░░░░░░░░░░░░░░░`
+**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -37,13 +37,13 @@ the same engine.
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | settings-import | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
-| python-intel | 0% `░░░░░░░░░░` | 0 | 0 | 7 |
+| python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 0% `░░░░░░░░░░` | 0 | 0 | 9 |
+| python-env | 45% `████░░░░░░` | 0 | 8 | 1 |
 
 Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 <!-- progress:end -->
@@ -65,6 +65,8 @@ Crates live in `crates/platform/` (language-agnostic) and, once they exist,
 | `db-testkit` | Conformance suite every database driver runs |
 | `secrets` | Secret stores: OS credential store, KeePass, memory |
 | `settings-import` | Import of PyCharm project settings (data sources) |
+| `py-env` (python) | Interpreters, virtualenvs, uv and pip integration, `env.*` commands |
+| `pyoxide-cli` (python) | `pyoxide`, the Python product's command line (`env`, plus all `db.*` commands) |
 | `db-cli` | `pyoxide-db`, a command-line database client |
 
 ## Getting started
