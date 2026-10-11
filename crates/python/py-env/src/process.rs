@@ -329,7 +329,9 @@ async fn pump<R: AsyncRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::sync::Mutex;
+    #[cfg(unix)]
     use std::time::Instant;
 
     #[cfg(unix)]
