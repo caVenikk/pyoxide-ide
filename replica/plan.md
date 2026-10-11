@@ -40,7 +40,7 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #9 Real Oracle 19c verification | maintainer | diagnose report | #3, #4, #6 | todo |
 | #10 oracle-rs cancel upstream | open | upstream | #3 | todo |
 | #17 Move crates into platform / product layout (ADR 0005) | lead | `crates/` | #16 done | after #16 (automatic) |
-| #16 Deduplicate driver plumbing, conformance test kit | lead | `db-core` (worker, value helpers, Oracle SQL text, tx state), new `db-testkit` | #3 merged | next, right after #3 (automatic) |
+| #16 Deduplicate driver plumbing, conformance test kit | lead | `db-core` (worker, value helpers, Oracle SQL text, tx state), new `db-testkit` | #3 merged | in progress (sub-agent) |
 
 ## Next areas (not started)
 - M2 editor: #11 reference baseline (first), #12 UI toolkit ADR with measured
