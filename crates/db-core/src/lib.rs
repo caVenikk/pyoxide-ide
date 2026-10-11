@@ -14,6 +14,7 @@ mod render;
 pub mod schema;
 pub mod timeout;
 mod value;
+pub mod worker;
 
 pub use connection::{
     BusyFlag, BusyGuard, CleanupGuard, Column, Connection, Cursor, Driver, ExecOptions, Outcome,
