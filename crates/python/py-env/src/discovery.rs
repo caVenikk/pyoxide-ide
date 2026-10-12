@@ -263,13 +263,24 @@ pub async fn discover(
 
     let mut interpreters = Vec::new();
     loop {
+        // Cancellation first: a probe cancelled by the same token finishes at
+        // the same moment and must not turn the run into a partial result.
         let next = tokio::select! {
-            n = tasks.join_next() => n,
+            biased;
             () = cancelled(&ctx.cancel) => {
                 return Err(EnvError::new(ErrorKind::Cancelled, "interpreter discovery was cancelled"));
             }
+            n = tasks.join_next() => n,
         };
-        let Some(joined) = next else { break };
+        let Some(joined) = next else {
+            if ctx.cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+                return Err(EnvError::new(
+                    ErrorKind::Cancelled,
+                    "interpreter discovery was cancelled",
+                ));
+            }
+            break;
+        };
         let Ok((candidate, result)) = joined else {
             continue;
         };
