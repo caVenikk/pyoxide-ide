@@ -170,7 +170,8 @@ name = "ContextMenu"
 # Previous keys move through the results; Tab and Shift+Tab go from field
 # to field; Alt+Down shows the field's history. The options, the file
 # mask, the scopes and Recursively take the reference IDE's mnemonic keys:
-# Alt with the letter.
+# Alt with the letter. In the preview, Enter, Tab and Alt+Down are the
+# editor's.
 [[context]]
 name = "FindInFiles > Editor"
 [context.bindings]
@@ -189,6 +190,7 @@ name = "FindInFiles > Editor"
 "alt-x" = "find.toggle-regex"
 "alt-k" = "find-in-files.toggle-mask"
 "alt-p" = "find-in-files.scope-project"
+"alt-m" = "find-in-files.scope-module"
 "alt-d" = "find-in-files.scope-directory"
 "alt-s" = "find-in-files.scope-named"
 "alt-y" = "find-in-files.toggle-recursive"

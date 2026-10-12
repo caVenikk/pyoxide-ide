@@ -26,6 +26,8 @@ const PREVIEW_TITLE: f32 = 28.0;
 const TITLE_PATH_CHARS: usize = 120;
 /// Height of the bottom row.
 const BOTTOM_HEIGHT: f32 = 40.0;
+/// Width of the module and scope lists (the reference's 300 px).
+const COMBO_WIDTH: f32 = 300.0;
 
 impl FindInFiles {
     fn shortcut(
@@ -136,7 +138,13 @@ impl FindInFiles {
                     .items_center()
                     .gap(px(6.0))
                     .child(checkbox("find-in-files-mask-box", mask_on, cx))
-                    .child("File mask:")
+                    // A check box shows its mnemonic while Option (Alt) is
+                    // held, as the reference's do; the scope tabs always.
+                    .child(if window.modifiers().alt {
+                        mnemonic_label("File mask:", 8)
+                    } else {
+                        StyledText::new("File mask:")
+                    })
                     .tooltip(Tooltip::text(
                         "File mask",
                         self.shortcut(&ToggleMask, window, cx),
@@ -310,7 +318,7 @@ impl FindInFiles {
     fn scope_tab(
         &self,
         id: &'static str,
-        label: &'static str,
+        (label, mnemonic): (&'static str, usize),
         kind: ScopeKind,
         action: &dyn gpui::Action,
         window: &Window,
@@ -332,7 +340,7 @@ impl FindInFiles {
                 d.bg(theme.color(UiRole::SearchOptionSelected))
             })
             .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-            .child(label)
+            .child(mnemonic_label(label, mnemonic))
             .tooltip(Tooltip::text(label, self.shortcut(action, window, cx)))
             .on_click(
                 cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -343,12 +351,63 @@ impl FindInFiles {
 
     /// The scope tabs and what the selected one needs: the folder for
     /// Directory, the scope list for Scope.
+    /// A list field (the module or the named scope): its text and the
+    /// arrow; a click opens its list.
+    fn combo(
+        &self,
+        id: &'static str,
+        text: String,
+        kind: DropKind,
+        list: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        div()
+            .id(id)
+            .debug_selector(move || id.into())
+            .relative()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .h(px(SMALL_BUTTON + 4.0))
+            .px(px(8.0))
+            .rounded(theme.metric(Metric::CornerRadius) * 1.5)
+            .border_1()
+            .border_color(theme.color(UiRole::BorderInput))
+            // The reference's module list is as wide as its scope list.
+            .min_w(px(COMBO_WIDTH))
+            .child(div().flex_1().child(text))
+            .child(Icon::new(IconName::CHEVRON_DOWN))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.show_dropdown(kind, window, cx)
+            }))
+            .children(list)
+            .into_any_element()
+    }
+
     fn render_scopes(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let directories = self.render_dropdown(&[DropKind::Directories], cx);
         let scopes = self.render_dropdown(&[DropKind::Scopes], cx);
+        let modules = self.render_dropdown(&[DropKind::Modules], cx);
+        let module = self.combo(
+            "find-in-files-module-list",
+            self.module_name(),
+            DropKind::Modules,
+            modules,
+            cx,
+        );
+        let named = self.combo(
+            "find-in-files-scope-list",
+            self.named.name().to_owned(),
+            DropKind::Scopes,
+            scopes,
+            cx,
+        );
         let theme = cx.theme();
         let details: Option<AnyElement> = match self.scope {
             ScopeKind::Project => None,
+            ScopeKind::Module => Some(module),
             ScopeKind::Directory => {
                 let focused = self.directory.focus_handle(cx).is_focused(window);
                 let bad = self.invalid_field == Some(Field::Directory);
@@ -428,28 +487,7 @@ impl FindInFiles {
                         .into_any_element(),
                 )
             }
-            ScopeKind::Named => Some(
-                div()
-                    .id("find-in-files-scope-list")
-                    .debug_selector(|| "find-in-files-scope-list".into())
-                    .relative()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.0))
-                    .h(px(SMALL_BUTTON + 4.0))
-                    .px(px(8.0))
-                    .rounded(theme.metric(Metric::CornerRadius) * 1.5)
-                    .border_1()
-                    .border_color(theme.color(UiRole::BorderInput))
-                    .child(self.named.name())
-                    .child(Icon::new(IconName::CHEVRON_DOWN))
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.show_dropdown(DropKind::Scopes, window, cx)
-                    }))
-                    .children(scopes)
-                    .into_any_element(),
-            ),
+            ScopeKind::Named => Some(named),
         };
         div()
             .flex()
@@ -461,17 +499,27 @@ impl FindInFiles {
             .px(px(PAD - 4.0))
             .border_b_1()
             .border_color(theme.color(UiRole::Divider))
+            // The reference's labels and mnemonics: In &Project, &Module,
+            // &Directory, &Scope.
             .child(self.scope_tab(
                 "find-in-files-scope-project",
-                "In Project",
+                ("In Project", 3),
                 ScopeKind::Project,
                 &ScopeProject,
                 window,
                 cx,
             ))
             .child(self.scope_tab(
+                "find-in-files-scope-module",
+                ("Module", 0),
+                ScopeKind::Module,
+                &ScopeModule,
+                window,
+                cx,
+            ))
+            .child(self.scope_tab(
                 "find-in-files-scope-directory",
-                "Directory",
+                ("Directory", 0),
                 ScopeKind::Directory,
                 &ScopeDirectory,
                 window,
@@ -479,7 +527,7 @@ impl FindInFiles {
             ))
             .child(self.scope_tab(
                 "find-in-files-scope-named",
-                "Scope",
+                ("Scope", 0),
                 ScopeKind::Named,
                 &ScopeNamed,
                 window,
@@ -829,6 +877,25 @@ impl FindInFiles {
     }
 }
 
+/// A label with its mnemonic letter (the char at `index`) underlined, as
+/// the reference draws its mnemonics.
+fn mnemonic_label(label: &'static str, index: usize) -> StyledText {
+    let start = label.char_indices().nth(index).map_or(0, |(i, _)| i);
+    let end = label[start..]
+        .chars()
+        .next()
+        .map_or(start, |c| start + c.len_utf8());
+    let underline = HighlightStyle {
+        underline: Some(gpui::UnderlineStyle {
+            thickness: px(1.0),
+            color: None,
+            wavy: false,
+        }),
+        ..HighlightStyle::default()
+    };
+    StyledText::new(label).with_highlights([(start..end, underline)])
+}
+
 /// A path shortened in the middle to at most `max` chars.
 fn shorten_middle(text: &str, max: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -896,6 +963,8 @@ impl Render for FindInFiles {
             .size_full()
             // Clicks inside the popup leave the focus in its fields.
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            // The check box's mnemonic shows while Option (Alt) is held.
+            .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .child(self.render_header(window, cx))
             .child(self.render_text_field(Field::Query, window, cx))
             .when(self.replace_mode, |d| {

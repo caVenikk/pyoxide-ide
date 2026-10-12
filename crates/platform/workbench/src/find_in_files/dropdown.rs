@@ -25,6 +25,7 @@ pub(super) enum DropKind {
     Masks,
     Directories,
     Scopes,
+    Modules,
 }
 
 impl DropKind {
@@ -35,6 +36,7 @@ impl DropKind {
             DropKind::Masks => "masks",
             DropKind::Directories => "directories",
             DropKind::Scopes => "scopes",
+            DropKind::Modules => "modules",
         }
     }
 
@@ -82,6 +84,7 @@ impl FindInFiles {
                 }
                 (items, current)
             }
+            DropKind::Modules => (vec![self.module_name()], self.module_name()),
             DropKind::Scopes => (
                 self.named_scopes()
                     .iter()
@@ -123,7 +126,7 @@ impl FindInFiles {
             DropKind::ReplaceHistory => &self.replace,
             DropKind::Masks => &self.mask,
             DropKind::Directories => &self.directory,
-            DropKind::Scopes => &self.query,
+            DropKind::Scopes | DropKind::Modules => &self.query,
         }
     }
 
@@ -142,6 +145,10 @@ impl FindInFiles {
             return;
         };
         match d.kind {
+            DropKind::Modules => {
+                self.scope = ScopeKind::Module;
+                window.focus(&self.query.focus_handle(cx));
+            }
             DropKind::Scopes => {
                 if let Some(named) = NamedScope::from_name(&item) {
                     self.named = named;
@@ -184,6 +191,10 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.in_preview(window, cx) {
+            cx.propagate();
+            return;
+        }
         let kind = match self.focused_field_kind(window, cx) {
             super::Field::Query => DropKind::SearchHistory,
             super::Field::Replace => DropKind::ReplaceHistory,

@@ -27,8 +27,9 @@ replacing in files).
 | New line | Cmd+Shift+Enter | Ctrl+Shift+Enter | search and replace fields |
 | Match Case / Words / Regex | Ctrl+Option+C / W / X, Option+C / W / X | Alt+C / W / X | popup fields |
 | File mask on or off | Ctrl+Option+K, Option+K | Alt+K | popup fields |
-| In Project / Directory / Scope | Ctrl+Option+P / D / S, Option+P / D / S | Alt+P / D / S | popup fields |
-| Recursively (Directory) | Ctrl+Option+Y, Option+Y | Alt+Y | popup fields |
+| In Project / Module / Directory / Scope | Ctrl+Option+P / M / D / S, Option+P / M / D / S | Alt+P / M / D / S | popup fields, preview |
+| Recursively (Directory) | Ctrl+Option+Y | Alt+Y | popup fields, preview |
+| Break the line, indent | Enter, Tab | Enter, Tab | preview (the editor's keys) |
 | Choose the folder | Shift+Enter | Shift+Enter | folder field |
 | Item of an open list | Up, Down, Enter, Escape | Up, Down, Enter, Escape | the list |
 
@@ -40,11 +41,18 @@ replacing in files).
      window. Its header reads "Find in Files", then the counter, then the
      File mask check box and field and the pin button. Below are the
      search field with `needle` selected and the focus in it, the scope
-     ("In Project", "Directory", "Scope"), the matching lines and, under a
+     tabs ("In Project", "Module", "Directory", "Scope", each with its
+     mnemonic letter underlined), the matching lines and, under a
      splitter, the preview.
+   - The first time, the file mask is on with `*.py`; later the popup
+     opens as it was left.
 2. Press Find in Files with nothing selected.
    - The field holds the search of the editor's open find bar, else the
      popup's last search, else the last search of the session.
+   - With an empty field there are no results, also with the file mask on:
+     the list and the preview are empty, "Type search query to find in
+     files" is centred in their place (in Replace in Files too) and the
+     header has no counter.
 3. Select a folder in the project tool window and press Find in Files.
    - The Directory scope is selected with that folder (a selected file
      gives its folder).
@@ -91,17 +99,26 @@ replacing in files).
 8. Press Enter or double-click a row.
    - The file opens with the caret at the start of the match, its line in
      the middle of the view, and the popup closes.
-9. Clear the query with File mask on.
-   - The files whose names match are listed, one row each with its first
-     line.
-
 ### Preview
-10. Select a row.
-    - 50 ms later the preview shows its file, read-only, with its syntax
+9. Select a row.
+    - 50 ms later the preview shows its file in an editor with its syntax
       colours and line numbers; the row's matches are marked (outlined in
       Replace in Files), the caret is on the first one and its line is in
       the middle. The title reads the file name and its folder in the
       project.
+10. Click into the preview and edit.
+    - It is a full editor on the file: typing, selection, the clipboard,
+      undo and redo and every editor key work, and the marked matches move
+      with the text. Enter breaks the line and Tab indents (they do not
+      open a result or move to another field); Escape closes the popup;
+      the option, scope and mask keys still switch the popup's options.
+    - A file open in a tab shows every edit at once, both ways, and the tab
+      saves it. A file that is not open is saved like any edit (after the
+      idle time, when the window loses the focus, when the preview shows
+      another file and when the popup closes), without opening a tab;
+      opening it from the popup continues with the edited text.
+    - The rows stay as they were found until the next search, as in the
+      reference.
 11. Drag the splitter between the list and the preview.
     - The share of each changes and is remembered across sessions
       (default: a third for the list).
@@ -112,7 +129,8 @@ replacing in files).
       compile says "Bad pattern ..." in place of the rows; one that matches
       the empty string says "Regular expression matches empty string".
 13. Check File mask (Option+K / Alt+K) and type `*.txt, !app*`.
-    - The focus moves to the mask, its text selected. Only files whose
+    - The label's mnemonic letter is underlined while Option (Alt) is
+      held. The focus moves to the mask, its text selected. Only files whose
       names match are searched: masks separated by commas, `*` and `?`
       wildcards, `!` to leave names out, case ignored. Unchecking it puts
       the focus back in the search field; unchecked, the mask cannot be
@@ -122,9 +140,11 @@ replacing in files).
 14. Choose Directory (Option+D / Alt+D).
     - The folder field gets the focus; the arrow lists the folders used,
       "…" (or Shift+Enter) shows a folder chooser, the tree button
-      (Option+Y / Alt+Y) searches the subfolders or not. A folder that is
+      (Ctrl+Option+Y / Alt+Y) searches the subfolders or not. A folder that is
       not there says "Directory is not found".
-15. Choose Scope (Option+S / Alt+S).
+15. Choose Module (Option+M / Alt+M) or Scope (Option+S / Alt+S).
+    - Module offers the project's one module, the project, in a list as
+      wide as the scope list; it searches the whole project.
     - The scope list offers Project Files, Recently Viewed Files,
       Recently Changed Files, Open Files and Current File (those without
       files are left out); the choice is remembered.
@@ -168,10 +188,7 @@ replacing in files).
       it was.
 
 ## Notes
-- The reference also offers the Module scope; a Pyoxide project has one
-  content root, so Module is left out.
-- The reference's preview is an editable editor on the file; Pyoxide's is
-  read-only.
+- A Pyoxide project is one module, so the Module tab lists the project.
 - The reference undoes a Replace All over several files as one global
   step ("Undo Replace?"); Pyoxide undoes it per open file, and a file
   changed on disk is not undone from the editor.

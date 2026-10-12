@@ -20,7 +20,7 @@ impl FindInFiles {
     /// The matcher of the shown results and the replacement, or why there
     /// is none (a malformed replacement marks the replace field).
     fn replace_parts(&self, cx: &mut Context<Self>) -> Option<(Matcher, String)> {
-        let matcher = self.last_search.as_ref()?.matcher.clone()?;
+        let matcher = self.last_search.as_ref()?.matcher.clone();
         let template = self.replace.read(cx).text();
         if let Err(e) = matcher.check_template(&template) {
             self.replace.update(cx, |f, cx| f.set_error(true, cx));

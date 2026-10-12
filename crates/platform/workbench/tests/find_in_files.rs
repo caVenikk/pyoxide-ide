@@ -3,6 +3,7 @@
 //! a project on disk.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use editor::Editor;
 use gpui::{
@@ -29,6 +30,7 @@ struct Keys {
     replace_all: &'static str,
     undo: &'static str,
     scope_project: &'static str,
+    scope_module: &'static str,
     scope_directory: &'static str,
     scope_named: &'static str,
     recursive: &'static str,
@@ -47,9 +49,11 @@ const MAC: Keys = Keys {
     replace_all: "alt-shift-enter",
     undo: "cmd-z",
     scope_project: "alt-p",
+    scope_module: "alt-m",
     scope_directory: "alt-d",
     scope_named: "alt-s",
-    recursive: "alt-y",
+    // The reference binds no Option+Y here.
+    recursive: "ctrl-alt-y",
 };
 
 const WIN: Keys = Keys {
@@ -65,6 +69,7 @@ const WIN: Keys = Keys {
     replace_all: "alt-shift-enter",
     undo: "ctrl-z",
     scope_project: "alt-p",
+    scope_module: "alt-m",
     scope_directory: "alt-d",
     scope_named: "alt-s",
     recursive: "alt-y",
@@ -269,6 +274,13 @@ fn the_selection_is_searched_and_enter_opens_the_match(cx: &mut TestAppContext) 
         assert_eq!(s["open"], json!(true));
         assert_eq!(s["text"], json!("needle"));
         assert!(h.focused(FindInFiles::query_field));
+        // First run: the file mask is on with the product's first mask.
+        assert_eq!(s["mask"], json!({ "on": true, "text": "*.py" }));
+        h.settle();
+        assert_eq!(h.state()["info"], json!("3 matches in 2 files"));
+        // Off, every file is searched; the focus goes back to the field.
+        h.press(h.keys.mask);
+        assert!(h.focused(FindInFiles::query_field));
         h.settle();
         // Hidden folders, byte code and the reference's project files are
         // left out; the first file found stays first, the others follow by
@@ -332,7 +344,13 @@ fn typing_searches_after_a_pause_and_options_apply(cx: &mut TestAppContext) {
         h.press(h.keys.open);
         let s = h.state();
         assert_eq!(s["text"], json!(""));
+        // An empty query: no results, the placeholder, no counter.
         assert_eq!(s["empty_text"], json!("Type search query to find in files"));
+        assert_eq!(s["info"], json!(""));
+        assert_eq!(s["rows"], json!([]));
+        assert_eq!(s["preview"], Value::Null);
+        h.press(h.keys.mask);
+        h.focus_field(FindInFiles::query_field);
         h.type_text("Needle");
         // Nothing until the pause.
         assert_eq!(h.state()["searching"], json!(true));
@@ -390,9 +408,14 @@ fn the_file_mask_narrows_the_files_and_is_remembered(cx: &mut TestAppContext) {
             json!({ "text": "needle", "case_sensitive": false, "regex": false, "whole_words": false }),
         );
         let s = h.state();
-        assert_eq!(s["mask"], json!({ "on": false, "text": "*.py" }));
-        assert_eq!(s["files"], json!(3));
-        // Alt+K checks the box and puts the focus in the mask.
+        assert_eq!(s["mask"], json!({ "on": true, "text": "*.py" }));
+        assert_eq!(s["files"], json!(2));
+        // Alt+K: off, every file.
+        h.press(h.keys.mask);
+        h.settle();
+        assert_eq!(h.state()["mask"]["on"], json!(false));
+        assert_eq!(h.state()["files"], json!(3));
+        // Alt+K checks the box again and puts the focus in the mask.
         h.press(h.keys.mask);
         assert!(h.focused(FindInFiles::mask_field));
         h.settle();
@@ -650,6 +673,14 @@ fn named_scopes_open_and_recent_files(cx: &mut TestAppContext) {
                 "Current File"
             ])
         );
+        // Option+M / Alt+M: the Module tab, the project's one module.
+        h.press(h.keys.scope_module);
+        h.settle();
+        let s = h.state();
+        assert_eq!(s["scope"], json!("module"));
+        let name = h.root.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(s["module"], json!(name));
+        assert_eq!(s["files"], json!(3));
         // Option+S / Alt+S: the Scope tab with the scope chosen last.
         h.press(h.keys.scope_named);
         h.settle();
@@ -694,7 +725,7 @@ fn the_preview_shows_the_selected_line(cx: &mut TestAppContext) {
         let p = h.state()["preview"].clone();
         assert_eq!(p["path"], json!(rows[0].0));
         assert_eq!(p["caret"][0], json!(rows[0].1 - 1));
-        assert_eq!(p["read_only"], json!(true));
+        assert_eq!(p["read_only"], json!(false), "the preview edits the file");
         assert!(p["highlights"].as_u64().unwrap() >= 1);
         // Another row: after a short wait.
         h.press("down");
@@ -764,8 +795,8 @@ fn histories_masks_and_tab_between_fields(cx: &mut TestAppContext) {
         assert_eq!(s["dropdown"], Value::Null);
         assert_eq!(s["text"], json!("alpha"));
         assert!(h.focused(FindInFiles::query_field));
-        // The masks of the mask field (once it is on).
-        h.press(h.keys.mask);
+        // The masks of the mask field (on from the first run).
+        h.focus_field(FindInFiles::mask_field);
         h.press("alt-down");
         let d = h.state()["dropdown"].clone();
         assert_eq!(d["kind"], json!("masks"));
@@ -787,14 +818,15 @@ fn histories_masks_and_tab_between_fields(cx: &mut TestAppContext) {
         assert!(h.focused(FindInFiles::query_field));
         h.press("shift-tab");
         assert!(h.focused(FindInFiles::mask_field));
-        // Without a query, the files of the mask are listed.
+        // Without a query nothing is listed, also with the mask on.
         h.invoke(
             "find-in-files.search",
             json!({ "text": "", "mask": "*.txt" }),
         );
         let s = h.state();
-        assert_eq!(h.rows(), [("notes.txt".to_owned(), 1)]);
-        assert_eq!(s["info"], json!("1 match in 1 file"));
+        assert_eq!(s["rows"], json!([]));
+        assert_eq!(s["info"], json!(""));
+        assert_eq!(s["empty_text"], json!("Type search query to find in files"));
         h.invoke("find-in-files.close", json!(null));
     });
 }
@@ -973,5 +1005,142 @@ fn find_in_files_from_the_tree_context_menu(cx: &mut TestAppContext) {
         assert_eq!(s["scope"], json!("directory"));
         assert_eq!(s["directory"], json!(pkg));
         h.press("escape");
+    });
+}
+
+impl H<'_> {
+    /// Selects the first row of `path` and waits for the preview.
+    fn select_row_of(&mut self, path: &str) {
+        let index = self
+            .rows()
+            .iter()
+            .position(|r| r.0 == path)
+            .unwrap_or_else(|| panic!("no row of {path}"));
+        self.invoke("find-in-files.page-up", json!(null));
+        for _ in 0..index {
+            self.invoke("find-in-files.next-result", json!(null));
+        }
+        self.cx.executor().advance_clock(DEBOUNCE);
+        self.draw();
+        assert_eq!(self.state()["preview"]["path"], json!(path));
+    }
+
+    fn tab_count(&mut self) -> usize {
+        self.invoke("workbench.state", json!(null))["tabs"]
+            .as_array()
+            .unwrap()
+            .len()
+    }
+}
+
+#[gpui::test]
+fn the_preview_edits_the_open_file_with_its_tab(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("app.py");
+        assert_eq!(h.state()["preview"]["linked"], json!(true));
+        // Typing in the preview: the tab shows it at once.
+        h.focus_field(FindInFiles::preview_editor);
+        h.type_text("XYZ");
+        let preview = h.popup();
+        let text =
+            h.cx.update(|cx| preview.read(cx).preview_editor().read(cx).text());
+        assert!(text.contains("print(\"XYZneedle\")"), "{text}");
+        let tab = h.invoke("editor.text", json!(null));
+        assert!(
+            tab.as_str().unwrap().contains("print(\"XYZneedle\")"),
+            "{tab}"
+        );
+        // The match marked in the preview moved with the text.
+        let marked = h.cx.update(|cx| {
+            let e = preview.read(cx).preview_editor().read(cx);
+            let m = e.search_highlights().unwrap().matches[0].clone();
+            e.buffer().slice(m)
+        });
+        assert_eq!(marked, "needle");
+        // Undo in the preview: both views go back.
+        h.press(h.keys.undo);
+        let tab = h.invoke("editor.text", json!(null));
+        assert!(tab.as_str().unwrap().contains("print(\"needle\")"), "{tab}");
+        let text =
+            h.cx.update(|cx| preview.read(cx).preview_editor().read(cx).text());
+        assert!(text.contains("print(\"needle\")"), "{text}");
+        // An edit in the tab shows in the preview.
+        let editor = h.editor();
+        h.cx.update(|cx| {
+            editor.update(cx, |e, cx| {
+                e.set_selections(text::SelectionSet::caret(0), cx);
+                e.insert("# top\n", cx);
+            })
+        });
+        h.draw();
+        let text =
+            h.cx.update(|cx| preview.read(cx).preview_editor().read(cx).text());
+        assert!(text.starts_with("# top\nimport os"), "{text}");
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
+
+#[gpui::test]
+fn the_preview_edits_and_saves_a_file_that_is_not_open(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let tabs = h.tab_count();
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        assert_eq!(h.state()["preview"]["linked"], json!(false));
+        h.focus_field(FindInFiles::preview_editor);
+        h.type_text("QQ");
+        assert_eq!(h.state()["preview"]["modified"], json!(true));
+        assert_eq!(h.read("notes.txt"), b"a needle and a Needle\n", "not yet");
+        // Saved after the idle time, without a tab.
+        h.cx.executor().advance_clock(Duration::from_secs(3));
+        h.draw();
+        assert_eq!(h.read("notes.txt"), b"a QQneedle and a Needle\n");
+        assert_eq!(h.state()["preview"]["modified"], json!(false));
+        assert_eq!(h.tab_count(), tabs, "no tab opened");
+        // Undo in the preview, saved again when the popup closes.
+        h.press(h.keys.undo);
+        h.press("escape");
+        h.draw();
+        assert_eq!(h.read("notes.txt"), b"a needle and a Needle\n");
+        assert_eq!(h.tab_count(), tabs);
+    });
+}
+
+#[gpui::test]
+fn keys_in_the_preview_go_to_its_editor(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        let rows = h.state()["rows"].clone();
+        h.focus_field(FindInFiles::preview_editor);
+        let preview = h.popup();
+        let text = |h: &mut H| {
+            h.cx.update(|cx| preview.read(cx).preview_editor().read(cx).text())
+        };
+        // Enter breaks the line (it does not open the result), Tab
+        // indents.
+        h.press("enter");
+        assert_eq!(h.state()["open"], json!(true));
+        assert_eq!(text(h), "a \nneedle and a Needle\n");
+        h.press("tab");
+        assert_eq!(text(h), "a \n    needle and a Needle\n");
+        // The rows stay as they were found (the reference does not search
+        // again for an edit in the preview).
+        assert_eq!(h.state()["rows"], rows);
+        // Escape closes the popup; the edits are saved.
+        h.press("escape");
+        assert_eq!(h.state()["open"], json!(false));
+        h.draw();
+        assert_eq!(h.read("notes.txt"), b"a \n    needle and a Needle\n");
     });
 }

@@ -32,9 +32,7 @@ pub enum Scope {
 /// One search over files.
 #[derive(Debug, Clone)]
 pub struct FileSearch {
-    /// What to look for; `None` lists the files (with a mask and no
-    /// query): one result per file, its first line.
-    pub matcher: Option<Matcher>,
+    pub matcher: Matcher,
     /// Only files whose names match (`None`: every file).
     pub mask: Option<FileMask>,
     pub scope: Scope,
@@ -272,21 +270,11 @@ impl Run<'_> {
         };
         self.files_searched.fetch_add(1, Ordering::Relaxed);
         let mut ranges: Vec<Range<usize>> = Vec::new();
-        match &self.search.matcher {
-            Some(matcher) => {
-                for (i, m) in matcher.find_iter(&text).enumerate() {
-                    if i % 1024 == 1023 && self.cancel.is_cancelled() {
-                        return;
-                    }
-                    ranges.push(m);
-                }
+        for (i, m) in self.search.matcher.find_iter(&text).enumerate() {
+            if i % 1024 == 1023 && self.cancel.is_cancelled() {
+                return;
             }
-            // The whole file is one result, shown by its first line.
-            None => {
-                let first = text.find('\n').unwrap_or(text.len());
-                let first = text[..first].strip_suffix('\r').map_or(first, str::len);
-                ranges.push(0..first);
-            }
+            ranges.push(m);
         }
         if ranges.is_empty() {
             return;
@@ -537,7 +525,7 @@ mod tests {
 
     fn search_in(dir: &Path, matcher: Matcher) -> FileSearch {
         FileSearch {
-            matcher: Some(matcher),
+            matcher,
             mask: None,
             scope: Scope::Directory {
                 path: dir.to_owned(),
@@ -774,23 +762,6 @@ mod tests {
         let (_, summary) = run(&search);
         assert_eq!(summary.matches, 150);
         assert!(!summary.truncated);
-    }
-
-    #[test]
-    fn without_a_query_the_files_of_the_mask_are_listed() {
-        let dir = project(&[
-            ("a.py", b"first line\r\nsecond\n"),
-            ("b.py", b""),
-            ("c.txt", b"text\n"),
-        ]);
-        let mut search = search_in(dir.path(), plain("x"));
-        search.matcher = None;
-        search.mask = Some(FileMask::parse("*.py").unwrap());
-        let (found, summary) = run(&search);
-        assert_eq!(found.keys().collect::<Vec<_>>(), ["a.py", "b.py"]);
-        assert_eq!(found["a.py"][0].text, "first line");
-        assert_eq!(found["a.py"][0].ranges, vec![0..10]);
-        assert_eq!(summary.matches, 2);
     }
 
     #[test]

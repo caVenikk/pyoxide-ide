@@ -188,8 +188,9 @@ name = "ContextMenu"
 # field holds one line), Page Up and Page Down and the Find Next and
 # Previous keys move through the results; Tab and Shift+Tab go from field
 # to field; Option+Down shows the field's history. The options, the file
-# mask, the scopes and Recursively take the reference IDE's mnemonic keys:
-# Ctrl+Option and Option with the letter.
+# mask and the scopes take the reference IDE's mnemonic keys: Ctrl+Option
+# and Option with the letter; Recursively only Ctrl+Option+Y. In the
+# preview, Enter, Tab and Option+Down are the editor's.
 [[context]]
 name = "FindInFiles > Editor"
 [context.bindings]
@@ -211,12 +212,13 @@ name = "FindInFiles > Editor"
 "alt-k" = "find-in-files.toggle-mask"
 "ctrl-alt-p" = "find-in-files.scope-project"
 "alt-p" = "find-in-files.scope-project"
+"ctrl-alt-m" = "find-in-files.scope-module"
+"alt-m" = "find-in-files.scope-module"
 "ctrl-alt-d" = "find-in-files.scope-directory"
 "alt-d" = "find-in-files.scope-directory"
 "ctrl-alt-s" = "find-in-files.scope-named"
 "alt-s" = "find-in-files.scope-named"
 "ctrl-alt-y" = "find-in-files.toggle-recursive"
-"alt-y" = "find-in-files.toggle-recursive"
 
 # The search and replace fields can hold several lines.
 [[context]]

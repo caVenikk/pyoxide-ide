@@ -1,8 +1,8 @@
 //! Find in Files and Replace in Files: a movable, resizable popup over the
 //! main window with a search field (Match Case, Words, Regex), a replace
 //! field, a file mask, the scope (the project, a folder, or a named scope
-//! such as the open files), the matching lines and a preview of the
-//! selected one, as in the reference IDE
+//! such as the open files), the matching lines and an editor on the
+//! selected one's file (the preview), as in the reference IDE
 //! (tests/scenarios/editor/find-in-files.md).
 //!
 //! The search runs in the background (`project-search`): every change of
@@ -122,6 +122,9 @@ ui::ui_commands! {
     /// Search the project.
     ScopeProject => "find-in-files.scope-project", "In Project",
         "Searches the whole project.";
+    /// Search a module.
+    ScopeModule => "find-in-files.scope-module", "Module",
+        "Searches the module chosen in the module list (a project is one module).";
     /// Search a folder.
     ScopeDirectory => "find-in-files.scope-directory", "Directory",
         "Searches the folder in the directory field (and its subfolders when Recursively is on).";
@@ -140,6 +143,9 @@ ui::ui_commands! {
     /// The previous field.
     PreviousField => "find-in-files.previous-field", "Previous Field",
         "Moves the focus to the previous field of the popup.";
+    /// Edit in the preview.
+    FocusPreview => "find-in-files.focus-preview", "Go to Preview",
+        "Moves the focus into the preview's editor (as a click into it does).";
 }
 
 /// Matches one search collects before it stops (the reference IDE's
@@ -218,6 +224,8 @@ pub struct OpenContext {
 pub enum ScopeKind {
     /// The whole project.
     Project,
+    /// A module: a Pyoxide project is one module, the project itself.
+    Module,
     /// A folder, with or without its subfolders.
     Directory,
     /// A named scope.
@@ -342,6 +350,8 @@ pub struct FindInFiles {
     replace_task: Option<Task<()>>,
     /// A folder chooser is open.
     browsing: bool,
+    /// The main window, for the editors of open files.
+    host: Option<gpui::WeakEntity<crate::workbench::Workbench>>,
     /// Folder choosers asked for (the test platform has none to show).
     browse_requests: usize,
     _subscriptions: Vec<Subscription>,
@@ -477,9 +487,16 @@ impl FindInFiles {
             split_bounds: None,
             replace_task: None,
             browsing: false,
+            host: None,
             browse_requests: 0,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The main window the popup belongs to (its tabs' editors share
+    /// their documents with the preview).
+    pub fn set_host(&mut self, host: gpui::WeakEntity<crate::workbench::Workbench>) {
+        self.host = Some(host);
     }
 
     // ---- state ------------------------------------------------------------
@@ -596,6 +613,16 @@ impl FindInFiles {
             .replace('\\', "/")
     }
 
+    /// The modules of the Module tab: the project.
+    fn module_name(&self) -> String {
+        self.context
+            .root
+            .as_ref()
+            .and_then(|r| r.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
     pub fn state_json(&self, cx: &App) -> serde_json::Value {
         let rows: Vec<_> = if self.stale {
             Vec::new()
@@ -615,6 +642,7 @@ impl FindInFiles {
         };
         let scope = match self.scope {
             ScopeKind::Project => "project".to_owned(),
+            ScopeKind::Module => "module".to_owned(),
             ScopeKind::Directory => "directory".to_owned(),
             ScopeKind::Named => self.named.name().to_owned(),
         };
@@ -628,6 +656,7 @@ impl FindInFiles {
             "regex": self.options.regex,
             "mask": { "on": self.mask_on, "text": self.mask.read(cx).text() },
             "scope": scope,
+            "module": self.module_name(),
             "directory": self.directory.read(cx).text(),
             "recursive": self.recursive,
             "scopes": self.named_scopes().iter().map(|s| s.name()).collect::<Vec<_>>(),
@@ -759,6 +788,7 @@ impl FindInFiles {
         self.open(replace, context, window, cx);
         match args.scope.as_deref() {
             Some("project") => self.scope = ScopeKind::Project,
+            Some("module") => self.scope = ScopeKind::Module,
             Some("directory") => self.scope = ScopeKind::Directory,
             Some(name) => {
                 if let Some(named) = NamedScope::from_name(name) {
@@ -788,7 +818,7 @@ impl FindInFiles {
         self.frame.cancel_drag();
         self.split_drag = None;
         self.cancel_search();
-        self.preview.clear(cx);
+        self.clear_preview(cx);
         self.save(cx);
         if restore_focus {
             cx.emit(FindInFilesEvent::Dismissed);
@@ -920,10 +950,8 @@ impl FindInFiles {
             None
         };
         let matcher = match Query::new(&text, self.options).compile() {
-            Ok(m) => Some(m),
-            // Without a query, the files of the mask are listed (not when
-            // replacing).
-            Err(QueryError::Empty) if mask.is_some() && !self.replace_mode => None,
+            Ok(m) => m,
+            // Nothing to search for: no results, also with a file mask.
             Err(QueryError::Empty) => return Err((Status::Empty, None)),
             Err(QueryError::Vague) => {
                 return Err(invalid(
@@ -946,7 +974,7 @@ impl FindInFiles {
         }
         let root = self.context.root.clone().ok_or((Status::NoProject, None))?;
         let scope = match self.scope {
-            ScopeKind::Project => Scope::Directory {
+            ScopeKind::Project | ScopeKind::Module => Scope::Directory {
                 path: root.clone(),
                 recursive: true,
             },
@@ -1003,7 +1031,7 @@ impl FindInFiles {
                 self.selected = None;
                 self.truncated = false;
                 self.last_search = None;
-                self.preview.clear(cx);
+                self.clear_preview(cx);
                 cx.notify();
                 return;
             }
@@ -1389,7 +1417,18 @@ impl FindInFiles {
         self.move_selection(-(PAGE_ROWS as isize), cx);
     }
 
+    /// The preview has the focus: Enter, Shift+Enter, Tab and Option+Down
+    /// (Alt+Down) are the editor's there, as in the reference IDE (its
+    /// popup actions are off while the focus is in an editor).
+    fn in_preview(&self, window: &Window, cx: &App) -> bool {
+        self.preview.editor().focus_handle(cx).is_focused(window)
+    }
+
     fn open_result_action(&mut self, _: &OpenResult, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_preview(window, cx) {
+            cx.propagate();
+            return;
+        }
         self.open_result(window, cx);
     }
 
@@ -1399,6 +1438,10 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.in_preview(window, cx) {
+            cx.propagate();
+            return;
+        }
         self.replace_selected(window, cx);
     }
 
@@ -1421,6 +1464,15 @@ impl FindInFiles {
         cx: &mut Context<Self>,
     ) {
         self.set_scope(ScopeKind::Project, window, cx);
+    }
+
+    fn scope_module_action(
+        &mut self,
+        _: &ScopeModule,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_scope(ScopeKind::Module, window, cx);
     }
 
     fn scope_directory_action(
@@ -1459,7 +1511,22 @@ impl FindInFiles {
         self.browse_directory(window, cx);
     }
 
+    fn focus_preview_action(
+        &mut self,
+        _: &FocusPreview,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.preview.path().is_some() {
+            window.focus(&self.preview.editor().focus_handle(cx));
+        }
+    }
+
     fn next_field_action(&mut self, _: &NextField, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_preview(window, cx) {
+            cx.propagate();
+            return;
+        }
         self.move_focus(true, window, cx);
     }
 
@@ -1469,6 +1536,10 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.in_preview(window, cx) {
+            cx.propagate();
+            return;
+        }
         self.move_focus(false, window, cx);
     }
 
@@ -1584,11 +1655,13 @@ popup_actions! {
     ToggleMask => toggle_mask_action,
     TogglePin => toggle_pin_action,
     ScopeProject => scope_project_action,
+    ScopeModule => scope_module_action,
     ScopeDirectory => scope_directory_action,
     ScopeNamed => scope_named_action,
     ToggleRecursive => toggle_recursive_action,
     BrowseDirectory => browse_directory_action,
     NextField => next_field_action,
+    FocusPreview => focus_preview_action,
     PreviousField => previous_field_action,
     editor::find::ToggleCase => toggle_case_action,
     editor::find::ToggleWords => toggle_words_action,

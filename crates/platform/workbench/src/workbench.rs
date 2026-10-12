@@ -128,6 +128,8 @@ impl Workbench {
         let file_types = Rc::new(FileTypes::new(&product.file_types));
         let panel = cx.new(|cx| ProjectPanel::new(file_types.clone(), cx));
         let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
+        let host = cx.entity().downgrade();
+        find_in_files.update(cx, |p, _| p.set_host(host));
         let subscriptions = vec![
             cx.subscribe_in(&find_in_files, window, |this, _, event, window, cx| {
                 match event {
@@ -224,6 +226,14 @@ impl Workbench {
     /// The find bar of the active tab's editor.
     pub fn active_find_bar(&self) -> Option<&Entity<FindBar>> {
         self.active.map(|i| &self.tabs[i].find)
+    }
+
+    /// The editor of the tab of `path`, when the file is open.
+    pub fn editor_for(&self, path: &Path) -> Option<Entity<Editor>> {
+        self.tabs
+            .iter()
+            .find(|t| t.path == path)
+            .map(|t| t.editor.clone())
     }
 
     /// The Find in Files popup (drawn while it is open).
@@ -364,7 +374,12 @@ impl Workbench {
             return;
         }
         self.pending_go_to = Some((path.clone(), point));
-        self.open_file(path, window, cx);
+        // Edited in the Find in Files preview: the tab takes that document.
+        let previewed = self.find_in_files.read(cx).preview_document(&path, cx);
+        match previewed {
+            Some(buffer) => self.add_tab(path, buffer, window, cx),
+            None => self.open_file(path, window, cx),
+        }
     }
 
     fn add_tab(
@@ -412,6 +427,8 @@ impl Workbench {
                 e.go_to(point.line + 1, Some(point.column + 1), cx)
             });
         }
+        self.find_in_files
+            .update(cx, |p, cx| p.tab_opened(&path, &editor, cx));
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -531,6 +548,8 @@ impl Workbench {
         for i in 0..self.tabs.len() {
             self.save_tab(i, cx);
         }
+        // A file edited in the Find in Files preview without a tab.
+        self.find_in_files.update(cx, |p, cx| p.save_preview(cx));
     }
 
     /// Closes a tab; a modified file is saved first (no prompt).

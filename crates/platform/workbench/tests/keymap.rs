@@ -479,6 +479,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["text"], json!("foo"), "{what}");
         }
         "find-in-files.scope-project"
+        | "find-in-files.scope-module"
         | "find-in-files.scope-directory"
         | "find-in-files.scope-named" => {
             h.search_in_files(" = ");
@@ -489,6 +490,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             let expected = match b.command.as_str() {
                 "find-in-files.scope-project" => "project",
+                "find-in-files.scope-module" => "module",
                 "find-in-files.scope-directory" => "directory",
                 _ => "Project Files",
             };

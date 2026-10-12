@@ -53,9 +53,11 @@ impl Default for FindInFilesSettings {
 }
 
 impl FindInFilesSettings {
-    /// Settings before any were saved: the product's masks to offer.
+    /// Settings before any were saved: the product's masks to offer, the
+    /// first one in use (the file mask starts checked).
     pub fn with_masks(masks: &[&str]) -> Self {
         Self {
+            file_mask: masks.first().map(|m| (*m).to_owned()),
             recent_masks: masks.iter().map(|m| (*m).to_owned()).collect(),
             ..Self::default()
         }
@@ -176,8 +178,15 @@ mod tests {
 
     #[test]
     fn masks_are_remembered_newest_first() {
+        // First run: the first mask is in use.
         let mut s = FindInFilesSettings::with_masks(&["*.py", "*.xml"]);
+        assert_eq!(s.file_mask.as_deref(), Some("*.py"));
         assert_eq!(s.shown_mask(), "*.py");
+        // Saved with the mask off, it stays off.
+        s.file_mask = None;
+        let text = toml::to_string(&s).unwrap();
+        let back: FindInFilesSettings = toml::from_str(&text).unwrap();
+        assert_eq!(back.file_mask, None);
         s.remember_mask("*.txt");
         s.remember_mask("*.py");
         assert_eq!(s.recent_masks, ["*.py", "*.txt", "*.xml"]);
