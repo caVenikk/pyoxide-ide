@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use db_core::worker::{ExecArgs, Executed, Interrupt, Page, Rows, Session};
@@ -41,8 +41,10 @@ thread_local! {
     static BUSY_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
-/// Sleeps in short steps while another connection holds a lock, and gives up
-/// when the busy timeout elapsed or the statement was cancelled.
+/// Waits in short steps while another connection holds a lock, and gives up
+/// when the busy timeout elapsed or the statement was cancelled. A step ends
+/// early when a connection of this process released its locks
+/// ([`LockReleases`]).
 fn busy_handler(attempt: i32) -> bool {
     let cancelled = BUSY_CANCEL.with(|c| {
         c.borrow()
@@ -59,8 +61,75 @@ fn busy_handler(attempt: i32) -> bool {
         return false;
     }
     let step = u64::try_from(attempt.clamp(0, 19)).unwrap_or(0) + 1;
-    std::thread::sleep(Duration::from_millis(step));
+    LOCK_RELEASES.wait(Duration::from_millis(step));
     true
+}
+
+/// Wakes the lock waits of this process when one of its connections lets go
+/// of its locks.
+///
+/// SQLite keeps no queue of lock waiters: a connection that finds the file
+/// locked polls through its busy handler. In rollback-journal mode a
+/// connection that commits back to back holds the PENDING or EXCLUSIVE lock
+/// for the whole of each commit (the journal and database syncs) and frees
+/// the file only for the round trip to its next statement. A waiter that
+/// sleeps between polls almost never lands in that gap, so it would wait
+/// until the writer stops, longer than its busy timeout when the commits are
+/// slow. Every connection therefore announces when it holds no transaction
+/// any more, and a waiting busy handler retries at once instead of sleeping
+/// on. Announcements are process-wide, not per file: a waiter on another
+/// file wakes, tries again and waits on. Locks held by other processes are
+/// still found by polling.
+struct LockReleases {
+    state: Mutex<Releases>,
+    changed: Condvar,
+}
+
+struct Releases {
+    /// Counts the announcements.
+    count: u64,
+    /// Busy handlers waiting now.
+    waiting: usize,
+}
+
+static LOCK_RELEASES: LockReleases = LockReleases {
+    state: Mutex::new(Releases {
+        count: 0,
+        waiting: 0,
+    }),
+    changed: Condvar::new(),
+};
+
+impl LockReleases {
+    fn state(&self) -> MutexGuard<'_, Releases> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A connection may have released its locks: wake the waiting busy
+    /// handlers so that they try again.
+    fn announce(&self) {
+        let mut state = self.state();
+        state.count = state.count.wrapping_add(1);
+        let waiting = state.waiting > 0;
+        drop(state);
+        if waiting {
+            self.changed.notify_all();
+        }
+    }
+
+    /// Wait for `max`, or less if a connection announces a release. A release
+    /// announced between the failed lock attempt and this call is missed;
+    /// the wait then ends by time.
+    fn wait(&self, max: Duration) {
+        let mut state = self.state();
+        let seen = state.count;
+        state.waiting += 1;
+        let (mut state, _) = self
+            .changed
+            .wait_timeout_while(state, max, |s| s.count == seen)
+            .unwrap_or_else(PoisonError::into_inner);
+        state.waiting -= 1;
+    }
 }
 
 const MAX_PROGRESS_OPS: i32 = 1000;
@@ -131,7 +200,18 @@ impl SqliteSession {
         if self.conn.is_autocommit() {
             return Ok(());
         }
-        self.conn.execute_batch(statement).map_err(|e| self.err(&e))
+        let ended = self.conn.execute_batch(statement).map_err(|e| self.err(&e));
+        self.announce_release();
+        ended
+    }
+
+    /// Wake the lock waits of other connections when this one holds no
+    /// transaction and so no lock any more (see [`LockReleases`]). Called
+    /// when no statement is open.
+    fn announce_release(&self) {
+        if self.conn.is_autocommit() {
+            LOCK_RELEASES.announce();
+        }
     }
 
     /// Map an error, reporting a lock wait that was cut short by a cancel as
@@ -183,10 +263,9 @@ impl SqliteSession {
             0
         })
     }
-}
 
-impl Session for SqliteSession {
-    fn execute(&self, args: ExecArgs, rows: Rows<'_, Self>) -> Result<Executed> {
+    /// Run one statement, see [`Session::execute`].
+    fn run(&self, args: ExecArgs, rows: Rows<'_, Self>) -> Result<Executed> {
         let mut stmt = self.prepare(&args.sql, &args.params)?;
         if stmt.column_count() == 0 {
             return self.run_without_rows(&mut stmt).map(Executed::affected);
@@ -220,6 +299,15 @@ impl Session for SqliteSession {
         let exhausted = cursor.finished;
         Ok(rows.serve(columns, exhausted, |f| cursor.fetch(f.max_rows)))
     }
+}
+
+impl Session for SqliteSession {
+    fn execute(&self, args: ExecArgs, rows: Rows<'_, Self>) -> Result<Executed> {
+        let executed = self.run(args, rows);
+        // The statement is closed now.
+        self.announce_release();
+        executed
+    }
 
     fn ping(&self) -> Result<()> {
         self.conn
@@ -234,6 +322,7 @@ impl Session for SqliteSession {
             self.conn
                 .execute_batch("COMMIT")
                 .map_err(|e| self.err(&e))?;
+            self.announce_release();
         }
         self.manual.set(manual);
         Ok(())
@@ -248,7 +337,10 @@ impl Session for SqliteSession {
     }
 
     fn close(self) -> Result<()> {
-        self.conn.close().map_err(|(_, e)| map_error(&e))
+        let closed = self.conn.close().map_err(|(_, e)| map_error(&e));
+        // Closing ends an open transaction.
+        LOCK_RELEASES.announce();
+        closed
     }
 }
 
