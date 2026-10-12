@@ -67,6 +67,7 @@ pub fn init(cx: &mut App, product: &Product) {
     editor::init(cx);
     crate::find_in_files::init(cx, &product.find_file_masks);
     crate::search_everywhere::init(cx);
+    crate::recent_files::init(cx);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()
@@ -138,6 +139,14 @@ pub fn init(cx: &mut App, product: &Product) {
         Rc::new(|_, window, cx| {
             let popup = workbench(window)?.read(cx).find_in_files().clone();
             Ok(popup.read(cx).state_json(cx))
+        }),
+    );
+    ui::command::register_query(
+        cx,
+        "recent-files.state",
+        Rc::new(|_, window, cx| {
+            let popup = workbench(window)?.read(cx).recent_files().clone();
+            Ok(popup.read(cx).state_json())
         }),
     );
     ui::command::register_query(

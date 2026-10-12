@@ -21,6 +21,8 @@ pub struct SearchEverywhereSettings {
     pub hidden_providers: Vec<String>,
     /// The Files tab's scope is All Places (else Project Files).
     pub files_all_places: bool,
+    /// Where Recent Files was moved and how it was resized.
+    pub recent_files: Option<PopupPlace>,
 }
 
 #[derive(Default)]
@@ -56,7 +58,7 @@ pub fn settings(cx: &App) -> SearchEverywhereSettings {
 }
 
 /// Changes the settings and writes them in the background.
-pub(super) fn update_settings(cx: &mut App, f: impl FnOnce(&mut SearchEverywhereSettings)) {
+pub(crate) fn update_settings(cx: &mut App, f: impl FnOnce(&mut SearchEverywhereSettings)) {
     let store = cx.default_global::<Store>();
     let before = store.settings.clone();
     f(&mut store.settings);

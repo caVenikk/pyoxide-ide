@@ -19,6 +19,7 @@
 "ctrl-shift-n" = "search-everywhere.go-to-file"
 "ctrl-shift-a" = "search-everywhere.go-to-action"
 "ctrl-alt-shift-e" = "search-everywhere.go-to-text"
+"ctrl-e" = "recent-files.open"
 
 [[context]]
 name = "ProjectTree"
@@ -275,3 +276,19 @@ name = "SearchEverywhereText > Editor"
 "alt-c" = "search-everywhere.toggle-case"
 "alt-w" = "search-everywhere.toggle-words"
 "alt-x" = "search-everywhere.toggle-regex"
+
+# Recent Files: Up and Down (round), Left and Right between the tool
+# windows and the files, Enter opens, Escape clears the speed search or
+# closes, Delete and Backspace take a file off the list (or a char off the
+# speed search).
+[[context]]
+name = "RecentFiles"
+[context.bindings]
+"up" = "recent-files.up"
+"down" = "recent-files.down"
+"left" = "recent-files.left"
+"right" = "recent-files.right"
+"enter" = "recent-files.select"
+"escape" = "recent-files.close"
+"delete" = "recent-files.delete"
+"backspace" = "recent-files.delete"

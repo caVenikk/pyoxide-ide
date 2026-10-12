@@ -17,6 +17,7 @@ pub mod keymap;
 pub mod popup;
 pub mod project_files;
 pub mod project_panel;
+pub mod recent_files;
 pub mod search_everywhere;
 pub mod settings;
 mod shot;

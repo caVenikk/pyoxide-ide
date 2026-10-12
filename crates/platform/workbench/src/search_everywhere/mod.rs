@@ -53,8 +53,8 @@ use crate::popup::PopupFrame;
 use actions::ActionItem;
 pub use providers::{FileRow, Provider, Row, TextRow};
 use providers::{DIRECTORY_TYPE, Found};
+pub(crate) use settings::update_settings;
 pub use settings::{SearchEverywhereSettings, load_settings, settings, settings_file};
-use settings::update_settings;
 
 ui::ui_commands! {
     COMMANDS, scope = "Workbench";
