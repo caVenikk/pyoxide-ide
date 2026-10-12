@@ -68,6 +68,16 @@ impl IconName {
     pub const WINDOW_MAXIMIZE: Self = Self("windows/maximize");
     pub const WINDOW_RESTORE: Self = Self("windows/restore");
     pub const WINDOW_CLOSE: Self = Self("windows/close");
+    pub const ARROW_UP: Self = Self("general/up");
+    pub const ARROW_DOWN: Self = Self("general/down");
+    pub const FILTER: Self = Self("general/filter");
+    pub const IN_SELECTION: Self = Self("actions/inSelection");
+    pub const MATCH_CASE: Self = Self("inline/matchCase");
+    pub const WORDS: Self = Self("inline/exactWords");
+    pub const REGEX: Self = Self("inline/regex");
+    pub const PRESERVE_CASE: Self = Self("inline/preserveCase");
+    pub const SEARCH_HISTORY: Self = Self("inline/searchHistory");
+    pub const NEW_LINE: Self = Self("inline/newLine");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -97,6 +107,7 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
+        "actions/inSelection",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/config", "fileTypes/css",
         "fileTypes/csv", "fileTypes/docker", "fileTypes/html", "fileTypes/image",
         "fileTypes/javaScript", "fileTypes/json", "fileTypes/markdown", "fileTypes/rst",
@@ -104,9 +115,11 @@ platform_icons! {
         "fileTypes/unknown", "fileTypes/xml", "fileTypes/yaml",
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
-        "general/collapseAll", "general/expandAll", "general/hide",
+        "general/collapseAll", "general/down", "general/expandAll", "general/filter", "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
-        "general/moreVertical", "general/search@20x20", "general/settings@20x20",
+        "general/moreVertical", "general/search@20x20", "general/settings@20x20", "general/up",
+        "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
+        "inline/searchHistory",
         "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/symlink",
         "run/debug", "run/run",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",

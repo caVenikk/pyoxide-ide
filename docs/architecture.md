@@ -30,13 +30,17 @@ Platform (`crates/platform/`, language-agnostic):
 - `settings-import`: PyCharm project settings (data sources, JDBC URLs).
 - `text`: the text model (ADR 0007): rope buffer, selections, undoable
   transactions, caret movement, encoding and line separator of the file.
+- `search`: the text search engine of Find / Replace in the editor and of
+  Find in Files: plain and regular expression queries with case and whole
+  word options, replacement templates, cancellable searches over text
+  snapshots off the UI thread.
 - `syntax`: tree-sitter parsing off the UI thread and highlight spans as
   theme text roles; grammars and queries come from the products.
 - `project`: an opened folder, its lazily listed file tree with ignore
   rules, reading and writing documents.
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
-  commands).
+  commands) and its find bar (Find / Replace in the file).
 - `themes`: theme model and tokens, default themes, import of PyCharm colour
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and

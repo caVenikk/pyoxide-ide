@@ -48,6 +48,157 @@ pub fn icon_button(
         .child(Icon::new(icon).size(icon_size))
 }
 
+/// Size of the small buttons inside bars and fields (find bar arrows,
+/// option toggles) and of their icons.
+pub const SMALL_BUTTON: f32 = 22.0;
+pub const SMALL_ICON: f32 = 16.0;
+/// Opacity of a disabled button.
+pub const DISABLED_ALPHA: f32 = 0.4;
+
+/// A small icon button for actions inside bars and fields (the find bar's
+/// previous and next arrows, its close button). A disabled button is
+/// dimmed and has no hover background; the caller adds the click handler
+/// only when it is enabled.
+pub fn small_icon_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.color(UiRole::Hover);
+    let pressed = theme.color(UiRole::Pressed);
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(px(SMALL_BUTTON))
+        .rounded(theme.metric(Metric::CornerRadius))
+        .when(enabled, |d| {
+            d.hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed))
+        })
+        .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
+        .child(Icon::new(icon).size(px(SMALL_ICON)))
+}
+
+/// An on/off option shown as an icon (Match Case, Words, Regex in a search
+/// field): a rounded background while it is on, a lighter one on hover.
+pub fn toggle_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    on: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.color(UiRole::Hover);
+    let selected = theme.color(UiRole::SearchOptionSelected);
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(px(SMALL_BUTTON))
+        .rounded(theme.metric(Metric::CornerRadius))
+        .when(on, |d| d.bg(selected))
+        .when(!on, |d| d.hover(move |s| s.bg(hover)))
+        .child(Icon::new(icon).size(px(SMALL_ICON)))
+}
+
+/// A push button with a text label (Replace, Replace All): a rounded
+/// outline, a hover background; dimmed when disabled.
+pub fn text_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.color(UiRole::Hover);
+    let pressed = theme.color(UiRole::Pressed);
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(px(SMALL_BUTTON + 2.0))
+        .px(px(10.0))
+        .rounded(theme.metric(Metric::CornerRadius))
+        .border_1()
+        .border_color(theme.color(UiRole::BorderInput))
+        .whitespace_nowrap()
+        .when(enabled, |d| {
+            d.hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed))
+        })
+        .when(!enabled, |d| {
+            d.opacity(DISABLED_ALPHA)
+                .text_color(theme.color(UiRole::TextDisabled))
+        })
+        .child(label.into())
+}
+
+/// The frame of a one-line text input: rounded, with the input outline;
+/// while `focused` the theme's focus ring is drawn over the outline, and
+/// with `error` the outline takes the danger colour. Children go in a row:
+/// leading icons, the text field (an editor in one-line mode), trailing
+/// buttons.
+pub fn input_frame(focused: bool, error: bool, cx: &App) -> Div {
+    let theme = cx.theme();
+    let radius = theme.metric(Metric::CornerRadius) * 1.5;
+    let border = if error {
+        theme.color(UiRole::Danger)
+    } else {
+        theme.color(UiRole::BorderInput)
+    };
+    let ring = theme.color(if error { UiRole::Danger } else { UiRole::Focus });
+    let ring_width = theme.metric(Metric::FocusWidth);
+    // Light themes fill the field; dark ones let the surface show through
+    // (as the reference IDE's fields in the islands themes).
+    let fill = (!theme.is_dark()).then(|| theme.color(UiRole::Input));
+    div()
+        .relative()
+        .flex()
+        .flex_row()
+        .items_center()
+        .min_w(px(0.0))
+        .rounded(radius)
+        .border_1()
+        .border_color(border)
+        .when_some(fill, |d, fill| d.bg(fill))
+        .when(focused, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top(px(-1.0))
+                    .left(px(-1.0))
+                    .right(px(-1.0))
+                    .bottom(px(-1.0))
+                    .rounded(radius)
+                    .border(ring_width)
+                    .border_color(ring),
+            )
+        })
+}
+
+/// Status text next to a search field ("3/12", "0 results"): muted, or the
+/// danger colour when nothing was found or the pattern is wrong.
+pub fn status_text(text: impl Into<SharedString>, error: bool, cx: &App) -> Div {
+    let theme = cx.theme();
+    let color = if error {
+        theme.color(UiRole::Danger)
+    } else {
+        theme.color(UiRole::TextMuted)
+    };
+    div()
+        .flex_none()
+        .whitespace_nowrap()
+        .text_color(color)
+        .child(text.into())
+}
+
 /// A tooltip with a title and an optional shortcut in muted text.
 pub struct Tooltip {
     title: SharedString,

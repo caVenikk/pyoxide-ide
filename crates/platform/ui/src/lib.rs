@@ -10,6 +10,7 @@ pub mod command;
 pub mod components;
 pub mod fonts;
 pub mod icons;
+pub mod keys;
 pub mod pointer;
 pub mod theme;
 

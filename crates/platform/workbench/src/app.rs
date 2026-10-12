@@ -110,6 +110,18 @@ pub fn init(cx: &mut App, product: &Product) {
         "editor.text",
         Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).text().into())),
     );
+    ui::command::register_query(
+        cx,
+        "find.state",
+        Rc::new(|_, window, cx| {
+            let bar = workbench(window)?
+                .read(cx)
+                .active_find_bar()
+                .cloned()
+                .ok_or_else(|| CommandError::new("not_available", "no editor is open"))?;
+            Ok(bar.read(cx).state_json(cx))
+        }),
+    );
     cx.on_action(|_: &Quit, cx| cx.quit());
     for error in crate::keymap::bind(cx, &crate::keymap::Keymap::platform_default()) {
         eprintln!("keymap: {error}");
@@ -181,6 +193,7 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // draws at once instead: the typed text is then ready for the next
         // refresh rather than the one after (ADR 0007, replica/perf.md).
         // Only real windows (the test platform has no native window).
+        crate::shot::set_native_windows();
         cx.observe_keystrokes(|_, window, _| crate::shot::request_display(window))
             .detach();
         // `PYOXIDE_NATIVE_POINTER=0` leaves the pointer to GPUI alone
@@ -206,8 +219,16 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
             }
         })
         .detach();
-        if let Some(path) = env::shot_path() {
-            save_shot_and_quit(window, path, cx);
+        let commands = match env::run_commands() {
+            Some(Ok(commands)) => commands,
+            Some(Err(e)) => {
+                eprintln!("{e}");
+                Vec::new()
+            }
+            None => Vec::new(),
+        };
+        if !commands.is_empty() || env::shot_path().is_some() {
+            run_commands_and_shot(window, commands, env::shot_path(), cx);
         }
         crate::bench::start(window, cx);
         if !env::background() {
@@ -216,13 +237,52 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     });
 }
 
-/// `PYOXIDE_SHOT`: wait until the window is on screen and settled, save its
-/// image, quit.
-fn save_shot_and_quit(window: WindowHandle<Workbench>, path: std::path::PathBuf, cx: &mut App) {
+/// `PYOXIDE_RUN` and `PYOXIDE_SHOT`: wait until the window is on screen and
+/// its files are open, run the commands, then save the window's image and
+/// quit.
+fn run_commands_and_shot(
+    window: WindowHandle<Workbench>,
+    commands: Vec<(String, serde_json::Value)>,
+    shot: Option<std::path::PathBuf>,
+    cx: &mut App,
+) {
     cx.spawn(async move |cx| {
         cx.background_executor()
             .timer(Duration::from_millis(1200))
             .await;
+        if !commands.is_empty() {
+            // Files open in the background: wait for them (at most 10 s).
+            for _ in 0..200 {
+                let busy = window.read_with(cx, |w, cx| w.is_busy(cx)).unwrap_or(false);
+                if !busy {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+            }
+            for (id, args) in commands {
+                // A command is available where the last drawn frame has its
+                // handler; a covered window may not have drawn the newest
+                // state yet.
+                let result = cx.update_window(window.into(), |_, window, cx| {
+                    window.draw(cx).clear();
+                    ui::command::invoke(&id, args, window, cx)
+                });
+                match result {
+                    Ok(Ok(value)) if !value.is_null() => env::marker(&format!("run {id} {value}")),
+                    Ok(Ok(_)) => env::marker(&format!("run {id}")),
+                    Ok(Err(e)) => eprintln!("PYOXIDE_RUN {id}: {e:?}"),
+                    Err(e) => eprintln!("PYOXIDE_RUN {id}: {e}"),
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(200))
+                    .await;
+            }
+        }
+        let Some(path) = shot else {
+            return;
+        };
         let _ = cx.update_window(window.into(), |_, window, _| {
             crate::shot::request_display(window)
         });

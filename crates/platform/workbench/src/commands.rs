@@ -55,6 +55,9 @@ ui::ui_commands! {
     /// Ask for a line to go to.
     ShowGoToLine => "workbench.go-to-line", "Go to Line:Column…",
         "Opens a field for a line and column to move the active editor's caret to.";
+    /// The find bar of the active editor.
+    FindState => "find.state", "Find State",
+        "Returns the state of the active editor's find bar as JSON (query, options, matches, current match, status).";
 }
 
 ui::ui_commands! {

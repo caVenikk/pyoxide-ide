@@ -108,6 +108,11 @@ name = "Editor"
 "shift-delete" = "editor.cut"
 "cmd-v" = "editor.paste"
 "shift-insert" = "editor.paste"
+# Find and replace
+"cmd-f" = "find.open"
+"cmd-r" = "find.replace"
+"cmd-g" = "find.next"
+"cmd-shift-g" = "find.previous"
 
 # The Go to Line field is a one-line editor: Enter and Escape close it.
 [[context]]
@@ -115,3 +120,52 @@ name = "GoToLine > Editor"
 [context.bindings]
 "enter" = "go-to-line.confirm"
 "escape" = "go-to-line.cancel"
+
+# The find bar's fields are editors: Enter goes to the next match,
+# Shift+Enter to the previous one; Down and Ctrl+N, Up and Ctrl+P do the same
+# while the fields hold one line each and move the caret when they hold more;
+# Cmd+Shift+Enter breaks the line. Escape closes the bar, Cmd+Enter goes back
+# to the editor, Tab switches between the fields, Option+Down shows the
+# search history. The options take the reference IDE's mnemonic keys:
+# Ctrl+Option and, as it also accepts on macOS, Option with the letter; the
+# buttons take Ctrl+Option with theirs.
+[[context]]
+name = "FindBar > Editor"
+[context.bindings]
+"enter" = "find.next"
+"down" = "find.down"
+"ctrl-n" = "find.down"
+"shift-enter" = "find.previous"
+"up" = "find.up"
+"ctrl-p" = "find.up"
+"escape" = "find.close"
+"cmd-enter" = "find.focus-editor"
+"cmd-shift-enter" = "find.new-line"
+"tab" = "find.switch-field"
+"shift-tab" = "find.switch-field"
+"alt-down" = "find.show-history"
+"ctrl-alt-c" = "find.toggle-case"
+"alt-c" = "find.toggle-case"
+"ctrl-alt-w" = "find.toggle-words"
+"alt-w" = "find.toggle-words"
+"ctrl-alt-x" = "find.toggle-regex"
+"alt-x" = "find.toggle-regex"
+"ctrl-alt-e" = "find.toggle-in-selection"
+"ctrl-alt-p" = "find.replace-current"
+"ctrl-alt-a" = "find.replace-all"
+"ctrl-alt-l" = "find.exclude"
+
+# Enter in the replace field replaces the current match.
+[[context]]
+name = "FindReplace > Editor"
+[context.bindings]
+"enter" = "find.replace-current"
+
+# The search history below a field.
+[[context]]
+name = "FindHistory"
+[context.bindings]
+"up" = "find.history-up"
+"down" = "find.history-down"
+"enter" = "find.history-pick"
+"escape" = "find.history-close"

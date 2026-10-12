@@ -43,7 +43,7 @@ Text buffer and editing,editor,must,yes,partial,"rope buffer, undo/redo, clipboa
 Python syntax highlighting,editor,must,yes,yes,tree-sitter off the UI thread mapped to theme text roles
 Tabs and split views,editor,must,yes,partial,tabs with modified marker and keyboard switching; no split views
 File tree and project model,editor,must,yes,partial,"open folder, lazy tree with ignore rules, keyboard navigation; no file operations or drag and drop"
-Search in file and project,editor,must,yes,no,
+Search in file and project,editor,must,yes,partial,"find and replace in file (#31: regex, case, words, in selection, history); project search is #43"
 Multi-cursor and column selection,editor,should,yes,no,
 Code folding,editor,should,yes,no,
 Live templates,editor,should,yes,no,
