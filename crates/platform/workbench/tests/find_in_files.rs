@@ -190,10 +190,10 @@ impl H<'_> {
     fn caret(&mut self) -> (String, usize, usize) {
         let s = self.invoke("editor.state", json!(null));
         let path = s["path"].as_str().unwrap_or_default().to_owned();
-        let rel = path
-            .strip_prefix(&format!("{}/", self.root.display()))
-            .unwrap_or(&path)
-            .replace('\\', "/");
+        // Both with `/` separators (the state reports them so).
+        let root = format!("{}/", self.root.display()).replace('\\', "/");
+        let path = path.replace('\\', "/");
+        let rel = path.strip_prefix(&root).unwrap_or(&path).to_owned();
         let editor = self.editor();
         let p = self.cx.update(|cx| editor.read(cx).caret_point());
         (rel, p.line, p.column)
