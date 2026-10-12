@@ -29,7 +29,12 @@ const DROPDOWN_WIDTH: f32 = 220.0;
 
 impl SearchEverywhere {
     /// The shortcut of a command where the field has the focus.
-    fn shortcut(&self, action: &dyn gpui::Action, window: &Window, cx: &App) -> Option<SharedString> {
+    fn shortcut(
+        &self,
+        action: &dyn gpui::Action,
+        window: &Window,
+        cx: &App,
+    ) -> Option<SharedString> {
         let focus = self.field.focus_handle(cx);
         ui::keys::shortcut_in(action, &focus, window).map(SharedString::from)
     }
@@ -61,11 +66,18 @@ impl SearchEverywhere {
                     .h(px(26.0))
                     .px(px(10.0))
                     .rounded(theme.metric(Metric::CornerRadius))
-                    .when(selected, |d| d.bg(theme.color(UiRole::SearchOptionSelected)))
+                    .when(selected, |d| {
+                        d.bg(theme.color(UiRole::SearchOptionSelected))
+                    })
                     .when(!selected, |d| d.hover(move |s| s.bg(hover)))
                     .child(tab.title())
-                    .tooltip(Tooltip::text(tab.title(), self.tab_shortcut(tab, window, cx)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.switch_tab(tab, cx)))
+                    .tooltip(Tooltip::text(
+                        tab.title(),
+                        self.tab_shortcut(tab, window, cx),
+                    ))
+                    .on_click(
+                        cx.listener(move |this, _: &ClickEvent, _, cx| this.switch_tab(tab, cx)),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -113,24 +125,54 @@ impl SearchEverywhere {
                         .flex_none()
                         .items_center()
                         .gap(px(6.0))
-                        .child(checkbox("search-everywhere-everywhere-box", self.everywhere(), cx))
+                        .child(checkbox(
+                            "search-everywhere-everywhere-box",
+                            self.everywhere(),
+                            cx,
+                        ))
                         .child(label)
-                        .tooltip(Tooltip::text(label, self.shortcut(&ToggleEverywhere, window, cx)))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_everywhere(cx)))
+                        .tooltip(Tooltip::text(
+                            label,
+                            self.shortcut(&ToggleEverywhere, window, cx),
+                        ))
+                        .on_click(
+                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_everywhere(cx)),
+                        )
                         .into_any_element(),
                 );
             }
             Tab::Files | Tab::Text => {
-                items.push(self.combo("search-everywhere-scope", self.scope_name().to_owned(), Dropdown::Scope, None, cx));
+                items.push(self.combo(
+                    "search-everywhere-scope",
+                    self.scope_name().to_owned(),
+                    Dropdown::Scope,
+                    None,
+                    cx,
+                ));
             }
         }
         if self.tab == Tab::Text {
-            let mask = self.mask.clone().unwrap_or_else(|| "All file types".to_owned());
-            items.push(self.combo("search-everywhere-mask", mask, Dropdown::Masks, Some(MASK_WIDTH), cx));
+            let mask = self
+                .mask
+                .clone()
+                .unwrap_or_else(|| "All file types".to_owned());
+            items.push(self.combo(
+                "search-everywhere-mask",
+                mask,
+                Dropdown::Masks,
+                Some(MASK_WIDTH),
+                cx,
+            ));
         }
         let filter = match self.tab {
-            Tab::All => Some((Dropdown::Providers, !settings(cx).hidden_providers.is_empty())),
-            Tab::Files => Some((Dropdown::FileTypes, !settings(cx).hidden_file_types.is_empty())),
+            Tab::All => Some((
+                Dropdown::Providers,
+                !settings(cx).hidden_providers.is_empty(),
+            )),
+            Tab::Files => Some((
+                Dropdown::FileTypes,
+                !settings(cx).hidden_file_types.is_empty(),
+            )),
             _ => None,
         };
         if let Some((kind, active)) = filter {
@@ -138,7 +180,9 @@ impl SearchEverywhere {
                 toggle_button("search-everywhere-filter", IconName::FILTER, active, cx)
                     .debug_selector(|| "search-everywhere-filter".into())
                     .tooltip(Tooltip::text("Filter", None))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.show_dropdown(kind.clone(), cx)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.show_dropdown(kind.clone(), cx)
+                    }))
                     .into_any_element(),
             );
         }
@@ -175,9 +219,19 @@ impl SearchEverywhere {
             .rounded(theme.metric(Metric::CornerRadius))
             .hover(move |s| s.bg(hover))
             .when_some(width, |d, w| d.w(px(w)))
-            .child(div().flex_1().overflow_hidden().whitespace_nowrap().child(text))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(text),
+            )
             .child(Icon::new(IconName::CHEVRON_DOWN).size(px(14.0)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.show_dropdown(kind.clone(), cx)))
+            .on_click(
+                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.show_dropdown(kind.clone(), cx)
+                }),
+            )
             .into_any_element()
     }
 
@@ -194,7 +248,9 @@ impl SearchEverywhere {
                 toggle_button(id, icon, on, cx)
                     .debug_selector(move || id.into())
                     .tooltip(Tooltip::text(title, self.shortcut(action, window, cx)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.change_options(change, cx)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.change_options(change, cx)
+                    }))
             };
             div()
                 .flex()
@@ -229,14 +285,22 @@ impl SearchEverywhere {
                     cx,
                 ))
         });
-        let history = small_icon_button("search-everywhere-history", IconName::SEARCH_HISTORY, true, cx)
-            .debug_selector(|| "search-everywhere-history".into())
-            .tooltip(Tooltip::text("Recent Searches", self.shortcut(&HistoryPrevious, window, cx)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                if !this.tab_history(this.tab).is_empty() {
-                    this.show_dropdown(Dropdown::History, cx);
-                }
-            }));
+        let history = small_icon_button(
+            "search-everywhere-history",
+            IconName::SEARCH_HISTORY,
+            true,
+            cx,
+        )
+        .debug_selector(|| "search-everywhere-history".into())
+        .tooltip(Tooltip::text(
+            "Recent Searches",
+            self.shortcut(&HistoryPrevious, window, cx),
+        ))
+        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+            if !this.tab_history(this.tab).is_empty() {
+                this.show_dropdown(Dropdown::History, cx);
+            }
+        }));
         let searching = self.is_searching() && !self.field.read(cx).text().is_empty();
         let spinner = searching.then(|| spinner("search-everywhere-spinner", cx));
         let theme = cx.theme();
@@ -311,25 +375,29 @@ impl SearchEverywhere {
                 } else {
                     self.file_types.icon(&file.path)
                 };
-                base.when(file.non_project && !selected, |d| d.bg(theme.color(UiRole::NonProjectFile)))
-                    .child(Icon::new(icon).size(px(16.0)))
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(StyledText::new(name.clone()).with_highlights(highlight(&name, &name_ranges, match_bg))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .overflow_hidden()
-                            .text_color(muted)
-                            .child(StyledText::new(location.clone()).with_highlights(highlight(
-                                &location,
-                                &location_ranges,
-                                match_bg,
-                            ))),
-                    )
+                base.when(file.non_project && !selected, |d| {
+                    d.bg(theme.color(UiRole::NonProjectFile))
+                })
+                .child(Icon::new(icon).size(px(16.0)))
+                .child(div().flex_none().child(
+                    StyledText::new(name.clone()).with_highlights(highlight(
+                        &name,
+                        &name_ranges,
+                        match_bg,
+                    )),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .text_color(muted)
+                        .child(StyledText::new(location.clone()).with_highlights(highlight(
+                            &location,
+                            &location_ranges,
+                            match_bg,
+                        ))),
+                )
             }
             Row::Action(i) => {
                 let a = &self.context.actions[*i];
@@ -341,9 +409,10 @@ impl SearchEverywhere {
                 };
                 base.when(!a.available, |d| d.text_color(muted))
                     .child(
-                        div()
-                            .flex_none()
-                            .child(StyledText::new(title.clone()).with_highlights(highlight(&title, &ranges, match_bg))),
+                        div().flex_none().child(
+                            StyledText::new(title.clone())
+                                .with_highlights(highlight(&title, &ranges, match_bg)),
+                        ),
                     )
                     .children(a.shortcut.clone().map(|s| {
                         div()
@@ -356,7 +425,11 @@ impl SearchEverywhere {
                     .child(div().flex_1())
             }
             Row::Text(line) => {
-                let ranges = if selected { line.ranges.clone() } else { Vec::new() };
+                let ranges = if selected {
+                    line.ranges.clone()
+                } else {
+                    Vec::new()
+                };
                 let file = line
                     .path
                     .file_name()
@@ -369,11 +442,10 @@ impl SearchEverywhere {
                             .min_w(px(0.0))
                             .overflow_hidden()
                             .font_family(theme.mono_family())
-                            .child(StyledText::new(line.text.clone()).with_highlights(highlight(
-                                &line.text,
-                                &ranges,
-                                match_bg,
-                            ))),
+                            .child(
+                                StyledText::new(line.text.clone())
+                                    .with_highlights(highlight(&line.text, &ranges, match_bg)),
+                            ),
                     )
                     .child(
                         div()
@@ -424,8 +496,9 @@ impl SearchEverywhere {
                 .child(label)
         };
         let scope_link = (!self.everywhere() && self.tab != Tab::Actions).then(|| {
-            link_to("search-everywhere-set-scope", "all places")
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.set_everywhere(true, true, cx)))
+            link_to("search-everywhere-set-scope", "all places").on_click(
+                cx.listener(|this, _: &ClickEvent, _, cx| this.set_everywhere(true, true, cx)),
+            )
         });
         let row = || div().flex().flex_row().gap(px(4.0));
         let mut lines: Vec<AnyElement> = Vec::new();
@@ -445,13 +518,15 @@ impl SearchEverywhere {
                     Some(link) => row().child("Set scope to").child(link).child("or use"),
                     None => row().child("Use"),
                 };
-                line = line.child(link_to("search-everywhere-find-in-files", "Find in Files").on_click(
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                        let text = this.field.read(cx).text();
-                        this.close(false, window, cx);
-                        cx.emit(SearchEverywhereEvent::FindInFiles(text));
-                    }),
-                ));
+                line = line.child(
+                    link_to("search-everywhere-find-in-files", "Find in Files").on_click(
+                        cx.listener(|this, _: &ClickEvent, window, cx| {
+                            let text = this.field.read(cx).text();
+                            this.close(false, window, cx);
+                            cx.emit(SearchEverywhereEvent::FindInFiles(text));
+                        }),
+                    ),
+                );
                 let rest = match keys {
                     Some(keys) => format!("({keys}) to perform full-text search."),
                     None => "to perform full-text search.".to_owned(),
@@ -471,7 +546,11 @@ impl SearchEverywhere {
                 .filter_map(|(on, name)| on.then_some(name))
                 .collect();
                 if !used.is_empty() {
-                    lines.push(div().child(format!("Search options used: {}", used.join(" "))).into_any_element());
+                    lines.push(
+                        div()
+                            .child(format!("Search options used: {}", used.join(" ")))
+                            .into_any_element(),
+                    );
                     lines.push(
                         link_to("search-everywhere-clear-options", "Clear all options")
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -508,7 +587,9 @@ impl SearchEverywhere {
         let mut rows = uniform_list(
             "search-everywhere-rows",
             self.rows.len(),
-            cx.processor(|this, range: Range<usize>, _, cx| range.map(|i| this.render_row(i, cx)).collect::<Vec<_>>()),
+            cx.processor(|this, range: Range<usize>, _, cx| {
+                range.map(|i| this.render_row(i, cx)).collect::<Vec<_>>()
+            }),
         )
         .debug_selector(|| "search-everywhere-rows".into())
         .track_scroll(self.list.clone())
@@ -544,7 +625,10 @@ impl SearchEverywhere {
         };
         match &kind {
             Dropdown::Scope => {
-                for (i, (name, all)) in [("Project Files", false), ("All Places", true)].into_iter().enumerate() {
+                for (i, (name, all)) in [("Project Files", false), ("All Places", true)]
+                    .into_iter()
+                    .enumerate()
+                {
                     let on = self.everywhere() == all;
                     rows.push(
                         item(format!("search-everywhere-scope-{i}").into(), on)
@@ -586,7 +670,9 @@ impl SearchEverywhere {
                     rows.push(
                         item(format!("search-everywhere-masks-{i}").into(), on)
                             .child(label)
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_mask(mask.clone(), cx)))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.set_mask(mask.clone(), cx)
+                            }))
                             .into_any_element(),
                     );
                 }
@@ -596,7 +682,10 @@ impl SearchEverywhere {
                 let (names, hidden): (Vec<String>, Vec<String>) = if kind == Dropdown::FileTypes {
                     (self.filter_types(), s.hidden_file_types)
                 } else {
-                    (Provider::ALL.iter().map(|p| p.title().to_owned()).collect(), s.hidden_providers)
+                    (
+                        Provider::ALL.iter().map(|p| p.title().to_owned()).collect(),
+                        s.hidden_providers,
+                    )
                 };
                 let buttons = div()
                     .flex()
@@ -608,31 +697,40 @@ impl SearchEverywhere {
                     .child(
                         div()
                             .id("search-everywhere-filter-all")
+                            .debug_selector(|| "search-everywhere-filter-all".into())
                             .cursor_pointer()
                             .child("All")
                             .on_click({
                                 let kind = kind.clone();
-                                cx.listener(move |this, _: &ClickEvent, _, cx| this.set_filter(&kind, None, true, cx))
+                                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.set_filter(&kind, None, true, cx)
+                                })
                             }),
                     )
                     .child(
                         div()
                             .id("search-everywhere-filter-none")
+                            .debug_selector(|| "search-everywhere-filter-none".into())
                             .cursor_pointer()
                             .child("None")
                             .on_click({
                                 let kind = kind.clone();
-                                cx.listener(move |this, _: &ClickEvent, _, cx| this.set_filter(&kind, None, false, cx))
+                                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.set_filter(&kind, None, false, cx)
+                                })
                             }),
                     )
                     .child(
                         div()
                             .id("search-everywhere-filter-invert")
+                            .debug_selector(|| "search-everywhere-filter-invert".into())
                             .cursor_pointer()
                             .child("Invert")
                             .on_click({
                                 let kind = kind.clone();
-                                cx.listener(move |this, _: &ClickEvent, _, cx| this.invert_filter(&kind, cx))
+                                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.invert_filter(&kind, cx)
+                                })
                             }),
                     );
                 rows.push(buttons.into_any_element());
@@ -654,7 +752,11 @@ impl SearchEverywhere {
                     let label = name.clone();
                     rows.push(
                         item(format!("search-everywhere-filter-{i}").into(), false)
-                            .child(checkbox(SharedString::from(format!("search-everywhere-filter-box-{i}")), shown, cx))
+                            .child(checkbox(
+                                SharedString::from(format!("search-everywhere-filter-box-{i}")),
+                                shown,
+                                cx,
+                            ))
                             .children(icon)
                             .child(label)
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -674,7 +776,11 @@ impl SearchEverywhere {
                     .debug_selector(|| "search-everywhere-dropdown".into())
                     .occlude()
                     .absolute()
-                    .top(px(if under_field { HEADER_HEIGHT + FIELD_HEIGHT } else { HEADER_HEIGHT }))
+                    .top(px(if under_field {
+                        HEADER_HEIGHT + FIELD_HEIGHT
+                    } else {
+                        HEADER_HEIGHT
+                    }))
                     .when(under_field, |d| d.left(px(8.0)))
                     .when(!under_field, |d| d.right(px(8.0)))
                     .w(px(DROPDOWN_WIDTH))
@@ -704,10 +810,17 @@ impl SearchEverywhere {
 /// matches, as the reference highlights them: the name with the longest
 /// tail of the name part that matches it, the location with the folder
 /// part before that tail.
-fn file_highlights(text: &str, name: &str, location: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+fn file_highlights(
+    text: &str,
+    name: &str,
+    location: &str,
+) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let sanitized: Vec<char> = sanitized_pattern(text).chars().collect();
     let name_chars: Vec<char> = name.chars().collect();
-    let start = sanitized.iter().rposition(|&c| c == '/').map_or(0, |i| i + 1);
+    let start = sanitized
+        .iter()
+        .rposition(|&c| c == '/')
+        .map_or(0, |i| i + 1);
     let last = sanitized.len().saturating_sub(1);
     for i in start..last.max(start + 1) {
         let tail: String = sanitized[i..].iter().collect();
@@ -732,8 +845,14 @@ fn substring(text: &str, pattern: &str) -> Vec<Range<usize>> {
     if pattern.is_empty() {
         return Vec::new();
     }
-    let lower: Vec<char> = text.chars().flat_map(|c| c.to_lowercase().take(1)).collect();
-    let p: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase().take(1)).collect();
+    let lower: Vec<char> = text
+        .chars()
+        .flat_map(|c| c.to_lowercase().take(1))
+        .collect();
+    let p: Vec<char> = pattern
+        .chars()
+        .flat_map(|c| c.to_lowercase().take(1))
+        .collect();
     (0..lower.len().saturating_sub(p.len() - 1))
         .find(|&i| lower[i..].starts_with(&p))
         .map(|i| std::iter::once(i..i + p.len()).collect())
@@ -741,7 +860,11 @@ fn substring(text: &str, pattern: &str) -> Vec<Range<usize>> {
 }
 
 /// Char ranges of `text` as byte ranges with a background.
-fn highlight(text: &str, ranges: &[Range<usize>], background: Hsla) -> Vec<(Range<usize>, HighlightStyle)> {
+fn highlight(
+    text: &str,
+    ranges: &[Range<usize>],
+    background: Hsla,
+) -> Vec<(Range<usize>, HighlightStyle)> {
     let mut offsets: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
     offsets.push(text.len());
     let style = HighlightStyle {
@@ -793,7 +916,13 @@ impl Render for SearchEverywhere {
             cx.defer_in(window, |this, _, cx| this.load_more(cx));
         }
         self.frame
-            .render("search-everywhere", content, |this| &mut this.frame, window, cx)
+            .render(
+                "search-everywhere",
+                content,
+                |this| &mut this.frame,
+                window,
+                cx,
+            )
             .into_any_element()
     }
 }

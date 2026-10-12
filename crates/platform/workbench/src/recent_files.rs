@@ -10,10 +10,10 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
-    HighlightStyle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    ParentElement, Render, SharedString, StyledText, Subscription, UniformListScrollHandle, Window,
-    div, prelude::*, px, uniform_list,
+    App, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, FontWeight, HighlightStyle,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement,
+    Render, SharedString, StyledText, Subscription, UniformListScrollHandle, Window, div,
+    prelude::*, px, uniform_list,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::json;
@@ -30,6 +30,9 @@ ui::ui_commands! {
     /// Recent Files.
     Open => "recent-files.open", "Recent Files",
         "Shows the recently opened files and the tool windows; again while it is open, switches \"Show edited only\".";
+    /// Describe the popup.
+    State => "recent-files.state", "Recent Files State",
+        "Returns the state of the Recent Files popup as JSON (files, tool windows, selection, speed search).";
 }
 
 ui::ui_commands! {
@@ -88,7 +91,10 @@ pub enum RecentFilesEvent {
     /// Show a tool window.
     ShowToolWindow(&'static str),
     /// Take a file off the recent files (and close its tab).
-    Remove { path: PathBuf, edited: bool },
+    Remove {
+        path: PathBuf,
+        edited: bool,
+    },
     /// Go to File with a text (nothing matched it here).
     GoToFile(String),
     /// Closed with Escape: the focus goes back.
@@ -124,7 +130,12 @@ impl Focusable for RecentFiles {
 }
 
 impl RecentFiles {
-    pub fn new(file_types: std::rc::Rc<FileTypes>, place: Option<PopupPlace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        file_types: std::rc::Rc<FileTypes>,
+        place: Option<PopupPlace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
         let subscriptions = vec![cx.on_focus_out(&focus, window, |this, _, window, cx| {
             if this.open && window.is_window_active() {
@@ -284,7 +295,9 @@ impl RecentFiles {
             .iter()
             .enumerate()
             .max_by_key(|(i, p)| {
-                let degree = self.matches(&self.row_text(p)).map_or(i32::MIN, |m| m.degree);
+                let degree = self
+                    .matches(&self.row_text(p))
+                    .map_or(i32::MIN, |m| m.degree);
                 (degree, std::cmp::Reverse(*i))
             })
             .map_or(0, |(i, _)| i)
@@ -439,7 +452,11 @@ impl RecentFiles {
         if k.modifiers.control || k.modifiers.platform || k.modifiers.alt || k.modifiers.function {
             return;
         }
-        let Some(text) = k.key_char.as_ref().filter(|t| !t.is_empty() && !t.chars().any(char::is_control)) else {
+        let Some(text) = k
+            .key_char
+            .as_ref()
+            .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
+        else {
             return;
         };
         self.filter.push_str(text);
@@ -478,9 +495,15 @@ impl RecentFiles {
             .overflow_hidden()
             .when(selected, |d| d.bg(theme.color(UiRole::Selection)))
             .child(Icon::new(self.file_types.icon(path)).size(px(16.0)))
-            .child(StyledText::new(name.clone()).with_highlights(highlight(&name, &ranges, match_bg)))
+            .child(
+                StyledText::new(name.clone()).with_highlights(highlight(&name, &ranges, match_bg)),
+            )
             .children(location.map(|l| div().text_color(theme.color(UiRole::TextMuted)).child(l)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.activate(List::Files, index, cx)))
+            .on_click(
+                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.activate(List::Files, index, cx)
+                }),
+            )
             .into_any_element()
     }
 }
@@ -523,14 +546,20 @@ impl Render for RecentFiles {
         // Centred in the window.
         let viewport = window.viewport_size();
         let height = self.frame.place().map_or(px(HEIGHT), |p| px(p.height));
-        self.frame.set_top(((viewport.height - height) / 2.0).max(px(16.0)));
+        self.frame
+            .set_top(((viewport.height - height) / 2.0).max(px(16.0)));
         let files = self.files();
         let tools = self.tool_windows();
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
         let selected_path = match self.list {
-            List::Files => files.get(self.selected).and_then(|p| p.parent()).map(home_relative),
-            List::ToolWindows => tools.get(self.selected).map(|t| format!("Activate tool window: {}", t.title)),
+            List::Files => files
+                .get(self.selected)
+                .and_then(|p| p.parent())
+                .map(home_relative),
+            List::ToolWindows => tools
+                .get(self.selected)
+                .map(|t| format!("Activate tool window: {}", t.title)),
         };
         let header = div()
             .id("recent-files-header")
@@ -548,7 +577,11 @@ impl Render for RecentFiles {
                     cx.notify();
                 }),
             )
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Recent Files"))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Recent Files"),
+            )
             .child(div().flex_1())
             .child(
                 div()
@@ -561,7 +594,12 @@ impl Render for RecentFiles {
                     .child("Show edited only")
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_edited(cx))),
             )
-            .children(self.context.shortcut.clone().map(|s| div().text_color(muted).child(s)));
+            .children(
+                self.context
+                    .shortcut
+                    .clone()
+                    .map(|s| div().text_color(muted).child(s)),
+            );
         let tool_rows: Vec<AnyElement> = tools
             .iter()
             .enumerate()
@@ -578,7 +616,9 @@ impl Render for RecentFiles {
                     .when(selected, |d| d.bg(theme.color(UiRole::Selection)))
                     .child(div().flex_1().child(t.title))
                     .children(t.shortcut.clone().map(|s| div().text_color(muted).child(s)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.activate(List::ToolWindows, i, cx)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.activate(List::ToolWindows, i, cx)
+                    }))
                     .into_any_element()
             })
             .collect();
@@ -655,7 +695,15 @@ impl Render for RecentFiles {
                                 .children(tool_rows),
                         )
                     })
-                    .child(div().flex().flex_col().flex_1().min_w(px(0.0)).pl(px(4.0)).child(file_list)),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .pl(px(4.0))
+                            .child(file_list),
+                    ),
             )
             .child(
                 div()

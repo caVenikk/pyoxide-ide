@@ -40,7 +40,12 @@ fn fixture(files: &[&str]) -> Fixture {
 }
 
 impl Fixture {
-    fn query<'a>(&self, text: &'a str, non_project: bool, context: Option<&'a std::path::Path>) -> GotoQuery<'a> {
+    fn query<'a>(
+        &self,
+        text: &'a str,
+        non_project: bool,
+        context: Option<&'a std::path::Path>,
+    ) -> GotoQuery<'a> {
         GotoQuery {
             text,
             non_project,
@@ -89,7 +94,10 @@ fn prefer_exact_extension_and_file_name_matches() {
     let f = fixture(&["foo/i.txt", "index.html"]);
     assert_eq!(f.goto("i"), ["foo/i.txt", "index.html"]);
     let f = fixture(&["foo/cp-users.txt", "cp-users-and-smth.html"]);
-    assert_eq!(f.goto("cpusers"), ["foo/cp-users.txt", "cp-users-and-smth.html"]);
+    assert_eq!(
+        f.goto("cpusers"),
+        ["foo/cp-users.txt", "cp-users-and-smth.html"]
+    );
 }
 
 #[test]
@@ -124,7 +132,10 @@ fn prefer_better_and_closer_path_matches() {
 
 #[test]
 fn same_names_by_path() {
-    let files: Vec<String> = (10..=30).rev().map(|i| format!("foo{i}/index.html")).collect();
+    let files: Vec<String> = (10..=30)
+        .rev()
+        .map(|i| format!("foo{i}/index.html"))
+        .collect();
     let refs: Vec<&str> = files.iter().map(String::as_str).collect();
     let f = fixture(&refs);
     let mut expected = files.clone();
@@ -175,7 +186,11 @@ fn paths_starting_with_a_dot_and_with_slashes() {
         "foo/bar/goo/file.txt",
     ] {
         assert_eq!(f.goto(path), ["foo/bar/goo/file.txt"], "{path}");
-        assert_eq!(f.goto(&path.replace('/', "\\")), ["foo/bar/goo/file.txt"], "{path}");
+        assert_eq!(
+            f.goto(&path.replace('/', "\\")),
+            ["foo/bar/goo/file.txt"],
+            "{path}"
+        );
     }
 }
 
@@ -278,7 +293,10 @@ fn ranked_by_weight() {
 #[test]
 fn exact_case_and_keyboard_layout() {
     let f = fixture(&["foo/SOMECLASS.java", "bar/SomeClass.java"]);
-    assert_eq!(f.goto("SomeClass.java"), ["bar/SomeClass.java", "foo/SOMECLASS.java"]);
+    assert_eq!(
+        f.goto("SomeClass.java"),
+        ["bar/SomeClass.java", "foo/SOMECLASS.java"]
+    );
     let f = fixture(&["String.java"]);
     assert_eq!(f.goto("Ыекштп"), ["String.java"]);
 }

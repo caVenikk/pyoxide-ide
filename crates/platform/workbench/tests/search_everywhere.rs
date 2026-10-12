@@ -107,7 +107,7 @@ impl H<'_> {
             .iter()
             .map(|r| match r["kind"].as_str().unwrap() {
                 "action" => format!("action:{}", r["id"].as_str().unwrap()),
-                "more" => "more".to_owned(),
+                "loading" => "loading".to_owned(),
                 kind => format!("{kind}:{}", r["path"].as_str().unwrap()),
             })
             .collect()
@@ -148,7 +148,7 @@ impl H<'_> {
     }
 
     /// A click on an element drawn with this debug selector.
-    fn click(&mut self, selector: &str) {
+    fn click(&mut self, selector: &'static str) {
         let bounds = self
             .vcx()
             .debug_bounds(selector)
@@ -438,14 +438,14 @@ fn more_rows_load_as_the_list_scrolls(cx: &mut TestAppContext) {
         h.press(h.keys.first);
         h.press("up");
         assert_eq!(h.state()["selected"], json!(0));
-        // Scrolled to the end: the next page, the rows shown stay.
+        // Scrolled to the end: the next pages, the rows shown stay.
         h.scroll_rows(ScrollDelta::Lines(point(0.0, -200.0)));
         h.draw();
         let rows = h.rows();
-        assert_eq!(rows.len(), 101, "{}", rows.len());
+        assert!(rows.len() > 51, "{}", rows.len());
         assert_eq!(rows[0], first, "the rows shown stay");
-        // Down on the last row loads the rest.
-        for _ in 0..99 {
+        // Down to the end: all of them, no spinner row.
+        for _ in 0..130 {
             h.press("down");
         }
         h.draw();
@@ -470,8 +470,11 @@ fn the_text_tab_finds_lines(cx: &mut TestAppContext) {
             .iter()
             .map(|r| format!("{}:{}", r["path"].as_str().unwrap(), r["line"]))
             .collect();
+        // In the order the files are found (each file's lines in order).
+        let mut sorted = lines.clone();
+        sorted.sort();
         assert_eq!(
-            lines,
+            sorted,
             ["app.py:4", "notes.txt:1", "pkg/util.py:4", "pkg/util.py:5"],
             "{rows}"
         );
@@ -479,9 +482,16 @@ fn the_text_tab_finds_lines(cx: &mut TestAppContext) {
         h.press(h.keys.match_case);
         h.settle();
         assert_eq!(h.state()["options"]["case_sensitive"], json!(true));
+        // Enter opens the line at its match.
+        let first = h.state()["rows"][0].clone();
+        let column = |text: &str| text.find("needle").unwrap();
+        let path = first["path"].as_str().unwrap().to_owned();
+        let line = first["line"].as_u64().unwrap() as usize - 1;
+        let text = std::fs::read_to_string(h.root.join(&path)).unwrap();
+        let col = column(text.lines().nth(line).unwrap());
         h.press("enter");
         h.draw();
-        assert_eq!(h.caret(), ("app.py".into(), 3, 11));
+        assert_eq!(h.caret(), (path, line, col));
         h.press(h.keys.go_to_text);
         assert_eq!(h.state()["options"]["case_sensitive"], json!(true));
         h.press(h.keys.match_case);
@@ -545,7 +555,10 @@ fn recent_files(cx: &mut TestAppContext) {
         let s = h.invoke("recent-files.state", json!(null));
         assert_eq!(s["files"], json!(["notes.txt"]));
         h.press("backspace backspace");
-        assert_eq!(h.invoke("recent-files.state", json!(null))["filter"], json!(""));
+        assert_eq!(
+            h.invoke("recent-files.state", json!(null))["filter"],
+            json!("")
+        );
         // Pressing it again: the edited files only.
         h.press(h.keys.recent);
         let s = h.invoke("recent-files.state", json!(null));
@@ -558,7 +571,10 @@ fn recent_files(cx: &mut TestAppContext) {
         let s = h.invoke("recent-files.state", json!(null));
         assert_eq!(s["files"], json!(["app.py", "pkg/util.py"]));
         // Enter opens the selected file.
-        h.press("up");
+        assert_eq!(
+            h.invoke("recent-files.state", json!(null))["selected"],
+            json!(1)
+        );
         h.press("enter");
         let s = h.invoke("workbench.state", json!(null));
         assert_eq!(s["recent_files"], json!(false));

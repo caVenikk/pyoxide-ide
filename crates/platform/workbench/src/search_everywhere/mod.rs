@@ -51,8 +51,8 @@ use ui::theme::ThemeExt as _;
 use crate::file_types::FileTypes;
 use crate::popup::PopupFrame;
 use actions::ActionItem;
-pub use providers::{FileRow, Provider, Row, TextRow};
 use providers::{DIRECTORY_TYPE, Found};
+pub use providers::{FileRow, Provider, Row, TextRow};
 pub(crate) use settings::update_settings;
 pub use settings::{SearchEverywhereSettings, load_settings, settings, settings_file};
 
@@ -188,7 +188,12 @@ impl Tab {
 
     fn providers(self) -> &'static [Provider] {
         match self {
-            Tab::All => &[Provider::Recent, Provider::Files, Provider::Actions, Provider::Text],
+            Tab::All => &[
+                Provider::Recent,
+                Provider::Files,
+                Provider::Actions,
+                Provider::Text,
+            ],
             Tab::Files => &[Provider::Files],
             Tab::Actions => &[Provider::Actions],
             Tab::Text => &[Provider::Text],
@@ -277,6 +282,9 @@ pub struct SearchEverywhere {
     auto_everywhere: Option<String>,
     rows: Vec<Row>,
     selected: Option<usize>,
+    /// The person moved the selection since the text changed: it stays on
+    /// its row (else the first row is selected as rows come).
+    selection_moved: bool,
     /// Rows of each kind asked for (grows as the list scrolls).
     limits: HashMap<Provider, usize>,
     /// Kinds that have more rows than shown.
@@ -345,7 +353,10 @@ impl SearchEverywhere {
         ];
         let mut frame = PopupFrame::new(
             gpui::size(px(WIDTH), px(HEIGHT)),
-            gpui::size(px(MIN_WIDTH), px(HEADER_HEIGHT + FIELD_HEIGHT + MIN_LIST_HEIGHT)),
+            gpui::size(
+                px(MIN_WIDTH),
+                px(HEADER_HEIGHT + FIELD_HEIGHT + MIN_LIST_HEIGHT),
+            ),
             px(0.0),
         );
         if let Some(place) = settings(cx).popup {
@@ -363,6 +374,7 @@ impl SearchEverywhere {
             auto_everywhere: None,
             rows: Vec::new(),
             selected: None,
+            selection_moved: false,
             limits: HashMap::new(),
             more: HashSet::new(),
             frozen: 0,
@@ -499,7 +511,13 @@ impl SearchEverywhere {
 
     /// Opens the popup on `tab` (or, when it is open, switches the tab, or
     /// on the same tab switches its scope).
-    pub fn show(&mut self, tab: Tab, context: OpenContext, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn show(
+        &mut self,
+        tab: Tab,
+        context: OpenContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.open {
             if tab == self.tab {
                 self.toggle_everywhere(cx);
@@ -528,11 +546,13 @@ impl SearchEverywhere {
         self.mask = shared.file_mask.clone();
         self.rows.clear();
         self.selected = None;
+        self.selection_moved = false;
         self.frozen = 0;
         self.history_at = None;
         self.dropdown = None;
         let text = selection.unwrap_or_else(|| self.last_search(tab));
-        self.field.update(cx, |f, cx| f.set_text_selected(&text, cx));
+        self.field
+            .update(cx, |f, cx| f.set_text_selected(&text, cx));
         window.focus(&self.field.focus_handle(cx));
         if self.everywhere() {
             cx.emit(SearchEverywhereEvent::WantNonProject);
@@ -673,6 +693,7 @@ impl SearchEverywhere {
         self.rows.clear();
         self.frozen = 0;
         self.selected = None;
+        self.selection_moved = false;
         self.search_now(cx);
         cx.notify();
     }
@@ -681,7 +702,11 @@ impl SearchEverywhere {
         let tabs = Tab::ALL;
         let i = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
         let n = tabs.len();
-        let next = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        let next = if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        };
         self.switch_tab(tabs[next], cx);
     }
 
@@ -747,7 +772,13 @@ impl SearchEverywhere {
 
     /// A filter item checked or unchecked (a file type, "Directory", or a
     /// kind of result on All); `None` checks all, `Some("")`... see callers.
-    pub(crate) fn set_filter(&mut self, kind: &Dropdown, item: Option<&str>, shown: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_filter(
+        &mut self,
+        kind: &Dropdown,
+        item: Option<&str>,
+        shown: bool,
+        cx: &mut Context<Self>,
+    ) {
         let all: Vec<String> = match kind {
             Dropdown::FileTypes => self.filter_types(),
             _ => Provider::ALL.iter().map(|p| p.title().to_owned()).collect(),
@@ -830,6 +861,7 @@ impl SearchEverywhere {
     // ---- searching ----------------------------------------------------------
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
+        self.selection_moved = false;
         let text = self.field.read(cx).text();
         // A scope widened because nothing was found goes back when the text
         // no longer contains what found nothing.
@@ -1017,7 +1049,11 @@ impl SearchEverywhere {
         self.finished = self.started.map(|t| t.elapsed());
         let text = self.field.read(cx).text();
         let previous = self.selected.and_then(|i| self.rows.get(i)).cloned();
-        self.more = found.iter().filter(|f| f.more).map(|f| f.provider).collect();
+        self.more = found
+            .iter()
+            .filter(|f| f.more)
+            .map(|f| f.provider)
+            .collect();
         let mut items: Vec<(Provider, Row, i32)> = Vec::new();
         for f in &found {
             for (row, weight) in &f.rows {
@@ -1066,10 +1102,10 @@ impl SearchEverywhere {
             previous_index(&self.rows, previous.as_ref())
                 .or(self.selected)
                 .map(|i| i.min(real - 1))
+        } else if self.selection_moved {
+            previous_index(&self.rows, previous.as_ref()).or(Some(0))
         } else {
-            self.restored_selection(&text)
-                .or_else(|| previous_index(&self.rows, previous.as_ref()))
-                .or(Some(0))
+            self.restored_selection(&text).or(Some(0))
         };
         cx.notify();
     }
@@ -1080,7 +1116,9 @@ impl SearchEverywhere {
         if tab != self.tab || last_text != text {
             return None;
         }
-        self.rows.iter().position(|r| row_key(r).as_ref() == Some(&key))
+        self.rows
+            .iter()
+            .position(|r| row_key(r).as_ref() == Some(&key))
     }
 
     /// Rows that are results (not the spinner row).
@@ -1098,6 +1136,10 @@ impl SearchEverywhere {
         let extent = handle.max_offset().height;
         let rest = extent + handle.offset().y;
         let viewport = handle.bounds().size.height;
+        // Not laid out yet: wait for the frame that shows the rows.
+        if viewport <= px(0.0) {
+            return false;
+        }
         extent <= px(0.0) || rest < (viewport / 2.0).max(px(50.0))
     }
 
@@ -1162,6 +1204,7 @@ impl SearchEverywhere {
             return;
         }
         self.selected = Some(index);
+        self.selection_moved = true;
         // As little scrolling as shows the row.
         let row_top = cx.theme().metric(themes::Metric::RowHeight) * index as f32;
         let scroll_top = -self.list.0.borrow().base_handle.offset().y;
@@ -1259,11 +1302,21 @@ impl SearchEverywhere {
         }
     }
 
-    fn toggle_everywhere_action(&mut self, _: &ToggleEverywhere, _: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_everywhere_action(
+        &mut self,
+        _: &ToggleEverywhere,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.toggle_everywhere(cx);
     }
 
-    fn history_previous_action(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
+    fn history_previous_action(
+        &mut self,
+        _: &HistoryPrevious,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.step_history(true, cx);
     }
 
@@ -1309,7 +1362,8 @@ fn row_key(row: &Row) -> Option<RowKey> {
 
 fn previous_index(rows: &[Row], previous: Option<&Row>) -> Option<usize> {
     let previous = previous?;
-    rows.iter().position(|r| r == previous && *r != Row::Loading)
+    rows.iter()
+        .position(|r| r == previous && *r != Row::Loading)
 }
 
 /// Registers the commands.

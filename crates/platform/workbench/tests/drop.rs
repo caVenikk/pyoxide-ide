@@ -449,7 +449,10 @@ fn the_empty_editor_area_shows_the_hints_of_the_reference(cx: &mut TestAppContex
     let mac = cfg!(target_os = "macos");
     let pick = |m: &'static str, w: &'static str| if mac { m } else { w };
     let project_view = pick("Project View ⌘1", "Project View Alt+1");
-    let search = pick("Search Everywhere Double ⇧", "Search Everywhere Double Shift");
+    let search = pick(
+        "Search Everywhere Double ⇧",
+        "Search Everywhere Double Shift",
+    );
     let go_to_file = pick("Go to File ⇧⌘O", "Go to File Ctrl+Shift+N");
     let recent = pick("Recent Files ⌘E", "Recent Files Ctrl+E");
     let drop = "Drop files here to open them";
@@ -462,7 +465,14 @@ fn the_empty_editor_area_shows_the_hints_of_the_reference(cx: &mut TestAppContex
     invoke(cx, window, "workbench.hide-tool-window", json!(null));
     assert_eq!(
         empty_text(cx, window),
-        ["Open a folder to start", search, project_view, go_to_file, recent, drop]
+        [
+            "Open a folder to start",
+            search,
+            project_view,
+            go_to_file,
+            recent,
+            drop
+        ]
     );
 
     // A project: the Project View hint only while the tool window is

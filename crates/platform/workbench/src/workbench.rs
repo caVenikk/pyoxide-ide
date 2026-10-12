@@ -882,7 +882,12 @@ impl Workbench {
         &self.recent_files
     }
 
-    fn open_recent_files(&mut self, _: &recent_files::Open, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_recent_files(
+        &mut self,
+        _: &recent_files::Open,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let open = self.recent_files.read(cx).is_open();
         if !open {
             self.remember_focus(window, cx);
@@ -899,7 +904,8 @@ impl Workbench {
             viewed.retain(|p| p != c);
             viewed.insert(0, c.clone());
         }
-        let shortcut = ui::keys::shortcut_in(&recent_files::Open, &self.focus, window).map(Into::into);
+        let shortcut =
+            ui::keys::shortcut_in(&recent_files::Open, &self.focus, window).map(Into::into);
         let tool_windows = vec![recent_files::ToolWindowItem {
             id: "project",
             title: "Project",
@@ -918,7 +924,12 @@ impl Workbench {
         cx.notify();
     }
 
-    fn recent_files_event(&mut self, event: &RecentFilesEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn recent_files_event(
+        &mut self,
+        event: &RecentFilesEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             RecentFilesEvent::OpenFile(path) => self.open_file(path.clone(), window, cx),
             RecentFilesEvent::ShowToolWindow(_) => {
@@ -932,6 +943,8 @@ impl Workbench {
                 }
                 if let Some(i) = self.tabs.iter().position(|t| &t.path == path) {
                     self.close_tab(i, window, cx);
+                    // The popup stays open with the focus.
+                    window.focus(&self.recent_files.focus_handle(cx));
                 }
             }
             RecentFilesEvent::GoToFile(text) => {
@@ -1042,7 +1055,12 @@ impl Workbench {
         self.show_search_everywhere(SeTab::Actions, window, cx);
     }
 
-    fn go_to_text(&mut self, _: &search_everywhere::GoToText, window: &mut Window, cx: &mut Context<Self>) {
+    fn go_to_text(
+        &mut self,
+        _: &search_everywhere::GoToText,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.show_search_everywhere(SeTab::Text, window, cx);
     }
 
@@ -1686,7 +1704,10 @@ impl Workbench {
         }
         let keys = |command: &str| {
             if let Some(key) = crate::keymap::double_tap_for(command, cx) {
-                return Some(crate::keymap::double_tap_text(key, cfg!(target_os = "macos")));
+                return Some(crate::keymap::double_tap_text(
+                    key,
+                    cfg!(target_os = "macos"),
+                ));
             }
             let action = cx.build_action(command, None).ok()?;
             ui::keys::shortcut_in(action.as_ref(), &self.focus, window)

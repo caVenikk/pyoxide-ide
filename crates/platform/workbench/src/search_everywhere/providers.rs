@@ -26,7 +26,12 @@ pub enum Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 4] = [Provider::Recent, Provider::Files, Provider::Actions, Provider::Text];
+    pub const ALL: [Provider; 4] = [
+        Provider::Recent,
+        Provider::Files,
+        Provider::Actions,
+        Provider::Text,
+    ];
 
     /// The name the All tab's filter lists.
     pub fn title(self) -> &'static str {
@@ -88,7 +93,12 @@ pub(super) struct Found {
 /// Recently opened files whose names match (all of them for an empty
 /// text), best match first, the more recent first between equal matches;
 /// the file of the active editor is left out.
-pub(super) fn recent(files: &[PathBuf], current: Option<&PathBuf>, text: &str, limit: usize) -> Found {
+pub(super) fn recent(
+    files: &[PathBuf],
+    current: Option<&PathBuf>,
+    text: &str,
+    limit: usize,
+) -> Found {
     let pattern = parse_position(text).pattern;
     let pattern = pattern.trim();
     let mut matcher = Matcher::new(&format!("*{pattern}"), MatchingMode::IgnoreCase);
@@ -131,7 +141,12 @@ pub(super) fn recent(files: &[PathBuf], current: Option<&PathBuf>, text: &str, l
 }
 
 /// The commands that match.
-pub(super) fn actions(items: &[ActionItem], text: &str, include_disabled: bool, limit: usize) -> Found {
+pub(super) fn actions(
+    items: &[ActionItem],
+    text: &str,
+    include_disabled: bool,
+    limit: usize,
+) -> Found {
     let hits = actions::search(items, text, include_disabled);
     let more = hits.len() > limit;
     let rows = hits
@@ -215,7 +230,11 @@ pub(super) fn files(q: FilesQuery) -> Found {
     let rows = page
         .into_iter()
         .map(|h| {
-            let weight = if exact(&h) { h.weight.max(top) } else { h.weight };
+            let weight = if exact(&h) {
+                h.weight.max(top)
+            } else {
+                h.weight
+            };
             (
                 Row::File(FileRow {
                     path: q.index.path(h.id),
