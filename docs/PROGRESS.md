@@ -2,13 +2,13 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 38%** `████████░░░░░░░░░░░░`
+**Overall parity: 39%** `████████░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 38% `████░░░░░░` | 1 | 4 | 4 |
+| editor | 44% `████░░░░░░` | 1 | 5 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -78,7 +78,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Python syntax highlighting | must | tree-sitter off the UI thread mapped to theme text roles |
 | 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
 | 🟡 | File tree and project model | must | open folder, lazy tree with ignore rules, keyboard navigation; no file operations or drag and drop |
-| ⬜ | Search in file and project | must |  |
+| 🟡 | Search in file and project | must | find and replace in file (#31: regex, case, words, in selection, history); project search is #43 |
 | ⬜ | Multi-cursor and column selection | should |  |
 | ⬜ | Code folding | should |  |
 | ⬜ | Live templates | should |  |

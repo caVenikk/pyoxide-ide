@@ -159,6 +159,24 @@ dominates and the budget is missed. The window therefore draws at once after
 every keystroke (macOS: the layer's display callback), so the typed text is
 ready for the next refresh; the table above is measured that way.
 
+### Find in file
+Engine: `cargo test --release -p search --test perf -- --ignored --nocapture`
+on the generated 10 MB file (10,485,700 bytes, 108,100 lines), median of 5
+runs. In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=find:<query>`
+clears the find field and types the query one key every 150 ms, 5 runs; time
+from key dispatch to the end of the first painted frame that shows that
+prefix's matches (display frames). Files up to 256 KB are searched on the UI
+thread; larger ones on a background snapshot, cancelled by the next key.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-12 | mac-1 | engine, 10 MB, plain text, 108,100 matches | 4.45 ms | char offsets for them 1.2 ms; no match 1.45 ms |
+| 2026-10-12 | mac-1 | engine, 10 MB, regex `'a+'$`, 108,100 matches | 8.6 ms | |
+| 2026-10-12 | mac-1 | engine, 10 MB, 1,000,000 match limit | 19.2 ms | worst case (Words rejecting every candidate) 150 ms, cancellable; cancel returns within 1.6 ms |
+| 2026-10-12 | mac-1 | key to highlight, 200-line file | p50 4.05 ms, p90 4.69 ms, p99 5.43 ms | key handling 0.3-0.5 ms |
+| 2026-10-12 | mac-1 | key to highlight, 100k lines (1.6 MB) | p50 16.1 ms, p90 23.5 ms, p99 25.2 ms | background search plus the hop back to the UI thread |
+| 2026-10-12 | mac-1 | key to highlight, 10 MB | p50 21.5 ms, p90 22.9 ms, p99 27.8 ms | query `x = 'aaa`; a query with no matches (`import`): p50 10.0 ms, p90 18.7 ms |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.
