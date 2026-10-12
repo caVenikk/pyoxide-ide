@@ -1,6 +1,8 @@
 //! Native window helpers (macOS; no-ops elsewhere): drawing a frame now,
 //! keeping a window visible during measurements, and `PYOXIDE_SHOT=<path>`,
-//! a PNG of the application's own window.
+//! a PNG of the application's own window. To show a state in the image,
+//! `PYOXIDE_RUN` runs UI commands first (see `env.rs`), for example
+//! `PYOXIDE_RUN='[["find.search", {"text": "def"}]]'` for the find bar.
 //!
 //! GPUI 0.2.2 cannot read back a rendered frame (the Metal renderer is
 //! private, the test platform does not render). On macOS the screenshot

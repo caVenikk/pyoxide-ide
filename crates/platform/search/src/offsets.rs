@@ -56,6 +56,7 @@ pub fn match_lines(haystack: &str, ranges: &[Range<usize>]) -> Vec<usize> {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)] // lists of ranges
 mod tests {
     use super::*;
 
