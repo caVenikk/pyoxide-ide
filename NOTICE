@@ -164,10 +164,12 @@ here with: source URL, commit, file(s), license, and what was changed.
   column pattern); platform/platform-impl/src/com/intellij/openapi/keymap/
   impl/ModifierKeyDoubleClickHandler.kt (the double tap's timing).
   Test cases from platform/util/text-matching/test/com/intellij/platform/
-  util/text/matching/NameUtilMatchingTest.kt.
+  util/text/matching/NameUtilMatchingTest.kt and java/java-tests/testSrc/
+  com/intellij/java/navigation/ChooseByNameTest.java and
+  ChooseByNameHddTest.java.
   Adapted: the matching algorithm and degree, Go to File's rounds over
-  name suffixes and folder patterns, its order and weights, the action
-  weights, the double tap's rules and times.
+  name suffixes and folder patterns, its order and weights, absolute
+  paths, the action weights, the double tap's rules and times.
   Changes: reimplemented in Rust over char slices; no Pinyin, typo-tolerant
   or fuzzy (Levenshtein) matching, no kana word breaks; the proximity
   order keeps open files, the current file's folder and project content
