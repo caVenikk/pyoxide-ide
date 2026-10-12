@@ -197,8 +197,8 @@ matches as the reference does.
 ### Go to File
 Engine: `FILE_INDEX_BENCH=<dir> cargo test --release -p file-index bench --
 --ignored --nocapture` builds the index of a folder (median of 10 builds) and
-types the words of `FILE_INDEX_BENCH_TYPE` one char at a time, the median of 20 searches with the final
-sort. In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=go-to-file:<query>`
+types the words of `FILE_INDEX_BENCH_TYPE` one char at a time (median of 20
+searches with the final sort per prefix). In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=go-to-file:<query>`
 opens the project, waits for its index, then 5 times opens Go to File with an
 empty field and types the query one key every 150 ms; time from key dispatch
 to the end of the first painted frame that shows that prefix's rows (display

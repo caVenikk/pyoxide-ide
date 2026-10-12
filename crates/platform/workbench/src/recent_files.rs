@@ -486,6 +486,7 @@ impl RecentFiles {
             .id(("recent-files-file", index))
             .flex()
             .flex_row()
+            .w_full()
             .items_center()
             .gap(px(6.0))
             .h(theme.metric(Metric::RowHeight))
@@ -714,9 +715,12 @@ impl Render for RecentFiles {
                     .px(px(12.0))
                     .text_size(px(11.0))
                     .text_color(muted)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .child(selected_path.unwrap_or_default()),
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .child(selected_path.unwrap_or_default()),
+                    ),
             );
         let content = content
             .on_action(cx.listener(Self::close_action))
