@@ -604,3 +604,120 @@ pub fn overlay(menu: &Entity<ContextMenu>, position: Point<Pixels>, window: &Win
     .with_priority(1)
     .into_any_element()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+    use gpui::{TestAppContext, VisualTestContext};
+
+    gpui::actions!(menu_test, [First, Second]);
+
+    /// The element that had the focus: it records the actions it gets.
+    struct Origin {
+        focus: FocusHandle,
+        got: Vec<&'static str>,
+        menu: Option<Entity<ContextMenu>>,
+    }
+
+    impl Render for Origin {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .track_focus(&self.focus)
+                .on_action(cx.listener(|this, _: &First, _, _| this.got.push("first")))
+                .on_action(cx.listener(|this, _: &Second, _, _| this.got.push("second")))
+                .size_full()
+                .children(self.menu.clone())
+        }
+    }
+
+    fn items() -> Vec<MenuItem> {
+        vec![
+            MenuItem::action("First", First).enabled(false),
+            MenuItem::separator(),
+            MenuItem::action("Second", Second),
+            MenuItem::submenu("More", vec![MenuItem::action("First", First)]),
+        ]
+    }
+
+    fn open(
+        cx: &mut TestAppContext,
+    ) -> (Entity<Origin>, Entity<ContextMenu>, &mut VisualTestContext) {
+        cx.update(|cx| crate::theme::init(cx, themes::ThemeKind::Dark));
+        let (origin, cx) = cx.add_window_view(|_, cx| Origin {
+            focus: cx.focus_handle(),
+            got: Vec::new(),
+            menu: None,
+        });
+        let menu = cx.update(|window, cx| {
+            let focus = origin.read(cx).focus.clone();
+            window.focus(&focus);
+            ContextMenu::build(items(), window, cx)
+        });
+        origin.update(cx, |o, _| o.menu = Some(menu.clone()));
+        // Actions reach what the last drawn frame has.
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear());
+        (origin, menu, cx)
+    }
+
+    fn selected(menu: &Entity<ContextMenu>, cx: &mut VisualTestContext) -> Vec<Option<usize>> {
+        menu.read_with(cx, |m, _| m.selected.clone())
+    }
+
+    #[gpui::test]
+    fn keys_skip_separators_and_disabled_rows_and_wrap(cx: &mut TestAppContext) {
+        let (_, menu, cx) = open(cx);
+        cx.dispatch_action(SelectNext);
+        assert_eq!(selected(&menu, cx), [Some(2)]);
+        cx.dispatch_action(SelectNext);
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+        cx.dispatch_action(SelectNext);
+        assert_eq!(selected(&menu, cx), [Some(2)]);
+        cx.dispatch_action(SelectPrevious);
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+        // Enter on a submenu row opens it with its first row selected.
+        cx.dispatch_action(Confirm);
+        assert_eq!(selected(&menu, cx), [Some(3), Some(0)]);
+        cx.dispatch_action(CloseSubmenu);
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+        cx.dispatch_action(OpenSubmenu);
+        assert_eq!(selected(&menu, cx), [Some(3), Some(0)]);
+        cx.dispatch_action(Cancel);
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert_eq!(state["levels"][0]["items"][0]["enabled"], json!(false));
+        assert_eq!(state["levels"][0]["items"][1]["separator"], json!(true));
+        assert_eq!(state["levels"][0]["items"][3]["submenu"], json!(true));
+    }
+
+    #[gpui::test]
+    fn a_chosen_action_goes_where_the_focus_was(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = open(cx);
+        let dismissed = Rc::new(Cell::new(false));
+        let flag = dismissed.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&menu, move |_, _: &DismissEvent, _| flag.set(true))
+                .detach()
+        });
+        cx.dispatch_action(SelectNext);
+        cx.dispatch_action(Confirm);
+        cx.run_until_parked();
+        assert!(dismissed.get());
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
+        let focused = cx.update(|window, cx| origin.read(cx).focus.is_focused(window));
+        assert!(focused, "the focus went back");
+    }
+
+    #[gpui::test]
+    fn escape_closes_the_menu_and_runs_nothing(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = open(cx);
+        cx.dispatch_action(SelectNext);
+        cx.dispatch_action(Cancel);
+        cx.run_until_parked();
+        assert!(menu.read_with(cx, |m, _| m.dismissed));
+        assert!(origin.read_with(cx, |o, _| o.got.is_empty()));
+    }
+}
