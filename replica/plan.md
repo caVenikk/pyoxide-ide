@@ -62,6 +62,8 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #45 Run the current Python file | - | run-debug crates; in parallel with #43/#44 only if it does not touch the same crates | #18 | todo |
 
 Queue after #45: M3 completion and navigation through a language server, then
-#13 control channel. Follow-ups of #18 are #24-#42.
+#13 control channel, then #50 (find filters for comments and string
+literals, which need the Python syntax layer). Follow-ups of #18 are #24-#42;
+of the search work #48-#53 and #65-#69.
 
 Typing latency and the 10 MB file are measured for the reference and Pyoxide (replica/perf.md).
