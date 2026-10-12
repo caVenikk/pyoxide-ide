@@ -673,22 +673,23 @@ impl Workbench {
             .map(|b| b.query_field().read(cx).text());
         let root = self.project(cx).map(|p| p.root().to_owned());
         // A folder selected in the tree (a selected file gives its folder).
-        let tree_folder = root
-            .as_ref()
-            .filter(|_| self.panel.focus_handle(cx).contains_focused(window, cx))
-            .and_then(|root| {
-                let selected = self.panel.read(cx).state_json(cx)["selected"]
-                    .as_str()
-                    .map(|rel| root.join(rel))?;
-                if selected.is_dir() {
-                    Some(selected)
+        let tree_folder = self
+            .panel
+            .focus_handle(cx)
+            .contains_focused(window, cx)
+            .then(|| self.panel.read(cx).selected_path())
+            .flatten()
+            .and_then(|(path, is_dir)| {
+                if is_dir {
+                    Some(path.to_path_buf())
                 } else {
-                    selected.parent().map(Path::to_path_buf)
+                    path.parent().map(Path::to_path_buf)
                 }
             });
         OpenContext {
             root,
-            filter: None,
+            // The tree's rules: folders marked in this session count at once.
+            filter: self.panel.read(cx).filter().cloned(),
             selection,
             find_bar_text,
             editors: self
@@ -1094,9 +1095,9 @@ impl Workbench {
             .p(px(12.0))
             .rounded(px(8.0))
             .border_1()
-            .border_color(theme.color(UiRole::Border))
+            .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow_lg()
+            .shadow(ui::components::popup_shadow())
             .child(div().child("Go to Line:Column"))
             .child(
                 div()
@@ -1150,9 +1151,9 @@ impl Workbench {
                 .py(px(4.0))
                 .rounded(theme.metric(Metric::CornerRadius))
                 .border_1()
-                .border_color(theme.color(UiRole::Border))
+                .border_color(theme.color(UiRole::PopupBorder))
                 .bg(theme.color(UiRole::SurfaceRaised))
-                .shadow_md()
+                .shadow(ui::components::popup_shadow())
                 .whitespace_nowrap()
                 .child(hint),
         )

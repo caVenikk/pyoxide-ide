@@ -223,9 +223,9 @@ impl PopupFrame {
                     .overflow_hidden()
                     .rounded(theme.metric(Metric::CornerRadius) * 2.0)
                     .border_1()
-                    .border_color(theme.color(UiRole::Border))
+                    .border_color(theme.color(UiRole::PopupBorder))
                     .bg(theme.color(UiRole::SurfaceRaised))
-                    .shadow_lg()
+                    .shadow(ui::components::popup_shadow())
                     .child(content),
             )
             .children(grips)

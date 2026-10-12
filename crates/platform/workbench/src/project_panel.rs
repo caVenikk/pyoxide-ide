@@ -147,6 +147,13 @@ impl ProjectPanel {
         self.loading > 0
     }
 
+    /// The selected row's path and whether it is a folder.
+    pub fn selected_path(&self) -> Option<(&Path, bool)> {
+        let tree = self.tree.as_ref()?;
+        let entry = &tree.node(self.selected?).entry;
+        Some((entry.path.as_path(), entry.is_dir()))
+    }
+
     /// The hide and exclude rules of the open project, once loaded. They
     /// are replaced (a cheap clone) whenever the person marks or unmarks a
     /// folder, so a search that takes them at its start sees every change

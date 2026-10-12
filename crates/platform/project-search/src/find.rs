@@ -52,7 +52,7 @@ pub struct FileSearch {
     /// file on disk.
     pub overrides: HashMap<PathBuf, Rope>,
     /// Show the matches in the reference IDE's project configuration files
-    /// too (see [`is_project_file`]). Off by default: they are searched but
+    /// too (`Filter::is_project_config`). Off by default: they are searched but
     /// their matches are held back ([`Summary::held_back`]), as the
     /// reference does; a mask that names them or a folder inside `.idea`
     /// turns it on by itself.
@@ -108,25 +108,6 @@ pub struct Summary {
     pub held_back: usize,
 }
 
-/// Name of the folder where the reference IDE keeps a project's settings.
-pub const PROJECT_STORE: &str = ".idea";
-
-/// Whether a file belongs to the reference IDE's project configuration: a
-/// project, module or workspace file (`.ipr`, `.iml`, `.iws`) or anything
-/// in a `.idea` folder. Find in Files holds their matches back unless asked
-/// for them, as the reference does.
-pub fn is_project_file(path: &Path) -> bool {
-    let internal = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
-        ["ipr", "iml", "iws"]
-            .iter()
-            .any(|t| e.eq_ignore_ascii_case(t))
-    });
-    internal
-        || path
-            .components()
-            .any(|c| c.as_os_str() == std::ffi::OsStr::new(PROJECT_STORE))
-}
-
 /// Shared state of the workers.
 struct Run<'a> {
     search: &'a FileSearch,
@@ -151,13 +132,15 @@ impl FileSearch {
     /// particular order). Blocking; stops early when `cancel` is set or the
     /// limit is reached.
     pub fn run(&self, cancel: &CancelToken, sink: &(dyn Fn(FileMatches) + Sync)) -> Summary {
+        let filter = self
+            .filter
+            .clone()
+            .unwrap_or_else(|| Filter::for_root(&self.root));
+        let project_files = self.searches_project_files(&filter);
         let run = Run {
             search: self,
-            filter: self
-                .filter
-                .clone()
-                .unwrap_or_else(|| Filter::for_root(&self.root)),
-            project_files: self.searches_project_files(),
+            filter,
+            project_files,
             cancel,
             sink,
             matches: AtomicUsize::new(0),
@@ -184,10 +167,9 @@ impl FileSearch {
     }
 
     /// Whether matches in project configuration files are shown: when asked
-    /// to, when
-    /// a mask ends in `.iml`, `.ipr` or `.iws`, or when the folder searched
-    /// is in `.idea` (the reference's rules).
-    pub fn searches_project_files(&self) -> bool {
+    /// to, when a mask ends in `.iml`, `.ipr` or `.iws`, or when the folder
+    /// searched is in `.idea` (the reference's rules).
+    pub fn searches_project_files(&self, filter: &Filter) -> bool {
         if self.project_files {
             return true;
         }
@@ -197,9 +179,7 @@ impl FileSearch {
                 .any(|m| [".iml", ".ipr", ".iws"].iter().any(|e| m.ends_with(e)))
         });
         let inside = match &self.scope {
-            Scope::Directory { path, .. } => path
-                .components()
-                .any(|c| c.as_os_str() == std::ffi::OsStr::new(PROJECT_STORE)),
+            Scope::Directory { path, .. } => filter.is_project_config(path),
             Scope::Files(_) => false,
         };
         named || inside
@@ -311,7 +291,7 @@ impl Run<'_> {
         if ranges.is_empty() {
             return;
         }
-        if !self.project_files && is_project_file(path) {
+        if !self.project_files && self.filter.is_project_config(path) {
             self.held_back.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -627,6 +607,15 @@ mod tests {
             ("pkg/skip.py", b"needle\n"),
         ]);
         let mut search = search_in(dir.path(), plain("needle"));
+        // The project excludes `.venv` (as the Python product does on its
+        // own).
+        let mut excluded = project::Exclusions::default();
+        excluded.add(".venv");
+        search.filter = Some(Filter::new(
+            dir.path(),
+            excluded,
+            project::AutoExclusions::NONE,
+        ));
         let (found, summary) = run(&search);
         let files: Vec<_> = found.keys().cloned().collect();
         assert_eq!(
@@ -701,9 +690,10 @@ mod tests {
             found.keys().collect::<Vec<_>>(),
             [".idea/inspectionProfiles/p.xml", ".idea/workspace.xml"]
         );
-        assert!(is_project_file(Path::new("x/.idea/a.xml")));
-        assert!(is_project_file(Path::new("x/m.IML")));
-        assert!(!is_project_file(Path::new("x/idea/a.xml")));
+        let filter = Filter::for_root(dir.path());
+        assert!(filter.is_project_config(&dir.path().join(".idea/a.xml")));
+        assert!(filter.is_project_config(&dir.path().join("m.IML")));
+        assert!(!filter.is_project_config(&dir.path().join("idea/a.xml")));
     }
 
     #[test]

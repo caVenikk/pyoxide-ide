@@ -24,8 +24,7 @@ mod replace;
 mod results;
 
 pub use find::{
-    FileMatches, FileSearch, LineMatch, MAX_LINE_CHARS, PROJECT_STORE, Scope, Summary, file_text,
-    is_project_file, line_matches,
+    FileMatches, FileSearch, LineMatch, MAX_LINE_CHARS, Scope, Summary, file_text, line_matches,
 };
 pub use mask::{FileMask, MaskError};
 pub use replace::{FileReplaceError, Replacement, apply, replace_in_file, replacements};

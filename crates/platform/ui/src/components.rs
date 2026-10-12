@@ -4,8 +4,9 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyView, App, Context, Div, ElementId, FontWeight, IntoElement,
-    PathBuilder, Render, SharedString, Stateful, Window, canvas, div, point, prelude::*, px,
+    Animation, AnimationExt as _, AnyView, App, BoxShadow, Context, Div, ElementId, FontWeight,
+    IntoElement, PathBuilder, Render, SharedString, Stateful, Window, canvas, div, point,
+    prelude::*, px,
 };
 use themes::{Metric, UiRole};
 
@@ -140,6 +141,21 @@ pub fn text_button(
                 .text_color(theme.color(UiRole::TextDisabled))
         })
         .child(label.into())
+}
+
+/// Popup shadow: `Ide.Shadow` of the Islands themes, 16 px of `#00000020`
+/// in both the dark and the light theme.
+const SHADOW_BLUR: f32 = 16.0;
+const SHADOW_ALPHA: f32 = 32.0 / 255.0;
+
+/// The shadow of popups, menus and tooltips.
+pub fn popup_shadow() -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: gpui::hsla(0.0, 0.0, 0.0, SHADOW_ALPHA),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(SHADOW_BLUR),
+        spread_radius: px(0.0),
+    }]
 }
 
 /// Size of a check box.
@@ -308,9 +324,9 @@ impl Render for Tooltip {
             .py(px(6.0))
             .rounded(theme.metric(Metric::CornerRadius) * 2.0)
             .border_1()
-            .border_color(theme.color(UiRole::Border))
+            .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow_md()
+            .shadow(popup_shadow())
             .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .text_color(theme.color(UiRole::Text))

@@ -1966,9 +1966,9 @@ impl FindBar {
                 .p(px(4.0))
                 .rounded(theme.metric(themes::Metric::CornerRadius) * 2.0)
                 .border_1()
-                .border_color(theme.color(UiRole::Border))
+                .border_color(theme.color(UiRole::PopupBorder))
                 .bg(theme.color(UiRole::SurfaceRaised))
-                .shadow_md()
+                .shadow(ui::components::popup_shadow())
                 .children(rows),
         ))
     }

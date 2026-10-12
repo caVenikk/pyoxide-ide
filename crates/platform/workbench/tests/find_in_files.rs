@@ -925,3 +925,27 @@ fn set_writable(path: &std::path::Path) {
     p.set_readonly(false);
     std::fs::set_permissions(path, p).unwrap();
 }
+
+#[gpui::test]
+fn a_folder_marked_excluded_is_left_out_at_once(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        assert_eq!(h.state()["files"], json!(3));
+        h.invoke("find-in-files.close", json!(null));
+        // Mark Directory As > Excluded in the tree.
+        h.invoke("project.tree.mark-excluded", json!({ "path": "pkg" }));
+        h.invoke("find-in-files.search", json!({ "text": "needle" }));
+        let files: Vec<String> = h.rows().into_iter().map(|r| r.0).collect();
+        assert!(files.iter().all(|f| !f.starts_with("pkg/")), "{files:?}");
+        assert_eq!(h.state()["files"], json!(2));
+        h.invoke("find-in-files.close", json!(null));
+        // Cancel Exclusion: it is searched again.
+        h.invoke("project.tree.cancel-exclusion", json!({ "path": "pkg" }));
+        h.invoke("find-in-files.search", json!({ "text": "needle" }));
+        assert_eq!(h.state()["files"], json!(3));
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
