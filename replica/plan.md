@@ -52,6 +52,6 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #14 Theme import and Pyoxide theme model | sub-agent themes | `crates/platform/themes`, `docs/theme-mapping.md` | - | merged (importer; settings UI later) |
 | #15 Python environments engine (uv) | sub-agent py-env | `crates/python/py-env`, `crates/python/pyoxide-cli` | - | merged (engine and CLI; UI later) |
 
-| #18 Application shell and editor MVP on GPUI | - | - | #12 | next |
+| #18 Application shell and editor MVP on GPUI | sub-agent shell | `crates/platform/{text,syntax,project,ui,editor,workbench}`, `crates/python/{py-syntax,pyoxide-ide}`, ADR 0007 | #12 | done (PR #22) |
 
-Typing latency is measured for the reference and Pyoxide together with #18.
+Typing latency and the 10 MB file are measured for the reference and Pyoxide (replica/perf.md).

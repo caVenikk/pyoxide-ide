@@ -2,13 +2,13 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 34%** `███████░░░░░░░░░░░░░`
+**Overall parity: 38%** `████████░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
+| editor | 38% `████░░░░░░` | 1 | 4 | 4 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -73,10 +73,11 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Text buffer and editing | must |  |
-| ⬜ | Python syntax highlighting | must |  |
-| ⬜ | Tabs and split views | must |  |
-| ⬜ | File tree and project model | must |  |
+| 🟡 | Text buffer and editing | must | rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); no reload of files changed on disk |
+| 🟡 | Main window chrome (toolbar, tool-window stripes, status bar) | must | New UI layout and Islands themes; toolbar file path; stripe buttons, run widget and status bar widgets are placeholders; native caption on Windows/Linux |
+| ✅ | Python syntax highlighting | must | tree-sitter off the UI thread mapped to theme text roles |
+| 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
+| 🟡 | File tree and project model | must | open folder, lazy tree with ignore rules, keyboard navigation; no file operations or drag and drop |
 | ⬜ | Search in file and project | must |  |
 | ⬜ | Multi-cursor and column selection | should |  |
 | ⬜ | Code folding | should |  |

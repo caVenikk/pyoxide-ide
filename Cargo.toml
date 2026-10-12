@@ -9,12 +9,20 @@ members = [
     "crates/platform/db-sqlite",
     "crates/platform/db-service",
     "crates/platform/db-testkit",
+    "crates/platform/project",
     "crates/platform/db-cli",
+    "crates/platform/editor",
     "crates/platform/secrets",
     "crates/platform/settings-import",
+    "crates/platform/syntax",
+    "crates/platform/text",
     "crates/platform/themes",
+    "crates/platform/ui",
+    "crates/platform/workbench",
     "crates/python/py-env",
+    "crates/python/py-syntax",
     "crates/python/pyoxide-cli",
+    "crates/python/pyoxide-ide",
 ]
 
 [workspace.package]
@@ -35,15 +43,33 @@ toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 zeroize = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
+gpui = "=0.2.2"
+# Same major version as GPUI uses, for colour icons at device scale.
+resvg = { version = "0.45", default-features = false }
 commands = { path = "crates/platform/commands" }
 db-core = { path = "crates/platform/db-core" }
+editor = { path = "crates/platform/editor" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
 db-oracle-odpi = { path = "crates/platform/db-oracle-odpi" }
 db-postgres = { path = "crates/platform/db-postgres" }
 db-sqlite = { path = "crates/platform/db-sqlite" }
 db-service = { path = "crates/platform/db-service" }
 db-testkit = { path = "crates/platform/db-testkit" }
+project = { path = "crates/platform/project" }
 secrets = { path = "crates/platform/secrets" }
 settings-import = { path = "crates/platform/settings-import" }
+syntax = { path = "crates/platform/syntax" }
+text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }
+ui = { path = "crates/platform/ui" }
+workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
+py-syntax = { path = "crates/python/py-syntax" }
+
+# Dependencies (GPUI, tree-sitter, ropey, ...) are optimized in debug builds
+# as well: a debug build of the IDE stays responsive enough to use, while
+# the workspace crates keep fast incremental builds and full debug info
+# (ADR 0007). Release builds are unaffected.
+[profile.dev.package."*"]
+opt-level = 2

@@ -77,15 +77,15 @@ success-bg = "#1f3326"
 info-bg = "#1d2f45"
 
 title-bar = "$bg-deep"
-toolbar = "$bg-panel"
+toolbar = "$bg-deep"
 status-bar = "$bg-deep"
 status-bar-text = "$fg-muted"
 tool-window = "$bg-panel"
-tool-window-header = "#20252d"
-tool-window-stripe = "$bg-side"
-tab-bar = "$bg-deep"
+tool-window-header = "$bg-panel"
+tool-window-stripe = "$bg-deep"
+tab-bar = "$bg-editor"
 tab-active = "$bg-editor"
-tab-inactive = "$bg-deep"
+tab-inactive = "$bg-editor"
 tab-hover = "#1f242c"
 tab-active-text = "$fg-bright"
 tab-inactive-text = "$fg-muted"
@@ -213,22 +213,31 @@ console-error = { fg = "$red" }
 console-input = { fg = "$teal-light" }
 
 [font]
+# Inter and JetBrains Mono ship with the IDE (crates/platform/ui/assets/fonts).
 ui-family = ["Inter", "system-ui", "Segoe UI", "Helvetica Neue", "sans-serif"]
 ui-size = 13.0
-editor-family = ["Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+editor-family = ["JetBrains Mono", "Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
 editor-size = 13.0
 editor-line-spacing = 1.2
 editor-ligatures = false
-terminal-family = ["Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+terminal-family = ["JetBrains Mono", "Cascadia Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
 terminal-size = 13.0
 
+# Layout of the main window (New UI with islands). Values follow the
+# IntelliJ Platform Community theme files and metrics (Apache-2.0, see
+# NOTICE).
 [metrics]
 row-height = 24.0
-row-height-compact = 20.0
-tab-height = 32.0
-toolbar-height = 40.0
-status-bar-height = 24.0
-tool-window-header-height = 28.0
+row-height-compact = 22.0
+tree-indent = 19.0
+tab-height = 40.0
+tab-selection-height = 28.0
+toolbar-height = 42.5
+toolbar-button-size = 30.0
+status-bar-height = 31.0
+tool-window-header-height = 41.0
+stripe-width = 40.0
+stripe-button-size = 30.0
 gutter-width = 48.0
 gutter-padding = 8.0
 indent-guide-width = 1.0
@@ -237,8 +246,11 @@ panel-padding = 8.0
 padding-small = 4.0
 padding = 8.0
 padding-large = 16.0
-corner-radius = 6.0
+island-gap = 5.0
+corner-radius = 4.0
 corner-radius-small = 3.0
+button-radius = 6.0
+island-radius = 10.0
 border-width = 1.0
 focus-width = 2.0
 scrollbar-width = 10.0

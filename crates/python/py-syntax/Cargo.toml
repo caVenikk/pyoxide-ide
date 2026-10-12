@@ -1,0 +1,15 @@
+[package]
+name = "py-syntax"
+description = "Python syntax for Pyoxide IDE: the tree-sitter grammar and the highlight query mapped to theme text roles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+syntax.workspace = true
+themes.workspace = true
+tree-sitter-python = "0.25"
+
+[dev-dependencies]
+text.workspace = true

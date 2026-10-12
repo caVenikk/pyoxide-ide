@@ -145,6 +145,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         ],
         TabInactiveText => &[Ui("EditorTabs.foreground"), Ui("TabbedPane.foreground")],
         TabUnderline => &[
+            Ui("EditorTabs.underlinedBorderColor"),
             Ui("EditorTabs.underlineColor"),
             Ui("DefaultTabs.underlineColor"),
             Ui("TabbedPane.underlineColor"),
@@ -176,10 +177,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],
         EditorText => &[Fg("TEXT"), Ui("Editor.foreground")],
-        Gutter => &[
-            Color("GUTTER_BACKGROUND"),
-            Color("EDITOR_GUTTER_BACKGROUND"),
-        ],
+        Gutter => &[Color("EDITOR_GUTTER_BACKGROUND")],
         LineNumber => &[Color("LINE_NUMBERS_COLOR")],
         LineNumberActive => &[Color("LINE_NUMBER_ON_CARET_ROW_COLOR")],
         Caret => &[Color("CARET_COLOR")],
@@ -357,6 +355,8 @@ pub(crate) fn metric_sources(metric: Metric) -> (&'static [&'static str], f32) {
     match metric {
         Metric::RowHeight => (&["Tree.rowHeight", "List.rowHeight"], 1.0),
         Metric::CornerRadius => (&["Component.arc", "Button.arc"], 0.5),
+        Metric::ButtonRadius => (&["MainToolbar.Button.arc"], 0.5),
+        Metric::IslandRadius => (&["Island.arc"], 0.5),
         Metric::FocusWidth => (&["Component.focusWidth"], 1.0),
         _ => (&[], 1.0),
     }

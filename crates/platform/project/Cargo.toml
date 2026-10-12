@@ -1,0 +1,15 @@
+[package]
+name = "project"
+description = "Project model of Pyoxide IDE: a folder, its lazily loaded file tree with ignore rules, and loading and saving documents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ignore = "0.4"
+text.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
