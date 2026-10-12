@@ -157,6 +157,7 @@ report says which parent was missing.
 | `ui.text-muted` | `Label.infoForeground`, `Component.infoForeground` | Secondary text and hints |
 | `ui.text-disabled` | `Label.disabledForeground`, `Label.disabledText`, `Component.disabledForeground` | Text of disabled controls |
 | `ui.text-link` | `Link.activeForeground`, `Link.foreground` | Links in the user interface |
+| `ui.shortcut` | `Shortcut.foreground` | Keyboard shortcuts shown after an action, as in the empty editor area |
 | `ui.accent` | `Button.default.startBackground`, `Component.accentColor`, `ProgressBar.progressColor`, `Component.focusColor` | Primary action and focus accent |
 | `ui.on-accent` | `Button.default.foreground` | Text and icons on the accent colour |
 | `ui.focus` | `Component.focusColor`, `Button.default.focusColor` | Keyboard focus ring |
@@ -296,7 +297,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.status-bar-text`, `ui.selection-text` | `ui.text` |
 | `ui.selection-inactive` | `ui.selection` |
 | `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
-| `ui.text-disabled` | `ui.text-muted` |
+| `ui.text-disabled`, `ui.shortcut` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |
 | `ui.completion-popup`, `ui.documentation-popup` | `ui.surface-raised` |

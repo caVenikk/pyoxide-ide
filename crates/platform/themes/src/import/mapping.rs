@@ -68,6 +68,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Ui("Component.disabledForeground"),
         ],
         TextLink => &[Ui("Link.activeForeground"), Ui("Link.foreground")],
+        Shortcut => &[Ui("Shortcut.foreground")],
         Accent => &[
             Ui("Button.default.startBackground"),
             Ui("Component.accentColor"),

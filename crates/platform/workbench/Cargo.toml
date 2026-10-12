@@ -33,6 +33,8 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# The list type of GPUI's `ExternalPaths` (tests/drop.rs).
+smallvec = "1"
 tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

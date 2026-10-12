@@ -74,6 +74,33 @@ fn remember_file(list: &mut Vec<PathBuf>, path: &Path) {
     list.truncate(find_in_files::RECENT_FILES);
 }
 
+/// Text of the empty editor area (the reference IDE's editor empty text):
+/// font size, line height (1.8 times the 20 px height of the font) and the
+/// first baseline at 3/8 of the area's height.
+const EMPTY_TEXT_SIZE: f32 = 16.0;
+const EMPTY_TEXT_LINE_HEIGHT: f32 = 36.0;
+const EMPTY_TEXT_BASELINE: f32 = 0.375;
+/// Distance from the top of a line of that text to its baseline.
+const EMPTY_TEXT_LINE_BASELINE: f32 = 24.0;
+
+/// Reads and decodes a file into a buffer (blocking; run off the UI
+/// thread). A file that does not decode cleanly opens read-only.
+fn read_buffer(path: &Path) -> Result<text::Buffer, project::LoadError> {
+    project::read_document(path).map(|loaded| {
+        let read_only = loaded.read_only || loaded.decoded.lossy;
+        let mut buffer = text::Buffer::from_decoded(loaded.decoded);
+        buffer.set_read_only(read_only);
+        buffer
+    })
+}
+
+/// A path dropped onto the editor area, checked and read off the UI thread.
+enum Dropped {
+    Folder(PathBuf),
+    /// A file and its contents; `None` when its tab is open already.
+    File(PathBuf, Option<Result<text::Buffer, project::LoadError>>),
+}
+
 /// An open file.
 struct Tab {
     path: PathBuf,
@@ -334,14 +361,7 @@ impl Workbench {
         // thread.
         let read = cx.background_spawn({
             let path = path.clone();
-            async move {
-                project::read_document(&path).map(|loaded| {
-                    let read_only = loaded.read_only || loaded.decoded.lossy;
-                    let mut buffer = text::Buffer::from_decoded(loaded.decoded);
-                    buffer.set_read_only(read_only);
-                    buffer
-                })
-            }
+            async move { read_buffer(&path) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let loaded = read.await;
@@ -382,6 +402,83 @@ impl Workbench {
             Some(buffer) => self.add_tab(path, buffer, window, cx),
             None => self.open_file(path, window, cx),
         }
+    }
+
+    /// Opens what was dropped onto the editor area, as the reference IDE
+    /// does: files open in tabs in the order they were dropped (a file that
+    /// is open already has its tab selected) and the last one is selected;
+    /// a folder of the project is selected in the project tool window, a
+    /// folder outside it is left alone. Without a project, a dropped folder
+    /// opens as the project and the rest of the drop is left alone, as on
+    /// the reference IDE's welcome screen. Paths are checked and files read
+    /// off the UI thread.
+    pub fn open_dropped(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        let has_project = self.project(cx).is_some();
+        let open = self.tab_paths();
+        self.pending += 1;
+        let read = cx.background_spawn(async move {
+            // As files named on the command line.
+            let paths: Vec<PathBuf> = paths
+                .into_iter()
+                .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                .collect();
+            if !has_project && let Some(folder) = paths.iter().find(|p| p.is_dir()) {
+                return vec![Dropped::Folder(folder.clone())];
+            }
+            paths
+                .into_iter()
+                .map(|path| {
+                    if path.is_dir() {
+                        Dropped::Folder(path)
+                    } else {
+                        let buffer = (!open.contains(&path)).then(|| read_buffer(&path));
+                        Dropped::File(path, buffer)
+                    }
+                })
+                .collect()
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let dropped = read.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.pending -= 1;
+                let mut error = None;
+                for item in dropped {
+                    match item {
+                        Dropped::File(path, Some(Ok(buffer))) => {
+                            this.add_tab(path, buffer, window, cx)
+                        }
+                        Dropped::File(path, Some(Err(e))) => {
+                            error = Some(format!("Cannot open {}: {e}", path.display()))
+                        }
+                        // Selects its tab (or reads it if it has been
+                        // closed since).
+                        Dropped::File(path, None) => this.open_file(path, window, cx),
+                        Dropped::Folder(path) => match this.project(cx) {
+                            None => this.open_folder(path, window, cx),
+                            Some(project) if project.relative(&path).is_some() => {
+                                this.project_visible = true;
+                                this.panel.update(cx, |panel, cx| panel.reveal(&path, cx));
+                                window.focus(&this.panel.focus_handle(cx));
+                            }
+                            Some(_) => {}
+                        },
+                    }
+                }
+                if let Some(error) = error {
+                    this.message = Some(error.into());
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn add_tab(
@@ -1276,7 +1373,47 @@ impl Workbench {
             .into_any_element()
     }
 
-    fn render_editor_area(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The lines of the empty editor area: the reference IDE's hints, in its
+    /// order, for the actions Pyoxide has (Search Everywhere, Go to File,
+    /// Recent Files and Navigation Bar are not there yet). An action's hint
+    /// shows its shortcut and is left out when it has none; the Project
+    /// View hint shows only while the project tool window is hidden.
+    /// Without a project the first line says how to start. None while a
+    /// file is open.
+    pub fn empty_text(&self, window: &Window, cx: &App) -> Vec<(&'static str, Option<String>)> {
+        let mut lines = Vec::new();
+        if !self.tabs.is_empty() {
+            return lines;
+        }
+        if self.project(cx).is_none() {
+            lines.push(("Open a folder to start", None));
+        }
+        if !self.project_visible
+            && let Some(keys) = ui::keys::shortcut_in(&ToggleProject, &self.focus, window)
+        {
+            lines.push(("Project View", Some(keys)));
+        }
+        lines.push(("Drop files here to open them", None));
+        lines
+    }
+
+    /// The editor island. Files dropped anywhere on it (the tabs, the
+    /// editor or the empty area) open in tabs, as in the reference IDE.
+    fn editor_island(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        island(cx, UiRole::EditorBackground)
+            .id("editor-area")
+            .debug_selector(|| "editor-area".into())
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .on_drop(
+                cx.listener(|this, dropped: &gpui::ExternalPaths, window, cx| {
+                    this.open_dropped(dropped.paths().to_vec(), window, cx)
+                }),
+            )
+    }
+
+    fn render_editor_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(active) = self.active {
             let theme = cx.theme();
             let tab_h = theme.metric(Metric::TabHeight);
@@ -1284,12 +1421,8 @@ impl Workbench {
             let tabs: Vec<AnyElement> = (0..self.tabs.len())
                 .map(|i| self.render_tab(i, cx))
                 .collect();
-            return island(cx, UiRole::EditorBackground)
-                .id("editor-area")
-                .debug_selector(|| "editor-area".into())
-                .flex_1()
-                .min_w(px(0.0))
-                .h_full()
+            return self
+                .editor_island(cx)
                 .child(
                     div()
                         .id("editor-tabs")
@@ -1320,34 +1453,55 @@ impl Workbench {
                 )
                 .into_any_element();
         }
+        // As the reference IDE's text painter draws them: a 16 px label
+        // font, lines 1.8 times the font height (20 px) apart, left-aligned
+        // in a block centred across the area, the first baseline at 3/8 of
+        // its height; a shortcut follows its action after a space (two in a
+        // dark theme).
         let theme = cx.theme();
+        let shortcut = gpui::HighlightStyle {
+            color: Some(theme.color(UiRole::Shortcut)),
+            ..Default::default()
+        };
+        let space = if theme.is_dark() { "  " } else { " " };
         let muted = theme.color(UiRole::TextMuted);
-        let link = theme.color(UiRole::TextLink);
-        let hint = |text: &'static str, keys: Option<&'static str>| {
-            div()
-                .flex()
-                .flex_row()
-                .gap(px(8.0))
-                .child(div().text_color(muted).child(text))
-                .children(keys.map(|k| div().text_color(link).child(k)))
-        };
-        let project_keys = if cfg!(target_os = "macos") {
-            "⌘1"
-        } else {
-            "Alt+1"
-        };
-        island(cx, UiRole::EditorBackground)
-            .id("editor-area")
-            .debug_selector(|| "editor-area".into())
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .items_center()
-            .justify_center()
-            .gap(px(10.0))
-            .child(hint("Open a folder to start", None))
-            .child(hint("Project tool window", Some(project_keys)))
-            .child(hint("Drop files here to open them", None))
+        let mut lines = Vec::new();
+        for (i, (action, keys)) in self.empty_text(window, cx).into_iter().enumerate() {
+            let mut text = action.to_owned();
+            let mut highlights = Vec::new();
+            if let Some(keys) = keys {
+                text.push_str(space);
+                highlights.push((text.len()..text.len() + keys.len(), shortcut));
+                text.push_str(&keys);
+            }
+            lines.push(
+                div()
+                    .debug_selector(move || format!("empty-text-{i}"))
+                    .whitespace_nowrap()
+                    .child(gpui::StyledText::new(text).with_highlights(highlights)),
+            );
+        }
+        self.editor_island(cx)
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(gpui::relative(EMPTY_TEXT_BASELINE))
+                    .mt(-px(EMPTY_TEXT_LINE_BASELINE))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .text_size(px(EMPTY_TEXT_SIZE))
+                            .line_height(px(EMPTY_TEXT_LINE_HEIGHT))
+                            .text_color(muted)
+                            .children(lines),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -1572,7 +1726,7 @@ impl Render for Workbench {
                                 d.child(self.render_project(cx))
                                     .child(self.render_splitter(gap, cx))
                             })
-                            .child(self.render_editor_area(cx)),
+                            .child(self.render_editor_area(window, cx)),
                     )
                     .child(self.render_right_stripe(cx)),
             )
