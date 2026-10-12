@@ -438,6 +438,17 @@ fn replace_one_and_all_with_groups(cx: &mut TestAppContext) {
                 .starts_with("Malformed replacement string")
         );
         assert_eq!(h.invoke("editor.text", json!(null)), json!("a=1\nb=2\nc=3"));
+        // A read-only file is left alone.
+        let editor = h.editor();
+        h.cx.update(|cx| editor.update(cx, |e, _| e.buffer_mut().set_read_only(true)));
+        h.invoke(
+            "find.search",
+            json!({ "text": "=", "regex": false, "replace": "-" }),
+        );
+        h.invoke("find.replace-all", json!(null));
+        assert_eq!(h.find()["hint"], json!("The file is read-only"));
+        assert_eq!(h.invoke("editor.text", json!(null)), json!("a=1\nb=2\nc=3"));
+        h.cx.update(|cx| editor.update(cx, |e, _| e.buffer_mut().set_read_only(false)));
     });
 }
 

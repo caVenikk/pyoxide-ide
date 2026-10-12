@@ -1087,6 +1087,17 @@ impl FindBar {
             && self.snapshot.as_ref().is_some_and(|(v, _)| *v == version)
     }
 
+    /// A read-only file is not changed; the hint says so.
+    fn writable(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.editor.read(cx).buffer().is_read_only() {
+            self.hint = Some("The file is read-only".into());
+            self.hint_above = false;
+            cx.notify();
+            return false;
+        }
+        true
+    }
+
     fn remember_both(&self, cx: &mut Context<Self>) {
         let text = self.query.read(cx).text();
         let replace = self.replace.read(cx).text();
@@ -1110,7 +1121,7 @@ impl FindBar {
 
     /// Replaces the current match; the next match becomes current.
     pub fn replace_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.open || !self.replace_mode || !self.results_current(cx) {
+        if !self.open || !self.replace_mode || !self.results_current(cx) || !self.writable(cx) {
             return;
         }
         let Some(range) = self
@@ -1143,9 +1154,6 @@ impl FindBar {
                         cx,
                     )
                 });
-                if self.editor.read(cx).buffer().is_read_only() {
-                    self.replaced_to = None;
-                }
             }
             Err(e) => self.replace_failed(e, window, cx),
         }
@@ -1154,7 +1162,7 @@ impl FindBar {
     /// Replaces every match that is not excluded, as one undo step (the
     /// replacements of a regular expression are built off the UI thread).
     pub fn replace_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.open || !self.replace_mode || !self.results_current(cx) {
+        if !self.open || !self.replace_mode || !self.results_current(cx) || !self.writable(cx) {
             return;
         }
         let template = self.replace.read(cx).text();
