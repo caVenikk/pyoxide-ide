@@ -68,13 +68,13 @@ https://www.jetbrains.com/help/pycharm/managing-editor-tabs.html
 - Step 7: the hints are in a 16 px font, 36 px apart, left-aligned in a
   block centred across the area, the first one at 3/8 of its height, the
   shortcut after the action in its own colour:
-  - without a project: `Open a folder to start`, `Project View ⌘1` (Alt+1)
-    while the tool window is hidden, `Drop files here to open them`;
-  - with a project: `Project View ⌘1` while the tool window is hidden,
-    `Drop files here to open them`.
-  The reference IDE shows Search Everywhere first and Go to File, Recent
-  Files and Navigation Bar after Project View; they come with those
-  actions.
+  - without a project: `Open a folder to start`, then the hints below;
+  - `Search Everywhere Double ⇧` (Double Shift), `Project View ⌘1`
+    (Alt+1) while the tool window is hidden, `Go to File ⇧⌘O`
+    (Ctrl+Shift+N), `Recent Files ⌘E` (Ctrl+E), `Drop files here to open
+    them`; a hint whose action has no shortcut is left out.
+  The reference IDE also shows Navigation Bar after Recent Files; it comes
+  with that action.
 
 ## Commands
 `workbench.state` (`tabs`, `active_tab`, `tree`, `project`). A drop has no
