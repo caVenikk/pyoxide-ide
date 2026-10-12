@@ -78,6 +78,284 @@ pub fn keep_visible(window: &gpui::Window) {
 #[cfg(not(target_os = "macos"))]
 pub fn keep_visible(_: &gpui::Window) {}
 
+/// Diagnostics: the system cursor the app shows now, by name.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn current_cursor() -> &'static str {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    // SAFETY: class methods of NSCursor, on the main thread.
+    unsafe {
+        let current: *mut Object = msg_send![class!(NSCursor), currentCursor];
+        let named: [(&str, *mut Object); 4] = [
+            ("arrow", msg_send![class!(NSCursor), arrowCursor]),
+            ("ibeam", msg_send![class!(NSCursor), IBeamCursor]),
+            (
+                "resize-left-right",
+                msg_send![class!(NSCursor), resizeLeftRightCursor],
+            ),
+            (
+                "pointing-hand",
+                msg_send![class!(NSCursor), pointingHandCursor],
+            ),
+        ];
+        named
+            .iter()
+            .find(|(_, c)| *c == current)
+            .map_or("other", |(n, _)| n)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn current_cursor() -> &'static str {
+    "unknown"
+}
+
+/// Diagnostics: shows the arrow as the system does on its own (window
+/// edges, title bar), without GPUI knowing.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn system_sets_arrow() {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    // SAFETY: NSCursor class methods on the main thread.
+    unsafe {
+        let arrow: *mut Object = msg_send![class!(NSCursor), arrowCursor];
+        let _: () = msg_send![arrow, set];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn system_sets_arrow() {}
+
+/// Diagnostics: the cursor the system displays now (in any app), as the
+/// hot spot of its image, and the real pointer position in window
+/// coordinates (top-left origin).
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn system_cursor(window: &gpui::Window) -> serde_json::Value {
+    use core_graphics::geometry::{CGPoint, CGRect};
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    // SAFETY: AppKit class methods and properties on the main thread.
+    unsafe {
+        let hot = |c: *mut Object| -> (f64, f64) {
+            if c.is_null() {
+                return (-1.0, -1.0);
+            }
+            let p: CGPoint = msg_send![c, hotSpot];
+            (p.x, p.y)
+        };
+        let system: *mut Object = msg_send![class!(NSCursor), currentSystemCursor];
+        let ibeam: *mut Object = msg_send![class!(NSCursor), IBeamCursor];
+        let arrow: *mut Object = msg_send![class!(NSCursor), arrowCursor];
+        let resize: *mut Object = msg_send![class!(NSCursor), resizeLeftRightCursor];
+        let mouse: CGPoint = msg_send![class!(NSEvent), mouseLocation];
+        let mut in_window = None;
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::AppKit(appkit) = handle.as_raw()
+        {
+            let view = appkit.ns_view.as_ptr() as *mut Object;
+            let ns_window: *mut Object = msg_send![view, window];
+            let frame: CGRect = msg_send![ns_window, frame];
+            in_window = Some((
+                mouse.x - frame.origin.x,
+                frame.size.height - (mouse.y - frame.origin.y),
+            ));
+        }
+        serde_json::json!({
+            "system_hot_spot": hot(system),
+            "ibeam_hot_spot": hot(ibeam),
+            "arrow_hot_spot": hot(arrow),
+            "resize_hot_spot": hot(resize),
+            "pointer_in_window": in_window,
+        })
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn system_cursor(_: &gpui::Window) -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+/// Diagnostics: the views of the window (from the frame view down) with
+/// their tracking areas (options bit mask and rectangle) and whether they
+/// have cursor rectangles.
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn tracking_areas(window: &gpui::Window) -> serde_json::Value {
+    use core_graphics::geometry::CGRect;
+    use objc::runtime::Object;
+    use objc::{msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    unsafe fn walk(view: *mut Object, depth: usize, out: &mut Vec<serde_json::Value>) {
+        // SAFETY: (caller) `view` is a live NSView on the main thread.
+        unsafe {
+            let class: *const objc::runtime::Class = msg_send![view, class];
+            let name = (*class).name().to_owned();
+            let areas: *mut Object = msg_send![view, trackingAreas];
+            let count: usize = msg_send![areas, count];
+            let mut list = Vec::new();
+            for i in 0..count {
+                let area: *mut Object = msg_send![areas, objectAtIndex: i];
+                let options: usize = msg_send![area, options];
+                let rect: CGRect = msg_send![area, rect];
+                let owner: *mut Object = msg_send![area, owner];
+                let owner_class: *const objc::runtime::Class = msg_send![owner, class];
+                list.push(serde_json::json!({
+                    "options": format!("{options:#x}"),
+                    "cursor_update": options & 0x4 != 0,
+                    "rect": [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height],
+                    "owner": (*owner_class).name(),
+                }));
+            }
+            out.push(serde_json::json!({ "depth": depth, "view": name, "tracking_areas": list }));
+            let subviews: *mut Object = msg_send![view, subviews];
+            let n: usize = msg_send![subviews, count];
+            for i in 0..n {
+                let sub: *mut Object = msg_send![subviews, objectAtIndex: i];
+                walk(sub, depth + 1, out);
+            }
+        }
+    }
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return serde_json::Value::Null;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return serde_json::Value::Null;
+    };
+    let view = appkit.ns_view.as_ptr() as *mut Object;
+    let mut out = Vec::new();
+    // SAFETY: AppKit views of this window, on the main thread.
+    unsafe {
+        let ns_window: *mut Object = msg_send![view, window];
+        let content: *mut Object = msg_send![ns_window, contentView];
+        let frame_view: *mut Object = msg_send![content, superview];
+        walk(
+            if frame_view.is_null() {
+                content
+            } else {
+                frame_view
+            },
+            0,
+            &mut out,
+        );
+    }
+    serde_json::Value::Array(out)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn tracking_areas(_: &gpui::Window) -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+/// Diagnostics: posts a mouse-moved event at a window position into the
+/// app's own event queue, so it goes through AppKit's event dispatch like a
+/// real mouse move (the real pointer does not move).
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn post_mouse_move(window: &gpui::Window, position: gpui::Point<gpui::Pixels>) {
+    use core_graphics::geometry::CGPoint;
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// NSEventTypeMouseMoved.
+    const MOUSE_MOVED: usize = 5;
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    let view = appkit.ns_view.as_ptr() as *mut Object;
+    let height = f64::from(f32::from(window.viewport_size().height));
+    // NSPoint is CGPoint on 64-bit macOS.
+    let location = CGPoint::new(
+        f64::from(f32::from(position.x)),
+        height - f64::from(f32::from(position.y)),
+    );
+    // SAFETY: AppKit calls on the main thread with a live window.
+    unsafe {
+        let ns_window: *mut Object = msg_send![view, window];
+        let number: isize = msg_send![ns_window, windowNumber];
+        let event: *mut Object = msg_send![class!(NSEvent),
+            mouseEventWithType: MOUSE_MOVED
+            location: location
+            modifierFlags: 0usize
+            timestamp: 0.0f64
+            windowNumber: number
+            context: std::ptr::null_mut::<Object>()
+            eventNumber: 0isize
+            clickCount: 0isize
+            pressure: 0.0f32];
+        if event.is_null() {
+            return;
+        }
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, postEvent: event atStart: false];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn post_mouse_move(_: &gpui::Window, _: gpui::Point<gpui::Pixels>) {}
+
+/// Diagnostics: hands a mouse-moved event to the window's frame view, as
+/// AppKit does for the frame view's own tracking area when the real pointer
+/// moves over the window (posted events do not reach tracking areas).
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+pub fn frame_view_mouse_moved(window: &gpui::Window, position: gpui::Point<gpui::Pixels>) {
+    use core_graphics::geometry::CGPoint;
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    const MOUSE_MOVED: usize = 5;
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    let view = appkit.ns_view.as_ptr() as *mut Object;
+    let height = f64::from(f32::from(window.viewport_size().height));
+    let location = CGPoint::new(
+        f64::from(f32::from(position.x)),
+        height - f64::from(f32::from(position.y)),
+    );
+    // SAFETY: AppKit calls on the main thread with a live window.
+    unsafe {
+        let ns_window: *mut Object = msg_send![view, window];
+        let number: isize = msg_send![ns_window, windowNumber];
+        let content: *mut Object = msg_send![ns_window, contentView];
+        let frame_view: *mut Object = msg_send![content, superview];
+        if frame_view.is_null() {
+            return;
+        }
+        let event: *mut Object = msg_send![class!(NSEvent),
+            mouseEventWithType: MOUSE_MOVED
+            location: location
+            modifierFlags: 0usize
+            timestamp: 0.0f64
+            windowNumber: number
+            context: std::ptr::null_mut::<Object>()
+            eventNumber: 0isize
+            clickCount: 0isize
+            pressure: 0.0f32];
+        if !event.is_null() {
+            let _: () = msg_send![frame_view, mouseMoved: event];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn frame_view_mouse_moved(_: &gpui::Window, _: gpui::Point<gpui::Pixels>) {}
+
 /// Save the window's on-screen image; returns its size in pixels.
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own

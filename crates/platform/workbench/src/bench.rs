@@ -179,6 +179,7 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
         match kind {
             Bench::Typing => typing(window, cx).await,
             Bench::Open(path) => open(window, path, cx).await,
+            Bench::Cursor => cursor(window, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -423,5 +424,120 @@ async fn open(window: WindowHandle<Workbench>, path: PathBuf, cx: &mut AsyncApp)
             "gaps_over_1_5x_median": display.then_some(long_gaps),
             "last_top_line": top,
         })
+    ));
+}
+
+/// The system cursor over text, gutter, splitter and toolbar: each place is
+/// reached with mouse moves posted to the application's event queue (the
+/// path of a real mouse move through AppKit), and the cursor shown is read
+/// back after each.
+async fn cursor(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
+    if !settle(window, cx, Duration::from_secs(60)).await {
+        env::marker("cursor {\"error\": \"the file did not open\"}");
+        return;
+    }
+    sleep(cx, Duration::from_secs(1)).await;
+    let Some(editor) = active_editor(window, cx) else {
+        return;
+    };
+    let Some((origin, lh, cw)) = editor
+        .read_with(cx, |e, _| e.text_geometry())
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let (splitter_x, height) = window
+        .update(cx, |w, window, cx| {
+            let theme = ui::theme::ThemeExt::theme(&**cx);
+            let stripe = theme.metric(themes::Metric::StripeWidth);
+            let gap = theme.metric(themes::Metric::IslandGap);
+            (
+                stripe + gpui::px(0.5) + w.project_width() + gap / 2.0,
+                window.viewport_size().height,
+            )
+        })
+        .unwrap_or((gpui::px(0.0), gpui::px(0.0)));
+    let y = origin.y + lh * 2.5;
+    let places = [
+        ("text", gpui::point(origin.x + cw * 3.0, y), "ibeam"),
+        ("gutter", gpui::point(origin.x - gpui::px(24.0), y), "arrow"),
+        (
+            "splitter",
+            gpui::point(splitter_x, height / 2.0),
+            "resize-left-right",
+        ),
+        (
+            "toolbar",
+            gpui::point(gpui::px(300.0), gpui::px(20.0)),
+            "arrow",
+        ),
+        (
+            "text-again",
+            gpui::point(origin.x + cw * 5.0, y + lh),
+            "ibeam",
+        ),
+    ];
+    let active = cx
+        .update_window(window.into(), |_, window, _| window.is_window_active())
+        .unwrap_or(false);
+    let mut results = Vec::new();
+    for (name, position, expected) in places {
+        let mut posted = Vec::new();
+        for step in 0..3 {
+            let p = gpui::point(position.x + gpui::px(step as f32 * 0.5), position.y);
+            let _ = cx.update_window(window.into(), |_, window, _| {
+                crate::shot::post_mouse_move(window, p)
+            });
+            sleep(cx, Duration::from_millis(150)).await;
+            posted.push(crate::shot::current_cursor());
+        }
+        // What the frame view's tracking area does on a real move, then the
+        // next move in the same place reaching GPUI.
+        let p = gpui::point(position.x - gpui::px(0.5), position.y);
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            crate::shot::frame_view_mouse_moved(window, p)
+        });
+        sleep(cx, Duration::from_millis(150)).await;
+        let after_frame_view = crate::shot::current_cursor();
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            crate::shot::post_mouse_move(window, p)
+        });
+        sleep(cx, Duration::from_millis(150)).await;
+        let after_frame_view_and_move = crate::shot::current_cursor();
+        // The system shows the arrow behind GPUI's back, then the pointer
+        // moves on inside the same element.
+        crate::shot::system_sets_arrow();
+        let p = gpui::point(position.x - gpui::px(1.0), position.y);
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            crate::shot::post_mouse_move(window, p)
+        });
+        sleep(cx, Duration::from_millis(150)).await;
+        let after_system_arrow_and_move = crate::shot::current_cursor();
+        let system = cx
+            .update_window(window.into(), |_, window, _| {
+                crate::shot::system_cursor(window)
+            })
+            .unwrap_or_default();
+        results.push(json!({
+            "system": system,
+            "place": name,
+            "x": f32::from(position.x),
+            "y": f32::from(position.y),
+            "expected": expected,
+            "after_posted_moves": posted,
+            "after_frame_view_move": after_frame_view,
+            "after_frame_view_move_then_move": after_frame_view_and_move,
+            "after_system_arrow_then_move": after_system_arrow_and_move,
+        }));
+    }
+    let views = cx
+        .update_window(window.into(), |_, window, _| {
+            crate::shot::tracking_areas(window)
+        })
+        .unwrap_or_default();
+    env::marker(&format!(
+        "cursor {}",
+        json!({ "window_active": active, "places": results, "views": views })
     ));
 }

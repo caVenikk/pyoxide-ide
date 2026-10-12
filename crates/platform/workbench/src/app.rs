@@ -183,6 +183,11 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // Only real windows (the test platform has no native window).
         cx.observe_keystrokes(|_, window, _| crate::shot::request_display(window))
             .detach();
+        // `PYOXIDE_NATIVE_POINTER=0` leaves the pointer to GPUI alone
+        // (diagnostics, see ui::pointer).
+        if std::env::var_os("PYOXIDE_NATIVE_POINTER").is_none_or(|v| v != "0") {
+            ui::pointer::enable_native();
+        }
         let window = open_main_window(cx, product.clone());
         // A folder opens as the project, files open in tabs.
         for path in paths {

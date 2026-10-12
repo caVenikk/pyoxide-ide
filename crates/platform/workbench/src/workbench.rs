@@ -6,10 +6,10 @@ use std::rc::Rc;
 
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, Entity, FocusHandle,
-    Focusable, FontWeight, Hsla, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    PathPromptOptions, Pixels, Render, SharedString, Subscription, Window, canvas, div, prelude::*,
-    px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase, Entity,
+    FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, SharedString, Subscription,
+    Window, canvas, div, prelude::*, px,
 };
 use project::Project;
 use serde_json::json;
@@ -783,7 +783,15 @@ impl Workbench {
             .flex_none()
             .w(width)
             .h_full()
-            .cursor(CursorStyle::ResizeLeftRight)
+            .child(
+                canvas(
+                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                    |_, hitbox, window, _| {
+                        ui::pointer::request(CursorStyle::ResizeLeftRight, &hitbox, window)
+                    },
+                )
+                .size_full(),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseDownEvent, _, cx| {
@@ -1101,6 +1109,7 @@ impl Focusable for Workbench {
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        ui::pointer::begin_frame();
         let bench = env::bench().is_some();
         if bench {
             crate::bench::frame_started();
@@ -1145,6 +1154,18 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::show_go_to_line))
             .on_mouse_move(cx.listener(Self::resize_project))
+            .when(env::debug_cursor(), |d| {
+                d.on_mouse_move(|e: &MouseMoveEvent, window, _| {
+                    env::marker(&format!(
+                        "mouse {:.0},{:.0} active {} resolved {:?} shown {}",
+                        f32::from(e.position.x),
+                        f32::from(e.position.y),
+                        window.is_window_active(),
+                        ui::pointer::resolve(window),
+                        crate::shot::current_cursor()
+                    ))
+                })
+            })
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -1201,18 +1222,34 @@ impl Render for Workbench {
                     .size_0(),
                 )
             })
-            // While resizing, the resize cursor stays wherever the mouse is.
+            // While resizing, the resize pointer stays wherever the mouse is.
             .when(self.resizing.is_some(), |d| {
                 d.child(
                     canvas(
                         |_, _, _| (),
                         |_, _, window, _| {
-                            window.set_window_cursor_style(CursorStyle::ResizeLeftRight)
+                            ui::pointer::request_window(CursorStyle::ResizeLeftRight, window)
                         },
                     )
                     .absolute()
                     .size_0(),
                 )
             })
+            // The pointer shape is set again on every mouse move (see
+            // ui::pointer).
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    |_, _, window, _| {
+                        window.on_mouse_event(|_: &MouseMoveEvent, phase, window, _| {
+                            if phase == DispatchPhase::Capture {
+                                ui::pointer::apply(window);
+                            }
+                        })
+                    },
+                )
+                .absolute()
+                .size_0(),
+            )
     }
 }

@@ -7284,6 +7284,8 @@ dependencies = [
  "gpui",
  "image",
  "libc",
+ "objc",
+ "raw-window-handle",
  "resvg",
  "serde",
  "serde_json",

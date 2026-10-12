@@ -381,3 +381,50 @@ fn go_to_line_field_closes_when_it_loses_the_focus(cx: &mut TestAppContext) {
     invoke(cx, window, "workbench.focus-editor", json!(null));
     assert_eq!(state(cx, window)["go_to_line"], json!(null));
 }
+
+#[gpui::test]
+fn pointer_shapes_over_text_gutter_and_splitter(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path().display().to_string()}),
+    );
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "src/app.py"}),
+    );
+    let editor = window
+        .read_with(cx, |w, _| w.active_editor().cloned())
+        .unwrap()
+        .unwrap();
+    let (origin, lh, cw) = editor.read_with(cx, |e, _| e.text_geometry().unwrap());
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    let splitter = vcx.debug_bounds("project-splitter").unwrap().center();
+    let y = origin.y + lh / 2.0;
+    for (position, expected) in [
+        (
+            gpui::point(origin.x + cw * 2.0, y),
+            gpui::CursorStyle::IBeam,
+        ),
+        (
+            gpui::point(origin.x - gpui::px(24.0), y),
+            gpui::CursorStyle::Arrow,
+        ),
+        (splitter, gpui::CursorStyle::ResizeLeftRight),
+        (
+            gpui::point(gpui::px(300.0), gpui::px(20.0)),
+            gpui::CursorStyle::Arrow,
+        ),
+    ] {
+        vcx.simulate_mouse_move(position, None, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        let shape = vcx.update(|window, _| ui::pointer::resolve(window));
+        assert_eq!(shape, expected, "at {position:?}");
+    }
+}

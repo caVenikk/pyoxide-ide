@@ -8,6 +8,9 @@
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
 //! | `PYOXIDE_BENCH=typing` | type 3 x 200 keys at line 50,000 of the open file, print key-to-frame times, quit |
 //! | `PYOXIDE_BENCH=open:<file>` | open a file, print the time to its first painted text and to highlighting, scroll it, quit |
+//! | `PYOXIDE_BENCH=cursor` | move the mouse (synthetic events) over text, gutter, splitter and toolbar, print the system cursor shown, quit |
+//! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |
+//! | `PYOXIDE_NATIVE_POINTER=0` | do not set the pointer shape on every mouse move (leave it to GPUI) |
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -29,6 +32,12 @@ pub fn theme_kind() -> ThemeKind {
     }
 }
 
+/// `PYOXIDE_DEBUG_CURSOR=1`: print the system cursor after every mouse move.
+pub fn debug_cursor() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("PYOXIDE_DEBUG_CURSOR").is_some_and(|v| v == "1"))
+}
+
 /// `PYOXIDE_SHOT`: where to save a screenshot of the main window.
 pub fn shot_path() -> Option<std::path::PathBuf> {
     std::env::var_os("PYOXIDE_SHOT").map(Into::into)
@@ -43,6 +52,8 @@ pub enum Bench {
     Typing,
     /// Opening a file of the open project, then scrolling it.
     Open(std::path::PathBuf),
+    /// The system cursor over the parts of the window.
+    Cursor,
 }
 
 /// The requested measurement (read once).
@@ -54,6 +65,7 @@ pub fn bench() -> Option<&'static Bench> {
             match value.as_str() {
                 "startup" => Some(Bench::Startup),
                 "typing" => Some(Bench::Typing),
+                "cursor" => Some(Bench::Cursor),
                 _ => value.strip_prefix("open:").map(|p| Bench::Open(p.into())),
             }
         })

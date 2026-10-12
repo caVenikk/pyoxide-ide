@@ -711,8 +711,8 @@ impl Element for EditorElement {
             bounds.bottom_right(),
         );
         // Arrow over the gutter and the scrollbar, I-beam over the text.
-        window.set_cursor_style(CursorStyle::Arrow, &p.hitbox);
-        window.set_cursor_style(CursorStyle::IBeam, &p.text_hitbox);
+        ui::pointer::request(CursorStyle::Arrow, &p.hitbox, window);
+        ui::pointer::request(CursorStyle::IBeam, &p.text_hitbox, window);
 
         window.paint_quad(fill(bounds, p.colors.background));
         window.paint_quad(fill(
