@@ -38,10 +38,11 @@ Open a SQLite file directly,db-gui,should,yes,no,feedback
 "Date and number formats for grid, import and export",db-gui,should,yes,no,feedback
 SQL*Plus commands in the Oracle console (DESCRIBE / EXEC),db-gui,should,no,no,own feature; feedback
 psql / sqlite3 meta-commands in the console (subset),db-gui,could,no,no,own feature; feedback
-Text buffer and editing,editor,must,yes,no,
-Python syntax highlighting,editor,must,yes,no,
-Tabs and split views,editor,must,yes,no,
-File tree and project model,editor,must,yes,no,
+Text buffer and editing,editor,must,yes,partial,"rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); no reload of files changed on disk"
+"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,"New UI layout and Islands themes; toolbar file path; stripe buttons, run widget and status bar widgets are placeholders; native caption on Windows/Linux"
+Python syntax highlighting,editor,must,yes,yes,tree-sitter off the UI thread mapped to theme text roles
+Tabs and split views,editor,must,yes,partial,tabs with modified marker and keyboard switching; no split views
+File tree and project model,editor,must,yes,partial,"open folder, lazy tree with ignore rules, keyboard navigation; no file operations or drag and drop"
 Search in file and project,editor,must,yes,no,
 Multi-cursor and column selection,editor,should,yes,no,
 Code folding,editor,should,yes,no,

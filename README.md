@@ -7,12 +7,14 @@ in one lightweight app, with no JVM and no web view. Offline, open source, and
 scriptable: every action is a command, so the UI, the CLI and AI agents drive
 the same engine.
 
-> **Status: pre-alpha.** No editor window yet: the engines exist and are usable
-> from the command line: the database client (`pyoxide-db`, Oracle,
-> PostgreSQL, SQLite), Python environments on top of uv (`pyoxide env`) and
-> import of PyCharm colour schemes, UI themes and data sources. The application
-> shell on GPUI is next. See the [roadmap](docs/ROADMAP.md) for what is planned
-> and how far along it is.
+> **Status: pre-alpha.** The first editor window exists: open a folder, browse
+> the project tree, edit Python with highlighting and the familiar keymap, save
+> (`cargo run --release -p pyoxide-ide -- <folder>`). No search, completion,
+> run or debug yet. The engines are usable from the command line: the database
+> client (`pyoxide-db`, Oracle, PostgreSQL, SQLite), Python environments on top
+> of uv (`pyoxide env`) and import of PyCharm colour schemes, UI themes and data
+> sources. See the [roadmap](docs/ROADMAP.md) for what is planned and how far
+> along it is.
 
 ## Goals
 
@@ -32,13 +34,13 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 34%** `███████░░░░░░░░░░░░░`
+**Overall parity: 38%** `████████░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
+| editor | 38% `████░░░░░░` | 1 | 4 | 4 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -53,8 +55,8 @@ Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 
 ## Workspace
 
-Crates live in `crates/platform/` (language-agnostic) and, once they exist,
-`crates/python/` (the Python product); see ADR 0005.
+Crates live in `crates/platform/` (language-agnostic) and `crates/python/`
+(the Python product); see ADR 0005.
 
 | Crate | Purpose |
 |---|---|
@@ -69,14 +71,31 @@ Crates live in `crates/platform/` (language-agnostic) and, once they exist,
 | `secrets` | Secret stores: OS credential store, KeePass, memory |
 | `settings-import` | Import of PyCharm project settings (data sources) |
 | `themes` | Theme model, default themes, import of PyCharm colour schemes and UI themes |
+| `text` | Rope text buffer, selections, undo/redo, line endings and encodings |
+| `syntax` | tree-sitter parsing and highlighting off the UI thread |
+| `project` | Project folder, lazy file tree, reading and saving documents |
+| `ui` | Component layer on GPUI: theme, fonts, icons, UI commands |
+| `editor` | The code editor view: layout, carets, selections, input, editing commands |
+| `workbench` | Main window: toolbar, tool windows, tabs, status bar, keymaps |
+| `py-syntax` (python) | Python grammar, highlight query and editing rules |
+| `pyoxide-ide` (python) | `pyoxide-ide`, the Python product's application |
 | `py-env` (python) | Interpreters, virtualenvs, uv and pip integration, `env.*` commands |
 | `pyoxide-cli` (python) | `pyoxide`, the Python product's command line (`env`, plus all `db.*` commands) |
 | `db-cli` | `pyoxide-db`, a command-line database client |
 
 ## Getting started
 
+The IDE window (the default keymaps and what works so far:
+[tests/scenarios/editor/keymap-and-editing-basics.md](tests/scenarios/editor/keymap-and-editing-basics.md)):
+
 ```bash
 git clone https://github.com/caVenikk/pyoxide-ide && cd pyoxide-ide
+cargo run --release -p pyoxide-ide -- path/to/project
+```
+
+The database client:
+
+```bash
 docker compose up -d            # PostgreSQL 18 and Oracle Free 23 for development
 export PYOXIDE_DB_PASSWORD=pyoxide
 cargo run -p db-cli -- --service FREEPDB1 --user pyoxide test

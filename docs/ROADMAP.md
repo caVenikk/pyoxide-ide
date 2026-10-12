@@ -12,11 +12,12 @@ with the skill loop described in [agent-workflow.md](agent-workflow.md).
       engines (MySQL, SQL Server, ...) come after the MVP. Done; open checks:
       Oracle Client integration tests (#4), a real Oracle 19c server (#9),
       statement cancel in `oracle-rs` upstream (#10)
-- [ ] **M2 Editor core**: text buffer, tree-sitter Python highlighting, UI toolkit
+- [x] **M2 Editor core**: text buffer, tree-sitter Python highlighting, UI toolkit
       decision (ADR + measurements), tabs, file tree, project and virtualenv
-      discovery (venv, uv, poetry, conda). In progress: GPUI chosen (ADR 0006),
-      reference baseline measured, interpreter discovery done (`py-env`);
-      application shell and editor next (#18)
+      discovery (venv, uv, poetry, conda). Done: GPUI (ADR 0006), application
+      shell and editor (ADR 0007, #18) within the typing and large-file budgets
+      (replica/perf.md), interpreter discovery (`py-env`). Next for the editor:
+      find and replace, Go to File, split views, multiple carets, folding
 - [ ] **M2b Python environments (uv-first)**: native uv integration: create
       virtualenvs, `uv init/sync/lock`, Python version management, package manager
       panel (list, install, upgrade, remove, search) on top of uv with a pip
