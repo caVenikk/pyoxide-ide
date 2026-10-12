@@ -1,14 +1,15 @@
 //! The editor entity: a buffer, its selections and the view state, plus
 //! every editing and caret command.
 
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{
     App, AppContext as _, ClipboardEntry, ClipboardItem, Context, Div, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render, Styled,
-    Subscription, Task, Window, div, point, px,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
+    SharedString, Styled, Subscription, Task, Window, div, point, px,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -86,6 +87,75 @@ fn leading_ws(text: &str) -> usize {
     text.chars().take_while(|c| *c == ' ' || *c == '\t').count()
 }
 
+/// Search matches painted in the text (the find bar's results).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchHighlights {
+    /// Char ranges, sorted and not overlapping.
+    pub matches: Vec<Range<usize>>,
+    /// Index of the current match: outlined in the caret colour.
+    pub current: Option<usize>,
+    /// The current match also gets the active match background (when it
+    /// is not selected, as in search within a selection).
+    pub current_background: bool,
+    /// Matches left out of Replace All: struck through.
+    pub excluded: BTreeSet<usize>,
+}
+
+/// Edits of more than this many replacements drop the highlighted matches
+/// instead of moving them (the find bar searches again anyway).
+const MAX_EDITS_TO_TRACK: usize = 64;
+
+impl SearchHighlights {
+    pub fn current_range(&self) -> Option<Range<usize>> {
+        self.current.and_then(|i| self.matches.get(i).cloned())
+    }
+
+    /// Index of the first match that ends at or after `pos`.
+    pub fn first_ending_at_or_after(&self, pos: usize) -> usize {
+        self.matches.partition_point(|m| m.end < pos)
+    }
+
+    /// Moves the matches through applied edits (in the order they were
+    /// applied); a match an edit touches inside is dropped.
+    fn edited(&mut self, edits: &[AppliedEdit]) {
+        if edits.len() > MAX_EDITS_TO_TRACK {
+            *self = Self {
+                current_background: self.current_background,
+                ..Self::default()
+            };
+            return;
+        }
+        for e in edits {
+            let delta = e.new_end as isize - e.old_end as isize;
+            // Matches before the edit stay; matches after it move; matches
+            // it touches inside are dropped.
+            let before = self.matches.partition_point(|m| m.end <= e.start);
+            let mut kept = Vec::with_capacity(self.matches.len());
+            let mut current = None;
+            let mut excluded = BTreeSet::new();
+            for (i, m) in self.matches.drain(..).enumerate() {
+                let moved = if i < before {
+                    m
+                } else if m.start >= e.old_end {
+                    (m.start as isize + delta) as usize..(m.end as isize + delta) as usize
+                } else {
+                    continue;
+                };
+                if self.current == Some(i) {
+                    current = Some(kept.len());
+                }
+                if self.excluded.contains(&i) {
+                    excluded.insert(kept.len());
+                }
+                kept.push(moved);
+            }
+            self.matches = kept;
+            self.current = current;
+            self.excluded = excluded;
+        }
+    }
+}
+
 /// What happened in an editor, for its observers (tabs, status bar,
 /// highlighting).
 #[derive(Debug, Clone)]
@@ -144,6 +214,15 @@ pub struct Editor {
     pub(crate) center_caret: bool,
     /// A one-line text field (no gutter, no scrollbar).
     pub(crate) single_line: bool,
+    /// Text shown in an empty one-line field.
+    pub(crate) placeholder: Option<SharedString>,
+    /// A one-line field shows its text in the error colour.
+    pub(crate) error: bool,
+    /// Search matches shown in the text.
+    pub(crate) search: Option<SearchHighlights>,
+    /// Bring this char offset into the middle of the view on the next
+    /// frame when it is not visible.
+    pub(crate) reveal: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -189,6 +268,10 @@ impl Editor {
             extend_last: None,
             center_caret: false,
             single_line: false,
+            placeholder: None,
+            error: false,
+            search: None,
+            reveal: None,
             _subscriptions: subscriptions,
         }
     }
@@ -196,6 +279,81 @@ impl Editor {
     /// Makes this editor a one-line text field (dialogs, search fields).
     pub fn set_single_line(&mut self, single_line: bool) {
         self.single_line = single_line;
+    }
+
+    /// Text shown in the empty one-line field ("Search").
+    pub fn set_placeholder(&mut self, placeholder: Option<SharedString>) {
+        self.placeholder = placeholder;
+    }
+
+    /// Shows the text of a one-line field in the theme's error colour (a
+    /// search that finds nothing).
+    pub fn set_error(&mut self, error: bool, cx: &mut Context<Self>) {
+        if self.error != error {
+            self.error = error;
+            cx.notify();
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.error
+    }
+
+    /// Replaces the whole text without an undo step and selects it (a
+    /// field filled in by its owner).
+    pub fn set_text_selected(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.buffer.text() != text {
+            self.buffer = Buffer::new(text);
+            self.buffer_reloaded(cx);
+        }
+        let len = self.buffer.len_chars();
+        self.set_selections(SelectionSet::single(Selection::new(0, len)), cx);
+    }
+
+    // ---- search highlights ------------------------------------------------
+
+    /// The search matches shown in the text.
+    pub fn search_highlights(&self) -> Option<&SearchHighlights> {
+        self.search.as_ref()
+    }
+
+    /// Shows search matches in the text, or removes them.
+    pub fn set_search_highlights(
+        &mut self,
+        highlights: Option<SearchHighlights>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.search != highlights {
+            self.search = highlights;
+            cx.notify();
+        }
+    }
+
+    /// Makes another match the current one.
+    pub fn set_search_current(&mut self, current: Option<usize>, cx: &mut Context<Self>) {
+        if let Some(h) = &mut self.search
+            && h.current != current
+        {
+            h.current = current;
+            cx.notify();
+        }
+    }
+
+    /// Scrolls `pos` into the middle of the view on the next frame unless
+    /// it is visible already.
+    pub fn reveal(&mut self, pos: usize, cx: &mut Context<Self>) {
+        self.reveal = Some(pos.min(self.buffer.len_chars()));
+        cx.notify();
+    }
+
+    /// Selects `range` with the caret at its end and reveals its start (a
+    /// search match).
+    pub fn select_and_reveal(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        self.set_selections(
+            SelectionSet::single(Selection::new(range.start, range.end)),
+            cx,
+        );
+        self.reveal(range.start, cx);
     }
 
     // ---- state ------------------------------------------------------------
@@ -348,6 +506,12 @@ impl Editor {
         ))
     }
 
+    /// Window bounds of the primary caret's character in the last frame
+    /// (where hints about the caret go).
+    pub fn caret_bounds(&self) -> Option<gpui::Bounds<Pixels>> {
+        self.bounds_for_offset(self.selections.primary().head)
+    }
+
     /// Lines shaped in the last frame (virtualization check).
     pub fn shaped_line_count(&self) -> usize {
         self.layout.as_ref().map_or(0, |l| l.lines.len())
@@ -404,6 +568,9 @@ impl Editor {
     fn changed(&mut self, applied: Vec<AppliedEdit>, cx: &mut Context<Self>) {
         if let Some(h) = &mut self.highlighter {
             h.edited(&self.buffer, &applied);
+        }
+        if let Some(search) = &mut self.search {
+            search.edited(&applied);
         }
         self.schedule_highlighting(cx);
         self.autoscroll = true;

@@ -108,6 +108,11 @@ name = "Editor"
 "shift-delete" = "editor.cut"
 "cmd-v" = "editor.paste"
 "shift-insert" = "editor.paste"
+# Find and replace
+"cmd-f" = "find.open"
+"cmd-r" = "find.replace"
+"cmd-g" = "find.next"
+"cmd-shift-g" = "find.previous"
 
 # The Go to Line field is a one-line editor: Enter and Escape close it.
 [[context]]
@@ -115,3 +120,24 @@ name = "GoToLine > Editor"
 [context.bindings]
 "enter" = "go-to-line.confirm"
 "escape" = "go-to-line.cancel"
+
+# The find bar's fields are one-line editors: Enter, Down and Ctrl+N go to
+# the next match, Shift+Enter, Up and Ctrl+P to the previous one, Escape
+# closes the bar. The options take the reference IDE's mnemonic keys:
+# Ctrl+Option and, as it also accepts on macOS, Option with the letter.
+[[context]]
+name = "FindBar > Editor"
+[context.bindings]
+"enter" = "find.next"
+"down" = "find.next"
+"ctrl-n" = "find.next"
+"shift-enter" = "find.previous"
+"up" = "find.previous"
+"ctrl-p" = "find.previous"
+"escape" = "find.close"
+"ctrl-alt-c" = "find.toggle-case"
+"alt-c" = "find.toggle-case"
+"ctrl-alt-w" = "find.toggle-words"
+"alt-w" = "find.toggle-words"
+"ctrl-alt-x" = "find.toggle-regex"
+"alt-x" = "find.toggle-regex"

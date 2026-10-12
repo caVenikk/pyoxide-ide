@@ -10,6 +10,7 @@ rust-version.workspace = true
 gpui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+search.workspace = true
 syntax.workspace = true
 text.workspace = true
 themes.workspace = true

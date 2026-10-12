@@ -39,9 +39,9 @@ here with: source URL, commit, file(s), license, and what was changed.
   New UI icons of the IntelliJ Platform Community (Apache-2.0, license text in
   LICENSE-APACHE), https://github.com/JetBrains/intellij-community @
   f5a0bddb9cee9135c700de9a67534e11cdf61c07. Files (light `name.svg` and dark
-  `name_dark.svg` variants): platform/icons/src/expui/{general,run,nodes,
-  fileTypes,toolwindows,windows}/... (the subset under the same relative
-  paths in assets/icons/), platform/icons/src/vcs/branch.svg,
+  `name_dark.svg` variants): platform/icons/src/expui/{actions,general,
+  inline,run,nodes,fileTypes,toolwindows,windows}/... (the subset under the
+  same relative paths in assets/icons/), platform/icons/src/vcs/branch.svg,
   plugins/terminal/resources/icons/expui/toolwindow/terminal@20x20.svg,
   python/python-parser/resources/icons/com/jetbrains/python/parser/expui/python.svg,
   python/pluginResources/icons/com/jetbrains/pythonCore/python/expui/
@@ -82,6 +82,21 @@ here with: source URL, commit, file(s), license, and what was changed.
   platform/platform-resources/src/keymaps/$default.xml and
   "Mac OS X 10.5+.xml". Only the keystrokes of the actions Pyoxide has are
   used, bound to Pyoxide's own command ids in its own format.
+
+- crates/platform/search/, crates/platform/editor/src/find.rs
+  The behaviour of Find and Replace in the editor follows the IntelliJ
+  Platform Community (Apache-2.0), https://github.com/JetBrains/intellij-community
+  @ f5a0bddb9cee9135c700de9a67534e11cdf61c07: the whole-word rule of
+  platform/lang-impl/src/com/intellij/find/impl/FindManagerBase.java, the
+  replacement template syntax of .../find/impl/RegExReplacementBuilder.java,
+  the choice of the current match and the wrap-around of
+  .../find/impl/livePreview/SearchResults.java and .../find/FindUtil.java,
+  and the UI strings of the find bar ("{0} results", "{0}/{1}", "{0}+",
+  "Bad pattern", "Vague pattern", "\"{0}\" not found, press {1} to search
+  from the top") from platform/ide-core/resources/messages/ApplicationBundle.properties
+  and platform/analysis-impl/resources/messages/FindBundle.properties.
+  Changes: reimplemented in Rust on the `regex` crate; word characters are
+  Unicode letters, digits and `_`.
 
 - crates/platform/editor/src/input.rs
   The structure of the platform input handler (UTF-16 conversions, marked

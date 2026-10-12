@@ -5,11 +5,11 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity, Font,
-    FontFeatures, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    App, BorderStyle, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler,
+    Entity, Font, FontFeatures, FontStyle, FontWeight, GlobalElementId, Hitbox, HitboxBehavior,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, ScrollWheelEvent, ShapedLine, SharedString, StrikethroughStyle, Style,
-    TextRun, UnderlineStyle, Window, fill, point, px, relative, size,
+    TextRun, UnderlineStyle, Window, fill, outline, point, px, relative, size,
 };
 use text::movement;
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
@@ -162,7 +162,18 @@ pub(crate) struct Prepaint {
     current_lines: Vec<Bounds<Pixels>>,
     selections: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
+    search: Vec<SearchRect>,
+    /// The placeholder of an empty one-line field and where it goes.
+    placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
     colors: Colors,
+}
+
+/// One line's part of a search match.
+#[derive(Clone, Copy)]
+struct SearchRect {
+    bounds: Bounds<Pixels>,
+    current: bool,
+    excluded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -174,6 +185,12 @@ struct Colors {
     caret: Hsla,
     scrollbar: Hsla,
     scrollbar_hover: Hsla,
+    search_match: Hsla,
+    search_current: Hsla,
+    /// Background of the current match (search within a selection, where
+    /// the current match is not selected).
+    search_current_background: Option<Hsla>,
+    text: Hsla,
 }
 
 /// Font metrics of the editor font at the editor size.
@@ -450,25 +467,38 @@ impl Element for EditorElement {
             caret: theme.color(UiRole::Caret),
             scrollbar: theme.color(UiRole::Scrollbar),
             scrollbar_hover: theme.color(UiRole::ScrollbarHover),
+            search_match: theme.color(UiRole::SearchMatch),
+            search_current: theme.color(UiRole::Caret),
+            search_current_background: None,
+            text: theme.color(UiRole::EditorText),
         };
         let input_color = theme.color(UiRole::Input);
         let number_color = theme.color(UiRole::LineNumber);
         let number_active = theme.color(UiRole::LineNumberActive);
-        let text_color = theme.color(UiRole::EditorText);
+        let mut text_color = theme.color(UiRole::EditorText);
         let caret_width = theme.metric(Metric::CaretWidth);
         let scrollbar_width = theme.metric(Metric::ScrollbarWidth);
         let lh = m.line_height;
 
         // Gutter: line numbers right-aligned in a column wide enough for the
         // largest number.
-        let (len_lines, tab_size, single_line) = {
+        let (len_lines, tab_size, single_line, error) = {
             let e = self.editor.read(cx);
-            (e.buffer.len_lines(), e.config().tab_size, e.single_line)
+            (
+                e.buffer.len_lines(),
+                e.config().tab_size,
+                e.single_line,
+                e.error,
+            )
         };
         if single_line {
             colors.background = input_color;
             colors.gutter = input_color;
         }
+        if error {
+            text_color = theme.color(UiRole::Danger);
+        }
+        colors.text = text_color;
         let digits = len_lines.to_string().len().max(2);
         let (gutter_width, text_left) = if single_line {
             (px(0.0), px(0.0))
@@ -485,6 +515,13 @@ impl Element for EditorElement {
         // Keep the caret in view after edits and caret moves.
         self.editor.update(cx, |e, _| {
             let max_y = lh * len_lines.saturating_sub(1) as f32;
+            if let Some(pos) = e.reveal.take() {
+                // A search match goes to the middle of the view when hidden.
+                let y = lh * e.buffer.char_to_line(pos) as f32;
+                if y < e.scroll.y || y + lh > e.scroll.y + bounds.size.height {
+                    e.scroll.y = y - (bounds.size.height - lh) / 2.0;
+                }
+            }
             if e.autoscroll {
                 e.autoscroll = false;
                 let head = e.selections.primary().head;
@@ -628,6 +665,68 @@ impl Element for EditorElement {
                 }
             }
         }
+        // Search matches on the visible lines.
+        let mut search_rects = Vec::new();
+        if let Some(h) = &editor.search {
+            if h.current_background {
+                colors.search_current_background = Some(theme.color(UiRole::SearchMatchActive));
+            }
+            let vis_start = editor.buffer.line_start(first);
+            let vis_end = editor.buffer.line_end(last.saturating_sub(1).max(first));
+            let from = h.first_ending_at_or_after(vis_start);
+            for (i, r) in h.matches.iter().enumerate().skip(from) {
+                if r.start > vis_end {
+                    break;
+                }
+                let a = editor.buffer.offset_to_point(r.start);
+                let b = editor.buffer.offset_to_point(r.end);
+                for line in a.line.max(first)..=b.line.min(last.saturating_sub(1)) {
+                    let Some(l) = layout_of(line) else { continue };
+                    let x0 = if line == a.line {
+                        line_x(l, a.column)
+                    } else {
+                        text_x - scroll.x
+                    };
+                    let x1 = if line == b.line {
+                        line_x(l, b.column)
+                    } else {
+                        // The line break of a match that goes on.
+                        line_x(l, editor.buffer.line_len(line)) + m.char_width
+                    };
+                    // An empty match is a thin bar.
+                    let x1 = if x1 > x0 { x1 } else { x0 + px(2.0) };
+                    search_rects.push(SearchRect {
+                        bounds: Bounds::from_corners(
+                            point(x0, top_of(line)),
+                            point(x1, top_of(line) + lh),
+                        ),
+                        current: h.current == Some(i),
+                        excluded: h.excluded.contains(&i),
+                    });
+                }
+            }
+        }
+
+        // The placeholder of an empty one-line field.
+        let placeholder = editor
+            .placeholder
+            .clone()
+            .filter(|_| single_line && editor.buffer.len_chars() == 0)
+            .map(|text| {
+                let run = TextRun {
+                    len: text.len(),
+                    font: m.font.clone(),
+                    color: theme.color(UiRole::TextMuted),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let shaped = window
+                    .text_system()
+                    .shape_line(text, m.font_size, &[run], None);
+                (shaped, point(text_x - scroll.x, top_of(0)))
+            });
+
         // The caret line is highlighted when nothing is selected.
         let current_lines = if !single_line && editor.selections.iter().all(|s| s.is_empty()) {
             caret_lines
@@ -722,6 +821,8 @@ impl Element for EditorElement {
             current_lines,
             selections: selection_rects,
             caret,
+            search: search_rects,
+            placeholder,
             colors,
         }
     }
@@ -770,6 +871,15 @@ impl Element for EditorElement {
                 bounds: text_bounds,
             }),
             |window| {
+                // Search matches under the selection; the current match
+                // has the active background only when it is not selected.
+                for r in &p.search {
+                    let color = match (r.current, p.colors.search_current_background) {
+                        (true, Some(active)) => active,
+                        _ => p.colors.search_match,
+                    };
+                    window.paint_quad(fill(r.bounds, color));
+                }
                 for r in &p.selections {
                     window.paint_quad(fill(*r, p.colors.selection));
                 }
@@ -779,6 +889,28 @@ impl Element for EditorElement {
                         bounds.top() + lh * l.line as f32 - self.editor.read(cx).scroll.y,
                     );
                     let _ = l.shaped.paint(origin, lh, window, cx);
+                }
+                if let Some((shaped, origin)) = &p.placeholder {
+                    let _ = shaped.paint(*origin, lh, window, cx);
+                }
+                for r in &p.search {
+                    if r.excluded {
+                        // Excluded from Replace All: struck through.
+                        let y = r.bounds.center().y.round();
+                        window.paint_quad(fill(
+                            Bounds::from_corners(
+                                point(r.bounds.left(), y),
+                                point(r.bounds.right(), y + px(1.0)),
+                            ),
+                            p.colors.text,
+                        ));
+                    }
+                    if r.current {
+                        window.paint_quad(
+                            outline(r.bounds, p.colors.search_current, BorderStyle::Solid)
+                                .corner_radii(px(3.0)),
+                        );
+                    }
                 }
                 if let Some(caret) = p.caret {
                     window.paint_quad(fill(caret, p.colors.caret));

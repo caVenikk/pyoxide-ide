@@ -199,11 +199,40 @@ impl H<'_> {
         self.focus_tree();
     }
 
+    fn find_state(&mut self) -> Value {
+        self.state()["find"].clone()
+    }
+
+    fn query_focused(&mut self) -> bool {
+        let bar = self
+            .workbench(|w, _| w.active_find_bar().cloned())
+            .expect("a find bar");
+        let field = self.cx.update(|cx| bar.read(cx).query_field().clone());
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                field.focus_handle(cx).is_focused(window)
+            })
+            .unwrap()
+    }
+
+    /// Opens the find bar with a plain, case-insensitive search for
+    /// `text`; the focus is in its field.
+    fn search(&mut self, text: &str) {
+        self.invoke(
+            "find.search",
+            json!({ "text": text, "case_sensitive": false, "whole_words": false, "regex": false }),
+        );
+        assert!(self.query_focused(), "the search field has the focus");
+    }
+
     /// Three tabs (a.py, b.py, c.txt), the first active, the project tool
     /// window shown, the editor focused.
     fn reset(&mut self) {
         if self.state()["go_to_line"].is_string() {
             self.invoke("go-to-line.cancel", json!(null));
+        }
+        if self.state()["find"]["open"] == json!(true) {
+            self.invoke("find.close", json!(null));
         }
         while self.state()["tabs"]
             .as_array()
@@ -420,6 +449,80 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(h.state()["go_to_line"], Value::Null, "{what}");
             assert_eq!(h.editor_marked(), "a\nb\nc|", "{what}");
             assert!(h.editor_focused(), "{what}: the editor has the focus");
+        }
+        "find.open" => {
+            // The selected text becomes the query, selected in the field.
+            h.set_editor("x ‹foo› foo");
+            h.press(keys);
+            let s = h.find_state();
+            assert_eq!(s["open"], json!(true), "{what}");
+            assert_eq!(s["text"], json!("foo"), "{what}");
+            assert_eq!(s["matches"], json!(2), "{what}");
+            assert_eq!(s["current"], json!(1), "{what}");
+            assert!(h.query_focused(), "{what}: the field has the focus");
+        }
+        "find.replace" => {
+            h.set_editor("x ‹foo› foo");
+            h.press(keys);
+            let s = h.find_state();
+            assert_eq!(s["open"], json!(true), "{what}");
+            assert_eq!(s["replace_mode"], json!(true), "{what}");
+            assert_eq!(s["text"], json!("foo"), "{what}");
+            assert!(h.query_focused(), "{what}: the search field has the focus");
+        }
+        "find.next" | "find.previous" => {
+            let forward = b.command == "find.next";
+            h.set_editor(if forward {
+                "|foo foo foo"
+            } else {
+                "foo foo foo|"
+            });
+            h.search("foo");
+            let start = if forward {
+                "‹foo› foo foo"
+            } else {
+                "foo foo ‹foo›"
+            };
+            assert_eq!(h.editor_marked(), start, "{what}");
+            if b.context.as_deref() != Some("FindBar > Editor") {
+                // From the editor, with the bar open.
+                h.focus_editor();
+            }
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "foo ‹foo› foo", "{what}");
+            assert_eq!(h.find_state()["current"], json!(2), "{what}");
+        }
+        "find.close" => {
+            h.set_editor("|foo foo");
+            h.search("foo");
+            h.press(keys);
+            assert_eq!(h.find_state()["open"], json!(false), "{what}");
+            // The current match stays selected; the editor has the focus.
+            assert_eq!(h.editor_marked(), "‹foo› foo", "{what}");
+            assert!(h.editor_focused(), "{what}");
+        }
+        "find.toggle-case" | "find.toggle-words" | "find.toggle-regex" => {
+            h.set_editor("|Foo foo food f.o");
+            h.search("f.o");
+            let option = match b.command.as_str() {
+                "find.toggle-case" => "case_sensitive",
+                "find.toggle-words" => "whole_words",
+                _ => "regex",
+            };
+            assert_eq!(h.find_state()["matches"], json!(1), "{what}");
+            h.press(keys);
+            let s = h.find_state();
+            assert_eq!(s[option], json!(true), "{what}");
+            let expected = match option {
+                // Case: still only the literal `f.o`.
+                "case_sensitive" => 1,
+                // Words: `f.o` stands alone.
+                "whole_words" => 1,
+                // Regex: `f.o` matches Foo, foo, foo(d) and f.o.
+                _ => 4,
+            };
+            assert_eq!(s["matches"], json!(expected), "{what}");
+            assert!(h.query_focused(), "{what}: the focus stays in the field");
         }
         "app.quit" => {
             h.press(keys);

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use editor::{Editor, EditorEvent};
+use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase, Entity,
     FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement, MouseButton,
@@ -69,7 +69,9 @@ pub fn parse_line_column(text: &str) -> Option<(usize, Option<usize>)> {
 struct Tab {
     path: PathBuf,
     editor: Entity<Editor>,
-    _subscription: Subscription,
+    /// The editor's find bar (shown while it is open).
+    find: Entity<FindBar>,
+    _subscriptions: [Subscription; 2],
 }
 
 /// The main window: toolbar, stripes, project tool window, editor area,
@@ -178,6 +180,11 @@ impl Workbench {
         self.active.map(|i| &self.tabs[i].editor)
     }
 
+    /// The find bar of the active tab's editor.
+    pub fn active_find_bar(&self) -> Option<&Entity<FindBar>> {
+        self.active.map(|i| &self.tabs[i].find)
+    }
+
     /// Paths of the open tabs, in order.
     pub fn tab_paths(&self) -> Vec<PathBuf> {
         self.tabs.iter().map(|t| t.path.clone()).collect()
@@ -221,6 +228,7 @@ impl Workbench {
             })).collect::<Vec<_>>(),
             "active_tab": self.active,
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
+            "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
             "theme": cx.theme().id(),
@@ -323,11 +331,15 @@ impl Workbench {
             }
             cx.notify()
         });
+        let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
+        // The bar opens and closes inside the editor area.
+        let find_subscription = cx.observe(&find, |_, _, cx| cx.notify());
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
             editor,
-            _subscription: subscription,
+            find,
+            _subscriptions: [subscription, find_subscription],
         });
         self.message = None;
         self.activate(index, window, cx);
@@ -934,6 +946,31 @@ impl Workbench {
         )
     }
 
+    /// The find bar's hint ("not found, press ... to search from the top")
+    /// below the caret.
+    fn render_find_hint(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let hint = self.active_find_bar()?.read(cx).hint()?.clone();
+        let caret = self.active_editor()?.read(cx).caret_bounds()?;
+        let theme = cx.theme();
+        Some(
+            div()
+                .id("find-hint")
+                .debug_selector(|| "find-hint".into())
+                .absolute()
+                .left(caret.left())
+                .top(caret.bottom() + px(2.0))
+                .px(px(8.0))
+                .py(px(4.0))
+                .rounded(theme.metric(Metric::CornerRadius))
+                .border_1()
+                .border_color(theme.color(UiRole::Border))
+                .bg(theme.color(UiRole::SurfaceRaised))
+                .shadow_md()
+                .whitespace_nowrap()
+                .child(hint),
+        )
+    }
+
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let tab = &self.tabs[index];
         let theme = cx.theme();
@@ -1057,6 +1094,13 @@ impl Workbench {
                         .border_b_1()
                         .border_color(separator)
                         .children(tabs),
+                )
+                .children(
+                    self.tabs[active]
+                        .find
+                        .read(cx)
+                        .is_open()
+                        .then(|| self.tabs[active].find.clone()),
                 )
                 .child(
                     div()
@@ -1254,8 +1298,14 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::show_go_to_line))
-            // Keyboard input for the idle save.
-            .capture_key_down(cx.listener(|this, _, _, cx| this.note_input(cx)))
+            // Keyboard input for the idle save; any key hides the find
+            // bar's hint.
+            .capture_key_down(cx.listener(|this, _, _, cx| {
+                this.note_input(cx);
+                if let Some(bar) = this.active_find_bar().cloned() {
+                    bar.update(cx, |bar, cx| bar.clear_hint(cx));
+                }
+            }))
             .on_mouse_move(cx.listener(Self::resize_project))
             .when(env::debug_cursor(), |d| {
                 d.on_mouse_move(|e: &MouseMoveEvent, window, _| {
@@ -1281,6 +1331,9 @@ impl Render for Workbench {
         // when another component has the focus.
         if let Some(editor) = self.active_editor() {
             root = editor::forward_actions(root, editor.clone());
+        }
+        if let Some(bar) = self.active_find_bar() {
+            root = editor::find::forward_actions(root, bar.clone());
         }
         root = project_panel::forward_actions(root, self.panel.clone());
         root.flex()
@@ -1312,6 +1365,7 @@ impl Render for Workbench {
             )
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
+            .children(self.render_find_hint(cx))
             .children(first_frame)
             // Measurements: the end of the frame's paint.
             .when(bench, |d| {
