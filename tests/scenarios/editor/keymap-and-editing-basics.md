@@ -8,18 +8,26 @@ real keystroke in `crates/platform/workbench/tests/keymap.rs`; the behaviour
 below is covered by `crates/platform/editor/tests/basics.rs` and the Python
 test of `crates/python/pyoxide-ide`.
 
+## Where the keystrokes come from
+The "Reference action" column names the action of the reference keymaps
+whose keystrokes a row uses. The Windows/Linux keystrokes are the action's
+entries in `$default.xml`. The macOS keymap (`Mac OS X 10.5+.xml`) either
+lists the action itself ("mac") or inherits it from `$default.xml`, where
+Ctrl becomes Cmd ("inh"); for example Duplicate Line or Selection is
+`control D` in `$default.xml` and so Cmd+D on macOS.
+
 ## Steps and expected behaviour
 
 ### Caret movement (each also with Shift, which extends the selection)
-| Action | Mac | Win |
-|---|---|---|
-| Character left / right | Left / Right, Ctrl+B / Ctrl+F | Left / Right |
-| Line up / down | Up / Down, Ctrl+P / Ctrl+N | Up / Down |
-| Previous / next word | Alt+Left / Alt+Right, Ctrl+Alt+B / Ctrl+Alt+F | Ctrl+Left / Ctrl+Right |
-| Line start / end | Cmd+Left / Cmd+Right, Home / End, Ctrl+A / Ctrl+E | Home / End |
-| Document start / end | Cmd+Home / Cmd+End | Ctrl+Home / Ctrl+End |
-| Page up / down | Page Up / Page Down | Page Up / Page Down |
-| Go to line and column | Cmd+L | Ctrl+G |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Character left / right | Left / Right, Ctrl+B / Ctrl+F | Left / Right | EditorLeft / EditorRight (mac) |
+| Line up / down | Up / Down, Ctrl+P / Ctrl+N | Up / Down | EditorUp / EditorDown (mac) |
+| Previous / next word | Alt+Left / Alt+Right, Ctrl+Alt+B / Ctrl+Alt+F | Ctrl+Left / Ctrl+Right | EditorPreviousWord / EditorNextWord (mac) |
+| Line start / end | Cmd+Left / Cmd+Right, Home / End, Ctrl+A / Ctrl+E | Home / End | EditorLineStart / EditorLineEnd (mac) |
+| Document start / end | Cmd+Home / Cmd+End | Ctrl+Home / Ctrl+End | EditorTextStart / EditorTextEnd (inh) |
+| Page up / down | Page Up / Page Down | Page Up / Page Down | EditorPageUp / EditorPageDown (inh) |
+| Go to line and column | Cmd+L | Ctrl+G | GotoLine (mac) |
 
 - Line start is "smart": the first press goes to the first non-blank
   character, the next to column 1, and back.
@@ -30,12 +38,12 @@ test of `crates/python/pyoxide-ide`.
   line number keeps it open.
 
 ### Deleting
-| Action | Mac | Win |
-|---|---|---|
-| Delete before / after the caret | Backspace (also Shift+Backspace) / Delete | same |
-| Delete to word start / end | Alt+Backspace / Alt+Delete | Ctrl+Backspace / Ctrl+Delete |
-| Delete line | Cmd+Backspace | Ctrl+Y |
-| Delete to line start / end | no default shortcut (commands) | same |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Delete before / after the caret | Backspace (also Shift+Backspace) / Delete | same | EditorBackSpace (mac), $Delete (mac) |
+| Delete to word start / end | Alt+Backspace / Alt+Delete | Ctrl+Backspace / Ctrl+Delete | EditorDeleteToWordStart / EditorDeleteToWordEnd (mac) |
+| Delete line | Cmd+Backspace | Ctrl+Y | EditorDeleteLine (mac) |
+| Delete to line start / end | no default shortcut (commands) | same | EditorDeleteToLineStart / EditorDeleteToLineEnd (no keystroke) |
 
 - Backspace in the leading spaces of a line goes back to the previous
   indentation stop (one level), not one space.
@@ -44,11 +52,11 @@ test of `crates/python/pyoxide-ide`.
   joins the line with the previous (next) one.
 
 ### Enter and indentation
-| Action | Mac | Win |
-|---|---|---|
-| New line | Enter | Enter |
-| Start new line below | Shift+Enter | Shift+Enter |
-| Indent / unindent | Tab / Shift+Tab | Tab / Shift+Tab |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| New line | Enter | Enter | EditorEnter (inh) |
+| Start new line below | Shift+Enter | Shift+Enter | EditorStartNewLine (mac) |
+| Indent / unindent | Tab / Shift+Tab | Tab / Shift+Tab | EditorIndentSelection / EditorUnindentSelection (inh) |
 
 - Enter keeps the indentation of the line; after a line ending with `:`
   (Python), or with an unclosed bracket, the new line gets one more level.
@@ -60,13 +68,13 @@ test of `crates/python/pyoxide-ide`.
   one it fills up to the next indentation stop. Shift+Tab removes one level.
 
 ### Line operations
-| Action | Mac | Win |
-|---|---|---|
-| Duplicate line or selection | Cmd+D | Ctrl+D |
-| Move line up / down | Alt+Shift+Up / Down | Alt+Shift+Up / Down |
-| Move statement up / down | Cmd+Shift+Up / Down | Ctrl+Shift+Up / Down |
-| Join lines | Ctrl+Shift+J | Ctrl+Shift+J |
-| Comment with line comment | Cmd+/ | Ctrl+/ |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Duplicate line or selection | Cmd+D | Ctrl+D | EditorDuplicate (inh: Ctrl+D becomes Cmd+D) |
+| Move line up / down | Alt+Shift+Up / Down | Alt+Shift+Up / Down | MoveLineUp / MoveLineDown (inh) |
+| Move statement up / down | Cmd+Shift+Up / Down | Ctrl+Shift+Up / Down | MoveStatementUp / MoveStatementDown (inh) |
+| Join lines | Ctrl+Shift+J | Ctrl+Shift+J | EditorJoinLines (mac) |
+| Comment with line comment | Cmd+/ | Ctrl+/ | CommentByLineComment (inh) |
 
 - Moving lines takes all selected lines and keeps them selected; the first
   line does not move up and the last does not move down.
@@ -93,12 +101,12 @@ test of `crates/python/pyoxide-ide`.
 - Typing a bracket or quote with a selection wraps the selection.
 
 ### Selection
-| Action | Mac | Win |
-|---|---|---|
-| Select all | Cmd+A | Ctrl+A |
-| Extend selection | Alt+Up | Ctrl+W |
-| Shrink selection | Alt+Down | Ctrl+Shift+W |
-| Drop the selection | Escape | Escape |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Select all | Cmd+A | Ctrl+A | $SelectAll (inh) |
+| Extend selection | Alt+Up | Ctrl+W | EditorSelectWord (mac) |
+| Shrink selection | Alt+Down | Ctrl+Shift+W | EditorUnSelectWord (mac) |
+| Drop the selection | Escape | Escape | EditorEscape (inh) |
 
 - Extend selection grows to the word, then to each enclosing syntax node
   (string content, string, arguments, call, statement, ... when the file
@@ -107,25 +115,25 @@ test of `crates/python/pyoxide-ide`.
   forgets them.
 
 ### Clipboard and history
-| Action | Mac | Win |
-|---|---|---|
-| Copy | Cmd+C, Cmd+Insert | Ctrl+C, Ctrl+Insert |
-| Cut | Cmd+X, Shift+Delete | Ctrl+X, Shift+Delete |
-| Paste | Cmd+V, Shift+Insert | Ctrl+V, Shift+Insert |
-| Undo | Cmd+Z | Ctrl+Z, Alt+Backspace |
-| Redo | Cmd+Shift+Z, Alt+Shift+Backspace | Ctrl+Shift+Z, Alt+Shift+Backspace |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Copy | Cmd+C, Cmd+Insert | Ctrl+C, Ctrl+Insert | $Copy (inh) |
+| Cut | Cmd+X, Shift+Delete | Ctrl+X, Shift+Delete | $Cut (inh) |
+| Paste | Cmd+V, Shift+Insert | Ctrl+V, Shift+Insert | $Paste (inh) |
+| Undo | Cmd+Z | Ctrl+Z, Alt+Backspace | $Undo (mac) |
+| Redo | Cmd+Shift+Z, Alt+Shift+Backspace | Ctrl+Shift+Z, Alt+Shift+Backspace | $Redo (inh) |
 
 - Copy or cut without a selection takes the whole caret line; pasting such
   a line puts it above the caret line, keeping the caret on its text.
 
 ### Files and tabs
-| Action | Mac | Win |
-|---|---|---|
-| Save all | Cmd+S | Ctrl+S |
-| Close tab | Cmd+W | Ctrl+F4 |
-| Next / previous tab | Cmd+Shift+] / [, Ctrl+Right / Left | Alt+Right / Left |
-| Project tool window | Cmd+1 | Alt+1 |
-| Hide tool window | Shift+Escape | Shift+Escape |
+| Action | Mac | Win | Reference action |
+|---|---|---|---|
+| Save all | Cmd+S | Ctrl+S | SaveAll (inh) |
+| Close tab | Cmd+W | Ctrl+F4 | CloseContent (mac) |
+| Next / previous tab | Cmd+Shift+] / [, Ctrl+Right / Left | Alt+Right / Left | NextTab / PreviousTab (mac) |
+| Project tool window | Cmd+1 | Alt+1 | ActivateProjectToolWindow (mac) |
+| Hide tool window | Shift+Escape | Shift+Escape | HideActiveWindow (inh) |
 
 ### Mouse
 - Click places the caret; drag selects; double click selects a word;
