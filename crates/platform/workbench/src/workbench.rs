@@ -208,7 +208,7 @@ impl Workbench {
                 "name": p.name(),
                 "root": p.root().display().to_string(),
             })),
-            "tree": self.panel.read(cx).state_json(),
+            "tree": self.panel.read(cx).state_json(cx),
             "tool_windows": { "project": {
                 "visible": self.project_visible,
                 "width": f32::from(self.project_width),
@@ -1001,6 +1001,7 @@ impl Workbench {
             }));
         let pill = div()
             .id(("tab", index))
+            .debug_selector(move || format!("tab-{index}"))
             .group(group)
             .flex()
             .flex_row()

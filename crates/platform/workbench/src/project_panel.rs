@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Render, ScrollStrategy, SharedString, Styled,
-    UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, ScrollStrategy, SharedString,
+    Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use project::{FileTree, Filter, NodeId, Project, list_dir};
 use serde_json::json;
@@ -149,9 +149,26 @@ impl ProjectPanel {
     fn select(&mut self, id: NodeId, cx: &mut Context<Self>) {
         self.selected = Some(id);
         if let Some(row) = self.tree.as_ref().and_then(|t| t.row_of(id)) {
-            self.scroll.scroll_to_item(row, ScrollStrategy::Top);
+            self.scroll_to_row(row, cx);
         }
         cx.notify();
+    }
+
+    /// Scrolls as little as shows `row` whole: a row above the view comes
+    /// in at the top, a row below it at the bottom, a visible row stays.
+    fn scroll_to_row(&self, row: usize, cx: &App) {
+        let row_top = cx.theme().metric(Metric::RowHeight) * row as f32;
+        let strategy = if row_top < self.scroll_top() {
+            ScrollStrategy::Top
+        } else {
+            ScrollStrategy::Bottom
+        };
+        self.scroll.scroll_to_item(row, strategy);
+    }
+
+    /// How far the rows are scrolled up, in pixels.
+    fn scroll_top(&self) -> Pixels {
+        -self.scroll.0.borrow().base_handle.offset().y
     }
 
     /// Opens a file row; expands or collapses a folder row.
@@ -203,8 +220,8 @@ impl ProjectPanel {
         self.select(current, cx);
     }
 
-    /// Rows and selection as JSON (for `workbench.state`).
-    pub fn state_json(&self) -> serde_json::Value {
+    /// Rows, selection and scroll position as JSON (for `workbench.state`).
+    pub fn state_json(&self, cx: &App) -> serde_json::Value {
         let Some(tree) = &self.tree else {
             return serde_json::Value::Null;
         };
@@ -215,6 +232,8 @@ impl ProjectPanel {
                 .map(|r| r.to_string_lossy().replace('\\', "/"))
                 .unwrap_or_default()
         };
+        let scroll_top = self.scroll_top();
+        let first_visible = (scroll_top / cx.theme().metric(Metric::RowHeight)).floor() as usize;
         json!({
             "rows": tree.rows().iter().map(|&id| {
                 let n = tree.node(id);
@@ -228,6 +247,8 @@ impl ProjectPanel {
             }).collect::<Vec<_>>(),
             "selected": self.selected.map(rel),
             "loading": self.loading > 0,
+            "scroll_top": f32::from(scroll_top),
+            "first_visible_row": first_visible,
         })
     }
 
@@ -508,26 +529,30 @@ impl Render for ProjectPanel {
                 .child("No project is open")
                 .into_any_element();
         }
-        el.child(
-            uniform_list(
-                "project-rows",
-                count,
-                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                    let rows: Vec<NodeId> = this
-                        .tree
-                        .as_ref()
-                        .map(|t| t.rows()[range.clone()].to_vec())
-                        .unwrap_or_default();
-                    rows.into_iter()
-                        .zip(range)
-                        .map(|(id, ix)| this.row(id, ix, focused, cx))
-                        .collect::<Vec<_>>()
-                }),
-            )
-            .track_scroll(self.scroll.clone())
-            .flex_1()
-            .overflow_hidden(),
+        let mut rows = uniform_list(
+            "project-rows",
+            count,
+            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                let rows: Vec<NodeId> = this
+                    .tree
+                    .as_ref()
+                    .map(|t| t.rows()[range.clone()].to_vec())
+                    .unwrap_or_default();
+                rows.into_iter()
+                    .zip(range)
+                    .map(|(id, ix)| this.row(id, ix, focused, cx))
+                    .collect::<Vec<_>>()
+            }),
         )
-        .into_any_element()
+        .debug_selector(|| "project-rows".into())
+        .track_scroll(self.scroll.clone())
+        .flex_1()
+        // The list scrolls vertically (its own `overflow-y: scroll`, which
+        // the wheel and trackpad need); names wider than the tool window
+        // are cut off.
+        .overflow_x_hidden();
+        // A sideways swipe does not scroll the rows up or down.
+        rows.style().restrict_scroll_to_axis = Some(true);
+        el.child(rows).into_any_element()
     }
 }
