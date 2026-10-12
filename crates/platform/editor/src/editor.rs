@@ -214,7 +214,8 @@ pub struct Editor {
     extend_last: Option<SelectionSet>,
     /// Center the caret line on the next frame (Go to Line).
     pub(crate) center_caret: bool,
-    /// A one-line text field (no gutter, no scrollbar).
+    /// A text field: no gutter, no scrollbar, no caret line (one line, or
+    /// a few in search fields).
     pub(crate) single_line: bool,
     /// Text shown in an empty one-line field.
     pub(crate) placeholder: Option<SharedString>,

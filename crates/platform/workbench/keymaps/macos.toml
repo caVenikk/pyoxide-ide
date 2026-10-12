@@ -121,23 +121,26 @@ name = "GoToLine > Editor"
 "enter" = "go-to-line.confirm"
 "escape" = "go-to-line.cancel"
 
-# The find bar's fields are one-line editors: Enter, Down and Ctrl+N go to
-# the next match, Shift+Enter, Up and Ctrl+P to the previous one, Escape
-# closes the bar, Cmd+Enter goes back to the editor, Tab switches between
-# the fields, Option+Down shows the search history. The options take the
-# reference IDE's mnemonic keys: Ctrl+Option and, as it also accepts on
-# macOS, Option with the letter; the buttons take Ctrl+Option with theirs.
+# The find bar's fields are editors: Enter goes to the next match,
+# Shift+Enter to the previous one; Down and Ctrl+N, Up and Ctrl+P do the same
+# while the fields hold one line each and move the caret when they hold more;
+# Cmd+Shift+Enter breaks the line. Escape closes the bar, Cmd+Enter goes back
+# to the editor, Tab switches between the fields, Option+Down shows the
+# search history. The options take the reference IDE's mnemonic keys:
+# Ctrl+Option and, as it also accepts on macOS, Option with the letter; the
+# buttons take Ctrl+Option with theirs.
 [[context]]
 name = "FindBar > Editor"
 [context.bindings]
 "enter" = "find.next"
-"down" = "find.next"
-"ctrl-n" = "find.next"
+"down" = "find.down"
+"ctrl-n" = "find.down"
 "shift-enter" = "find.previous"
-"up" = "find.previous"
-"ctrl-p" = "find.previous"
+"up" = "find.up"
+"ctrl-p" = "find.up"
 "escape" = "find.close"
 "cmd-enter" = "find.focus-editor"
+"cmd-shift-enter" = "find.new-line"
 "tab" = "find.switch-field"
 "shift-tab" = "find.switch-field"
 "alt-down" = "find.show-history"

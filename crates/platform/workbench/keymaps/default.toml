@@ -107,20 +107,23 @@ name = "GoToLine > Editor"
 "enter" = "go-to-line.confirm"
 "escape" = "go-to-line.cancel"
 
-# The find bar's fields are one-line editors: Enter and Down go to the next
-# match, Shift+Enter and Up to the previous one, Escape closes the bar,
-# Ctrl+Enter goes back to the editor, Tab switches between the fields,
-# Alt+Down shows the search history. The options and the buttons take the
-# reference IDE's mnemonic keys (Alt with the letter).
+# The find bar's fields are editors: Enter goes to the next match,
+# Shift+Enter to the previous one; Down and Up do the same while the fields
+# hold one line each and move the caret when they hold more;
+# Ctrl+Shift+Enter breaks the line. Escape closes the bar, Ctrl+Enter goes
+# back to the editor, Tab switches between the fields, Alt+Down shows the
+# search history. The options and the buttons take the reference IDE's
+# mnemonic keys (Alt with the letter).
 [[context]]
 name = "FindBar > Editor"
 [context.bindings]
 "enter" = "find.next"
-"down" = "find.next"
+"down" = "find.down"
 "shift-enter" = "find.previous"
-"up" = "find.previous"
+"up" = "find.up"
 "escape" = "find.close"
 "ctrl-enter" = "find.focus-editor"
+"ctrl-shift-enter" = "find.new-line"
 "tab" = "find.switch-field"
 "shift-tab" = "find.switch-field"
 "alt-down" = "find.show-history"

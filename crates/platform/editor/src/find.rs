@@ -93,6 +93,15 @@ ui::ui_commands! {
     /// Move between the search and the replace field.
     SwitchField => "find.switch-field", "Next Field",
         "Moves the focus between the search field and the replace field.";
+    /// Break the line in a field.
+    NewLine => "find.new-line", "New Line",
+        "Breaks the line in the focused field of the find bar, for a search or a replacement over several lines.";
+    /// Down in a field.
+    Down => "find.down", "Next Occurrence or Line Down",
+        "Selects the next match; while a field holds several lines, moves the caret down instead.";
+    /// Up in a field.
+    Up => "find.up", "Previous Occurrence or Line Up",
+        "Selects the previous match; while a field holds several lines, moves the caret up instead.";
     /// Show the recent searches.
     ShowHistory => "find.show-history", "Search History",
         "Shows the recent searches (or replacements) of the session below the focused field.";
@@ -117,6 +126,9 @@ pub const HISTORY_SIZE: usize = 30;
 /// Height of a row of the bar and of its fields.
 const ROW_HEIGHT: f32 = 34.0;
 const FIELD_HEIGHT: f32 = 28.0;
+/// Lines a field shows before it scrolls (the reference IDE's
+/// `ide.find.max.rows`).
+const MAX_FIELD_ROWS: usize = 3;
 /// Share of the bar's width taken by the fields, and their smallest width.
 const FIELD_WIDTH: f32 = 0.4;
 const MIN_FIELD_WIDTH: f32 = 240.0;
@@ -478,12 +490,12 @@ impl FindBar {
 
     // ---- opening and closing ---------------------------------------------
 
-    /// Opens the bar (or brings the focus back to it): a single-line
-    /// selection becomes the query; in Replace a selection over several
-    /// lines limits the search to it (Find does the same here, where the
-    /// reference IDE puts the lines into a multi-line field). Otherwise the
-    /// field keeps the last search. The field texts are selected so that
-    /// typing replaces them.
+    /// Opens the bar (or brings the focus back to it), as the reference IDE
+    /// does: the selected text becomes the query, also over several lines;
+    /// only Replace with a selection over several lines starts with an
+    /// empty query and searches within the selection. Otherwise the field
+    /// keeps the last search (unless that was over several lines). The
+    /// field texts are selected so that typing replaces them.
     pub fn open(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         let last = last_search(cx);
         let was_open = self.open;
@@ -503,7 +515,7 @@ impl FindBar {
         } else {
             last.text.clone()
         };
-        if text.contains('\n') {
+        if !was_open && text.contains('\n') {
             text.clear();
         }
         // The selected current match of an open bar is not a new query.
@@ -512,8 +524,8 @@ impl FindBar {
             self.initial = Some(self.editor.read(cx).selections().clone());
             self.scope = None;
             if !selected.is_empty() {
-                if selected.contains('\n') {
-                    // Search within the lines, starting with an empty query.
+                if replace && selected.contains('\n') {
+                    // Replace within the lines, starting with an empty query.
                     self.scope = Some(selection);
                     text.clear();
                 } else {
@@ -1019,7 +1031,7 @@ impl FindBar {
         } else {
             last_search(cx).text
         };
-        let mut message = format!("\"{text}\" not found");
+        let mut message = format!("\"{}\" not found", one_line(&text));
         if can_wrap {
             self.wrap = Some(direction);
             let editor_focus = self.editor.focus_handle(cx);
@@ -1536,7 +1548,88 @@ impl FindBar {
         self.history_close(window, cx);
     }
 
+    /// A field holds several lines: the search runs over line breaks, and
+    /// Up and Down move the caret in the fields (as in the reference IDE).
+    pub fn is_multiline(&self, cx: &App) -> bool {
+        self.query.read(cx).buffer().len_lines() > 1
+            || self.replace.read(cx).buffer().len_lines() > 1
+    }
+
+    /// The field that has the focus (the search field when none has).
+    fn focused_field(&self, window: &Window, cx: &App) -> Entity<Editor> {
+        if self.replace.focus_handle(cx).is_focused(window) {
+            self.replace.clone()
+        } else {
+            self.query.clone()
+        }
+    }
+
+    fn new_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let field = self.focused_field(window, cx);
+        window.focus(&field.focus_handle(cx));
+        field.update(cx, |f, cx| f.insert("\n", cx));
+        cx.notify();
+    }
+
+    /// Up and Down in a field: the previous or next match, or, while a
+    /// field holds several lines, the caret movement (the key goes on to the
+    /// field's own binding).
+    fn up_down(&mut self, direction: Direction, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_multiline(cx) {
+            cx.propagate();
+            return;
+        }
+        self.find(direction, window, cx);
+    }
+
+    fn new_line_action(&mut self, _: &NewLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_line(window, cx);
+    }
+
+    fn down_action(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
+        self.up_down(Direction::Forward, window, cx);
+    }
+
+    fn up_action(&mut self, _: &Up, window: &mut Window, cx: &mut Context<Self>) {
+        self.up_down(Direction::Backward, window, cx);
+    }
+
     // ---- drawing --------------------------------------------------------------
+
+    /// Lines a field shows: its lines, at most [`MAX_FIELD_ROWS`].
+    fn field_rows(field: &Entity<Editor>, cx: &App) -> usize {
+        field.read(cx).buffer().len_lines().clamp(1, MAX_FIELD_ROWS)
+    }
+
+    /// Height of a field's frame for its lines.
+    fn frame_height(field: &Entity<Editor>, window: &Window, cx: &App) -> gpui::Pixels {
+        let line = crate::field_line_height(window, cx);
+        px(FIELD_HEIGHT) + line * (Self::field_rows(field, cx) - 1) as f32
+    }
+
+    /// Height of a row of the bar with this field.
+    fn row_height(field: &Entity<Editor>, window: &Window, cx: &App) -> gpui::Pixels {
+        Self::frame_height(field, window, cx) + px(ROW_HEIGHT - FIELD_HEIGHT)
+    }
+
+    /// The new-line button inside a field.
+    fn new_line_button(
+        &self,
+        id: &'static str,
+        field: &Entity<Editor>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let shortcut = ui::keys::shortcut_in(&NewLine, &field.focus_handle(cx), window)
+            .map(SharedString::from);
+        let target = field.clone();
+        small_icon_button(id, IconName::NEW_LINE, true, cx)
+            .tooltip(Tooltip::text("New Line", shortcut))
+            .on_click(cx.listener(move |_, _: &ClickEvent, window, cx| {
+                window.focus(&target.focus_handle(cx));
+                target.update(cx, |f, cx| f.insert("\n", cx));
+            }))
+    }
 
     /// A field of the bar: the frame, an optional leading icon, the one-line
     /// editor and trailing children.
@@ -1555,16 +1648,26 @@ impl FindBar {
                 .is_some_and(|h| (h.field == Field::Query) == (id == "find-query"))
                 && self.history_focus.is_focused(window));
         let line = crate::field_line_height(window, cx);
+        let rows = Self::field_rows(field, cx);
+        // Inside the 1 px border: the first line centred in a one-line
+        // field; more lines grow the field downwards, up to the most it
+        // shows, then the text scrolls. Icons and buttons stay at the top.
+        let inner = px(FIELD_HEIGHT - 2.0);
+        let pad = ((inner - line) / 2.0).max(px(0.0));
         input_frame(focused, false, cx)
             .id(id)
             .debug_selector(move || id.into())
+            .items_start()
             .w(relative(FIELD_WIDTH))
             .min_w(px(MIN_FIELD_WIDTH))
-            .h(px(FIELD_HEIGHT))
+            .h(Self::frame_height(field, window, cx))
             .map(|d| match leading {
                 Some(icon) => d.child(
                     div()
+                        .flex()
                         .flex_none()
+                        .items_center()
+                        .h(inner)
                         .pl(px(6.0))
                         .pr(px(4.0))
                         .child(Icon::new(icon)),
@@ -1575,10 +1678,33 @@ impl FindBar {
                 div()
                     .flex_1()
                     .min_w(px(0.0))
-                    .h(line)
+                    .mt(pad)
+                    .h(line * rows as f32)
                     .overflow_hidden()
                     .child(field.clone()),
             )
+    }
+
+    /// Icons and buttons inside a field, at the height of its first line.
+    fn field_trailing(&self) -> gpui::Div {
+        div()
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .h(px(FIELD_HEIGHT - 2.0))
+            .gap(px(2.0))
+            .pr(px(3.0))
+    }
+
+    /// An element next to a field, at the height of the field's first line.
+    fn beside_field(el: impl IntoElement) -> gpui::Div {
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(px(FIELD_HEIGHT))
+            .child(el)
     }
 
     fn render_query_row(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1592,12 +1718,9 @@ impl FindBar {
         let field_shortcut = |action: &dyn gpui::Action| {
             ui::keys::shortcut_in(action, &field_focus, window).map(SharedString::from)
         };
-        let toggles = div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .gap(px(2.0))
-            .pr(px(3.0))
+        let toggles = self
+            .field_trailing()
+            .child(self.new_line_button("find-query-new-line", &self.query, window, cx))
             .child(
                 toggle_button(
                     "find-match-case",
@@ -1675,37 +1798,38 @@ impl FindBar {
         div()
             .flex()
             .flex_row()
-            .items_center()
-            .h(px(ROW_HEIGHT))
+            .items_start()
+            .h(Self::row_height(&self.query, window, cx))
             .px(px(4.0))
+            .py(px((ROW_HEIGHT - FIELD_HEIGHT) / 2.0))
             .gap(px(4.0))
-            .child(
+            .child(Self::beside_field(
                 small_icon_button("find-mode", mode_icon, true, cx)
                     .tooltip(Tooltip::text(mode_tooltip, mode_shortcut))
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         let replace = !this.replace_mode;
                         this.open(replace, window, cx)
                     })),
-            )
+            ))
             .child(field)
-            .child(
+            .child(Self::beside_field(
                 status_text(status, error, cx)
                     .id("find-status")
                     .debug_selector(|| "find-status".into())
                     .pl(px(6.0))
                     .pr(px(2.0)),
-            )
-            .child(previous)
-            .child(next)
-            .child(in_selection)
+            ))
+            .child(Self::beside_field(previous))
+            .child(Self::beside_field(next))
+            .child(Self::beside_field(in_selection))
             .child(div().flex_1())
-            .child(
+            .child(Self::beside_field(
                 small_icon_button("find-close", IconName::CLOSE, true, cx)
                     .tooltip(Tooltip::text("Close", field_shortcut(&Close)))
                     .on_click(
                         cx.listener(|this, _: &ClickEvent, window, cx| this.close(window, cx)),
                     ),
-            )
+            ))
     }
 
     fn render_replace_row(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1718,21 +1842,24 @@ impl FindBar {
         let shortcut = |action: &dyn gpui::Action| {
             ui::keys::shortcut_in(action, &field_focus, window).map(SharedString::from)
         };
+        let new_line = self.new_line_button("find-replace-new-line", &self.replace, window, cx);
         let field = self
             .field_frame("find-replace", &self.replace, None, window, cx)
-            .key_context("FindReplace");
+            .key_context("FindReplace")
+            .child(self.field_trailing().child(new_line));
         div()
             .flex()
             .flex_row()
-            .items_center()
-            .h(px(ROW_HEIGHT))
+            .items_start()
+            .h(Self::row_height(&self.replace, window, cx))
             .px(px(4.0))
+            .py(px((ROW_HEIGHT - FIELD_HEIGHT) / 2.0))
             .gap(px(4.0))
             // Room of the mode button above.
             .child(div().flex_none().w(px(SMALL_BUTTON)))
             .child(field)
             .child(div().w(px(6.0)))
-            .child(
+            .child(Self::beside_field(
                 text_button("find-replace-current", "Replace", can_replace, cx)
                     .tooltip(Tooltip::text("Replace", shortcut(&ReplaceCurrent)))
                     .when(can_replace, |d| {
@@ -1740,8 +1867,8 @@ impl FindBar {
                             this.replace_current(window, cx)
                         }))
                     }),
-            )
-            .child(
+            ))
+            .child(Self::beside_field(
                 text_button("find-replace-all", "Replace All", can_replace_all, cx)
                     .tooltip(Tooltip::text("Replace All", shortcut(&ReplaceAll)))
                     .when(can_replace_all, |d| {
@@ -1749,8 +1876,8 @@ impl FindBar {
                             this.replace_all(window, cx)
                         }))
                     }),
-            )
-            .child(
+            ))
+            .child(Self::beside_field(
                 text_button(
                     "find-exclude",
                     if excluded { "Include" } else { "Exclude" },
@@ -1766,19 +1893,24 @@ impl FindBar {
                         cx.listener(|this, _: &ClickEvent, window, cx| this.exclude(window, cx)),
                     )
                 }),
-            )
+            ))
     }
 
-    fn render_history(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn render_history(&self, window: &Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let h = self.history.as_ref()?;
+        // Below the field it belongs to.
+        let query_row = Self::row_height(&self.query, window, cx);
+        let gap = px((ROW_HEIGHT - FIELD_HEIGHT) / 2.0);
+        let top = match h.field {
+            Field::Query => query_row - gap + px(2.0),
+            Field::Replace => {
+                query_row + gap + Self::frame_height(&self.replace, window, cx) + px(2.0)
+            }
+        };
         let theme = cx.theme();
         let selected_bg = theme.color(UiRole::Selection);
         let selected_text = theme.color(UiRole::SelectionText);
         let hover = theme.color(UiRole::Hover);
-        let top = match h.field {
-            Field::Query => ROW_HEIGHT - 2.0,
-            Field::Replace => 2.0 * ROW_HEIGHT - 2.0,
-        };
         let rows: Vec<_> = h
             .items
             .iter()
@@ -1794,7 +1926,7 @@ impl FindBar {
                     .overflow_hidden()
                     .when(selected, |d| d.bg(selected_bg).text_color(selected_text))
                     .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-                    .child(item.clone())
+                    .child(one_line(item))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.history_pick(Some(i), window, cx)
                     }))
@@ -1807,7 +1939,7 @@ impl FindBar {
                 .key_context("FindHistory")
                 .track_focus(&self.history_focus)
                 .absolute()
-                .top(px(top))
+                .top(top)
                 .left(px(FIELD_LEFT))
                 .w(relative(FIELD_WIDTH))
                 .min_w(px(MIN_FIELD_WIDTH))
@@ -1863,6 +1995,11 @@ struct Found {
     ranges: Vec<Range<usize>>,
     lines: Vec<usize>,
     truncated: bool,
+}
+
+/// A text over several lines shown on one line (hints, history items).
+fn one_line(text: &str) -> String {
+    text.replace('\n', " \u{21b5} ")
 }
 
 /// "0 results", "1 result", "12 results".
@@ -2000,7 +2137,7 @@ impl Render for FindBar {
             .when(self.replace_mode, |d| {
                 d.child(self.render_replace_row(window, cx))
             })
-            .children(self.render_history(cx));
+            .children(self.render_history(window, cx));
         Self::bind_actions(el, cx)
     }
 }
@@ -2043,6 +2180,9 @@ find_actions! {
     FocusEditor => focus_editor_action,
     SwitchField => switch_field_action,
     ShowHistory => show_history_action,
+    NewLine => new_line_action,
+    Down => down_action,
+    Up => up_action,
     HistoryUp => history_up_action,
     HistoryDown => history_down_action,
     HistoryPick => history_pick_action,

@@ -73,7 +73,13 @@ impl Query {
         let pattern = if regex_mode {
             self.text.clone()
         } else {
-            regex::escape(&self.text)
+            // Text over several lines: a line break matches `\n` and
+            // `\r\n`, so raw file text with CRLF breaks matches too.
+            self.text
+                .split('\n')
+                .map(regex::escape)
+                .collect::<Vec<_>>()
+                .join(r"\r?\n")
         };
         let regex = RegexBuilder::new(&pattern)
             .case_insensitive(!self.options.case_sensitive)
@@ -259,9 +265,10 @@ impl Iterator for Matches<'_> {
 }
 
 /// `text` as a regular expression that matches it literally (selected text
-/// put into a search field while "Regex" is on).
+/// put into a search field while "Regex" is on); line breaks become `\n`,
+/// so the pattern stays on one line, as in the reference IDE.
 pub fn escape(text: &str) -> String {
-    regex::escape(text)
+    regex::escape(text).replace('\n', "\\n")
 }
 
 /// A character that belongs to a word for "Words": a letter or digit of
@@ -436,6 +443,27 @@ mod tests {
         // `.` does not match the carriage return.
         assert_eq!(find(text, r"two.", r), Vec::<&str>::new());
         assert_eq!(find(text, r"t.o", r), ["two"]);
+    }
+
+    #[test]
+    fn queries_over_several_lines() {
+        let text = "def f():\n    return 1\n\ndef g():\n    return 2\n";
+        // Plain text across a line break.
+        let plain = opts(true, false, false);
+        assert_eq!(find(text, ":\n    return", plain).len(), 2);
+        // A text with CRLF breaks matches the same query.
+        let crlf = text.replace('\n', "\r\n");
+        assert_eq!(find(&crlf, ":\n    return", plain), [":\r\n    return"; 2]);
+        // An escaped selection over lines finds itself as a regex.
+        let selected = "f():\n    return 1";
+        let pattern = escape(selected);
+        assert_eq!(pattern, "f\\(\\):\\n    return 1");
+        assert_eq!(find(text, &pattern, opts(true, false, true)), [selected]);
+        // `\n` in a pattern.
+        assert_eq!(find(text, r"\d\n\ndef", opts(true, false, true)).len(), 1);
+        // Words: only the outer ends count.
+        let words = opts(true, true, false);
+        assert_eq!(find("ab\ncd abc\ncd ab\ncde", "ab\ncd", words), ["ab\ncd"]);
     }
 
     #[test]

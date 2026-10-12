@@ -503,8 +503,8 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["text"], json!("foo"), "{what}");
             assert!(h.query_focused(), "{what}: the search field has the focus");
         }
-        "find.next" | "find.previous" => {
-            let forward = b.command == "find.next";
+        "find.next" | "find.previous" | "find.down" | "find.up" => {
+            let forward = b.command == "find.next" || b.command == "find.down";
             h.set_editor(if forward {
                 "|foo foo foo"
             } else {
@@ -558,8 +558,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert!(h.query_focused(), "{what}: the focus stays in the field");
         }
         "find.toggle-in-selection" => {
-            // Opened with lines selected: the search stays within them.
+            // Replace opened with lines selected: the search stays within them.
             h.set_editor("‹foo\nfoo›\nfoo");
+            h.invoke("find.replace", json!(null));
             h.search("foo");
             let s = h.find_state();
             assert_eq!(s["in_selection"], json!(true), "{what}");
@@ -605,6 +606,17 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.invoke("find.replace-all", json!(null));
             let text = h.invoke("editor.text", json!(null));
             assert_eq!(text, json!("foo x x"), "{what}");
+        }
+        "find.new-line" => {
+            h.set_editor("|ab\ncd ab\ncd");
+            h.search("ab");
+            h.press("end");
+            h.press(keys);
+            h.cx.simulate_input(h.window.into(), "cd");
+            h.draw();
+            let s = h.find_state();
+            assert_eq!(s["text"], json!("ab\ncd"), "{what}");
+            assert_eq!(s["matches"], json!(2), "{what}");
         }
         "find.focus-editor" => {
             h.set_editor("|foo foo");

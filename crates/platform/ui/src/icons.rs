@@ -77,6 +77,7 @@ impl IconName {
     pub const REGEX: Self = Self("inline/regex");
     pub const PRESERVE_CASE: Self = Self("inline/preserveCase");
     pub const SEARCH_HISTORY: Self = Self("inline/searchHistory");
+    pub const NEW_LINE: Self = Self("inline/newLine");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -117,7 +118,7 @@ platform_icons! {
         "general/collapseAll", "general/down", "general/expandAll", "general/filter", "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreVertical", "general/search@20x20", "general/settings@20x20", "general/up",
-        "inline/exactWords", "inline/matchCase", "inline/preserveCase", "inline/regex",
+        "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
         "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/symlink",
         "run/debug", "run/run",

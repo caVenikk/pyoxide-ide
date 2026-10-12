@@ -4,6 +4,8 @@
 
 use std::rc::Rc;
 
+use gpui::ClipboardItem;
+
 use editor::Editor;
 use gpui::{
     AppContext as _, Entity, Focusable as _, Keystroke, Modifiers, TestAppContext, WindowHandle,
@@ -65,6 +67,9 @@ struct Keys {
     regex: &'static str,
     in_selection: &'static str,
     replace_all: &'static str,
+    new_line: &'static str,
+    paste: &'static str,
+    save: &'static str,
 }
 
 const MAC: Keys = Keys {
@@ -79,6 +84,9 @@ const MAC: Keys = Keys {
     regex: "alt-x",
     in_selection: "ctrl-alt-e",
     replace_all: "ctrl-alt-a",
+    new_line: "cmd-shift-enter",
+    paste: "cmd-v",
+    save: "cmd-s",
 };
 
 const WIN: Keys = Keys {
@@ -93,12 +101,16 @@ const WIN: Keys = Keys {
     regex: "alt-x",
     in_selection: "ctrl-alt-e",
     replace_all: "alt-a",
+    new_line: "ctrl-shift-enter",
+    paste: "ctrl-v",
+    save: "ctrl-s",
 };
 
 struct H<'a> {
     cx: &'a mut TestAppContext,
     window: WindowHandle<Workbench>,
     keys: &'static Keys,
+    root: std::path::PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -204,6 +216,17 @@ impl H<'_> {
             .unwrap()
     }
 
+    /// Line of the caret in the search field.
+    fn query_caret_line(&mut self) -> usize {
+        let bar = self
+            .window
+            .read_with(self.cx, |w, _| w.active_find_bar().cloned())
+            .unwrap()
+            .unwrap();
+        self.cx
+            .update(|cx| bar.read(cx).query_field().read(cx).caret_point().line)
+    }
+
     fn highlighted(&mut self) -> usize {
         let editor = self.editor();
         self.cx.update(|cx| {
@@ -237,6 +260,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys)
         cx,
         window,
         keys,
+        root: root.clone(),
         _dir: dir,
     };
     h.draw();
@@ -560,4 +584,139 @@ fn shortcuts_match_with_a_cyrillic_layout(cx: &mut TestAppContext) {
     h.cx.dispatch_keystroke(h.window.into(), key(Modifiers::command(), "g", None));
     h.draw();
     assert_eq!(h.find()["status"], json!("2/2"));
+}
+
+#[gpui::test]
+fn find_with_lines_selected_searches_for_them(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.set_editor("x\n‹def f():\n    pass›\nx\ndef f():\n    pass\n");
+        h.press(h.keys.find);
+        let s = h.find();
+        // The lines are the query; the whole file is searched.
+        assert_eq!(s["text"], json!("def f():\n    pass"));
+        assert_eq!(s["in_selection"], json!(false));
+        assert_eq!(s["status"], json!("1/2"));
+        assert_eq!(h.highlighted(), 2);
+        // Enter still goes to the next match, Shift+Enter back.
+        h.press("enter");
+        assert_eq!(
+            h.marked(),
+            "x\ndef f():\n    pass\nx\n‹def f():\n    pass›\n"
+        );
+        assert_eq!(h.find()["status"], json!("2/2"));
+        h.press("shift-enter");
+        assert_eq!(h.find()["status"], json!("1/2"));
+        // Up and Down move the caret in a field over several lines.
+        h.press("down");
+        assert_eq!(h.query_caret_line(), 1);
+        assert_eq!(h.find()["status"], json!("1/2"));
+        h.press("up");
+        assert_eq!(h.query_caret_line(), 0);
+        // Regex on: the lines go in escaped, on one line.
+        h.press("escape");
+        h.invoke("find.search", json!({ "text": "", "regex": true }));
+        h.press("escape");
+        h.set_editor("‹a.b\nc›\na.b\nc axb\nc");
+        h.press(h.keys.find);
+        let s = h.find();
+        assert_eq!(s["text"], json!(r"a\.b\nc"));
+        assert_eq!(s["matches"], json!(2));
+        h.invoke("find.search", json!({ "text": "", "regex": false }));
+    });
+}
+
+#[gpui::test]
+fn new_lines_and_pasted_lines_in_the_fields(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.set_editor("|ab\ncd ab\ncd ab cd");
+        h.press(h.keys.find);
+        h.type_text("ab");
+        assert_eq!(h.find()["matches"], json!(3));
+        h.press(h.keys.new_line);
+        h.type_text("cd");
+        let s = h.find();
+        assert_eq!(s["text"], json!("ab\ncd"));
+        assert_eq!(s["matches"], json!(2));
+        // Pasted lines keep their breaks (CRLF ones too).
+        h.cx.write_to_clipboard(ClipboardItem::new_string("b\r\ncd".into()));
+        h.press(h.keys.find);
+        h.press(h.keys.paste);
+        let s = h.find();
+        assert_eq!(s["text"], json!("b\ncd"));
+        assert_eq!(s["matches"], json!(2));
+    });
+}
+
+#[gpui::test]
+fn lines_of_a_crlf_file(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        std::fs::write(h.root.join("crlf.txt"), "one\r\ntwo\r\none\r\ntwo\r\n").unwrap();
+        h.invoke("project.open-file", json!({ "path": "crlf.txt" }));
+        h.invoke(
+            "editor.set-selection",
+            json!({ "anchor": { "line": 0, "column": 0 }, "head": { "line": 1, "column": 3 } }),
+        );
+        h.focus_editor();
+        h.press(h.keys.replace);
+        // Replace with lines selected searches within them: Find instead.
+        h.press("escape");
+        h.invoke(
+            "editor.set-selection",
+            json!({ "anchor": { "line": 0, "column": 0 }, "head": { "line": 1, "column": 3 } }),
+        );
+        h.focus_editor();
+        h.press(h.keys.find);
+        let s = h.find();
+        assert_eq!(s["text"], json!("one\ntwo"));
+        assert_eq!(s["matches"], json!(2));
+        // Replace them with lines; the file keeps its CRLF breaks.
+        h.press(h.keys.replace);
+        h.press("tab");
+        h.type_text("1");
+        h.press(h.keys.new_line);
+        h.type_text("2");
+        h.press(h.keys.replace_all);
+        assert_eq!(h.invoke("editor.text", json!(null)), json!("1\n2\n1\n2\n"));
+        h.focus_editor();
+        h.press(h.keys.save);
+        let disk = std::fs::read_to_string(h.root.join("crlf.txt")).unwrap();
+        assert_eq!(disk, "1\r\n2\r\n1\r\n2\r\n");
+        h.invoke("tabs.close", json!(null));
+    });
+}
+
+#[gpui::test]
+fn replacing_lines_with_lines(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.set_editor("|a\nb\na\nb\nab");
+        h.press(h.keys.replace);
+        h.type_text("a");
+        h.press(h.keys.new_line);
+        h.type_text("b");
+        assert_eq!(h.find()["matches"], json!(2));
+        h.press("tab");
+        h.type_text("x");
+        h.press(h.keys.new_line);
+        h.type_text("y");
+        // Enter in the replace field replaces the current match.
+        h.press("enter");
+        assert_eq!(
+            h.invoke("editor.text", json!(null)),
+            json!("x\ny\na\nb\nab")
+        );
+        assert_eq!(h.marked(), "x\ny\n‹a\nb›\nab");
+        h.invoke("find.search", json!({ "text": "x\ny", "replace": "a\nb" }));
+        h.press(h.keys.replace_all);
+        assert_eq!(
+            h.invoke("editor.text", json!(null)),
+            json!("a\nb\na\nb\nab")
+        );
+        // Replace All of matches over lines is one undo step.
+        h.focus_editor();
+        h.press(h.keys.undo);
+        assert_eq!(
+            h.invoke("editor.text", json!(null)),
+            json!("x\ny\na\nb\nab")
+        );
+    });
 }

@@ -16,7 +16,9 @@ keymaps), `crates/platform/workbench/tests/keymap.rs` (every binding),
 | Replace | Cmd+R | Ctrl+R | editor, find bar |
 | Find Next | Cmd+G | F3, Ctrl+L | editor, find bar |
 | Find Previous | Cmd+Shift+G | Shift+F3, Ctrl+Shift+L | editor, find bar |
-| Next / previous match | Enter, Down, Ctrl+N / Shift+Enter, Up, Ctrl+P | Enter, Down / Shift+Enter, Up | find bar fields |
+| Next / previous match | Enter / Shift+Enter | Enter / Shift+Enter | find bar fields |
+| Next / previous match, or caret down / up when a field holds several lines | Down, Ctrl+N / Up, Ctrl+P | Down / Up | find bar fields |
+| New line in a field | Cmd+Shift+Enter | Ctrl+Shift+Enter | find bar fields |
 | Close the bar | Escape | Escape | find bar fields |
 | Back to the editor | Cmd+Enter | Ctrl+Enter | find bar fields |
 | Other field | Tab, Shift+Tab | Tab, Shift+Tab | find bar fields |
@@ -44,13 +46,19 @@ then again to Cmd+G, and the later entry replaces the earlier one.
    shows the last search (`one`), selected. The word at the caret is not
    used (the reference IDE does that only with a registry switch that is
    off by default).
-5. Select a few lines and press Replace: the bar opens in replace mode
+5. Select a few lines and press Find: the lines go into the search field
+   as a query over several lines, and the whole file is searched for them
+   (`1/2`); In Selection stays off.
+6. Select a few lines and press Replace: the bar opens in replace mode
    with an empty search field ("Search in selection only"); matches are
    searched only within the lines, which stay selected, and the current
-   match is outlined with the active match background. Find with a
-   selection over several lines does the same here (the reference IDE puts
-   the lines into a multi-line search field instead).
-6. With Regex on, a selected `a.b` goes into the field as `a\.b`.
+   match is outlined with the active match background. This is the
+   reference IDE's rule (`FindUtil.configureFindModel`): a selection over
+   several lines becomes the query unless the bar opens for Replace, which
+   searches within it instead. A search over several lines from an earlier
+   bar is not offered again when the bar opens.
+7. With Regex on, a selected `a.b` goes into the field as `a\.b`, and line
+   breaks of a selection as `\n` (the pattern stays on one line).
 
 ### Searching while typing
 1. In `alpha beta alpha gamma alpha` with the caret at the start, press
@@ -69,7 +77,11 @@ then again to Cmd+G, and the later entry replaces the earlier one.
 
 ### Moving between matches
 1. Enter (or Down) selects the next match, Shift+Enter (or Up) the
-   previous one; the counter follows (`2/3`).
+   previous one; the counter follows (`2/3`). While one of the fields
+   holds several lines, Down and Up move the caret in the field instead
+   (as the reference IDE does); Enter and Shift+Enter keep moving between
+   matches (in the reference IDE they do nothing in a field over several
+   lines).
 2. Find Next / Find Previous do the same from the editor while the bar
    is open.
 3. At the last match, Find Next does not move: a hint below the caret says
@@ -87,6 +99,24 @@ then again to Cmd+G, and the later entry replaces the earlier one.
 2. After a search and Escape, Find Next selects the next match of the last
    search after the selection, without highlighting; at the end the same
    hint, then from the top. Find Previous the same way backwards.
+
+### Searching over several lines
+1. The search and replace fields take several lines: New Line
+   (Cmd/Ctrl+Shift+Enter, or the "New Line" icon in the field) breaks the
+   line; pasted text keeps its line breaks (CRLF ones become one break).
+2. A field grows with its lines up to three, then its text scrolls; the
+   buttons and the counter stay at the height of the first line.
+3. A query over several lines matches across line breaks; in a file with
+   CRLF breaks (and with a selection taken from it) it matches the same
+   way, since the editor keeps one kind of break inside. `\n` in a regular
+   expression matches a line break. Words checks only the outer ends of a
+   match.
+4. Matches over several lines are highlighted on each line, the current
+   one outlined on each of its lines; the scrollbar mark is at the line
+   where the match starts.
+5. Replace and Replace All work on matches over several lines and with
+   replacements over several lines; Replace All stays one undo step, and
+   saving keeps the file's CRLF breaks.
 
 ### Options
 1. Match Case, Words and Regex are toggle icons inside the search field
@@ -134,7 +164,7 @@ frames (replica/perf.md). Files up to 256 KB are searched at once, so the
 frame of the key already shows the matches.
 
 ## Not covered yet
-Multi-line search and replace fields, Preserve Case, the search filters
+Preserve Case, the search filters
 (comments, string literals), Select All Occurrences and the other
 multiple-caret actions of the bar, Open in Find Window, the regex help
 popup, replacement preview balloons.
