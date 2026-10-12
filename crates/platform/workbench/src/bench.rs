@@ -427,6 +427,28 @@ async fn open(window: WindowHandle<Workbench>, path: PathBuf, cx: &mut AsyncApp)
     ));
 }
 
+/// Waits until the window has handled a mouse move to `p` (posted events
+/// are handled in the order the run loop picks), then a little longer.
+async fn moved_to(
+    window: WindowHandle<Workbench>,
+    p: gpui::Point<gpui::Pixels>,
+    cx: &mut AsyncApp,
+) {
+    let until = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < until {
+        let at = cx
+            .update_window(window.into(), |_, window, _| window.mouse_position())
+            .ok();
+        if at.is_some_and(|at| {
+            (at.x - p.x).abs() < gpui::px(0.25) && (at.y - p.y).abs() < gpui::px(0.25)
+        }) {
+            break;
+        }
+        sleep(cx, Duration::from_millis(5)).await;
+    }
+    sleep(cx, Duration::from_millis(50)).await;
+}
+
 /// The system cursor over text, gutter, splitter and toolbar: each place is
 /// reached with mouse moves posted to the application's event queue (the
 /// path of a real mouse move through AppKit), and the cursor shown is read
@@ -489,7 +511,7 @@ async fn cursor(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
             let _ = cx.update_window(window.into(), |_, window, _| {
                 crate::shot::post_mouse_move(window, p)
             });
-            sleep(cx, Duration::from_millis(150)).await;
+            moved_to(window, p, cx).await;
             posted.push(crate::shot::current_cursor());
         }
         // What the frame view's tracking area does on a real move, then the
@@ -503,7 +525,7 @@ async fn cursor(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         let _ = cx.update_window(window.into(), |_, window, _| {
             crate::shot::post_mouse_move(window, p)
         });
-        sleep(cx, Duration::from_millis(150)).await;
+        moved_to(window, p, cx).await;
         let after_frame_view_and_move = crate::shot::current_cursor();
         // The system shows the arrow behind GPUI's back, then the pointer
         // moves on inside the same element.
@@ -512,7 +534,7 @@ async fn cursor(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         let _ = cx.update_window(window.into(), |_, window, _| {
             crate::shot::post_mouse_move(window, p)
         });
-        sleep(cx, Duration::from_millis(150)).await;
+        moved_to(window, p, cx).await;
         let after_system_arrow_and_move = crate::shot::current_cursor();
         let system = cx
             .update_window(window.into(), |_, window, _| {

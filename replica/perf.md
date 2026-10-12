@@ -143,6 +143,8 @@ running). The display refreshed at 60 Hz during these runs (median frame gap
 | 2026-10-11 | mac-1 | scrolling the 10 MB file, 3 lines per frame | frame work p50 3.4 ms, p99 4.4 ms | max 6.8 ms | 300 frames in 5 s at 60 Hz, no gap over 1.5x the median |
 | 2026-10-11 | mac-1 | memory after typing (100k-line file open) | 182 MB RSS | 182 MB | single process |
 | 2026-10-11 | mac-1 | memory after opening and scrolling the 10 MB file | 265 MB RSS | 266 MB | |
+| 2026-10-12 | mac-1 | typing, 100k-line file, with the lexical highlighting layer: key to frame | p50 2.61 ms, p90 3.89 ms, p99 5.45 ms | max 5.88 ms | 2 runs x 600 keys; load average about 4.8 (other applications busy) |
+| 2026-10-12 | mac-1 | typing, same runs: app work | p50 0.81 ms, p90 0.91 ms, p99 1.34 ms | max 3.79 ms | per run p99 1.18 / 1.49 ms |
 
 Against the budgets of docs/performance.md: keystroke to paint p99 5.8 ms
 (budget 16 ms); 10 MB file 24 ms to the first text (budget 200 ms), no dropped
