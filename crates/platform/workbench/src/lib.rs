@@ -14,9 +14,11 @@ pub mod env;
 pub mod file_types;
 pub mod keymap;
 pub mod project_panel;
+pub mod settings;
 mod shot;
 pub mod workbench;
 
 pub use app::{Product, StripeItem, init, open_main_window, run};
 pub use file_types::{FileType, HighlighterFactory};
+pub use settings::SaveSettings;
 pub use workbench::Workbench;

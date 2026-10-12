@@ -119,6 +119,18 @@ is a guess; the error itself gets the theme's error underline. The lexer
 states of all lines are computed with the background parse, so the UI
 thread only lexes the lines it paints.
 
+### Saving
+There is no unsaved state to lose: a modified file is written when its tab
+closes, when another tab is selected, when the window loses the focus to
+another application, and after 2 seconds without keyboard or mouse input
+or edits (`workbench::SaveSettings`, defaults in code until there is a
+settings window). The reference IDE saves on frame deactivation by default
+and has an idle save that is off by default (15 s, 1 to 300 s); Pyoxide
+turns the idle save on with a shorter time and adds the save on tab
+switch. Idle time is a timer that is armed by input and, when it fires
+early because of later input, sleeps for the rest of the time; there is no
+polling.
+
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a
 stable dotted id (`project.open-folder`, `editor.undo`, `editor.copy`,

@@ -428,3 +428,109 @@ fn pointer_shapes_over_text_gutter_and_splitter(cx: &mut TestAppContext) {
         assert_eq!(shape, expected, "at {position:?}");
     }
 }
+
+fn open_project_with_files(
+    cx: &mut TestAppContext,
+) -> (WindowHandle<Workbench>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path().display().to_string()}),
+    );
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "src/app.py"}),
+    );
+    (window, dir)
+}
+
+fn advance(cx: &mut TestAppContext, ms: u64) {
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(ms));
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn files_are_saved_after_idle_time(cx: &mut TestAppContext) {
+    let (window, dir) = open_project_with_files(cx);
+    let file = dir.path().join("src/app.py");
+    let original = std::fs::read(&file).unwrap();
+    invoke(cx, window, "editor.type", json!({"text": "x"}));
+    advance(cx, 1500);
+    assert_eq!(std::fs::read(&file).unwrap(), original, "saved too early");
+    // More input restarts the idle time.
+    invoke(cx, window, "editor.type", json!({"text": "y"}));
+    advance(cx, 1500);
+    assert_eq!(std::fs::read(&file).unwrap(), original, "saved too early");
+    advance(cx, 600);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "xydef main():\r\n    pass\r\n"
+    );
+    assert_eq!(state(cx, window)["tabs"][0]["modified"], json!(false));
+
+    // Keyboard input counts as activity too.
+    invoke(cx, window, "editor.type", json!({"text": "z"}));
+    advance(cx, 1500);
+    cx.simulate_keystrokes(window.into(), "escape");
+    advance(cx, 1500);
+    assert!(std::fs::read_to_string(&file).unwrap().starts_with("xyd"));
+    advance(cx, 600);
+    assert!(std::fs::read_to_string(&file).unwrap().starts_with("xyz"));
+
+    // Off: no save after the idle time.
+    window
+        .update(cx, |w, _, _| {
+            w.set_save_settings(workbench::SaveSettings {
+                save_on_idle: false,
+                ..workbench::SaveSettings::default()
+            })
+        })
+        .unwrap();
+    invoke(cx, window, "editor.type", json!({"text": "!"}));
+    advance(cx, 10_000);
+    let disk = std::fs::read_to_string(&file).unwrap();
+    assert!(disk.starts_with("xyzd"), "{disk:?}");
+}
+
+#[gpui::test]
+fn leaving_a_tab_saves_its_file(cx: &mut TestAppContext) {
+    let (window, dir) = open_project_with_files(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "README.md"}),
+    );
+    invoke(cx, window, "editor.type", json!({"text": "Hi "}));
+    assert_eq!(state(cx, window)["tabs"][1]["modified"], json!(true));
+    invoke(cx, window, "tabs.select", json!({"index": 0}));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "Hi # Demo\n"
+    );
+    assert_eq!(state(cx, window)["tabs"][1]["modified"], json!(false));
+}
+
+#[gpui::test]
+fn deactivating_the_window_saves_files(cx: &mut TestAppContext) {
+    let (window, dir) = open_project_with_files(cx);
+    cx.update_window(window.into(), |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+    invoke(cx, window, "editor.type", json!({"text": "x"}));
+    let vcx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    vcx.deactivate_window();
+    vcx.run_until_parked();
+    assert!(
+        std::fs::read_to_string(dir.path().join("src/app.py"))
+            .unwrap()
+            .starts_with("xdef")
+    );
+}

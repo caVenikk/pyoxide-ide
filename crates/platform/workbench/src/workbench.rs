@@ -3,13 +3,14 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Instant;
 
 use editor::{Editor, EditorEvent};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase, Entity,
     FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, SharedString, Subscription,
-    Window, canvas, div, prelude::*, px,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollWheelEvent,
+    SharedString, Subscription, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
 use serde_json::json;
@@ -24,6 +25,7 @@ use crate::commands::*;
 use crate::env;
 use crate::file_types::FileTypes;
 use crate::project_panel::{self, PanelEvent, ProjectPanel};
+use crate::settings::SaveSettings;
 
 /// Default width of the project tool window.
 pub const PROJECT_WIDTH: f32 = 333.0;
@@ -88,6 +90,11 @@ pub struct Workbench {
     go_to_line: Option<(Entity<Editor>, Subscription)>,
     /// Resizing the project tool window: mouse x and width at the start.
     resizing: Option<(Pixels, Pixels)>,
+    save_settings: SaveSettings,
+    /// The last keyboard or mouse input or edit (executor clock).
+    last_input: Option<Instant>,
+    /// A save after the idle time is scheduled.
+    idle_save_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -104,7 +111,7 @@ impl Workbench {
             // Files are saved when the window loses the focus, as in the
             // reference IDE.
             cx.observe_window_activation(window, |this, window, cx| {
-                if !window.is_window_active() {
+                if !window.is_window_active() && this.save_settings.save_on_deactivation {
                     this.save_all(cx);
                 }
             }),
@@ -123,6 +130,9 @@ impl Workbench {
             message: None,
             go_to_line: None,
             resizing: None,
+            save_settings: SaveSettings::default(),
+            last_input: None,
+            idle_save_pending: false,
             _subscriptions: subscriptions,
         }
     }
@@ -303,7 +313,14 @@ impl Workbench {
             }
             editor
         });
-        let subscription = cx.subscribe(&editor, |_, _, _: &EditorEvent, cx| cx.notify());
+        let subscription = cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
+            if matches!(event, EditorEvent::Edited(_)) {
+                // Edits count as input for the idle save (they may also come
+                // from commands rather than keys).
+                this.note_input(cx);
+            }
+            cx.notify()
+        });
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -318,9 +335,64 @@ impl Workbench {
         if index >= self.tabs.len() {
             return;
         }
+        if let Some(previous) = self.active
+            && previous != index
+            && self.save_settings.save_on_tab_switch
+        {
+            self.save_tab(previous, cx);
+        }
         self.active = Some(index);
         window.focus(&self.tabs[index].editor.focus_handle(cx));
         cx.notify();
+    }
+
+    pub fn save_settings(&self) -> SaveSettings {
+        self.save_settings
+    }
+
+    pub fn set_save_settings(&mut self, settings: SaveSettings) {
+        self.save_settings = settings;
+    }
+
+    /// Keyboard or mouse input (or an edit) happened: the idle save waits
+    /// for the idle time from now. One timer runs at a time; when it fires
+    /// early because of later input it sleeps for the rest of the time.
+    pub fn note_input(&mut self, cx: &mut Context<Self>) {
+        if !self.save_settings.save_on_idle {
+            return;
+        }
+        self.last_input = Some(cx.background_executor().now());
+        if self.idle_save_pending {
+            return;
+        }
+        self.idle_save_pending = true;
+        let idle = self.save_settings.idle();
+        cx.spawn(async move |this, cx| {
+            let mut wait = idle;
+            loop {
+                cx.background_executor().timer(wait).await;
+                let next = this.update(cx, |this, cx| {
+                    let now = cx.background_executor().now();
+                    let since = this
+                        .last_input
+                        .map_or(idle, |t| now.saturating_duration_since(t));
+                    if since >= idle || !this.save_settings.save_on_idle {
+                        this.idle_save_pending = false;
+                        if this.save_settings.save_on_idle {
+                            this.save_all(cx);
+                        }
+                        None
+                    } else {
+                        Some(idle - since)
+                    }
+                });
+                match next {
+                    Ok(Some(rest)) => wait = rest,
+                    _ => break,
+                }
+            }
+        })
+        .detach();
     }
 
     /// Writes one tab's file if it is modified.
@@ -1153,6 +1225,8 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::show_go_to_line))
+            // Keyboard input for the idle save.
+            .capture_key_down(cx.listener(|this, _, _, cx| this.note_input(cx)))
             .on_mouse_move(cx.listener(Self::resize_project))
             .when(env::debug_cursor(), |d| {
                 d.on_mouse_move(|e: &MouseMoveEvent, window, _| {
@@ -1238,16 +1312,35 @@ impl Render for Workbench {
             // The pointer shape is set again on every mouse move (see
             // ui::pointer).
             .child(
-                canvas(
-                    |_, _, _| (),
-                    |_, _, window, _| {
+                canvas(|_, _, _| (), {
+                    let this = cx.entity();
+                    move |_, _, window, _| {
                         window.on_mouse_event(|_: &MouseMoveEvent, phase, window, _| {
                             if phase == DispatchPhase::Capture {
                                 ui::pointer::apply(window);
                             }
-                        })
-                    },
-                )
+                        });
+                        // Mouse input for the idle save.
+                        let input = this.clone();
+                        window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture {
+                                input.update(cx, |w, cx| w.note_input(cx));
+                            }
+                        });
+                        let input = this.clone();
+                        window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture {
+                                input.update(cx, |w, cx| w.note_input(cx));
+                            }
+                        });
+                        let input = this.clone();
+                        window.on_mouse_event(move |_: &ScrollWheelEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture {
+                                input.update(cx, |w, cx| w.note_input(cx));
+                            }
+                        });
+                    }
+                })
                 .absolute()
                 .size_0(),
             )
