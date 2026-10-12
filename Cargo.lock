@@ -8478,6 +8478,7 @@ dependencies = [
  "search",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "text",
  "themes",

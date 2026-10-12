@@ -1,5 +1,6 @@
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use common::{file_params, memory, new_file, open, rows, run, scalar, with_create};
@@ -505,4 +506,68 @@ async fn two_connections_work_in_parallel() {
     );
     let _ = (ra, rb);
     assert_eq!(count(&b, "t").await, 50);
+}
+
+#[tokio::test]
+async fn a_waiting_reader_gets_in_between_back_to_back_writes() {
+    // A writer that commits back to back holds the file lock nearly all the
+    // time (here 25 ms per transaction, like a slow disk sync) and frees it
+    // only for the round trip to its next statement. A reader that waits
+    // for the lock must get it at one of the first gaps, not only when the
+    // writer stops.
+    const WRITES: usize = 16;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("turns.db");
+    let a = open(&with_create(file_params(&path))).await;
+    run(&a, "CREATE TABLE t(x)").await;
+    let b = open(&file_params(&path)).await;
+    // The reader loads the schema now, so it needs a single gap later.
+    assert_eq!(count(&b, "t").await, 0);
+    let committed = AtomicUsize::new(0);
+    run(&a, "BEGIN EXCLUSIVE").await;
+    let ((), seen) = tokio::join!(
+        async {
+            for i in 0..WRITES {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                run(&a, "COMMIT").await;
+                committed.fetch_add(1, Ordering::SeqCst);
+                if i + 1 < WRITES {
+                    run(&a, "BEGIN EXCLUSIVE").await;
+                }
+            }
+        },
+        async {
+            assert_eq!(count(&b, "t").await, 0);
+            committed.load(Ordering::SeqCst)
+        }
+    );
+    assert!(
+        seen <= WRITES / 4,
+        "the reader waited for {seen} of {WRITES} transactions"
+    );
+}
+
+#[tokio::test]
+async fn finished_queries_hold_no_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("idle.db");
+    let a = open(&with_create(file_params(&path))).await;
+    run(&a, "CREATE TABLE t(x)").await;
+    run(&a, "INSERT INTO t VALUES (1), (2)").await;
+    // No waiting: any lock left by `a` fails the exclusive transaction.
+    let probe = &open(&busy_params(&path, "0")).await;
+    let exclusive = || async move {
+        run(probe, "BEGIN EXCLUSIVE").await;
+        run(probe, "COMMIT").await;
+    };
+    // A query read to the end.
+    assert_eq!(rows(&a, "SELECT x FROM t", &[]).await.rows.len(), 2);
+    exclusive().await;
+    // A query cut short: the cursor is closed before `query` returns.
+    let cut = a.query("SELECT x FROM t", &[], 1).await.unwrap();
+    assert!(cut.truncated);
+    exclusive().await;
+    // A statement without rows.
+    run(&a, "UPDATE t SET x = x + 1").await;
+    exclusive().await;
 }
