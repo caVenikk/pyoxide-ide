@@ -18,6 +18,9 @@ use workbench::{Product, Workbench};
 struct Keys {
     go_to_file: &'static str,
     go_to_action: &'static str,
+    go_to_text: &'static str,
+    recent: &'static str,
+    match_case: &'static str,
     first: &'static str,
     last: &'static str,
     non_project: &'static str,
@@ -27,6 +30,9 @@ struct Keys {
 const MAC: Keys = Keys {
     go_to_file: "cmd-shift-o",
     go_to_action: "cmd-shift-a",
+    go_to_text: "cmd-alt-shift-e",
+    recent: "cmd-e",
+    match_case: "alt-c",
     first: "cmd-up",
     last: "cmd-down",
     non_project: "alt-n",
@@ -36,6 +42,9 @@ const MAC: Keys = Keys {
 const WIN: Keys = Keys {
     go_to_file: "ctrl-shift-n",
     go_to_action: "ctrl-shift-a",
+    go_to_text: "ctrl-alt-shift-e",
+    recent: "ctrl-e",
+    match_case: "alt-c",
     first: "ctrl-up",
     last: "ctrl-down",
     non_project: "alt-n",
@@ -135,6 +144,17 @@ impl H<'_> {
                 self.cx.executor().advance_clock(gap);
             }
         }
+        self.draw();
+    }
+
+    /// A click on an element drawn with this debug selector.
+    fn click(&mut self, selector: &str) {
+        let bounds = self
+            .vcx()
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"));
+        self.vcx()
+            .simulate_click(bounds.center(), Modifiers::none());
         self.draw();
     }
 
@@ -354,9 +374,11 @@ fn tabs_switch_and_the_shortcut_again_includes_non_project_items(cx: &mut TestAp
         h.press("tab");
         assert_eq!(h.state()["tab"], json!("actions"));
         h.press("tab");
+        assert_eq!(h.state()["tab"], json!("text"));
+        h.press("tab");
         assert_eq!(h.state()["tab"], json!("all"));
         h.press("shift-tab");
-        assert_eq!(h.state()["tab"], json!("actions"));
+        assert_eq!(h.state()["tab"], json!("text"));
         assert_eq!(h.state()["text"], json!("app"));
         // Go to File from another tab: the Files tab.
         h.press(h.keys.go_to_file);
@@ -390,10 +412,10 @@ fn actions_run_from_the_actions_tab(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn more_results_and_scrolling(cx: &mut TestAppContext) {
+fn more_rows_load_as_the_list_scrolls(cx: &mut TestAppContext) {
     both(cx, |h| {
-        for i in 0..45 {
-            std::fs::write(h.root.join(format!("pkg/mod_{i:02}.py")), "").unwrap();
+        for i in 0..120 {
+            std::fs::write(h.root.join(format!("pkg/mod_{i:03}.py")), "").unwrap();
         }
         // The index follows a new build of the project's rules.
         h.invoke(
@@ -405,24 +427,143 @@ fn more_results_and_scrolling(cx: &mut TestAppContext) {
         h.type_text("mod_");
         h.settle();
         let rows = h.rows();
-        assert_eq!(rows.len(), 31, "30 and more");
-        assert_eq!(rows[30], "more");
+        assert_eq!(rows.len(), 51, "a page and the spinner row");
+        assert_eq!(rows[50], "loading");
         let first = rows[0].clone();
-        h.scroll_rows(ScrollDelta::Lines(point(0.0, -50.0)));
-        // Page Down goes a page on, not past the end; Up from the first
-        // row goes round to the "more" row.
+        // Page Down goes a page on; Up on the first row stays while more
+        // rows are to come.
         h.press(h.keys.last);
         let page = h.state()["selected"].as_u64().unwrap();
-        assert!(page > 1 && page < 30, "{page}");
+        assert!(page > 1 && page < 50, "{page}");
         h.press(h.keys.first);
         h.press("up");
-        assert_eq!(h.state()["selected"], json!(30));
-        h.press("enter");
+        assert_eq!(h.state()["selected"], json!(0));
+        // Scrolled to the end: the next page, the rows shown stay.
+        h.scroll_rows(ScrollDelta::Lines(point(0.0, -200.0)));
         h.draw();
         let rows = h.rows();
-        assert_eq!(rows.len(), 45, "the rest, no more row");
+        assert_eq!(rows.len(), 101, "{}", rows.len());
         assert_eq!(rows[0], first, "the rows shown stay");
-        assert_eq!(h.state()["selected"], json!(30), "the first new one");
+        // Down on the last row loads the rest.
+        for _ in 0..99 {
+            h.press("down");
+        }
+        h.draw();
+        let rows = h.rows();
+        assert_eq!(rows.len(), 120, "all, no spinner row");
+        assert!(!rows.contains(&"loading".to_owned()));
         h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_text_tab_finds_lines(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_text);
+        assert_eq!(h.state()["tab"], json!("text"));
+        h.type_text("needle");
+        h.settle();
+        let rows = h.state()["rows"].clone();
+        let lines: Vec<String> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| format!("{}:{}", r["path"].as_str().unwrap(), r["line"]))
+            .collect();
+        assert_eq!(
+            lines,
+            ["app.py:4", "notes.txt:1", "pkg/util.py:4", "pkg/util.py:5"],
+            "{rows}"
+        );
+        // Match Case: the options are shared with Find in Files.
+        h.press(h.keys.match_case);
+        h.settle();
+        assert_eq!(h.state()["options"]["case_sensitive"], json!(true));
+        h.press("enter");
+        h.draw();
+        assert_eq!(h.caret(), ("app.py".into(), 3, 11));
+        h.press(h.keys.go_to_text);
+        assert_eq!(h.state()["options"]["case_sensitive"], json!(true));
+        h.press(h.keys.match_case);
+        h.press("escape");
+        // On All, lines come after the files and actions.
+        h.double_shift(Duration::from_millis(60));
+        h.type_text("needle");
+        h.settle();
+        let rows = h.rows();
+        assert!(rows.last().unwrap().starts_with("text:"), "{rows:?}");
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_files_scope_and_filter(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["scope"], json!("Project Files"));
+        // Go to File again: All Places, kept for the next time.
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["scope"], json!("All Places"));
+        h.press("escape");
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["scope"], json!("All Places"));
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["scope"], json!("Project Files"));
+        // The filter leaves out folders.
+        h.type_text("pkg");
+        h.settle();
+        assert!(h.rows().contains(&"folder:pkg".to_owned()));
+        h.click("search-everywhere-filter");
+        assert_eq!(h.state()["dropdown"], json!("filetypes"));
+        h.click("search-everywhere-filter-0");
+        h.settle();
+        assert_eq!(h.state()["hidden_file_types"], json!(["Directory"]));
+        assert!(!h.rows().contains(&"folder:pkg".to_owned()));
+        h.click("search-everywhere-filter-all");
+        h.settle();
+        assert!(h.rows().contains(&"folder:pkg".to_owned()));
+        h.press("escape");
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn recent_files(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        for file in ["notes.txt", "pkg/util.py", "app.py"] {
+            h.invoke("project.open-file", json!({ "path": file }));
+        }
+        h.press(h.keys.recent);
+        let s = h.invoke("recent-files.state", json!(null));
+        assert_eq!(s["open"], json!(true));
+        // The current file first, the one before it selected.
+        assert_eq!(s["files"], json!(["app.py", "pkg/util.py", "notes.txt"]));
+        assert_eq!(s["selected"], json!(1));
+        assert_eq!(s["tool_windows"], json!(["Project"]));
+        // Typing filters the lists.
+        h.press("n o");
+        let s = h.invoke("recent-files.state", json!(null));
+        assert_eq!(s["files"], json!(["notes.txt"]));
+        h.press("backspace backspace");
+        assert_eq!(h.invoke("recent-files.state", json!(null))["filter"], json!(""));
+        // Pressing it again: the edited files only.
+        h.press(h.keys.recent);
+        let s = h.invoke("recent-files.state", json!(null));
+        assert_eq!(s["edited_only"], json!(true));
+        assert_eq!(s["files"], json!([]));
+        h.press(h.keys.recent);
+        // Delete takes a file off the list and closes its tab.
+        h.press("down");
+        h.press("delete");
+        let s = h.invoke("recent-files.state", json!(null));
+        assert_eq!(s["files"], json!(["app.py", "pkg/util.py"]));
+        // Enter opens the selected file.
+        h.press("up");
+        h.press("enter");
+        let s = h.invoke("workbench.state", json!(null));
+        assert_eq!(s["recent_files"], json!(false));
+        let active = s["active_tab"].as_u64().unwrap() as usize;
+        assert_eq!(s["tabs"][active]["path"], json!("pkg/util.py"));
+        assert_eq!(s["tabs"].as_array().unwrap().len(), 2);
     });
 }

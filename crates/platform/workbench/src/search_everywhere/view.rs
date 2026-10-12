@@ -527,8 +527,10 @@ impl SearchEverywhere {
         let hover = theme.color(UiRole::Hover);
         let mut rows: Vec<AnyElement> = Vec::new();
         let item = |id: SharedString, on: bool| {
+            let selector = id.to_string();
             div()
                 .id(id)
+                .debug_selector(move || selector.clone())
                 .flex()
                 .flex_row()
                 .items_center()
