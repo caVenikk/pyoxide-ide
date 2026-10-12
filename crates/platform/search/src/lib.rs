@@ -26,5 +26,5 @@ pub use cancel::{CancelToken, Cancelled};
 pub use matcher::{
     Found, Matcher, Matches, Query, QueryError, SearchOptions, escape, is_word_char,
 };
-pub use offsets::to_char_ranges;
+pub use offsets::{match_lines, to_byte_ranges, to_char_ranges};
 pub use replace::ReplaceError;

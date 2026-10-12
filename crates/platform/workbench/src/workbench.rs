@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
+use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase, Entity,
@@ -71,7 +72,7 @@ struct Tab {
     editor: Entity<Editor>,
     /// The editor's find bar (shown while it is open).
     find: Entity<FindBar>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 3],
 }
 
 /// The main window: toolbar, stripes, project tool window, editor area,
@@ -332,14 +333,18 @@ impl Workbench {
             cx.notify()
         });
         let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
-        // The bar opens and closes inside the editor area.
-        let find_subscription = cx.observe(&find, |_, _, cx| cx.notify());
+        // The bar opens and closes inside the editor area; matches found in
+        // the background are drawn at once, not at the next refresh.
+        let find_subscription = cx.subscribe_in(&find, window, |_, _, _: &FindEvent, window, _| {
+            crate::shot::draw_now(window)
+        });
+        let observe_find = cx.observe(&find, |_, _, cx| cx.notify());
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
             editor,
             find,
-            _subscriptions: [subscription, find_subscription],
+            _subscriptions: [subscription, find_subscription, observe_find],
         });
         self.message = None;
         self.activate(index, window, cx);
@@ -1370,10 +1375,13 @@ impl Render for Workbench {
             // Measurements: the end of the frame's paint.
             .when(bench, |d| {
                 let editor = self.active_editor().cloned();
+                let find = self.active_find_bar().cloned();
                 d.child(
                     canvas(
                         |_, _, _| (),
-                        move |_, _, _, cx| crate::bench::frame_painted(editor.as_ref(), cx),
+                        move |_, _, _, cx| {
+                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), cx)
+                        },
                     )
                     .absolute()
                     .size_0(),

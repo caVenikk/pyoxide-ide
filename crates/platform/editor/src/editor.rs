@@ -99,6 +99,8 @@ pub struct SearchHighlights {
     pub current_background: bool,
     /// Matches left out of Replace All: struck through.
     pub excluded: BTreeSet<usize>,
+    /// Lines with matches (sorted, each once), marked on the scrollbar.
+    pub lines: Vec<usize>,
 }
 
 /// Edits of more than this many replacements drop the highlighted matches
@@ -218,6 +220,11 @@ pub struct Editor {
     pub(crate) placeholder: Option<SharedString>,
     /// A one-line field shows its text in the error colour.
     pub(crate) error: bool,
+    /// A one-line field in the UI font (search fields) instead of the
+    /// editor font.
+    pub(crate) ui_font: bool,
+    /// No background of its own: the field's container paints it.
+    pub(crate) transparent: bool,
     /// Search matches shown in the text.
     pub(crate) search: Option<SearchHighlights>,
     /// Bring this char offset into the middle of the view on the next
@@ -270,6 +277,8 @@ impl Editor {
             single_line: false,
             placeholder: None,
             error: false,
+            ui_font: false,
+            transparent: false,
             search: None,
             reveal: None,
             _subscriptions: subscriptions,
@@ -279,6 +288,17 @@ impl Editor {
     /// Makes this editor a one-line text field (dialogs, search fields).
     pub fn set_single_line(&mut self, single_line: bool) {
         self.single_line = single_line;
+    }
+
+    /// Shows the text of a one-line field in the UI font instead of the
+    /// editor font (search fields, as in the reference IDE).
+    pub fn set_ui_font(&mut self, ui_font: bool) {
+        self.ui_font = ui_font;
+    }
+
+    /// Leaves the background to the field's container.
+    pub fn set_transparent(&mut self, transparent: bool) {
+        self.transparent = transparent;
     }
 
     /// Text shown in the empty one-line field ("Search").
@@ -336,6 +356,20 @@ impl Editor {
         {
             h.current = current;
             cx.notify();
+        }
+    }
+
+    /// Leaves a match out of Replace All (struck through), or takes it back.
+    pub fn set_search_excluded(&mut self, index: usize, excluded: bool, cx: &mut Context<Self>) {
+        if let Some(h) = &mut self.search {
+            let changed = if excluded {
+                h.excluded.insert(index)
+            } else {
+                h.excluded.remove(&index)
+            };
+            if changed {
+                cx.notify();
+            }
         }
     }
 

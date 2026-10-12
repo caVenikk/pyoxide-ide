@@ -193,6 +193,7 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // draws at once instead: the typed text is then ready for the next
         // refresh rather than the one after (ADR 0007, replica/perf.md).
         // Only real windows (the test platform has no native window).
+        crate::shot::set_native_windows();
         cx.observe_keystrokes(|_, window, _| crate::shot::request_display(window))
             .detach();
         // `PYOXIDE_NATIVE_POINTER=0` leaves the pointer to GPUI alone

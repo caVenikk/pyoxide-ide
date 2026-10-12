@@ -20,9 +20,17 @@ pub use element::LONG_LINE;
 pub use find::FindBar;
 pub use highlight::{Highlighter, Job, JobResult, Span, SyntaxHighlighter};
 
+/// Height of a one-line field in the UI font ([`Editor::set_ui_font`]),
+/// for laying out its container.
+pub fn field_line_height(window: &gpui::Window, cx: &gpui::App) -> gpui::Pixels {
+    use ui::theme::ThemeExt as _;
+    element::metrics(cx.theme(), window, true).line_height
+}
+
 /// Registers the editor and find bar commands with the command index.
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, find::COMMANDS);
     ui::command::register(cx, find::BAR_COMMANDS);
+    ui::command::register(cx, find::HISTORY_COMMANDS);
 }

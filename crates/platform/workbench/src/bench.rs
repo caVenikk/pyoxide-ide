@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use editor::Editor;
+use editor::{Editor, FindBar};
 use gpui::{App, AppContext as _, AsyncApp, Entity, Keystroke, WindowHandle};
 use serde_json::json;
 
@@ -41,6 +41,8 @@ struct Frame {
     path: Option<PathBuf>,
     lines: usize,
     highlighted: bool,
+    /// The query whose matches the find bar showed.
+    find_text: Option<String>,
 }
 
 #[derive(Default)]
@@ -60,8 +62,9 @@ pub fn frame_started() {
 
 /// Called from a canvas painted after everything else (the end of the
 /// frame's paint).
-pub fn frame_painted(editor: Option<&Entity<Editor>>, cx: &App) {
+pub fn frame_painted(editor: Option<&Entity<Editor>>, find: Option<&Entity<FindBar>>, cx: &App) {
     let end = Instant::now();
+    let find_text = find.and_then(|f| f.read(cx).searched_text().map(str::to_owned));
     let (version, path, lines, highlighted) = match editor {
         Some(e) => {
             let e = e.read(cx);
@@ -84,6 +87,7 @@ pub fn frame_painted(editor: Option<&Entity<Editor>>, cx: &App) {
             path,
             lines,
             highlighted,
+            find_text,
         });
     });
 }
@@ -180,6 +184,7 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
             Bench::Typing => typing(window, cx).await,
             Bench::Open(path) => open(window, path, cx).await,
             Bench::Cursor => cursor(window, cx).await,
+            Bench::Find(query) => find(window, query, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -423,6 +428,97 @@ async fn open(window: WindowHandle<Workbench>, path: PathBuf, cx: &mut AsyncApp)
             "frame_gap_ms": display.then(|| stats(gaps)),
             "gaps_over_1_5x_median": display.then_some(long_gaps),
             "last_top_line": top,
+        })
+    ));
+}
+
+/// Typing a query into the find bar of the open file: `RUNS` runs that
+/// clear the field and type the query char by char, one key every
+/// `FIND_KEY_INTERVAL`; for each key, the time from its dispatch to the end
+/// of the first frame that paints the matches of the query typed so far.
+async fn find(window: WindowHandle<Workbench>, query: String, cx: &mut AsyncApp) {
+    const FIND_RUNS: usize = 5;
+    const FIND_KEY_INTERVAL: Duration = Duration::from_millis(150);
+    if !settle(window, cx, Duration::from_secs(120)).await {
+        env::marker("find {\"error\": \"the file did not open\"}");
+        return;
+    }
+    sleep(cx, Duration::from_secs(2)).await;
+    let display = display_frames(window, cx).await;
+    let lines = active_editor(window, cx)
+        .and_then(|e| e.read_with(cx, |e, _| e.buffer().len_lines()).ok())
+        .unwrap_or(0);
+    let mut latency = Vec::new();
+    let mut handling = Vec::new();
+    let mut missed = 0;
+    let mut counts = Vec::new();
+    for _ in 0..FIND_RUNS {
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            if !display {
+                window.draw(cx).clear();
+            }
+            let _ = ui::command::invoke("find.search", json!({ "text": "" }), window, cx);
+        });
+        sleep(cx, Duration::from_millis(500)).await;
+        let mut typed = String::new();
+        for c in query.chars() {
+            typed.push(c);
+            let key = if c == ' ' {
+                "space".to_owned()
+            } else {
+                c.to_string()
+            };
+            let Ok(keystroke) = Keystroke::parse(&key) else {
+                continue;
+            };
+            if !display {
+                force_frame(window, cx);
+            }
+            let sent = Instant::now();
+            let _ = cx.update_window(window.into(), |_, window, cx| {
+                window.dispatch_keystroke(keystroke, cx);
+            });
+            handling.push(ms(sent.elapsed()));
+            // Wait for the first frame that shows the matches of `typed`.
+            let until = Instant::now() + Duration::from_secs(10);
+            let mut shown = None;
+            while Instant::now() < until {
+                sleep(cx, Duration::from_millis(1)).await;
+                if !display {
+                    force_frame(window, cx);
+                }
+                shown = frames()
+                    .into_iter()
+                    .find(|f| f.start >= sent && f.find_text.as_deref() == Some(typed.as_str()));
+                if shown.is_some() {
+                    break;
+                }
+            }
+            match shown {
+                Some(f) => latency.push(ms(f.end - sent)),
+                None => missed += 1,
+            }
+            sleep(cx, FIND_KEY_INTERVAL).await;
+        }
+        let count = window
+            .read_with(cx, |w, cx| {
+                w.active_find_bar().map(|f| f.read(cx).counts(cx).0)
+            })
+            .ok()
+            .flatten();
+        counts.push(count);
+    }
+    env::marker(&format!(
+        "find {}",
+        json!({
+            "frames": frame_source(display),
+            "query": query,
+            "lines": lines,
+            "keys": FIND_RUNS * query.chars().count(),
+            "frames_missing": missed,
+            "matches": counts.last().copied().flatten(),
+            "key_to_highlight_ms": stats(latency),
+            "key_handling_ms": stats(handling),
         })
     ));
 }

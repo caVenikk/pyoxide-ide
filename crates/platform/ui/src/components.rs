@@ -93,7 +93,7 @@ pub fn toggle_button(
 ) -> Stateful<Div> {
     let theme = cx.theme();
     let hover = theme.color(UiRole::Hover);
-    let selected = theme.color(UiRole::Pressed);
+    let selected = theme.color(UiRole::SearchOptionSelected);
     div()
         .id(id)
         .flex()
@@ -155,6 +155,9 @@ pub fn input_frame(focused: bool, error: bool, cx: &App) -> Div {
     };
     let ring = theme.color(if error { UiRole::Danger } else { UiRole::Focus });
     let ring_width = theme.metric(Metric::FocusWidth);
+    // Light themes fill the field; dark ones let the surface show through
+    // (as the reference IDE's fields in the islands themes).
+    let fill = (!theme.is_dark()).then(|| theme.color(UiRole::Input));
     div()
         .relative()
         .flex()
@@ -164,6 +167,7 @@ pub fn input_frame(focused: bool, error: bool, cx: &App) -> Div {
         .rounded(radius)
         .border_1()
         .border_color(border)
+        .when_some(fill, |d, fill| d.bg(fill))
         .when(focused, |d| {
             d.child(
                 div()

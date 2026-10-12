@@ -10,6 +10,24 @@
 //! what GPUI presented on screen.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Windows are real platform windows (the application runs, not a test):
+/// [`draw_now`] asks them to draw.
+static NATIVE: AtomicBool = AtomicBool::new(false);
+
+/// Called by the application start-up: windows are native.
+pub fn set_native_windows() {
+    NATIVE.store(true, Ordering::Relaxed);
+}
+
+/// Draws a frame of a native window now rather than at the next display
+/// refresh (see [`request_display`]); nothing in tests.
+pub fn draw_now(window: &gpui::Window) {
+    if NATIVE.load(Ordering::Relaxed) {
+        request_display(window);
+    }
+}
 
 /// Asks Core Animation to redraw the window's layer: GPUI draws and presents
 /// a frame at the end of the current run loop pass, without waiting for the

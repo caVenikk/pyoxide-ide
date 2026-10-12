@@ -212,6 +212,11 @@ report says which parent was missing.
 | `ui.editor-selection` | `SELECTION_BACKGROUND` (scheme color) | Selected text background |
 | `ui.search-match` | `TEXT_SEARCH_RESULT_ATTRIBUTES` background, `SearchMatch.startBackground` | Background of search matches |
 | `ui.search-match-active` | `SEARCH_RESULT_ATTRIBUTES` background | Background of the current search match |
+| `ui.search-match-stripe` | `TEXT_SEARCH_RESULT_ATTRIBUTES` error stripe colour | Marks of search matches on the scrollbar |
+| `ui.search-field` | `Editor.SearchField.background` | Background of the find bar at the top of the editor |
+| `ui.search-field-border` | `Editor.SearchField.borderColor`, `Editor.Toolbar.borderColor` | Line between the find bar and the text |
+| `ui.search-field-error` | `SearchField.errorForeground` | Text of a search field whose search finds nothing |
+| `ui.search-option-selected` | `SearchOption.selectedBackground` | Background of a search option that is on (Match Case, Words, Regex) |
 | `ui.indent-guide` | `INDENT_GUIDE` (scheme color) | Indent guides |
 | `ui.indent-guide-active` | `SELECTED_INDENT_GUIDE` (scheme color) | Indent guide of the caret block |
 | `ui.right-margin` | `RIGHT_MARGIN_COLOR` (scheme color) | Right margin line |
@@ -298,7 +303,11 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.line-number-active` | `ui.line-number` |
 | `ui.caret`, `ui.terminal-foreground` | `ui.editor-text` |
 | `ui.indent-guide-active` | `ui.indent-guide` |
-| `ui.search-match-active` | `ui.search-match` |
+| `ui.search-match-active`, `ui.search-match-stripe` | `ui.search-match` |
+| `ui.search-field` | `ui.editor-background` |
+| `ui.search-field-border` | `ui.border` |
+| `ui.search-field-error` | `ui.danger` |
+| `ui.search-option-selected` | `ui.pressed` |
 
 ## Text roles
 

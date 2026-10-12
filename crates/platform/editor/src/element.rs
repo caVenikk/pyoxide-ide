@@ -30,6 +30,8 @@ const GUTTER_RIGHT: f32 = 42.5;
 const TEXT_LEFT: f32 = 6.0;
 /// Smallest scrollbar thumb.
 const MIN_THUMB: f32 = 24.0;
+/// Height of a search match mark on the scrollbar.
+const STRIPE_MARK: f32 = 2.0;
 
 /// One painted line: its shaped text and the mapping from char columns to
 /// bytes of the shaped text (tabs are expanded to spaces).
@@ -163,6 +165,8 @@ pub(crate) struct Prepaint {
     selections: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
     search: Vec<SearchRect>,
+    /// Marks of search matches on the scrollbar.
+    stripe_marks: Vec<Bounds<Pixels>>,
     /// The placeholder of an empty one-line field and where it goes.
     placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
     colors: Colors,
@@ -186,6 +190,7 @@ struct Colors {
     scrollbar: Hsla,
     scrollbar_hover: Hsla,
     search_match: Hsla,
+    search_stripe: Hsla,
     search_current: Hsla,
     /// Background of the current match (search within a selection, where
     /// the current match is not selected).
@@ -194,20 +199,26 @@ struct Colors {
 }
 
 /// Font metrics of the editor font at the editor size.
-struct Metrics {
+pub(crate) struct Metrics {
     font: Font,
     font_size: Pixels,
-    line_height: Pixels,
+    pub(crate) line_height: Pixels,
     char_width: Pixels,
     /// Line numbers are one size smaller than the text.
     number_size: Pixels,
     number_width: Pixels,
 }
 
-fn metrics(theme: &Theme, window: &Window) -> Metrics {
+/// Font metrics of an editor: the editor font, or the UI font of a one-line
+/// field that shows UI text (search fields).
+pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics {
     let font = Font {
-        family: theme.mono_family(),
-        features: if theme.raw().fonts.editor_ligatures {
+        family: if ui_font {
+            theme.ui_family()
+        } else {
+            theme.mono_family()
+        },
+        features: if ui_font || theme.raw().fonts.editor_ligatures {
             FontFeatures::default()
         } else {
             FontFeatures::disable_ligatures()
@@ -216,7 +227,11 @@ fn metrics(theme: &Theme, window: &Window) -> Metrics {
         weight: FontWeight::NORMAL,
         style: FontStyle::Normal,
     };
-    let font_size = theme.editor_size();
+    let font_size = if ui_font {
+        theme.ui_size()
+    } else {
+        theme.editor_size()
+    };
     let ts = window.text_system();
     let id = ts.resolve_font(&font);
     // Whole-pixel ascent and descent (the descent is reported negative),
@@ -458,7 +473,11 @@ impl Element for EditorElement {
         cx: &mut App,
     ) -> Prepaint {
         let theme = cx.theme();
-        let m = metrics(theme, window);
+        let (ui_font, transparent) = {
+            let e = self.editor.read(cx);
+            (e.ui_font, e.transparent)
+        };
+        let m = metrics(theme, window, ui_font);
         let mut colors = Colors {
             background: theme.color(UiRole::EditorBackground),
             gutter: theme.color(UiRole::Gutter),
@@ -468,6 +487,7 @@ impl Element for EditorElement {
             scrollbar: theme.color(UiRole::Scrollbar),
             scrollbar_hover: theme.color(UiRole::ScrollbarHover),
             search_match: theme.color(UiRole::SearchMatch),
+            search_stripe: theme.color(UiRole::SearchMatchStripe),
             search_current: theme.color(UiRole::Caret),
             search_current_background: None,
             text: theme.color(UiRole::EditorText),
@@ -495,8 +515,12 @@ impl Element for EditorElement {
             colors.background = input_color;
             colors.gutter = input_color;
         }
+        if transparent {
+            colors.background = gpui::transparent_black();
+            colors.gutter = gpui::transparent_black();
+        }
         if error {
-            text_color = theme.color(UiRole::Danger);
+            text_color = theme.color(UiRole::SearchFieldError);
         }
         colors.text = text_color;
         let digits = len_lines.to_string().len().max(2);
@@ -791,6 +815,26 @@ impl Element for EditorElement {
             Scrollbar { track, thumb }
         });
 
+        // Search matches on the scrollbar: a mark per line, drawn once per
+        // pixel row.
+        let mut stripe_marks = Vec::new();
+        if let (Some(bar), Some(h)) = (&scrollbar, &editor.search) {
+            let total = len_lines.max(1) as f32;
+            let free = f32::from(bar.track.size.height) - STRIPE_MARK;
+            let mut last_y = None;
+            for &line in &h.lines {
+                let y = (f32::from(bar.track.top()) + free * (line as f32 / total)).round();
+                if last_y == Some(y) {
+                    continue;
+                }
+                last_y = Some(y);
+                stripe_marks.push(Bounds::new(
+                    point(bar.track.left() + px(2.0), px(y)),
+                    size(bar.track.size.width - px(4.0), px(STRIPE_MARK)),
+                ));
+            }
+        }
+
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let text_right = scrollbar.map_or(bounds.right(), |s| s.track.left());
         let text_hitbox = window.insert_hitbox(
@@ -822,6 +866,7 @@ impl Element for EditorElement {
             selections: selection_rects,
             caret,
             search: search_rects,
+            stripe_marks,
             placeholder,
             colors,
         }
@@ -917,6 +962,9 @@ impl Element for EditorElement {
                 }
             },
         );
+        for r in &p.stripe_marks {
+            window.paint_quad(fill(*r, p.colors.search_stripe));
+        }
         if let Some(bar) = p.layout.scrollbar {
             let hovered =
                 window.mouse_position().x >= bar.track.left() && p.hitbox.is_hovered(window);
