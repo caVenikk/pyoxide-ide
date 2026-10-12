@@ -952,7 +952,8 @@ impl FindInFiles {
             },
             ScopeKind::Directory => {
                 let dir = self.directory.read(cx).text();
-                let path = PathBuf::from(dir.trim());
+                // A relative folder is one of the project's.
+                let path = root.join(dir.trim());
                 if dir.trim().is_empty() || !path.is_dir() {
                     return Err(invalid("Directory is not found".into(), Field::Directory));
                 }
