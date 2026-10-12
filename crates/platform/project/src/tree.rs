@@ -206,6 +206,14 @@ impl FileTree {
         self.rebuild();
     }
 
+    /// Marks every listed entry excluded or not by `filter` (after the
+    /// exclusions changed); the root never is.
+    pub fn refresh_excluded(&mut self, filter: &Filter) {
+        for n in self.nodes.iter_mut().skip(1) {
+            n.entry.excluded = filter.is_excluded(&n.entry.path, n.entry.is_dir());
+        }
+    }
+
     /// Collapses every directory except the root.
     pub fn collapse_all(&mut self) {
         for n in self.nodes.iter_mut().skip(1) {
@@ -233,9 +241,18 @@ impl FileTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::AutoExclusions;
+    use crate::store::Exclusions;
+
+    const PY: AutoExclusions = AutoExclusions {
+        dir_names: &[".venv"],
+        root_dir_markers: &["pyvenv.cfg"],
+    };
 
     fn layout(root: &Path) {
-        for dir in ["src/pkg", "tests", ".git", "Zeta", ".venv"] {
+        for dir in [
+            "src/pkg", "tests", ".git", "Zeta", ".venv", ".oxide", ".idea",
+        ] {
             std::fs::create_dir_all(root.join(dir)).unwrap();
         }
         std::fs::write(root.join(".venv/pyvenv.cfg"), "").unwrap();
@@ -244,16 +261,20 @@ mod tests {
         }
     }
 
+    fn names(entries: &[Entry]) -> Vec<&str> {
+        entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
     #[test]
     fn lists_sorted_and_filtered() {
         let dir = tempfile::tempdir().unwrap();
         layout(dir.path());
-        let filter = Filter::for_root(dir.path());
+        let filter = Filter::new(dir.path(), Exclusions::default(), PY);
         let entries = list_dir(dir.path(), &filter).unwrap();
-        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(
-            names,
+            names(&entries),
             [
+                ".idea",
                 ".venv",
                 "src",
                 "tests",
@@ -263,20 +284,54 @@ mod tests {
                 "README.md"
             ]
         );
-        assert!(entries[0].excluded);
-        assert!(!entries[1].excluded);
+        assert!(!entries[0].excluded);
+        assert!(entries[1].excluded);
+        assert!(!entries[2].excluded);
+        // Everything below an excluded folder is excluded.
+        let inside = list_dir(&dir.path().join(".venv"), &filter).unwrap();
+        assert_eq!(names(&inside), ["pyvenv.cfg"]);
+        assert!(inside[0].excluded);
+    }
+
+    #[test]
+    fn a_reference_module_file_excludes_folders_when_the_project_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for d in ["venv/lib", "src"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::create_dir_all(root.join(".idea")).unwrap();
+        std::fs::write(
+            root.join(".idea/x.iml"),
+            r#"<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/venv" />
+    </content>
+  </component>
+</module>"#,
+        )
+        .unwrap();
+        let filter = Filter::for_root(root);
+        let entries = list_dir(root, &filter).unwrap();
+        assert_eq!(names(&entries), [".idea", "src", "venv"]);
+        assert_eq!(
+            entries.iter().map(|e| e.excluded).collect::<Vec<_>>(),
+            [false, false, true]
+        );
+        assert!(list_dir(&root.join("venv"), &filter).unwrap()[0].excluded);
     }
 
     #[test]
     fn expands_lazily_and_flattens_visible_rows() {
         let dir = tempfile::tempdir().unwrap();
         layout(dir.path());
-        let filter = Filter::for_root(dir.path());
+        let filter = Filter::new(dir.path(), Exclusions::default(), PY);
         let mut tree = FileTree::new(dir.path());
         assert!(tree.needs_listing(FileTree::ROOT));
         assert_eq!(tree.rows(), [FileTree::ROOT]);
         tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
-        assert_eq!(tree.rows().len(), 8);
+        assert_eq!(tree.rows().len(), 9);
         let src = tree.find(&dir.path().join("src")).unwrap();
         assert!(tree.expand(src));
         tree.set_children(src, list_dir(&dir.path().join("src"), &filter).unwrap());
@@ -285,17 +340,32 @@ mod tests {
         assert_eq!(tree.row_of(pkg), Some(tree.row_of(src).unwrap() + 1));
         assert!(tree.expand(pkg));
         tree.set_children(pkg, list_dir(&dir.path().join("src/pkg"), &filter).unwrap());
-        assert_eq!(tree.rows().len(), 10);
+        assert_eq!(tree.rows().len(), 11);
         // Collapsing keeps the listing; expanding again needs no listing.
         tree.collapse(src);
-        assert_eq!(tree.rows().len(), 8);
+        assert_eq!(tree.rows().len(), 9);
         assert!(!tree.expand(src));
-        assert_eq!(tree.rows().len(), 10);
+        assert_eq!(tree.rows().len(), 11);
         // A new listing keeps the state of known children.
         tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
         assert!(tree.node(src).expanded);
-        assert_eq!(tree.rows().len(), 10);
+        assert_eq!(tree.rows().len(), 11);
         tree.collapse_all();
-        assert_eq!(tree.rows().len(), 8);
+        assert_eq!(tree.rows().len(), 9);
+
+        // Marking a folder excluded updates it and everything listed below.
+        let mut marked = Exclusions::default();
+        marked.add("src");
+        tree.refresh_excluded(&filter.with_exclusions(marked));
+        let excluded = |tree: &FileTree, p: &str| {
+            tree.node(tree.find(&dir.path().join(p)).unwrap())
+                .entry
+                .excluded
+        };
+        assert!(excluded(&tree, "src") && excluded(&tree, "src/pkg/mod.py"));
+        assert!(excluded(&tree, ".venv") && !excluded(&tree, "tests"));
+        assert!(!tree.node(FileTree::ROOT).entry.excluded);
+        tree.refresh_excluded(&filter);
+        assert!(!excluded(&tree, "src") && !excluded(&tree, "src/pkg/mod.py"));
     }
 }

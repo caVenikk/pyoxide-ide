@@ -84,6 +84,7 @@ roles! {
         Border => ("border", "General", "Borders between panels"),
         BorderInput => ("border-input", "General", "Outline of inputs and buttons"),
         Divider => ("divider", "General", "Thin separators inside a panel"),
+        PopupBorder => ("popup-border", "General", "Border of popups and menus, and the separators in menus"),
         Text => ("text", "General", "Primary text"),
         TextMuted => ("text-muted", "General", "Secondary text and hints"),
         TextDisabled => ("text-disabled", "General", "Text of disabled controls"),
@@ -125,6 +126,7 @@ roles! {
         Progress => ("progress", "Chrome", "Progress bar fill"),
         ProgressTrack => ("progress-track", "Chrome", "Progress bar track"),
         Notification => ("notification", "Chrome", "Notification balloon"),
+        NonProjectFile => ("non-project-file", "Chrome", "Row background of files outside the project content, such as excluded folders"),
 
         EditorBackground => ("editor-background", "Editor", "Editor background"),
         EditorText => ("editor-text", "Editor", "Default editor text"),
@@ -344,7 +346,7 @@ impl UiRole {
             TabActiveText | TabInactiveText => Some(Text),
             StatusBarText | SelectionText => Some(Text),
             SelectionInactive => Some(Selection),
-            BorderInput | Divider => Some(Border),
+            BorderInput | Divider | PopupBorder => Some(Border),
             TextDisabled => Some(TextMuted),
             TextLink | Focus | Progress | TabUnderline | CompletionMatch => Some(Accent),
             ScrollbarHover => Some(Scrollbar),
@@ -359,6 +361,7 @@ impl UiRole {
             SearchFieldBorder => Some(Border),
             SearchFieldError => Some(Danger),
             SearchOptionSelected => Some(Pressed),
+            NonProjectFile => Some(SurfaceAlt),
             _ => None,
         }
     }

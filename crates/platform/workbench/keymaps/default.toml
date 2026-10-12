@@ -29,6 +29,7 @@ name = "ProjectTree"
 "ctrl-=" = "project.tree.expand-all"
 "escape" = "workbench.focus-editor"
 "shift-escape" = "workbench.hide-tool-window"
+"menu" = "project.tree.context-menu"
 
 [[context]]
 name = "Editor"
@@ -151,6 +152,17 @@ name = "FindHistory"
 "down" = "find.history-down"
 "enter" = "find.history-pick"
 "escape" = "find.history-close"
+
+# An open context menu (Swing popup menu keys of the reference IDE).
+[[context]]
+name = "ContextMenu"
+[context.bindings]
+"up" = "menu.up"
+"down" = "menu.down"
+"right" = "menu.open-submenu"
+"left" = "menu.close-submenu"
+"enter" = "menu.confirm"
+"escape" = "menu.cancel"
 
 # The Find in Files popup. In its fields Enter opens the selected result
 # (Shift+Enter too) and Escape closes the popup; Up and Down (while the

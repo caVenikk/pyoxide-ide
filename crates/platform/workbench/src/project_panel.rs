@@ -1,18 +1,28 @@
 //! The project tool window: the file tree of the open folder, virtualized,
-//! loaded one directory at a time off the UI thread.
+//! loaded one directory at a time off the UI thread. Opening a folder first
+//! loads its hide and exclude rules in the background (importing the
+//! reference IDE's exclusions once, ADR 0008); directories are listed when
+//! the rules are there.
+//!
+//! The context menu of a row has *Mark Directory As* (*Mark File As* for a
+//! file) with *Excluded* and *Cancel Exclusion*; the project settings are
+//! written in the background after every change.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, ScrollStrategy, SharedString,
-    Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+    App, Bounds, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
+    ScrollStrategy, SharedString, Styled, Subscription, UniformListScrollHandle, Window, canvas,
+    div, point, prelude::*, px, uniform_list,
 };
-use project::{FileTree, Filter, NodeId, Project, list_dir};
+use project::{FileTree, Filter, Node, NodeId, Project, list_dir};
 use serde_json::json;
 use themes::{Metric, UiRole};
 use ui::icons::{Icon, IconName};
+use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt;
 
 use crate::file_types::FileTypes;
@@ -32,7 +42,20 @@ ui::ui_commands! {
         "Expands the selected folder and the folders below it that are listed.";
     Reveal { path: String } => "project.tree.reveal", "Select in Project",
         "Expands the folders above a path and selects it.", r#"{"path": "src/app.py"}"#;
+    ShowContextMenu => "project.tree.context-menu", "Show Context Menu",
+        "Opens the context menu of the selected row.";
+    MarkExcluded { path: Option<String> } => "project.tree.mark-excluded", "Excluded",
+        "Mark Directory As > Excluded: leaves the selected folder or file (or `path`, relative to the project) out of search, Go to File and indexing, and stores that in the project settings.",
+        r#"{"path": "docs"}"#;
+    CancelExclusion { path: Option<String> } => "project.tree.cancel-exclusion", "Cancel Exclusion",
+        "Mark Directory As > Cancel Exclusion: makes the selected excluded folder or file (or `path`) ordinary project content again.",
+        r#"{"path": "docs"}"#;
 }
+
+/// Title of the submenu with the exclusion commands, for a folder and for
+/// a file.
+const MARK_DIRECTORY_AS: &str = "Mark Directory As";
+const MARK_FILE_AS: &str = "Mark File As";
 
 /// Space left of the first chevron, inside the island.
 const TREE_LEFT: f32 = 12.0;
@@ -53,7 +76,13 @@ pub struct ProjectPanel {
     focus: FocusHandle,
     project: Option<Project>,
     tree: Option<FileTree>,
-    filter: Filter,
+    /// Hide and exclude rules of the project; `None` while they load.
+    filter: Option<Filter>,
+    /// Directories to list once the rules are loaded.
+    waiting: Vec<NodeId>,
+    /// Changes with every opened project, so late results of the previous
+    /// one are dropped.
+    generation: u64,
     selected: Option<NodeId>,
     scroll: UniformListScrollHandle,
     file_types: Rc<FileTypes>,
@@ -61,6 +90,17 @@ pub struct ProjectPanel {
     loading: usize,
     /// A path to select once its folders are listed.
     reveal: Option<PathBuf>,
+    /// The open context menu and where it opened (window coordinates).
+    context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// A save of the project settings is running; `resave` asks for one
+    /// more with the latest exclusions.
+    saving: bool,
+    resave: bool,
+    /// Why the project settings could not be written, after a failed save.
+    settings_error: Option<String>,
+    /// Where the rows were drawn (window coordinates), to place a context
+    /// menu opened from the keyboard.
+    rows_bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -77,13 +117,25 @@ impl ProjectPanel {
             focus: cx.focus_handle(),
             project: None,
             tree: None,
-            filter: Filter::default(),
+            filter: None,
+            waiting: Vec::new(),
+            generation: 0,
             selected: None,
             scroll: UniformListScrollHandle::new(),
             file_types,
             loading: 0,
             reveal: None,
+            context_menu: None,
+            saving: false,
+            resave: false,
+            settings_error: None,
+            rows_bounds: Rc::default(),
         }
+    }
+
+    /// The open context menu, if any.
+    pub fn context_menu(&self) -> Option<&Entity<ContextMenu>> {
+        self.context_menu.as_ref().map(|(menu, _, _)| menu)
     }
 
     pub fn project(&self) -> Option<&Project> {
@@ -95,26 +147,73 @@ impl ProjectPanel {
         self.loading > 0
     }
 
-    /// Shows a folder; its root is listed in the background.
+    /// The hide and exclude rules of the open project, once loaded. They
+    /// are replaced (a cheap clone) whenever the person marks or unmarks a
+    /// folder, so a search that takes them at its start sees every change
+    /// of the session.
+    pub fn filter(&self) -> Option<&Filter> {
+        self.filter.as_ref()
+    }
+
+    /// Shows a folder. Its rules are loaded (and the reference IDE's
+    /// exclusions imported, once) in the background, then its root is
+    /// listed.
     pub fn set_project(&mut self, project: Project, cx: &mut Context<Self>) {
-        self.filter = Filter::for_root(project.root());
-        self.tree = Some(FileTree::new(project.root()));
+        let root = project.root().to_owned();
+        self.generation += 1;
+        let generation = self.generation;
+        self.filter = None;
+        self.waiting.clear();
+        self.context_menu = None;
+        self.settings_error = None;
+        self.tree = Some(FileTree::new(&root));
         self.project = Some(project);
         self.selected = Some(FileTree::ROOT);
+        self.loading += 1;
+        let task = cx.background_spawn(async move {
+            // A failed import leaves the project as it was; the rules
+            // still read `.idea` until the project has its own folder.
+            let _ = project::store::import_idea(&root);
+            Filter::for_root(&root)
+        });
+        cx.spawn(async move |this, cx| {
+            let filter = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading -= 1;
+                if this.generation != generation {
+                    return;
+                }
+                this.filter = Some(filter);
+                for id in std::mem::take(&mut this.waiting) {
+                    this.list(id, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         self.list(FileTree::ROOT, cx);
         cx.notify();
     }
 
     fn list(&mut self, id: NodeId, cx: &mut Context<Self>) {
         let Some(tree) = &self.tree else { return };
+        let Some(filter) = self.filter.clone() else {
+            if !self.waiting.contains(&id) {
+                self.waiting.push(id);
+            }
+            return;
+        };
         let path = tree.node(id).entry.path.clone();
-        let filter = self.filter.clone();
+        let generation = self.generation;
         self.loading += 1;
         let task = cx.background_spawn(async move { list_dir(&path, &filter) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading -= 1;
+                if this.generation != generation {
+                    return;
+                }
                 if let Some(tree) = &mut this.tree {
                     match result {
                         Ok(entries) => tree.set_children(id, entries),
@@ -243,12 +342,17 @@ impl ProjectPanel {
                     "dir": n.entry.is_dir(),
                     "expanded": n.expanded,
                     "excluded": n.entry.excluded,
+                    "icon": self.icon(n).0,
+                    "background": n.entry.excluded.then(|| UiRole::NonProjectFile.name()),
                 })
             }).collect::<Vec<_>>(),
             "selected": self.selected.map(rel),
             "loading": self.loading > 0,
             "scroll_top": f32::from(scroll_top),
             "first_visible_row": first_visible,
+            "context_menu": self.context_menu().map(|m| m.read(cx).state_json()),
+            "exclusions": self.filter.as_ref().map(|f| &f.exclusions().paths),
+            "settings_error": self.settings_error,
         })
     }
 
@@ -351,6 +455,212 @@ impl ProjectPanel {
         self.reveal(&path, cx);
     }
 
+    // ---- exclusions and the context menu ------------------------------------
+
+    /// The path a command names (relative to the project, or absolute), or
+    /// the selected row's, and whether it is a folder.
+    fn target(&self, path: Option<&str>) -> Option<(PathBuf, bool)> {
+        let tree = self.tree.as_ref()?;
+        let path = match path {
+            Some(p) => {
+                let p = Path::new(p);
+                if p.is_absolute() {
+                    p.to_owned()
+                } else {
+                    self.project.as_ref()?.root().join(p)
+                }
+            }
+            None => tree.node(self.selected?).entry.path.clone(),
+        };
+        let is_dir = match tree.find(&path) {
+            Some(id) => tree.node(id).entry.is_dir(),
+            None => path.is_dir(),
+        };
+        Some((path, is_dir))
+    }
+
+    fn mark_excluded(&mut self, a: &MarkExcluded, _: &mut Window, cx: &mut Context<Self>) {
+        let (Some((path, is_dir)), Some(filter)) = (self.target(a.path.as_deref()), &self.filter)
+        else {
+            return;
+        };
+        // Only project content can be excluded: not the root, not what is
+        // excluded already.
+        let Some(rel) = filter.relative(&path) else {
+            return;
+        };
+        if filter.is_excluded(&path, is_dir) {
+            return;
+        }
+        let mut exclusions = filter.exclusions().clone();
+        exclusions.add(&rel);
+        self.set_exclusions(exclusions, cx);
+    }
+
+    fn cancel_exclusion(&mut self, a: &CancelExclusion, _: &mut Window, cx: &mut Context<Self>) {
+        let (Some((path, _)), Some(filter)) = (self.target(a.path.as_deref()), &self.filter) else {
+            return;
+        };
+        // Only a stored exclusion can be cancelled; a product's automatic
+        // ones (a virtual environment) cannot, as in the reference IDE,
+        // which excludes them again on its own.
+        let Some(rel) = filter.relative(&path) else {
+            return;
+        };
+        if !filter.is_excluded_root(&path) {
+            return;
+        }
+        let mut exclusions = filter.exclusions().clone();
+        exclusions.remove(&rel);
+        self.set_exclusions(exclusions, cx);
+    }
+
+    /// Applies new exclusions to the rules and the listed rows, then
+    /// writes the project settings in the background.
+    fn set_exclusions(&mut self, exclusions: project::Exclusions, cx: &mut Context<Self>) {
+        let Some(filter) = &self.filter else { return };
+        let filter = filter.with_exclusions(exclusions);
+        if let Some(tree) = &mut self.tree {
+            tree.refresh_excluded(&filter);
+        }
+        self.filter = Some(filter);
+        self.save_settings(cx);
+        cx.notify();
+    }
+
+    /// Writes the exclusions into the project settings, one save at a time.
+    fn save_settings(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
+            self.resave = true;
+            return;
+        }
+        let (Some(filter), Some(project)) = (&self.filter, &self.project) else {
+            return;
+        };
+        let root = project.root().to_owned();
+        let exclusions = filter.exclusions().clone();
+        let generation = self.generation;
+        self.saving = true;
+        self.loading += 1;
+        let task = cx.background_spawn(async move { project::store::save(&root, &exclusions) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading -= 1;
+                this.saving = false;
+                let current = this.generation == generation;
+                if current {
+                    this.settings_error = result.err().map(|e| e.to_string());
+                }
+                if std::mem::take(&mut this.resave) && current {
+                    this.save_settings(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The rows of the context menu of `id`: *Mark Directory As* (or *Mark
+    /// File As*) with *Excluded* for project content or *Cancel Exclusion*
+    /// for a stored exclusion. The project root, rows inside an excluded
+    /// folder and folders a product excludes have nothing to mark.
+    fn context_menu_items(&self, id: NodeId) -> Vec<MenuItem> {
+        let (Some(tree), Some(filter)) = (&self.tree, &self.filter) else {
+            return Vec::new();
+        };
+        let entry = &tree.node(id).entry;
+        let Some(rel) = filter.relative(&entry.path) else {
+            return Vec::new();
+        };
+        let mark = if filter.is_excluded_root(&entry.path) {
+            MenuItem::action("Cancel Exclusion", CancelExclusion { path: Some(rel) })
+        } else if !entry.excluded {
+            MenuItem::action("Excluded", MarkExcluded { path: Some(rel) })
+                .icon(IconName::EXCLUDED_FOLDER)
+        } else {
+            return Vec::new();
+        };
+        let title = if entry.is_dir() {
+            MARK_DIRECTORY_AS
+        } else {
+            MARK_FILE_AS
+        };
+        vec![MenuItem::submenu(title, vec![mark])]
+    }
+
+    /// Opens the context menu of `id` at `position` (window coordinates).
+    fn open_context_menu(
+        &mut self,
+        id: NodeId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self.context_menu_items(id);
+        if items.is_empty() {
+            return;
+        }
+        window.focus(&self.focus);
+        let menu = ContextMenu::build(items, window, cx);
+        let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+            this.context_menu = None;
+            cx.notify();
+        });
+        self.context_menu = Some((menu, position, dismissed));
+        cx.notify();
+    }
+
+    fn show_context_menu(
+        &mut self,
+        _: &ShowContextMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(tree), Some(id)) = (&self.tree, self.selected) else {
+            return;
+        };
+        let Some(row) = tree.row_of(id) else { return };
+        // Below the selected row, where its name starts.
+        let theme = cx.theme();
+        let row_height = theme.metric(Metric::RowHeight);
+        let indent = theme.metric(Metric::TreeIndent) * tree.node(id).depth as f32;
+        let x = px(TREE_LEFT + ICON_X + TEXT_X) + indent;
+        let y = row_height * (row + 1) as f32 - self.scroll_top();
+        let origin = self.rows_bounds.get().origin;
+        self.open_context_menu(id, origin + point(x, y), window, cx);
+    }
+
+    /// Selects the row under a right click and opens its context menu.
+    fn context_click(
+        &mut self,
+        id: NodeId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus);
+        self.selected = Some(id);
+        self.open_context_menu(id, position, window, cx);
+        cx.notify();
+    }
+
+    /// The icon of a row: the project root, an excluded folder (also one
+    /// inside an excluded folder, as in the reference IDE), a folder, or the
+    /// file type's.
+    fn icon(&self, node: &Node) -> IconName {
+        let entry = &node.entry;
+        if !entry.is_dir() {
+            self.file_types.icon(&entry.path)
+        } else if node.depth == 0 {
+            IconName::MODULE
+        } else if entry.excluded {
+            IconName::EXCLUDED_FOLDER
+        } else {
+            IconName::FOLDER
+        }
+    }
+
     // ---- drawing ----------------------------------------------------------
 
     fn row(
@@ -374,24 +684,15 @@ impl ProjectPanel {
             theme.color(UiRole::SelectionInactive)
         };
         let hover = theme.color(UiRole::Hover);
-        let text_color = if entry.excluded {
-            theme.color(UiRole::GitIgnored)
-        } else if selected && focused {
+        // Excluded rows keep the normal text colour and get the background
+        // of non-project files across the whole row.
+        let text_color = if selected && focused {
             theme.color(UiRole::SelectionText)
         } else {
             theme.color(UiRole::Text)
         };
-        let icon = if entry.is_dir() {
-            if node.depth == 0 {
-                IconName::MODULE
-            } else if entry.excluded {
-                IconName::EXCLUDED_FOLDER
-            } else {
-                IconName::FOLDER
-            }
-        } else {
-            self.file_types.icon(&entry.path)
-        };
+        let non_project = entry.excluded.then(|| theme.color(UiRole::NonProjectFile));
+        let icon = self.icon(node);
         let chevron = entry.is_dir().then(|| {
             let name = if node.expanded {
                 IconName::CHEVRON_DOWN
@@ -428,12 +729,18 @@ impl ProjectPanel {
                 );
             }
         }
-        div()
+        let row = div()
             .id(("row", ix))
+            // Tests find a row by its path (no cost in release builds).
+            .debug_selector(|| {
+                let rel = self.filter.as_ref().and_then(|f| f.relative(&entry.path));
+                format!("tree-row:{}", rel.unwrap_or_default())
+            })
             .relative()
             .w_full()
             .h(row_height)
             .overflow_hidden()
+            .when_some(non_project, |d, bg| d.bg(bg))
             .child(
                 div()
                     .absolute()
@@ -470,8 +777,27 @@ impl ProjectPanel {
                     this.activate(id, cx);
                 }
                 cx.notify();
-            }))
-            .into_any_element()
+            }));
+        // The context menu opens on the right button: when it goes down on
+        // macOS and Linux, when it comes up on Windows (the platforms'
+        // popup triggers).
+        #[cfg(not(windows))]
+        let row = row.on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, e: &gpui::MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.context_click(id, e.position, window, cx);
+            }),
+        );
+        #[cfg(windows)]
+        let row = row.on_mouse_up(
+            MouseButton::Right,
+            cx.listener(move |this, e: &gpui::MouseUpEvent, window, cx| {
+                cx.stop_propagation();
+                this.context_click(id, e.position, window, cx);
+            }),
+        );
+        row.into_any_element()
     }
 }
 
@@ -503,6 +829,9 @@ panel_actions! {
     CollapseAll => collapse_all,
     ExpandAll => expand_all,
     Reveal => reveal_action,
+    ShowContextMenu => show_context_menu,
+    MarkExcluded => mark_excluded,
+    CancelExclusion => cancel_exclusion,
 }
 
 impl Render for ProjectPanel {
@@ -553,6 +882,26 @@ impl Render for ProjectPanel {
         .overflow_x_hidden();
         // A sideways swipe does not scroll the rows up or down.
         rows.style().restrict_scroll_to_axis = Some(true);
-        el.child(rows).into_any_element()
+        let bounds = self.rows_bounds.clone();
+        let menu = self
+            .context_menu
+            .as_ref()
+            .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
+        el.child(
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h(px(0.0))
+                .child(rows)
+                .child(
+                    canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                ),
+        )
+        .children(menu)
+        .into_any_element()
     }
 }

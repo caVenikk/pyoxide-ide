@@ -123,6 +123,7 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
         (GitUntracked, SurfaceAlt, Need::Text),
         (GitConflict, SurfaceAlt, Need::Text),
         (GitIgnored, SurfaceAlt, Need::Large),
+        (Text, NonProjectFile, Need::Text),
         (TerminalForeground, TerminalBackground, Need::Text),
         (TerminalBlack, TerminalBackground, Need::Text),
         (TerminalRed, TerminalBackground, Need::Text),

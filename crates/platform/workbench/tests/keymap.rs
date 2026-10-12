@@ -199,6 +199,20 @@ impl H<'_> {
         self.focus_tree();
     }
 
+    /// Opens the context menu of a tree row; nothing is selected in it.
+    fn open_menu(&mut self, path: &str) {
+        self.select_in_tree(path);
+        self.invoke("project.tree.context-menu", json!(null));
+        assert_eq!(self.menu_levels().len(), 1, "the context menu is open");
+    }
+
+    fn menu_levels(&mut self) -> Vec<Value> {
+        self.state()["tree"]["context_menu"]["levels"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn find_state(&mut self) -> Value {
         self.state()["find"].clone()
     }
@@ -283,6 +297,9 @@ impl H<'_> {
     /// Three tabs (a.py, b.py, c.txt), the first active, the project tool
     /// window shown, the editor focused.
     fn reset(&mut self) {
+        while !self.state()["tree"]["context_menu"].is_null() {
+            self.invoke("menu.cancel", json!(null));
+        }
         if self.state()["go_to_line"].is_string() {
             self.invoke("go-to-line.cancel", json!(null));
         }
@@ -997,6 +1014,50 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.tree_row("src")["expanded"], json!(true), "{what}");
             assert_eq!(h.tree_row("src/pkg")["expanded"], json!(true), "{what}");
+        }
+        "project.tree.context-menu" => {
+            h.select_in_tree("src");
+            h.press(keys);
+            let levels = h.menu_levels();
+            assert_eq!(
+                levels[0]["items"][0]["label"],
+                json!("Mark Directory As"),
+                "{what}"
+            );
+        }
+        "menu.down" | "menu.up" => {
+            h.open_menu("src");
+            h.press(keys);
+            // One row: both directions select it.
+            assert_eq!(h.menu_levels()[0]["selected"], json!(0), "{what}");
+        }
+        "menu.open-submenu" => {
+            h.open_menu("src");
+            h.invoke("menu.down", json!(null));
+            h.press(keys);
+            let levels = h.menu_levels();
+            assert_eq!(levels.len(), 2, "{what}");
+            assert_eq!(levels[1]["selected"], json!(0), "{what}");
+        }
+        "menu.close-submenu" => {
+            h.open_menu("src");
+            h.invoke("menu.down", json!(null));
+            h.invoke("menu.open-submenu", json!(null));
+            h.press(keys);
+            assert_eq!(h.menu_levels().len(), 1, "{what}");
+        }
+        "menu.confirm" => {
+            h.open_menu("src");
+            h.invoke("menu.down", json!(null));
+            h.press(keys);
+            // On a submenu row: the submenu opens.
+            assert_eq!(h.menu_levels().len(), 2, "{what}");
+        }
+        "menu.cancel" => {
+            h.open_menu("src");
+            h.press(keys);
+            assert!(h.menu_levels().is_empty(), "{what}");
+            assert!(h.tree_focused(), "{what}: the tree has the focus back");
         }
         _ => return false,
     }

@@ -4960,10 +4960,11 @@ dependencies = [
 name = "project"
 version = "0.0.1"
 dependencies = [
- "ignore",
+ "quick-xml 0.42.0",
  "tempfile",
  "text",
  "thiserror 2.0.21",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]
@@ -7119,6 +7120,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

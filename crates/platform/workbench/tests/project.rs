@@ -17,6 +17,10 @@ fn open(cx: &mut TestAppContext) -> WindowHandle<Workbench> {
             indent_after: &[':'],
             ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
         }],
+        auto_excluded: workbench::AutoExclusions {
+            dir_names: &[".venv"],
+            root_dir_markers: &["pyvenv.cfg"],
+        },
         ..Product::default()
     };
     let window = cx.update(|cx| {
@@ -269,6 +273,114 @@ fn tree_keyboard_commands(cx: &mut TestAppContext) {
         state(cx, window)["tool_windows"]["project"]["visible"],
         json!(true)
     );
+}
+
+fn excluded(s: &Value) -> Vec<(String, bool)> {
+    s["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r["path"].as_str().unwrap().to_owned(),
+                r["excluded"].as_bool().unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[gpui::test]
+fn reference_exclusions_are_imported_once_and_gitignore_is_content(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let w = |p: &str, text: &str| {
+        let path = root.join(p);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    w(
+        ".idea/modules.xml",
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/x.iml" filepath="$PROJECT_DIR$/.idea/x.iml" />
+    </modules>
+  </component>
+</project>"#,
+    );
+    w(
+        ".idea/x.iml",
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/venv" />
+    </content>
+  </component>
+</module>"#,
+    );
+    w("venv/lib/site.py", "");
+    w("build/out.txt", "");
+    w("src/app.py", "");
+    w(".gitignore", "build/\nvenv/\n");
+    let window = open(cx);
+    let open_folder = |cx: &mut TestAppContext| {
+        invoke(
+            cx,
+            window,
+            "project.open-folder",
+            json!({"path": root.display().to_string()}),
+        )
+    };
+    open_folder(cx);
+    let s = state(cx, window);
+    // `.idea` is shown; `venv` is excluded as in the reference; the folder
+    // named in `.gitignore` is ordinary content.
+    let want = |venv: bool, build: bool| {
+        vec![
+            ("".to_owned(), false),
+            (".idea".to_owned(), false),
+            ("build".to_owned(), build),
+            ("src".to_owned(), false),
+            ("venv".to_owned(), venv),
+            (".gitignore".to_owned(), false),
+        ]
+    };
+    assert_eq!(excluded(&s), want(true, false));
+    // The import wrote Pyoxide's own settings and left `.idea` alone.
+    let settings = root.join(".oxide/project.toml");
+    let text = std::fs::read_to_string(&settings).unwrap();
+    assert!(text.contains("paths = [\n    \"venv\",\n]"), "{text}");
+
+    // From now on only `.oxide` counts: `.idea` is not read again.
+    std::fs::write(
+        &settings,
+        "version = 1\n\n[exclusions]\npaths = [\"build\"]\n",
+    )
+    .unwrap();
+    open_folder(cx);
+    let s = state(cx, window);
+    assert_eq!(excluded(&s), want(false, true));
+}
+
+#[gpui::test]
+fn opening_a_project_creates_no_settings_folder(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    // A reference project without exclusions has nothing to import.
+    std::fs::create_dir_all(dir.path().join(".idea")).unwrap();
+    std::fs::write(dir.path().join(".idea/misc.xml"), "<project/>").unwrap();
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path().display().to_string()}),
+    );
+    let s = state(cx, window);
+    assert_eq!(rows(&s)[..3], ["", ".idea", ".venv"]);
+    assert!(!dir.path().join(".oxide").exists());
 }
 
 #[gpui::test]

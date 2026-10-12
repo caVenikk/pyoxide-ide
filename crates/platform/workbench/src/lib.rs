@@ -22,5 +22,6 @@ pub mod workbench;
 
 pub use app::{Product, StripeItem, init, open_main_window, run};
 pub use file_types::{FileType, HighlighterFactory};
+pub use project::AutoExclusions;
 pub use settings::SaveSettings;
 pub use workbench::Workbench;
