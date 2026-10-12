@@ -1053,16 +1053,20 @@ impl Element for EditorElement {
                 editor.update(cx, |ed, cx| ed.mouse_up(cx));
             }
         });
-        let editor = self.editor.clone();
-        let hitbox = p.hitbox.clone();
-        window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
-            if !phase.bubble() || !hitbox.should_handle_scroll(window) {
-                return;
-            }
-            let delta = e.delta.pixel_delta(lh);
-            editor.update(cx, |ed, cx| ed.scroll_by(point(-delta.x, -delta.y), cx));
-            cx.stop_propagation();
-        });
+        // A one-line field does not scroll with the wheel or a swipe, which
+        // could move its text out of view; the caret keeps the text in view.
+        if !self.editor.read(cx).single_line {
+            let editor = self.editor.clone();
+            let hitbox = p.hitbox.clone();
+            window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+                if !phase.bubble() || !hitbox.should_handle_scroll(window) {
+                    return;
+                }
+                let delta = e.delta.pixel_delta(lh);
+                editor.update(cx, |ed, cx| ed.scroll_by(point(-delta.x, -delta.y), cx));
+                cx.stop_propagation();
+            });
+        }
     }
 }
 
