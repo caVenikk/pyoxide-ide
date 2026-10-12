@@ -524,6 +524,12 @@ impl FindInFiles {
         self.status == Status::Searching
     }
 
+    /// A search runs (not only waits for the typing to pause): the loading
+    /// indicator shows, as the reference's does once its search starts.
+    fn is_running(&self) -> bool {
+        self.status == Status::Searching && self.search_task.is_some()
+    }
+
     /// The counts of the header with `+` while there may be more:
     /// matches and files.
     fn counts(&self) -> (String, String) {

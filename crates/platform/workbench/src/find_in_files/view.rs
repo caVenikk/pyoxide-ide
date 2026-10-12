@@ -122,7 +122,7 @@ impl FindInFiles {
                     .text_color(theme.color(UiRole::TextMuted))
                     .child(self.info()),
             )
-            .when(self.is_searching(), |d| {
+            .when(self.is_running(), |d| {
                 d.child(ui::components::spinner("find-in-files-loading", cx))
             })
             .child(div().flex_1())

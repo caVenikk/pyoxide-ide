@@ -949,3 +949,29 @@ fn a_folder_marked_excluded_is_left_out_at_once(cx: &mut TestAppContext) {
         h.invoke("find-in-files.close", json!(null));
     });
 }
+
+#[gpui::test]
+fn find_in_files_from_the_tree_context_menu(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let pkg = h.root.join("pkg").display().to_string();
+        // On a folder: Find in Files… searches that folder.
+        h.invoke("project.tree.reveal", json!({ "path": "pkg" }));
+        h.invoke("project.tree.context-menu", json!(null));
+        h.press("down enter");
+        let s = h.state();
+        assert_eq!(s["open"], json!(true));
+        assert_eq!(s["replace_mode"], json!(false));
+        assert_eq!(s["scope"], json!("directory"));
+        assert_eq!(s["directory"], json!(pkg));
+        h.press("escape");
+        // On a file: Replace in Files… in the file's folder.
+        h.invoke("project.tree.reveal", json!({ "path": "pkg/util.py" }));
+        h.invoke("project.tree.context-menu", json!(null));
+        h.press("down down enter");
+        let s = h.state();
+        assert_eq!(s["replace_mode"], json!(true));
+        assert_eq!(s["scope"], json!("directory"));
+        assert_eq!(s["directory"], json!(pkg));
+        h.press("escape");
+    });
+}

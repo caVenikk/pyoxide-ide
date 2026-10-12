@@ -48,6 +48,9 @@ replacing in files).
 3. Select a folder in the project tool window and press Find in Files.
    - The Directory scope is selected with that folder (a selected file
      gives its folder).
+   - The tree's context menu offers *Find in Files…* and *Replace in
+     Files…* above *Mark Directory As*, for folders and files alike; they
+     open the popup the same way.
 
 ### What is searched
 4. Search a project with `.git`, `__pycache__`, `*.pyc`, a virtual
@@ -57,7 +60,8 @@ replacing in files).
      excluded folders (unless the folder searched is itself excluded),
      binary files and files over 20 MB. Ignore files such as `.gitignore`
      do not leave files out by themselves; which folders count as excluded
-     is the project's setting.
+     is the project's setting, and a folder marked Excluded in the tree is
+     left out of the next search at once.
    - The reference IDE's project files (`.idea/`, `*.iml`, `*.ipr`,
      `*.iws`) are searched, but their matches are held back unless the
      mask names them or the folder searched is inside `.idea`.

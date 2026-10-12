@@ -1021,6 +1021,11 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let levels = h.menu_levels();
             assert_eq!(
                 levels[0]["items"][0]["label"],
+                json!("Find in Files…"),
+                "{what}"
+            );
+            assert_eq!(
+                levels[0]["items"][3]["label"],
                 json!("Mark Directory As"),
                 "{what}"
             );
@@ -1028,12 +1033,13 @@ fn check(h: &mut H, b: &Binding) -> bool {
         "menu.down" | "menu.up" => {
             h.open_menu("src");
             h.press(keys);
-            // One row: both directions select it.
-            assert_eq!(h.menu_levels()[0]["selected"], json!(0), "{what}");
+            // Down from no row selects the first one, Up the last one.
+            let expected = if b.command == "menu.down" { 0 } else { 3 };
+            assert_eq!(h.menu_levels()[0]["selected"], json!(expected), "{what}");
         }
         "menu.open-submenu" => {
             h.open_menu("src");
-            h.invoke("menu.down", json!(null));
+            h.invoke("menu.up", json!(null));
             h.press(keys);
             let levels = h.menu_levels();
             assert_eq!(levels.len(), 2, "{what}");
@@ -1041,14 +1047,14 @@ fn check(h: &mut H, b: &Binding) -> bool {
         }
         "menu.close-submenu" => {
             h.open_menu("src");
-            h.invoke("menu.down", json!(null));
+            h.invoke("menu.up", json!(null));
             h.invoke("menu.open-submenu", json!(null));
             h.press(keys);
             assert_eq!(h.menu_levels().len(), 1, "{what}");
         }
         "menu.confirm" => {
             h.open_menu("src");
-            h.invoke("menu.down", json!(null));
+            h.invoke("menu.up", json!(null));
             h.press(keys);
             // On a submenu row: the submenu opens.
             assert_eq!(h.menu_levels().len(), 2, "{what}");
