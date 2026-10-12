@@ -373,6 +373,9 @@ impl H<'_> {
         if self.state()["search_everywhere"] == json!(true) {
             self.invoke("search-everywhere.close", json!(null));
         }
+        while self.state()["recent_files"] == json!(true) {
+            self.invoke("recent-files.close", json!(null));
+        }
         while self.state()["tabs"]
             .as_array()
             .is_some_and(|t| !t.is_empty())
@@ -724,16 +727,91 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["open"], json!(true), "{what}");
             assert_eq!(s["tab"], json!("all"), "{what}");
         }
-        "search-everywhere.go-to-file" | "search-everywhere.go-to-action" => {
+        "search-everywhere.go-to-file"
+        | "search-everywhere.go-to-action"
+        | "search-everywhere.go-to-text" => {
             h.press(keys);
             let s = h.se();
             assert_eq!(s["open"], json!(true), "{what}");
-            let tab = if b.command.ends_with("file") {
-                "files"
-            } else {
-                "actions"
+            let tab = b.command.rsplit('-').next().unwrap();
+            let tab = match tab {
+                "file" => "files",
+                "action" => "actions",
+                other => other,
             };
             assert_eq!(s["tab"], json!(tab), "{what}");
+        }
+        "search-everywhere.toggle-case"
+        | "search-everywhere.toggle-words"
+        | "search-everywhere.toggle-regex" => {
+            h.search_everywhere("text", " = ");
+            let option = match b.command.as_str() {
+                "search-everywhere.toggle-case" => "case_sensitive",
+                "search-everywhere.toggle-words" => "whole_words",
+                _ => "regex",
+            };
+            h.press(keys);
+            assert_eq!(h.se()["options"][option], json!(true), "{what}");
+            // Back off: the options are shared with Find in Files.
+            h.press(keys);
+            assert_eq!(h.se()["options"][option], json!(false), "{what}");
+        }
+        "recent-files.open" => {
+            h.press(keys);
+            let s = h.invoke("recent-files.state", json!(null));
+            assert_eq!(s["open"], json!(true), "{what}");
+        }
+        "recent-files.down" | "recent-files.up" | "recent-files.left" | "recent-files.right" => {
+            h.invoke("recent-files.open", json!(null));
+            let rf = |h: &mut H| h.invoke("recent-files.state", json!(null));
+            assert_eq!(rf(h)["selected"], json!(1), "{what}");
+            match b.command.as_str() {
+                "recent-files.down" => {
+                    h.press(keys);
+                    assert_eq!(rf(h)["selected"], json!(2), "{what}");
+                }
+                "recent-files.up" => {
+                    h.press(keys);
+                    assert_eq!(rf(h)["selected"], json!(0), "{what}");
+                }
+                "recent-files.left" => {
+                    h.press(keys);
+                    assert_eq!(rf(h)["list"], json!("tool_windows"), "{what}");
+                }
+                _ => {
+                    h.invoke("recent-files.left", json!(null));
+                    h.press(keys);
+                    assert_eq!(rf(h)["list"], json!("files"), "{what}");
+                }
+            }
+        }
+        "recent-files.select" => {
+            h.invoke("recent-files.open", json!(null));
+            let file = h.invoke("recent-files.state", json!(null))["files"][1].clone();
+            h.press(keys);
+            let s = h.state();
+            assert_eq!(s["recent_files"], json!(false), "{what}");
+            let active = s["active_tab"].as_u64().unwrap() as usize;
+            assert_eq!(s["tabs"][active]["path"], file, "{what}");
+        }
+        "recent-files.close" => {
+            h.invoke("recent-files.open", json!(null));
+            h.press(keys);
+            assert_eq!(h.state()["recent_files"], json!(false), "{what}");
+            assert!(h.editor_focused(), "{what}: the focus goes back");
+        }
+        "recent-files.delete" => {
+            h.invoke("recent-files.open", json!(null));
+            let before = h.invoke("recent-files.state", json!(null))["files"]
+                .as_array()
+                .unwrap()
+                .len();
+            h.press(keys);
+            let after = h.invoke("recent-files.state", json!(null))["files"]
+                .as_array()
+                .unwrap()
+                .len();
+            assert_eq!(after, before - 1, "{what}");
         }
         "search-everywhere.next-tab" | "search-everywhere.previous-tab" => {
             h.search_everywhere("files", "a.py");
