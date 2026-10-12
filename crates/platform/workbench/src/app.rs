@@ -39,6 +39,9 @@ pub struct Product {
     pub left_stripe_bottom: Vec<StripeItem>,
     /// Text of the interpreter widget in the status bar.
     pub interpreter_label: Option<&'static str>,
+    /// Folders the product excludes from a project on its own, such as a
+    /// virtual environment (ADR 0008).
+    pub auto_excluded: project::AutoExclusions,
 }
 
 /// Default size of the main window's content.
@@ -51,11 +54,13 @@ pub const TRAFFIC_LIGHTS: (f32, f32) = (14.0, 13.0);
 /// Registers fonts, icons, the theme, commands and key bindings. Called once
 /// per application (and by tests before opening a window).
 pub fn init(cx: &mut App, product: &Product) {
+    project::set_auto_exclusions(product.auto_excluded);
     ui::init(cx, env::theme_kind());
     ui::icons::register(cx, product.icons);
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
+    ui::command::register(cx, ui::menu::COMMANDS);
     editor::init(cx);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window

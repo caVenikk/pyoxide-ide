@@ -152,6 +152,7 @@ report says which parent was missing.
 | `ui.border` | `Borders.color`, `ToolWindow.borderColor`, `Popup.borderColor`, `Menu.borderColor` | Borders between panels |
 | `ui.border-input` | `Component.borderColor`, `TextField.borderColor`, `Button.startBorderColor` | Outline of inputs and buttons |
 | `ui.divider` | `Separator.separatorColor`, `Menu.separatorColor`, `Popup.separatorColor`, `MainToolbar.separatorColor` | Thin separators inside a panel |
+| `ui.popup-border` | `Popup.borderColor`, `Menu.borderColor` | Border of popups and menus, and the separators in menus |
 | `ui.text` | `Label.foreground`, `Panel.foreground` | Primary text |
 | `ui.text-muted` | `Label.infoForeground`, `Component.infoForeground` | Secondary text and hints |
 | `ui.text-disabled` | `Label.disabledForeground`, `Label.disabledText`, `Component.disabledForeground` | Text of disabled controls |
@@ -197,6 +198,7 @@ report says which parent was missing.
 | `ui.progress` | `ProgressBar.progressColor` | Progress bar fill |
 | `ui.progress-track` | `ProgressBar.trackColor` | Progress bar track |
 | `ui.notification` | `NOTIFICATION_BACKGROUND` (scheme color), `Notification.background` | Notification balloon |
+| `ui.non-project-file` | `FileColor.Yellow` | Row background of files outside the project content, such as excluded folders (the reference's "Non-Project Files" file colour) |
 
 ### Editor
 
@@ -293,7 +295,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.tab-active-text`, `ui.tab-inactive-text` | `ui.text` |
 | `ui.status-bar-text`, `ui.selection-text` | `ui.text` |
 | `ui.selection-inactive` | `ui.selection` |
-| `ui.border-input`, `ui.divider` | `ui.border` |
+| `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
 | `ui.text-disabled` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |
@@ -308,6 +310,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.search-field-border` | `ui.border` |
 | `ui.search-field-error` | `ui.danger` |
 | `ui.search-option-selected` | `ui.pressed` |
+| `ui.non-project-file` | `ui.surface-alt` |
 
 ## Text roles
 

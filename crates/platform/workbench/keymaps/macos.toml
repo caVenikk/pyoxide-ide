@@ -169,3 +169,14 @@ name = "FindHistory"
 "down" = "find.history-down"
 "enter" = "find.history-pick"
 "escape" = "find.history-close"
+
+# An open context menu (Swing popup menu keys of the reference IDE).
+[[context]]
+name = "ContextMenu"
+[context.bindings]
+"up" = "menu.up"
+"down" = "menu.down"
+"right" = "menu.open-submenu"
+"left" = "menu.close-submenu"
+"enter" = "menu.confirm"
+"escape" = "menu.cancel"

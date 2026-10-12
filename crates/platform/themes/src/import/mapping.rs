@@ -174,6 +174,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Color("NOTIFICATION_BACKGROUND"),
             Ui("Notification.background"),
         ],
+        NonProjectFile => &[Ui("FileColor.Yellow")],
+        PopupBorder => &[Ui("Popup.borderColor"), Ui("Menu.borderColor")],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],
         EditorText => &[Fg("TEXT"), Ui("Editor.foreground")],

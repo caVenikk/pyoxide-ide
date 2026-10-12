@@ -15,7 +15,8 @@
 - Folders come before files, both sorted by name, case-insensitively.
 - `.git` and `__pycache__` are not shown (the default list of ignored files
   and folders); `.venv` is shown as an excluded folder and never expanded
-  automatically; folders named in `.gitignore` are shown as excluded.
+  automatically; folders named in `.gitignore` are ordinary folders.
+  Excluded folders are described in excluded-folders.md.
 - Expanding `src` shows `app.py` with a Python file icon.
 - Opening a folder of 50,000 files shows the tree at once; the UI keeps
   responding while folders load.

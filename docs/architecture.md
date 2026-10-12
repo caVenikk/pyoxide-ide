@@ -36,8 +36,10 @@ Platform (`crates/platform/`, language-agnostic):
   snapshots off the UI thread.
 - `syntax`: tree-sitter parsing off the UI thread and highlight spans as
   theme text roles; grammars and queries come from the products.
-- `project`: an opened folder, its lazily listed file tree with ignore
-  rules, reading and writing documents.
+- `project`: an opened folder, its lazily listed file tree with hidden and
+  excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
+  project settings and the one-time import of the reference IDE's
+  exclusions (ADR 0008), reading and writing documents.
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
   commands) and its find bar (Find / Replace in the file).
@@ -45,7 +47,8 @@ Platform (`crates/platform/`, language-agnostic):
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
   metrics, bundled fonts, colour icons rasterized at device scale, common
-  components, the UI command index (`ui_commands!`, `command::invoke`).
+  components, context menus, the UI command index (`ui_commands!`,
+  `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar), keymaps, application start-up, environment switches
   and in-app measurements.
