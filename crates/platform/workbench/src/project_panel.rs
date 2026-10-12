@@ -1,5 +1,8 @@
 //! The project tool window: the file tree of the open folder, virtualized,
-//! loaded one directory at a time off the UI thread.
+//! loaded one directory at a time off the UI thread. Opening a folder first
+//! loads its hide and exclude rules in the background (importing the
+//! reference IDE's exclusions once, ADR 0008); directories are listed when
+//! the rules are there.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -53,7 +56,13 @@ pub struct ProjectPanel {
     focus: FocusHandle,
     project: Option<Project>,
     tree: Option<FileTree>,
-    filter: Filter,
+    /// Hide and exclude rules of the project; `None` while they load.
+    filter: Option<Filter>,
+    /// Directories to list once the rules are loaded.
+    waiting: Vec<NodeId>,
+    /// Changes with every opened project, so late results of the previous
+    /// one are dropped.
+    generation: u64,
     selected: Option<NodeId>,
     scroll: UniformListScrollHandle,
     file_types: Rc<FileTypes>,
@@ -77,7 +86,9 @@ impl ProjectPanel {
             focus: cx.focus_handle(),
             project: None,
             tree: None,
-            filter: Filter::default(),
+            filter: None,
+            waiting: Vec::new(),
+            generation: 0,
             selected: None,
             scroll: UniformListScrollHandle::new(),
             file_types,
@@ -95,26 +106,68 @@ impl ProjectPanel {
         self.loading > 0
     }
 
-    /// Shows a folder; its root is listed in the background.
+    /// The hide and exclude rules of the open project, once loaded.
+    pub fn filter(&self) -> Option<&Filter> {
+        self.filter.as_ref()
+    }
+
+    /// Shows a folder. Its rules are loaded (and the reference IDE's
+    /// exclusions imported, once) in the background, then its root is
+    /// listed.
     pub fn set_project(&mut self, project: Project, cx: &mut Context<Self>) {
-        self.filter = Filter::for_root(project.root());
-        self.tree = Some(FileTree::new(project.root()));
+        let root = project.root().to_owned();
+        self.generation += 1;
+        let generation = self.generation;
+        self.filter = None;
+        self.waiting.clear();
+        self.tree = Some(FileTree::new(&root));
         self.project = Some(project);
         self.selected = Some(FileTree::ROOT);
+        self.loading += 1;
+        let task = cx.background_spawn(async move {
+            // A failed import leaves the project as it was; the rules
+            // still read `.idea` until the project has its own folder.
+            let _ = project::store::import_idea(&root);
+            Filter::for_root(&root)
+        });
+        cx.spawn(async move |this, cx| {
+            let filter = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading -= 1;
+                if this.generation != generation {
+                    return;
+                }
+                this.filter = Some(filter);
+                for id in std::mem::take(&mut this.waiting) {
+                    this.list(id, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         self.list(FileTree::ROOT, cx);
         cx.notify();
     }
 
     fn list(&mut self, id: NodeId, cx: &mut Context<Self>) {
         let Some(tree) = &self.tree else { return };
+        let Some(filter) = self.filter.clone() else {
+            if !self.waiting.contains(&id) {
+                self.waiting.push(id);
+            }
+            return;
+        };
         let path = tree.node(id).entry.path.clone();
-        let filter = self.filter.clone();
+        let generation = self.generation;
         self.loading += 1;
         let task = cx.background_spawn(async move { list_dir(&path, &filter) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading -= 1;
+                if this.generation != generation {
+                    return;
+                }
                 if let Some(tree) = &mut this.tree {
                     match result {
                         Ok(entries) => tree.set_children(id, entries),

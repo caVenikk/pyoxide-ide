@@ -1,16 +1,22 @@
-//! The project model of Pyoxide IDE (ADR 0007): a folder opened as a project,
-//! its file tree loaded one directory at a time, the rules that hide or
-//! exclude entries, and reading and writing documents.
+//! The project model of Pyoxide IDE (ADR 0007, 0008): a folder opened as a
+//! project, its file tree loaded one directory at a time, the rules that
+//! hide or exclude entries, Pyoxide's own project folder with the shared
+//! project settings, and reading and writing documents.
 //!
 //! Everything here is blocking and toolkit-free: callers run it on a
 //! background thread (the workbench uses GPUI's background executor).
 
 mod document;
 mod filter;
+pub mod idea;
+pub mod store;
 mod tree;
 
 pub use document::{LoadError, Loaded, MAX_FILE_SIZE, read_document, write_document};
-pub use filter::Filter;
+pub use filter::{
+    AutoExclusions, DEFAULT_IGNORED, Filter, NameMasks, auto_exclusions, set_auto_exclusions,
+};
+pub use store::{Exclusions, STORE_DIR, StoreError};
 pub use tree::{Entry, EntryKind, FileTree, Node, NodeId, list_dir};
 
 use std::path::{Path, PathBuf};

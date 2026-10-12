@@ -100,6 +100,31 @@ here with: source URL, commit, file(s), license, and what was changed.
   Changes: reimplemented in Rust on the `regex` crate; word characters are
   Unicode letters, digits and `_`.
 
+- crates/platform/project/src/filter.rs, store.rs, idea.rs,
+  docs/adr/0008-project-folder-and-exclusions.md
+  The project model follows the IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @
+  0b33b8b8e90353a31a9db5b8fcecc6626d94967e: the default list of ignored
+  files and folders of platform/platform-impl/src/com/intellij/openapi/
+  fileTypes/impl/FileTypeManagerImpl.java and the mask rules of
+  jps/model-impl/src/org/jetbrains/jps/model/fileTypes/impl/
+  FileNameMatcherFactoryImpl.java, jps/model-impl/src/com/intellij/openapi/
+  fileTypes/impl/FileTypeAssocTable.java and WildcardFileNameMatcher.java;
+  the module file format read by jps/model-serialization/src/org/jetbrains/
+  jps/model/serialization/JpsProjectLoader.java, module/
+  JpsModuleRootModelSerializer.java and PathMacroUtil.java; the exclusion
+  behaviour of platform/projectModel-impl/src/com/intellij/workspaceModel/
+  core/fileIndex/impl/workspaceFileSets.kt, platform/lang-impl/src/com/
+  intellij/psi/impl/file/SourceRootIconProvider.java, .../find/impl/
+  FindInProjectTask.java and FileScanner.kt, platform/core-api/src/com/
+  intellij/openapi/project/ProjectCoreUtil.kt, .../ide/projectView/actions/
+  MarkExcludeRootAction.java and UnmarkRootAction.java, and the virtual
+  environment exclusion of python/python-pyproject/src/com/intellij/python/
+  pyproject/model/internal/platformBridge/VenvExcluder.kt and
+  python/src/com/jetbrains/python/sdk/PySdkExt.kt.
+  Only the list of names and the file format are used; reimplemented in
+  Rust, no code is copied.
+
 - crates/platform/editor/src/input.rs
   The structure of the platform input handler (UTF-16 conversions, marked
   text, replace-and-mark) follows GPUI's text input example (Apache-2.0),

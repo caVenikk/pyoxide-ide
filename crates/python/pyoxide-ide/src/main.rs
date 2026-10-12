@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use editor::SyntaxHighlighter;
 use ui::icons::{IconName, IconSvg};
-use workbench::{FileType, Product, StripeItem};
+use workbench::{AutoExclusions, FileType, Product, StripeItem};
 
 /// Icons of the Python product (IntelliJ Platform Community, Apache-2.0,
 /// see NOTICE).
@@ -52,6 +52,15 @@ fn python() -> FileType {
     }
 }
 
+/// Virtual environments are excluded from a project on their own, as the
+/// reference IDE does: every folder named `.venv`, and (standing in for the
+/// environment of the project's interpreter until interpreters are chosen
+/// in the IDE) a folder under the project root that holds a `pyvenv.cfg`.
+const EXCLUDED: AutoExclusions = AutoExclusions {
+    dir_names: &[".venv"],
+    root_dir_markers: &["pyvenv.cfg"],
+};
+
 fn product() -> Product {
     Product {
         name: "Pyoxide",
@@ -70,6 +79,7 @@ fn product() -> Product {
             },
         ],
         interpreter_label: Some("No interpreter"),
+        auto_excluded: EXCLUDED,
     }
 }
 
