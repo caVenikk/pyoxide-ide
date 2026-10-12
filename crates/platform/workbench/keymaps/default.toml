@@ -14,6 +14,7 @@
 "alt-right" = "tabs.next"
 "alt-left" = "tabs.previous"
 "ctrl-shift-f" = "find-in-files.open"
+"ctrl-shift-r" = "find-in-files.open-replace"
 
 [[context]]
 name = "ProjectTree"
@@ -151,25 +152,36 @@ name = "FindHistory"
 "enter" = "find.history-pick"
 "escape" = "find.history-close"
 
-# The Find in Files popup. In its fields Enter opens the selected result,
-# Escape closes the popup, Up and Down (while the search field holds one
-# line), Page Up and Page Down and the Find Next and Previous keys move
-# through the results; the options and the file mask take the reference
-# IDE's mnemonic keys, Alt with the letter.
+# The Find in Files popup. In its fields Enter opens the selected result
+# (Shift+Enter too) and Escape closes the popup; Up and Down (while the
+# field holds one line), Page Up and Page Down and the Find Next and
+# Previous keys move through the results; Tab and Shift+Tab go from field
+# to field; Alt+Down shows the field's history. The options, the file
+# mask, the scopes and Recursively take the reference IDE's mnemonic keys:
+# Alt with the letter.
 [[context]]
 name = "FindInFiles > Editor"
 [context.bindings]
 "enter" = "find-in-files.open-result"
+"shift-enter" = "find-in-files.open-result"
 "escape" = "find-in-files.close"
 "f3" = "find-in-files.next-result"
 "ctrl-l" = "find-in-files.next-result"
 "shift-f3" = "find-in-files.previous-result"
 "ctrl-shift-l" = "find-in-files.previous-result"
+"tab" = "find-in-files.next-field"
+"shift-tab" = "find-in-files.previous-field"
+"alt-down" = "find.show-history"
 "alt-c" = "find.toggle-case"
 "alt-w" = "find.toggle-words"
 "alt-x" = "find.toggle-regex"
 "alt-k" = "find-in-files.toggle-mask"
+"alt-p" = "find-in-files.scope-project"
+"alt-d" = "find-in-files.scope-directory"
+"alt-s" = "find-in-files.scope-named"
+"alt-y" = "find-in-files.toggle-recursive"
 
+# The search and replace fields can hold several lines.
 [[context]]
 name = "FindInFilesQuery > Editor"
 [context.bindings]
@@ -178,3 +190,25 @@ name = "FindInFilesQuery > Editor"
 "pagedown" = "find-in-files.page-down"
 "pageup" = "find-in-files.page-up"
 "ctrl-shift-enter" = "find.new-line"
+
+[[context]]
+name = "FindInFilesReplace > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"ctrl-shift-enter" = "find.new-line"
+
+# Replace in Files: Enter replaces the selected match, Shift+Alt+Enter
+# replaces them all.
+[[context]]
+name = "ReplaceInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.replace-selected"
+"shift-enter" = "find-in-files.replace-selected"
+"alt-shift-enter" = "find-in-files.replace-all"
+
+# Shift+Enter in the folder field shows the folder chooser.
+[[context]]
+name = "FindInFilesDirectory > Editor"
+[context.bindings]
+"shift-enter" = "find-in-files.browse-directory"

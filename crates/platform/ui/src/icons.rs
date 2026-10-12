@@ -40,6 +40,8 @@ impl IconName {
     pub const LOCKED: Self = Self("general/locked");
     pub const MORE_VERTICAL: Self = Self("general/moreVertical");
     pub const PIN: Self = Self("general/pin");
+    pub const MORE_HORIZONTAL: Self = Self("general/moreHorizontal");
+    pub const SHOW_AS_TREE: Self = Self("general/showAsTree");
     pub const SEARCH: Self = Self("general/search@20x20");
     pub const SETTINGS: Self = Self("general/settings@20x20");
     pub const RUN: Self = Self("run/run");
@@ -118,7 +120,7 @@ platform_icons! {
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/down", "general/expandAll", "general/filter", "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
-        "general/moreVertical", "general/pin", "general/search@20x20", "general/settings@20x20", "general/up",
+        "general/moreHorizontal", "general/moreVertical", "general/pin", "general/search@20x20", "general/settings@20x20", "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
         "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/symlink",

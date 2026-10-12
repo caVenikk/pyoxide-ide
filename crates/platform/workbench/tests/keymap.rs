@@ -441,6 +441,112 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.popup()[option], json!(true), "{what}");
         }
+        "find.show-history" if in_popup => {
+            for text in ["alpha", "beta"] {
+                h.search_in_files(text);
+                h.invoke("find-in-files.close", json!(null));
+            }
+            h.search_in_files("gamma");
+            h.press(keys);
+            let d = h.popup()["dropdown"].clone();
+            assert_eq!(d["kind"], json!("search-history"), "{what}");
+            assert_eq!(d["items"][0], json!("beta"), "{what}");
+            h.invoke("find.history-close", json!(null));
+        }
+        "find-in-files.open-replace" => {
+            h.set_editor("x ‹foo› foo");
+            h.press(keys);
+            let s = h.popup();
+            assert_eq!(s["open"], json!(true), "{what}");
+            assert_eq!(s["replace_mode"], json!(true), "{what}");
+            assert_eq!(s["text"], json!("foo"), "{what}");
+        }
+        "find-in-files.scope-project"
+        | "find-in-files.scope-directory"
+        | "find-in-files.scope-named" => {
+            h.search_in_files(" = ");
+            if b.command.ends_with("project") {
+                h.invoke("find-in-files.scope-directory", json!(null));
+                h.invoke("find-in-files.open", json!(null));
+            }
+            h.press(keys);
+            let expected = match b.command.as_str() {
+                "find-in-files.scope-project" => "project",
+                "find-in-files.scope-directory" => "directory",
+                _ => "Project Files",
+            };
+            assert_eq!(h.popup()["scope"], json!(expected), "{what}");
+            h.invoke("find-in-files.scope-project", json!(null));
+        }
+        "find-in-files.toggle-recursive" => {
+            h.search_in_files(" = ");
+            let before = h.popup()["recursive"].as_bool().unwrap();
+            h.press(keys);
+            assert_eq!(h.popup()["recursive"], json!(!before), "{what}");
+            h.invoke("find-in-files.toggle-recursive", json!(null));
+        }
+        "find-in-files.next-field" | "find-in-files.previous-field" => {
+            // Search and replace fields: either key goes to the other one.
+            h.invoke(
+                "find-in-files.search",
+                json!({ "text": " = ", "replace": "x", "mask": "" }),
+            );
+            h.press(keys);
+            let popup = h.workbench(|w, _| w.find_in_files().clone());
+            let field = h.cx.update(|cx| popup.read(cx).replace_field().clone());
+            let focused =
+                h.cx.update_window(h.window.into(), |_, window, cx| {
+                    field.focus_handle(cx).is_focused(window)
+                })
+                .unwrap();
+            assert!(focused, "{what}: the replace field has the focus");
+        }
+        "find-in-files.replace-selected" | "find-in-files.replace-all" => {
+            for file in ["rep1.txt", "rep2.txt"] {
+                std::fs::write(h.root.join(file), "qq_token qq_token\n").unwrap();
+            }
+            h.invoke(
+                "find-in-files.search",
+                json!({ "text": "qq_token", "replace": "done", "mask": "", "case_sensitive": false, "whole_words": false, "regex": false }),
+            );
+            assert_eq!(h.popup()["matches"], json!(4));
+            h.press(keys);
+            if b.command.ends_with("replace-all") {
+                h.cx.simulate_prompt_answer("Replace");
+                h.draw();
+                for file in ["rep1.txt", "rep2.txt"] {
+                    let disk = std::fs::read_to_string(h.root.join(file)).unwrap();
+                    assert_eq!(disk, "done done\n", "{what}");
+                }
+            } else {
+                let changed = ["rep1.txt", "rep2.txt"]
+                    .iter()
+                    .filter(|f| {
+                        std::fs::read_to_string(h.root.join(f)).unwrap() == "done qq_token\n"
+                    })
+                    .count();
+                assert_eq!(changed, 1, "{what}: the selected match");
+                assert_eq!(h.popup()["rows"].as_array().unwrap().len(), 3, "{what}");
+            }
+            for file in ["rep1.txt", "rep2.txt"] {
+                std::fs::remove_file(h.root.join(file)).unwrap();
+            }
+            if h.popup()["open"] == json!(true) {
+                h.invoke("find-in-files.close", json!(null));
+            }
+        }
+        "find-in-files.browse-directory" => {
+            h.search_in_files(" = ");
+            h.invoke("find-in-files.scope-directory", json!(null));
+            let before = h.popup()["browse_requests"].as_u64().unwrap();
+            h.press(keys);
+            assert_eq!(
+                h.popup()["browse_requests"],
+                json!(before + 1),
+                "{what}: the folder chooser"
+            );
+            h.invoke("find-in-files.scope-project", json!(null));
+        }
         "find.new-line" if in_popup => {
             h.search_in_files("a");
             h.press("end");

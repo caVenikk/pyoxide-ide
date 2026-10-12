@@ -67,6 +67,13 @@ pub fn parse_line_column(text: &str) -> Option<(usize, Option<usize>)> {
     Some((line, column))
 }
 
+/// Puts a file first in a list of recent files.
+fn remember_file(list: &mut Vec<PathBuf>, path: &Path) {
+    list.retain(|p| p != path);
+    list.insert(0, path.to_owned());
+    list.truncate(find_in_files::RECENT_FILES);
+}
+
 /// An open file.
 struct Tab {
     path: PathBuf,
@@ -107,6 +114,10 @@ pub struct Workbench {
     return_focus: Option<FocusHandle>,
     /// A file being opened goes to this point once it is loaded.
     pending_go_to: Option<(PathBuf, text::Point)>,
+    /// Files shown in editors and files edited, most recent first (the
+    /// Recently Viewed and Recently Changed scopes of Find in Files).
+    recently_viewed: Vec<PathBuf>,
+    recently_changed: Vec<PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -116,7 +127,7 @@ impl Workbench {
         window.focus(&focus);
         let file_types = Rc::new(FileTypes::new(&product.file_types));
         let panel = cx.new(|cx| ProjectPanel::new(file_types.clone(), cx));
-        let find_in_files = cx.new(|cx| FindInFiles::new(window, cx));
+        let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&find_in_files, window, |this, _, event, window, cx| {
                 match event {
@@ -127,6 +138,9 @@ impl Workbench {
                         Some(focus) => window.focus(&focus),
                         None => this.focus_editor(&FocusEditor, window, cx),
                     },
+                    FindInFilesEvent::Message(message) => {
+                        this.message = Some(message.clone().into())
+                    }
                 }
                 cx.notify();
             }),
@@ -162,6 +176,8 @@ impl Workbench {
             find_in_files,
             return_focus: None,
             pending_go_to: None,
+            recently_viewed: Vec::new(),
+            recently_changed: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -374,11 +390,13 @@ impl Workbench {
             }
             editor
         });
-        let subscription = cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
+        let edited_path = path.clone();
+        let subscription = cx.subscribe(&editor, move |this, _, event: &EditorEvent, cx| {
             if matches!(event, EditorEvent::Edited(_)) {
                 // Edits count as input for the idle save (they may also come
                 // from commands rather than keys).
                 this.note_input(cx);
+                remember_file(&mut this.recently_changed, &edited_path);
             }
             cx.notify()
         });
@@ -416,6 +434,8 @@ impl Workbench {
             self.save_tab(previous, cx);
         }
         self.active = Some(index);
+        let path = self.tabs[index].path.clone();
+        remember_file(&mut self.recently_viewed, &path);
         window.focus(&self.tabs[index].editor.focus_handle(cx));
         cx.notify();
     }
@@ -635,8 +655,9 @@ impl Workbench {
     }
 
     /// What Find in Files opens with: the project, the active editor's
-    /// selection while it has the focus, its open find bar's search and the
-    /// open documents with unsaved changes.
+    /// selection while it has the focus, its open find bar's search, the
+    /// open editors, the recently viewed and changed files, and the folder
+    /// selected in the project tool window while it has the focus.
     fn find_in_files_context(&self, window: &Window, cx: &App) -> OpenContext {
         let selection = self
             .active_editor()
@@ -650,18 +671,35 @@ impl Workbench {
             .map(|b| b.read(cx))
             .filter(|b| b.is_open())
             .map(|b| b.query_field().read(cx).text());
-        let overrides = self
-            .tabs
-            .iter()
-            .filter(|t| t.editor.read(cx).is_modified())
-            .map(|t| (t.path.clone(), t.editor.read(cx).buffer().rope().clone()))
-            .collect();
+        let root = self.project(cx).map(|p| p.root().to_owned());
+        // A folder selected in the tree (a selected file gives its folder).
+        let tree_folder = root
+            .as_ref()
+            .filter(|_| self.panel.focus_handle(cx).contains_focused(window, cx))
+            .and_then(|root| {
+                let selected = self.panel.read(cx).state_json(cx)["selected"]
+                    .as_str()
+                    .map(|rel| root.join(rel))?;
+                if selected.is_dir() {
+                    Some(selected)
+                } else {
+                    selected.parent().map(Path::to_path_buf)
+                }
+            });
         OpenContext {
-            root: self.project(cx).map(|p| p.root().to_owned()),
+            root,
             filter: None,
             selection,
             find_bar_text,
-            overrides,
+            editors: self
+                .tabs
+                .iter()
+                .map(|t| (t.path.clone(), t.editor.clone()))
+                .collect(),
+            current_file: self.active.map(|i| self.tabs[i].path.clone()),
+            recently_viewed: self.recently_viewed.clone(),
+            recently_changed: self.recently_changed.clone(),
+            tree_folder,
         }
     }
 
@@ -680,7 +718,20 @@ impl Workbench {
         let context = self.find_in_files_context(window, cx);
         self.remember_focus(window, cx);
         self.find_in_files
-            .update(cx, |p, cx| p.open(context, window, cx));
+            .update(cx, |p, cx| p.open(false, context, window, cx));
+        cx.notify();
+    }
+
+    fn open_replace_in_files(
+        &mut self,
+        _: &find_in_files::OpenReplace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let context = self.find_in_files_context(window, cx);
+        self.remember_focus(window, cx);
+        self.find_in_files
+            .update(cx, |p, cx| p.open(true, context, window, cx));
         cx.notify();
     }
 
@@ -1436,6 +1487,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::show_go_to_line))
             .on_action(cx.listener(Self::open_find_in_files))
+            .on_action(cx.listener(Self::open_replace_in_files))
             .on_action(cx.listener(Self::search_in_files))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.

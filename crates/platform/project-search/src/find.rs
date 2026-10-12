@@ -1,10 +1,10 @@
 //! Searching the files of a scope in parallel.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ignore::{WalkBuilder, WalkState};
 use project::{Filter, MAX_FILE_SIZE};
@@ -32,7 +32,9 @@ pub enum Scope {
 /// One search over files.
 #[derive(Debug, Clone)]
 pub struct FileSearch {
-    pub matcher: Matcher,
+    /// What to look for; `None` lists the files (with a mask and no
+    /// query): one result per file, its first line.
+    pub matcher: Option<Matcher>,
     /// Only files whose names match (`None`: every file).
     pub mask: Option<FileMask>,
     pub scope: Scope,
@@ -43,6 +45,9 @@ pub struct FileSearch {
     pub filter: Option<Filter>,
     /// The search stops after this many matches.
     pub limit: usize,
+    /// Lines shown by an earlier pass of the same search, by file: not
+    /// reported or counted again (loading more results).
+    pub known: Arc<HashMap<PathBuf, HashSet<usize>>>,
     /// Text of open documents with unsaved changes, searched instead of the
     /// file on disk.
     pub overrides: HashMap<PathBuf, Rope>,
@@ -136,6 +141,8 @@ struct Run<'a> {
     truncated: AtomicBool,
     large: Mutex<Vec<PathBuf>>,
     held_back: AtomicUsize,
+    /// Matches handed to the sink.
+    reported: AtomicUsize,
 }
 
 impl FileSearch {
@@ -159,6 +166,7 @@ impl FileSearch {
             truncated: AtomicBool::new(false),
             large: Mutex::new(Vec::new()),
             held_back: AtomicUsize::new(0),
+            reported: AtomicUsize::new(0),
         };
         match &self.scope {
             Scope::Directory { path, recursive } => run.walk(path, *recursive),
@@ -167,7 +175,7 @@ impl FileSearch {
         Summary {
             files_searched: run.files_searched.load(Ordering::Relaxed),
             files_with_matches: run.files_with_matches.load(Ordering::Relaxed),
-            matches: run.matches.load(Ordering::Relaxed).min(self.limit),
+            matches: run.reported.load(Ordering::Relaxed),
             truncated: run.truncated.load(Ordering::Relaxed),
             cancelled: cancel.is_cancelled(),
             large_files: run.large.into_inner().unwrap_or_default(),
@@ -284,11 +292,21 @@ impl Run<'_> {
         };
         self.files_searched.fetch_add(1, Ordering::Relaxed);
         let mut ranges: Vec<Range<usize>> = Vec::new();
-        for (i, m) in self.search.matcher.find_iter(&text).enumerate() {
-            if i % 1024 == 1023 && self.cancel.is_cancelled() {
-                return;
+        match &self.search.matcher {
+            Some(matcher) => {
+                for (i, m) in matcher.find_iter(&text).enumerate() {
+                    if i % 1024 == 1023 && self.cancel.is_cancelled() {
+                        return;
+                    }
+                    ranges.push(m);
+                }
             }
-            ranges.push(m);
+            // The whole file is one result, shown by its first line.
+            None => {
+                let first = text.find('\n').unwrap_or(text.len());
+                let first = text[..first].strip_suffix('\r').map_or(first, str::len);
+                ranges.push(0..first);
+            }
         }
         if ranges.is_empty() {
             return;
@@ -297,26 +315,49 @@ impl Run<'_> {
             self.held_back.fetch_add(1, Ordering::Relaxed);
             return;
         }
-        // The limit counts matches over all files.
-        let before = self.matches.fetch_add(ranges.len(), Ordering::Relaxed);
-        if before >= self.search.limit {
+        // The limit counts matches over all files; lines shown by an
+        // earlier pass count no more.
+        let limit = self.search.limit;
+        let mut before = self.matches.load(Ordering::Acquire);
+        if before >= limit {
             self.truncated.store(true, Ordering::Relaxed);
             return;
         }
-        let allowed = self.search.limit - before;
-        if ranges.len() >= allowed {
-            ranges.truncate(allowed);
-            if before + ranges.len() >= self.search.limit {
-                self.truncated.store(true, Ordering::Relaxed);
+        let known = self.search.known.get(path);
+        let (mut lines, mut cut) = collect_lines(&text, &ranges, known, limit - before);
+        // Takes this file's share of the limit; when other files took
+        // theirs meanwhile, fewer lines fit.
+        let kept = loop {
+            cut |= keep_within(&mut lines, limit - before);
+            let kept: usize = lines.iter().map(|l| l.ranges.len()).sum();
+            match self.matches.compare_exchange(
+                before,
+                before + kept,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break kept,
+                Err(now) if now >= limit => {
+                    self.truncated.store(true, Ordering::Relaxed);
+                    return;
+                }
+                Err(now) => before = now,
             }
+        };
+        if kept == 0 {
+            return;
+        }
+        if cut || before + kept >= limit {
+            self.truncated.store(true, Ordering::Relaxed);
         }
         if self.cancel.is_cancelled() {
             return;
         }
         self.files_with_matches.fetch_add(1, Ordering::Relaxed);
+        self.reported.fetch_add(kept, Ordering::Relaxed);
         (self.sink)(FileMatches {
             path: path.to_owned(),
-            lines: line_matches(&text, &ranges),
+            lines,
         });
     }
 
@@ -363,11 +404,26 @@ pub fn file_text(bytes: Vec<u8>) -> Option<std::borrow::Cow<'static, str>> {
 /// its number and the matches as char columns. Line breaks may be `\n` or
 /// `\r\n`.
 pub fn line_matches(text: &str, ranges: &[Range<usize>]) -> Vec<LineMatch> {
+    collect_lines(text, ranges, None, usize::MAX).0
+}
+
+/// [`line_matches`] leaving out the `known` lines and stopping before the
+/// line that would start past `budget` matches; also says whether it
+/// stopped early.
+fn collect_lines(
+    text: &str,
+    ranges: &[Range<usize>],
+    known: Option<&HashSet<usize>>,
+    budget: usize,
+) -> (Vec<LineMatch>, bool) {
+    let mut kept = 0usize;
     let bytes = text.as_bytes();
     let mut out: Vec<LineMatch> = Vec::new();
     // Line number at `pos`, counted forwards.
     let (mut pos, mut line) = (0usize, 0usize);
     let mut last_start = None;
+    // The current line is a known one.
+    let mut skipping = false;
     for r in ranges {
         line += bytes[pos..r.start].iter().filter(|&&b| b == b'\n').count();
         pos = r.start;
@@ -382,12 +438,25 @@ pub fn line_matches(text: &str, ranges: &[Range<usize>]) -> Vec<LineMatch> {
         if end > start && bytes[end - 1] == b'\r' {
             end -= 1;
         }
+        let same_line = last_start == Some(start);
+        if same_line && skipping {
+            continue;
+        }
+        if !same_line {
+            skipping = known.is_some_and(|k| k.contains(&line));
+            if skipping {
+                last_start = Some(start);
+                continue;
+            }
+        }
+        if kept >= budget {
+            return (out, true);
+        }
+        kept += 1;
         let col = |byte: usize| text[start..byte.clamp(start, end)].chars().count();
         let first_col = col(r.start);
         let range = first_col..col(r.end).max(first_col);
-        if last_start == Some(start)
-            && let Some(last) = out.last_mut()
-        {
+        if same_line && let Some(last) = out.last_mut() {
             last.ranges.push(range);
             continue;
         }
@@ -409,7 +478,27 @@ pub fn line_matches(text: &str, ranges: &[Range<usize>]) -> Vec<LineMatch> {
             first: Point::new(line, first_col)..end_point,
         });
     }
-    out
+    (out, false)
+}
+
+/// Keeps the first `budget` matches of the lines; says whether any were
+/// dropped.
+fn keep_within(lines: &mut Vec<LineMatch>, budget: usize) -> bool {
+    let mut left = budget;
+    let mut dropped = false;
+    lines.retain_mut(|l| {
+        if left == 0 {
+            dropped = true;
+            return false;
+        }
+        if l.ranges.len() > left {
+            l.ranges.truncate(left);
+            dropped = true;
+        }
+        left -= l.ranges.len();
+        true
+    });
+    dropped
 }
 
 /// A line's text for display: the whole line, or for a long one the part
@@ -468,7 +557,7 @@ mod tests {
 
     fn search_in(dir: &Path, matcher: Matcher) -> FileSearch {
         FileSearch {
-            matcher,
+            matcher: Some(matcher),
             mask: None,
             scope: Scope::Directory {
                 path: dir.to_owned(),
@@ -477,6 +566,7 @@ mod tests {
             root: dir.to_owned(),
             filter: None,
             limit: 1000,
+            known: Arc::default(),
             overrides: HashMap::new(),
             project_files: false,
         }
@@ -676,13 +766,41 @@ mod tests {
             .values()
             .map(|l| l.iter().map(|l| l.ranges.len()).sum::<usize>())
             .sum();
-        assert!(total <= 10, "{total}");
+        assert_eq!(total, 10);
         assert!(summary.truncated);
         assert_eq!(summary.matches, 10);
+        // Loading more: the lines shown are not counted again.
+        let known: HashMap<PathBuf, HashSet<usize>> = found
+            .keys()
+            .map(|rel| (dir.path().join(rel), HashSet::from([0])))
+            .collect();
+        search.known = Arc::new(known);
+        search.limit = 6;
+        let (more, summary) = run(&search);
+        assert_eq!(summary.matches, 6);
+        assert!(more.keys().all(|k| !found.contains_key(k)));
+        search.known = Arc::default();
         search.limit = 1000;
         let (_, summary) = run(&search);
         assert_eq!(summary.matches, 150);
         assert!(!summary.truncated);
+    }
+
+    #[test]
+    fn without_a_query_the_files_of_the_mask_are_listed() {
+        let dir = project(&[
+            ("a.py", b"first line\r\nsecond\n"),
+            ("b.py", b""),
+            ("c.txt", b"text\n"),
+        ]);
+        let mut search = search_in(dir.path(), plain("x"));
+        search.matcher = None;
+        search.mask = Some(FileMask::parse("*.py").unwrap());
+        let (found, summary) = run(&search);
+        assert_eq!(found.keys().collect::<Vec<_>>(), ["a.py", "b.py"]);
+        assert_eq!(found["a.py"][0].text, "first line");
+        assert_eq!(found["a.py"][0].ranges, vec![0..10]);
+        assert_eq!(summary.matches, 2);
     }
 
     #[test]

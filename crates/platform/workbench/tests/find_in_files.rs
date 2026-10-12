@@ -5,7 +5,10 @@
 use std::rc::Rc;
 
 use editor::Editor;
-use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, WindowHandle};
+use gpui::{
+    AppContext as _, Entity, Focusable as _, Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent,
+    TestAppContext, TouchPhase, VisualTestContext, WindowHandle, point, px,
+};
 use serde_json::{Value, json};
 use text::{Buffer, Selection, SelectionSet};
 use workbench::find_in_files::{DEBOUNCE, FindInFiles};
@@ -22,6 +25,13 @@ struct Keys {
     mask: &'static str,
     new_line: &'static str,
     select_all: &'static str,
+    replace: &'static str,
+    replace_all: &'static str,
+    undo: &'static str,
+    scope_project: &'static str,
+    scope_directory: &'static str,
+    scope_named: &'static str,
+    recursive: &'static str,
 }
 
 const MAC: Keys = Keys {
@@ -33,6 +43,13 @@ const MAC: Keys = Keys {
     mask: "alt-k",
     new_line: "cmd-shift-enter",
     select_all: "cmd-a",
+    replace: "cmd-shift-r",
+    replace_all: "alt-shift-enter",
+    undo: "cmd-z",
+    scope_project: "alt-p",
+    scope_directory: "alt-d",
+    scope_named: "alt-s",
+    recursive: "alt-y",
 };
 
 const WIN: Keys = Keys {
@@ -44,6 +61,13 @@ const WIN: Keys = Keys {
     mask: "alt-k",
     new_line: "ctrl-shift-enter",
     select_all: "ctrl-a",
+    replace: "ctrl-shift-r",
+    replace_all: "alt-shift-enter",
+    undo: "ctrl-z",
+    scope_project: "alt-p",
+    scope_directory: "alt-d",
+    scope_named: "alt-s",
+    recursive: "alt-y",
 };
 
 struct H<'a> {
@@ -450,4 +474,454 @@ fn the_popup_closes_when_the_focus_leaves_unless_pinned(cx: &mut TestAppContext)
         let settings = h.cx.update(|cx| workbench::find_in_files::settings(cx));
         assert!(settings.pinned, "the pin is remembered");
     });
+}
+
+impl H<'_> {
+    /// A scroll event over the results (negative scrolls down), then the
+    /// frames that follow (loading more starts after the frame that shows
+    /// the end).
+    fn scroll_results(&mut self, delta: ScrollDelta) {
+        let bounds = VisualTestContext::from_window(self.window.into(), self.cx)
+            .debug_bounds("find-in-files-rows")
+            .expect("the results are drawn");
+        VisualTestContext::from_window(self.window.into(), self.cx).simulate_event(
+            ScrollWheelEvent {
+                position: bounds.center(),
+                delta,
+                modifiers: Modifiers::none(),
+                touch_phase: TouchPhase::Moved,
+            },
+        );
+        for _ in 0..4 {
+            self.draw();
+        }
+    }
+}
+
+#[gpui::test]
+fn scrolling_to_the_end_loads_more(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let many: String = (0..160).map(|i| format!("hay {i}\n")).collect();
+        std::fs::write(h.root.join("many.txt"), many).unwrap();
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "hay ", "mask": "" }),
+        );
+        let s = h.state();
+        assert_eq!(s["matches"], json!(100));
+        assert_eq!(s["info"], json!("100+ matches in 1+ file"));
+        let first = s["rows"][0].clone();
+        // A trackpad swipe scrolls without moving the selection.
+        h.scroll_results(ScrollDelta::Pixels(point(px(0.0), px(-30.0))));
+        let s = h.state();
+        assert!(
+            s["scroll_top"].as_f64().unwrap() > 0.0,
+            "{}",
+            s["scroll_top"]
+        );
+        assert_eq!(s["selected"], json!(0));
+        assert_eq!(s["matches"], json!(100), "not near the end yet");
+        // The wheel to the end: 50 more, the rows on screen stay.
+        h.scroll_results(ScrollDelta::Lines(point(0.0, -200.0)));
+        let s = h.state();
+        assert_eq!(s["matches"], json!(150));
+        assert_eq!(s["rows"][0], first);
+        assert_eq!(s["info"], json!("150+ matches in 1+ file"));
+        // Again: the rest, and the search is complete.
+        h.scroll_results(ScrollDelta::Lines(point(0.0, -200.0)));
+        let s = h.state();
+        assert_eq!(s["matches"], json!(160));
+        assert_eq!(s["truncated"], json!(false));
+        assert_eq!(s["info"], json!("160 matches in 1 file"));
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
+
+impl H<'_> {
+    fn bounds_of(&mut self, selector: &'static str) -> gpui::Bounds<gpui::Pixels> {
+        VisualTestContext::from_window(self.window.into(), self.cx)
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"))
+    }
+
+    /// Drags with the left button from `from` to `to`.
+    fn drag(&mut self, from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>) {
+        let mut vcx = VisualTestContext::from_window(self.window.into(), self.cx);
+        vcx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear());
+        vcx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        self.draw();
+    }
+
+    fn focus_field(&mut self, field: fn(&FindInFiles) -> &Entity<Editor>) {
+        let popup = self.popup();
+        let handle = self.cx.update(|cx| field(popup.read(cx)).focus_handle(cx));
+        self.cx
+            .update_window(self.window.into(), |_, window, _| window.focus(&handle))
+            .unwrap();
+        self.draw();
+    }
+
+    fn message(&mut self) -> Value {
+        self.invoke("workbench.state", json!(null))["message"].clone()
+    }
+
+    fn write(&mut self, path: &str, text: &[u8]) {
+        let path = self.root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn read(&mut self, path: &str) -> Vec<u8> {
+        std::fs::read(self.root.join(path)).unwrap()
+    }
+}
+
+#[gpui::test]
+fn the_directory_scope_with_and_without_subfolders(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.write("pkg/sub/deep.py", b"needle\n");
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        // Option+D / Alt+D: the Directory tab, the focus in its field.
+        h.press(h.keys.scope_directory);
+        let s = h.state();
+        assert_eq!(s["scope"], json!("directory"));
+        assert!(h.focused(FindInFiles::directory_field));
+        let pkg = h.root.join("pkg").display().to_string();
+        h.type_text(&pkg);
+        h.settle();
+        let files: Vec<String> = h.rows().into_iter().map(|r| r.0).collect();
+        assert!(files.contains(&"pkg/sub/deep.py".to_owned()), "{files:?}");
+        assert!(files.iter().all(|f| f.starts_with("pkg/")), "{files:?}");
+        // Option+Y / Alt+Y: not into subfolders.
+        h.press(h.keys.recursive);
+        h.settle();
+        let s = h.state();
+        assert_eq!(s["recursive"], json!(false));
+        let files: Vec<String> = h.rows().into_iter().map(|r| r.0).collect();
+        assert!(files.iter().all(|f| f == "pkg/util.py"), "{files:?}");
+        h.press(h.keys.recursive);
+        // A folder that is not there.
+        h.type_text("/missing");
+        h.settle();
+        assert_eq!(h.state()["empty_text"], json!("Directory is not found"));
+        // Back to the whole project: Option+P / Alt+P.
+        h.press(h.keys.scope_project);
+        h.settle();
+        let s = h.state();
+        assert_eq!(s["scope"], json!("project"));
+        assert_eq!(s["files"], json!(4));
+        h.press("escape");
+        // A folder selected in the project tool window becomes the scope.
+        h.invoke("project.tree.reveal", json!({ "path": "pkg" }));
+        let panel = h.window.read_with(h.cx, |w, _| w.panel().clone()).unwrap();
+        let handle = h.cx.update(|cx| panel.focus_handle(cx));
+        h.cx.update_window(h.window.into(), |_, window, _| window.focus(&handle))
+            .unwrap();
+        h.draw();
+        h.press(h.keys.open);
+        let s = h.state();
+        assert_eq!(s["scope"], json!("directory"));
+        assert_eq!(s["directory"], json!(pkg));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn named_scopes_open_and_recent_files(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke("project.open-file", json!({ "path": "notes.txt" }));
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        let s = h.state();
+        assert_eq!(
+            s["scopes"],
+            json!([
+                "Project Files",
+                "Recently Viewed Files",
+                "Open Files",
+                "Current File"
+            ])
+        );
+        // Option+S / Alt+S: the Scope tab with the scope chosen last.
+        h.press(h.keys.scope_named);
+        h.settle();
+        assert_eq!(h.state()["scope"], json!("Project Files"));
+        assert_eq!(h.state()["files"], json!(3));
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "scope": "Current File" }),
+        );
+        assert_eq!(h.rows(), [("notes.txt".to_owned(), 1)]);
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "scope": "Open Files" }),
+        );
+        let mut files: Vec<String> = h.rows().into_iter().map(|r| r.0).collect();
+        files.dedup();
+        files.sort();
+        assert_eq!(files, ["app.py", "notes.txt"]);
+        // An edit puts the file into Recently Changed Files.
+        let editor = h.editor();
+        h.cx.update(|cx| editor.update(cx, |e, cx| e.insert("needle ", cx)));
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "scope": "Recently Changed Files" }),
+        );
+        assert_eq!(h.rows(), [("notes.txt".to_owned(), 1)]);
+        assert_eq!(h.state()["matches"], json!(3), "the edited text");
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
+
+#[gpui::test]
+fn the_preview_shows_the_selected_line(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        let rows = h.rows();
+        h.cx.executor().advance_clock(DEBOUNCE);
+        h.draw();
+        let p = h.state()["preview"].clone();
+        assert_eq!(p["path"], json!(rows[0].0));
+        assert_eq!(p["caret"][0], json!(rows[0].1 - 1));
+        assert_eq!(p["read_only"], json!(true));
+        assert!(p["highlights"].as_u64().unwrap() >= 1);
+        // Another row: after a short wait.
+        h.press("down");
+        h.press("down");
+        h.cx.executor().advance_clock(DEBOUNCE);
+        h.draw();
+        let p = h.state()["preview"].clone();
+        assert_eq!(p["path"], json!(rows[2].0));
+        assert_eq!(p["caret"][0], json!(rows[2].1 - 1));
+        // The splitter moves the boundary between the list and the preview.
+        let split = h.state()["split"].as_f64().unwrap();
+        let bar = h.bounds_of("find-in-files-splitter");
+        h.drag(bar.center(), bar.center() + point(px(0.0), px(60.0)));
+        let moved = h.state()["split"].as_f64().unwrap();
+        assert!(moved > split + 0.05, "{split} -> {moved}");
+        h.invoke("find-in-files.close", json!(null));
+        let settings = h.cx.update(|cx| workbench::find_in_files::settings(cx));
+        assert!((settings.splitter.unwrap() as f64 - moved).abs() < 1e-6);
+    });
+}
+
+#[gpui::test]
+fn the_popup_is_resized_from_its_edges_and_keeps_its_size(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke("find-in-files.search", json!({ "text": "needle" }));
+        let before = h.bounds_of("find-in-files");
+        let grip = h.bounds_of("popup-grip-right");
+        h.drag(grip.center(), grip.center() + point(px(-60.0), px(0.0)));
+        let after = h.bounds_of("find-in-files");
+        assert!(
+            (f32::from(after.size.width) - f32::from(before.size.width) + 60.0).abs() < 1.0,
+            "{before:?} -> {after:?}"
+        );
+        assert_eq!(after.left(), before.left());
+        // Moved by its header.
+        let header = h.bounds_of("find-in-files-header");
+        let at = header.origin + point(px(200.0), px(10.0));
+        h.drag(at, at + point(px(30.0), px(40.0)));
+        let moved = h.bounds_of("find-in-files");
+        assert_eq!(moved.origin, after.origin + point(px(30.0), px(40.0)));
+        h.press("escape");
+        h.press(h.keys.open);
+        assert_eq!(h.bounds_of("find-in-files"), moved, "kept");
+        let settings = h.cx.update(|cx| workbench::find_in_files::settings(cx));
+        assert!(settings.popup.is_some());
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn histories_masks_and_tab_between_fields(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        for text in ["alpha", "beta"] {
+            h.invoke("find-in-files.search", json!({ "text": text }));
+            h.invoke("find-in-files.close", json!(null));
+        }
+        h.press(h.keys.open);
+        // Option+Down / Alt+Down: the search history, newest first.
+        h.press("alt-down");
+        let d = h.state()["dropdown"].clone();
+        assert_eq!(d["kind"], json!("search-history"));
+        assert_eq!(d["items"][0], json!("beta"));
+        assert_eq!(d["items"][1], json!("alpha"));
+        h.press("down");
+        h.press("enter");
+        let s = h.state();
+        assert_eq!(s["dropdown"], Value::Null);
+        assert_eq!(s["text"], json!("alpha"));
+        assert!(h.focused(FindInFiles::query_field));
+        // The masks of the mask field (once it is on).
+        h.press(h.keys.mask);
+        h.press("alt-down");
+        let d = h.state()["dropdown"].clone();
+        assert_eq!(d["kind"], json!("masks"));
+        assert_eq!(d["items"], json!(["*.py", "*.xml"]));
+        h.press("down");
+        h.press("enter");
+        assert_eq!(h.state()["mask"]["text"], json!("*.xml"));
+        // Escape closes a list and leaves the popup open.
+        h.press("alt-down");
+        h.press("escape");
+        let s = h.state();
+        assert_eq!(s["dropdown"], Value::Null);
+        assert_eq!(s["open"], json!(true));
+        // Tab goes through the fields and back.
+        h.focus_field(FindInFiles::query_field);
+        h.press("tab");
+        assert!(h.focused(FindInFiles::mask_field));
+        h.press("tab");
+        assert!(h.focused(FindInFiles::query_field));
+        h.press("shift-tab");
+        assert!(h.focused(FindInFiles::mask_field));
+        // Without a query, the files of the mask are listed.
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "", "mask": "*.txt" }),
+        );
+        let s = h.state();
+        assert_eq!(h.rows(), [("notes.txt".to_owned(), 1)]);
+        assert_eq!(s["info"], json!("1 match in 1 file"));
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
+
+#[gpui::test]
+fn replace_one_match_and_all_of_them(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.write("crlf.txt", b"needle one\r\nneedle two\r\n");
+        let mut utf16 = vec![0xFF, 0xFE];
+        for unit in "caf\u{e9} needle\n".encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        h.write("utf16.txt", &utf16);
+        // Cmd+Shift+R / Ctrl+Shift+R: Replace in Files, a row per match.
+        h.focus_editor();
+        h.press(h.keys.replace);
+        let s = h.state();
+        assert_eq!(s["replace_mode"], json!(true));
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "replace": "pin", "mask": "" }),
+        );
+        let s = h.state();
+        assert_eq!(s["matches"], json!(8));
+        assert_eq!(s["rows"].as_array().unwrap().len(), 8, "a row per match");
+        // Enter replaces the selected match: notes.txt is not open, so the
+        // file changes on disk.
+        let notes = h.rows().iter().position(|r| r.0 == "notes.txt").unwrap();
+        for _ in 0..notes {
+            h.press("down");
+        }
+        h.press("enter");
+        assert_eq!(h.read("notes.txt"), b"a pin and a Needle\n");
+        let s = h.state();
+        assert_eq!(s["rows"].as_array().unwrap().len(), 7);
+        assert_eq!(s["selected"], json!(notes), "the next row in its place");
+        assert_eq!(s["open"], json!(true), "the popup stays open");
+        // In the open file the buffer changes, one undo step.
+        let app = h.rows().iter().position(|r| r.0 == "app.py").unwrap();
+        h.invoke("find-in-files.page-up", json!(null));
+        for _ in 0..app {
+            h.invoke("find-in-files.next-result", json!(null));
+        }
+        h.invoke("find-in-files.replace-selected", json!(null));
+        let text = h.invoke("editor.text", json!(null));
+        assert!(text.as_str().unwrap().contains("print(\"pin\")"), "{text}");
+        assert!(
+            h.read("app.py").windows(6).any(|w| w == b"needle"),
+            "not saved"
+        );
+        // A read-only file: nothing is replaced, the status bar says why.
+        h.write("ro.txt", b"needle\n");
+        set_read_only(&h.root.join("ro.txt"));
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "replace": "pin" }),
+        );
+        h.invoke("find-in-files.replace-all", json!(null));
+        assert!(h.cx.has_pending_prompt(), "several files: a confirmation");
+        let (title, detail) = h.cx.pending_prompt().unwrap();
+        assert_eq!(title, "Replace All");
+        assert!(
+            detail.starts_with("Replace 7 occurrences of 'needle' across 5 files with 'pin'"),
+            "{detail}"
+        );
+        h.cx.simulate_prompt_answer("Replace");
+        h.draw();
+        let message = h.message();
+        assert!(
+            message
+                .as_str()
+                .unwrap_or_default()
+                .contains("ro.txt is read-only"),
+            "{message}"
+        );
+        assert_eq!(h.read("crlf.txt"), b"needle one\r\nneedle two\r\n");
+        // Without it: every match is replaced, the popup closes.
+        set_writable(&h.root.join("ro.txt"));
+        std::fs::remove_file(h.root.join("ro.txt")).unwrap();
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "replace": "pin" }),
+        );
+        h.press(h.keys.replace_all);
+        h.cx.simulate_prompt_answer("Replace");
+        h.draw();
+        assert_eq!(h.state()["open"], json!(false));
+        assert_eq!(h.message(), json!("6 occurrences replaced"));
+        assert_eq!(h.read("crlf.txt"), b"pin one\r\npin two\r\n");
+        let back = text::decode(&h.read("utf16.txt")).unwrap();
+        assert_eq!(back.text, "caf\u{e9} pin\n");
+        assert_eq!(back.encoding, text::Encoding::Utf16Le);
+        assert_eq!(h.read("pkg/util.py"), b"x = 1\n\n\n# pin here\npin = 2\n");
+        // The open file: one undo step brings its match back.
+        h.focus_editor();
+        h.press(h.keys.undo);
+        let text = h.invoke("editor.text", json!(null));
+        assert!(
+            text.as_str().unwrap().contains("print(\"needle\")"),
+            "{text}"
+        );
+    });
+}
+
+#[cfg(unix)]
+fn set_read_only(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444)).unwrap();
+}
+
+#[cfg(unix)]
+fn set_writable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+#[cfg(not(unix))]
+fn set_read_only(path: &std::path::Path) {
+    let mut p = std::fs::metadata(path).unwrap().permissions();
+    p.set_readonly(true);
+    std::fs::set_permissions(path, p).unwrap();
+}
+
+#[cfg(not(unix))]
+#[allow(clippy::permissions_set_readonly_false)]
+fn set_writable(path: &std::path::Path) {
+    let mut p = std::fs::metadata(path).unwrap().permissions();
+    p.set_readonly(false);
+    std::fs::set_permissions(path, p).unwrap();
 }

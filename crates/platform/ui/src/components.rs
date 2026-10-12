@@ -1,9 +1,11 @@
 //! Small building blocks shared by the workbench and the editor. Every
 //! colour and size comes from the theme.
 
+use std::time::Duration;
+
 use gpui::{
-    AnyView, App, Context, Div, ElementId, FontWeight, IntoElement, PathBuilder, Render,
-    SharedString, Stateful, Window, canvas, div, point, prelude::*, px,
+    Animation, AnimationExt as _, AnyView, App, Context, Div, ElementId, FontWeight, IntoElement,
+    PathBuilder, Render, SharedString, Stateful, Window, canvas, div, point, prelude::*, px,
 };
 use themes::{Metric, UiRole};
 
@@ -176,6 +178,41 @@ pub fn checkbox(id: impl Into<ElementId>, checked: bool, cx: &App) -> Stateful<D
         .when(!checked, |d| {
             d.border_1().border_color(theme.color(UiRole::BorderInput))
         })
+}
+
+/// Size of the loading indicator.
+pub const SPINNER: f32 = 16.0;
+
+/// The loading indicator: eight dots in a circle, the bright one going
+/// round, as the reference IDE's animated progress icon.
+pub fn spinner(id: impl Into<ElementId>, cx: &App) -> impl IntoElement {
+    let color = cx.theme().color(UiRole::TextMuted);
+    div()
+        .relative()
+        .flex_none()
+        .size(px(SPINNER))
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(800)).repeat(),
+            move |d, delta| {
+                let step = (delta * 8.0) as usize % 8;
+                d.children((0..8).map(|i| {
+                    let angle = std::f32::consts::TAU * i as f32 / 8.0;
+                    let (r, dot) = (5.5, 3.0);
+                    let x = SPINNER / 2.0 + r * angle.sin() - dot / 2.0;
+                    let y = SPINNER / 2.0 - r * angle.cos() - dot / 2.0;
+                    let age = (step + 8 - i) % 8;
+                    div()
+                        .absolute()
+                        .left(px(x))
+                        .top(px(y))
+                        .size(px(dot))
+                        .rounded_full()
+                        .bg(color)
+                        .opacity(1.0 - age as f32 * 0.11)
+                }))
+            },
+        )
 }
 
 /// The frame of a one-line text input: rounded, with the input outline;

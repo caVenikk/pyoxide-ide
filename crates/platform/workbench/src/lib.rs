@@ -14,6 +14,7 @@ pub mod env;
 pub mod file_types;
 pub mod find_in_files;
 pub mod keymap;
+pub mod popup;
 pub mod project_panel;
 pub mod settings;
 mod shot;

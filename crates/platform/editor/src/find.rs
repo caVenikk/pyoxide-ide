@@ -167,6 +167,16 @@ pub fn remember_search(cx: &mut App, text: &str) {
     update_last_search(cx, |s| remember(&mut s.history, text));
 }
 
+/// The replacement of the last search (Replace in Files shares it).
+pub fn set_last_replace(cx: &mut App, text: &str) {
+    update_last_search(cx, |s| s.replace = text.to_owned());
+}
+
+/// Puts a replacement first in the replace history.
+pub fn remember_replace(cx: &mut App, text: &str) {
+    update_last_search(cx, |s| remember(&mut s.replace_history, text));
+}
+
 /// Puts `text` first in a history.
 fn remember(history: &mut Vec<String>, text: &str) {
     if text.is_empty() {

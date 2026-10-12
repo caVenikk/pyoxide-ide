@@ -41,7 +41,8 @@ Platform (`crates/platform/`, language-agnostic):
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching
-  lines and stops at a limit, and the results as ordered rows.
+  lines and stops at a limit (later passes skip the lines shown), the
+  results as ordered rows, and replacing in files on disk.
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
   commands) and its find bar (Find / Replace in the file).
@@ -51,7 +52,8 @@ Platform (`crates/platform/`, language-agnostic):
   metrics, bundled fonts, colour icons rasterized at device scale, common
   components, the UI command index (`ui_commands!`, `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
-  area, status bar, the Find in Files popup), keymaps, application
+  area, status bar, a movable and resizable popup frame, the Find in Files
+  and Replace in Files popup with its preview), keymaps, application
   start-up, environment switches and in-app measurements.
 
 Python product (`crates/python/`):

@@ -177,6 +177,23 @@ thread; larger ones on a background snapshot, cancelled by the next key.
 | 2026-10-12 | mac-1 | key to highlight, 100k lines (1.6 MB) | p50 16.1 ms, p90 23.5 ms, p99 25.2 ms | background search plus the hop back to the UI thread |
 | 2026-10-12 | mac-1 | key to highlight, 10 MB | p50 21.5 ms, p90 22.9 ms, p99 27.8 ms | query `x = 'aaa`; a query with no matches (`import`): p50 10.0 ms, p90 18.7 ms |
 
+### Find in files
+In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=find-in-files:<query>`
+opens the project, then runs the search five times through the
+`find-in-files.search` command (no typing delay); time from the command to
+the first rows on the UI thread and to the end of the search, and the
+longest frame drawn meanwhile. Flask 3.1.0 (shallow clone); a generated tree
+of 20,000 Python files in 400 folders, 300 MB (scratch script, not in the
+repository). Warm file cache; the search runs on all cores and stops at 100
+matches as the reference does.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-12 | mac-1 | Flask, `redirect` (stops at 100): first rows / end | p50 1.0 ms / 4.7 ms | p90 1.2 ms / 6.2 ms; "100+ matches in 22+ files" |
+| 2026-10-12 | mac-1 | Flask, no match (every file searched): end | p50 6.4 ms | p90 16.7 ms; longest frame 7.7 ms |
+| 2026-10-12 | mac-1 | 20k files / 300 MB, 10 matches in 10 files: first rows / end | p50 114 ms / 252 ms | p90 201 ms / 368 ms; longest frame meanwhile 8.4 ms; 102 MB RSS after the runs |
+| 2026-10-12 | mac-1 | 20k files / 300 MB, `cache` (stops at 100): first rows / end | p50 0.9 ms / 1.9 ms | |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

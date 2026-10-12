@@ -20,6 +20,7 @@
 
 mod find;
 mod mask;
+mod replace;
 mod results;
 
 pub use find::{
@@ -27,4 +28,5 @@ pub use find::{
     is_project_file, line_matches,
 };
 pub use mask::{FileMask, MaskError};
+pub use replace::{FileReplaceError, Replacement, apply, replace_in_file, replacements};
 pub use results::{Results, Row};
