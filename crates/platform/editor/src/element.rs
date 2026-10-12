@@ -916,17 +916,27 @@ impl Element for EditorElement {
                 bounds: text_bounds,
             }),
             |window| {
-                // Search matches under the selection; the current match
-                // has the active background only when it is not selected.
-                for r in &p.search {
-                    let color = match (r.current, p.colors.search_current_background) {
-                        (true, Some(active)) => active,
-                        _ => p.colors.search_match,
-                    };
-                    window.paint_quad(fill(r.bounds, color));
+                // Search matches go under the selection (the current match
+                // is the selection); when searching within a selection they
+                // go over it, the current one with the active background.
+                let paint_search = |window: &mut Window| {
+                    for r in &p.search {
+                        let color = match (r.current, p.colors.search_current_background) {
+                            (true, Some(active)) => active,
+                            _ => p.colors.search_match,
+                        };
+                        window.paint_quad(fill(r.bounds, color));
+                    }
+                };
+                let in_selection = p.colors.search_current_background.is_some();
+                if !in_selection {
+                    paint_search(window);
                 }
                 for r in &p.selections {
                     window.paint_quad(fill(*r, p.colors.selection));
+                }
+                if in_selection {
+                    paint_search(window);
                 }
                 for l in &p.layout.lines {
                     let origin = point(
