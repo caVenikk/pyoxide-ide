@@ -114,12 +114,13 @@ fn bounds(
 /// made from that field.
 fn external_paths(paths: &[PathBuf]) -> ExternalPaths {
     let list: SmallVec<[PathBuf; 2]> = paths.iter().cloned().collect();
-    // SAFETY: in gpui 0.2.2 (pinned by the workspace) `ExternalPaths` is
-    // `struct ExternalPaths(pub(crate) SmallVec<[PathBuf; 2]>)`, and the
+    // SAFETY: relies on gpui 0.2.2 (`gpui = "=0.2.2"` in the workspace
+    // manifest), where src/interactive.rs declares
+    // `struct ExternalPaths(pub(crate) SmallVec<[PathBuf; 2]>)`; the
     // workspace has one `smallvec` 1.x, so this is the type of that field.
     // `transmute` only compiles when both types have the same size, which
     // leaves the one field at offset 0: the layouts are the same. The paths
-    // are read back below.
+    // are read back below. Check this again when GPUI is upgraded.
     let external = unsafe { std::mem::transmute::<SmallVec<[PathBuf; 2]>, ExternalPaths>(list) };
     assert_eq!(external.paths(), paths);
     external
@@ -296,7 +297,7 @@ fn a_drop_on_the_tree_or_the_chrome_does_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn the_caret_follows_a_drag_over_the_text(cx: &mut TestAppContext) {
+fn a_drag_over_an_editor_keeps_its_selection(cx: &mut TestAppContext) {
     let (_dir, root) = project();
     let window = open(cx);
     open_folder(cx, window, &root);
@@ -306,24 +307,20 @@ fn the_caret_follows_a_drag_over_the_text(cx: &mut TestAppContext) {
         "project.open-file",
         json!({"path": "src/app.py"}),
     );
+    let selection = json!({"anchor": {"line": 0, "column": 4}, "head": {"line": 1, "column": 4}});
+    invoke(cx, window, "editor.set-selection", selection.clone());
     invoke(cx, window, "workbench.toggle-project", json!(null));
     assert!(tree_focused(cx, window));
 
-    let (origin, line_height, char_width) = window
+    // Files dragged over the text, then out of the window: the editor's
+    // selection and the focus stay as they were.
+    let (origin, line_height, _) = window
         .update(cx, |workbench, _, cx| {
             workbench.active_editor().unwrap().read(cx).text_geometry()
         })
         .unwrap()
         .unwrap();
-    let at = |line: f32, column: f32| {
-        point(
-            origin.x + char_width * column + px(1.0),
-            origin.y + line_height * (line + 0.5),
-        )
-    };
-    let caret = |cx: &mut TestAppContext| state(cx, window)["editor"]["caret"].clone();
-    // Over the tree the caret stays; over the text it follows the pointer
-    // and the editor takes the focus, as in the reference IDE.
+    let on_text = point(origin.x + px(30.0), origin.y + line_height * 3.5);
     let tree = bounds(cx, window, "project-tool-window");
     file_drop(
         cx,
@@ -333,42 +330,26 @@ fn the_caret_follows_a_drag_over_the_text(cx: &mut TestAppContext) {
             paths: external_paths(&[root.join("README.md")]),
         },
     );
-    assert_eq!(caret(cx), json!({"line": 0, "column": 0}));
-    assert!(tree_focused(cx, window));
-    file_drop(
-        cx,
-        window,
-        FileDropEvent::Pending {
-            position: at(1.0, 4.0),
-        },
-    );
-    assert_eq!(caret(cx), json!({"line": 1, "column": 4}));
-    assert!(editor_focused(cx, window));
-    file_drop(
-        cx,
-        window,
-        FileDropEvent::Pending {
-            position: at(3.0, 2.0),
-        },
-    );
-    assert_eq!(caret(cx), json!({"line": 3, "column": 2}));
-    // Over the line numbers it stays where it was.
-    let area = bounds(cx, window, "editor-area");
-    file_drop(
-        cx,
-        window,
-        FileDropEvent::Pending {
-            position: point(area.left() + px(4.0), at(0.0, 0.0).y),
-        },
-    );
-    assert_eq!(caret(cx), json!({"line": 3, "column": 2}));
-    // Leaving the window ends the drag; the drag selected nothing.
+    file_drop(cx, window, FileDropEvent::Pending { position: on_text });
     file_drop(cx, window, FileDropEvent::Exited);
+    let s = state(cx, window);
+    assert_eq!(s["editor"]["selections"], json!([selection]));
+    assert_eq!(tabs(&s), ["src/app.py"]);
+    assert!(tree_focused(cx, window));
+
+    // Dropped there, the file opens; the first editor keeps its selection.
+    drag_and_drop(
+        cx,
+        window,
+        &[root.join("README.md")],
+        &[tree.center(), on_text],
+    );
+    assert_eq!(tabs(&state(cx, window)), ["src/app.py", "README.md"]);
+    invoke(cx, window, "tabs.select", json!({"index": 0}));
     assert_eq!(
         state(cx, window)["editor"]["selections"],
-        json!([{"anchor": {"line": 3, "column": 2}, "head": {"line": 3, "column": 2}}])
+        json!([selection])
     );
-    assert_eq!(tabs(&state(cx, window)), ["src/app.py"]);
 }
 
 #[gpui::test]

@@ -1021,14 +1021,10 @@ impl Element for EditorElement {
             cx.stop_propagation();
         });
         let editor = self.editor.clone();
-        let text_hitbox = p.text_hitbox.clone();
-        window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+        window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
             if !phase.bubble() || e.pressed_button != Some(MouseButton::Left) {
                 return;
             }
-            // A drag from outside the editor (files dragged in from the
-            // file manager) moves the caret over the text.
-            let dragged_over = cx.has_active_drag() && text_hitbox.is_hovered(window);
             editor.update(cx, |ed, cx| match ed.drag {
                 Some(DragUnit::Scrollbar(_)) => ed.drag_scrollbar(e.position.y, cx),
                 Some(_) => {
@@ -1043,10 +1039,6 @@ impl Element for EditorElement {
                     }
                     let pos = ed.offset_for_position(e.position);
                     ed.mouse_drag(pos, cx);
-                }
-                None if dragged_over => {
-                    let pos = ed.offset_for_position(e.position);
-                    ed.drag_over(pos, window, cx);
                 }
                 None => {}
             });

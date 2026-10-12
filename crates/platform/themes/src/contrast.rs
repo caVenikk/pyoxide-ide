@@ -69,6 +69,7 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
         (TextDisabled, Surface, Need::Large),
         (TextLink, Surface, Need::Text),
         (TextLink, SurfaceRaised, Need::Text),
+        (Shortcut, EditorBackground, Need::Text),
         (OnAccent, Accent, Need::Text),
         (Accent, Surface, Need::Ui),
         (Accent, EditorBackground, Need::Ui),

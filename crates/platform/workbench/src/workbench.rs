@@ -1460,7 +1460,7 @@ impl Workbench {
         // dark theme).
         let theme = cx.theme();
         let shortcut = gpui::HighlightStyle {
-            color: Some(theme.color(UiRole::TextLink)),
+            color: Some(theme.color(UiRole::Shortcut)),
             ..Default::default()
         };
         let space = if theme.is_dark() { "  " } else { " " };

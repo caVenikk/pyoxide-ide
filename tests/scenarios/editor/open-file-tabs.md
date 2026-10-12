@@ -35,8 +35,8 @@ https://www.jetbrains.com/help/pycharm/managing-editor-tabs.html
 1. With the project open and no tab open, drag `b.py` and `notes.txt` from
    the file manager onto the editor area and drop them.
 2. Drag `a.py` and `b.py` onto the tab strip and drop them.
-3. With `a.py` open, drag a file over its text and its line numbers, then
-   out of the window without dropping it.
+3. With `a.py` open and a few words of it selected, drag a file over its
+   text, then out of the window without dropping it.
 4. Drop a file onto a row of the project tree, below the rows, onto the
    toolbar, a stripe and the status bar.
 5. Hide the project tool window and drop the project's `src` folder onto the
@@ -52,9 +52,10 @@ https://www.jetbrains.com/help/pycharm/managing-editor-tabs.html
   focus.
 - Step 2: `a.py` opens in a new tab; `b.py` is open already, so its tab is
   selected, being dropped last.
-- Step 3: while the file is over the text, the caret follows the pointer
-  and the editor takes the focus; over the line numbers the caret stays.
-  Nothing opens and nothing is selected.
+- Step 3: nothing opens; the selection and the focus stay as they were.
+  (The reference IDE's editor moves its caret to the pointer during any
+  drag; that feedback belongs to dragging text inside the editor, which
+  keeps the selection while the caret moves.)
 - Step 4: nothing happens. Moving and copying files into a folder of the
   tree is a feature of its own.
 - Step 5: the project tool window opens, selects `src` and takes the focus;
