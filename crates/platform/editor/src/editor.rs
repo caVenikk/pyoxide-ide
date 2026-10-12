@@ -2014,6 +2014,16 @@ impl Editor {
         }
     }
 
+    /// Something dragged from outside (files from the file manager) is over
+    /// the text at char offset `pos`: the caret follows it and the editor
+    /// takes the focus, as the reference IDE's editor does during a drag.
+    pub(crate) fn drag_over(&mut self, pos: usize, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus);
+        if self.selections != SelectionSet::single(Selection::caret(pos)) {
+            self.set_selections(SelectionSet::single(Selection::caret(pos)), cx);
+        }
+    }
+
     pub(crate) fn mouse_up(&mut self, cx: &mut Context<Self>) {
         if self.drag.take().is_some() {
             cx.notify();

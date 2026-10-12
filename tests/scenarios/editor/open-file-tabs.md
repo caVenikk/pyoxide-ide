@@ -28,3 +28,61 @@
 
 ## Source
 https://www.jetbrains.com/help/pycharm/managing-editor-tabs.html
+
+# Drop files and folders
+
+## Steps
+1. With the project open and no tab open, drag `b.py` and `notes.txt` from
+   the file manager onto the editor area and drop them.
+2. Drag `a.py` and `b.py` onto the tab strip and drop them.
+3. With `a.py` open, drag a file over its text and its line numbers, then
+   out of the window without dropping it.
+4. Drop a file onto a row of the project tree, below the rows, onto the
+   toolbar, a stripe and the status bar.
+5. Hide the project tool window and drop the project's `src` folder onto the
+   editor area; then drop a folder from outside the project.
+6. Start the IDE without a project and drop a file, then a folder, onto the
+   editor area.
+7. Close all tabs and look at the empty editor area with and without a
+   project, with the project tool window shown and hidden.
+
+## Expected
+- Step 1: `b.py` and `notes.txt` open in tabs in the order they were
+  dropped; `notes.txt`, dropped last, is selected and its editor has the
+  focus.
+- Step 2: `a.py` opens in a new tab; `b.py` is open already, so its tab is
+  selected, being dropped last.
+- Step 3: while the file is over the text, the caret follows the pointer
+  and the editor takes the focus; over the line numbers the caret stays.
+  Nothing opens and nothing is selected.
+- Step 4: nothing happens. Moving and copying files into a folder of the
+  tree is a feature of its own.
+- Step 5: the project tool window opens, selects `src` and takes the focus;
+  the tabs stay as they are. The folder from outside the project is left
+  alone (the reference IDE hands it to its other Select In targets, such as
+  the system file manager).
+- Step 6: the file opens in a tab; the folder opens as the project, as a
+  folder dropped on the reference IDE's welcome screen does, and the rest of
+  that drop is left alone.
+- Step 7: the hints are in a 16 px font, 36 px apart, left-aligned in a
+  block centred across the area, the first one at 3/8 of its height, the
+  shortcut after the action in its own colour:
+  - without a project: `Open a folder to start`, `Project View ⌘1` (Alt+1)
+    while the tool window is hidden, `Drop files here to open them`;
+  - with a project: `Project View ⌘1` while the tool window is hidden,
+    `Drop files here to open them`.
+  The reference IDE shows Search Everywhere first and Go to File, Recent
+  Files and Navigation Bar after Project View; they come with those
+  actions.
+
+## Commands
+`workbench.state` (`tabs`, `active_tab`, `tree`, `project`). A drop has no
+command: its result is the same as `project.open-file` for each file in
+turn, `project.tree.reveal` for a folder of the project and
+`project.open-folder` for a folder without a project.
+
+## Source
+IntelliJ Platform Community sources (see NOTICE): `EditorsSplitters.kt`,
+`EditorTabbedContainer.kt`, `FileDropManager.kt`, `FileNavigatorImpl.kt`,
+`EditorImpl.java`, `ProjectViewDropTarget.java`, `ProjectsTabFactory.kt`,
+`DefaultEditorEmptyTextProvider.kt`, `EditorEmptyTextPainter.java`.
