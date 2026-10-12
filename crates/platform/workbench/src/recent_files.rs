@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
+    App, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
     HighlightStyle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     ParentElement, Render, SharedString, StyledText, Subscription, UniformListScrollHandle, Window,
     div, prelude::*, px, uniform_list,
@@ -19,7 +19,7 @@ use name_match::{Matcher, MatchingMode};
 use serde_json::json;
 use themes::{Metric, UiRole};
 use ui::components::checkbox;
-use ui::icons::{Icon, IconName};
+use ui::icons::Icon;
 use ui::theme::ThemeExt;
 
 use crate::file_types::FileTypes;
