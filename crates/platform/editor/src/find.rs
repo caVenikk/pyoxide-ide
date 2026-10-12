@@ -248,6 +248,7 @@ pub struct FindBar {
     /// What the last action said ("not found, press ... to search from the
     /// top"), shown near the caret until the next key.
     hint: Option<SharedString>,
+    hint_above: bool,
     /// The editor's selections when the bar opened: restored when the query
     /// is cleared, and the range In Selection searches.
     initial: Option<SelectionSet>,
@@ -337,6 +338,7 @@ impl FindBar {
             pending: None,
             wrap: None,
             hint: None,
+            hint_above: false,
             initial: None,
             own_selection: None,
             history: None,
@@ -381,6 +383,11 @@ impl FindBar {
     /// What the last action said, shown near the caret until the next key.
     pub fn hint(&self) -> Option<&SharedString> {
         self.hint.as_ref()
+    }
+
+    /// The hint goes above the caret (a backward search), not below it.
+    pub fn hint_above(&self) -> bool {
+        self.hint_above
     }
 
     pub fn clear_hint(&mut self, cx: &mut Context<Self>) {
@@ -1034,6 +1041,7 @@ impl FindBar {
             };
         }
         self.hint = Some(message.into());
+        self.hint_above = direction == Direction::Backward;
     }
 
     /// The caret moved: onto another match, that match becomes current (the
@@ -1092,6 +1100,7 @@ impl FindBar {
         match error {
             ReplaceError::Malformed(message) => {
                 self.hint = Some(format!("Malformed replacement string: {message}").into());
+                self.hint_above = false;
                 self.replace.update(cx, |f, cx| f.set_error(true, cx));
             }
             ReplaceError::Stale => self.search(Reason::Edited, window, cx),
@@ -1221,6 +1230,7 @@ impl FindBar {
         };
         self.wrap = None;
         self.own_selection = Some(selection.range());
+        self.hint_above = false;
         self.hint = Some(
             match count {
                 1 => "1 occurrence replaced".to_owned(),
@@ -1683,7 +1693,7 @@ impl FindBar {
             .child(div().flex_1())
             .child(
                 small_icon_button("find-close", IconName::CLOSE, true, cx)
-                    .tooltip(Tooltip::text("Close", None))
+                    .tooltip(Tooltip::text("Close", field_shortcut(&Close)))
                     .on_click(
                         cx.listener(|this, _: &ClickEvent, window, cx| this.close(window, cx)),
                     ),

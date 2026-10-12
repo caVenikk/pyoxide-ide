@@ -953,8 +953,13 @@ impl Workbench {
 
     /// The find bar's hint ("not found, press ... to search from the top")
     /// below the caret.
-    fn render_find_hint(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let hint = self.active_find_bar()?.read(cx).hint()?.clone();
+    fn render_find_hint(
+        &self,
+        window_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
+        let bar = self.active_find_bar()?.read(cx);
+        let (hint, above) = (bar.hint()?.clone(), bar.hint_above());
         let caret = self.active_editor()?.read(cx).caret_bounds()?;
         let theme = cx.theme();
         Some(
@@ -963,7 +968,14 @@ impl Workbench {
                 .debug_selector(|| "find-hint".into())
                 .absolute()
                 .left(caret.left())
-                .top(caret.bottom() + px(2.0))
+                // Below the caret line; a backward search's hint above it.
+                .map(|d| {
+                    if above {
+                        d.bottom(window_height - caret.top() + px(2.0))
+                    } else {
+                        d.top(caret.bottom() + px(2.0))
+                    }
+                })
                 .px(px(8.0))
                 .py(px(4.0))
                 .rounded(theme.metric(Metric::CornerRadius))
@@ -1370,7 +1382,7 @@ impl Render for Workbench {
             )
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
-            .children(self.render_find_hint(cx))
+            .children(self.render_find_hint(window.viewport_size().height, cx))
             .children(first_frame)
             // Measurements: the end of the frame's paint.
             .when(bench, |d| {
