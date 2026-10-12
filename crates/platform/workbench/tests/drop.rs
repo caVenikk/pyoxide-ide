@@ -411,7 +411,14 @@ fn without_a_project_a_dropped_folder_opens_as_the_project(cx: &mut TestAppConte
     assert_eq!(tabs(&s), Vec::<String>::new());
 }
 
-const EMPTY_TEXT_LINES: [&str; 3] = ["empty-text-0", "empty-text-1", "empty-text-2"];
+const EMPTY_TEXT_LINES: [&str; 6] = [
+    "empty-text-0",
+    "empty-text-1",
+    "empty-text-2",
+    "empty-text-3",
+    "empty-text-4",
+    "empty-text-5",
+];
 
 /// The lines of the empty editor area, with a shortcut after its action.
 fn empty_text(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Vec<String> {
@@ -439,36 +446,34 @@ fn empty_text(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Vec<S
 
 #[gpui::test]
 fn the_empty_editor_area_shows_the_hints_of_the_reference(cx: &mut TestAppContext) {
-    let project_view = if cfg!(target_os = "macos") {
-        "Project View ⌘1"
-    } else {
-        "Project View Alt+1"
-    };
+    let mac = cfg!(target_os = "macos");
+    let pick = |m: &'static str, w: &'static str| if mac { m } else { w };
+    let project_view = pick("Project View ⌘1", "Project View Alt+1");
+    let search = pick("Search Everywhere Double ⇧", "Search Everywhere Double Shift");
+    let go_to_file = pick("Go to File ⇧⌘O", "Go to File Ctrl+Shift+N");
+    let recent = pick("Recent Files ⌘E", "Recent Files Ctrl+E");
+    let drop = "Drop files here to open them";
     let window = open(cx);
-    // No project: how to start, then the hints.
+    // No project: how to start, then the hints in the reference's order.
     assert_eq!(
         empty_text(cx, window),
-        ["Open a folder to start", "Drop files here to open them"]
+        ["Open a folder to start", search, go_to_file, recent, drop]
     );
     invoke(cx, window, "workbench.hide-tool-window", json!(null));
     assert_eq!(
         empty_text(cx, window),
-        [
-            "Open a folder to start",
-            project_view,
-            "Drop files here to open them"
-        ]
+        ["Open a folder to start", search, project_view, go_to_file, recent, drop]
     );
 
     // A project: the Project View hint only while the tool window is
     // hidden.
     let (_dir, root) = project();
     open_folder(cx, window, &root);
-    assert_eq!(empty_text(cx, window), ["Drop files here to open them"]);
+    assert_eq!(empty_text(cx, window), [search, go_to_file, recent, drop]);
     invoke(cx, window, "workbench.hide-tool-window", json!(null));
     assert_eq!(
         empty_text(cx, window),
-        [project_view, "Drop files here to open them"]
+        [search, project_view, go_to_file, recent, drop]
     );
 
     // The lines are left-aligned in a block centred across the area, the

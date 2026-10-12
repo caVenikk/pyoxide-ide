@@ -1582,12 +1582,12 @@ impl Workbench {
     }
 
     /// The lines of the empty editor area: the reference IDE's hints, in its
-    /// order, for the actions Pyoxide has (Search Everywhere, Go to File,
-    /// Recent Files and Navigation Bar are not there yet). An action's hint
-    /// shows its shortcut and is left out when it has none; the Project
-    /// View hint shows only while the project tool window is hidden.
-    /// Without a project the first line says how to start. None while a
-    /// file is open.
+    /// order, for the actions Pyoxide has (the Navigation Bar is not there
+    /// yet): Search Everywhere, Project View, Go to File, Recent Files. An
+    /// action's hint shows its shortcut ("Double ⇧" for a double tap) and is
+    /// left out when it has none; the Project View hint shows only while
+    /// the project tool window is hidden. Without a project the first line
+    /// says how to start. None while a file is open.
     pub fn empty_text(&self, window: &Window, cx: &App) -> Vec<(&'static str, Option<String>)> {
         let mut lines = Vec::new();
         if !self.tabs.is_empty() {
@@ -1596,11 +1596,24 @@ impl Workbench {
         if self.project(cx).is_none() {
             lines.push(("Open a folder to start", None));
         }
-        if !self.project_visible
-            && let Some(keys) = ui::keys::shortcut_in(&ToggleProject, &self.focus, window)
-        {
-            lines.push(("Project View", Some(keys)));
+        let keys = |command: &str| {
+            if let Some(key) = crate::keymap::double_tap_for(command, cx) {
+                return Some(crate::keymap::double_tap_text(key, cfg!(target_os = "macos")));
+            }
+            let action = cx.build_action(command, None).ok()?;
+            ui::keys::shortcut_in(action.as_ref(), &self.focus, window)
+        };
+        let mut hint = |text: &'static str, command: &str| {
+            if let Some(keys) = keys(command) {
+                lines.push((text, Some(keys)));
+            }
+        };
+        hint("Search Everywhere", "search-everywhere.open");
+        if !self.project_visible {
+            hint("Project View", "workbench.toggle-project");
         }
+        hint("Go to File", "search-everywhere.go-to-file");
+        hint("Recent Files", "recent-files.open");
         lines.push(("Drop files here to open them", None));
         lines
     }
