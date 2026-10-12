@@ -7,7 +7,8 @@
 use gpui::{
     AnyElement, ClickEvent, Context, CursorStyle, FontWeight, HighlightStyle, HitboxBehavior,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Render, SharedString, StyledText, Window, canvas, div, px, uniform_list,
+    ParentElement, Render, SharedString, StyledText, Window, anchored, canvas, deferred, div,
+    point, px, uniform_list,
 };
 use themes::{Metric, UiRole};
 use ui::components::{
@@ -791,13 +792,54 @@ impl FindInFiles {
                     .children(self.render_preview_title(cx))
                     .child(
                         div()
+                            .key_context("FindInFilesPreview")
                             .flex_1()
                             .min_h(px(0.0))
-                            .child(self.preview.editor().clone()),
+                            .child(self.preview.editor().clone())
+                            .children(self.render_preview_hint(cx)),
                     ),
             )
             .children(tracking)
             .into_any_element()
+    }
+
+    /// The hint of Find Next in the preview ("not found, press ... to
+    /// search from the top") below the caret, as in any editor.
+    fn render_preview_hint(&self, cx: &App) -> Option<AnyElement> {
+        let bar = self.preview.find_bar().read(cx);
+        let (hint, above) = (bar.hint()?.clone(), bar.hint_above());
+        let caret = self.preview.editor().read(cx).caret_bounds()?;
+        let theme = cx.theme();
+        let at = if above {
+            point(caret.left(), caret.top() - px(2.0))
+        } else {
+            point(caret.left(), caret.bottom() + px(2.0))
+        };
+        let anchor = if above {
+            gpui::Corner::BottomLeft
+        } else {
+            gpui::Corner::TopLeft
+        };
+        Some(
+            deferred(
+                anchored().position(at).anchor(anchor).child(
+                    div()
+                        .id("find-in-files-preview-hint")
+                        .debug_selector(|| "find-in-files-preview-hint".into())
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .rounded(theme.metric(Metric::CornerRadius))
+                        .border_1()
+                        .border_color(theme.color(UiRole::PopupBorder))
+                        .bg(theme.color(UiRole::SurfaceRaised))
+                        .shadow(ui::components::popup_shadow())
+                        .whitespace_nowrap()
+                        .child(hint),
+                ),
+            )
+            .with_priority(2)
+            .into_any_element(),
+        )
     }
 
     fn drag_split(&mut self, y: gpui::Pixels, cx: &mut Context<Self>) {

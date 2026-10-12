@@ -219,6 +219,8 @@ pub struct Editor {
     pub(crate) single_line: bool,
     /// Text shown in an empty one-line field.
     pub(crate) placeholder: Option<SharedString>,
+    /// The placeholder shows only while the field has no focus.
+    pub(crate) placeholder_unfocused: bool,
     /// A one-line field shows its text in the error colour.
     pub(crate) error: bool,
     /// A one-line field in the UI font (search fields) instead of the
@@ -277,6 +279,7 @@ impl Editor {
             center_caret: false,
             single_line: false,
             placeholder: None,
+            placeholder_unfocused: false,
             error: false,
             ui_font: false,
             transparent: false,
@@ -305,6 +308,23 @@ impl Editor {
     /// Text shown in the empty one-line field ("Search").
     pub fn set_placeholder(&mut self, placeholder: Option<SharedString>) {
         self.placeholder = placeholder;
+    }
+
+    /// Shows the placeholder only while the field has no focus, as the
+    /// reference IDE's dialog fields do (an empty field with the focus
+    /// shows just the caret).
+    pub fn set_placeholder_unfocused(&mut self, unfocused: bool) {
+        self.placeholder_unfocused = unfocused;
+    }
+
+    /// The placeholder the field shows now: an empty one-line field shows
+    /// it, unless it has the focus and shows it only without.
+    pub fn shown_placeholder(&self, focused: bool) -> Option<&SharedString> {
+        self.placeholder.as_ref().filter(|_| {
+            self.single_line
+                && self.buffer.len_chars() == 0
+                && !(self.placeholder_unfocused && focused)
+        })
     }
 
     /// Shows the text of a one-line field in the theme's error colour (a

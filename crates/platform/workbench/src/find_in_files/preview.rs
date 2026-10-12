@@ -10,24 +10,48 @@
 //! edit (after the idle time, when the window loses the focus, when the
 //! preview shows another file and when the popup closes) without opening a
 //! tab; opening it from the popup hands this document to the new tab.
-//! The marked matches move with the edits.
+//!
+//! The rows keep the text they were found with, as in the reference, but
+//! where their matches are moves with the edits: the marked matches, the
+//! place a row opens at and the match a Replace changes follow the text.
+//! Find Next and Find Previous in the preview are the editor's.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use editor::find::{Direction, FindBar};
 use editor::{Editor, EditorEvent, SearchHighlights};
 use gpui::{App, AppContext as _, Context, Entity, Subscription, Task, WeakEntity, Window};
+use project_search::Row;
 use serde_json::json;
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point};
 
 use super::{FindInFiles, PREVIEW_DELAY};
 
+/// A row as found: its line and the column where its first match starts.
+type RowKey = (usize, usize);
+
+/// Where a row's matches are now in its file's document.
+#[derive(Debug, Clone)]
+struct RowMarks {
+    /// Char ranges; the first is the match the row opens at.
+    ranges: Vec<Range<usize>>,
+    /// Where the first one starts.
+    first: Point,
+}
+
 pub(super) struct Preview {
     editor: Entity<Editor>,
+    /// Find Next and Find Previous in the preview (the bar itself is not
+    /// shown; its hint is).
+    find: Entity<FindBar>,
     /// The file shown.
     path: Option<PathBuf>,
-    /// The row shown: its line and where its first match starts.
-    shown: Option<Point>,
+    /// The row shown.
+    shown: Option<RowKey>,
+    /// Where the rows' matches are now, for the files the preview showed.
+    marks: HashMap<PathBuf, HashMap<RowKey, RowMarks>>,
     task: Option<Task<()>>,
     /// The editor of the file's tab: edits go both ways.
     linked: Option<(WeakEntity<Editor>, Subscription)>,
@@ -37,7 +61,7 @@ pub(super) struct Preview {
     echo_tab: Option<u64>,
     /// The idle save of the preview's own document.
     save_task: Option<Task<()>>,
-    _subscription: Subscription,
+    _subscriptions: [Subscription; 3],
 }
 
 impl Preview {
@@ -47,26 +71,47 @@ impl Preview {
             e.buffer_mut().set_read_only(true);
             e
         });
-        let subscription = cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
-            if let EditorEvent::Edited(applied) = event {
-                this.preview_edited(applied, cx);
-            }
-        });
+        let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
+        let subscriptions = [
+            cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
+                if let EditorEvent::Edited(applied) = event {
+                    this.preview_edited(applied, cx);
+                }
+            }),
+            // The bar's hint ("not found, press ...") is drawn by the popup;
+            // the next key hides it (also one an action takes).
+            cx.observe(&find, |_, _, cx| cx.notify()),
+            cx.intercept_keystrokes({
+                let find = find.downgrade();
+                move |_, _, cx| {
+                    if let Some(bar) = find.upgrade() {
+                        bar.update(cx, |bar, cx| bar.clear_hint(cx));
+                    }
+                }
+            }),
+        ];
         Self {
             editor,
+            find,
             path: None,
             shown: None,
+            marks: HashMap::new(),
             task: None,
             linked: None,
             echo_preview: None,
             echo_tab: None,
             save_task: None,
-            _subscription: subscription,
+            _subscriptions: subscriptions,
         }
     }
 
     pub fn editor(&self) -> &Entity<Editor> {
         &self.editor
+    }
+
+    /// Find Next and Find Previous in the preview.
+    pub fn find_bar(&self) -> &Entity<FindBar> {
+        &self.find
     }
 
     pub fn path(&self) -> Option<&PathBuf> {
@@ -85,6 +130,7 @@ impl Preview {
             "read_only": e.buffer().is_read_only(),
             "linked": self.linked.is_some(),
             "modified": self.linked.is_none() && e.is_modified(),
+            "hint": self.find.read(cx).hint().map(|h| h.to_string()),
         })
     }
 }
@@ -99,6 +145,96 @@ impl FindInFiles {
             cx.background_executor().timer(PREVIEW_DELAY).await;
             let _ = this.update(cx, |this, cx| this.show_preview(cx));
         }));
+    }
+
+    /// The preview's editor when it edits `path`'s own document (the file
+    /// is not open in a tab).
+    pub(super) fn preview_own_editor(&self, path: &Path) -> Option<Entity<Editor>> {
+        (self.preview.path.as_deref() == Some(path) && self.preview.linked.is_none())
+            .then(|| self.preview.editor.clone())
+    }
+
+    /// Where a row's first match is now: moved by the edits made while the
+    /// preview showed its file, else where it was found.
+    pub(super) fn row_point(&self, row: &Row) -> Point {
+        self.preview
+            .marks
+            .get(row.path.as_ref())
+            .and_then(|m| m.get(&row_key(row)))
+            .map_or(row.line.first.start, |m| m.first)
+    }
+
+    /// The rows changed (a new search): their matches are where they were
+    /// found.
+    pub(super) fn forget_marks(&mut self) {
+        self.preview.marks.clear();
+    }
+
+    /// The rows of the shown file that have no marks yet get them, from
+    /// where they were found.
+    pub(super) fn sync_marks(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.preview.path.clone() else {
+            return;
+        };
+        let b = self.preview.editor.read(cx).buffer();
+        let marks = self.preview.marks.entry(path.clone()).or_default();
+        for row in self.results.rows().iter().filter(|r| *r.path == path) {
+            marks.entry(row_key(row)).or_insert_with(|| {
+                let ranges = found_ranges(row, b);
+                let first = ranges
+                    .first()
+                    .map_or(row.line.first.start, |r| b.offset_to_point(r.start));
+                RowMarks { ranges, first }
+            });
+        }
+    }
+
+    /// The edit moved the matches of the shown file's rows; the marked ones
+    /// are shown where they are now.
+    fn move_marks(&mut self, applied: &[AppliedEdit], cx: &mut Context<Self>) {
+        let Some(path) = self.preview.path.clone() else {
+            return;
+        };
+        let b = self.preview.editor.read(cx).buffer();
+        let len = b.len_chars();
+        let Some(marks) = self.preview.marks.get_mut(&path) else {
+            return;
+        };
+        for m in marks.values_mut() {
+            for r in &mut m.ranges {
+                let moved = map_range(r.clone(), applied);
+                *r = moved.start.min(len)..moved.end.min(len);
+            }
+            if let Some(r) = m.ranges.first() {
+                m.first = b.offset_to_point(r.start);
+            }
+        }
+        let shown = self
+            .preview
+            .shown
+            .and_then(|key| marks.get(&key))
+            .map(|m| m.ranges.clone());
+        if let Some(ranges) = shown {
+            self.show_marks(&ranges, false, cx);
+        }
+    }
+
+    /// Find Next or Find Previous in the preview: the next match of the
+    /// last search in the file, as in any editor; nothing when there was
+    /// no search in a file yet (the preview has no find bar to open).
+    pub(super) fn find_in_preview(
+        &mut self,
+        direction: Direction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let last = editor::find::last_search(cx);
+        if !last.performed || last.text.is_empty() || self.preview.path.is_none() {
+            return;
+        }
+        self.preview
+            .find
+            .update(cx, |bar, cx| bar.find(direction, window, cx));
     }
 
     /// The editor of the tab of `path`, when the file is open.
@@ -204,6 +340,7 @@ impl FindInFiles {
         });
         self.preview.path = Some(path);
         self.preview.shown = None;
+        self.sync_marks(cx);
         self.mark_preview(row, cx);
     }
 
@@ -231,6 +368,8 @@ impl FindInFiles {
         if self.preview.path.is_none() {
             return;
         }
+        // Also for an edit copied from the tab.
+        self.move_marks(applied, cx);
         let version = self.preview.editor.read(cx).buffer().version();
         if self.preview.echo_preview.take() == Some(version) {
             return;
@@ -350,47 +489,102 @@ impl FindInFiles {
 
     /// Marks the row's matches (outlined in replace mode) and puts the
     /// caret on the first one, its line in the middle.
-    fn mark_preview(&mut self, row: &project_search::Row, cx: &mut Context<Self>) {
-        let first = row.line.first.clone();
+    fn mark_preview(&mut self, row: &Row, cx: &mut Context<Self>) {
+        let key = row_key(row);
+        let fresh = self.preview.shown != Some(key);
+        self.preview.shown = Some(key);
+        let marked = self
+            .preview
+            .marks
+            .get(row.path.as_ref())
+            .and_then(|m| m.get(&key));
+        let ranges = match marked {
+            Some(m) => m.ranges.clone(),
+            None => found_ranges(row, self.preview.editor.read(cx).buffer()),
+        };
+        self.show_marks(&ranges, fresh, cx);
+    }
+
+    /// Marks matches in the preview; with `go`, the caret goes on the first
+    /// one, its line in the middle.
+    fn show_marks(&mut self, ranges: &[Range<usize>], go: bool, cx: &mut Context<Self>) {
         let replace = self.replace_mode;
-        let fresh = self.preview.shown != Some(first.start);
-        self.preview.shown = Some(first.start);
         self.preview.editor.update(cx, |e, cx| {
-            let b = e.buffer();
-            let line = row.line.line.min(b.len_lines().saturating_sub(1));
-            let start = b.line_start(line);
-            let len = b.line_len(line);
-            let mut matches: Vec<_> = row
-                .line
-                .ranges
-                .iter()
-                .enumerate()
-                .map(|(i, r)| {
-                    if i == 0 {
-                        b.point_to_offset(first.start)..b.point_to_offset(first.end)
-                    } else {
-                        start + r.start.min(len)..start + r.end.min(len)
-                    }
-                })
-                .filter(|r| r.end > r.start)
-                .collect();
+            let first = ranges.first().map(|r| e.buffer().offset_to_point(r.start));
+            let mut matches: Vec<_> = ranges.iter().filter(|r| r.end > r.start).cloned().collect();
             matches.sort_by_key(|r| r.start);
+            let current = (replace && !matches.is_empty()).then_some(0);
             e.set_search_highlights(
                 Some(SearchHighlights {
                     matches,
-                    current: replace.then_some(0),
+                    current,
                     current_background: false,
                     excluded: Default::default(),
-                    lines: vec![line],
+                    lines: first.map(|p| vec![p.line]).unwrap_or_default(),
                 }),
                 cx,
             );
-            if fresh {
-                e.go_to(first.start.line + 1, Some(first.start.column + 1), cx);
+            if go && let Some(p) = first {
+                e.go_to(p.line + 1, Some(p.column + 1), cx);
             }
         });
         cx.notify();
     }
+}
+
+fn row_key(row: &Row) -> RowKey {
+    (
+        row.line.line,
+        row.line.ranges.first().map_or(0, |m| m.start),
+    )
+}
+
+/// A row's matches as char ranges of `b` where they were found: the first
+/// one (which may go on to later lines) from its points, the others from
+/// their columns.
+fn found_ranges(row: &Row, b: &Buffer) -> Vec<Range<usize>> {
+    let first = &row.line.first;
+    let line = row.line.line.min(b.len_lines().saturating_sub(1));
+    let start = b.line_start(line);
+    let len = b.line_len(line);
+    row.line
+        .ranges
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            if i == 0 {
+                b.point_to_offset(first.start)..b.point_to_offset(first.end)
+            } else {
+                start + r.start.min(len)..start + r.end.min(len)
+            }
+        })
+        .collect()
+}
+
+/// Moves a char range through edits as applied (each in the text the
+/// ones before it left): an edit before the range shifts it, one inside it
+/// grows or shrinks it; text typed at its start or end stays outside it.
+fn map_range(range: Range<usize>, applied: &[AppliedEdit]) -> Range<usize> {
+    let mut r = range;
+    for e in applied {
+        let shift = |p: usize| (p as isize + e.new_end as isize - e.old_end as isize) as usize;
+        let start = if r.start < e.start {
+            r.start
+        } else if r.start >= e.old_end {
+            shift(r.start)
+        } else {
+            e.start
+        };
+        let end = if r.end <= e.start {
+            r.end
+        } else if r.end >= e.old_end {
+            shift(r.end)
+        } else {
+            e.new_end
+        };
+        r = start..end.max(start);
+    }
+    r
 }
 
 /// Copies an edit of `from` (as applied) to `to`, which held the same text
@@ -508,6 +702,54 @@ mod tests {
             CaretPlacement::AfterEachEdit,
         );
         assert_eq!(b.text(), "one two three four");
+    }
+
+    #[test]
+    fn marked_matches_follow_the_edits() {
+        let edit = |text: &str, sel: Range<usize>, new: &str| {
+            let mut b = Buffer::new(text);
+            let mut s = SelectionSet::caret(0);
+            let applied = b.transact(
+                &mut s,
+                vec![Edit::new(sel, new)],
+                EditKind::Other,
+                CaretPlacement::AfterEachEdit,
+            );
+            (applied, b)
+        };
+        // "a needle b": the match is 2..8.
+        let (applied, b) = edit("a needle b", 0..0, "XY");
+        assert_eq!(
+            b.slice(map_range(2..8, &applied)),
+            "needle",
+            "before: moved"
+        );
+        let (applied, b) = edit("a needle b", 2..2, "ZZ");
+        assert_eq!(
+            b.slice(map_range(2..8, &applied)),
+            "needle",
+            "typed at the start"
+        );
+        let (applied, b) = edit("a needle b", 8..8, "s");
+        assert_eq!(
+            b.slice(map_range(2..8, &applied)),
+            "needle",
+            "typed at the end"
+        );
+        let (applied, b) = edit("a needle b", 4..5, "EE");
+        assert_eq!(
+            b.slice(map_range(2..8, &applied)),
+            "neEEdle",
+            "inside: grows"
+        );
+        let (applied, b) = edit("a needle b", 9..10, "c");
+        assert_eq!(b.slice(map_range(2..8, &applied)), "needle", "after: stays");
+        let (applied, b) = edit("a needle b", 0..4, "");
+        assert_eq!(
+            b.slice(map_range(2..8, &applied)),
+            "edle",
+            "its start deleted"
+        );
     }
 
     #[test]

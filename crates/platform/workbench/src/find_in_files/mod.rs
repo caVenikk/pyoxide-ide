@@ -146,6 +146,9 @@ ui::ui_commands! {
     /// Edit in the preview.
     FocusPreview => "find-in-files.focus-preview", "Go to Preview",
         "Moves the focus into the preview's editor (as a click into it does).";
+    /// Open the file in an editor.
+    EditSource => "find-in-files.edit-source", "Edit Source",
+        "Opens the file in an editor: from the preview at its caret, else the selected line at its match; the popup closes unless it is pinned.";
 }
 
 /// Matches one search collects before it stops (the reference IDE's
@@ -376,7 +379,11 @@ impl FindInFiles {
                 e.set_single_line(true);
                 e.set_ui_font(true);
                 e.set_transparent(true);
+                // "Search" and "Replace" show while the field has no focus,
+                // as in the reference (an empty field with the focus shows
+                // the caret only).
                 e.set_placeholder(Some(placeholder.into()));
+                e.set_placeholder_unfocused(true);
                 e.set_config(editor::EditorConfig {
                     brackets: Vec::new(),
                     ..editor::EditorConfig::default()
@@ -739,6 +746,7 @@ impl FindInFiles {
         self.context = context;
         if !self.open || self.replace_mode != replace {
             self.results = self.empty_results_for(replace);
+            self.forget_marks();
             self.stale = false;
             self.selected = None;
         }
@@ -924,12 +932,21 @@ impl FindInFiles {
 
     /// Open documents with unsaved changes, searched instead of their files.
     fn overrides(&self, cx: &App) -> HashMap<PathBuf, Rope> {
-        self.context
+        let mut overrides: HashMap<PathBuf, Rope> = self
+            .context
             .editors
             .iter()
             .filter(|(_, e)| e.read(cx).is_modified())
             .map(|(p, e)| (p.clone(), e.read(cx).buffer().rope().clone()))
-            .collect()
+            .collect();
+        // A file edited in the preview and not saved yet.
+        if let Some(path) = self.preview.path()
+            && let Some(editor) = self.preview_own_editor(path)
+            && editor.read(cx).is_modified()
+        {
+            overrides.insert(path.clone(), editor.read(cx).buffer().rope().clone());
+        }
+        overrides
     }
 
     /// What is searched for, or why nothing is (with the field at fault).
@@ -1032,6 +1049,7 @@ impl FindInFiles {
                 self.invalid_field = field;
                 self.status = status;
                 self.results = self.empty_results();
+                self.forget_marks();
                 self.stale = false;
                 self.selected = None;
                 self.truncated = false;
@@ -1165,6 +1183,7 @@ impl FindInFiles {
         }
         if self.stale {
             self.results = self.empty_results();
+            self.forget_marks();
             self.stale = false;
             self.selected = None;
         }
@@ -1178,6 +1197,7 @@ impl FindInFiles {
         for file in files {
             self.results.add(file);
         }
+        self.sync_marks(cx);
         let before = self.selected;
         let had_selection = selected.is_some();
         self.selected = match selected {
@@ -1266,7 +1286,19 @@ impl FindInFiles {
             return;
         };
         let path = (*row.path).clone();
-        let point = row.line.first.start;
+        // Where the match is now (edits in the preview move it).
+        let point = self.row_point(row);
+        self.open_at(path, point, window, cx);
+    }
+
+    /// Opens a file at a point and closes the popup unless it is pinned.
+    fn open_at(
+        &mut self,
+        path: PathBuf,
+        point: Point,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A document edited in the preview goes to the tab (the popup does
         // not write it as it closes).
         let document = if self.pinned {
@@ -1402,17 +1434,68 @@ impl FindInFiles {
         self.close(true, window, cx);
     }
 
-    fn next_result_action(&mut self, _: &NextResult, _: &mut Window, cx: &mut Context<Self>) {
+    /// The next row; in the preview Find Next, as in any editor (the
+    /// reference binds its row keys to the fields and the list only).
+    fn next_result_action(&mut self, _: &NextResult, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_preview(window, cx) {
+            self.find_in_preview(editor::find::Direction::Forward, window, cx);
+            return;
+        }
         self.move_selection(1, cx);
     }
 
     fn previous_result_action(
         &mut self,
         _: &PreviousResult,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.in_preview(window, cx) {
+            self.find_in_preview(editor::find::Direction::Backward, window, cx);
+            return;
+        }
         self.move_selection(-1, cx);
+    }
+
+    /// The editor's Find Next (F3, Ctrl+L): the next match in the preview;
+    /// in the fields the next row, as the reference has it.
+    fn find_next_action(
+        &mut self,
+        _: &editor::find::Next,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.in_preview(window, cx) {
+            self.find_in_preview(editor::find::Direction::Forward, window, cx);
+            return;
+        }
+        self.move_selection(1, cx);
+    }
+
+    fn find_previous_action(
+        &mut self,
+        _: &editor::find::Previous,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.in_preview(window, cx) {
+            self.find_in_preview(editor::find::Direction::Backward, window, cx);
+            return;
+        }
+        self.move_selection(-1, cx);
+    }
+
+    /// Edit Source (F4): from the preview the file at the preview's caret,
+    /// else the selected row.
+    fn edit_source_action(&mut self, _: &EditSource, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_preview(window, cx)
+            && let Some(path) = self.preview.path().cloned()
+        {
+            let point = self.preview.editor().read(cx).caret_point();
+            self.open_at(path, point, window, cx);
+            return;
+        }
+        self.open_result(window, cx);
     }
 
     fn down_action(&mut self, _: &Down, window: &mut Window, cx: &mut Context<Self>) {
@@ -1676,6 +1759,9 @@ popup_actions! {
     BrowseDirectory => browse_directory_action,
     NextField => next_field_action,
     FocusPreview => focus_preview_action,
+    EditSource => edit_source_action,
+    editor::find::Next => find_next_action,
+    editor::find::Previous => find_previous_action,
     PreviousField => previous_field_action,
     editor::find::ToggleCase => toggle_case_action,
     editor::find::ToggleWords => toggle_words_action,

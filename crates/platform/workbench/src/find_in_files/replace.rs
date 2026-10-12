@@ -32,12 +32,16 @@ impl FindInFiles {
         Some((matcher, template))
     }
 
+    /// The editor holding `path`'s document: its tab's, or the preview's
+    /// when the preview edits a file that is not open (the replacement
+    /// goes into that document, which the preview saves).
     fn editor_of(&self, path: &PathBuf) -> Option<Entity<editor::Editor>> {
         self.context
             .editors
             .iter()
             .find(|(p, _)| p == path)
             .map(|(_, e)| e.clone())
+            .or_else(|| self.preview_own_editor(path))
     }
 
     /// Replaces the selected match; its row goes and the next one is
@@ -57,7 +61,8 @@ impl FindInFiles {
             return;
         };
         let path = (*row.path).clone();
-        let only = HashSet::from([row.line.first.start]);
+        // Where the match is now (edits in the preview move it).
+        let only = HashSet::from([self.row_point(&row)]);
         if let Some(editor) = self.editor_of(&path) {
             let text = editor.read(cx).text();
             let done = match project_search::replacements(&text, &matcher, &template, Some(&only)) {
@@ -170,7 +175,12 @@ impl FindInFiles {
         search.limit = usize::MAX;
         search.known = Arc::default();
         search.overrides = self.overrides(cx);
-        let editors = self.context.editors.clone();
+        let mut editors = self.context.editors.clone();
+        if let Some(path) = self.preview.path()
+            && let Some(editor) = self.preview_own_editor(path)
+        {
+            editors.push((path.clone(), editor));
+        }
         let find = cx.background_spawn(async move {
             let found = std::sync::Mutex::new(Vec::new());
             search.run(&CancelToken::new(), &|m| {

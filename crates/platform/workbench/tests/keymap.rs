@@ -278,6 +278,31 @@ impl H<'_> {
 
     /// Searches the project with the Find in Files popup (plain, without a
     /// mask); the focus is in its search field.
+    /// Waits for the popup's preview and puts the focus and the caret in
+    /// it.
+    fn focus_preview(&mut self, caret: usize) {
+        self.cx
+            .executor()
+            .advance_clock(workbench::find_in_files::PREVIEW_DELAY * 2);
+        self.draw();
+        let popup = self.workbench(|w, _| w.find_in_files().clone());
+        let preview = self.cx.update(|cx| popup.read(cx).preview_editor().clone());
+        self.cx.update(|cx| {
+            preview.update(cx, |e, cx| e.set_selections(SelectionSet::caret(caret), cx))
+        });
+        let handle = self.cx.update(|cx| preview.focus_handle(cx));
+        self.focus(handle);
+    }
+
+    /// The preview's selection, as text.
+    fn preview_selection(&mut self) -> String {
+        let popup = self.workbench(|w, _| w.find_in_files().clone());
+        self.cx.update(|cx| {
+            let e = popup.read(cx).preview_editor().read(cx);
+            e.buffer().slice(e.selections().primary().range())
+        })
+    }
+
     fn search_in_files(&mut self, text: &str) {
         self.invoke(
             "find-in-files.search",
@@ -622,6 +647,38 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let active = s["active_tab"].as_u64().unwrap() as usize;
             assert_eq!(s["tabs"][active]["path"], row["path"], "{what}");
             assert!(h.editor_focused(), "{what}");
+        }
+        "find-in-files.edit-source" => {
+            h.search_in_files(" = ");
+            let row = h.popup()["rows"][1].clone();
+            h.invoke("find-in-files.next-result", json!(null));
+            h.press(keys);
+            assert_eq!(h.popup()["open"], json!(false), "{what}");
+            let s = h.state();
+            let active = s["active_tab"].as_u64().unwrap() as usize;
+            assert_eq!(s["tabs"][active]["path"], row["path"], "{what}");
+            assert!(h.editor_focused(), "{what}");
+        }
+        "find.next" | "find.previous"
+            if b.context.as_deref() == Some("FindInFilesPreview > Editor") =>
+        {
+            // The editor's Find Next in the preview: the next `=` of the
+            // last search in a file ("x = 1"); the rows stay.
+            h.cx.update(|cx| {
+                cx.set_global(editor::find::LastSearch {
+                    text: "=".into(),
+                    performed: true,
+                    ..Default::default()
+                })
+            });
+            h.search_in_files(" = ");
+            let forward = b.command == "find.next";
+            h.focus_preview(if forward { 0 } else { 5 });
+            let selected = h.popup()["selected"].clone();
+            h.press(keys);
+            assert_eq!(h.preview_selection(), "=", "{what}");
+            assert_eq!(h.popup()["selected"], selected, "{what}");
+            h.cx.update(|cx| cx.set_global(editor::find::LastSearch::default()));
         }
         "find-in-files.toggle-mask" => {
             h.search_in_files(" = ");

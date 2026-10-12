@@ -21,6 +21,8 @@ replacing in files).
 | Close the popup | Escape | Escape | popup fields |
 | Next / previous line of the results | Down / Up | Down / Up | search and replace fields holding one line |
 | Next / previous line of the results | Cmd+G / Cmd+Shift+G | F3, Ctrl+L / Shift+F3, Ctrl+Shift+L | popup fields |
+| Find Next / Find Previous in the file | Cmd+G / Cmd+Shift+G | F3, Ctrl+L / Shift+F3, Ctrl+Shift+L | preview (the editor's keys) |
+| Edit Source | Cmd+Down, F4 | F4 | popup fields (the selected line), preview (at its caret) |
 | A page down / up in the results | Page Down / Page Up | Page Down / Page Up | search field |
 | Next / previous field | Tab / Shift+Tab | Tab / Shift+Tab | popup fields |
 | History of the field (masks and folders for theirs) | Option+Down | Alt+Down | popup fields |
@@ -40,7 +42,9 @@ replacing in files).
    - A popup opens over the window, centred, 115 px below the top of the
      window. Its header reads "Find in Files", then the counter, then the
      File mask check box and field and the pin button. Below are the
-     search field with `needle` selected and the focus in it, the scope
+     search field with `needle` selected and the focus in it (an empty
+     field with the focus shows only the caret; without it, "Search" and
+     "Replace" in grey), the scope
      tabs ("In Project", "Module", "Directory", "Scope", each with its
      mnemonic letter underlined), the matching lines and, under a
      splitter, the preview.
@@ -98,7 +102,8 @@ replacing in files).
      bottom row reads "Use ⌘G and ⇧⌘G to select usages".
 8. Press Enter or double-click a row.
    - The file opens with the caret at the start of the match, its line in
-     the middle of the view, and the popup closes.
+     the middle of the view, and the popup closes. Edit Source (Cmd+Down
+     or F4 / F4) does the same.
 ### Preview
 9. Select a row.
     - 50 ms later the preview shows its file in an editor with its syntax
@@ -112,13 +117,20 @@ replacing in files).
       with the text. Enter breaks the line and Tab indents (they do not
       open a result or move to another field); Escape closes the popup;
       the option, scope and mask keys still switch the popup's options.
+    - Find Next and Find Previous (Cmd+G / F3) go to the next match of the
+      last search in a file, as in any editor, with the "not found, press
+      ... to search from the top" hint at the end; the selected row stays.
+    - Edit Source (Cmd+Down or F4 / F4) opens the file in an editor at the
+      preview's caret.
     - A file open in a tab shows every edit at once, both ways, and the tab
       saves it. A file that is not open is saved like any edit (after the
       idle time, when the window loses the focus, when the preview shows
       another file and when the popup closes), without opening a tab;
       opening it from the popup continues with the edited text.
     - The rows stay as they were found until the next search, as in the
-      reference.
+      reference, but where their matches are follows the edits: another
+      row of the file is marked where its match is now, a row opens there,
+      and Replace changes the match there.
 11. Drag the splitter between the list and the preview.
     - The share of each changes and is remembered across sessions
       (default: a third for the list).

@@ -744,24 +744,20 @@ impl Element for EditorElement {
         }
 
         // The placeholder of an empty one-line field.
-        let placeholder = editor
-            .placeholder
-            .clone()
-            .filter(|_| single_line && editor.buffer.len_chars() == 0)
-            .map(|text| {
-                let run = TextRun {
-                    len: text.len(),
-                    font: m.font.clone(),
-                    color: theme.color(UiRole::TextMuted),
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let shaped = window
-                    .text_system()
-                    .shape_line(text, m.font_size, &[run], None);
-                (shaped, point(text_x - scroll.x, top_of(0)))
-            });
+        let placeholder = editor.shown_placeholder(focused).cloned().map(|text| {
+            let run = TextRun {
+                len: text.len(),
+                font: m.font.clone(),
+                color: theme.color(UiRole::TextMuted),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shaped = window
+                .text_system()
+                .shape_line(text, m.font_size, &[run], None);
+            (shaped, point(text_x - scroll.x, top_of(0)))
+        });
 
         // The caret line is highlighted when nothing is selected.
         let current_lines = if !single_line && editor.selections.iter().all(|s| s.is_empty()) {

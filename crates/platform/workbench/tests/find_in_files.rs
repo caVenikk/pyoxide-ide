@@ -1171,3 +1171,217 @@ fn opening_a_file_edited_in_the_preview_keeps_the_edits(cx: &mut TestAppContext)
         assert_eq!(h.read("notes.txt"), b"a ZZneedle and a Needle\n");
     });
 }
+
+impl H<'_> {
+    /// The placeholder a popup field shows now.
+    fn placeholder(&mut self, field: fn(&FindInFiles) -> &Entity<Editor>) -> Option<String> {
+        let popup = self.popup();
+        let field = self.cx.update(|cx| field(popup.read(cx)).clone());
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                let focused = field.focus_handle(cx).is_focused(window);
+                field
+                    .read(cx)
+                    .shown_placeholder(focused)
+                    .map(|p| p.to_string())
+            })
+            .unwrap()
+    }
+
+    /// The preview's selection, as text.
+    fn preview_selection(&mut self) -> (usize, String) {
+        let popup = self.popup();
+        self.cx.update(|cx| {
+            let e = popup.read(cx).preview_editor().read(cx);
+            let r = e.selections().primary().range();
+            (r.start, e.buffer().slice(r))
+        })
+    }
+
+    /// The text of the matches marked in the preview.
+    fn preview_marks(&mut self) -> Vec<String> {
+        let popup = self.popup();
+        self.cx.update(|cx| {
+            let e = popup.read(cx).preview_editor().read(cx);
+            e.search_highlights()
+                .map(|h| {
+                    h.matches
+                        .iter()
+                        .map(|m| e.buffer().slice(m.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+}
+
+#[gpui::test]
+fn the_empty_fields_show_their_placeholder_only_without_the_focus(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.focus_editor();
+        h.press(h.keys.replace);
+        h.press(h.keys.select_all);
+        h.press("backspace");
+        assert!(h.focused(FindInFiles::query_field));
+        // The reference shows the caret only in the empty field with the
+        // focus, and "Search" / "Replace" in an empty one without it.
+        assert_eq!(h.placeholder(FindInFiles::query_field), None);
+        h.press("tab");
+        assert!(h.focused(FindInFiles::replace_field));
+        assert_eq!(
+            h.placeholder(FindInFiles::query_field),
+            Some("Search".into())
+        );
+        h.press(h.keys.select_all);
+        h.press("backspace");
+        assert_eq!(h.placeholder(FindInFiles::replace_field), None);
+        h.press("shift-tab");
+        assert_eq!(
+            h.placeholder(FindInFiles::replace_field),
+            Some("Replace".into())
+        );
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn find_next_in_the_preview_is_the_editors(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        // The last search in a file (Find Next repeats it).
+        h.cx.update(|cx| {
+            cx.set_global(editor::find::LastSearch {
+                text: "needle".into(),
+                performed: true,
+                ..Default::default()
+            })
+        });
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        let selected = h.state()["selected"].clone();
+        h.focus_field(FindInFiles::preview_editor);
+        // "a needle and a Needle": the caret is on the first match.
+        h.press(h.keys.next);
+        assert_eq!(h.preview_selection(), (2, "needle".into()));
+        h.press(h.keys.next);
+        assert_eq!(h.preview_selection(), (15, "Needle".into()));
+        h.press(h.keys.previous);
+        assert_eq!(h.preview_selection(), (2, "needle".into()));
+        // The rows did not move.
+        assert_eq!(h.state()["selected"], selected);
+        // Past the last match: the editor's hint, gone with the next key.
+        h.press(h.keys.next);
+        h.press(h.keys.next);
+        let hint = h.state()["preview"]["hint"].clone();
+        assert!(
+            hint.as_str()
+                .is_some_and(|t| t.contains("not found, press")),
+            "{hint}"
+        );
+        h.press("right");
+        assert_eq!(h.state()["preview"]["hint"], json!(null));
+        // In the search field the same keys move through the rows (the
+        // order of the files depends on which is found first).
+        h.focus_field(FindInFiles::query_field);
+        let last = h.rows().len() as u64 - 1;
+        let key = if selected == json!(last) {
+            h.keys.previous
+        } else {
+            h.keys.next
+        };
+        h.press(key);
+        assert_ne!(h.state()["selected"], selected);
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn edit_source_opens_the_file_at_the_previews_caret(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        h.focus_field(FindInFiles::preview_editor);
+        h.press("end");
+        h.press("f4");
+        assert_eq!(h.state()["open"], json!(false));
+        assert_eq!(h.caret(), ("notes.txt".into(), 0, 21));
+        assert!(h.editor_focused());
+        // From the search field F4 opens the selected row at its match.
+        h.focus_editor();
+        h.press(h.keys.open);
+        h.settle();
+        let rows = h.rows();
+        let util = rows.iter().position(|r| r.0 == "pkg/util.py").unwrap();
+        h.invoke("find-in-files.page-up", json!(null));
+        for _ in 0..util {
+            h.invoke("find-in-files.next-result", json!(null));
+        }
+        h.press("f4");
+        assert_eq!(h.state()["open"], json!(false));
+        assert_eq!(h.caret(), ("pkg/util.py".into(), 3, 2));
+    });
+}
+
+#[gpui::test]
+fn rows_open_where_edits_in_the_preview_moved_their_matches(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        let rows = h.state()["rows"].clone();
+        // pkg/util.py: "# needle here" (line 4) and "needle = 2" (line 5).
+        h.select_row_of("pkg/util.py");
+        h.focus_field(FindInFiles::preview_editor);
+        // A line break before the first match moves both down a line.
+        h.press("enter");
+        assert_eq!(h.preview_marks(), vec!["needle".to_owned()]);
+        // The rows keep their text; the next one is marked where its
+        // match is now.
+        assert_eq!(h.state()["rows"], rows);
+        h.focus_field(FindInFiles::query_field);
+        h.press(h.keys.next);
+        h.cx.executor().advance_clock(DEBOUNCE);
+        h.draw();
+        assert_eq!(h.preview_marks(), vec!["needle".to_owned()]);
+        assert_eq!(h.state()["preview"]["caret"], json!([5, 0]));
+        // Text typed before it in the preview: the row opens at the match.
+        h.focus_field(FindInFiles::preview_editor);
+        h.type_text("new_");
+        assert_eq!(h.preview_marks(), vec!["needle".to_owned()]);
+        h.focus_field(FindInFiles::query_field);
+        h.press("enter");
+        assert_eq!(h.caret(), ("pkg/util.py".into(), 5, 4));
+        let text = h.invoke("editor.text", json!(null));
+        assert_eq!(text, json!("x = 1\n\n\n# \nneedle here\nnew_needle = 2\n"));
+    });
+}
+
+#[gpui::test]
+fn replace_changes_the_match_where_preview_edits_moved_it(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "replace": "pin", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        h.focus_field(FindInFiles::preview_editor);
+        h.type_text("big ");
+        // Replace (from the replace field): the match it was found at, in
+        // the document the preview edits; the preview saves it.
+        h.focus_field(FindInFiles::replace_field);
+        h.press("enter");
+        let popup = h.popup();
+        let text =
+            h.cx.update(|cx| popup.read(cx).preview_editor().read(cx).text());
+        assert_eq!(text, "a big pin and a Needle\n");
+        h.press("escape");
+        h.draw();
+        assert_eq!(h.read("notes.txt"), b"a big pin and a Needle\n");
+    });
+}

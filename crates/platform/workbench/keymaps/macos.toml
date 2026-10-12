@@ -190,7 +190,9 @@ name = "ContextMenu"
 # to field; Option+Down shows the field's history. The options, the file
 # mask and the scopes take the reference IDE's mnemonic keys: Ctrl+Option
 # and Option with the letter; Recursively only Ctrl+Option+Y. In the
-# preview, Enter, Tab and Option+Down are the editor's.
+# preview, Enter, Tab and Option+Down are the editor's, and Cmd+G and
+# Cmd+Shift+G its Find Next and Find Previous (below). Cmd+Down and F4
+# (Edit Source) open the file: from the preview at its caret.
 [[context]]
 name = "FindInFiles > Editor"
 [context.bindings]
@@ -219,6 +221,15 @@ name = "FindInFiles > Editor"
 "ctrl-alt-s" = "find-in-files.scope-named"
 "alt-s" = "find-in-files.scope-named"
 "ctrl-alt-y" = "find-in-files.toggle-recursive"
+"cmd-down" = "find-in-files.edit-source"
+"f4" = "find-in-files.edit-source"
+
+# Find Next and Find Previous in the preview are the editor's.
+[[context]]
+name = "FindInFilesPreview > Editor"
+[context.bindings]
+"cmd-g" = "find.next"
+"cmd-shift-g" = "find.previous"
 
 # The search and replace fields can hold several lines.
 [[context]]
