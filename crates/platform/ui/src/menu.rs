@@ -15,10 +15,10 @@
 //! the menu closes it; so does deactivating the window.
 
 use gpui::{
-    Action, AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Point, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    anchored, deferred, div, point, prelude::*, px,
+    Action, AnyElement, App, AppContext as _, BoxShadow, Context, DismissEvent, Entity,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, anchored, deferred, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
@@ -45,23 +45,42 @@ crate::ui_commands! {
 /// Key context of an open context menu.
 pub const KEY_CONTEXT: &str = "ContextMenu";
 
-/// Height of an item row.
-const ITEM_HEIGHT: f32 = 24.0;
-/// Height of a separator row and its line.
+// Metrics of the reference IDE's popup menus in the New UI (see NOTICE).
+// An item row is a list row (`List.rowHeight`, the theme's row height)
+// plus the selection's outer insets above and below (`IdeaMenuUI.
+// patchPreferredSize`).
+
+/// Selection background inside an item row: `PopupMenu.Selection.
+/// outerInsets` (1, 7).
+const SELECTION_X: f32 = 7.0;
+const SELECTION_Y: f32 = 1.0;
+/// Content inside the selection background: `PopupMenu.Selection.
+/// innerInsets` (0, 6) of the New UI.
+const CONTENT_X: f32 = 6.0;
+/// Radius of the selection background: `PopupMenu.Selection.arc` 8 is a
+/// diameter.
+const SELECTION_RADIUS: f32 = 4.0;
+/// Separator row: `PopupMenuSeparator.height` 9, a line of
+/// `stripeWidth` 1 at `stripeIndent` 4, `withToEdge` 10 from both sides.
 const SEPARATOR_HEIGHT: f32 = 9.0;
-/// Space above the first and below the last row.
+const SEPARATOR_INDENT: f32 = 4.0;
+const SEPARATOR_X: f32 = 10.0;
+/// Space above the first and below the last row: `PopupMenu.borderInsets`
+/// (6, 1, 6, 1); the 1 is the border.
 const PAD_Y: f32 = 6.0;
-/// Space between the popup border and the selection background.
-const SELECTION_X: f32 = 6.0;
-/// Space between the selection background and the content.
-const CONTENT_X: f32 = 8.0;
-/// Icon column and the gap after it.
-const ICON: f32 = 16.0;
-const ICON_GAP: f32 = 6.0;
-/// Space between the label and the submenu arrow.
-const ARROW_GAP: f32 = 24.0;
-const MIN_WIDTH: f32 = 140.0;
+/// Popup corners: `PopupMenu.borderCornerRadius` 8.
 const RADIUS: f32 = 8.0;
+/// Icon column (16 px icons) and the gap to the label: Swing's menu item
+/// `defaultTextIconGap` 4.
+const ICON: f32 = 16.0;
+const ICON_GAP: f32 = 4.0;
+/// Room after the label (`BegMenuItemUI.getPreferredSize`: the gutter of
+/// 18 and four text gaps); a submenu's arrow sits at its right end.
+const TRAILING: f32 = 18.0 + 4.0 * ICON_GAP;
+/// Popup shadow: `Ide.Shadow` of the Islands themes, 16 px of `#00000020`
+/// in both the dark and the light theme.
+const SHADOW_BLUR: f32 = 16.0;
+const SHADOW_ALPHA: f32 = 32.0 / 255.0;
 
 /// One row of a menu.
 pub enum MenuItem {
@@ -177,10 +196,10 @@ impl MenuItem {
         }
     }
 
-    fn height(&self) -> f32 {
+    fn height(&self, item_height: f32) -> f32 {
         match self {
             Self::Separator => SEPARATOR_HEIGHT,
-            _ => ITEM_HEIGHT,
+            _ => item_height,
         }
     }
 }
@@ -441,7 +460,8 @@ impl ContextMenu {
         let selection = theme.color(UiRole::Selection);
         let text = theme.color(UiRole::Text);
         let disabled = theme.color(UiRole::TextDisabled);
-        let line = theme.color(UiRole::Border);
+        let line = theme.color(UiRole::PopupBorder);
+        let item_height = item_height(cx);
         let rows: Vec<AnyElement> = items
             .iter()
             .enumerate()
@@ -451,9 +471,8 @@ impl ContextMenu {
                     return div()
                         .id(id)
                         .h(px(SEPARATOR_HEIGHT))
-                        .flex()
-                        .items_center()
-                        .px(px(SELECTION_X + CONTENT_X / 2.0))
+                        .pt(px(SEPARATOR_INDENT))
+                        .px(px(SEPARATOR_X))
                         .child(div().h(px(1.0)).w_full().bg(line))
                         .into_any_element();
                 }
@@ -465,8 +484,9 @@ impl ContextMenu {
                 div()
                     .id(id)
                     .debug_selector(move || selector.clone())
-                    .h(px(ITEM_HEIGHT))
+                    .h(px(item_height))
                     .px(px(SELECTION_X))
+                    .py(px(SELECTION_Y))
                     .child(
                         div()
                             .size_full()
@@ -474,7 +494,7 @@ impl ContextMenu {
                             .flex_row()
                             .items_center()
                             .px(px(CONTENT_X))
-                            .rounded(theme.metric(Metric::CornerRadius))
+                            .rounded(px(SELECTION_RADIUS))
                             .when(is_selected, |d| d.bg(selection))
                             .text_color(if enabled { text } else { disabled })
                             .when(with_icons, |d| {
@@ -486,14 +506,14 @@ impl ContextMenu {
                                 )
                             })
                             .child(div().flex_1().whitespace_nowrap().child(label))
-                            .when(submenu, |d| {
-                                d.child(
-                                    div()
-                                        .flex_none()
-                                        .pl(px(ARROW_GAP))
-                                        .child(Icon::new(IconName::CHEVRON_RIGHT)),
-                                )
-                            }),
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(px(TRAILING))
+                                    .flex()
+                                    .justify_end()
+                                    .when(submenu, |d| d.child(Icon::new(IconName::CHEVRON_RIGHT))),
+                            ),
                     )
                     .when(enabled, |d| {
                         d.on_mouse_move(cx.listener(move |this, _, _, cx| {
@@ -518,34 +538,45 @@ impl ContextMenu {
             .occlude()
             .flex()
             .flex_col()
-            .min_w(px(MIN_WIDTH))
             .py(px(PAD_Y))
             .rounded(px(RADIUS))
             .border_1()
-            .border_color(theme.color(UiRole::Border))
+            .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow_lg()
+            .shadow(vec![BoxShadow {
+                color: gpui::hsla(0.0, 0.0, 0.0, SHADOW_ALPHA),
+                offset: point(px(0.0), px(0.0)),
+                blur_radius: px(SHADOW_BLUR),
+                spread_radius: px(0.0),
+            }])
             .children(rows)
             .into_any_element()
     }
 
     /// Distance from the top of `level` to the top of its row `ix`.
-    fn row_top(&self, level: usize, ix: usize) -> f32 {
+    fn row_top(&self, level: usize, ix: usize, item_height: f32) -> f32 {
         self.level_items(level)[..ix]
             .iter()
-            .map(MenuItem::height)
+            .map(|item| item.height(item_height))
             .sum()
     }
+}
+
+/// Height of an item row: a list row of the theme and the selection's
+/// outer insets.
+fn item_height(cx: &App) -> f32 {
+    f32::from(cx.theme().metric(Metric::RowHeight)) + 2.0 * SELECTION_Y
 }
 
 impl Render for ContextMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let family = cx.theme().ui_family();
         let size = cx.theme().ui_size();
+        let item_height = item_height(cx);
         let mut tops = vec![0.0];
         for level in 1..self.selected.len() {
             let parent = self.selected[level - 1].unwrap_or(0);
-            tops.push(tops[level - 1] + self.row_top(level - 1, parent));
+            tops.push(tops[level - 1] + self.row_top(level - 1, parent, item_height));
         }
         let levels: Vec<AnyElement> = (0..self.selected.len())
             .map(|level| {

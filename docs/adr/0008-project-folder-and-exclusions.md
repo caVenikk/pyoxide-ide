@@ -149,6 +149,12 @@ Option 3.
   `project.tree.mark-excluded` and `project.tree.cancel-exclusion`, with an
   optional `path`; the menu is `project.tree.context-menu` (the context
   menu key on Windows and Linux).
+- The menu follows the reference's popup menus in the New UI: item rows of
+  the list row height plus 1 px above and below (26 px with the Islands
+  themes), a rounded selection 7 px from the sides with 6 px inside,
+  separators of 9 px, 6 px above the first and below the last row, 8 px
+  corners, a 1 px border in the theme role `popup-border` (the reference's
+  `Popup.borderColor`) and the 16 px `Ide.Shadow` in both themes.
 - Excluded rows keep the normal text colour and get the excluded folder
   icon (folders) and the background of non-project files across the row
   (the theme role `non-project-file`, the reference's `FileColor.Yellow`).

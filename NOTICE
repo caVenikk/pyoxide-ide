@@ -124,8 +124,14 @@ here with: source URL, commit, file(s), license, and what was changed.
   pyproject/model/internal/platformBridge/VenvExcluder.kt and
   python/src/com/jetbrains/python/sdk/PySdkExt.kt. The context menu
   follows the popup menu metrics of platform/util/ui/src/com/intellij/util/
-  ui/JBUI.java and platform/platform-resources/src/themes/
-  intellijlaf.theme.json (PopupMenu, PopupMenuSeparator), the menu
+  ui/JBUI.java (PopupMenu.Selection insets and arc, List.rowHeight),
+  platform/platform-impl/src/com/intellij/ui/plaf/beg/IdeaMenuUI.java and
+  BegMenuItemUI.java (item height and widths), .../ide/ui/laf/darcula/ui/
+  DarculaPopupMenuBorder.java and DarculaMenuSeparatorUI.java,
+  .../ui/WindowRoundedCornersManager.java (the popup border colour),
+  platform/platform-resources/src/themes/darcula.theme.json and
+  intellijlaf.theme.json (PopupMenu, PopupMenuSeparator) and the Islands
+  theme files (Popup.borderColor, Menu.borderColor, Ide.Shadow), the menu
   structure of platform/platform-impl/resources/idea/LangActions.xml and
   python/resources/META-INF/pycharm-core.xml, and the UI strings "Mark
   Directory As", "Mark File As", "Excluded" and "Cancel Exclusion" of
