@@ -11,6 +11,7 @@
 //! | `PYOXIDE_BENCH=open:<file>` | open a file, print the time to its first painted text and to highlighting, scroll it, quit |
 //! | `PYOXIDE_BENCH=find:<query>` | type a query into the find bar of the open file char by char (5 runs), print key-to-highlight times, quit |
 //! | `PYOXIDE_BENCH=find-in-files:<query>` | search the open project for a query with Find in Files (5 runs), print the times to the first row and to the end of the search, quit |
+//! | `PYOXIDE_BENCH=go-to-file:<query>` | type a query into Go to File char by char (5 runs), print the index build time and key-to-rows times, quit |
 //! | `PYOXIDE_BENCH=cursor` | move the mouse (synthetic events) over text, gutter, splitter and toolbar, print the system cursor shown, quit |
 //! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |
 //! | `PYOXIDE_NATIVE_POINTER=0` | do not set the pointer shape on every mouse move (leave it to GPUI) |
@@ -72,6 +73,8 @@ pub enum Bench {
     Find(String),
     /// Searching the open project with Find in Files.
     FindInFiles(String),
+    /// Typing a query into Go to File.
+    GoToFile(String),
 }
 
 /// The requested measurement (read once).
@@ -96,6 +99,11 @@ pub fn bench() -> Option<&'static Bench> {
                         value
                             .strip_prefix("find-in-files:")
                             .map(|q| Bench::FindInFiles(q.to_owned()))
+                    })
+                    .or_else(|| {
+                        value
+                            .strip_prefix("go-to-file:")
+                            .map(|q| Bench::GoToFile(q.to_owned()))
                     }),
             }
         })

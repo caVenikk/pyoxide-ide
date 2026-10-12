@@ -2087,11 +2087,12 @@ impl Render for Workbench {
             .when(bench, |d| {
                 let editor = self.active_editor().cloned();
                 let find = self.active_find_bar().cloned();
+                let se = self.search_everywhere.clone();
                 d.child(
                     canvas(
                         |_, _, _| (),
                         move |_, _, _, cx| {
-                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), cx)
+                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), &se, cx)
                         },
                     )
                     .absolute()
