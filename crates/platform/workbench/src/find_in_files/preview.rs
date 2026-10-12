@@ -317,6 +317,28 @@ impl FindInFiles {
             .then(|| self.preview.editor.read(cx).buffer().clone())
     }
 
+    /// [`Self::preview_document`], and the preview lets go of it (it is
+    /// not saved by the preview any more).
+    pub(super) fn take_preview_document(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Option<Buffer> {
+        let document = self.preview_document(path, cx)?;
+        let p = &mut self.preview;
+        p.save_task = None;
+        p.path = None;
+        p.shown = None;
+        p.editor.update(cx, |e, cx| {
+            *e.buffer_mut() = Buffer::new("");
+            e.buffer_mut().set_read_only(true);
+            e.set_path(None);
+            e.buffer_reloaded(cx);
+            e.set_search_highlights(None, cx);
+        });
+        Some(document)
+    }
+
     /// A tab opened `path`: when the preview shows it, the two views are
     /// linked (they hold the same text).
     pub fn tab_opened(&mut self, path: &Path, tab: &Entity<Editor>, cx: &mut Context<Self>) {

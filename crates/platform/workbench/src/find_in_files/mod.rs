@@ -181,10 +181,15 @@ const PAGE_ROWS: usize = 10;
 const SPLIT: f32 = 0.33;
 
 /// What the popup tells the workbench.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum FindInFilesEvent {
-    /// Open a file with the caret at a point.
-    OpenAt { path: PathBuf, point: Point },
+    /// Open a file with the caret at a point; `document` is the file's
+    /// text as edited in the preview, for the new tab to continue with.
+    OpenAt {
+        path: PathBuf,
+        point: Point,
+        document: Option<Buffer>,
+    },
     /// The popup was closed with Escape: the focus goes back to where it
     /// was.
     Dismissed,
@@ -1260,15 +1265,24 @@ impl FindInFiles {
         else {
             return;
         };
-        let event = FindInFilesEvent::OpenAt {
-            path: (*row.path).clone(),
-            point: row.line.first.start,
+        let path = (*row.path).clone();
+        let point = row.line.first.start;
+        // A document edited in the preview goes to the tab (the popup does
+        // not write it as it closes).
+        let document = if self.pinned {
+            self.preview_document(&path, cx)
+        } else {
+            self.take_preview_document(&path, cx)
         };
         self.save(cx);
         if !self.pinned {
             self.close(false, window, cx);
         }
-        cx.emit(event);
+        cx.emit(FindInFilesEvent::OpenAt {
+            path,
+            point,
+            document,
+        });
     }
 
     fn toggle_mask(&mut self, window: &mut Window, cx: &mut Context<Self>) {

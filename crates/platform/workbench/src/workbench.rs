@@ -133,9 +133,11 @@ impl Workbench {
         let subscriptions = vec![
             cx.subscribe_in(&find_in_files, window, |this, _, event, window, cx| {
                 match event {
-                    FindInFilesEvent::OpenAt { path, point } => {
-                        this.open_file_at(path.clone(), *point, window, cx)
-                    }
+                    FindInFilesEvent::OpenAt {
+                        path,
+                        point,
+                        document,
+                    } => this.open_file_at(path.clone(), *point, document.clone(), window, cx),
                     FindInFilesEvent::Dismissed => match this.return_focus.take() {
                         Some(focus) => window.focus(&focus),
                         None => this.focus_editor(&FocusEditor, window, cx),
@@ -363,6 +365,7 @@ impl Workbench {
         &mut self,
         path: PathBuf,
         point: text::Point,
+        document: Option<text::Buffer>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -375,8 +378,7 @@ impl Workbench {
         }
         self.pending_go_to = Some((path.clone(), point));
         // Edited in the Find in Files preview: the tab takes that document.
-        let previewed = self.find_in_files.read(cx).preview_document(&path, cx);
-        match previewed {
+        match document {
             Some(buffer) => self.add_tab(path, buffer, window, cx),
             None => self.open_file(path, window, cx),
         }

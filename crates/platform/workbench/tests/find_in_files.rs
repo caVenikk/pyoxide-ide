@@ -1144,3 +1144,30 @@ fn keys_in_the_preview_go_to_its_editor(cx: &mut TestAppContext) {
         assert_eq!(h.read("notes.txt"), b"a \n    needle and a Needle\n");
     });
 }
+
+#[gpui::test]
+fn opening_a_file_edited_in_the_preview_keeps_the_edits(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke(
+            "find-in-files.search",
+            json!({ "text": "needle", "mask": "" }),
+        );
+        h.select_row_of("notes.txt");
+        h.focus_field(FindInFiles::preview_editor);
+        h.type_text("ZZ");
+        // Enter in the search field opens the row: the tab continues with
+        // the edited text.
+        h.focus_field(FindInFiles::query_field);
+        h.press("enter");
+        assert_eq!(h.state()["open"], json!(false));
+        let s = h.invoke("workbench.state", json!(null));
+        let active = s["active_tab"].as_u64().unwrap() as usize;
+        assert_eq!(s["tabs"][active]["path"], json!("notes.txt"));
+        assert_eq!(s["tabs"][active]["modified"], json!(true));
+        let text = h.invoke("editor.text", json!(null));
+        assert_eq!(text, json!("a ZZneedle and a Needle\n"));
+        // The tab saves it.
+        h.invoke("workbench.save-all", json!(null));
+        assert_eq!(h.read("notes.txt"), b"a ZZneedle and a Needle\n");
+    });
+}
