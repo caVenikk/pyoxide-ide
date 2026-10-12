@@ -534,3 +534,18 @@ fn deactivating_the_window_saves_files(cx: &mut TestAppContext) {
             .starts_with("xdef")
     );
 }
+
+#[gpui::test]
+fn a_modified_file_shows_a_dot_in_its_tab(cx: &mut TestAppContext) {
+    let (window, _dir) = open_project_with_files(cx);
+    let marker = |cx: &mut TestAppContext| {
+        gpui::VisualTestContext::from_window(window.into(), cx).debug_bounds("tab-modified-0")
+    };
+    assert!(marker(cx).is_none());
+    invoke(cx, window, "editor.type", json!({"text": "x"}));
+    let dot = marker(cx).expect("the modified dot is drawn");
+    // In the place of the close button, which is 16 px wide.
+    assert_eq!(dot.size.width, gpui::px(16.0));
+    // The title has no asterisk.
+    assert_eq!(state(cx, window)["tabs"][0]["modified"], json!(true));
+}

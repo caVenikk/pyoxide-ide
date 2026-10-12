@@ -37,6 +37,8 @@ const TAB_H_OFFSET: f32 = 4.0;
 const TAB_PADDING: f32 = 8.0;
 /// Opacity of the titles of tabs that are not selected.
 const INACTIVE_TAB_ALPHA: f32 = 0.75;
+/// Diameter of the dot that marks a modified file in its tab.
+const MODIFIED_DOT: f32 = 6.0;
 /// Narrowest project tool window when resizing it.
 const MIN_PROJECT_WIDTH: f32 = 120.0;
 /// Narrowest editor area left when widening the project tool window.
@@ -954,18 +956,45 @@ impl Workbench {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let title = if modified { format!("*{name}") } else { name };
+        let title = name;
         let group: SharedString = format!("tab-{index}").into();
+        // A modified file shows a dot where the close button is; hovering
+        // the dot shows the close button (as the reference IDE's New UI tabs
+        // do when modified tabs are marked).
+        let close_group: SharedString = format!("tab-close-{index}").into();
+        let dot = theme.color(UiRole::Accent);
+        let close_icon = div()
+            .absolute()
+            .size_full()
+            .when(modified, |d| {
+                d.invisible()
+                    .group_hover(close_group.clone(), |s| s.visible())
+            })
+            .child(Icon::new(IconName::CLOSE_SMALL));
+        let marker = modified.then(|| {
+            div()
+                .debug_selector(move || format!("tab-modified-{index}"))
+                .absolute()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .group_hover(close_group.clone(), |s| s.invisible())
+                .child(div().size(px(MODIFIED_DOT)).rounded_full().bg(dot))
+        });
         let close = div()
             .id(("tab-close", index))
+            .group(close_group.clone())
+            .relative()
             .flex_none()
             .size(px(16.0))
             .rounded(px(3.0))
-            .when(!selected, |d| {
+            .when(!selected && !modified, |d| {
                 d.invisible().group_hover(group.clone(), |s| s.visible())
             })
             .hover(move |s| s.bg(hover))
-            .child(Icon::new(IconName::CLOSE_SMALL))
+            .child(close_icon)
+            .children(marker)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 this.close_tab(index, window, cx);

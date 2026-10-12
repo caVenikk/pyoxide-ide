@@ -129,7 +129,11 @@ and has an idle save that is off by default (15 s, 1 to 300 s); Pyoxide
 turns the idle save on with a shorter time and adds the save on tab
 switch. Idle time is a timer that is armed by input and, when it fires
 early because of later input, sleeps for the rest of the time; there is no
-polling.
+polling. While a file is modified its tab shows a 6 px dot in the theme's
+accent colour in place of the close button, which comes back on hover. The
+reference IDE draws the same dot (in its information badge colour) only
+when "Mark modified" is switched on, which is off by default; Pyoxide
+always shows it.
 
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a
