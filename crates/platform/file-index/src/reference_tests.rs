@@ -327,11 +327,17 @@ fn absolute_paths_outside_the_project() {
     std::fs::write(&file, "").unwrap();
     let text = file.display().to_string();
     assert_eq!(absolute_path(&text, None), Some(file.clone()));
-    assert_eq!(absolute_path(&format!("{text}:12"), None), Some(file.clone()));
+    assert_eq!(
+        absolute_path(&format!("{text}:12"), None),
+        Some(file.clone())
+    );
     let dir_text = dir.display().to_string();
     assert_eq!(absolute_path(&dir_text, None), Some(dir.clone()));
     if !cfg!(windows) {
-        assert_eq!(absolute_path("~/outside.txt", Some(&dir)), Some(file.clone()));
+        assert_eq!(
+            absolute_path("~/outside.txt", Some(&dir)),
+            Some(file.clone())
+        );
         assert_eq!(absolute_path("~/", Some(&dir)), Some(dir.clone()));
     }
     let missing = dir.join("definitely").join("not").join("here.txt");
