@@ -209,6 +209,16 @@ pub(crate) struct Metrics {
     number_width: Pixels,
 }
 
+/// OpenType features of the UI font in a text field: no ligatures and no
+/// contextual alternates, so that typed characters show as typed (`->`
+/// stays two characters instead of an arrow, as in the reference IDE).
+pub(crate) fn field_font_features() -> FontFeatures {
+    FontFeatures(std::sync::Arc::new(vec![
+        ("calt".into(), 0),
+        ("liga".into(), 0),
+    ]))
+}
+
 /// Font metrics of an editor: the editor font, or the UI font of a one-line
 /// field that shows UI text (search fields).
 pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics {
@@ -218,7 +228,9 @@ pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics 
         } else {
             theme.mono_family()
         },
-        features: if ui_font || theme.raw().fonts.editor_ligatures {
+        features: if ui_font {
+            field_font_features()
+        } else if theme.raw().fonts.editor_ligatures {
             FontFeatures::default()
         } else {
             FontFeatures::disable_ligatures()
@@ -1070,5 +1082,21 @@ impl Editor {
         let ratio = ((y - grab - bar.track.top()) / free).clamp(0.0, 1.0);
         let max_y = self.max_scroll_y();
         self.set_scroll_y(max_y * ratio, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_fields_show_characters_as_typed() {
+        let features = field_font_features();
+        assert_eq!(features.is_calt_enabled(), Some(false));
+        assert!(
+            features.tag_value_list().contains(&("liga".to_owned(), 0)),
+            "{:?}",
+            features.tag_value_list()
+        );
     }
 }

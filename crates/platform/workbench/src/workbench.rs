@@ -532,6 +532,7 @@ impl Workbench {
         let field = cx.new(|cx| {
             let mut field = Editor::new(text::Buffer::new(&text), window, cx);
             field.set_single_line(true);
+            field.set_ui_font(true);
             let len = field.buffer().len_chars();
             field.set_selections(text::SelectionSet::single(text::Selection::new(0, len)), cx);
             field
