@@ -281,6 +281,36 @@ pub struct Highlighted {
     pub errors: Vec<Vec<Range<usize>>>,
 }
 
+/// A node with errors still to look at.
+struct Pending<'t> {
+    node: Node<'t>,
+    /// The statement around the node.
+    statement: Option<Range<usize>>,
+    /// The node is part of a construct (not a statement of its own).
+    in_construct: bool,
+}
+
+/// The token that ends before byte `at` (skipping white space): a word, or
+/// one character.
+fn token_before(rope: &Rope, at: usize) -> Option<Range<usize>> {
+    let mut end = at.min(rope.len_bytes());
+    while end > 0 && matches!(rope.byte(end - 1), b' ' | b'\t' | b'\n' | b'\r') {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+    let mut start = end;
+    while start > 0 && word(rope.byte(start - 1)) {
+        start -= 1;
+    }
+    if start == end {
+        start = rope.char_to_byte(rope.byte_to_char(end - 1));
+    }
+    Some(start..end)
+}
+
 /// Pushes the children of `node` that contain errors, with the statement
 /// around each. Of statements (children of a container or of the root) only
 /// those that touch `range` are visited; inside a statement every error
@@ -290,7 +320,7 @@ fn push_children<'t>(
     statement: Option<Range<usize>>,
     children_are_statements: bool,
     range: &Range<usize>,
-    stack: &mut Vec<(Node<'t>, Option<Range<usize>>)>,
+    stack: &mut Vec<Pending<'t>>,
 ) {
     let mut cursor = node.walk();
     let first = if children_are_statements {
@@ -312,7 +342,11 @@ fn push_children<'t>(
             } else {
                 statement.clone()
             };
-            stack.push((child, statement));
+            stack.push(Pending {
+                node: child,
+                statement,
+                in_construct: !children_are_statements,
+            });
         }
         if !cursor.goto_next_sibling() {
             break;
@@ -337,43 +371,41 @@ fn error_regions(
     if !root.has_error() {
         return (untrusted, marks);
     }
-    // (node, the statement around it)
-    let mut stack: Vec<(Node, Option<Range<usize>>)> = Vec::new();
+    let line_of = |byte: usize| rope.byte_to_line(byte.min(rope.len_bytes()));
+    let mut stack = Vec::new();
     push_children(root, None, true, &range, &mut stack);
-    while let Some((node, statement)) = stack.pop() {
+    while let Some(Pending {
+        node,
+        statement,
+        in_construct,
+    }) = stack.pop()
+    {
         if node.is_error() {
             let r = node.byte_range();
-            // Mark the rest of the first line of the error.
-            let line = rope.byte_to_line(r.start.min(rope.len_bytes()));
-            let line_end = rope.line_to_byte(line) + rope.line(line).len_bytes();
-            let mut end = r.end.min(line_end);
-            while end > r.start && matches!(rope.byte(end - 1), b'\n' | b'\r' | b' ' | b'\t') {
-                end -= 1;
-            }
-            if end > r.start {
-                marks.push(r.start..end);
-            }
-            untrusted.push(r);
+            untrusted.push(r.clone());
             untrusted.extend(statement);
+            // Where the error is: when the parser kept a construct open
+            // across lines and skipped tokens of a later line, the token
+            // before the skipped ones (`def fib` followed by another
+            // definition: right after `fib`); otherwise the last token on
+            // the first line of the error (`class Point` without a colon:
+            // `Point`).
+            let before = token_before(rope, r.start);
+            let mark = match before {
+                Some(b) if in_construct && line_of(b.end) < line_of(r.start) => Some(b),
+                _ => {
+                    let line = line_of(r.start);
+                    let line_end = rope.line_to_byte(line) + rope.line(line).len_bytes();
+                    token_before(rope, r.end.min(line_end)).filter(|t| t.end > r.start)
+                }
+            };
+            marks.extend(mark);
             continue;
         }
         if node.is_missing() {
             untrusted.extend(statement);
-            // Mark the word (or character) before the missing token.
-            let at = node.start_byte().min(rope.len_bytes());
-            let mut start = at;
-            while start > 0 && {
-                let b = rope.byte(start - 1);
-                b.is_ascii_alphanumeric() || b == b'_'
-            } {
-                start -= 1;
-            }
-            if start == at && at > 0 {
-                start = at - 1;
-            }
-            if start < at {
-                marks.push(start..at);
-            }
+            // A missing token is zero-width: mark the token before it.
+            marks.extend(token_before(rope, node.start_byte()));
             continue;
         }
         let children_are_statements = containers.contains(&node.kind());

@@ -265,11 +265,49 @@ class Greeting(Base):
                     "after {broken:?}: no error mark"
                 );
             }
+            // The mark is on the broken line, not on the code after it
+            // (after `if x` the parser reads the decorator as part of the
+            // condition and reports the error later).
+            if !broken.starts_with("if") {
+                assert!(
+                    bad.errors[3..].iter().all(|e| e.is_empty()),
+                    "after {broken:?}: {:?}",
+                    bad.errors
+                );
+            }
         }
         assert!(good.errors.iter().all(|e| e.is_empty()));
     }
 
     /// Before the first parse finishes, the lexer alone colours the text.
+    /// Error marks sit where a token is expected, on the faulty line, and
+    /// not on the valid code after it.
+    #[test]
+    fn error_marks_sit_on_the_faulty_line() {
+        for (text, line, mark) in [
+            (
+                "def fib\n\n\ndef func_0(a, b=None):\n    value = a + 0\n    return value\n",
+                0,
+                4..7,
+            ),
+            (
+                "class Point\n    x = 1\n    y = 2\n\n\ndef f():\n    pass\n",
+                0,
+                6..11,
+            ),
+            ("x = foo(\ny = 2\n", 0, 7..8),
+        ] {
+            let h = highlight_text(text);
+            for (i, errors) in h.errors.iter().enumerate() {
+                if i == line {
+                    assert_eq!(errors, &vec![mark.clone()], "{text:?}");
+                } else {
+                    assert!(errors.is_empty(), "{text:?}: line {i}: {errors:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn highlights_without_a_tree() {
         let lang = language();
