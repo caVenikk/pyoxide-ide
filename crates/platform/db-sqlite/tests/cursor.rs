@@ -137,30 +137,29 @@ async fn cancel_covers_a_statement_that_has_not_started_yet() {
     assert_eq!(scalar(&conn, "SELECT 10").await, Value::Int(10));
 }
 
+/// Its first row comes only after all 300,000 numbers are generated and
+/// sorted (tens of milliseconds), so the statement is not answered at once.
+const FIRST_ROW_LATE: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 300000) \
+     SELECT x FROM c ORDER BY x DESC";
+
 #[tokio::test]
 async fn a_cursor_nobody_received_does_not_block_the_connection() {
     let conn = memory().await;
     let opts = ExecOptions::default();
-    // Poll once so the request goes out, then give up before the answer is
-    // read: the worker holds a cursor that no object refers to. The worker
-    // runs on its own thread and can answer within that first poll; the
-    // received cursor is then dropped and the attempt repeated.
-    for _ in 0..100 {
-        let mut call = Box::pin(conn.execute(HUNDRED_THOUSAND, &[], &opts));
-        let answered = tokio::select! {
-            biased;
-            _ = &mut call => true,
-            () = std::future::ready(()) => false,
-        };
-        if answered {
-            continue;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        drop(call);
-        assert_eq!(scalar(&conn, "SELECT 11").await, Value::Int(11));
-        return;
+    // Poll once so the request goes out, let the worker answer, then give up
+    // without reading the answer: the worker holds a cursor that no object
+    // refers to. A statement answered at once would be received by that
+    // first poll (the worker thread can run before the poll returns), so the
+    // statement needs time before its first row.
+    let mut call = Box::pin(conn.execute(FIRST_ROW_LATE, &[], &opts));
+    tokio::select! {
+        biased;
+        _ = &mut call => panic!("the statement cannot be answered yet"),
+        () = std::future::ready(()) => {}
     }
-    panic!("the statement was answered within its first poll in every attempt");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(call);
+    assert_eq!(scalar(&conn, "SELECT 11").await, Value::Int(11));
 }
 
 #[tokio::test]
