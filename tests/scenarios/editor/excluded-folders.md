@@ -39,13 +39,27 @@
   the reference IDE `venv` stays excluded in Pyoxide: `.idea` is read only
   once, when there is no `.oxide` yet.
 - Step 8: no `.oxide` folder is created.
+- A right click on `.venv` (excluded by the rule for virtual environments),
+  on a row inside an excluded folder or on the project root shows no
+  *Excluded* and no *Cancel Exclusion*: automatic exclusions cannot be
+  cancelled (the reference IDE excludes a `.venv` again on its own), and
+  *Not Excluded* for a folder inside an excluded one comes later.
+- A file has *Mark File As* with the same rows.
+- On Windows and Linux the context menu key opens the menu of the selected
+  row below it. In the menu Up and Down move, Right and Enter open the
+  submenu, Left and Escape close it, Escape closes the menu, and a click
+  outside closes it without doing anything.
 - Find in Files, Go to File and indexing leave hidden and excluded entries
   out.
 
 ## Commands
 `project.open-folder {"path": ...}`, `project.tree.reveal {"path": ...}`,
+`project.tree.context-menu`, `project.tree.mark-excluded {"path": ...}`,
+`project.tree.cancel-exclusion {"path": ...}`, `menu.up`, `menu.down`,
+`menu.open-submenu`, `menu.close-submenu`, `menu.confirm`, `menu.cancel`,
 `project.tree.expand`, `project.tree.expand-all`, `workbench.state`
-(`tree.rows[].excluded`).
+(`tree.rows[].excluded`, `.icon`, `.background`, `tree.context_menu`,
+`tree.exclusions`).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/configuring-project-structure.html,

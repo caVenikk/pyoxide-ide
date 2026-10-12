@@ -126,11 +126,36 @@ Option 3.
   The Python product excludes every folder named `.venv`, as the
   reference does, and a folder directly under the project root that
   contains `pyvenv.cfg`, standing in for the reference's exclusion of the
-  interpreter's environment until interpreters are chosen in the IDE.
+  interpreter's environment. Once interpreters are chosen in the IDE,
+  that rule becomes "the selected interpreter's environment".
   Automatic exclusions are rules, not stored entries, so they create no
-  `.oxide/` folder.
+  `.oxide/` folder, and they cannot be cancelled: the reference excludes
+  them again on its own.
+- `Filter::is_project_config` reports the reference's settings files
+  (anything in `.idea`, `*.iml`, `*.ipr`, `*.iws`). They are shown and not
+  excluded; Find in Files holds their matches back behind a link that
+  includes them, as the reference does.
 - The rules are loaded off the UI thread when a project opens; the tree
-  lists folders once they are there.
+  lists folders once they are there. The project tool window owns the
+  current rules (`ProjectPanel::filter`, a cheap clone) and replaces them
+  when the person marks or unmarks a folder, so Find in Files, Go to File
+  and indexing take them from there rather than building their own.
+
+### Marking folders
+- The project tool window's context menu (a reusable component in `ui`,
+  `ui::menu::ContextMenu`) has *Mark Directory As* (*Mark File As* for a
+  file) with *Excluded* for project content and *Cancel Exclusion* for a
+  stored exclusion, the labels of the reference. Both are UI commands,
+  `project.tree.mark-excluded` and `project.tree.cancel-exclusion`, with an
+  optional `path`; the menu is `project.tree.context-menu` (the context
+  menu key on Windows and Linux).
+- Excluded rows keep the normal text colour and get the excluded folder
+  icon (folders) and the background of non-project files across the row
+  (the theme role `non-project-file`, the reference's `FileColor.Yellow`).
+  They are not expanded on their own (Expand All skips them) and expand by
+  hand.
+- The rows and the rules change at once; the settings file is written in
+  the background, one save at a time.
 
 ## Consequences
 - There is no two-way sync. Exclusions made in the reference after the
@@ -140,6 +165,10 @@ Option 3.
 - Exclude patterns of content roots below the project root and modules
   that the reference has unloaded are not taken into account by the
   import.
+- The other rows of the reference's *Mark Directory As* (Sources Root,
+  Test Sources Root, Namespace Package, Not Excluded for a folder inside an
+  excluded one) and the user's own list of ignored files and folders come
+  later, as does the rest of the context menu (file operations, #37).
 - Later, with the settings task: personal state such as open tabs and the
   window layout, which stays out of the repository (its location is
   decided then), and importing other `.idea` settings (run

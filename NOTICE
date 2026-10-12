@@ -101,7 +101,8 @@ here with: source URL, commit, file(s), license, and what was changed.
   Unicode letters, digits and `_`.
 
 - crates/platform/project/src/filter.rs, store.rs, idea.rs,
-  docs/adr/0008-project-folder-and-exclusions.md
+  crates/platform/ui/src/menu.rs, crates/platform/workbench/src/project_panel.rs
+  (context menu), docs/adr/0008-project-folder-and-exclusions.md
   The project model follows the IntelliJ Platform Community (Apache-2.0),
   https://github.com/JetBrains/intellij-community @
   0b33b8b8e90353a31a9db5b8fcecc6626d94967e: the default list of ignored
@@ -121,9 +122,17 @@ here with: source URL, commit, file(s), license, and what was changed.
   MarkExcludeRootAction.java and UnmarkRootAction.java, and the virtual
   environment exclusion of python/python-pyproject/src/com/intellij/python/
   pyproject/model/internal/platformBridge/VenvExcluder.kt and
-  python/src/com/jetbrains/python/sdk/PySdkExt.kt.
-  Only the list of names and the file format are used; reimplemented in
-  Rust, no code is copied.
+  python/src/com/jetbrains/python/sdk/PySdkExt.kt. The context menu
+  follows the popup menu metrics of platform/util/ui/src/com/intellij/util/
+  ui/JBUI.java and platform/platform-resources/src/themes/
+  intellijlaf.theme.json (PopupMenu, PopupMenuSeparator), the menu
+  structure of platform/platform-impl/resources/idea/LangActions.xml and
+  python/resources/META-INF/pycharm-core.xml, and the UI strings "Mark
+  Directory As", "Mark File As", "Excluded" and "Cancel Exclusion" of
+  platform/platform-resources-en/src/messages/ActionsBundle.properties and
+  platform/lang-api/resources/messages/LangBundle.properties.
+  Only the list of names, the file format, numbers and strings are used;
+  reimplemented in Rust, no code is copied.
 
 - crates/platform/editor/src/input.rs
   The structure of the platform input handler (UTF-16 conversions, marked

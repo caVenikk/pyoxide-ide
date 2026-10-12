@@ -197,6 +197,7 @@ report says which parent was missing.
 | `ui.progress` | `ProgressBar.progressColor` | Progress bar fill |
 | `ui.progress-track` | `ProgressBar.trackColor` | Progress bar track |
 | `ui.notification` | `NOTIFICATION_BACKGROUND` (scheme color), `Notification.background` | Notification balloon |
+| `ui.non-project-file` | `FileColor.Yellow` | Row background of files outside the project content, such as excluded folders (the reference's "Non-Project Files" file colour) |
 
 ### Editor
 
@@ -308,6 +309,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.search-field-border` | `ui.border` |
 | `ui.search-field-error` | `ui.danger` |
 | `ui.search-option-selected` | `ui.pressed` |
+| `ui.non-project-file` | `ui.surface-alt` |
 
 ## Text roles
 

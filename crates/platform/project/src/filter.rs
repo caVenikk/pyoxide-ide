@@ -270,6 +270,29 @@ impl Filter {
         false
     }
 
+    /// A settings file of the reference IDE: anything in a `.idea` folder,
+    /// and module, project and workspace files (`*.iml`, `*.ipr`, `*.iws`).
+    /// Find in Files holds their matches back unless asked to include them,
+    /// as the reference does; they are shown and are not excluded.
+    pub fn is_project_config(&self, path: &Path) -> bool {
+        const EXTENSIONS: [&str; 3] = ["iml", "ipr", "iws"];
+        let is_config_file = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)));
+        if is_config_file {
+            return true;
+        }
+        let names = match self.relative_names(path) {
+            Some(names) => names,
+            None => path
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect(),
+        };
+        names.iter().any(|n| n == crate::idea::IDEA_DIR)
+    }
+
     /// The path itself is in the exclusions of the project settings (so
     /// its exclusion can be cancelled).
     pub fn is_excluded_root(&self, path: &Path) -> bool {
@@ -420,6 +443,36 @@ mod tests {
         assert_eq!(f.relative(root), None);
         // Nothing is excluded before a project is open.
         assert!(!Filter::default().is_excluded(&root.join("venv"), true));
+    }
+
+    #[test]
+    fn reference_settings_files_are_project_config() {
+        let root = Path::new("/work/demo");
+        let f = Filter::new(root, Exclusions::default(), AutoExclusions::NONE);
+        for path in [
+            ".idea",
+            ".idea/workspace.xml",
+            ".idea/inspectionProfiles/Project.xml",
+            "demo.iml",
+            "sub/legacy.IPR",
+            "legacy.iws",
+            "sub/.idea/misc.xml",
+        ] {
+            assert!(f.is_project_config(&root.join(path)), "{path}");
+            assert!(!f.is_excluded(&root.join(path), false), "{path}");
+        }
+        for path in [
+            ".ideas/x",
+            "src/app.py",
+            "iml",
+            "x.iml.bak",
+            ".oxide/project.toml",
+        ] {
+            assert!(!f.is_project_config(&root.join(path)), "{path}");
+        }
+        assert!(f.is_project_config(Path::new("/elsewhere/.idea/x.xml")));
+        assert!(!Filter::default().is_project_config(&root.join("src/app.py")));
+        assert!(Filter::default().is_project_config(&root.join(".idea/x.xml")));
     }
 
     #[test]

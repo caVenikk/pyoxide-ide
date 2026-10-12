@@ -60,6 +60,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
+    ui::command::register(cx, ui::menu::COMMANDS);
     editor::init(cx);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window

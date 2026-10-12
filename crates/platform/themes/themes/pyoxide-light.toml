@@ -95,6 +95,7 @@ scrollbar-track = "#00000000"
 progress = "$copper"
 progress-track = "$line"
 notification = "$bg-white"
+non-project-file = "#fbf3e7"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"

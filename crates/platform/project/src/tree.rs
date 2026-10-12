@@ -206,6 +206,14 @@ impl FileTree {
         self.rebuild();
     }
 
+    /// Marks every listed entry excluded or not by `filter` (after the
+    /// exclusions changed); the root never is.
+    pub fn refresh_excluded(&mut self, filter: &Filter) {
+        for n in self.nodes.iter_mut().skip(1) {
+            n.entry.excluded = filter.is_excluded(&n.entry.path, n.entry.is_dir());
+        }
+    }
+
     /// Collapses every directory except the root.
     pub fn collapse_all(&mut self) {
         for n in self.nodes.iter_mut().skip(1) {
@@ -344,5 +352,20 @@ mod tests {
         assert_eq!(tree.rows().len(), 11);
         tree.collapse_all();
         assert_eq!(tree.rows().len(), 9);
+
+        // Marking a folder excluded updates it and everything listed below.
+        let mut marked = Exclusions::default();
+        marked.add("src");
+        tree.refresh_excluded(&filter.with_exclusions(marked));
+        let excluded = |tree: &FileTree, p: &str| {
+            tree.node(tree.find(&dir.path().join(p)).unwrap())
+                .entry
+                .excluded
+        };
+        assert!(excluded(&tree, "src") && excluded(&tree, "src/pkg/mod.py"));
+        assert!(excluded(&tree, ".venv") && !excluded(&tree, "tests"));
+        assert!(!tree.node(FileTree::ROOT).entry.excluded);
+        tree.refresh_excluded(&filter);
+        assert!(!excluded(&tree, "src") && !excluded(&tree, "src/pkg/mod.py"));
     }
 }

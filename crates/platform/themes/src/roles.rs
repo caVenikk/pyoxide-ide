@@ -125,6 +125,7 @@ roles! {
         Progress => ("progress", "Chrome", "Progress bar fill"),
         ProgressTrack => ("progress-track", "Chrome", "Progress bar track"),
         Notification => ("notification", "Chrome", "Notification balloon"),
+        NonProjectFile => ("non-project-file", "Chrome", "Row background of files outside the project content, such as excluded folders"),
 
         EditorBackground => ("editor-background", "Editor", "Editor background"),
         EditorText => ("editor-text", "Editor", "Default editor text"),
@@ -359,6 +360,7 @@ impl UiRole {
             SearchFieldBorder => Some(Border),
             SearchFieldError => Some(Danger),
             SearchOptionSelected => Some(Pressed),
+            NonProjectFile => Some(SurfaceAlt),
             _ => None,
         }
     }
