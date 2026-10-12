@@ -10,6 +10,7 @@ members = [
     "crates/platform/db-service",
     "crates/platform/db-testkit",
     "crates/platform/project",
+    "crates/platform/project-search",
     "crates/platform/search",
     "crates/platform/db-cli",
     "crates/platform/editor",
@@ -59,6 +60,7 @@ db-sqlite = { path = "crates/platform/db-sqlite" }
 db-service = { path = "crates/platform/db-service" }
 db-testkit = { path = "crates/platform/db-testkit" }
 project = { path = "crates/platform/project" }
+project-search = { path = "crates/platform/project-search" }
 search = { path = "crates/platform/search" }
 secrets = { path = "crates/platform/secrets" }
 settings-import = { path = "crates/platform/settings-import" }

@@ -12,6 +12,7 @@ pub mod chrome;
 pub mod commands;
 pub mod env;
 pub mod file_types;
+pub mod find_in_files;
 pub mod keymap;
 pub mod project_panel;
 pub mod settings;

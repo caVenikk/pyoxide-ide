@@ -39,6 +39,9 @@ pub struct Product {
     pub left_stripe_bottom: Vec<StripeItem>,
     /// Text of the interpreter widget in the status bar.
     pub interpreter_label: Option<&'static str>,
+    /// File masks Find in Files offers before any was used, the first one
+    /// shown in its mask field.
+    pub find_file_masks: Vec<&'static str>,
 }
 
 /// Default size of the main window's content.
@@ -57,6 +60,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
     editor::init(cx);
+    crate::find_in_files::init(cx, &product.find_file_masks);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()
@@ -120,6 +124,14 @@ pub fn init(cx: &mut App, product: &Product) {
                 .cloned()
                 .ok_or_else(|| CommandError::new("not_available", "no editor is open"))?;
             Ok(bar.read(cx).state_json(cx))
+        }),
+    );
+    ui::command::register_query(
+        cx,
+        "find-in-files.state",
+        Rc::new(|_, window, cx| {
+            let popup = workbench(window)?.read(cx).find_in_files().clone();
+            Ok(popup.read(cx).state_json(cx))
         }),
     );
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -189,6 +201,10 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     let product = Rc::new(product);
     Application::new().run(move |cx| {
         init(cx, &product);
+        // Settings that last across sessions (tests keep the defaults).
+        if let Some(file) = crate::find_in_files::settings_file() {
+            crate::find_in_files::load_settings(cx, file);
+        }
         // Frames follow the display's refresh. After a keystroke the window
         // draws at once instead: the typed text is then ready for the next
         // refresh rather than the one after (ADR 0007, replica/perf.md).

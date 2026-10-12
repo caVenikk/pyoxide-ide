@@ -4967,6 +4967,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "project-search"
+version = "0.0.1"
+dependencies = [
+ "ignore",
+ "project",
+ "regex",
+ "search",
+ "tempfile",
+ "text",
+]
+
+[[package]]
 name = "psm"
 version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8434,12 +8446,17 @@ version = "0.0.1"
 dependencies = [
  "commands",
  "core-graphics 0.24.0",
+ "dirs 7.0.0",
  "editor",
+ "futures",
  "gpui",
  "image",
  "objc",
  "project",
+ "project-search",
  "raw-window-handle",
+ "regex",
+ "search",
  "serde",
  "serde_json",
  "tempfile",

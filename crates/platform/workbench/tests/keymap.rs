@@ -258,6 +258,28 @@ impl H<'_> {
         assert!(self.query_focused(), "the search field has the focus");
     }
 
+    fn popup(&mut self) -> Value {
+        self.invoke("find-in-files.state", json!(null))
+    }
+
+    /// Searches the project with the Find in Files popup (plain, without a
+    /// mask); the focus is in its search field.
+    fn search_in_files(&mut self, text: &str) {
+        self.invoke(
+            "find-in-files.search",
+            json!({ "text": text, "case_sensitive": false, "whole_words": false, "regex": false, "mask": "" }),
+        );
+        let popup = self.workbench(|w, _| w.find_in_files().clone());
+        let field = self.cx.update(|cx| popup.read(cx).query_field().clone());
+        let focused = self
+            .cx
+            .update_window(self.window.into(), |_, window, cx| {
+                field.focus_handle(cx).is_focused(window)
+            })
+            .unwrap();
+        assert!(focused, "the popup's search field has the focus");
+    }
+
     /// Three tabs (a.py, b.py, c.txt), the first active, the project tool
     /// window shown, the editor focused.
     fn reset(&mut self) {
@@ -266,6 +288,11 @@ impl H<'_> {
         }
         if self.state()["find"]["open"] == json!(true) {
             self.invoke("find.close", json!(null));
+        }
+        if self.state()["find_in_files"] == json!(true) {
+            // Closed from its field (it may not have the focus).
+            self.invoke("find-in-files.open", json!(null));
+            self.invoke("find-in-files.close", json!(null));
         }
         while self.state()["tabs"]
             .as_array()
@@ -399,7 +426,84 @@ fn check(h: &mut H, b: &Binding) -> bool {
         assert_eq!(h.editor_marked(), after, "{what}");
         return true;
     }
+    let in_popup = b
+        .context
+        .as_deref()
+        .is_some_and(|c| c.starts_with("FindInFiles"));
     match b.command.as_str() {
+        "find.toggle-case" | "find.toggle-words" | "find.toggle-regex" if in_popup => {
+            h.search_in_files(" = ");
+            let option = match b.command.as_str() {
+                "find.toggle-case" => "case_sensitive",
+                "find.toggle-words" => "whole_words",
+                _ => "regex",
+            };
+            h.press(keys);
+            assert_eq!(h.popup()[option], json!(true), "{what}");
+        }
+        "find.new-line" if in_popup => {
+            h.search_in_files("a");
+            h.press("end");
+            h.press(keys);
+            h.cx.simulate_input(h.window.into(), "b");
+            h.draw();
+            assert_eq!(h.popup()["text"], json!("a\nb"), "{what}");
+        }
+        "find-in-files.open" => {
+            h.set_editor("x ‹foo› foo");
+            h.press(keys);
+            let s = h.popup();
+            assert_eq!(s["open"], json!(true), "{what}");
+            assert_eq!(s["text"], json!("foo"), "{what}");
+        }
+        "find-in-files.close" => {
+            h.search_in_files(" = ");
+            h.press(keys);
+            assert_eq!(h.popup()["open"], json!(false), "{what}");
+            assert!(h.editor_focused(), "{what}: the focus goes back");
+        }
+        "find-in-files.next-result"
+        | "find-in-files.previous-result"
+        | "find-in-files.down"
+        | "find-in-files.up"
+        | "find-in-files.page-down"
+        | "find-in-files.page-up" => {
+            // The `x = n` lines of the project's files (some may be open
+            // with other text).
+            h.search_in_files(" = ");
+            let n = h.popup()["rows"].as_array().unwrap().len();
+            assert!(n >= 3, "{what}: {n} rows");
+            let forward = b.command.ends_with("next-result") || b.command.ends_with("down");
+            if !forward {
+                h.invoke("find-in-files.page-down", json!(null));
+                assert_eq!(h.popup()["selected"], json!(n - 1));
+            }
+            h.press(keys);
+            let expected = match b.command.as_str() {
+                "find-in-files.page-down" => n - 1,
+                "find-in-files.page-up" => 0,
+                _ if forward => 1,
+                _ => n - 2,
+            };
+            assert_eq!(h.popup()["selected"], json!(expected), "{what}");
+        }
+        "find-in-files.open-result" => {
+            h.search_in_files(" = ");
+            let row = h.popup()["rows"][1].clone();
+            h.invoke("find-in-files.next-result", json!(null));
+            h.press(keys);
+            assert_eq!(h.popup()["open"], json!(false), "{what}");
+            let s = h.state();
+            let active = s["active_tab"].as_u64().unwrap() as usize;
+            assert_eq!(s["tabs"][active]["path"], row["path"], "{what}");
+            assert!(h.editor_focused(), "{what}");
+        }
+        "find-in-files.toggle-mask" => {
+            h.search_in_files(" = ");
+            h.press(keys);
+            assert_eq!(h.popup()["mask"]["on"], json!(true), "{what}");
+            h.invoke("find-in-files.toggle-mask", json!(null));
+        }
         "editor.page-up"
         | "editor.page-down"
         | "editor.select-page-up"

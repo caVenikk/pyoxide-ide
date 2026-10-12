@@ -16,6 +16,7 @@
 "ctrl-right" = "tabs.next"
 "cmd-{" = "tabs.previous"
 "ctrl-left" = "tabs.previous"
+"cmd-shift-f" = "find-in-files.open"
 
 [[context]]
 name = "ProjectTree"
@@ -169,3 +170,33 @@ name = "FindHistory"
 "down" = "find.history-down"
 "enter" = "find.history-pick"
 "escape" = "find.history-close"
+
+# The Find in Files popup. In its fields Enter opens the selected result,
+# Escape closes the popup, Up and Down (while the search field holds one
+# line), Page Up and Page Down and the Find Next and Previous keys move
+# through the results; the options and the file mask take the reference
+# IDE's mnemonic keys, Ctrl+Option and Option with the letter.
+[[context]]
+name = "FindInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.open-result"
+"escape" = "find-in-files.close"
+"cmd-g" = "find-in-files.next-result"
+"cmd-shift-g" = "find-in-files.previous-result"
+"ctrl-alt-c" = "find.toggle-case"
+"alt-c" = "find.toggle-case"
+"ctrl-alt-w" = "find.toggle-words"
+"alt-w" = "find.toggle-words"
+"ctrl-alt-x" = "find.toggle-regex"
+"alt-x" = "find.toggle-regex"
+"ctrl-alt-k" = "find-in-files.toggle-mask"
+"alt-k" = "find-in-files.toggle-mask"
+
+[[context]]
+name = "FindInFilesQuery > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"pagedown" = "find-in-files.page-down"
+"pageup" = "find-in-files.page-up"
+"cmd-shift-enter" = "find.new-line"

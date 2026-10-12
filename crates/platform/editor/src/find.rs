@@ -70,11 +70,11 @@ ui::ui_commands! {
     Close => "find.close", "Close",
         "Closes the find bar, removes the highlighting of the matches and keeps the current match selected.";
     /// Match case on or off.
-    ToggleCase => "find.toggle-case", "Match Case", "Switches case-sensitive matching on or off.";
+    ToggleCase => "find.toggle-case", "Match Case", "Switches case-sensitive matching on or off (the find bar, Find in Files).";
     /// Whole words on or off.
-    ToggleWords => "find.toggle-words", "Words", "Switches whole-word matching on or off.";
+    ToggleWords => "find.toggle-words", "Words", "Switches whole-word matching on or off (the find bar, Find in Files).";
     /// Regular expressions on or off.
-    ToggleRegex => "find.toggle-regex", "Regex", "Switches regular expression matching on or off.";
+    ToggleRegex => "find.toggle-regex", "Regex", "Switches regular expression matching on or off (the find bar, Find in Files).";
     /// Search within the selection.
     ToggleInSelection => "find.toggle-in-selection", "In Selection",
         "Searches only within the selection the find bar opened with, or in the whole file again.";
@@ -95,7 +95,7 @@ ui::ui_commands! {
         "Moves the focus between the search field and the replace field.";
     /// Break the line in a field.
     NewLine => "find.new-line", "New Line",
-        "Breaks the line in the focused field of the find bar, for a search or a replacement over several lines.";
+        "Breaks the line in the focused search or replace field (the find bar, Find in Files), for a search or a replacement over several lines.";
     /// Down in a field.
     Down => "find.down", "Next Occurrence or Line Down",
         "Selects the next match; while a field holds several lines, moves the caret down instead.";
@@ -126,9 +126,9 @@ pub const HISTORY_SIZE: usize = 30;
 /// Height of a row of the bar and of its fields.
 const ROW_HEIGHT: f32 = 34.0;
 const FIELD_HEIGHT: f32 = 28.0;
-/// Lines a field shows before it scrolls (the reference IDE's
+/// Lines a search field shows before it scrolls (the reference IDE's
 /// `ide.find.max.rows`).
-const MAX_FIELD_ROWS: usize = 3;
+pub const MAX_FIELD_ROWS: usize = 3;
 /// Share of the bar's width taken by the fields, and their smallest width.
 const FIELD_WIDTH: f32 = 0.4;
 const MIN_FIELD_WIDTH: f32 = 240.0;
@@ -159,6 +159,12 @@ pub fn last_search(cx: &App) -> LastSearch {
 
 fn update_last_search(cx: &mut App, f: impl FnOnce(&mut LastSearch)) {
     f(cx.default_global::<LastSearch>());
+}
+
+/// Puts a search first in the search history the find bars show; Find in
+/// Files shares it, as in the reference IDE.
+pub fn remember_search(cx: &mut App, text: &str) {
+    update_last_search(cx, |s| remember(&mut s.history, text));
 }
 
 /// Puts `text` first in a history.

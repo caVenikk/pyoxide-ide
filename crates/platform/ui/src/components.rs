@@ -2,8 +2,8 @@
 //! colour and size comes from the theme.
 
 use gpui::{
-    AnyView, App, Context, Div, ElementId, FontWeight, IntoElement, Render, SharedString, Stateful,
-    Window, div, prelude::*, px,
+    AnyView, App, Context, Div, ElementId, FontWeight, IntoElement, PathBuilder, Render,
+    SharedString, Stateful, Window, canvas, div, point, prelude::*, px,
 };
 use themes::{Metric, UiRole};
 
@@ -138,6 +138,44 @@ pub fn text_button(
                 .text_color(theme.color(UiRole::TextDisabled))
         })
         .child(label.into())
+}
+
+/// Size of a check box.
+pub const CHECKBOX: f32 = 16.0;
+
+/// A check box: a rounded square with the input outline, filled with the
+/// accent colour and a check mark while it is on. The caller adds the click
+/// handler (usually on the check box and its label together).
+pub fn checkbox(id: impl Into<ElementId>, checked: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let mark = theme.color(UiRole::OnAccent);
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(CHECKBOX))
+        .rounded(theme.metric(Metric::CornerRadiusSmall))
+        .when(checked, |d| {
+            d.bg(theme.color(UiRole::Accent)).child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let o = bounds.origin;
+                        let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
+                        let mut path = PathBuilder::stroke(px(1.75));
+                        path.move_to(at(4.0, 8.0));
+                        path.line_to(at(7.0, 11.0));
+                        path.line_to(at(12.0, 5.0));
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, mark);
+                        }
+                    },
+                )
+                .size_full(),
+            )
+        })
+        .when(!checked, |d| {
+            d.border_1().border_color(theme.color(UiRole::BorderInput))
+        })
 }
 
 /// The frame of a one-line text input: rounded, with the input outline;

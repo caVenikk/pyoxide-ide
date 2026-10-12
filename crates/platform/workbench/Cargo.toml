@@ -8,9 +8,14 @@ rust-version.workspace = true
 
 [dependencies]
 commands.workspace = true
+dirs = "7"
 editor.workspace = true
+futures = "0.3"
 gpui.workspace = true
 project.workspace = true
+project-search.workspace = true
+regex.workspace = true
+search.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 text.workspace = true
