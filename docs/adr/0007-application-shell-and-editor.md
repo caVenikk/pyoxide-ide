@@ -172,8 +172,12 @@ the dependencies (GPUI, tree-sitter, ropey, ...) with `opt-level = 2`
 text shaping and the parser run far slower without optimization, and a
 debug build should stay responsive enough for manual checks, while the
 workspace crates keep fast incremental builds and full debug information.
-Headless tests run faster too. The cost is a longer first build of the
-dependencies.
+The cost is a longer first build of the dependencies. CI does not pay it:
+clippy and the tests run with
+`--config 'profile.dev.package."*".opt-level=0'` (.github/workflows/ci.yml).
+With optimized dependencies the Windows check job took 28-36 min (clippy
+8-11 min, tests 15-19 min); with the override it takes about 6 min
+(clippy 1.2 min, tests 2.8 min), macOS and Linux about 3 min.
 
 ### Look
 The shell reproduces the reference IDE's current New UI ("Islands") layout
