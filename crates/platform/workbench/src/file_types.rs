@@ -173,6 +173,11 @@ impl FileTypes {
         Self { types }
     }
 
+    /// Every type, product types first.
+    pub fn types(&self) -> &[FileType] {
+        &self.types
+    }
+
     pub fn for_path(&self, path: &Path) -> Option<&FileType> {
         self.types.iter().find(|t| t.matches(path))
     }

@@ -18,6 +18,9 @@ mod goto;
 mod index;
 mod position;
 
+#[cfg(test)]
+mod reference_tests;
+
 use std::path::PathBuf;
 
 pub use goto::{

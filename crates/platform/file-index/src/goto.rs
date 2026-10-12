@@ -83,9 +83,12 @@ impl FileIndex {
             .strip_prefix("./")
             .or_else(|| text.strip_prefix(".\\"))
             .map_or(text.to_owned(), |rest| rest.to_owned());
+        // A pattern ending with a slash asks for folders only.
+        let folders_only = text.ends_with(['/', '\\']);
         let search = Search {
             index: self,
             query,
+            folders_only,
             open: query
                 .open_files
                 .iter()
@@ -108,26 +111,19 @@ impl FileIndex {
         out
     }
 
-    /// A path typed in full: relative to the project, starting with the
-    /// project folder's name, or absolute.
+    /// An absolute path typed in full, of a file or folder of the project
+    /// (a path from the project folder ranks first by its folder match
+    /// instead, as in the reference).
     fn by_path(&self, text: &str, non_project: bool) -> Option<EntryId> {
         if !text.contains(['/', '\\']) {
             return None;
         }
-        let path = parse_position(text).pattern.trim_end().replace('\\', "/");
-        let path = path.trim_end_matches('/');
-        let candidates = [
-            PathBuf::from(path),
-            self.root().join(path.trim_start_matches('/')),
-            self.root()
-                .parent()
-                .map(|p| p.join(path.trim_start_matches('/')))
-                .unwrap_or_default(),
-        ];
-        candidates
-            .iter()
-            .filter(|p| p.starts_with(self.root()))
-            .find_map(|p| self.find(p))
+        let path = parse_position(text).pattern;
+        let path = PathBuf::from(path.trim_end().trim_end_matches(['/', '\\']));
+        if !path.is_absolute() || !path.starts_with(self.root()) {
+            return None;
+        }
+        self.find(&path)
             .filter(|&id| id != ROOT && (non_project || !self.is_excluded(id)))
     }
 
@@ -152,7 +148,7 @@ impl FileIndex {
 
     fn visible(&self, id: EntryId, non_project: bool) -> bool {
         let e = &self.entries[id as usize];
-        e.alive && id != ROOT && (non_project || !e.excluded)
+        e.alive && id != ROOT && (non_project || !(e.excluded || e.config))
     }
 }
 
@@ -177,6 +173,7 @@ pub fn sanitized_pattern(text: &str) -> String {
 struct Search<'a> {
     index: &'a FileIndex,
     query: &'a GotoQuery<'a>,
+    folders_only: bool,
     open: HashSet<EntryId>,
     context_dir: Option<EntryId>,
 }
@@ -258,7 +255,9 @@ impl Search<'_> {
                         idx.entries_of(m.name)
                             .iter()
                             .filter(|&&e| {
-                                idx.visible(e, self.query.non_project) && dirs.contains(idx, e)
+                                idx.visible(e, self.query.non_project)
+                                    && (!self.folders_only || idx.is_dir(e))
+                                    && dirs.contains(idx, e)
                             })
                             .map(move |&e| (e, m.degree))
                     })

@@ -52,7 +52,7 @@ mod replace;
 mod settings;
 mod view;
 
-use settings::update_settings;
+pub(crate) use settings::update_settings;
 pub use settings::{FindInFilesSettings, init, load_settings, settings, settings_file};
 
 ui::ui_commands! {
@@ -706,6 +706,14 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The options and the mask are shared with Search Everywhere's Text
+        // tab: take them as they are now.
+        if !self.open {
+            let shared = settings(cx);
+            self.options = shared.options();
+            self.mask_on = shared.file_mask.is_some();
+            set_field_text(&self.mask, &shared.shown_mask(), cx);
+        }
         let mut text = self.query.read(cx).text();
         if let Some(selected) = context
             .selection

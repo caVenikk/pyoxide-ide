@@ -1,6 +1,6 @@
 //! The Search Everywhere settings that last across sessions: where the
-//! popup was left and how large it was, and the file types the Files tab
-//! leaves out.
+//! popup was left and how large it was, the Files tab's scope, and what the
+//! filters leave out.
 
 use std::path::PathBuf;
 
@@ -17,6 +17,10 @@ pub struct SearchEverywhereSettings {
     /// File types unchecked in the Files tab's filter (by name; "Directory"
     /// for folders).
     pub hidden_file_types: Vec<String>,
+    /// Kinds of results unchecked in the All tab's filter.
+    pub hidden_providers: Vec<String>,
+    /// The Files tab's scope is All Places (else Project Files).
+    pub files_all_places: bool,
 }
 
 #[derive(Default)]

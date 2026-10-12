@@ -24,6 +24,9 @@ pub(crate) struct Entry {
     pub(crate) is_dir: bool,
     /// Excluded, or inside an excluded folder: not project content.
     pub(crate) excluded: bool,
+    /// A settings file of the reference IDE (`.idea/`, `*.iml`): not project
+    /// content either, but listed.
+    pub(crate) config: bool,
     pub(crate) children: Vec<EntryId>,
     pub(crate) alive: bool,
     /// An excluded folder whose content is not listed.
@@ -51,8 +54,9 @@ pub struct FileIndex {
     non_project: bool,
 }
 
-/// What a walk found: a path, a folder or not, excluded or not.
-type Found = (PathBuf, bool, bool);
+/// What a walk found: a path, a folder or not, excluded or not, a
+/// settings file or not.
+type Found = (PathBuf, bool, bool, bool);
 
 impl FileIndex {
     /// An index with only the root folder.
@@ -75,6 +79,7 @@ impl FileIndex {
             parent: ROOT,
             is_dir: true,
             excluded: false,
+            config: false,
             children: Vec::new(),
             alive: true,
             unlisted: false,
@@ -151,7 +156,7 @@ impl FileIndex {
         self.entries
             .iter()
             .skip(1)
-            .filter(|e| e.alive && !e.excluded)
+            .filter(|e| e.alive && !e.excluded && !e.config)
             .count()
     }
 
@@ -159,9 +164,11 @@ impl FileIndex {
         self.entries[id as usize].is_dir
     }
 
-    /// Excluded or inside an excluded folder.
+    /// Not project content: excluded, inside an excluded folder, or a
+    /// settings file of the reference IDE.
     pub fn is_excluded(&self, id: EntryId) -> bool {
-        self.entries[id as usize].excluded
+        let e = &self.entries[id as usize];
+        e.excluded || e.config
     }
 
     pub fn name(&self, id: EntryId) -> &str {
@@ -253,7 +260,8 @@ impl FileIndex {
                         return;
                     }
                     let excluded = parent_excluded || filter.is_excluded(&current, dir);
-                    self.push_entry(id, name, dir, excluded)
+                    let config = filter.is_project_config(&current);
+                    self.push_entry(id, name, dir, excluded, config)
                 }
             };
         }
@@ -316,6 +324,7 @@ impl FileIndex {
             let excluded = self.entries[parent as usize].excluded && parent != ROOT
                 || filter.is_excluded(&path, is_dir);
             self.entries[id as usize].excluded = excluded;
+            self.entries[id as usize].config = filter.is_project_config(&path);
             for &child in &self.entries[id as usize].children {
                 stack.push((child, path.join(self.name(child))));
             }
@@ -336,7 +345,14 @@ impl FileIndex {
         id
     }
 
-    fn push_entry(&mut self, parent: EntryId, name: &str, is_dir: bool, excluded: bool) -> EntryId {
+    fn push_entry(
+        &mut self,
+        parent: EntryId,
+        name: &str,
+        is_dir: bool,
+        excluded: bool,
+        config: bool,
+    ) -> EntryId {
         let name = self.intern(name);
         let id = self.entries.len() as EntryId;
         self.entries.push(Entry {
@@ -344,6 +360,7 @@ impl FileIndex {
             parent,
             is_dir,
             excluded,
+            config,
             children: Vec::new(),
             alive: true,
             unlisted: is_dir && excluded && !self.non_project,
@@ -358,7 +375,7 @@ impl FileIndex {
         // Folders before their content.
         found.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let mut ids: HashMap<PathBuf, EntryId> = HashMap::new();
-        for (path, is_dir, excluded) in found {
+        for (path, is_dir, excluded, config) in found {
             let parent = match path.parent() {
                 Some(p) if p == self.root => ROOT,
                 Some(p) => match ids.get(p).copied().or_else(|| self.find(p)) {
@@ -374,7 +391,7 @@ impl FileIndex {
             if self.child(parent, &name).is_some() {
                 continue;
             }
-            let id = self.push_entry(parent, &name, is_dir, excluded);
+            let id = self.push_entry(parent, &name, is_dir, excluded, config);
             if is_dir {
                 ids.insert(path, id);
             }
@@ -410,9 +427,10 @@ fn walk(dir: &Path, filter: &Filter, non_project: bool, cancel: &AtomicBool) -> 
             }
             let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
             let excluded = filter.is_excluded(entry.path(), is_dir);
+            let config = filter.is_project_config(entry.path());
             let skip = is_dir && excluded && !non_project;
             if let Ok(mut found) = found.lock() {
-                found.push((entry.into_path(), is_dir, excluded));
+                found.push((entry.into_path(), is_dir, excluded, config));
             }
             if skip {
                 WalkState::Skip

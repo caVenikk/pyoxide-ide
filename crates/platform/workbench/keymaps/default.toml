@@ -18,6 +18,7 @@
 "shift shift" = "search-everywhere.open"
 "ctrl-shift-n" = "search-everywhere.go-to-file"
 "ctrl-shift-a" = "search-everywhere.go-to-action"
+"ctrl-alt-shift-e" = "search-everywhere.go-to-text"
 
 [[context]]
 name = "ProjectTree"
@@ -266,3 +267,11 @@ name = "SearchEverywhere > Editor"
 "alt-up" = "search-everywhere.history-previous"
 "alt-down" = "search-everywhere.history-next"
 "alt-n" = "search-everywhere.toggle-everywhere"
+
+# The Text tab's options: Alt with the letter.
+[[context]]
+name = "SearchEverywhereText > Editor"
+[context.bindings]
+"alt-c" = "search-everywhere.toggle-case"
+"alt-w" = "search-everywhere.toggle-words"
+"alt-x" = "search-everywhere.toggle-regex"

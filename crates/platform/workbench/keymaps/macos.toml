@@ -21,6 +21,7 @@
 "shift shift" = "search-everywhere.open"
 "cmd-shift-o" = "search-everywhere.go-to-file"
 "cmd-shift-a" = "search-everywhere.go-to-action"
+"cmd-alt-shift-e" = "search-everywhere.go-to-text"
 
 [[context]]
 name = "ProjectTree"
@@ -294,3 +295,14 @@ name = "SearchEverywhere > Editor"
 "alt-down" = "search-everywhere.history-next"
 "ctrl-alt-n" = "search-everywhere.toggle-everywhere"
 "alt-n" = "search-everywhere.toggle-everywhere"
+
+# The Text tab's options: Ctrl+Option and Option with the letter.
+[[context]]
+name = "SearchEverywhereText > Editor"
+[context.bindings]
+"ctrl-alt-c" = "search-everywhere.toggle-case"
+"alt-c" = "search-everywhere.toggle-case"
+"ctrl-alt-w" = "search-everywhere.toggle-words"
+"alt-w" = "search-everywhere.toggle-words"
+"ctrl-alt-x" = "search-everywhere.toggle-regex"
+"alt-x" = "search-everywhere.toggle-regex"

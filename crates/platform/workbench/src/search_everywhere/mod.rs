@@ -1,75 +1,86 @@
 //! Search Everywhere and Go to File: one popup with tabs (All, Files,
-//! Actions), as in the reference IDE (tests/scenarios/editor/search-everywhere.md).
+//! Actions, Text), as the reference IDE's current ("split") Search
+//! Everywhere (tests/scenarios/editor/search-everywhere.md).
 //!
 //! Double Shift opens it on All, Go to File on Files, Go to Action on
-//! Actions; pressing the shortcut of the tab shown again switches
-//! "Include non-project items" (on Actions: disabled actions) on or off,
-//! another one switches the tab. The field starts with the text selected
-//! in the editor, else the tab's last search, selected.
+//! Actions, Find Text on Text; pressing the shortcut of the tab shown again
+//! switches its scope (All: "Include non-project items", Files and Text:
+//! Project Files / All Places, Actions: "Include disabled actions"), another
+//! one switches the tab. The field starts with the text selected in the
+//! editor, else the tab's last search, selected.
 //!
 //! - Files: the project's file name index ([`crate::project_files`]) finds
 //!   files and folders as the reference ranks them (`file-index`);
-//!   `name:line:column` opens at that place.
+//!   `name:line:column` opens at that place. A filter leaves out file
+//!   types; the scope (persisted) adds non-project items.
 //! - Actions: the registered commands by title ([`actions`]).
-//! - All: recently opened files that match on top, then files and
-//!   actions by weight; with an empty field the recent files.
+//! - Text: lines of the project's files (`project-search`), with Match
+//!   Case, Words and Regex and the file mask shared with Find in Files.
+//! - All: recently opened files that match on top, then everything by
+//!   weight (text last); with an empty field the recent files.
 //!
-//! A tab shows up to [`SINGLE_LIMIT`] results of each kind (All:
-//! [`MULTIPLE_LIMIT`]) and a "… more" row for the next ones. Typing
-//! searches again [`DEBOUNCE`] after the last key (at once for an empty
-//! field); a search that finds nothing in the project looks at non-project
-//! items too, until the text no longer contains the text that found
-//! nothing.
+//! Rows load as the list is scrolled (a spinner row ends the list while
+//! there are more). Typing searches again [`DEBOUNCE`] after the last key
+//! (at once for an empty field); the rows shown stay until the new ones
+//! come. A search that finds nothing widens the tab's scope by itself,
+//! until the text no longer contains the text that found nothing.
 
 pub mod actions;
+mod providers;
 mod settings;
 mod view;
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use editor::Editor;
-use file_index::{FileHit, FileIndex, GotoQuery, parse_position, rank};
+use file_index::{FileIndex, parse_position};
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, Subscription, Task, UniformListScrollHandle, Window, prelude::*, px,
 };
-use name_match::{Matcher, MatchingMode};
+use project_search::{FileMask, FileSearch, Scope};
+use search::{CancelToken, Query, SearchOptions};
 use serde_json::json;
 use text::Buffer;
-
 use ui::theme::ThemeExt as _;
 
 use crate::file_types::FileTypes;
 use crate::popup::PopupFrame;
 use actions::ActionItem;
-use settings::update_settings;
+pub use providers::{FileRow, Provider, Row, TextRow};
+use providers::{DIRECTORY_TYPE, Found};
 pub use settings::{SearchEverywhereSettings, load_settings, settings, settings_file};
+use settings::update_settings;
 
 ui::ui_commands! {
     COMMANDS, scope = "Workbench";
     /// Search Everywhere (All tab).
     Open => "search-everywhere.open", "Search Everywhere",
-        "Opens Search Everywhere on the All tab: recent files, files and actions.";
+        "Opens Search Everywhere on the All tab: recent files, files, actions and text.";
     /// Go to File.
     GoToFile => "search-everywhere.go-to-file", "Go to File…",
         "Opens Search Everywhere on the Files tab to open a file by its name (`name:line:column` opens at a line).";
     /// Go to Action.
     GoToAction => "search-everywhere.go-to-action", "Find Action…",
         "Opens Search Everywhere on the Actions tab to run a command by its name.";
+    /// Find text.
+    GoToText => "search-everywhere.go-to-text", "Text…",
+        "Opens Search Everywhere on the Text tab to find a text in the project's files.";
     /// Search for a text in a tab.
     Search {
         text: String,
         tab: Option<String>,
         non_project: Option<bool>,
     } => "search-everywhere.search", "Search Everywhere for Text",
-        "Opens Search Everywhere on a tab (`all`, `files`, `actions`) with a text; `non_project` includes non-project items.",
+        "Opens Search Everywhere on a tab (`all`, `files`, `actions`, `text`) with a text; `non_project` widens the tab's scope (non-project items, All Places, disabled actions).",
         r#"{"text": "app.py:12", "tab": "files", "non_project": false}"#;
     /// Describe the popup.
     State => "search-everywhere.state", "Search Everywhere State",
-        "Returns the state of the Search Everywhere popup as JSON (tab, text, rows, selected row).";
+        "Returns the state of the Search Everywhere popup as JSON (tab, text, scope, rows, selected row).";
 }
 
 ui::ui_commands! {
@@ -83,29 +94,36 @@ ui::ui_commands! {
     /// The next row.
     Down => "search-everywhere.down", "Next Result", "Selects the next result (after the last, the first).";
     /// The previous row.
-    Up => "search-everywhere.up", "Previous Result", "Selects the previous result (before the first, the last).";
-    /// The last row.
-    NextGroup => "search-everywhere.next-group", "Last Result", "Selects the last result.";
+    Up => "search-everywhere.up", "Previous Result", "Selects the previous result (before the first, the last once all are there).";
+    /// A page down.
+    NextGroup => "search-everywhere.next-group", "Page Down", "Selects the result a page further down.";
     /// The first row.
     PreviousGroup => "search-everywhere.previous-group", "First Result", "Selects the first result.";
     /// Open or run the selected row.
     Select => "search-everywhere.select", "Open Result",
-        "Opens the selected file (at the line and column typed after its name), runs the selected action, or loads more results.";
-    /// Include non-project items.
+        "Opens the selected file (at the line and column typed after its name) or line, or runs the selected action.";
+    /// Widen the scope.
     ToggleEverywhere => "search-everywhere.toggle-everywhere", "Include Non-Project Items",
-        "Switches including non-project items (on the Actions tab: disabled actions) on or off.";
+        "Switches the tab's scope: non-project items on All, All Places on Files and Text, disabled actions on Actions.";
     /// The previous search of the tab.
     HistoryPrevious => "search-everywhere.history-previous", "Previous Search",
         "Puts the tab's previous search in the field.";
     /// The next search of the tab.
     HistoryNext => "search-everywhere.history-next", "Next Search",
         "Puts the tab's next search in the field.";
+    /// Match Case on the Text tab.
+    ToggleCase => "search-everywhere.toggle-case", "Match Case",
+        "Switches Match Case of the Text tab (shared with Find in Files).";
+    /// Words on the Text tab.
+    ToggleWords => "search-everywhere.toggle-words", "Words",
+        "Switches Words of the Text tab (shared with Find in Files).";
+    /// Regex on the Text tab.
+    ToggleRegex => "search-everywhere.toggle-regex", "Regex",
+        "Switches Regex of the Text tab (shared with Find in Files).";
 }
 
-/// Results of each kind on a tab of one kind, and loaded by "more".
-pub const SINGLE_LIMIT: usize = 30;
-/// Results of each kind on the All tab, and loaded by "more".
-pub const MULTIPLE_LIMIT: usize = 15;
+/// Rows of each kind asked for at a time.
+pub const PAGE: usize = 50;
 /// Wait after a key before searching (the reference's).
 pub const DEBOUNCE: Duration = Duration::from_millis(100);
 /// Searches kept per tab.
@@ -115,13 +133,13 @@ const HISTORY_LIMIT: usize = 50;
 const WIDTH: f32 = 700.0;
 const HEIGHT: f32 = 600.0;
 const MIN_WIDTH: f32 = 700.0;
-/// Rows a page down leaves of the previous page.
-const PAGE_OVERLAP: usize = 4;
 /// The header with the tabs, and the field.
 const HEADER_HEIGHT: f32 = 40.0;
 const FIELD_HEIGHT: f32 = 40.0;
 /// The list is at least this high when shown.
 const MIN_LIST_HEIGHT: f32 = 100.0;
+/// Rows a page down leaves of the previous page.
+const PAGE_OVERLAP: usize = 4;
 
 /// The tabs, in the reference's order (it shows Classes and Symbols when a
 /// language provides them).
@@ -130,16 +148,18 @@ pub enum Tab {
     All,
     Files,
     Actions,
+    Text,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 3] = [Tab::All, Tab::Files, Tab::Actions];
+    pub const ALL: [Tab; 4] = [Tab::All, Tab::Files, Tab::Actions, Tab::Text];
 
     pub fn title(self) -> &'static str {
         match self {
             Tab::All => "All",
             Tab::Files => "Files",
             Tab::Actions => "Actions",
+            Tab::Text => "Text",
         }
     }
 
@@ -148,6 +168,7 @@ impl Tab {
             Tab::All => "all",
             Tab::Files => "files",
             Tab::Actions => "actions",
+            Tab::Text => "text",
         }
     }
 
@@ -161,15 +182,21 @@ impl Tab {
             Tab::All => "search-everywhere.open",
             Tab::Files => "search-everywhere.go-to-file",
             Tab::Actions => "search-everywhere.go-to-action",
+            Tab::Text => "search-everywhere.go-to-text",
         }
     }
 
-    /// Results of each kind.
-    fn limit(self) -> usize {
+    fn providers(self) -> &'static [Provider] {
         match self {
-            Tab::All => MULTIPLE_LIMIT,
-            _ => SINGLE_LIMIT,
+            Tab::All => &[Provider::Recent, Provider::Files, Provider::Actions, Provider::Text],
+            Tab::Files => &[Provider::Files],
+            Tab::Actions => &[Provider::Actions],
+            Tab::Text => &[Provider::Text],
         }
+    }
+
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
@@ -178,6 +205,8 @@ impl Tab {
 pub struct OpenContext {
     pub root: Option<PathBuf>,
     pub index: Option<Arc<FileIndex>>,
+    /// The project's rules (for the Text tab).
+    pub filter: Option<project::Filter>,
     /// The editor's selection (one line), for the field.
     pub selection: Option<String>,
     pub open_files: Vec<PathBuf>,
@@ -187,6 +216,8 @@ pub struct OpenContext {
     pub recent_files: Vec<PathBuf>,
     /// The commands, as available where the focus was.
     pub actions: Vec<ActionItem>,
+    /// Open documents with unsaved changes (searched instead of the file).
+    pub overrides: HashMap<PathBuf, text::Rope>,
 }
 
 /// What the popup asks of the workbench.
@@ -212,52 +243,22 @@ pub enum SearchEverywhereEvent {
 
 impl EventEmitter<SearchEverywhereEvent> for SearchEverywhere {}
 
-/// A row of the list.
+/// A list over the popup: the scope list, a filter, the search history or
+/// the file masks.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Row {
-    File(FileRow),
-    Action(usize),
-    /// "… more": the next results.
-    More,
+pub(crate) enum Dropdown {
+    Scope,
+    FileTypes,
+    Providers,
+    History,
+    Masks,
 }
 
+/// A row as it is kept across a reopen (to select it again).
 #[derive(Debug, Clone, PartialEq)]
-pub struct FileRow {
-    pub path: PathBuf,
-    pub is_dir: bool,
-    /// Not project content.
-    pub non_project: bool,
-    /// From the recent files.
-    pub recent: bool,
-    pub weight: i32,
-}
-
-/// Which provider a row came from, for the order of the All tab and for
-/// loading more.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Provider {
-    Recent,
-    Files,
-    Actions,
-}
-
-impl Provider {
-    /// Lower first between equal weights (the reference's sort weights).
-    fn sort_weight(self) -> i32 {
-        match self {
-            Provider::Recent => 70,
-            Provider::Files => 200,
-            Provider::Actions => 400,
-        }
-    }
-}
-
-/// What a search found for one provider: rows in order, and whether there
-/// are more.
-struct Found {
-    provider: Provider,
-    rows: Vec<(Row, i32)>,
-    more: bool,
+enum RowKey {
+    Path(PathBuf),
+    Line(PathBuf, usize),
 }
 
 pub struct SearchEverywhere {
@@ -267,26 +268,37 @@ pub struct SearchEverywhere {
     open: bool,
     tab: Tab,
     context: OpenContext,
-    /// "Include non-project items" (All, Files) and "Include disabled
-    /// actions" (Actions).
-    everywhere: bool,
-    /// Switched on by the popup because nothing was found (the text that
-    /// found nothing), not by the person.
+    /// The scope of each tab is widened (non-project items, All Places,
+    /// disabled actions).
+    everywhere: [bool; 4],
+    /// The person set the scope in this popup: it is not changed by itself.
+    chosen: [bool; 4],
+    /// Widened by the popup because the text found nothing.
     auto_everywhere: Option<String>,
     rows: Vec<Row>,
     selected: Option<usize>,
-    /// Rows of each provider asked for (grows with "more").
-    limits: Vec<(Provider, usize)>,
-    /// Rows shown before "more" was chosen stay where they are.
+    /// Rows of each kind asked for (grows as the list scrolls).
+    limits: HashMap<Provider, usize>,
+    /// Kinds that have more rows than shown.
+    more: HashSet<Provider>,
+    /// Rows shown before loading more stay where they are.
     frozen: usize,
     searching: bool,
     generation: u64,
     search_task: Option<Task<()>>,
+    cancel: Option<CancelToken>,
     debounce: Option<Task<()>>,
+    /// The Text tab's options and file mask (`None`: all file types),
+    /// shared with Find in Files.
+    options: SearchOptions,
+    mask: Option<String>,
     /// Searches per tab, oldest first, and the position while going
     /// through them.
     history: Vec<(String, Tab)>,
     history_at: Option<usize>,
+    /// The tab, text and selected row when the popup closed.
+    last_selection: Option<(Tab, String, RowKey)>,
+    dropdown: Option<Dropdown>,
     list: UniformListScrollHandle,
     frame: PopupFrame,
     /// Measurements: when the last search started and how long it took.
@@ -319,6 +331,7 @@ impl SearchEverywhere {
             cx.subscribe(&field, |this, _, event, cx| {
                 if matches!(event, editor::EditorEvent::Edited(_)) {
                     this.history_at = None;
+                    this.dropdown = None;
                     this.text_changed(cx);
                 }
             }),
@@ -332,10 +345,7 @@ impl SearchEverywhere {
         ];
         let mut frame = PopupFrame::new(
             gpui::size(px(WIDTH), px(HEIGHT)),
-            gpui::size(
-                px(MIN_WIDTH),
-                px(HEADER_HEIGHT + FIELD_HEIGHT + MIN_LIST_HEIGHT),
-            ),
+            gpui::size(px(MIN_WIDTH), px(HEADER_HEIGHT + FIELD_HEIGHT + MIN_LIST_HEIGHT)),
             px(0.0),
         );
         if let Some(place) = settings(cx).popup {
@@ -348,18 +358,25 @@ impl SearchEverywhere {
             open: false,
             tab: Tab::All,
             context: OpenContext::default(),
-            everywhere: false,
+            everywhere: [false; 4],
+            chosen: [false; 4],
             auto_everywhere: None,
             rows: Vec::new(),
             selected: None,
-            limits: Vec::new(),
+            limits: HashMap::new(),
+            more: HashSet::new(),
             frozen: 0,
             searching: false,
             generation: 0,
             search_task: None,
+            cancel: None,
             debounce: None,
+            options: SearchOptions::default(),
+            mask: None,
             history: Vec::new(),
             history_at: None,
+            last_selection: None,
+            dropdown: None,
             list: UniformListScrollHandle::new(),
             frame,
             started: None,
@@ -395,6 +412,19 @@ impl SearchEverywhere {
         self.searching || self.debounce.is_some()
     }
 
+    fn everywhere(&self) -> bool {
+        self.everywhere[self.tab.index()]
+    }
+
+    /// The scope's name on the Files and Text tabs.
+    fn scope_name(&self) -> &'static str {
+        if self.everywhere() {
+            "All Places"
+        } else {
+            "Project Files"
+        }
+    }
+
     pub fn state_json(&self, cx: &App) -> serde_json::Value {
         let rows: Vec<_> = self.rows.iter().map(|r| self.row_json(r)).collect();
         json!({
@@ -402,10 +432,21 @@ impl SearchEverywhere {
             "tab": self.tab.name(),
             "tabs": Tab::ALL.iter().map(|t| t.name()).collect::<Vec<_>>(),
             "text": self.field.read(cx).text(),
-            "everywhere": self.everywhere,
+            "everywhere": self.everywhere(),
+            "scope": matches!(self.tab, Tab::Files | Tab::Text).then(|| self.scope_name()),
+            "options": {
+                "case_sensitive": self.options.case_sensitive,
+                "whole_words": self.options.whole_words,
+                "regex": self.options.regex,
+                "mask": self.mask,
+            },
+            "hidden_file_types": settings(cx).hidden_file_types,
+            "hidden_providers": settings(cx).hidden_providers,
             "searching": self.is_searching(),
+            "collapsed": self.collapsed(cx),
             "rows": rows,
             "selected": self.selected,
+            "dropdown": self.dropdown.as_ref().map(|d| format!("{d:?}").to_lowercase()),
         })
     }
 
@@ -428,7 +469,13 @@ impl SearchEverywhere {
                     "available": a.available,
                 })
             }
-            Row::More => json!({ "kind": "more" }),
+            Row::Text(t) => json!({
+                "kind": "text",
+                "path": self.rel(&t.path),
+                "line": t.line + 1,
+                "text": t.text,
+            }),
+            Row::Loading => json!({ "kind": "loading" }),
         }
     }
 
@@ -443,17 +490,16 @@ impl SearchEverywhere {
         rel.to_string_lossy().replace('\\', "/")
     }
 
+    /// Only the tabs and the field: nothing typed and nothing to list.
+    fn collapsed(&self, cx: &App) -> bool {
+        self.rows.is_empty() && self.field.read(cx).text().is_empty()
+    }
+
     // ---- opening and closing ------------------------------------------------
 
     /// Opens the popup on `tab` (or, when it is open, switches the tab, or
-    /// on the same tab switches non-project items).
-    pub fn show(
-        &mut self,
-        tab: Tab,
-        context: OpenContext,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// on the same tab switches its scope).
+    pub fn show(&mut self, tab: Tab, context: OpenContext, window: &mut Window, cx: &mut Context<Self>) {
         if self.open {
             if tab == self.tab {
                 self.toggle_everywhere(cx);
@@ -470,16 +516,27 @@ impl SearchEverywhere {
         self.context = context;
         self.open = true;
         self.tab = tab;
-        self.everywhere = false;
+        // Each tab starts with its own scope (the Files tab's is kept).
+        let saved = settings(cx);
+        self.everywhere = [false; 4];
+        self.everywhere[Tab::Files.index()] = saved.files_all_places;
+        self.chosen = [false; 4];
+        self.chosen[Tab::Files.index()] = saved.files_all_places;
         self.auto_everywhere = None;
+        let shared = crate::find_in_files::settings(cx);
+        self.options = shared.options();
+        self.mask = shared.file_mask.clone();
         self.rows.clear();
         self.selected = None;
         self.frozen = 0;
         self.history_at = None;
+        self.dropdown = None;
         let text = selection.unwrap_or_else(|| self.last_search(tab));
-        self.field
-            .update(cx, |f, cx| f.set_text_selected(&text, cx));
+        self.field.update(cx, |f, cx| f.set_text_selected(&text, cx));
         window.focus(&self.field.focus_handle(cx));
+        if self.everywhere() {
+            cx.emit(SearchEverywhereEvent::WantNonProject);
+        }
         self.search_now(cx);
         cx.notify();
     }
@@ -500,10 +557,11 @@ impl SearchEverywhere {
             self.switch_tab(tab, cx);
         }
         if let Some(on) = non_project {
-            self.set_everywhere(on, cx);
+            self.set_everywhere(on, false, cx);
         }
         self.field.update(cx, |f, cx| f.set_text_selected(text, cx));
         self.debounce = None;
+        self.frozen = 0;
         self.search_now(cx);
     }
 
@@ -515,10 +573,15 @@ impl SearchEverywhere {
         }
         let text = self.field.read(cx).text();
         self.remember(&text);
+        self.last_selection = self
+            .selected
+            .and_then(|i| self.rows.get(i))
+            .and_then(row_key)
+            .map(|key| (self.tab, text.clone(), key));
         self.open = false;
-        self.search_task = None;
+        self.cancel_search();
         self.debounce = None;
-        self.searching = false;
+        self.dropdown = None;
         self.frame.cancel_drag();
         let place = self.frame.place();
         update_settings(cx, |s| s.popup = place);
@@ -545,7 +608,7 @@ impl SearchEverywhere {
 
     /// The searches of a tab, oldest first (All: every tab's, without
     /// repeats).
-    fn tab_history(&self, tab: Tab) -> Vec<String> {
+    pub(crate) fn tab_history(&self, tab: Tab) -> Vec<String> {
         match tab {
             Tab::All => {
                 let mut out: Vec<String> = Vec::new();
@@ -584,65 +647,167 @@ impl SearchEverywhere {
             (Some(i), true) => (i + n - 1) % n,
             (Some(i), false) => (i + 1) % n,
         };
-        let text = list[at].clone();
-        self.field
-            .update(cx, |f, cx| f.set_text_selected(&text, cx));
-        self.text_changed(cx);
+        self.set_text(&list[at].clone(), cx);
         self.history_at = Some(at);
     }
 
-    // ---- tabs and options -------------------------------------------------
+    /// Puts a text in the field (selected) and searches it.
+    pub(crate) fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.field.update(cx, |f, cx| f.set_text_selected(text, cx));
+        self.text_changed(cx);
+    }
 
-    fn switch_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
+    // ---- tabs, scopes and options -----------------------------------------
+
+    pub(crate) fn switch_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         if self.tab == tab {
             return;
         }
-        self.tab = tab;
-        // Each tab starts with project items only, unless switched on by
-        // the person in this popup.
-        if self.auto_everywhere.is_some() || !self.everywhere_chosen() {
-            self.everywhere = false;
-            self.auto_everywhere = None;
+        // A scope the popup widened by itself goes back.
+        if self.auto_everywhere.take().is_some() {
+            let i = self.tab.index();
+            self.everywhere[i] = self.chosen[i] && self.everywhere[i];
         }
+        self.tab = tab;
+        self.dropdown = None;
+        self.rows.clear();
         self.frozen = 0;
         self.selected = None;
         self.search_now(cx);
         cx.notify();
     }
 
-    /// The person switched non-project items on in this popup.
-    fn everywhere_chosen(&self) -> bool {
-        self.everywhere && self.auto_everywhere.is_none()
-    }
-
     fn step_tab(&mut self, forward: bool, cx: &mut Context<Self>) {
         let tabs = Tab::ALL;
         let i = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
         let n = tabs.len();
-        let next = if forward {
-            (i + 1) % n
-        } else {
-            (i + n - 1) % n
-        };
+        let next = if forward { (i + 1) % n } else { (i + n - 1) % n };
         self.switch_tab(tabs[next], cx);
     }
 
     pub fn toggle_everywhere(&mut self, cx: &mut Context<Self>) {
-        let on = !self.everywhere;
-        self.set_everywhere(on, cx);
+        let on = !self.everywhere();
+        self.set_everywhere(on, true, cx);
     }
 
-    fn set_everywhere(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.auto_everywhere = None;
-        if self.everywhere == on {
+    /// Widens or narrows the tab's scope; `chosen` when the person did (the
+    /// Files tab keeps it across sessions).
+    pub(crate) fn set_everywhere(&mut self, on: bool, chosen: bool, cx: &mut Context<Self>) {
+        let i = self.tab.index();
+        if chosen {
+            self.auto_everywhere = None;
+            self.chosen[i] = true;
+            if self.tab == Tab::Files {
+                update_settings(cx, |s| s.files_all_places = on);
+            }
+        }
+        if self.everywhere[i] == on {
             return;
         }
-        self.everywhere = on;
+        self.everywhere[i] = on;
         if on && self.tab != Tab::Actions {
             cx.emit(SearchEverywhereEvent::WantNonProject);
         }
         self.frozen = 0;
         self.search_now(cx);
+        cx.notify();
+    }
+
+    /// Match Case, Words, Regex of the Text tab (kept for Find in Files).
+    fn change_options(&mut self, change: impl FnOnce(&mut SearchOptions), cx: &mut Context<Self>) {
+        change(&mut self.options);
+        let options = self.options;
+        crate::find_in_files::update_settings(cx, |s| {
+            s.case_sensitive = options.case_sensitive;
+            s.whole_words = options.whole_words;
+            s.regex = options.regex;
+        });
+        if self.tab == Tab::Text {
+            self.frozen = 0;
+            self.search_now(cx);
+        }
+        cx.notify();
+    }
+
+    /// The Text tab's file mask (`None`: all file types; kept for Find in
+    /// Files).
+    pub(crate) fn set_mask(&mut self, mask: Option<String>, cx: &mut Context<Self>) {
+        self.mask = mask.clone();
+        crate::find_in_files::update_settings(cx, |s| {
+            if let Some(m) = &mask {
+                s.remember_mask(m);
+            }
+            s.file_mask = mask;
+        });
+        self.dropdown = None;
+        self.frozen = 0;
+        self.search_now(cx);
+        cx.notify();
+    }
+
+    /// A filter item checked or unchecked (a file type, "Directory", or a
+    /// kind of result on All); `None` checks all, `Some("")`... see callers.
+    pub(crate) fn set_filter(&mut self, kind: &Dropdown, item: Option<&str>, shown: bool, cx: &mut Context<Self>) {
+        let all: Vec<String> = match kind {
+            Dropdown::FileTypes => self.filter_types(),
+            _ => Provider::ALL.iter().map(|p| p.title().to_owned()).collect(),
+        };
+        update_settings(cx, |s| {
+            let hidden = match kind {
+                Dropdown::FileTypes => &mut s.hidden_file_types,
+                _ => &mut s.hidden_providers,
+            };
+            match item {
+                Some(name) => {
+                    hidden.retain(|h| h != name);
+                    if !shown {
+                        hidden.push(name.to_owned());
+                    }
+                }
+                None if shown => hidden.clear(),
+                None => *hidden = all,
+            }
+        });
+        self.frozen = 0;
+        self.search_now(cx);
+        cx.notify();
+    }
+
+    /// Inverts the checked items of a filter.
+    pub(crate) fn invert_filter(&mut self, kind: &Dropdown, cx: &mut Context<Self>) {
+        let all: Vec<String> = match kind {
+            Dropdown::FileTypes => self.filter_types(),
+            _ => Provider::ALL.iter().map(|p| p.title().to_owned()).collect(),
+        };
+        update_settings(cx, |s| {
+            let hidden = match kind {
+                Dropdown::FileTypes => &mut s.hidden_file_types,
+                _ => &mut s.hidden_providers,
+            };
+            *hidden = all.into_iter().filter(|a| !hidden.contains(a)).collect();
+        });
+        self.frozen = 0;
+        self.search_now(cx);
+        cx.notify();
+    }
+
+    /// The items of the Files tab's filter: folders, then the file types.
+    pub(crate) fn filter_types(&self) -> Vec<String> {
+        let mut out = vec![DIRECTORY_TYPE.to_owned()];
+        for t in self.file_types.types() {
+            if !out.iter().any(|o| o == t.name) {
+                out.push(t.name.to_owned());
+            }
+        }
+        out
+    }
+
+    pub(crate) fn show_dropdown(&mut self, dropdown: Dropdown, cx: &mut Context<Self>) {
+        self.dropdown = if self.dropdown.as_ref() == Some(&dropdown) {
+            None
+        } else {
+            Some(dropdown)
+        };
         cx.notify();
     }
 
@@ -666,14 +831,14 @@ impl SearchEverywhere {
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
         let text = self.field.read(cx).text();
-        // Non-project items switched on because nothing was found go off
-        // when the text no longer contains what found nothing.
+        // A scope widened because nothing was found goes back when the text
+        // no longer contains what found nothing.
         if let Some(not_found) = &self.auto_everywhere
             && not_found.chars().count() > 1
             && !text.contains(not_found.as_str())
         {
             self.auto_everywhere = None;
-            self.everywhere = false;
+            self.everywhere[self.tab.index()] = false;
         }
         self.frozen = 0;
         if text.is_empty() {
@@ -691,182 +856,172 @@ impl SearchEverywhere {
         cx.notify();
     }
 
-    fn reset_limits(&mut self) {
-        self.limits.clear();
-    }
-
     fn limit(&self, provider: Provider) -> usize {
-        self.limits
-            .iter()
-            .find(|(p, _)| *p == provider)
-            .map_or(self.tab.limit(), |(_, l)| *l)
+        self.limits.get(&provider).copied().unwrap_or(PAGE)
     }
 
-    /// Searches the tab now (in the background for files).
+    fn cancel_search(&mut self) {
+        self.search_task = None;
+        self.searching = false;
+        if let Some(cancel) = self.cancel.take() {
+            cancel.cancel();
+        }
+    }
+
+    /// The providers the tab asks, without those the All tab's filter
+    /// leaves out.
+    fn providers(&self, cx: &App) -> Vec<Provider> {
+        let hidden = settings(cx).hidden_providers;
+        self.tab
+            .providers()
+            .iter()
+            .copied()
+            .filter(|p| self.tab != Tab::All || !hidden.iter().any(|h| h == p.title()))
+            .collect()
+    }
+
+    /// Searches the tab now: recent files and actions here, files and text
+    /// in the background.
     fn search_now(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
         if self.frozen == 0 {
-            self.reset_limits();
+            self.limits.clear();
         }
         self.generation += 1;
         let generation = self.generation;
         self.searching = true;
         self.started = Some(std::time::Instant::now());
         let text = self.field.read(cx).text();
-        let tab = self.tab;
-        let providers: &[Provider] = match tab {
-            Tab::All => &[Provider::Recent, Provider::Files, Provider::Actions],
-            Tab::Files => &[Provider::Files],
-            Tab::Actions => &[Provider::Actions],
-        };
-        // Recent files and actions are found here; files in the background.
+        let providers = self.providers(cx);
+        let everywhere = self.everywhere();
         let mut found = Vec::new();
-        for &p in providers {
+        for &p in &providers {
             match p {
-                Provider::Recent => found.push(self.find_recent(&text)),
-                Provider::Actions => found.push(self.find_actions(&text)),
-                Provider::Files => {}
+                Provider::Recent => found.push(providers::recent(
+                    &self.context.recent_files,
+                    self.context.current_file.as_ref(),
+                    &text,
+                    self.limit(p),
+                )),
+                Provider::Actions => found.push(providers::actions(
+                    &self.context.actions,
+                    &text,
+                    everywhere && self.tab == Tab::Actions,
+                    self.limit(p),
+                )),
+                Provider::Files | Provider::Text => {}
             }
         }
-        let files_wanted = providers.contains(&Provider::Files) && !text.trim().is_empty();
-        let index = self.context.index.clone().filter(|_| files_wanted);
-        let Some(index) = index else {
+        let blank = text.trim().is_empty();
+        let files = (providers.contains(&Provider::Files) && !blank)
+            .then(|| self.files_query(&text, cx))
+            .flatten();
+        let text_search = (providers.contains(&Provider::Text) && !blank)
+            .then(|| self.text_search(&text))
+            .flatten();
+        if files.is_none() && text_search.is_none() {
             self.show_found(found, cx);
             return;
-        };
-        let limit = self.limit(Provider::Files);
-        let query_text = text.clone();
-        let non_project = self.everywhere && tab != Tab::Actions;
-        let open_files = self.context.open_files.clone();
-        let current = self.context.current_file.clone();
+        }
+        let cancel = CancelToken::new();
+        self.cancel = Some(cancel.clone());
         let task = cx.background_spawn(async move {
-            let query = GotoQuery {
-                text: &query_text,
-                non_project,
-                open_files: &open_files,
-                context: current.as_deref(),
-            };
-            let hits = index.goto_file(&query, &|| false);
-            let more = hits.len() > limit;
-            let mut page: Vec<FileHit> = hits.into_iter().take(limit).collect();
-            rank(&mut page);
-            let rows: Vec<(Row, i32)> = page
-                .into_iter()
-                .map(|h| {
-                    (
-                        Row::File(FileRow {
-                            path: index.path(h.id),
-                            is_dir: h.is_dir,
-                            non_project: h.non_project,
-                            recent: false,
-                            weight: h.weight,
-                        }),
-                        h.weight,
-                    )
-                })
-                .collect();
-            Found {
-                provider: Provider::Files,
-                rows,
-                more,
+            let mut more = Vec::new();
+            if let Some(q) = files {
+                more.push(providers::files(q));
             }
+            if let Some(search) = text_search {
+                more.push(providers::text(search, &cancel));
+            }
+            more
         });
         self.search_task = Some(cx.spawn(async move |this, cx| {
-            let files = task.await;
+            let more = task.await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
-                found.push(files);
+                found.extend(more);
                 this.show_found(found, cx);
             });
         }));
         cx.notify();
     }
 
-    /// Recent files whose names match, best first (all of them for an
-    /// empty field); the file of the active editor is left out.
-    fn find_recent(&self, text: &str) -> Found {
-        let pattern = parse_position(text).pattern;
-        let pattern = pattern.trim();
-        let mut matcher = Matcher::new(&format!("*{pattern}"), MatchingMode::IgnoreCase);
-        if !pattern.starts_with('*') {
-            matcher = matcher.prefer_start();
-        }
-        let mut rows: Vec<(Row, i32)> = Vec::new();
-        for path in &self.context.recent_files {
-            if Some(path) == self.context.current_file.as_ref() || !path.exists() {
-                continue;
-            }
-            if rows
-                .iter()
-                .any(|(r, _)| matches!(r, Row::File(f) if &f.path == path))
-            {
-                continue;
-            }
-            let name: Vec<char> = path
-                .file_name()
-                .map(|n| n.to_string_lossy().chars().collect())
-                .unwrap_or_default();
-            let Some(m) = matcher.match_chars(&name) else {
-                continue;
-            };
-            rows.push((
-                Row::File(FileRow {
-                    path: path.clone(),
-                    is_dir: false,
-                    non_project: false,
-                    recent: true,
-                    weight: m.degree,
-                }),
-                m.degree,
-            ));
-        }
-        rows.sort_by_key(|r| std::cmp::Reverse(r.1));
-        let limit = self.limit(Provider::Recent);
-        let more = rows.len() > limit;
-        rows.truncate(limit);
-        Found {
-            provider: Provider::Recent,
-            rows,
-            more,
-        }
+    fn files_query(&self, text: &str, cx: &App) -> Option<providers::FilesQuery> {
+        let index = self.context.index.clone()?;
+        let hidden = if self.tab == Tab::Files {
+            settings(cx).hidden_file_types.into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        Some(providers::FilesQuery {
+            index,
+            text: text.to_owned(),
+            non_project: self.everywhere(),
+            open_files: self.context.open_files.clone(),
+            current: self.context.current_file.clone(),
+            hidden_types: hidden,
+            types: (*self.file_types).clone(),
+            limit: self.limit(Provider::Files),
+        })
     }
 
-    fn find_actions(&self, text: &str) -> Found {
-        let hits = actions::search(
-            &self.context.actions,
-            text,
-            self.everywhere && self.tab == Tab::Actions,
-        );
-        let limit = self.limit(Provider::Actions);
-        let more = hits.len() > limit;
-        let rows = hits
-            .into_iter()
-            .take(limit)
-            .map(|h| (Row::Action(h.index), h.weight))
-            .collect();
-        Found {
-            provider: Provider::Actions,
-            rows,
-            more,
-        }
+    /// The Text tab's search (on All: plain, no mask).
+    fn text_search(&self, text: &str) -> Option<FileSearch> {
+        let root = self.context.root.clone()?;
+        let (options, mask) = if self.tab == Tab::Text {
+            let mask = match &self.mask {
+                Some(m) => Some(FileMask::parse(m).ok()?),
+                None => None,
+            };
+            (self.options, mask)
+        } else {
+            (SearchOptions::default(), None)
+        };
+        let matcher = Query::new(text, options).compile().ok()?;
+        // All Places: the excluded folders too.
+        let filter = if self.everywhere() {
+            Some(project::Filter::new(
+                &root,
+                project::Exclusions::default(),
+                project::AutoExclusions::NONE,
+            ))
+        } else {
+            self.context.filter.clone()
+        };
+        Some(FileSearch {
+            matcher,
+            mask,
+            scope: Scope::Directory {
+                path: root.clone(),
+                recursive: true,
+            },
+            root,
+            filter,
+            limit: self.limit(Provider::Text),
+            known: Default::default(),
+            overrides: self.context.overrides.clone(),
+            project_files: false,
+        })
     }
 
     /// Puts the rows found in the list: recent files first (on All), then
-    /// by weight, the providers in their order between equal weights; rows
-    /// shown before "more" stay where they were; a "more" row ends the list
-    /// when a provider has more.
+    /// by weight, the rows that came first first between equal weights;
+    /// rows shown before loading more stay where they were; a spinner row
+    /// ends the list while there are more.
     fn show_found(&mut self, found: Vec<Found>, cx: &mut Context<Self>) {
         self.searching = false;
         self.search_task = None;
+        self.cancel = None;
         self.finished = self.started.map(|t| t.elapsed());
         let text = self.field.read(cx).text();
         let previous = self.selected.and_then(|i| self.rows.get(i)).cloned();
-        let more = found.iter().any(|f| f.more);
+        self.more = found.iter().filter(|f| f.more).map(|f| f.provider).collect();
         let mut items: Vec<(Provider, Row, i32)> = Vec::new();
         for f in &found {
             for (row, weight) in &f.rows {
-                // A file already shown as a recent file is not repeated.
+                // A file shown as a recent file is not repeated.
                 if let Row::File(file) = row
                     && !file.recent
                     && items
@@ -878,30 +1033,24 @@ impl SearchEverywhere {
                 items.push((f.provider, row.clone(), *weight));
             }
         }
-        items.sort_by(|a, b| {
-            let top = |p: Provider| i32::from(p == Provider::Recent);
-            top(b.0)
-                .cmp(&top(a.0))
-                .then(b.2.cmp(&a.2))
-                .then(a.0.sort_weight().cmp(&b.0.sort_weight()))
-        });
-        let mut rows: Vec<Row> = Vec::new();
-        // Rows shown before "more" keep their places.
-        let frozen: Vec<Row> = self.rows.iter().take(self.frozen).cloned().collect();
-        rows.extend(frozen.iter().cloned());
+        items.sort_by(|a, b| b.0.pinned().cmp(&a.0.pinned()).then(b.2.cmp(&a.2)));
+        let mut rows: Vec<Row> = self.rows.iter().take(self.frozen).cloned().collect();
         for (_, row, _) in items {
             if !rows.contains(&row) {
                 rows.push(row);
             }
         }
-        if more {
-            rows.push(Row::More);
+        if !self.more.is_empty() {
+            rows.push(Row::Loading);
         }
         let nothing = rows.is_empty();
+        let new_from = self.frozen;
         self.rows = rows;
-        // Nothing in the project: look at non-project items too.
-        if nothing && !text.trim().is_empty() && !self.everywhere {
-            self.everywhere = true;
+        // Nothing found: the tab's scope widens by itself (unless the
+        // person set it in this popup).
+        let i = self.tab.index();
+        if nothing && !text.trim().is_empty() && !self.everywhere[i] && !self.chosen[i] {
+            self.everywhere[i] = true;
             self.auto_everywhere = Some(text.clone());
             if self.tab != Tab::Actions {
                 cx.emit(SearchEverywhereEvent::WantNonProject);
@@ -909,34 +1058,91 @@ impl SearchEverywhere {
             self.search_now(cx);
             return;
         }
-        self.selected = if self.rows.is_empty() {
+        let real = self.real_rows();
+        self.selected = if real == 0 {
             None
-        } else if self.frozen > 0 {
-            Some(self.frozen.min(self.rows.len() - 1))
+        } else if new_from > 0 {
+            // More rows below: the selection stays.
+            previous_index(&self.rows, previous.as_ref())
+                .or(self.selected)
+                .map(|i| i.min(real - 1))
         } else {
-            previous
-                .and_then(|p| self.rows.iter().position(|r| *r == p))
+            self.restored_selection(&text)
+                .or_else(|| previous_index(&self.rows, previous.as_ref()))
                 .or(Some(0))
         };
-        if let Some(i) = self.selected {
-            self.list.scroll_to_item(i, gpui::ScrollStrategy::Top);
-        }
         cx.notify();
+    }
+
+    /// The row selected when the popup closed with this tab and text.
+    fn restored_selection(&mut self, text: &str) -> Option<usize> {
+        let (tab, last_text, key) = self.last_selection.take()?;
+        if tab != self.tab || last_text != text {
+            return None;
+        }
+        self.rows.iter().position(|r| row_key(r).as_ref() == Some(&key))
+    }
+
+    /// Rows that are results (not the spinner row).
+    fn real_rows(&self) -> usize {
+        self.rows.iter().filter(|r| **r != Row::Loading).count()
+    }
+
+    /// The list was scrolled near its end: more rows.
+    pub(crate) fn wants_more(&self) -> bool {
+        if self.more.is_empty() || self.searching {
+            return false;
+        }
+        let list = self.list.0.borrow();
+        let handle = &list.base_handle;
+        let extent = handle.max_offset().height;
+        let rest = extent + handle.offset().y;
+        let viewport = handle.bounds().size.height;
+        extent <= px(0.0) || rest < (viewport / 2.0).max(px(50.0))
+    }
+
+    /// Every kind that has more shows a page more; the rows shown stay.
+    pub(crate) fn load_more(&mut self, cx: &mut Context<Self>) {
+        if self.more.is_empty() || self.searching {
+            return;
+        }
+        self.rows.retain(|r| *r != Row::Loading);
+        self.frozen = self.rows.len();
+        for p in self.more.clone() {
+            let limit = self.limit(p) + PAGE;
+            self.limits.insert(p, limit);
+        }
+        self.search_now(cx);
     }
 
     // ---- moving and choosing ----------------------------------------------
 
     /// Up and Down; past the ends round to the other end (Up only once
-    /// the search is complete, as more rows may still come).
+    /// all rows are there). Down at the end while more come loads them.
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let n = self.rows.len();
+        let n = self.real_rows();
         if n == 0 {
             return;
         }
+        let complete = self.more.is_empty() && !self.is_searching();
         let next = match self.selected {
             None => 0,
-            Some(i) if delta < 0 && i == 0 && self.is_searching() => 0,
-            Some(i) => (i as isize + delta).rem_euclid(n as isize) as usize,
+            Some(i) if delta < 0 && i == 0 => {
+                if complete {
+                    n - 1
+                } else {
+                    0
+                }
+            }
+            Some(i) if delta > 0 && i + 1 >= n => {
+                if complete {
+                    0
+                } else {
+                    self.load_more(cx);
+                    i
+                }
+            }
+            Some(i) => (i as isize + delta) as usize,
         };
         self.select_row(next, cx);
     }
@@ -951,8 +1157,8 @@ impl SearchEverywhere {
         (f32::from(height) / f32::from(row)).floor().max(1.0) as usize
     }
 
-    fn select_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.rows.len() {
+    pub(crate) fn select_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.real_rows() {
             return;
         }
         self.selected = Some(index);
@@ -968,13 +1174,13 @@ impl SearchEverywhere {
         cx.notify();
     }
 
-    /// Enter: opens the file, runs the action, or loads more.
+    /// Enter: opens the file or line, or runs the action.
     pub fn choose(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(row) = self.rows.get(index).cloned() else {
             return;
         };
         match row {
-            Row::More => self.load_more(cx),
+            Row::Loading => {}
             Row::File(file) => {
                 let text = self.field.read(cx).text();
                 let position = parse_position(&text);
@@ -989,6 +1195,14 @@ impl SearchEverywhere {
                     });
                 }
             }
+            Row::Text(line) => {
+                self.close(false, window, cx);
+                cx.emit(SearchEverywhereEvent::OpenFile {
+                    path: line.path,
+                    line: Some(line.line),
+                    column: Some(line.column),
+                });
+            }
             Row::Action(i) => {
                 let id = self.context.actions[i].id;
                 self.close(true, window, cx);
@@ -997,39 +1211,13 @@ impl SearchEverywhere {
         }
     }
 
-    /// "… more": every provider that has more shows that many more rows;
-    /// the rows shown stay where they are.
-    fn load_more(&mut self, cx: &mut Context<Self>) {
-        let Some(i) = self.rows.iter().position(|r| *r == Row::More) else {
-            return;
-        };
-        self.rows.remove(i);
-        self.frozen = self.rows.len();
-        let step = self.tab.limit();
-        let providers = [Provider::Recent, Provider::Files, Provider::Actions];
-        for p in providers {
-            let shown = self
-                .rows
-                .iter()
-                .filter(|r| match (p, r) {
-                    (Provider::Recent, Row::File(f)) => f.recent,
-                    (Provider::Files, Row::File(f)) => !f.recent,
-                    (Provider::Actions, Row::Action(_)) => true,
-                    _ => false,
-                })
-                .count();
-            let limit = shown + step;
-            match self.limits.iter_mut().find(|(x, _)| *x == p) {
-                Some(l) => l.1 = limit,
-                None => self.limits.push((p, limit)),
-            }
-        }
-        self.search_now(cx);
-    }
-
     // ---- actions ----------------------------------------------------------
 
     fn close_action(&mut self, _: &Close, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dropdown.take().is_some() {
+            cx.notify();
+            return;
+        }
         self.close(true, window, cx);
     }
 
@@ -1049,16 +1237,15 @@ impl SearchEverywhere {
         self.move_selection(-1, cx);
     }
 
-    /// Page Down: a page further, keeping a few rows of the last page.
+    /// Page Down: a page further, keeping a few rows of the last page (not
+    /// onto the spinner row).
     fn next_group_action(&mut self, _: &NextGroup, _: &mut Window, cx: &mut Context<Self>) {
-        if self.rows.is_empty() {
+        let n = self.real_rows();
+        if n == 0 {
             return;
         }
         let step = self.visible_rows(cx).saturating_sub(PAGE_OVERLAP).max(1);
-        let next = self
-            .selected
-            .map_or(0, |i| i + step)
-            .min(self.rows.len() - 1);
+        let next = self.selected.map_or(0, |i| i + step).min(n - 1);
         self.select_row(next, cx);
     }
 
@@ -1072,27 +1259,57 @@ impl SearchEverywhere {
         }
     }
 
-    fn toggle_everywhere_action(
-        &mut self,
-        _: &ToggleEverywhere,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn toggle_everywhere_action(&mut self, _: &ToggleEverywhere, _: &mut Window, cx: &mut Context<Self>) {
         self.toggle_everywhere(cx);
     }
 
-    fn history_previous_action(
-        &mut self,
-        _: &HistoryPrevious,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn history_previous_action(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
         self.step_history(true, cx);
     }
 
     fn history_next_action(&mut self, _: &HistoryNext, _: &mut Window, cx: &mut Context<Self>) {
         self.step_history(false, cx);
     }
+
+    /// The Text tab's options; elsewhere the key goes on to the field.
+    fn toggle_case_action(&mut self, _: &ToggleCase, _: &mut Window, cx: &mut Context<Self>) {
+        if self.tab != Tab::Text {
+            cx.propagate();
+            return;
+        }
+        self.change_options(|o| o.case_sensitive = !o.case_sensitive, cx);
+    }
+
+    fn toggle_words_action(&mut self, _: &ToggleWords, _: &mut Window, cx: &mut Context<Self>) {
+        if self.tab != Tab::Text {
+            cx.propagate();
+            return;
+        }
+        self.change_options(|o| o.whole_words = !o.whole_words, cx);
+    }
+
+    fn toggle_regex_action(&mut self, _: &ToggleRegex, _: &mut Window, cx: &mut Context<Self>) {
+        if self.tab != Tab::Text {
+            cx.propagate();
+            return;
+        }
+        self.change_options(|o| o.regex = !o.regex, cx);
+    }
+}
+
+/// How a row is found again after a reopen.
+fn row_key(row: &Row) -> Option<RowKey> {
+    match row {
+        Row::File(f) => Some(RowKey::Path(f.path.clone())),
+        Row::Action(_) => None,
+        Row::Text(t) => Some(RowKey::Line(t.path.clone(), t.line)),
+        Row::Loading => None,
+    }
+}
+
+fn previous_index(rows: &[Row], previous: Option<&Row>) -> Option<usize> {
+    let previous = previous?;
+    rows.iter().position(|r| r == previous && *r != Row::Loading)
 }
 
 /// Registers the commands.
@@ -1123,4 +1340,7 @@ popup_actions! {
     ToggleEverywhere => toggle_everywhere_action,
     HistoryPrevious => history_previous_action,
     HistoryNext => history_next_action,
+    ToggleCase => toggle_case_action,
+    ToggleWords => toggle_words_action,
+    ToggleRegex => toggle_regex_action,
 }

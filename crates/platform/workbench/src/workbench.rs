@@ -798,9 +798,17 @@ impl Workbench {
         }
         let focus = window.focused(cx);
         let actions = search_everywhere::actions::collect(focus.as_ref(), window, cx);
+        let overrides = self
+            .tabs
+            .iter()
+            .filter(|t| t.editor.read(cx).is_modified())
+            .map(|t| (t.path.clone(), t.editor.read(cx).buffer().rope().clone()))
+            .collect();
         search_everywhere::OpenContext {
             root: self.project(cx).map(|p| p.root().to_owned()),
             index: self.project_files.read(cx).index(),
+            filter: self.panel.read(cx).filter().cloned(),
+            overrides,
             selection,
             open_files: self.tab_paths(),
             current_file: self.active.map(|i| self.tabs[i].path.clone()),
@@ -847,6 +855,10 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         self.show_search_everywhere(SeTab::Actions, window, cx);
+    }
+
+    fn go_to_text(&mut self, _: &search_everywhere::GoToText, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_search_everywhere(SeTab::Text, window, cx);
     }
 
     fn search_everywhere_for(
@@ -1710,6 +1722,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_search_everywhere))
             .on_action(cx.listener(Self::go_to_file))
             .on_action(cx.listener(Self::go_to_action))
+            .on_action(cx.listener(Self::go_to_text))
             .on_action(cx.listener(Self::search_everywhere_for))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
