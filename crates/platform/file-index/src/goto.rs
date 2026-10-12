@@ -22,7 +22,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 use name_match::{Matcher, MatchingMode, START_MATCH_WEIGHT};
 
@@ -45,6 +45,37 @@ pub struct GotoQuery<'a> {
     pub open_files: &'a [PathBuf],
     /// The file of the active editor: files in its folder go next.
     pub context: Option<&'a Path>,
+    /// The home folder, for paths typed as `~/...`.
+    pub home: Option<&'a Path>,
+}
+
+/// The file or folder an absolute path typed in full points to, in the
+/// project or not (Go to File finds it first, whatever the scope): the line
+/// and column are left out, `~/` stands for `home` (not on Windows), and
+/// the filesystem root, a network path or a path that does not exist point
+/// nowhere.
+pub fn absolute_path(text: &str, home: Option<&Path>) -> Option<PathBuf> {
+    if !text.contains(['/', '\\']) {
+        return None;
+    }
+    let path = parse_position(text).pattern;
+    let path = path.trim_end();
+    let path = match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) if !cfg!(windows) => home.join(rest),
+        _ => PathBuf::from(path),
+    };
+    // A network path could keep the search waiting.
+    let network = path.to_string_lossy().starts_with("//")
+        || matches!(
+            path.components().next(),
+            Some(Component::Prefix(p)) if matches!(p.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+        );
+    if !path.is_absolute() || path.parent().is_none() || network {
+        return None;
+    }
+    // The path as the index keeps it: no `.` parts, no trailing slash.
+    let path: PathBuf = path.components().collect();
+    path.exists().then_some(path)
 }
 
 /// A file or folder found.
@@ -76,7 +107,7 @@ impl FileIndex {
             }
         };
         let text = query.text;
-        if let Some(id) = self.by_path(text, query.non_project) {
+        if let Some(id) = absolute_path(text, query.home).and_then(|p| self.find(&p)) {
             emit(self.hit(id, EXACT_MATCH_DEGREE), &mut out);
         }
         let text = text
@@ -109,22 +140,6 @@ impl FileIndex {
             }
         }
         out
-    }
-
-    /// An absolute path typed in full, of a file or folder of the project
-    /// (a path from the project folder ranks first by its folder match
-    /// instead, as in the reference).
-    fn by_path(&self, text: &str, non_project: bool) -> Option<EntryId> {
-        if !text.contains(['/', '\\']) {
-            return None;
-        }
-        let path = parse_position(text).pattern;
-        let path = PathBuf::from(path.trim_end().trim_end_matches(['/', '\\']));
-        if !path.is_absolute() || !path.starts_with(self.root()) {
-            return None;
-        }
-        self.find(&path)
-            .filter(|&id| id != ROOT && (non_project || !self.is_excluded(id)))
     }
 
     fn hit(&self, id: EntryId, weight: i32) -> FileHit {

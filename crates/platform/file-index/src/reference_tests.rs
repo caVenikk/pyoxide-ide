@@ -51,6 +51,7 @@ impl Fixture {
             non_project,
             open_files: &[],
             context,
+            home: None,
         }
     }
 
@@ -299,4 +300,78 @@ fn exact_case_and_keyboard_layout() {
     );
     let f = fixture(&["String.java"]);
     assert_eq!(f.goto("Ыекштп"), ["String.java"]);
+}
+
+#[test]
+fn a_full_path() {
+    let f = fixture(&["foo/index.html", ".idea/workspace.xml"]);
+    let path = f.root.join("foo").join("index.html").display().to_string();
+    assert_eq!(f.goto(&path), ["foo/index.html"]);
+    assert_eq!(f.goto(&format!("{path}:0")), ["foo/index.html"]);
+    let dir = f.root.join("foo").display().to_string();
+    assert_eq!(f.goto(&dir), ["foo/"]);
+    // Excluded content too, whatever the scope.
+    let excluded = f.root.join(".idea").join("workspace.xml");
+    assert_eq!(
+        f.goto(&excluded.display().to_string()),
+        [".idea/workspace.xml"]
+    );
+}
+
+#[test]
+fn absolute_paths_outside_the_project() {
+    let f = fixture(&["foo/index.html"]);
+    let outside = tempfile::tempdir().unwrap();
+    let dir = std::fs::canonicalize(outside.path()).unwrap();
+    let file = dir.join("outside.txt");
+    std::fs::write(&file, "").unwrap();
+    let text = file.display().to_string();
+    assert_eq!(absolute_path(&text, None), Some(file.clone()));
+    assert_eq!(absolute_path(&format!("{text}:12"), None), Some(file.clone()));
+    let dir_text = dir.display().to_string();
+    assert_eq!(absolute_path(&dir_text, None), Some(dir.clone()));
+    if !cfg!(windows) {
+        assert_eq!(absolute_path("~/outside.txt", Some(&dir)), Some(file.clone()));
+        assert_eq!(absolute_path("~/", Some(&dir)), Some(dir.clone()));
+    }
+    let missing = dir.join("definitely").join("not").join("here.txt");
+    assert_eq!(absolute_path(&missing.display().to_string(), None), None);
+    // The filesystem root is no match: it would outrank every other.
+    assert_eq!(absolute_path("/", None), None);
+    assert_eq!(absolute_path("//", None), None);
+    // Not in the index: the popup adds the row itself.
+    assert!(f.goto(&text).is_empty());
+}
+
+#[test]
+fn file_names_before_folder_matches() {
+    let f = fixture(&["resolve/ResolveCache.java", "abc/ResolveCacheSettings.xml"]);
+    assert_eq!(
+        f.goto("resolvecache"),
+        ["resolve/ResolveCache.java", "abc/ResolveCacheSettings.xml"]
+    );
+}
+
+#[test]
+fn a_long_full_name() {
+    let dirs = [
+        "aaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbb",
+        "cccccccccccccccccc",
+        "ddddddddddddddddd",
+        "eeeeeeeeeeeeeeee",
+        "ffffffffffffffffff",
+        "ggggggggggggggggg",
+        "hhhhhhhhhhhhhhhh",
+    ];
+    let file = format!("{}/ClassName.java", dirs.join("/"));
+    let f = fixture(&[&file]);
+    let text = format!("{}/ClassName.java", dirs[1..].join("/"));
+    assert_eq!(f.goto(&text), [file]);
+}
+
+#[test]
+fn a_folder_and_a_name_in_the_russian_layout() {
+    let f = fixture(&["lang/String.java"]);
+    assert_eq!(f.goto("дфтпЫекштп"), ["lang/String.java"]);
 }

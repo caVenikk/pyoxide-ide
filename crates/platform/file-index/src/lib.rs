@@ -24,8 +24,8 @@ mod reference_tests;
 use std::path::PathBuf;
 
 pub use goto::{
-    DIRECTORY_MATCH_DEGREE, EXACT_MATCH_DEGREE, FileHit, GotoQuery, qualifier_matcher, rank,
-    sanitized_pattern,
+    DIRECTORY_MATCH_DEGREE, EXACT_MATCH_DEGREE, FileHit, GotoQuery, absolute_path,
+    qualifier_matcher, rank, sanitized_pattern,
 };
 pub use index::{EntryId, FileIndex, ROOT};
 pub use position::{Position, parse_position};

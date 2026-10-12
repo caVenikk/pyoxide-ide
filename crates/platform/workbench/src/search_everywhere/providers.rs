@@ -8,7 +8,9 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use file_index::{EXACT_MATCH_DEGREE, FileHit, FileIndex, GotoQuery, parse_position, rank};
+use file_index::{
+    EXACT_MATCH_DEGREE, FileHit, FileIndex, GotoQuery, absolute_path, parse_position, rank,
+};
 use name_match::{Matcher, MatchingMode};
 use project_search::{FileSearch, Results};
 use search::CancelToken;
@@ -168,6 +170,8 @@ pub(super) struct FilesQuery {
     pub non_project: bool,
     pub open_files: Vec<PathBuf>,
     pub current: Option<PathBuf>,
+    /// The home folder, for paths typed as `~/...`.
+    pub home: Option<PathBuf>,
     /// File types left out by the filter ("Directory" for folders).
     pub hidden_types: HashSet<String>,
     pub types: FileTypes,
@@ -186,21 +190,37 @@ pub(super) fn files(q: FilesQuery) -> Found {
         non_project: q.non_project,
         open_files: &q.open_files,
         context: q.current.as_deref(),
+        home: q.home.as_deref(),
     };
-    let hidden = |h: &FileHit| {
+    let hidden_path = |path: &std::path::Path, is_dir: bool| {
         if q.hidden_types.is_empty() {
             return false;
         }
-        let name = if h.is_dir {
+        let name = if is_dir {
             DIRECTORY_TYPE
         } else {
-            match q.types.for_path(&q.index.path(h.id)) {
+            match q.types.for_path(path) {
                 Some(t) => t.name,
                 None => return false,
             }
         };
         q.hidden_types.contains(name)
     };
+    let hidden = |h: &FileHit| hidden_path(&q.index.path(h.id), h.is_dir);
+    // An absolute path outside the index, typed in full, goes first.
+    let outside = absolute_path(&q.text, q.home.as_deref())
+        .filter(|path| q.index.find(path).is_none())
+        .map(|path| {
+            let is_dir = path.is_dir();
+            FileRow {
+                path,
+                is_dir,
+                non_project: true,
+                recent: false,
+                weight: EXACT_MATCH_DEGREE,
+            }
+        })
+        .filter(|row| !hidden_path(&row.path, row.is_dir));
     let hits: Vec<FileHit> = q
         .index
         .goto_file(&query, &|| false)
@@ -249,6 +269,9 @@ pub(super) fn files(q: FilesQuery) -> Found {
         .collect::<Vec<_>>();
     let mut rows = rows;
     rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+    if let Some(row) = outside {
+        rows.insert(0, (Row::File(row), EXACT_MATCH_DEGREE));
+    }
     Found {
         provider: Provider::Files,
         rows,

@@ -309,6 +309,28 @@ fn folders_in_the_pattern(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_path_outside_the_project_typed_in_full(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let outside = tempfile::tempdir().unwrap();
+        let dir = if cfg!(windows) {
+            outside.path().to_path_buf()
+        } else {
+            std::fs::canonicalize(outside.path()).unwrap()
+        };
+        let file = dir.join("outside.txt");
+        std::fs::write(&file, "one\ntwo\n").unwrap();
+        h.press(h.keys.go_to_file);
+        h.type_text(&format!("{}:2", file.display()));
+        h.settle();
+        let shown = file.display().to_string().replace('\\', "/");
+        assert_eq!(h.rows(), [format!("file:{shown}")]);
+        h.press("enter");
+        h.draw();
+        assert_eq!(h.caret(), (shown, 1, 0));
+    });
+}
+
+#[gpui::test]
 fn double_shift_opens_search_everywhere(cx: &mut TestAppContext) {
     both(cx, |h| {
         // Too slow: nothing.

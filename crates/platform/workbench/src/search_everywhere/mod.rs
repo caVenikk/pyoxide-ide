@@ -993,6 +993,7 @@ impl SearchEverywhere {
             non_project: self.everywhere(),
             open_files: self.context.open_files.clone(),
             current: self.context.current_file.clone(),
+            home: dirs::home_dir(),
             hidden_types: hidden,
             types: (*self.file_types).clone(),
             limit: self.limit(Provider::Files),
