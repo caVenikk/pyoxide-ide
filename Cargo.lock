@@ -3370,6 +3370,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignore"
+version = "0.4.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00b69833ed729dc5aa7d19541d96d6cf8e9137194207a04916d658e43168402f"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata",
+ "same-file",
+ "walkdir",
+ "winapi-util",
+]
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4949,6 +4965,18 @@ dependencies = [
  "text",
  "thiserror 2.0.21",
  "toml_edit 0.25.17+spec-1.1.0",
+]
+
+[[package]]
+name = "project-search"
+version = "0.0.1"
+dependencies = [
+ "ignore",
+ "project",
+ "regex",
+ "search",
+ "tempfile",
+ "text",
 ]
 
 [[package]]
@@ -8420,12 +8448,17 @@ version = "0.0.1"
 dependencies = [
  "commands",
  "core-graphics 0.24.0",
+ "dirs 7.0.0",
  "editor",
+ "futures",
  "gpui",
  "image",
  "objc",
  "project",
+ "project-search",
  "raw-window-handle",
+ "regex",
+ "search",
  "serde",
  "serde_json",
  "tempfile",

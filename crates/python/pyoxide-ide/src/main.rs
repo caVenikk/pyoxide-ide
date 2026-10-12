@@ -79,6 +79,11 @@ fn product() -> Product {
             },
         ],
         interpreter_label: Some("No interpreter"),
+        // The reference IDE's masks for Python: the language's files, then
+        // markup and styles, then notebooks, stubs and Cython.
+        find_file_masks: vec![
+            "*.py", "*.xml", "*.html", "*.css", "*.ipynb", "*.pyi", "*.pyx", "*.pxd", "*.pxi",
+        ],
         auto_excluded: EXCLUDED,
     }
 }

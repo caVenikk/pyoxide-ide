@@ -24,7 +24,8 @@
   non-project files, the name in the normal text colour, collapsed.
   `build` is an ordinary folder: files that version control ignores are
   ordinary content. `.gitignore` itself is shown.
-- Step 3: the menu has *Mark Directory As* with *Excluded*; after choosing
+- Step 3: the menu has *Find in Files…* and *Replace in Files…*, then
+  *Mark Directory As* with *Excluded*; after choosing
   it `docs` looks like `.venv` and stays collapsed. Expand All leaves it
   closed. A `.oxide/project.toml` file appears with `docs` under
   `[exclusions] paths`.

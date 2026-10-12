@@ -13,6 +13,8 @@
 "ctrl-f4" = "tabs.close"
 "alt-right" = "tabs.next"
 "alt-left" = "tabs.previous"
+"ctrl-shift-f" = "find-in-files.open"
+"ctrl-shift-r" = "find-in-files.open-replace"
 
 [[context]]
 name = "ProjectTree"
@@ -161,3 +163,78 @@ name = "ContextMenu"
 "left" = "menu.close-submenu"
 "enter" = "menu.confirm"
 "escape" = "menu.cancel"
+
+# The Find in Files popup. In its fields Enter opens the selected result
+# (Shift+Enter too) and Escape closes the popup; Up and Down (while the
+# field holds one line), Page Up and Page Down and the Find Next and
+# Previous keys move through the results; Tab and Shift+Tab go from field
+# to field; Alt+Down shows the field's history. The options, the file
+# mask, the scopes and Recursively take the reference IDE's mnemonic keys:
+# Alt with the letter. In the preview, Enter, Tab and Alt+Down are the
+# editor's, and F3, Ctrl+L, Shift+F3 and Ctrl+Shift+L its Find Next and Find
+# Previous (below). F4 (Edit Source) opens the file: from the preview at its
+# caret.
+[[context]]
+name = "FindInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.open-result"
+"shift-enter" = "find-in-files.open-result"
+"escape" = "find-in-files.close"
+"f3" = "find-in-files.next-result"
+"ctrl-l" = "find-in-files.next-result"
+"shift-f3" = "find-in-files.previous-result"
+"ctrl-shift-l" = "find-in-files.previous-result"
+"tab" = "find-in-files.next-field"
+"shift-tab" = "find-in-files.previous-field"
+"alt-down" = "find.show-history"
+"alt-c" = "find.toggle-case"
+"alt-w" = "find.toggle-words"
+"alt-x" = "find.toggle-regex"
+"alt-k" = "find-in-files.toggle-mask"
+"alt-p" = "find-in-files.scope-project"
+"alt-m" = "find-in-files.scope-module"
+"alt-d" = "find-in-files.scope-directory"
+"alt-s" = "find-in-files.scope-named"
+"alt-y" = "find-in-files.toggle-recursive"
+"f4" = "find-in-files.edit-source"
+
+# Find Next and Find Previous in the preview are the editor's.
+[[context]]
+name = "FindInFilesPreview > Editor"
+[context.bindings]
+"f3" = "find.next"
+"ctrl-l" = "find.next"
+"shift-f3" = "find.previous"
+"ctrl-shift-l" = "find.previous"
+
+# The search and replace fields can hold several lines.
+[[context]]
+name = "FindInFilesQuery > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"pagedown" = "find-in-files.page-down"
+"pageup" = "find-in-files.page-up"
+"ctrl-shift-enter" = "find.new-line"
+
+[[context]]
+name = "FindInFilesReplace > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"ctrl-shift-enter" = "find.new-line"
+
+# Replace in Files: Enter replaces the selected match, Shift+Alt+Enter
+# replaces them all.
+[[context]]
+name = "ReplaceInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.replace-selected"
+"shift-enter" = "find-in-files.replace-selected"
+"alt-shift-enter" = "find-in-files.replace-all"
+
+# Shift+Enter in the folder field shows the folder chooser.
+[[context]]
+name = "FindInFilesDirectory > Editor"
+[context.bindings]
+"shift-enter" = "find-in-files.browse-directory"

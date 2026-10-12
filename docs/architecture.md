@@ -40,6 +40,11 @@ Platform (`crates/platform/`, language-agnostic):
   excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
   project settings and the one-time import of the reference IDE's
   exclusions (ADR 0008), reading and writing documents.
+- `project-search`: Find in Files without a toolkit: the files of a scope
+  that are project content (the project's hidden and excluded entries left
+  out), file masks, a parallel cancellable search that streams the matching
+  lines and stops at a limit (later passes skip the lines shown), the
+  results as ordered rows, and replacing in files on disk.
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
   commands) and its find bar (Find / Replace in the file).
@@ -50,8 +55,9 @@ Platform (`crates/platform/`, language-agnostic):
   components, context menus, the UI command index (`ui_commands!`,
   `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
-  area, status bar), keymaps, application start-up, environment switches
-  and in-app measurements.
+  area, status bar, a movable and resizable popup frame, the Find in Files
+  and Replace in Files popup with its preview), keymaps, application
+  start-up, environment switches and in-app measurements.
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model

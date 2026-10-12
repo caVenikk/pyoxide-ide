@@ -23,6 +23,11 @@ pub fn set_native_windows() {
     NATIVE.store(true, Ordering::Relaxed);
 }
 
+/// Whether the windows are real ones (not the test platform's).
+pub fn native_windows() -> bool {
+    NATIVE.load(Ordering::Relaxed)
+}
+
 /// Draws a frame of a native window now rather than at the next display
 /// refresh (see [`request_display`]); nothing in tests.
 pub fn draw_now(window: &gpui::Window) {

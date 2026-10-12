@@ -77,8 +77,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Main window chrome (toolbar, tool-window stripes, status bar) | must | New UI layout and Islands themes; toolbar file path; stripe buttons, run widget and status bar widgets are placeholders; native caption on Windows/Linux |
 | ✅ | Python syntax highlighting | must | tree-sitter off the UI thread mapped to theme text roles |
 | 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
-| 🟡 | File tree and project model | must | open folder, lazy tree with ignore rules, keyboard navigation; no file operations or drag and drop |
-| 🟡 | Search in file and project | must | find and replace in file (#31: regex, case, words, in selection, history); project search is #43 |
+| 🟡 | File tree and project model | must | open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; no file operations or drag and drop |
+| 🟡 | Search in file and project | must | find and replace in file (#31) and in files (#43: scopes, masks, editable preview, Replace in Files); missing: Find tool window (#65), multi-row selection (#66), undo across files (#67), comment/string filters (#50) |
 | ⬜ | Multi-cursor and column selection | should |  |
 | ⬜ | Code folding | should |  |
 | ⬜ | Live templates | should |  |

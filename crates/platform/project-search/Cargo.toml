@@ -1,0 +1,17 @@
+[package]
+name = "project-search"
+description = "Find in Files of Pyoxide IDE: searching the files of a project (scopes, file masks, open documents) in parallel, streaming the matching lines, and replacing in files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ignore = "0.4"
+project.workspace = true
+regex.workspace = true
+search.workspace = true
+text.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

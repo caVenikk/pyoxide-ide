@@ -185,6 +185,7 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
             Bench::Open(path) => open(window, path, cx).await,
             Bench::Cursor => cursor(window, cx).await,
             Bench::Find(query) => find(window, query, cx).await,
+            Bench::FindInFiles(query) => find_in_files(window, query, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -519,6 +520,89 @@ async fn find(window: WindowHandle<Workbench>, query: String, cx: &mut AsyncApp)
             "matches": counts.last().copied().flatten(),
             "key_to_highlight_ms": stats(latency),
             "key_handling_ms": stats(handling),
+        })
+    ));
+}
+
+/// Searches the open project with Find in Files: the time from the
+/// command to the first rows on the UI thread and to the end of the
+/// search, and the longest frame drawn meanwhile.
+async fn find_in_files(window: WindowHandle<Workbench>, query: String, cx: &mut AsyncApp) {
+    const RUNS: usize = 5;
+    // The project's tree is listed first.
+    let until = Instant::now() + Duration::from_secs(60);
+    while Instant::now() < until {
+        let busy = window.read_with(cx, |w, cx| w.is_busy(cx)).unwrap_or(true);
+        if !busy {
+            break;
+        }
+        sleep(cx, Duration::from_millis(50)).await;
+    }
+    sleep(cx, Duration::from_secs(1)).await;
+    let display = display_frames(window, cx).await;
+    let (mut first, mut done, mut longest) = (Vec::new(), Vec::new(), Vec::new());
+    let mut result = serde_json::Value::Null;
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            let args = json!({
+                "text": query,
+                "case_sensitive": false,
+                "whole_words": false,
+                "regex": false,
+                "mask": "",
+            });
+            let _ = ui::command::invoke("find-in-files.search", args, window, cx);
+        });
+        let until = Instant::now() + Duration::from_secs(120);
+        let mut timing = None;
+        while Instant::now() < until {
+            sleep(cx, Duration::from_millis(1)).await;
+            if !display {
+                force_frame(window, cx);
+            }
+            timing = window
+                .read_with(cx, |w, cx| w.find_in_files().read(cx).timing())
+                .ok()
+                .flatten();
+            if timing.is_some_and(|t| t.1.is_some()) {
+                break;
+            }
+        }
+        let Some((first_rows, finished)) = timing else {
+            continue;
+        };
+        if let Some(t) = first_rows {
+            first.push(ms(t));
+        }
+        if let Some(t) = finished {
+            done.push(ms(t));
+        }
+        let end = Instant::now();
+        let frames_ms: Vec<f64> = frames()
+            .into_iter()
+            .filter(|f| f.start >= started && f.end <= end)
+            .map(|f| ms(f.end - f.start))
+            .collect();
+        longest.push(frames_ms.iter().copied().fold(0.0, f64::max));
+        result = window
+            .read_with(cx, |w, cx| {
+                let s = w.find_in_files().read(cx).state_json(cx);
+                json!({ "matches": s["matches"], "files": s["files"], "info": s["info"] })
+            })
+            .unwrap_or_default();
+        sleep(cx, Duration::from_millis(300)).await;
+    }
+    env::marker(&format!(
+        "find_in_files {}",
+        json!({
+            "frames": frame_source(display),
+            "query": query,
+            "runs": RUNS,
+            "result": result,
+            "first_rows_ms": stats(first),
+            "done_ms": stats(done),
+            "longest_frame_ms": stats(longest),
         })
     ));
 }

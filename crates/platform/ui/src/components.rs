@@ -1,9 +1,12 @@
 //! Small building blocks shared by the workbench and the editor. Every
 //! colour and size comes from the theme.
 
+use std::time::Duration;
+
 use gpui::{
-    AnyView, App, Context, Div, ElementId, FontWeight, IntoElement, Render, SharedString, Stateful,
-    Window, div, prelude::*, px,
+    Animation, AnimationExt as _, AnyView, App, BoxShadow, Context, Div, ElementId, FontWeight,
+    IntoElement, PathBuilder, Render, SharedString, Stateful, Window, canvas, div, point,
+    prelude::*, px,
 };
 use themes::{Metric, UiRole};
 
@@ -140,6 +143,94 @@ pub fn text_button(
         .child(label.into())
 }
 
+/// Popup shadow: `Ide.Shadow` of the Islands themes, 16 px of `#00000020`
+/// in both the dark and the light theme.
+const SHADOW_BLUR: f32 = 16.0;
+const SHADOW_ALPHA: f32 = 32.0 / 255.0;
+
+/// The shadow of popups, menus and tooltips.
+pub fn popup_shadow() -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: gpui::hsla(0.0, 0.0, 0.0, SHADOW_ALPHA),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(SHADOW_BLUR),
+        spread_radius: px(0.0),
+    }]
+}
+
+/// Size of a check box.
+pub const CHECKBOX: f32 = 16.0;
+
+/// A check box: a rounded square with the input outline, filled with the
+/// accent colour and a check mark while it is on. The caller adds the click
+/// handler (usually on the check box and its label together).
+pub fn checkbox(id: impl Into<ElementId>, checked: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let mark = theme.color(UiRole::OnAccent);
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(CHECKBOX))
+        .rounded(theme.metric(Metric::CornerRadiusSmall))
+        .when(checked, |d| {
+            d.bg(theme.color(UiRole::Accent)).child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let o = bounds.origin;
+                        let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
+                        let mut path = PathBuilder::stroke(px(1.75));
+                        path.move_to(at(4.0, 8.0));
+                        path.line_to(at(7.0, 11.0));
+                        path.line_to(at(12.0, 5.0));
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, mark);
+                        }
+                    },
+                )
+                .size_full(),
+            )
+        })
+        .when(!checked, |d| {
+            d.border_1().border_color(theme.color(UiRole::BorderInput))
+        })
+}
+
+/// Size of the loading indicator.
+pub const SPINNER: f32 = 16.0;
+
+/// The loading indicator: eight dots in a circle, the bright one going
+/// round, as the reference IDE's animated progress icon.
+pub fn spinner(id: impl Into<ElementId>, cx: &App) -> impl IntoElement {
+    let color = cx.theme().color(UiRole::TextMuted);
+    div()
+        .relative()
+        .flex_none()
+        .size(px(SPINNER))
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(800)).repeat(),
+            move |d, delta| {
+                let step = (delta * 8.0) as usize % 8;
+                d.children((0..8).map(|i| {
+                    let angle = std::f32::consts::TAU * i as f32 / 8.0;
+                    let (r, dot) = (5.5, 3.0);
+                    let x = SPINNER / 2.0 + r * angle.sin() - dot / 2.0;
+                    let y = SPINNER / 2.0 - r * angle.cos() - dot / 2.0;
+                    let age = (step + 8 - i) % 8;
+                    div()
+                        .absolute()
+                        .left(px(x))
+                        .top(px(y))
+                        .size(px(dot))
+                        .rounded_full()
+                        .bg(color)
+                        .opacity(1.0 - age as f32 * 0.11)
+                }))
+            },
+        )
+}
+
 /// The frame of a one-line text input: rounded, with the input outline;
 /// while `focused` the theme's focus ring is drawn over the outline, and
 /// with `error` the outline takes the danger colour. Children go in a row:
@@ -233,9 +324,9 @@ impl Render for Tooltip {
             .py(px(6.0))
             .rounded(theme.metric(Metric::CornerRadius) * 2.0)
             .border_1()
-            .border_color(theme.color(UiRole::Border))
+            .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow_md()
+            .shadow(popup_shadow())
             .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .text_color(theme.color(UiRole::Text))

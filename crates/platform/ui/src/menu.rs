@@ -15,10 +15,10 @@
 //! the menu closes it; so does deactivating the window.
 
 use gpui::{
-    Action, AnyElement, App, AppContext as _, BoxShadow, Context, DismissEvent, Entity,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, anchored, deferred, div, point, prelude::*, px,
+    Action, AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    Point, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    anchored, deferred, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
@@ -77,10 +77,6 @@ const ICON_GAP: f32 = 4.0;
 /// Room after the label (`BegMenuItemUI.getPreferredSize`: the gutter of
 /// 18 and four text gaps); a submenu's arrow sits at its right end.
 const TRAILING: f32 = 18.0 + 4.0 * ICON_GAP;
-/// Popup shadow: `Ide.Shadow` of the Islands themes, 16 px of `#00000020`
-/// in both the dark and the light theme.
-const SHADOW_BLUR: f32 = 16.0;
-const SHADOW_ALPHA: f32 = 32.0 / 255.0;
 
 /// One row of a menu.
 pub enum MenuItem {
@@ -543,12 +539,7 @@ impl ContextMenu {
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow(vec![BoxShadow {
-                color: gpui::hsla(0.0, 0.0, 0.0, SHADOW_ALPHA),
-                offset: point(px(0.0), px(0.0)),
-                blur_radius: px(SHADOW_BLUR),
-                spread_radius: px(0.0),
-            }])
+            .shadow(crate::components::popup_shadow())
             .children(rows)
             .into_any_element()
     }

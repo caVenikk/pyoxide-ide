@@ -181,12 +181,20 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     right_click(cx, window, "tree-row:docs");
     let t = tree(cx, window);
     assert_eq!(t["selected"], json!("docs"));
-    assert_eq!(menu(&t), [["Mark Directory As"]]);
+    assert_eq!(
+        menu(&t),
+        [[
+            "Find in Files…",
+            "Replace in Files…",
+            "-",
+            "Mark Directory As"
+        ]]
+    );
 
     // Hovering the submenu row opens it; it offers Excluded.
     hover(cx, window, "menu-item:Mark Directory As");
     let t = tree(cx, window);
-    assert_eq!(menu(&t), [vec!["Mark Directory As"], vec!["Excluded"]]);
+    assert_eq!(menu(&t)[1], ["Excluded"]);
     assert_eq!(
         t["context_menu"]["levels"][1]["items"][0]["command"],
         json!("project.tree.mark-excluded")
@@ -228,23 +236,25 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     );
     // Rows inside an excluded folder have nothing to mark.
     right_click(cx, window, "tree-row:docs/api");
-    assert_eq!(tree(cx, window)["context_menu"], json!(null));
+    assert_eq!(
+        menu(&tree(cx, window)),
+        [vec!["Find in Files…", "Replace in Files…"]]
+    );
+    press(cx, window, "escape");
     invoke(cx, window, "project.tree.collapse-all", json!(null));
 
-    // The menu again, now with the keyboard: Right opens the submenu and
-    // selects its first row, which is Cancel Exclusion; Enter runs it.
+    // The menu again, now with the keyboard: Up selects its last row,
+    // Right opens the submenu and selects its first row, which is Cancel
+    // Exclusion; Enter runs it.
     right_click(cx, window, "tree-row:docs");
-    press(cx, window, "down");
+    press(cx, window, "up");
     assert_eq!(
         tree(cx, window)["context_menu"]["levels"][0]["selected"],
-        json!(0)
+        json!(3)
     );
     press(cx, window, "right");
     let t = tree(cx, window);
-    assert_eq!(
-        menu(&t),
-        [vec!["Mark Directory As"], vec!["Cancel Exclusion"]]
-    );
+    assert_eq!(menu(&t)[1], ["Cancel Exclusion"]);
     assert_eq!(t["context_menu"]["levels"][1]["selected"], json!(0));
     // Left closes the submenu, Escape the menu.
     press(cx, window, "left");
@@ -254,7 +264,7 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     assert_eq!(row(&tree(cx, window), "docs")["excluded"], json!(true));
 
     right_click(cx, window, "tree-row:docs");
-    press(cx, window, "down right enter");
+    press(cx, window, "up right enter");
     let t = tree(cx, window);
     assert_eq!(t["context_menu"], json!(null));
     assert_eq!(row(&t, "docs")["excluded"], json!(false));
@@ -265,7 +275,10 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
 
     // A click outside the menu closes it without doing anything.
     right_click(cx, window, "tree-row:notes.txt");
-    assert_eq!(menu(&tree(cx, window)), [["Mark File As"]]);
+    assert_eq!(
+        menu(&tree(cx, window)),
+        [["Find in Files…", "Replace in Files…", "-", "Mark File As"]]
+    );
     click(cx, window, "tree-row:src");
     let t = tree(cx, window);
     assert_eq!(t["context_menu"], json!(null));
@@ -274,9 +287,17 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     // A folder a product rule excludes offers no Cancel Exclusion, and the
     // project root has nothing to mark.
     right_click(cx, window, "tree-row:.venv");
-    assert_eq!(tree(cx, window)["context_menu"], json!(null));
+    assert_eq!(
+        menu(&tree(cx, window)),
+        [vec!["Find in Files…", "Replace in Files…"]]
+    );
+    press(cx, window, "escape");
     right_click(cx, window, "tree-row:");
-    assert_eq!(tree(cx, window)["context_menu"], json!(null));
+    assert_eq!(
+        menu(&tree(cx, window)),
+        [vec!["Find in Files…", "Replace in Files…"]]
+    );
+    press(cx, window, "escape");
 }
 
 #[gpui::test]
@@ -341,10 +362,7 @@ fn marks_persist_and_files_can_be_excluded_by_command(cx: &mut TestAppContext) {
     // The file's menu says Mark File As.
     right_click(cx, window, "tree-row:notes.txt");
     hover(cx, window, "menu-item:Mark File As");
-    assert_eq!(
-        menu(&tree(cx, window)),
-        [vec!["Mark File As"], vec!["Cancel Exclusion"]]
-    );
+    assert_eq!(menu(&tree(cx, window))[1], ["Cancel Exclusion"]);
     press(cx, window, "escape escape");
 
     // Reopening the project keeps the marks.
@@ -384,7 +402,15 @@ fn context_menu_from_the_keyboard(cx: &mut TestAppContext) {
     invoke(cx, window, "project.tree.reveal", json!({"path": "src"}));
     invoke(cx, window, "project.tree.context-menu", json!(null));
     let t = tree(cx, window);
-    assert_eq!(menu(&t), [["Mark Directory As"]]);
+    assert_eq!(
+        menu(&t),
+        [[
+            "Find in Files…",
+            "Replace in Files…",
+            "-",
+            "Mark Directory As"
+        ]]
+    );
     // It opens below the selected row.
     let row_bounds = {
         draw(cx, window);
@@ -399,10 +425,10 @@ fn context_menu_from_the_keyboard(cx: &mut TestAppContext) {
         (menu_bounds.top() - row_bounds.bottom()).abs() < gpui::px(1.0),
         "menu at {menu_bounds:?}, row at {row_bounds:?}"
     );
-    press(cx, window, "down enter");
+    press(cx, window, "up enter");
     // Enter on a submenu row opens it and selects its first row.
     let t = tree(cx, window);
-    assert_eq!(menu(&t), [vec!["Mark Directory As"], vec!["Excluded"]]);
+    assert_eq!(menu(&t)[1], ["Excluded"]);
     press(cx, window, "enter");
     assert_eq!(row(&tree(cx, window), "src")["excluded"], json!(true));
 }

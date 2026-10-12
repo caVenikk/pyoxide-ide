@@ -147,6 +147,13 @@ impl ProjectPanel {
         self.loading > 0
     }
 
+    /// The selected row's path and whether it is a folder.
+    pub fn selected_path(&self) -> Option<(&Path, bool)> {
+        let tree = self.tree.as_ref()?;
+        let entry = &tree.node(self.selected?).entry;
+        Some((entry.path.as_path(), entry.is_dir()))
+    }
+
     /// The hide and exclude rules of the open project, once loaded. They
     /// are replaced (a cheap clone) whenever the person marks or unmarks a
     /// folder, so a search that takes them at its start sees every change
@@ -561,17 +568,24 @@ impl ProjectPanel {
         .detach();
     }
 
-    /// The rows of the context menu of `id`: *Mark Directory As* (or *Mark
-    /// File As*) with *Excluded* for project content or *Cancel Exclusion*
-    /// for a stored exclusion. The project root, rows inside an excluded
-    /// folder and folders a product excludes have nothing to mark.
+    /// The rows of the context menu of `id`, in the reference IDE's order:
+    /// *Find in Files…* and *Replace in Files…* (the row's folder, or the
+    /// folder of a file, becomes the Directory scope), then *Mark Directory
+    /// As* (or *Mark File As*) with *Excluded* for project content or
+    /// *Cancel Exclusion* for a stored exclusion. The project root, rows
+    /// inside an excluded folder and folders a product excludes have
+    /// nothing to mark.
     fn context_menu_items(&self, id: NodeId) -> Vec<MenuItem> {
         let (Some(tree), Some(filter)) = (&self.tree, &self.filter) else {
             return Vec::new();
         };
+        let mut items = vec![
+            MenuItem::action("Find in Files…", crate::find_in_files::Open),
+            MenuItem::action("Replace in Files…", crate::find_in_files::OpenReplace),
+        ];
         let entry = &tree.node(id).entry;
         let Some(rel) = filter.relative(&entry.path) else {
-            return Vec::new();
+            return items;
         };
         let mark = if filter.is_excluded_root(&entry.path) {
             MenuItem::action("Cancel Exclusion", CancelExclusion { path: Some(rel) })
@@ -579,14 +593,16 @@ impl ProjectPanel {
             MenuItem::action("Excluded", MarkExcluded { path: Some(rel) })
                 .icon(IconName::EXCLUDED_FOLDER)
         } else {
-            return Vec::new();
+            return items;
         };
         let title = if entry.is_dir() {
             MARK_DIRECTORY_AS
         } else {
             MARK_FILE_AS
         };
-        vec![MenuItem::submenu(title, vec![mark])]
+        items.push(MenuItem::separator());
+        items.push(MenuItem::submenu(title, vec![mark]));
+        items
     }
 
     /// Opens the context menu of `id` at `position` (window coordinates).
