@@ -18,6 +18,9 @@
 "ctrl-left" = "tabs.previous"
 "cmd-shift-f" = "find-in-files.open"
 "cmd-shift-r" = "find-in-files.open-replace"
+"shift shift" = "search-everywhere.open"
+"cmd-shift-o" = "search-everywhere.go-to-file"
+"cmd-shift-a" = "search-everywhere.go-to-action"
 
 [[context]]
 name = "ProjectTree"
@@ -262,3 +265,32 @@ name = "ReplaceInFiles > Editor"
 name = "FindInFilesDirectory > Editor"
 [context.bindings]
 "shift-enter" = "find-in-files.browse-directory"
+
+# Search Everywhere: Tab and Shift+Tab (and the next and previous tab
+# keys) switch tabs, Up and Down move through the results (round), Page
+# Up and Cmd+Up go to the first, Page Down and Cmd+Down to the last;
+# Option+Up and Option+Down go through the tab's searches. Enter opens or
+# runs the selected result (Shift+Enter too). Ctrl+Option+N and Option+N
+# include non-project items.
+[[context]]
+name = "SearchEverywhere > Editor"
+[context.bindings]
+"tab" = "search-everywhere.next-tab"
+"shift-tab" = "search-everywhere.previous-tab"
+"cmd-}" = "search-everywhere.next-tab"
+"cmd-{" = "search-everywhere.previous-tab"
+"ctrl-right" = "search-everywhere.next-tab"
+"ctrl-left" = "search-everywhere.previous-tab"
+"down" = "search-everywhere.down"
+"up" = "search-everywhere.up"
+"pagedown" = "search-everywhere.next-group"
+"cmd-down" = "search-everywhere.next-group"
+"pageup" = "search-everywhere.previous-group"
+"cmd-up" = "search-everywhere.previous-group"
+"enter" = "search-everywhere.select"
+"shift-enter" = "search-everywhere.select"
+"escape" = "search-everywhere.close"
+"alt-up" = "search-everywhere.history-previous"
+"alt-down" = "search-everywhere.history-next"
+"ctrl-alt-n" = "search-everywhere.toggle-everywhere"
+"alt-n" = "search-everywhere.toggle-everywhere"

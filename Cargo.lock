@@ -2243,6 +2243,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "file-index"
+version = "0.0.1"
+dependencies = [
+ "ignore",
+ "name-match",
+ "project",
+ "regex",
+ "tempfile",
+]
+
+[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4063,6 +4074,10 @@ dependencies = [
  "thiserror 2.0.21",
  "unicode-ident",
 ]
+
+[[package]]
+name = "name-match"
+version = "0.0.1"
 
 [[package]]
 name = "nanorand"
@@ -8450,9 +8465,11 @@ dependencies = [
  "core-graphics 0.24.0",
  "dirs 7.0.0",
  "editor",
+ "file-index",
  "futures",
  "gpui",
  "image",
+ "name-match",
  "objc",
  "project",
  "project-search",

@@ -66,6 +66,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::command::register(cx, ui::menu::COMMANDS);
     editor::init(cx);
     crate::find_in_files::init(cx, &product.find_file_masks);
+    crate::search_everywhere::init(cx);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()
@@ -139,7 +140,18 @@ pub fn init(cx: &mut App, product: &Product) {
             Ok(popup.read(cx).state_json(cx))
         }),
     );
+    ui::command::register_query(
+        cx,
+        "search-everywhere.state",
+        Rc::new(|_, window, cx| {
+            let popup = workbench(window)?.read(cx).search_everywhere().clone();
+            Ok(popup.read(cx).state_json(cx))
+        }),
+    );
     cx.on_action(|_: &Quit, cx| cx.quit());
+    // Any key ends a double tap of a modifier in progress.
+    cx.intercept_keystrokes(|event, _, cx| crate::keymap::key_pressed(&event.keystroke, cx))
+        .detach();
     for error in crate::keymap::bind(cx, &crate::keymap::Keymap::platform_default()) {
         eprintln!("keymap: {error}");
     }
@@ -209,6 +221,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // Settings that last across sessions (tests keep the defaults).
         if let Some(file) = crate::find_in_files::settings_file() {
             crate::find_in_files::load_settings(cx, file);
+        }
+        if let Some(file) = crate::search_everywhere::settings_file() {
+            crate::search_everywhere::load_settings(cx, file);
         }
         // Frames follow the display's refresh. After a keystroke the window
         // draws at once instead: the typed text is then ready for the next

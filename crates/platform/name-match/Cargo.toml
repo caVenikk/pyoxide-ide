@@ -1,0 +1,9 @@
+[package]
+name = "name-match"
+description = "Name matching of Pyoxide IDE: the reference IDE's camel-hump pattern matcher (wildcards, word starts, middle matches) with its matching degree, for Go to File, actions and speed search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

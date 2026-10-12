@@ -1,0 +1,428 @@
+//! Search Everywhere and Go to File (tests/scenarios/editor/search-everywhere.md),
+//! driven by real keystrokes and modifier events through both default
+//! keymaps in a headless main window over a project on disk.
+
+use std::rc::Rc;
+use std::time::Duration;
+
+use editor::Editor;
+use gpui::{
+    AppContext as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
+    VisualTestContext, WindowHandle, point,
+};
+use serde_json::{Value, json};
+use workbench::keymap::{self, Keymap};
+use workbench::search_everywhere::DEBOUNCE;
+use workbench::{Product, Workbench};
+
+struct Keys {
+    go_to_file: &'static str,
+    go_to_action: &'static str,
+    first: &'static str,
+    last: &'static str,
+    non_project: &'static str,
+    select_all: &'static str,
+}
+
+const MAC: Keys = Keys {
+    go_to_file: "cmd-shift-o",
+    go_to_action: "cmd-shift-a",
+    first: "cmd-up",
+    last: "cmd-down",
+    non_project: "alt-n",
+    select_all: "cmd-a",
+};
+
+const WIN: Keys = Keys {
+    go_to_file: "ctrl-shift-n",
+    go_to_action: "ctrl-shift-a",
+    first: "ctrl-up",
+    last: "ctrl-down",
+    non_project: "alt-n",
+    select_all: "ctrl-a",
+};
+
+struct H<'a> {
+    cx: &'a mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    keys: &'static Keys,
+    root: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+impl H<'_> {
+    fn draw(&mut self) {
+        self.cx.run_until_parked();
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| window.draw(cx).clear())
+            .unwrap();
+    }
+
+    /// Lets a search start after its delay and finish.
+    fn settle(&mut self) {
+        self.cx.executor().advance_clock(DEBOUNCE * 2);
+        self.draw();
+    }
+
+    fn invoke(&mut self, id: &str, args: Value) -> Value {
+        let out = self
+            .cx
+            .update_window(self.window.into(), |_, window, cx| {
+                ui::command::invoke(id, args, window, cx)
+            })
+            .unwrap()
+            .unwrap_or_else(|e| panic!("{id}: {e:?}"));
+        self.draw();
+        out
+    }
+
+    fn press(&mut self, keys: &str) {
+        self.cx.simulate_keystrokes(self.window.into(), keys);
+        self.draw();
+    }
+
+    fn type_text(&mut self, text: &str) {
+        self.cx.simulate_input(self.window.into(), text);
+        self.draw();
+    }
+
+    fn state(&mut self) -> Value {
+        self.invoke("search-everywhere.state", json!(null))
+    }
+
+    /// The rows as `kind:path-or-id`.
+    fn rows(&mut self) -> Vec<String> {
+        self.state()["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| match r["kind"].as_str().unwrap() {
+                "action" => format!("action:{}", r["id"].as_str().unwrap()),
+                "more" => "more".to_owned(),
+                kind => format!("{kind}:{}", r["path"].as_str().unwrap()),
+            })
+            .collect()
+    }
+
+    fn editor(&mut self) -> gpui::Entity<Editor> {
+        self.window
+            .read_with(self.cx, |w, _| w.active_editor().cloned())
+            .unwrap()
+            .expect("an editor is open")
+    }
+
+    fn caret(&mut self) -> (String, usize, usize) {
+        let s = self.invoke("editor.state", json!(null));
+        let path = s["path"].as_str().unwrap_or_default().replace('\\', "/");
+        let root = format!("{}/", self.root.display()).replace('\\', "/");
+        let rel = path.strip_prefix(&root).unwrap_or(&path).to_owned();
+        let editor = self.editor();
+        let p = self.cx.update(|cx| editor.read(cx).caret_point());
+        (rel, p.line, p.column)
+    }
+
+    fn vcx(&mut self) -> VisualTestContext {
+        VisualTestContext::from_window(self.window.into(), self.cx)
+    }
+
+    /// Shift goes down and up twice, `gap` between the steps (a while
+    /// after the last key: a tap right after typing does not count).
+    fn double_shift(&mut self, gap: Duration) {
+        self.cx.executor().advance_clock(Duration::from_millis(200));
+        for _ in 0..2 {
+            for modifiers in [Modifiers::shift(), Modifiers::none()] {
+                self.vcx().simulate_modifiers_change(modifiers);
+                self.cx.executor().advance_clock(gap);
+            }
+        }
+        self.draw();
+    }
+
+    fn scroll_rows(&mut self, delta: ScrollDelta) {
+        let bounds = self
+            .vcx()
+            .debug_bounds("search-everywhere-rows")
+            .expect("the results are drawn");
+        self.vcx().simulate_event(ScrollWheelEvent {
+            position: bounds.center(),
+            delta,
+            modifiers: Modifiers::none(),
+            touch_phase: TouchPhase::Moved,
+        });
+        self.draw();
+    }
+}
+
+fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys) -> H<'a> {
+    let dir = tempfile::tempdir().unwrap();
+    // A fixed project name: Go to File matches folder paths from it.
+    let root = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+    for (path, text) in [
+        (
+            "app.py",
+            "import os\n\ndef main():\n    print(\"needle\")\n",
+        ),
+        ("notes.txt", "a needle\n"),
+        ("pkg/__init__.py", ""),
+        ("pkg/util.py", "x = 1\n\n\n# needle here\nneedle = 2\n"),
+        ("pkg/application.py", "y = 2\n"),
+        ("tests/test_app.py", "z = 3\n"),
+        (".git/config", "x\n"),
+        (".venv/lib/site.py", "s = 1\n"),
+        (".venv/pyvenv.cfg", "home = /usr\n"),
+    ] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let product = Product {
+        name: "Test IDE",
+        // `.venv` is excluded as the Python product does.
+        auto_excluded: project::AutoExclusions {
+            dir_names: &[".venv"],
+            root_dir_markers: &[],
+        },
+        ..Product::default()
+    };
+    let keymap = Keymap::parse(keymap_text).unwrap();
+    let window = cx.update(|cx| {
+        workbench::init(cx, &product);
+        cx.clear_key_bindings();
+        let errors = keymap::bind(cx, &keymap);
+        assert!(errors.is_empty(), "keymap errors: {errors:?}");
+        workbench::open_main_window(cx, Rc::new(product))
+    });
+    cx.update_window(window.into(), |_, window, _| window.activate_window())
+        .unwrap();
+    let mut h = H {
+        cx,
+        window,
+        keys,
+        root: root.clone(),
+        _dir: dir,
+    };
+    h.draw();
+    h.invoke(
+        "project.open-folder",
+        json!({ "path": root.display().to_string() }),
+    );
+    // The index is built in the background.
+    h.draw();
+    let s = h.invoke("workbench.state", json!(null));
+    assert!(s["file_index"].as_u64().is_some_and(|n| n > 0), "{s}");
+    h
+}
+
+fn both(cx: &mut TestAppContext, test: fn(&mut H)) {
+    for (text, keys) in [(keymap::MACOS, &MAC), (keymap::DEFAULT, &WIN)] {
+        let mut h = setup(cx, text, keys);
+        test(&mut h);
+    }
+}
+
+#[gpui::test]
+fn go_to_file_finds_a_file_and_opens_it_at_a_line(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        let s = h.state();
+        assert_eq!(s["open"], json!(true));
+        assert_eq!(s["tab"], json!("files"));
+        assert_eq!(s["text"], json!(""));
+        assert!(h.rows().is_empty(), "nothing for an empty field");
+        h.type_text("util");
+        assert_eq!(h.state()["searching"], json!(true), "after a pause");
+        h.settle();
+        assert_eq!(h.rows(), ["file:pkg/util.py"]);
+        // A line and column after the name.
+        h.type_text(":4:3");
+        h.settle();
+        assert_eq!(h.rows(), ["file:pkg/util.py"]);
+        h.press("enter");
+        assert_eq!(h.state()["open"], json!(false));
+        h.draw();
+        assert_eq!(h.caret(), ("pkg/util.py".into(), 3, 2));
+        // Reopened: the last search of the tab, selected.
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["text"], json!("util:4:3"));
+        h.type_text("app");
+        h.settle();
+        assert_eq!(
+            h.rows(),
+            [
+                "file:app.py",
+                "file:pkg/application.py",
+                "file:tests/test_app.py"
+            ]
+        );
+        // Up and Down go round; Ctrl/Cmd+Up and Down to the ends.
+        h.press("up");
+        assert_eq!(h.state()["selected"], json!(2));
+        h.press("down");
+        assert_eq!(h.state()["selected"], json!(0));
+        h.press(h.keys.last);
+        assert_eq!(h.state()["selected"], json!(2));
+        h.press(h.keys.first);
+        assert_eq!(h.state()["selected"], json!(0));
+        h.press("escape");
+        assert_eq!(h.state()["open"], json!(false));
+    });
+}
+
+#[gpui::test]
+fn folders_in_the_pattern(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        h.type_text("pkg/app");
+        h.settle();
+        assert_eq!(h.rows(), ["file:pkg/application.py"]);
+        h.press("escape");
+        // A folder: shown in the project tool window.
+        h.press(h.keys.go_to_file);
+        h.press(h.keys.select_all);
+        h.type_text("tests/");
+        h.settle();
+        assert_eq!(h.rows()[0], "folder:tests");
+        h.press("enter");
+        let s = h.invoke("workbench.state", json!(null));
+        assert_eq!(s["search_everywhere"], json!(false));
+    });
+}
+
+#[gpui::test]
+fn double_shift_opens_search_everywhere(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        // Too slow: nothing.
+        h.double_shift(Duration::from_millis(400));
+        assert_eq!(h.state()["open"], json!(false));
+        h.double_shift(Duration::from_millis(60));
+        let s = h.state();
+        assert_eq!(s["open"], json!(true));
+        assert_eq!(s["tab"], json!("all"));
+        // Again on the All tab: non-project items.
+        h.double_shift(Duration::from_millis(60));
+        assert_eq!(h.state()["everywhere"], json!(true));
+        h.press("escape");
+        assert_eq!(h.state()["open"], json!(false));
+    });
+}
+
+#[gpui::test]
+fn recent_files_with_an_empty_field(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        for file in ["notes.txt", "pkg/util.py", "app.py"] {
+            h.invoke("project.open-file", json!({ "path": file }));
+        }
+        h.double_shift(Duration::from_millis(60));
+        // The file of the active editor is left out; newest first.
+        assert_eq!(h.rows(), ["file:pkg/util.py", "file:notes.txt"]);
+        assert_eq!(h.state()["rows"][0]["recent"], json!(true));
+        // Typed: recent files on top, then the others by weight, a file
+        // once.
+        h.type_text("ut");
+        h.settle();
+        let rows = h.rows();
+        assert_eq!(rows[0], "file:pkg/util.py", "{rows:?}");
+        assert_eq!(h.state()["rows"][0]["recent"], json!(true));
+        let files: Vec<_> = rows.iter().filter(|r| r.starts_with("file:")).collect();
+        assert_eq!(files, ["file:pkg/util.py"], "once");
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn tabs_switch_and_the_shortcut_again_includes_non_project_items(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        h.type_text("site");
+        h.settle();
+        // Nothing in the project: non-project items are looked at.
+        let s = h.state();
+        assert_eq!(s["everywhere"], json!(true));
+        assert_eq!(h.rows(), ["file:.venv/lib/site.py"]);
+        assert_eq!(h.state()["rows"][0]["non_project"], json!(true));
+        // Another text: project items again.
+        h.press(h.keys.select_all);
+        h.type_text("app");
+        h.settle();
+        assert_eq!(h.state()["everywhere"], json!(false));
+        // Go to File again: non-project items on; Alt+N off.
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["everywhere"], json!(true));
+        h.press(h.keys.non_project);
+        assert_eq!(h.state()["everywhere"], json!(false));
+        // Tab and Shift+Tab switch tabs, round; the text stays.
+        h.press("tab");
+        assert_eq!(h.state()["tab"], json!("actions"));
+        h.press("tab");
+        assert_eq!(h.state()["tab"], json!("all"));
+        h.press("shift-tab");
+        assert_eq!(h.state()["tab"], json!("actions"));
+        assert_eq!(h.state()["text"], json!("app"));
+        // Go to File from another tab: the Files tab.
+        h.press(h.keys.go_to_file);
+        assert_eq!(h.state()["tab"], json!("files"));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn actions_run_from_the_actions_tab(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke("project.open-file", json!({ "path": "app.py" }));
+        h.invoke("editor.type", json!({ "text": "x" }));
+        let tab =
+            |h: &mut H| h.invoke("workbench.state", json!(null))["tabs"][0]["modified"].clone();
+        assert_eq!(tab(h), json!(true));
+        h.press(h.keys.go_to_action);
+        let s = h.state();
+        assert_eq!(s["tab"], json!("actions"));
+        h.type_text("save all");
+        h.settle();
+        let rows = h.rows();
+        assert_eq!(rows[0], "action:workbench.save-all", "{rows:?}");
+        let shortcut = h.state()["rows"][0]["shortcut"].clone();
+        assert!(shortcut.is_string(), "{shortcut}");
+        h.press("enter");
+        assert_eq!(h.state()["open"], json!(false));
+        h.draw();
+        assert_eq!(tab(h), json!(false), "saved");
+    });
+}
+
+#[gpui::test]
+fn more_results_and_scrolling(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        for i in 0..45 {
+            std::fs::write(h.root.join(format!("pkg/mod_{i:02}.py")), "").unwrap();
+        }
+        // The index follows a new build of the project's rules.
+        h.invoke(
+            "project.open-folder",
+            json!({ "path": h.root.display().to_string() }),
+        );
+        h.draw();
+        h.press(h.keys.go_to_file);
+        h.type_text("mod_");
+        h.settle();
+        let rows = h.rows();
+        assert_eq!(rows.len(), 31, "30 and more");
+        assert_eq!(rows[30], "more");
+        let first = rows[0].clone();
+        h.scroll_rows(ScrollDelta::Lines(point(0.0, -50.0)));
+        // Page Down goes a page on, not past the end; Up from the first
+        // row goes round to the "more" row.
+        h.press(h.keys.last);
+        let page = h.state()["selected"].as_u64().unwrap();
+        assert!(page > 1 && page < 30, "{page}");
+        h.press(h.keys.first);
+        h.press("up");
+        assert_eq!(h.state()["selected"], json!(30));
+        h.press("enter");
+        h.draw();
+        let rows = h.rows();
+        assert_eq!(rows.len(), 45, "the rest, no more row");
+        assert_eq!(rows[0], first, "the rows shown stay");
+        assert_eq!(h.state()["selected"], json!(30), "the first new one");
+        h.press("escape");
+    });
+}

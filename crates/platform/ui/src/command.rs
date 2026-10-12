@@ -70,6 +70,12 @@ pub fn register_query(cx: &mut App, id: &'static str, query: QueryFn) {
         .insert(id, query);
 }
 
+/// The command answers from the state instead of changing it (a query).
+pub fn is_query(cx: &App, id: &str) -> bool {
+    cx.try_global::<CommandIndex>()
+        .is_some_and(|index| index.queries.contains_key(id))
+}
+
 /// All registered commands, sorted by id.
 pub fn list(cx: &App) -> Vec<UiCommand> {
     cx.try_global::<CommandIndex>()
