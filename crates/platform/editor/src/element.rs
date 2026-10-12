@@ -261,10 +261,60 @@ fn display_text(
     (text, map)
 }
 
-/// Text runs for a line from highlight spans (char columns of the line).
+/// Splits `runs` so that the bytes `range` get `underline`.
+fn underline_range(
+    runs: Vec<TextRun>,
+    range: Range<usize>,
+    underline: UnderlineStyle,
+) -> Vec<TextRun> {
+    if range.start >= range.end {
+        return runs;
+    }
+    let mut split = Vec::with_capacity(runs.len() + 2);
+    let mut pos = 0;
+    for run in runs {
+        let (rs, re) = (pos, pos + run.len);
+        pos = re;
+        for (s, e, under) in [
+            (rs, range.start.min(re), false),
+            (range.start.max(rs), range.end.min(re), true),
+            (range.end.max(rs), re, false),
+        ] {
+            if s < e {
+                let mut r = run.clone();
+                r.len = e - s;
+                if under {
+                    r.underline = Some(UnderlineStyle {
+                        color: underline.color.or(Some(r.color)),
+                        ..underline
+                    });
+                }
+                split.push(r);
+            }
+        }
+    }
+    split
+}
+
+/// The theme's underline for syntax errors.
+fn error_underline(theme: &Theme) -> UnderlineStyle {
+    let style = theme.text_style(TextRole::DiagnosticError);
+    UnderlineStyle {
+        color: style.underline_colour().map(color).or(style.fg.map(color)),
+        thickness: px(1.0),
+        wavy: !matches!(
+            style.underline_style(),
+            ThemeUnderline::Single | ThemeUnderline::Thick
+        ),
+    }
+}
+
+/// Text runs for a line from highlight spans (char columns of the line),
+/// with error marks and the input method's composition underlined.
 #[allow(clippy::too_many_arguments)]
 fn runs(
     spans: &[(Range<usize>, TextRole)],
+    errors: &[Range<usize>],
     cols: &Range<usize>,
     col_bytes: Option<&Vec<u32>>,
     text_len: usize,
@@ -338,36 +388,20 @@ fn runs(
         push(&mut out, &mut at, end.min(text_len), &run);
     }
     push(&mut out, &mut at, text_len, &plain);
+    if !errors.is_empty() {
+        let underline = error_underline(theme);
+        for e in errors {
+            out = underline_range(out, byte_of(e.start)..byte_of(e.end), underline);
+        }
+    }
     // Underline the input method's composition.
     if let Some(marked) = marked {
-        let (ms, me) = (byte_of(marked.start), byte_of(marked.end));
-        if ms < me {
-            let mut split = Vec::with_capacity(out.len() + 2);
-            let mut pos = 0;
-            for run in out {
-                let (rs, re) = (pos, pos + run.len);
-                pos = re;
-                for (s, e, under) in [
-                    (rs, ms.min(re), false),
-                    (ms.max(rs), me.min(re), true),
-                    (me.max(rs), re, false),
-                ] {
-                    if s < e {
-                        let mut r = run.clone();
-                        r.len = e - s;
-                        if under {
-                            r.underline = Some(UnderlineStyle {
-                                color: Some(r.color),
-                                thickness: px(1.0),
-                                wavy: false,
-                            });
-                        }
-                        split.push(r);
-                    }
-                }
-            }
-            return split;
-        }
+        let plain = UnderlineStyle {
+            color: None,
+            thickness: px(1.0),
+            wavy: false,
+        };
+        out = underline_range(out, byte_of(marked.start)..byte_of(marked.end), plain);
     }
     out
 }
@@ -495,6 +529,7 @@ impl Element for EditorElement {
 
         // Shape the visible lines.
         let mut spans = Vec::new();
+        let mut errors = Vec::new();
         let mut lines = Vec::with_capacity(visible.len());
         let visible_cols = (text_width / m.char_width).ceil() as usize + 1;
         let scroll_col = (scroll.x / m.char_width).floor() as usize;
@@ -508,8 +543,10 @@ impl Element for EditorElement {
             };
             let (text, col_bytes) = display_text(editor, line, cols.clone(), tab_size);
             spans.clear();
+            errors.clear();
             if let Some(h) = editor.highlighter() {
                 h.line_spans(line, &mut spans);
+                h.line_errors(line, &mut errors);
             }
             let line_start = editor.buffer.line_start(line);
             let marked = editor.marked.as_ref().and_then(|r| {
@@ -519,6 +556,7 @@ impl Element for EditorElement {
             });
             let text_runs = runs(
                 &spans,
+                &errors,
                 &cols,
                 col_bytes.as_ref(),
                 text.len(),

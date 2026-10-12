@@ -150,6 +150,67 @@ mod tests {
         );
     }
 
+    /// Typing an incomplete line above valid code keeps the code below
+    /// highlighted (the lexical layer, ADR 0007).
+    #[gpui::test]
+    fn highlighting_survives_a_syntax_error_while_typing(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use serde_json::{Value, json};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("app.py"),
+            "def func_0(a, b=None):\n    return a\n",
+        )
+        .unwrap();
+        let product = std::rc::Rc::new(product());
+        let window = cx.update(|cx| {
+            workbench::init(cx, &product);
+            workbench::open_main_window(cx, product.clone())
+        });
+        let invoke = |cx: &mut gpui::TestAppContext, id: &str, args: Value| -> Value {
+            let out = cx
+                .update_window(window.into(), |_, window, cx| {
+                    ui::command::invoke(id, args, window, cx)
+                })
+                .unwrap()
+                .unwrap_or_else(|e| panic!("{id}: {e:?}"));
+            cx.run_until_parked();
+            out
+        };
+        invoke(
+            cx,
+            "project.open-folder",
+            json!({"path": dir.path().display().to_string()}),
+        );
+        invoke(cx, "project.open-file", json!({"path": "app.py"}));
+        let expected = json!([
+            {"start": 0, "end": 3, "role": "keyword"},
+            {"start": 4, "end": 10, "role": "function-decl"},
+        ]);
+        let line0 = invoke(cx, "editor.highlights", json!({"line": 0}));
+        assert_eq!(
+            line0["spans"].as_array().unwrap()[..2],
+            expected.as_array().unwrap()[..]
+        );
+        for text in ["def fib\n", "def fib(\n"] {
+            invoke(
+                cx,
+                "editor.set-selection",
+                json!({"anchor": {"line": 0, "column": 0}, "head": {"line": 0, "column": 0}}),
+            );
+            invoke(cx, "editor.type", json!({"text": text}));
+            let after = invoke(cx, "editor.highlights", json!({"line": 1}));
+            assert_eq!(after["current"], json!(true));
+            assert_eq!(
+                after["spans"].as_array().unwrap()[..2],
+                expected.as_array().unwrap()[..],
+                "after typing {text:?}"
+            );
+            invoke(cx, "editor.undo", json!(null));
+        }
+    }
+
     /// Python editing through real keystrokes of the platform keymap:
     /// Extend Selection follows the syntax tree, Shrink Selection goes back,
     /// quotes pair, and the line comment is `# `.

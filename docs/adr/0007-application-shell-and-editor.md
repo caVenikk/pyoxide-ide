@@ -104,6 +104,21 @@ callback), so the typed text is ready for the next refresh rather than the
 one after; at 60 Hz this takes keystroke-to-frame p99 from about 19.5 ms to
 about 6 ms (replica/perf.md).
 
+### Highlighting
+Highlighting has two layers, as in the reference IDE, whose colours come
+from a lexer and whose errors only add a mark. A language's line lexer
+(`syntax::Lexer`, for Python `py_syntax::PythonLexer`) colours keywords,
+literals, comments, decorators, operators, built-ins, the name after `def`
+and `class` and calls, line by line with a small state between lines (an
+open triple-quoted string); it needs no parse tree, so a file is coloured
+before its first parse and incomplete code keeps its colours. The
+tree-sitter captures are painted on top for what needs structure (methods,
+docstrings, keyword arguments, f-string expressions), except in the
+statements that contain an ERROR or MISSING node, where the tree's shape
+is a guess; the error itself gets the theme's error underline. The lexer
+states of all lines are computed with the background parse, so the UI
+thread only lexes the lines it paints.
+
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a
 stable dotted id (`project.open-folder`, `editor.undo`, `editor.copy`,

@@ -6,13 +6,16 @@
 //! on the background executor; the result comes back through
 //! [`Highlighter::job_done`] on the UI thread. Edits are applied to the
 //! current syntax tree at once, so highlighting stays in place while a
-//! reparse runs, and typing never waits for the parser.
+//! reparse runs, and typing never waits for the parser. The language's
+//! lexer colours lines without the tree (see the `syntax` crate), so
+//! highlighting is there before the first parse and survives syntax errors.
 
 use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use syntax::LineStates;
 use syntax::tree_sitter::{InputEdit, Tree};
 use text::{AppliedEdit, Buffer};
 use themes::TextRole;
@@ -45,6 +48,9 @@ pub trait Highlighter: 'static {
     /// Appends the spans of `line` to `out`, sorted and not overlapping.
     fn line_spans(&self, line: usize, out: &mut Vec<Span>);
 
+    /// Appends the char ranges of `line` to mark as syntax errors.
+    fn line_errors(&self, _line: usize, _out: &mut Vec<Range<usize>>) {}
+
     /// Highlighting reflects the current text (no parse pending).
     fn is_current(&self) -> bool {
         true
@@ -69,8 +75,11 @@ pub struct SyntaxHighlighter {
     running: Option<Arc<AtomicBool>>,
     /// Edits made while the running parse works on an older text.
     edits_during_job: Vec<InputEdit>,
-    /// Spans of the prepared lines.
+    /// Lexer state at the start of each line, as far as known.
+    states: LineStates,
+    /// Spans and error marks of the prepared lines.
     cache: Vec<Vec<Span>>,
+    errors: Vec<Vec<Range<usize>>>,
     cache_start: usize,
     cache_valid: bool,
 }
@@ -83,7 +92,9 @@ impl SyntaxHighlighter {
             dirty: true,
             running: None,
             edits_during_job: Vec::new(),
+            states: LineStates::default(),
             cache: Vec::new(),
+            errors: Vec::new(),
             cache_start: 0,
             cache_valid: false,
         }
@@ -103,11 +114,13 @@ impl Highlighter for SyntaxHighlighter {
         self.tree = None;
         self.dirty = true;
         self.edits_during_job.clear();
+        self.states.clear();
         self.cache_valid = false;
     }
 
     fn edited(&mut self, _: &Buffer, edits: &[AppliedEdit]) {
         for e in edits {
+            self.states.invalidate_after(e.start_position.0);
             let edit = syntax::input_edit(e);
             if let Some(tree) = &mut self.tree {
                 tree.edit(&edit);
@@ -131,9 +144,17 @@ impl Highlighter for SyntaxHighlighter {
         let language = self.language.clone();
         let rope = buffer.rope().clone();
         let old = self.tree.clone();
+        // The known lexer states are extended to every line in the
+        // background, so that the UI thread never lexes a long stretch of
+        // the file itself.
+        let mut states = self.states.clone();
         Some(Box::new(move || {
             let tree = syntax::parse(&language, &rope, old.as_ref(), &cancel);
-            Box::new(tree) as JobResult
+            let states = language.lexer().filter(|_| tree.is_some()).map(|lexer| {
+                states.ensure(lexer, &rope, rope.len_lines().saturating_sub(1));
+                states
+            });
+            Box::new((tree, states)) as JobResult
         }))
     }
 
@@ -146,13 +167,26 @@ impl Highlighter for SyntaxHighlighter {
             // A reset happened meanwhile: this tree belongs to old text.
             return;
         }
-        if let Ok(tree) = result.downcast::<Option<Tree>>()
-            && let Some(mut tree) = *tree
+        if let Ok(result) = result.downcast::<(Option<Tree>, Option<LineStates>)>()
+            && let (Some(mut tree), states) = *result
         {
+            let first_edited = self
+                .edits_during_job
+                .iter()
+                .map(|e| e.start_position.row)
+                .min();
             for edit in self.edits_during_job.drain(..) {
                 tree.edit(&edit);
             }
             self.tree = Some(tree);
+            if let Some(mut states) = states {
+                if let Some(row) = first_edited {
+                    states.invalidate_after(row);
+                }
+                if states.len() > self.states.len() {
+                    self.states = states;
+                }
+            }
             self.cache_valid = false;
         }
     }
@@ -162,12 +196,15 @@ impl Highlighter for SyntaxHighlighter {
         if self.cache_valid && cached.start <= lines.start && lines.end <= cached.end {
             return;
         }
-        let Some(tree) = &self.tree else {
-            self.cache.clear();
-            self.cache_valid = true;
-            return;
-        };
-        self.cache = syntax::highlight(&self.language, tree, buffer.rope(), lines.clone());
+        let h = syntax::highlight(
+            &self.language,
+            self.tree.as_ref(),
+            buffer.rope(),
+            lines.clone(),
+            &mut self.states,
+        );
+        self.cache = h.spans;
+        self.errors = h.errors;
         self.cache_start = lines.start;
         self.cache_valid = true;
     }
@@ -178,6 +215,15 @@ impl Highlighter for SyntaxHighlighter {
             .and_then(|i| self.cache.get(i))
         {
             out.extend_from_slice(spans);
+        }
+    }
+
+    fn line_errors(&self, line: usize, out: &mut Vec<Range<usize>>) {
+        if let Some(errors) = line
+            .checked_sub(self.cache_start)
+            .and_then(|i| self.errors.get(i))
+        {
+            out.extend_from_slice(errors);
         }
     }
 
