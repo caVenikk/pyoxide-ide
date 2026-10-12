@@ -141,17 +141,26 @@ async fn cancel_covers_a_statement_that_has_not_started_yet() {
 async fn a_cursor_nobody_received_does_not_block_the_connection() {
     let conn = memory().await;
     let opts = ExecOptions::default();
-    let mut call = Box::pin(conn.execute(HUNDRED_THOUSAND, &[], &opts));
     // Poll once so the request goes out, then give up before the answer is
-    // read: the worker holds a cursor that no object refers to.
-    tokio::select! {
-        biased;
-        _ = &mut call => panic!("the statement cannot be answered yet"),
-        () = std::future::ready(()) => {}
+    // read: the worker holds a cursor that no object refers to. The worker
+    // runs on its own thread and can answer within that first poll; the
+    // received cursor is then dropped and the attempt repeated.
+    for _ in 0..100 {
+        let mut call = Box::pin(conn.execute(HUNDRED_THOUSAND, &[], &opts));
+        let answered = tokio::select! {
+            biased;
+            _ = &mut call => true,
+            () = std::future::ready(()) => false,
+        };
+        if answered {
+            continue;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(call);
+        assert_eq!(scalar(&conn, "SELECT 11").await, Value::Int(11));
+        return;
     }
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    drop(call);
-    assert_eq!(scalar(&conn, "SELECT 11").await, Value::Int(11));
+    panic!("the statement was answered within its first poll in every attempt");
 }
 
 #[tokio::test]
