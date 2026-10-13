@@ -145,6 +145,8 @@ running). The display refreshed at 60 Hz during these runs (median frame gap
 | 2026-10-11 | mac-1 | memory after opening and scrolling the 10 MB file | 265 MB RSS | 266 MB | |
 | 2026-10-12 | mac-1 | typing, 100k-line file, with the lexical highlighting layer: key to frame | p50 2.61 ms, p90 3.89 ms, p99 5.45 ms | max 5.88 ms | 2 runs x 600 keys; load average about 4.8 (other applications busy) |
 | 2026-10-12 | mac-1 | typing, same runs: app work | p50 0.81 ms, p90 0.91 ms, p99 1.34 ms | max 3.79 ms | per run p99 1.18 / 1.49 ms |
+| 2026-10-13 | mac-1 | typing, 100k-line file, key to frame, while a Python process floods the Run console | p50 3.25 / 3.47 ms, p90 4.51 / 4.76 ms, p99 6.09 / 6.17 ms | max 6.87 / 16.27 ms | 2 runs x 600 keys; the file itself runs (`PYOXIDE_RUN='[["run.run",{}]]'`) and prints coloured 90-character lines without pause for 40 s, about a million lines a second through the 1024 KB cycle buffer; the same session without the run: p50 2.84, p99 5.71, max 6.90 ms; load average about 6 |
+| 2026-10-13 | mac-1 | typing while the console floods: app work | p50 1.21 / 1.23 ms, p99 2.54 / 2.53 ms | max 2.77 / 13.95 ms | the console takes output at most every 100 ms while it keeps coming; 599 MB RSS at the end of the flooded run (251 MB without the run) |
 
 Against the budgets of docs/performance.md: keystroke to paint p99 5.8 ms
 (budget 16 ms); 10 MB file 24 ms to the first text (budget 200 ms), no dropped
