@@ -76,6 +76,8 @@ progress = "#3871e1"
 progress-track = "#40434a"
 notification = "#25324d"
 non-project-file = "#291f1c"
+run-widget-running = "#338555"
+run-widget-stop = "#c54e58"
 editor-background = "#191a1c"
 editor-text = "#bcbec4"
 gutter = "#191a1c"
@@ -315,6 +317,9 @@ fg = "#f75464"
 [syntax.console-input]
 fg = "#6aab73"
 italic = true
+
+[syntax.console-system]
+fg = "#bcbec4"
 
 [font]
 ui-family = [

@@ -176,6 +176,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Ui("Notification.background"),
         ],
         NonProjectFile => &[Ui("FileColor.Yellow")],
+        RunWidgetRunning => &[Ui("RunWidget.runningBackground")],
+        RunWidgetStop => &[Ui("RunWidget.stopBackground")],
         PopupBorder => &[Ui("Popup.borderColor"), Ui("Menu.borderColor")],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],
@@ -357,6 +359,7 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         InlayHint => &["INLAY_DEFAULT", "INLINE_PARAMETER_HINT"],
         ConsoleError => &["CONSOLE_ERROR_OUTPUT"],
         ConsoleInput => &["CONSOLE_USER_INPUT"],
+        ConsoleSystem => &["CONSOLE_SYSTEM_OUTPUT"],
     }
 }
 

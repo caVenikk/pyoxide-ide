@@ -15,7 +15,8 @@ use text::movement;
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
 use ui::theme::{Theme, ThemeExt, color};
 
-use crate::editor::{DragUnit, Editor};
+use crate::editor::{DragUnit, Editor, EditorEvent};
+use crate::highlight::InlineStyle;
 
 /// Lines longer than this are shaped only around the visible columns.
 pub const LONG_LINE: usize = 2000;
@@ -28,6 +29,9 @@ const GUTTER_LEFT: f32 = 8.0;
 const GUTTER_RIGHT: f32 = 42.5;
 /// Space between the gutter and column 0 of the text.
 const TEXT_LEFT: f32 = 6.0;
+/// Room left of a console's text (the reference shows no gutter there;
+/// its folding outline is empty).
+const CONSOLE_GUTTER: f32 = 6.0;
 /// Smallest scrollbar thumb.
 const MIN_THUMB: f32 = 24.0;
 /// Height of a search match mark on the scrollbar.
@@ -83,6 +87,24 @@ pub(crate) struct LayoutInfo {
     pub lines: Vec<LineLayout>,
     pub viewport_lines: usize,
     pub scrollbar: Option<Scrollbar>,
+    /// Hyperlinks on the visible lines.
+    pub links: Vec<LinkRect>,
+}
+
+/// A hyperlink's part on one visible line.
+#[derive(Clone)]
+pub(crate) struct LinkRect {
+    pub bounds: Bounds<Pixels>,
+    pub line: usize,
+    /// Char range in the line.
+    pub range: Range<usize>,
+}
+
+impl LayoutInfo {
+    /// The hyperlink at a window position.
+    pub fn link_at(&self, position: gpui::Point<Pixels>) -> Option<&LinkRect> {
+        self.links.iter().find(|l| l.bounds.contains(&position))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -169,6 +191,8 @@ pub(crate) struct Prepaint {
     stripe_marks: Vec<Bounds<Pixels>>,
     /// The placeholder of an empty one-line field and where it goes.
     placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
+    /// Hitboxes of the hyperlinks (hand pointer).
+    link_hitboxes: Vec<Hitbox>,
     colors: Colors,
 }
 
@@ -305,12 +329,8 @@ fn display_text(
     (text, map)
 }
 
-/// Splits `runs` so that the bytes `range` get `underline`.
-fn underline_range(
-    runs: Vec<TextRun>,
-    range: Range<usize>,
-    underline: UnderlineStyle,
-) -> Vec<TextRun> {
+/// Splits `runs` so that the bytes `range` can be restyled by `f`.
+fn map_range(runs: Vec<TextRun>, range: Range<usize>, f: impl Fn(&mut TextRun)) -> Vec<TextRun> {
     if range.start >= range.end {
         return runs;
     }
@@ -319,7 +339,7 @@ fn underline_range(
     for run in runs {
         let (rs, re) = (pos, pos + run.len);
         pos = re;
-        for (s, e, under) in [
+        for (s, e, inside) in [
             (rs, range.start.min(re), false),
             (range.start.max(rs), range.end.min(re), true),
             (range.end.max(rs), re, false),
@@ -327,17 +347,71 @@ fn underline_range(
             if s < e {
                 let mut r = run.clone();
                 r.len = e - s;
-                if under {
-                    r.underline = Some(UnderlineStyle {
-                        color: underline.color.or(Some(r.color)),
-                        ..underline
-                    });
+                if inside {
+                    f(&mut r);
                 }
                 split.push(r);
             }
         }
     }
     split
+}
+
+/// Splits `runs` so that the bytes `range` get `underline`.
+fn underline_range(
+    runs: Vec<TextRun>,
+    range: Range<usize>,
+    underline: UnderlineStyle,
+) -> Vec<TextRun> {
+    map_range(runs, range, |r| {
+        r.underline = Some(UnderlineStyle {
+            color: underline.color.or(Some(r.color)),
+            ..underline
+        });
+    })
+}
+
+/// Applies an explicit style to a run.
+fn apply_inline(r: &mut TextRun, style: &InlineStyle) {
+    if let Some(c) = style.color {
+        r.color = c;
+    }
+    if style.background.is_some() {
+        r.background_color = style.background;
+    }
+    if style.bold {
+        r.font.weight = FontWeight::BOLD;
+    }
+    if style.italic {
+        r.font.style = FontStyle::Italic;
+    }
+    if let Some(thickness) = style.underline {
+        r.underline = Some(UnderlineStyle {
+            color: Some(r.color),
+            thickness: px(thickness),
+            wavy: false,
+        });
+    }
+    if style.strikethrough {
+        r.strikethrough = Some(StrikethroughStyle {
+            thickness: px(1.0),
+            color: Some(r.color),
+        });
+    }
+}
+
+/// The theme's link style as an explicit style.
+fn link_style(theme: &Theme, default: Hsla) -> InlineStyle {
+    let style = theme.text_style(TextRole::Link);
+    let fg = style.fg.map(color).unwrap_or(default);
+    InlineStyle {
+        color: Some(fg),
+        background: style.bg.map(color),
+        bold: style.is_bold(),
+        italic: style.is_italic(),
+        underline: Some(1.0),
+        strikethrough: false,
+    }
 }
 
 /// The theme's underline for syntax errors.
@@ -353,12 +427,20 @@ fn error_underline(theme: &Theme) -> UnderlineStyle {
     }
 }
 
+/// What decorates one line besides its role spans.
+struct LineExtras<'a> {
+    errors: &'a [Range<usize>],
+    styles: &'a [(Range<usize>, InlineStyle)],
+    links: &'a [Range<usize>],
+}
+
 /// Text runs for a line from highlight spans (char columns of the line),
-/// with error marks and the input method's composition underlined.
+/// explicit styles and links drawn over them, with error marks and the
+/// input method's composition underlined.
 #[allow(clippy::too_many_arguments)]
 fn runs(
     spans: &[(Range<usize>, TextRole)],
-    errors: &[Range<usize>],
+    extras: LineExtras<'_>,
     cols: &Range<usize>,
     col_bytes: Option<&Vec<u32>>,
     text_len: usize,
@@ -432,9 +514,22 @@ fn runs(
         push(&mut out, &mut at, end.min(text_len), &run);
     }
     push(&mut out, &mut at, text_len, &plain);
-    if !errors.is_empty() {
+    for (range, style) in extras.styles {
+        out = map_range(out, byte_of(range.start)..byte_of(range.end), |r| {
+            apply_inline(r, style)
+        });
+    }
+    if !extras.links.is_empty() {
+        let style = link_style(theme, default);
+        for range in extras.links {
+            out = map_range(out, byte_of(range.start)..byte_of(range.end), |r| {
+                apply_inline(r, &style)
+            });
+        }
+    }
+    if !extras.errors.is_empty() {
         let underline = error_underline(theme);
-        for e in errors {
+        for e in extras.errors {
             out = underline_range(out, byte_of(e.start)..byte_of(e.end), underline);
         }
     }
@@ -514,18 +609,24 @@ impl Element for EditorElement {
 
         // Gutter: line numbers right-aligned in a column wide enough for the
         // largest number.
-        let (len_lines, tab_size, single_line, error) = {
+        let (len_lines, tab_size, single_line, error, console) = {
             let e = self.editor.read(cx);
             (
                 e.buffer.len_lines(),
                 e.config().tab_size,
                 e.single_line,
                 e.error,
+                e.console,
             )
         };
         if single_line {
             colors.background = input_color;
             colors.gutter = input_color;
+        }
+        if console {
+            colors.background = theme.color(UiRole::TerminalBackground);
+            colors.gutter = colors.background;
+            text_color = theme.color(UiRole::TerminalForeground);
         }
         if transparent {
             colors.background = gpui::transparent_black();
@@ -538,6 +639,8 @@ impl Element for EditorElement {
         let digits = len_lines.to_string().len().max(2);
         let (gutter_width, text_left) = if single_line {
             (px(0.0), px(0.0))
+        } else if console {
+            (px(CONSOLE_GUTTER), px(0.0))
         } else {
             (
                 px(GUTTER_LEFT + GUTTER_RIGHT) + m.number_width * digits as f32,
@@ -550,7 +653,14 @@ impl Element for EditorElement {
 
         // Keep the caret in view after edits and caret moves.
         self.editor.update(cx, |e, _| {
-            let max_y = lh * len_lines.saturating_sub(1) as f32;
+            let max_y = if console {
+                (lh * len_lines as f32 - bounds.size.height).max(px(0.0))
+            } else {
+                lh * len_lines.saturating_sub(1) as f32
+            };
+            if std::mem::take(&mut e.scroll_to_end) {
+                e.scroll.y = max_y;
+            }
             if let Some(pos) = e.reveal.take() {
                 // A search match goes to the middle of the view when hidden.
                 let y = lh * e.buffer.char_to_line(pos) as f32;
@@ -603,6 +713,10 @@ impl Element for EditorElement {
         // Shape the visible lines.
         let mut spans = Vec::new();
         let mut errors = Vec::new();
+        let mut styles = Vec::new();
+        let mut line_links = Vec::new();
+        // Hyperlinks: (line, char range).
+        let mut links: Vec<(usize, Range<usize>)> = Vec::new();
         let mut lines = Vec::with_capacity(visible.len());
         let visible_cols = (text_width / m.char_width).ceil() as usize + 1;
         let scroll_col = (scroll.x / m.char_width).floor() as usize;
@@ -617,10 +731,15 @@ impl Element for EditorElement {
             let (text, col_bytes) = display_text(editor, line, cols.clone(), tab_size);
             spans.clear();
             errors.clear();
+            styles.clear();
+            line_links.clear();
             if let Some(h) = editor.highlighter() {
                 h.line_spans(line, &mut spans);
                 h.line_errors(line, &mut errors);
+                h.line_styles(line, theme, &mut styles);
+                h.line_links(line, &mut line_links);
             }
+            links.extend(line_links.iter().map(|r| (line, r.clone())));
             let line_start = editor.buffer.line_start(line);
             let marked = editor.marked.as_ref().and_then(|r| {
                 let line_end = line_start + len;
@@ -629,7 +748,11 @@ impl Element for EditorElement {
             });
             let text_runs = runs(
                 &spans,
-                &errors,
+                LineExtras {
+                    errors: &errors,
+                    styles: &styles,
+                    links: &line_links,
+                },
                 &cols,
                 col_bytes.as_ref(),
                 text.len(),
@@ -759,8 +882,30 @@ impl Element for EditorElement {
             (shaped, point(text_x - scroll.x, top_of(0)))
         });
 
-        // The caret line is highlighted when nothing is selected.
-        let current_lines = if !single_line && editor.selections.iter().all(|s| s.is_empty()) {
+        // Hyperlink rectangles on the visible lines.
+        let link_rects: Vec<LinkRect> = links
+            .into_iter()
+            .filter_map(|(line, range)| {
+                let l = layout_of(line)?;
+                let x0 = line_x(l, range.start);
+                let x1 = line_x(l, range.end);
+                (x1 > x0).then(|| LinkRect {
+                    bounds: Bounds::from_corners(
+                        point(x0, top_of(line)),
+                        point(x1, top_of(line) + lh),
+                    ),
+                    line,
+                    range,
+                })
+            })
+            .collect();
+
+        // The caret line is highlighted when nothing is selected (not in a
+        // console).
+        let current_lines = if !single_line
+            && !console
+            && editor.selections.iter().all(|s| s.is_empty())
+        {
             caret_lines
                 .iter()
                 .filter(|l| visible.contains(l))
@@ -774,7 +919,7 @@ impl Element for EditorElement {
         let numbers_right = bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32;
         let numbers = visible
             .clone()
-            .filter(|_| !single_line)
+            .filter(|_| !single_line && !console)
             .map(|line| {
                 let label = SharedString::from((line + 1).to_string());
                 let color = if caret_lines.contains(&line) {
@@ -800,7 +945,11 @@ impl Element for EditorElement {
 
         // Vertical scrollbar when the text is taller than the view; the view
         // can scroll until the last line is at the top.
-        let content = lh * (len_lines.saturating_sub(1)) as f32 + bounds.size.height;
+        let content = if console {
+            (lh * len_lines as f32).max(bounds.size.height)
+        } else {
+            lh * (len_lines.saturating_sub(1)) as f32 + bounds.size.height
+        };
         let scrollbar = (!single_line && len_lines > viewport_lines).then(|| {
             let track = Bounds::new(
                 point(bounds.right() - scrollbar_width, bounds.top()),
@@ -809,7 +958,7 @@ impl Element for EditorElement {
             let h = (bounds.size.height * (bounds.size.height / content))
                 .max(px(MIN_THUMB))
                 .min(bounds.size.height);
-            let max_y = lh * len_lines.saturating_sub(1) as f32;
+            let max_y = content - bounds.size.height;
             let ratio = if max_y > px(0.0) {
                 scroll.y / max_y
             } else {
@@ -852,6 +1001,16 @@ impl Element for EditorElement {
             ),
             HitboxBehavior::Normal,
         );
+        let link_hitboxes = link_rects
+            .iter()
+            .map(|l| {
+                let visible = l.bounds.intersect(&Bounds::from_corners(
+                    point(bounds.left() + gutter_width, bounds.top()),
+                    point(text_right, bounds.bottom()),
+                ));
+                window.insert_hitbox(visible, HitboxBehavior::Normal)
+            })
+            .collect();
         let layout = LayoutInfo {
             bounds,
             text_x,
@@ -861,6 +1020,7 @@ impl Element for EditorElement {
             lines,
             viewport_lines,
             scrollbar,
+            links: link_rects,
         };
         let stored = layout.clone();
         self.editor.update(cx, |e, _| e.layout = Some(stored));
@@ -876,6 +1036,7 @@ impl Element for EditorElement {
             search: search_rects,
             stripe_marks,
             placeholder,
+            link_hitboxes,
             colors,
         }
     }
@@ -905,6 +1066,9 @@ impl Element for EditorElement {
         // Arrow over the gutter and the scrollbar, I-beam over the text.
         ui::pointer::request(CursorStyle::Arrow, &p.hitbox, window);
         ui::pointer::request(CursorStyle::IBeam, &p.text_hitbox, window);
+        for link in &p.link_hitboxes {
+            ui::pointer::request(CursorStyle::PointingHand, link, window);
+        }
 
         window.paint_quad(fill(bounds, p.colors.background));
         window.paint_quad(fill(
@@ -936,6 +1100,15 @@ impl Element for EditorElement {
                         window.paint_quad(fill(r.bounds, color));
                     }
                 };
+                // Text backgrounds (a console's ANSI backgrounds) go under
+                // the search matches and the selection.
+                for l in &p.layout.lines {
+                    let origin = point(
+                        p.layout.text_x - scroll_x + l.x_offset,
+                        bounds.top() + lh * l.line as f32 - self.editor.read(cx).scroll.y,
+                    );
+                    let _ = l.shaped.paint_background(origin, lh, window, cx);
+                }
                 let in_selection = p.colors.search_current_background.is_some();
                 if !in_selection {
                     paint_search(window);
@@ -1015,6 +1188,14 @@ impl Element for EditorElement {
                     ed.drag_scrollbar(e.position.y, cx);
                     return;
                 }
+                // A link is followed when the mouse is released where it
+                // was pressed (`EditorHyperlinkSupport`).
+                ed.pressed_link = ed
+                    .layout
+                    .as_ref()
+                    .and_then(|l| l.link_at(e.position))
+                    .filter(|_| e.click_count == 1)
+                    .map(|l| (l.line, l.range.clone(), e.position));
                 let pos = ed.offset_for_position(e.position);
                 ed.mouse_down(pos, e.click_count, e.modifiers.shift, window, cx);
             });
@@ -1046,7 +1227,16 @@ impl Element for EditorElement {
         let editor = self.editor.clone();
         window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
             if phase.bubble() && e.button == MouseButton::Left {
-                editor.update(cx, |ed, cx| ed.mouse_up(cx));
+                editor.update(cx, |ed, cx| {
+                    ed.mouse_up(cx);
+                    if let Some((line, range, at)) = ed.pressed_link.take() {
+                        let moved = (e.position.x - at.x).abs() > px(1.0)
+                            || (e.position.y - at.y).abs() > px(1.0);
+                        if !moved {
+                            cx.emit(EditorEvent::LinkClicked { line, range });
+                        }
+                    }
+                });
             }
         });
         // A one-line field does not scroll with the wheel or a swipe, which

@@ -13,12 +13,12 @@ pub mod highlight;
 mod input;
 
 pub use editor::{
-    BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, SearchHighlights, forward_actions,
-    new_editor,
+    BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, SearchHighlights,
+    forward_actions, new_editor,
 };
 pub use element::LONG_LINE;
 pub use find::FindBar;
-pub use highlight::{Highlighter, Job, JobResult, Span, SyntaxHighlighter};
+pub use highlight::{Highlighter, InlineStyle, Job, JobResult, Span, SyntaxHighlighter};
 
 /// Height of a one-line field in the UI font ([`Editor::set_ui_font`]),
 /// for laying out its container.

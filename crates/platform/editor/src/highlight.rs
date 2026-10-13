@@ -23,6 +23,19 @@ use themes::TextRole;
 /// A styled range of one line: chars from the start of the line.
 pub type Span = (Range<usize>, TextRole);
 
+/// An explicit style of a range of a line, drawn over the role spans (for
+/// example a console's ANSI colours). Unset parts keep the text's style.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct InlineStyle {
+    pub color: Option<gpui::Hsla>,
+    pub background: Option<gpui::Hsla>,
+    pub bold: bool,
+    pub italic: bool,
+    /// Underline thickness in logical pixels.
+    pub underline: Option<f32>,
+    pub strikethrough: bool,
+}
+
 /// Work for a background thread and its result.
 pub type JobResult = Box<dyn Any + Send>;
 pub type Job = Box<dyn FnOnce() -> JobResult + Send>;
@@ -51,6 +64,21 @@ pub trait Highlighter: 'static {
     /// Appends the char ranges of `line` to mark as syntax errors.
     fn line_errors(&self, _line: usize, _out: &mut Vec<Range<usize>>) {}
 
+    /// Appends explicit styles of `line` (char ranges, sorted, not
+    /// overlapping), drawn over its spans; colours come from `theme`.
+    fn line_styles(
+        &self,
+        _line: usize,
+        _theme: &ui::theme::Theme,
+        _out: &mut Vec<(Range<usize>, InlineStyle)>,
+    ) {
+    }
+
+    /// Appends the char ranges of `line` that are hyperlinks (sorted, not
+    /// overlapping): drawn in the link style, with the hand pointer; a click
+    /// reports [`EditorEvent::LinkClicked`](crate::EditorEvent).
+    fn line_links(&self, _line: usize, _out: &mut Vec<Range<usize>>) {}
+
     /// Highlighting reflects the current text (no parse pending).
     fn is_current(&self) -> bool {
         true
@@ -61,6 +89,28 @@ pub trait Highlighter: 'static {
     fn enclosing_ranges(&self, _buffer: &Buffer, _range: Range<usize>) -> Vec<Range<usize>> {
         Vec::new()
     }
+}
+
+/// Drops a value on a thread of its own, one value after another.
+fn drop_off_thread<T: Send + 'static>(value: T) {
+    use std::sync::Mutex;
+    use std::sync::mpsc::{Sender, channel};
+    type Garbage = Box<dyn Send>;
+    static DROPPER: Mutex<Option<Sender<Garbage>>> = Mutex::new(None);
+    let mut dropper = DROPPER.lock().unwrap_or_else(|e| e.into_inner());
+    let sender = dropper.get_or_insert_with(|| {
+        let (tx, rx) = channel::<Garbage>();
+        let _ = std::thread::Builder::new()
+            .name("editor drop".to_owned())
+            .spawn(move || {
+                for garbage in rx {
+                    drop(garbage)
+                }
+            });
+        tx
+    });
+    // If the thread is gone, the value is dropped here instead.
+    let _ = sender.send(Box::new(value));
 }
 
 /// Highlighting with a tree-sitter grammar of the `syntax` crate.
@@ -178,7 +228,11 @@ impl Highlighter for SyntaxHighlighter {
             for edit in self.edits_during_job.drain(..) {
                 tree.edit(&edit);
             }
-            self.tree = Some(tree);
+            // Freeing the tree of a large file takes long (hundreds of
+            // milliseconds under memory pressure): not on the UI thread.
+            if let Some(old) = self.tree.replace(tree) {
+                drop_off_thread(old);
+            }
             if let Some(mut states) = states {
                 if let Some(row) = first_edited {
                     states.invalidate_after(row);

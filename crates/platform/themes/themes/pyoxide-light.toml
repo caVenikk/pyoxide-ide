@@ -98,6 +98,8 @@ progress = "$copper"
 progress-track = "$line"
 notification = "$bg-white"
 non-project-file = "#fbf3e7"
+run-widget-running = "$leaf"
+run-widget-stop = "$red"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"
@@ -218,6 +220,7 @@ folded-text = { fg = "$fg-muted", bg = "#0000000f" }
 inlay-hint = { fg = "#5f6877", bg = "#0000000a", italic = true }
 console-error = { fg = "$red" }
 console-input = { fg = "$teal-light" }
+console-system = { fg = "$blue" }
 
 [font]
 # Inter and JetBrains Mono ship with the IDE (crates/platform/ui/assets/fonts).

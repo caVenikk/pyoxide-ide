@@ -128,6 +128,8 @@ roles! {
         ProgressTrack => ("progress-track", "Chrome", "Progress bar track"),
         Notification => ("notification", "Chrome", "Notification balloon"),
         NonProjectFile => ("non-project-file", "Chrome", "Row background of files outside the project content, such as excluded folders"),
+        RunWidgetRunning => ("run-widget-running", "Chrome", "Background of the run widget's Run button while its process runs"),
+        RunWidgetStop => ("run-widget-stop", "Chrome", "Background of the run widget's Stop button"),
 
         EditorBackground => ("editor-background", "Editor", "Editor background"),
         EditorText => ("editor-text", "Editor", "Default editor text"),
@@ -255,6 +257,7 @@ roles! {
         InlayHint => ("inlay-hint", "Editor decoration", "Inline type and parameter hints"),
         ConsoleError => ("console-error", "Editor decoration", "Error output in the run console"),
         ConsoleInput => ("console-input", "Editor decoration", "User input in the run console"),
+        ConsoleSystem => ("console-system", "Editor decoration", "The IDE's own lines in the run console (command line, exit code)"),
     }
 }
 
@@ -363,6 +366,8 @@ impl UiRole {
             SearchFieldError => Some(Danger),
             SearchOptionSelected => Some(Pressed),
             NonProjectFile => Some(SurfaceAlt),
+            RunWidgetRunning => Some(Success),
+            RunWidgetStop => Some(Danger),
             _ => None,
         }
     }

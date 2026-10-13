@@ -60,10 +60,12 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #64 Drop files onto the window to open them | sub-agent drop | `workbench` (editor area, empty state) | #18 | done (PR #70) |
 | #71 SQLite lock waits starved by back-to-back commits | sub-agent sqlite | `db-sqlite` | - | done (PR #72) |
 | #44 Go to File and Search Everywhere | sub-agent find | `ui` (popup, list, fuzzy), `project` (file name index), `workbench` | #43 | done (PR #73) |
-| #45 Run the current Python file | - | run-debug crates; in parallel with #43/#44 only if it does not touch the same crates | #18 | todo |
+| #45 Run the current Python file | sub-agents run (A1 non-UI, A2 UI, B interpreter) | new `crates/platform/{process,console}`, `crates/python/py-run`; `workbench` (bottom tool window area, Run tool window, run widget, dialogs, product hooks), `editor` (console mode), `project` (personal state, ADR 0009), `ui` (list popups), `pyoxide-ide` (Python run provider, interpreter widget) | #18 | done (PR #76) |
+| #74 Run configurations with a one-time import from `.idea` | - | run-debug | #45 | todo |
+| #75 Configured interpreters, Add New Interpreter, interpreter settings | - | python-env | #45 | todo |
 
-Queue after #45: M3 completion and navigation through a language server, then
-#13 control channel, then #50 (find filters for comments and string
+Queue: M3 completion and navigation through a language server (recon and
+issues first), then #13 control channel, then #50 (find filters for comments and string
 literals, which need the Python syntax layer). Follow-ups of #18 are #24-#42;
 of the search work #48-#53 and #65-#69.
 

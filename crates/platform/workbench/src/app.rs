@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, Application, Bounds, Menu, MenuItem, TitlebarOptions, WindowBounds,
-    WindowHandle, WindowOptions, point, px, size,
+    AnyView, App, AppContext as _, Application, Bounds, Menu, MenuItem, TitlebarOptions,
+    WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions, point, px, size,
 };
 use ui::command::CommandError;
 use ui::icons::{IconName, IconSvg};
@@ -15,6 +15,7 @@ use crate::commands::{self, Quit, SetTheme, ToggleProject};
 use crate::env;
 use crate::file_types::FileType;
 use crate::project_panel;
+use crate::run::RunHook;
 use crate::workbench::Workbench;
 
 /// A tool window button of a stripe that a product adds.
@@ -40,6 +41,29 @@ pub struct NavigationHooks {
     pub package_markers: &'static [&'static str],
 }
 
+/// A product's view in the status bar, right of the platform's widgets
+/// (for example the Python interpreter widget). `create` runs once per
+/// main window, after the workbench is built; the view may subscribe to
+/// [`WorkbenchEvent`](crate::workbench::WorkbenchEvent)s through the
+/// workbench handle.
+#[derive(Clone)]
+pub struct StatusWidget {
+    /// The widget's id.
+    pub id: &'static str,
+    pub create: CreateStatusWidget,
+}
+
+/// Creates a [`StatusWidget`]'s view for a main window.
+pub type CreateStatusWidget = Rc<dyn Fn(WeakEntity<Workbench>, &mut Window, &mut App) -> AnyView>;
+
+impl std::fmt::Debug for StatusWidget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StatusWidget")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a product tells the workbench about itself.
 #[derive(Debug, Clone, Default)]
 pub struct Product {
@@ -52,8 +76,9 @@ pub struct Product {
     pub icons: &'static [IconSvg],
     /// Extra tool window buttons in the lower group of the left stripe.
     pub left_stripe_bottom: Vec<StripeItem>,
-    /// Text of the interpreter widget in the status bar.
-    pub interpreter_label: Option<&'static str>,
+    /// The product's widgets in the status bar, in order, right of the
+    /// platform's widgets.
+    pub status_widgets: Vec<StatusWidget>,
     /// File masks Find in Files offers before any was used, the first one
     /// shown in its mask field.
     pub find_file_masks: Vec<&'static str>,
@@ -62,6 +87,12 @@ pub struct Product {
     pub auto_excluded: project::AutoExclusions,
     /// Source roots, locations and package folders for Go to File.
     pub navigation: NavigationHooks,
+    /// Registers the product's commands, globals and key bindings; called
+    /// at the end of [`init`].
+    pub init: Option<fn(&mut App)>,
+    /// Runs files of the product's languages (the run widget, the Run tool
+    /// window and the `run.*` commands); without it nothing can be run.
+    pub run: Option<RunHook>,
 }
 
 /// Default size of the main window's content.
@@ -85,6 +116,8 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::find_in_files::init(cx, &product.find_file_masks);
     crate::search_everywhere::init(cx);
     crate::recent_files::init(cx);
+    crate::run::init(cx);
+    ui::command::register(cx, crate::dialog::COMMANDS);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()
@@ -160,6 +193,11 @@ pub fn init(cx: &mut App, product: &Product) {
     );
     ui::command::register_query(
         cx,
+        "run.state",
+        Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).run_state_json(window, cx))),
+    );
+    ui::command::register_query(
+        cx,
         "recent-files.state",
         Rc::new(|_, window, cx| {
             let popup = workbench(window)?.read(cx).recent_files().clone();
@@ -201,6 +239,9 @@ pub fn init(cx: &mut App, product: &Product) {
             MenuItem::action(format!("Quit {}", product.name), Quit),
         ],
     }]);
+    if let Some(init) = product.init {
+        init(cx);
+    }
 }
 
 /// Window options of the main window: the content extends under a
@@ -232,7 +273,10 @@ pub fn window_options(cx: &App, product: &Product) -> WindowOptions {
 pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Workbench> {
     let options = window_options(cx, &product);
     cx.open_window(options, |window, cx| {
-        cx.new(|cx| Workbench::new(product, window, cx))
+        let workbench = cx.new(|cx| Workbench::new(product.clone(), window, cx));
+        // The product's status bar widgets get the finished workbench.
+        Workbench::create_status_widgets(&workbench, &product, window, cx);
+        workbench
     })
     .expect("open the main window")
 }

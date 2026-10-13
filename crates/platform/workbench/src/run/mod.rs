@@ -1,0 +1,98 @@
+//! Running files: the contract with the product that knows how to run a
+//! file of its language ([`RunProvider`]), the Run tool window and the
+//! `run.*` commands.
+//!
+//! The workbench knows no language: it asks the product's provider whether
+//! the current file can be run and for the command line that runs it, then
+//! starts the process, shows its output in the Run tool window and handles
+//! Stop and Rerun.
+
+pub mod commands;
+pub mod console_view;
+pub mod tool_window;
+pub mod widget;
+
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gpui::{App, Task};
+use ui::icons::IconName;
+
+pub use console_view::{ConsoleEvent, ConsoleView};
+pub use tool_window::{RunTab, RunToolWindow, RunToolWindowEvent, TabStatus};
+
+/// Registers the run commands.
+pub fn init(cx: &mut App) {
+    ui::command::register(cx, commands::COMMANDS);
+    ui::command::register(cx, commands::TOOL_WINDOW_COMMANDS);
+}
+
+/// What the workbench asks the product to run: the current file.
+#[derive(Debug, Clone)]
+pub struct RunRequest {
+    /// The file to run (absolute).
+    pub file: PathBuf,
+    /// The project folder, when a project is open.
+    pub project_root: Option<PathBuf>,
+    /// The project's source roots, as the product's
+    /// [`NavigationHooks::source_roots`](crate::NavigationHooks) found them
+    /// when the project opened.
+    pub source_roots: Arc<Vec<PathBuf>>,
+}
+
+/// A process ready to start, as the product prepared it.
+pub struct RunSpec {
+    /// Title of the run's tab in the Run tool window: the configuration's
+    /// name (for a file, its name without the extension, `main`).
+    pub title: String,
+    /// Icon of the run's tab.
+    pub icon: IconName,
+    /// The process to start.
+    pub command: process::CommandLine,
+    /// The console's first line: the command line as the reference prints
+    /// it.
+    pub display: String,
+    /// Finders of links in the output (tracebacks to `file:line`, URLs), in
+    /// order.
+    pub link_filters: Vec<Arc<dyn console::LinkFilter>>,
+}
+
+impl std::fmt::Debug for RunSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunSpec")
+            .field("title", &self.title)
+            .field("icon", &self.icon)
+            .field("display", &self.display)
+            .field("link_filters", &self.link_filters.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Runs files of a product's languages.
+pub trait RunProvider: 'static {
+    /// The file can be run (Run is enabled while it is the current file).
+    /// Called while drawing: no I/O.
+    fn can_run(&self, file: &Path, cx: &App) -> bool;
+
+    /// Prepares the command line that runs the request's file: finds the
+    /// interpreter and builds the arguments and environment, off the UI
+    /// thread. An error is a message for the user.
+    fn prepare(&self, request: RunRequest, cx: &mut App) -> Task<Result<RunSpec, String>>;
+}
+
+/// The product's [`RunProvider`] in a [`Product`](crate::Product).
+#[derive(Clone)]
+pub struct RunHook(pub Rc<dyn RunProvider>);
+
+impl RunHook {
+    pub fn new(provider: impl RunProvider) -> Self {
+        Self(Rc::new(provider))
+    }
+}
+
+impl std::fmt::Debug for RunHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RunHook")
+    }
+}

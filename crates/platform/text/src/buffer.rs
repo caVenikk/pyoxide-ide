@@ -376,6 +376,18 @@ impl Buffer {
         }
     }
 
+    /// Replaces a char range with text outside the undo history, also in a
+    /// read-only buffer: a console's output. The text keeps its modified
+    /// state. Edits are applied in the order given, each in the coordinates
+    /// of the text left by the previous one.
+    pub fn replace_untracked(&mut self, range: Range<usize>, text: &str) -> AppliedEdit {
+        let len = self.len_chars();
+        let end = range.end.min(len);
+        let start = range.start.min(end);
+        let text = normalize_line_endings(text);
+        self.replace(start, end - start, &text)
+    }
+
     /// Reverts the last undo group; returns the applied replacements and the
     /// selections from before it.
     pub fn undo(&mut self) -> Option<(Vec<AppliedEdit>, SelectionSet)> {
@@ -475,6 +487,24 @@ mod tests {
         assert_eq!(b.utf16_to_char(b.char_to_utf16(emoji + 1)), emoji + 1);
         assert_eq!(Buffer::new("").len_lines(), 1);
         assert_eq!(Buffer::new("a\n").len_lines(), 2);
+    }
+
+    #[test]
+    fn untracked_replacements_skip_history_and_read_only() {
+        let mut b = Buffer::new("ab\ncd");
+        b.set_read_only(true);
+        let v = b.version();
+        let applied = b.replace_untracked(5..5, "\r\nef");
+        assert_eq!(b.text(), "ab\ncd\nef");
+        assert_eq!((applied.start, applied.old_end, applied.new_end), (5, 5, 8));
+        b.replace_untracked(0..3, "");
+        assert_eq!(b.text(), "cd\nef");
+        assert!(b.version() > v);
+        assert!(!b.can_undo());
+        assert!(!b.is_modified());
+        // Ranges are clamped to the text.
+        b.replace_untracked(4..99, "X");
+        assert_eq!(b.text(), "cd\neX");
     }
 
     #[test]

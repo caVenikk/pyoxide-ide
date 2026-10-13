@@ -1263,6 +1263,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "console"
+version = "0.0.1"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4953,6 +4960,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "process"
+version = "0.0.1"
+dependencies = [
+ "flume",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5052,6 +5068,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "py-run"
+version = "0.0.1"
+dependencies = [
+ "console",
+ "process",
+ "py-env",
+ "regex",
+ "tempfile",
+]
+
+[[package]]
 name = "py-syntax"
 version = "0.0.1"
 dependencies = [
@@ -5080,8 +5107,13 @@ dependencies = [
 name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
+ "dirs 7.0.0",
  "editor",
  "gpui",
+ "process",
+ "project",
+ "py-env",
+ "py-run",
  "py-syntax",
  "serde_json",
  "tempfile",
@@ -7321,6 +7353,7 @@ dependencies = [
  "gpui",
  "image",
  "libc",
+ "name-match",
  "objc",
  "raw-window-handle",
  "resvg",
@@ -8462,6 +8495,7 @@ name = "workbench"
 version = "0.0.1"
 dependencies = [
  "commands",
+ "console",
  "core-graphics 0.24.0",
  "dirs 7.0.0",
  "editor",
@@ -8471,6 +8505,7 @@ dependencies = [
  "image",
  "name-match",
  "objc",
+ "process",
  "project",
  "project-search",
  "raw-window-handle",

@@ -39,7 +39,8 @@ Platform (`crates/platform/`, language-agnostic):
 - `project`: an opened folder, its lazily listed file tree with hidden and
   excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
   project settings and the one-time import of the reference IDE's
-  exclusions (ADR 0008), reading and writing documents.
+  exclusions (ADR 0008), the personal project state (ADR 0009), reading
+  and writing documents.
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching
@@ -58,8 +59,8 @@ Platform (`crates/platform/`, language-agnostic):
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
   metrics, bundled fonts, colour icons rasterized at device scale, common
-  components, context menus, the UI command index (`ui_commands!`,
-  `command::invoke`).
+  components, context menus and list popups, the UI command index
+  (`ui_commands!`, `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar, a movable and resizable popup frame, the Find in Files
   and Replace in Files popup with its preview, Search Everywhere and Go to

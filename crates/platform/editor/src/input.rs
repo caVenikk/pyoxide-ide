@@ -8,7 +8,7 @@ use std::ops::Range;
 use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window, point};
 use text::{CaretPlacement, Edit, EditKind, Selection, SelectionSet};
 
-use crate::editor::Editor;
+use crate::editor::{Editor, ForwardedInput};
 
 impl Editor {
     fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
@@ -97,6 +97,14 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.forward_input {
+            if !text.is_empty() {
+                cx.emit(crate::EditorEvent::Input(ForwardedInput::Text(
+                    text::normalize_line_endings(text).into_owned(),
+                )));
+            }
+            return;
+        }
         let range = range_utf16.map(|r| self.range_from_utf16(&r));
         self.replace_for_input(range, text, cx);
         self.marked = None;
@@ -111,6 +119,10 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A console takes composed text only once it is committed.
+        if self.forward_input {
+            return;
+        }
         let range = range_utf16.map(|r| self.range_from_utf16(&r));
         let Some(inserted) = self.replace_for_input(range, text, cx) else {
             return;

@@ -9,6 +9,7 @@
 [[context]]
 [context.bindings]
 "alt-1" = "workbench.toggle-project"
+"alt-4" = "workbench.toggle-run"
 "ctrl-s" = "workbench.save-all"
 "ctrl-f4" = "tabs.close"
 "alt-right" = "tabs.next"
@@ -20,6 +21,12 @@
 "ctrl-shift-a" = "search-everywhere.go-to-action"
 "ctrl-alt-shift-e" = "search-everywhere.go-to-text"
 "ctrl-e" = "recent-files.open"
+# Run: the current file (Current File is the only configuration yet);
+# Run Context Configuration runs it as well; Stop stops the run, a second
+# Stop kills it.
+"shift-f10" = "run.run"
+"ctrl-shift-f10" = "run.current-file"
+"ctrl-f2" = "run.stop"
 
 [[context]]
 name = "ProjectTree"
@@ -295,3 +302,34 @@ name = "RecentFiles"
 "escape" = "recent-files.close"
 "delete" = "recent-files.delete"
 "backspace" = "recent-files.delete"
+
+# The Run tool window: Rerun, Close Tab, Up and Down the Stack Trace;
+# Escape goes to the editor, Shift+Escape hides the tool window. (A
+# binding without a context counts as one of the innermost context, so
+# these sections come last; the console, an editor, repeats the keys that
+# the editor or the whole window bind.)
+[[context]]
+name = "RunToolWindow"
+[context.bindings]
+"ctrl-f5" = "run.rerun"
+"ctrl-f4" = "run.close-tab"
+"ctrl-alt-up" = "run.console.previous-link"
+"ctrl-alt-down" = "run.console.next-link"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+# The Run console: Close Tab and Send EOF take the keys of Close and
+# Duplicate Line; Escape leaves it.
+[[context]]
+name = "RunConsole > Editor"
+[context.bindings]
+"ctrl-f4" = "run.close-tab"
+"ctrl-d" = "run.console.send-eof"
+"escape" = "workbench.focus-editor"
+
+# A message dialog: Enter chooses the default button, Escape cancels.
+[[context]]
+name = "Dialog"
+[context.bindings]
+"enter" = "dialog.confirm"
+"escape" = "dialog.cancel"

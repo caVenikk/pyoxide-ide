@@ -39,7 +39,7 @@ Open a SQLite file directly,db-gui,should,yes,no,feedback
 SQL*Plus commands in the Oracle console (DESCRIBE / EXEC),db-gui,should,no,no,own feature; feedback
 psql / sqlite3 meta-commands in the console (subset),db-gui,could,no,no,own feature; feedback
 Text buffer and editing,editor,must,yes,partial,"rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); no reload of files changed on disk"
-"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,"New UI layout and Islands themes; toolbar file path; stripe buttons, run widget and status bar widgets are placeholders; native caption on Windows/Linux"
+"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,"New UI layout and Islands themes; toolbar file path; run widget and Run tool window work for Current File; interpreter status widget; other stripe buttons and status widgets are placeholders; native caption on Windows/Linux"
 Python syntax highlighting,editor,must,yes,yes,tree-sitter off the UI thread mapped to theme text roles
 Tabs and split views,editor,must,yes,partial,tabs with modified marker and keyboard switching; no split views
 File tree and project model,editor,must,yes,partial,"open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; no file operations or drag and drop"
@@ -53,14 +53,15 @@ Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
 UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
-Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; no UI yet"
+Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75"
 Completion,python-intel,must,yes,no,LSP
 Go to definition and find usages,python-intel,must,yes,no,LSP
 Hover and signature help,python-intel,must,yes,no,LSP
 Rename and refactorings,python-intel,should,yes,no,
 Lint and format (ruff),python-intel,must,yes,no,
 Type checking,python-intel,must,yes,no,ty / basedpyright / pyrefly by ADR
-Run configurations,run-debug,must,yes,no,
+"Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun)",run-debug,must,yes,yes,"#45; uv run for uv environments; soft wraps, print and console find later"
+Run configurations,run-debug,must,yes,no,#74
 Debugger (breakpoints / stepping / variables),run-debug,must,yes,no,DAP / debugpy
 Test runner (pytest),run-debug,should,yes,no,
 Integrated terminal,run-debug,must,yes,no,
@@ -78,6 +79,6 @@ uv: install and manage Python versions,python-env,should,yes,partial,engine and 
 Package manager panel (list / install / upgrade / remove),python-env,must,yes,partial,"engine and CLI (env packages/add/remove, outdated); panel UI todo"
 Package search and version picker,python-env,should,yes,partial,PyPI lookup (env search); picker UI todo
 Dependency groups and extras in pyproject.toml,python-env,should,yes,partial,read and edit via uv add --group/--optional; no UI yet
-uv run as run configuration,python-env,should,yes,no,
+uv run as run configuration,python-env,should,yes,partial,"the current file runs through uv run in a uv environment (#45); configurations: #74"
 PEP 723 inline script dependencies,python-env,could,yes,partial,parsed by the project model
 Other managers (poetry / conda / pipenv / pip),python-env,should,yes,partial,"discovery of Poetry/conda/Pipenv, pip fallback for packages"
