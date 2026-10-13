@@ -224,6 +224,73 @@ here with: source URL, commit, file(s), license, and what was changed.
   documentation of built-in functions and exceptions. The grammar's own
   query is not copied.
 
+- crates/platform/process
+  Closely adapted from IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @
+  82a18fd6f8095cced5d0cef964c041f63ece8ee5 (branch 262): the stop
+  semantics of platform/platform-util-io/src/com/intellij/execution/process/
+  KillableProcessHandler.java, OSProcessHandler.java, OSProcessUtil.java and
+  platform/util/src/com/intellij/execution/process/UnixProcessManager.java
+  (SIGINT, then SIGKILL, to the process tree, children first), of
+  platform/execution-impl/src/com/intellij/execution/actions/StopAction.java,
+  and of platform/platform-util-io-impl/src/com/intellij/execution/process/
+  LocalProcessServiceImpl.kt (a 0xFF byte on standard input after Ctrl+C on
+  Windows); the end of output of platform/util/src/com/intellij/execution/
+  process/BaseOSProcessHandler.java; the exit code text of
+  platform/ide-core/src/com/intellij/execution/process/
+  ProcessTerminatedListener.java with the signal table of
+  platform/util/base/src/com/intellij/execution/process/UnixSignal.kt and
+  the message of platform/ide-core/resources/messages/IdeCoreBundle.properties;
+  the command line presentation of platform/execution/src/com/intellij/
+  execution/target/TargetedCommandLine.kt, platform/util/src/com/intellij/
+  execution/CommandLineUtil.java and .../util/execution/ParametersListUtil.java.
+  The Windows process tree kill and Ctrl+C follow WinP (MIT, (c) 2008-
+  Kohsuke Kawaguchi, Sun Microsystems, Inc., and contributors),
+  https://github.com/kohsuke/winp, files native/winp.cpp
+  (KillProcessTreeWinHelper) and native/sendctrlc/main.cpp.
+  Changes: reimplemented in Rust; the process starts in its own process
+  group, which a kill also signals; the Windows Ctrl+C is sent from the
+  IDE's process instead of a helper program.
+
+- crates/platform/console
+  Closely adapted from IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @
+  82a18fd6f8095cced5d0cef964c041f63ece8ee5 (branch 262): the escape
+  sequence lexer of platform/platform-util-io/src/com/intellij/execution/
+  process/AnsiStreamingLexer.java, the SGR codes and the 256-colour table
+  of AnsiTerminalEmulator.java, AnsiCommands.java, AnsiEscapeDecoder.java
+  and platform/platform-api/src/com/intellij/execution/process/
+  ColoredOutputTypeRegistryImpl.java; the carriage return and backspace
+  rules of platform/execution-impl/src/com/intellij/execution/impl/
+  TokenBuffer.java, platform/lang-impl/src/com/intellij/execution/impl/
+  ConsoleViewImpl.kt and ConsoleTokenUtil.java and of platform/util/src/
+  com/intellij/util/io/BaseOutputReader.java; the cycle buffer of
+  .../execution/impl/ConsoleBuffer.java and platform/core-impl/src/com/
+  intellij/openapi/editor/impl/DocumentImpl.java; the URL filter and its
+  regular expressions of platform/execution-impl/src/com/intellij/execution/
+  filters/UrlFilter.java and platform/util/src/com/intellij/util/io/
+  URLUtil.java (URL_PATTERN_OPTIMIZED, FILE_URL_PATTERN_OPTIMIZED).
+  Changes: reimplemented in Rust on the `regex` crate, whose syntax has no
+  look-behind (checked by hand); text is UTF-8 with byte ranges.
+
+- crates/python/py-run
+  Closely adapted from IntelliJ Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @
+  82a18fd6f8095cced5d0cef964c041f63ece8ee5 (branch 262): the command line,
+  environment and PYTHONPATH of python/src/com/jetbrains/python/run/
+  PythonCommandLineState.java, PythonScripts.kt, TargetedPythonPaths.kt,
+  PythonRunConfigurationProducer.java, python/python-sdk/src/com/jetbrains/
+  python/sdk/PythonEnvUtil.java, PySdkUtil.java and python/src/com/jetbrains/
+  python/sdk/PythonSdkType.java (virtual environment activation),
+  python/src/com/jetbrains/python/sdk/uv/run/UvRunToolProvider.kt (uv run);
+  the traceback filter of python/src/com/jetbrains/python/run/
+  PythonTracebackFilter.kt and PyTracebackParser.kt (its regular
+  expression), python/src/com/jetbrains/python/traceBackParsers/
+  TraceBackParserAdapter.java, python/src/com/jetbrains/python/testing/
+  pytest/PyTestTracebackParser.java and PyFilesStateMachine.java.
+  Changes: reimplemented in Rust; the activation sets VIRTUAL_ENV and PATH
+  directly instead of reading the environment of the activate script.
+
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,
   and JetBrains Mono 2.304 (c) 2020 The JetBrains Mono Project Authors,
