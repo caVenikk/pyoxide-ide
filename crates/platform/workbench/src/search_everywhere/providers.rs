@@ -94,7 +94,8 @@ pub(super) struct Found {
 
 /// Recently opened files whose names match (all of them for an empty
 /// text), best match first, the more recent first between equal matches;
-/// the file of the active editor is left out.
+/// the file of the active editor is left out (deleted files are left out
+/// of `files` beforehand, off the UI thread).
 pub(super) fn recent(
     files: &[PathBuf],
     current: Option<&PathBuf>,
@@ -110,7 +111,7 @@ pub(super) fn recent(
     let mut rows: Vec<(Row, i32)> = Vec::new();
     let mut seen = HashSet::new();
     for path in files {
-        if Some(path) == current || !seen.insert(path) || !path.exists() {
+        if Some(path) == current || !seen.insert(path) {
             continue;
         }
         let name: Vec<char> = path
@@ -184,7 +185,7 @@ pub(super) const DIRECTORY_TYPE: &str = "Directory";
 /// Files and folders, the first `limit` the reference finds, ordered by
 /// weight; a file that matches the text exactly (its name, or its name
 /// without the extension) comes before the other files.
-pub(super) fn files(q: FilesQuery) -> Found {
+pub(super) fn files(q: FilesQuery, cancel: &CancelToken) -> Found {
     let query = GotoQuery {
         text: &q.text,
         non_project: q.non_project,
@@ -223,7 +224,7 @@ pub(super) fn files(q: FilesQuery) -> Found {
         .filter(|row| !hidden_path(&row.path, row.is_dir));
     let hits: Vec<FileHit> = q
         .index
-        .goto_file(&query, &|| false)
+        .goto_file(&query, &|| cancel.is_cancelled())
         .into_iter()
         .filter(|h| !hidden(h))
         .collect();

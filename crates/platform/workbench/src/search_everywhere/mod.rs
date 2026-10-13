@@ -309,6 +309,8 @@ pub struct SearchEverywhere {
     dropdown: Option<Dropdown>,
     list: UniformListScrollHandle,
     frame: PopupFrame,
+    /// Checks in the background which recent files still exist.
+    recent_check: Option<Task<()>>,
     /// Measurements: when the last search started and how long it took.
     started: Option<std::time::Instant>,
     finished: Option<Duration>,
@@ -391,6 +393,7 @@ impl SearchEverywhere {
             dropdown: None,
             list: UniformListScrollHandle::new(),
             frame,
+            recent_check: None,
             started: None,
             finished: None,
             _subscriptions: subscriptions,
@@ -557,8 +560,31 @@ impl SearchEverywhere {
         if self.everywhere() {
             cx.emit(SearchEverywhereEvent::WantNonProject);
         }
+        self.check_recent_files(cx);
         self.search_now(cx);
         cx.notify();
+    }
+
+    /// Leaves out the recent files deleted since they were opened (the
+    /// disk is asked in the background; a change searches again).
+    fn check_recent_files(&mut self, cx: &mut Context<Self>) {
+        let files = self.context.recent_files.clone();
+        let check = cx.background_spawn(async move {
+            let gone: HashSet<PathBuf> = files.into_iter().filter(|p| !p.exists()).collect();
+            gone
+        });
+        self.recent_check = Some(cx.spawn(async move |this, cx| {
+            let gone = check.await;
+            let _ = this.update(cx, |this, cx| {
+                this.recent_check = None;
+                if gone.is_empty() || !this.open {
+                    return;
+                }
+                this.context.recent_files.retain(|p| !gone.contains(p));
+                this.frozen = 0;
+                this.search_now(cx);
+            });
+        }));
     }
 
     /// Opens on `tab` with `text` (the command for agents and tests).
@@ -601,6 +627,7 @@ impl SearchEverywhere {
         self.open = false;
         self.cancel_search();
         self.debounce = None;
+        self.recent_check = None;
         self.dropdown = None;
         self.frame.cancel_drag();
         let place = self.frame.place();
@@ -694,6 +721,9 @@ impl SearchEverywhere {
         self.frozen = 0;
         self.selected = None;
         self.selection_moved = false;
+        if self.everywhere() && tab != Tab::Actions {
+            cx.emit(SearchEverywhereEvent::WantNonProject);
+        }
         self.search_now(cx);
         cx.notify();
     }
@@ -854,6 +884,7 @@ impl SearchEverywhere {
         }
         self.context.index = index;
         if self.open {
+            self.frozen = 0;
             self.search_now(cx);
         }
     }
@@ -862,12 +893,12 @@ impl SearchEverywhere {
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
         self.selection_moved = false;
+        self.cancel_search();
         let text = self.field.read(cx).text();
-        // A scope widened because nothing was found goes back when the text
-        // no longer contains what found nothing.
+        // A scope widened because nothing was found goes back unless the
+        // text still contains what found nothing (longer than one char).
         if let Some(not_found) = &self.auto_everywhere
-            && not_found.chars().count() > 1
-            && !text.contains(not_found.as_str())
+            && !(not_found.chars().count() > 1 && text.contains(not_found.as_str()))
         {
             self.auto_everywhere = None;
             self.everywhere[self.tab.index()] = false;
@@ -952,7 +983,7 @@ impl SearchEverywhere {
             .then(|| self.text_search(&text))
             .flatten();
         if files.is_none() && text_search.is_none() {
-            self.show_found(found, cx);
+            self.show_found(found, &text, cx);
             return;
         }
         let cancel = CancelToken::new();
@@ -960,7 +991,7 @@ impl SearchEverywhere {
         let task = cx.background_spawn(async move {
             let mut more = Vec::new();
             if let Some(q) = files {
-                more.push(providers::files(q));
+                more.push(providers::files(q, &cancel));
             }
             if let Some(search) = text_search {
                 more.push(providers::text(search, &cancel));
@@ -974,7 +1005,7 @@ impl SearchEverywhere {
                     return;
                 }
                 found.extend(more);
-                this.show_found(found, cx);
+                this.show_found(found, &text, cx);
             });
         }));
         cx.notify();
@@ -1043,12 +1074,13 @@ impl SearchEverywhere {
     /// by weight, the rows that came first first between equal weights;
     /// rows shown before loading more stay where they were; a spinner row
     /// ends the list while there are more.
-    fn show_found(&mut self, found: Vec<Found>, cx: &mut Context<Self>) {
+    /// The rows found for `text`.
+    fn show_found(&mut self, found: Vec<Found>, text: &str, cx: &mut Context<Self>) {
         self.searching = false;
         self.search_task = None;
         self.cancel = None;
         self.finished = self.started.map(|t| t.elapsed());
-        let text = self.field.read(cx).text();
+        let text = text.to_owned();
         let previous = self.selected.and_then(|i| self.rows.get(i)).cloned();
         self.more = found
             .iter()
@@ -1129,7 +1161,7 @@ impl SearchEverywhere {
 
     /// The list was scrolled near its end: more rows.
     pub(crate) fn wants_more(&self) -> bool {
-        if self.more.is_empty() || self.searching {
+        if self.more.is_empty() || self.is_searching() {
             return false;
         }
         let list = self.list.0.borrow();
@@ -1146,7 +1178,7 @@ impl SearchEverywhere {
 
     /// Every kind that has more shows a page more; the rows shown stay.
     pub(crate) fn load_more(&mut self, cx: &mut Context<Self>) {
-        if self.more.is_empty() || self.searching {
+        if self.more.is_empty() || self.is_searching() {
             return;
         }
         self.rows.retain(|r| *r != Row::Loading);

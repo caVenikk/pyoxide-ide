@@ -368,6 +368,14 @@ fn recent_files_with_an_empty_field(cx: &mut TestAppContext) {
         let files: Vec<_> = rows.iter().filter(|r| r.starts_with("file:")).collect();
         assert_eq!(files, ["file:pkg/util.py"], "once");
         h.press("escape");
+        // A recent file deleted since is left out.
+        std::fs::remove_file(h.root.join("notes.txt")).unwrap();
+        h.double_shift(Duration::from_millis(60));
+        // The last search comes back selected: clear it.
+        h.press("backspace");
+        h.settle();
+        assert_eq!(h.rows(), ["file:pkg/util.py"]);
+        h.press("escape");
     });
 }
 
@@ -382,6 +390,10 @@ fn tabs_switch_and_the_shortcut_again_includes_non_project_items(cx: &mut TestAp
         assert_eq!(s["everywhere"], json!(true));
         assert_eq!(h.rows(), ["file:.venv/lib/site.py"]);
         assert_eq!(h.state()["rows"][0]["non_project"], json!(true));
+        // A text that still contains it keeps them.
+        h.type_text(".py");
+        h.settle();
+        assert_eq!(h.state()["everywhere"], json!(true));
         // Another text: project items again.
         h.press(h.keys.select_all);
         h.type_text("app");

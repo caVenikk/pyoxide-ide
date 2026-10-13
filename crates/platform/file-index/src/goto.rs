@@ -73,9 +73,19 @@ pub fn absolute_path(text: &str, home: Option<&Path>) -> Option<PathBuf> {
     if !path.is_absolute() || path.parent().is_none() || network {
         return None;
     }
-    // The path as the index keeps it: no `.` parts, no trailing slash.
-    let path: PathBuf = path.components().collect();
-    path.exists().then_some(path)
+    // The path as the index keeps it: no `.` or `..` parts, no trailing
+    // slash.
+    let mut normal = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    (normal.parent().is_some() && normal.exists()).then_some(normal)
 }
 
 /// A file or folder found.
