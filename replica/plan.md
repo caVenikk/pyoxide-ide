@@ -57,8 +57,9 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #47 Tree scrolls with the wheel and trackpad | sub-agent scroll | `workbench` (project panel), `editor` (one-line fields) | #18 | done (PR #54) |
 | #61 Excluded folders and ignored files | sub-agent exclusions | `project` (filter, `.oxide` store, `.idea` import), `ui` (context menu), `workbench` (tree), `themes`, ADR 0008 | #18 | done (PR #62) |
 | #43 Find in Files | sub-agent find | new `crates/platform/project-search`, `workbench` (popup frame, find in files), `ui` | #31, #61 | done (PR #63) |
-| #64 Drop files onto the window to open them | sub-agent drop | `workbench` (editor area, empty state) | #18 | in progress |
-| #44 Go to File and Search Everywhere | sub-agent find (next) | `ui` (popup, list, fuzzy), `project` (file name index), `workbench` | #43 | todo |
+| #64 Drop files onto the window to open them | sub-agent drop | `workbench` (editor area, empty state) | #18 | done (PR #70) |
+| #71 SQLite lock waits starved by back-to-back commits | sub-agent sqlite | `db-sqlite` | - | done (PR #72) |
+| #44 Go to File and Search Everywhere | sub-agent find | `ui` (popup, list, fuzzy), `project` (file name index), `workbench` | #43 | done (PR #73) |
 | #45 Run the current Python file | - | run-debug crates; in parallel with #43/#44 only if it does not touch the same crates | #18 | todo |
 
 Queue after #45: M3 completion and navigation through a language server, then

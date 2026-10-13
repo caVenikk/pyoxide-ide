@@ -8,7 +8,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 44% `████░░░░░░` | 1 | 5 | 3 |
+| editor | 44% `████░░░░░░` | 1 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
 | run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
@@ -79,6 +79,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
 | 🟡 | File tree and project model | must | open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; no file operations or drag and drop |
 | 🟡 | Search in file and project | must | find and replace in file (#31) and in files (#43: scopes, masks, editable preview, Replace in Files); missing: Find tool window (#65), multi-row selection (#66), undo across files (#67), comment/string filters (#50) |
+| 🟡 | Navigation popups (Search Everywhere, Go to File / Action, Recent Files) | must | All / Files / Actions / Text tabs, ported name matcher, file:line, recent files; Classes and Symbols with M3; preview and Find window (#65); the reference's ML ranking replaced by a fixed rule |
 | ⬜ | Multi-cursor and column selection | should |  |
 | ⬜ | Code folding | should |  |
 | ⬜ | Live templates | should |  |
