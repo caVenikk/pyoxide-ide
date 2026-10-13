@@ -1,7 +1,8 @@
 //! The project model of Pyoxide IDE (ADR 0007, 0008): a folder opened as a
 //! project, its file tree loaded one directory at a time, the rules that
 //! hide or exclude entries, Pyoxide's own project folder with the shared
-//! project settings, and reading and writing documents.
+//! project settings and the personal project state, and reading and
+//! writing documents.
 //!
 //! Everything here is blocking and toolkit-free: callers run it on a
 //! background thread (the workbench uses GPUI's background executor).
@@ -11,6 +12,7 @@ mod filter;
 pub mod idea;
 pub mod store;
 mod tree;
+pub mod workspace;
 
 pub use document::{LoadError, Loaded, MAX_FILE_SIZE, read_document, write_document};
 pub use filter::{
