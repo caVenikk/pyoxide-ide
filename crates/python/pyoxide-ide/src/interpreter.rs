@@ -840,16 +840,29 @@ mod tests {
         idea_project_sdk(&root, "uv (skin-tech-api)");
         let newer = dir.path().join("PyCharm2026.2");
         let older = dir.path().join("PyCharm2025.3");
+        // The SDK's home is `python3.13` of the environment.
+        let (home, rel_python, rel_home) = if cfg!(windows) {
+            (
+                uv.with_file_name("python3.13.exe"),
+                ".venv/Scripts/python.exe",
+                ".venv/Scripts/python3.13.exe",
+            )
+        } else {
+            (
+                uv.with_file_name("python3.13"),
+                ".venv/bin/python",
+                ".venv/bin/python3.13",
+            )
+        };
         sdk_table(&older, &[("uv (skin-tech-api)", &plain)]);
         sdk_table(
             &newer,
             &[
                 ("Python 3.12", Path::new("/usr/bin/python3.12")),
-                ("uv (skin-tech-api)", &root.join(".venv/bin/python3.13")),
+                ("uv (skin-tech-api)", &home),
             ],
         );
-        // The SDK's home is `python3.13` of the environment.
-        std::fs::write(root.join(".venv/bin/python3.13"), "").unwrap();
+        std::fs::write(&home, "").unwrap();
         let dirs = || vec![newer.clone(), older.clone()];
         let found = scan_with(&root, None, dirs);
         assert!(found.chosen);
@@ -866,11 +879,11 @@ mod tests {
         );
         let text = std::fs::read_to_string(project::workspace::workspace_file(&root)).unwrap();
         for line in [
-            "interpreter = \".venv/bin/python\"",
-            "sdk-name = \"uv (skin-tech-api)\"",
-            "sdk-home = \".venv/bin/python3.13\"",
+            format!("interpreter = \"{rel_python}\""),
+            "sdk-name = \"uv (skin-tech-api)\"".to_owned(),
+            format!("sdk-home = \"{rel_home}\""),
         ] {
-            assert!(text.contains(line), "{line} missing:\n{text}");
+            assert!(text.contains(&line), "{line} missing:\n{text}");
         }
         // Once: the stored choice counts from now on, and the name stays
         // with its interpreter when another one is chosen.
