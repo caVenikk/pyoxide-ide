@@ -533,6 +533,11 @@ impl ConsoleView {
         self.flush(cx);
     }
 
+    /// The console has links (Up and Down the Stack Trace are enabled).
+    pub fn has_links(&self) -> bool {
+        self.decor.borrow().iter().any(|d| !d.links.is_empty())
+    }
+
     /// The console has text (Clear All is enabled).
     pub fn has_content(&self, cx: &App) -> bool {
         self.editor.read(cx).buffer().len_chars() > 0

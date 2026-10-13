@@ -874,13 +874,7 @@ impl RunToolWindow {
         let tab = &self.tabs[index];
         let console = tab.console.read(cx);
         let has_content = console.has_content(cx);
-        let has_links = console.state_json(cx)["lines"]
-            .as_array()
-            .is_some_and(|lines| {
-                lines
-                    .iter()
-                    .any(|l| l["links"].as_array().is_some_and(|a| !a.is_empty()))
-            });
+        let has_links = console.has_links();
         let keys = |action: &dyn gpui::Action| -> Option<SharedString> {
             ui::keys::shortcut_in(action, &self.content_focus(cx), window).map(Into::into)
         };

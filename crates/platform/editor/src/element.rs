@@ -1100,6 +1100,15 @@ impl Element for EditorElement {
                         window.paint_quad(fill(r.bounds, color));
                     }
                 };
+                // Text backgrounds (a console's ANSI backgrounds) go under
+                // the search matches and the selection.
+                for l in &p.layout.lines {
+                    let origin = point(
+                        p.layout.text_x - scroll_x + l.x_offset,
+                        bounds.top() + lh * l.line as f32 - self.editor.read(cx).scroll.y,
+                    );
+                    let _ = l.shaped.paint_background(origin, lh, window, cx);
+                }
                 let in_selection = p.colors.search_current_background.is_some();
                 if !in_selection {
                     paint_search(window);
