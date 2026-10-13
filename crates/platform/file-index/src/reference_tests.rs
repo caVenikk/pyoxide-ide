@@ -309,7 +309,10 @@ fn a_full_path() {
     assert_eq!(f.goto(&path), ["foo/index.html"]);
     assert_eq!(f.goto(&format!("{path}:0")), ["foo/index.html"]);
     let roundabout = f.root.join("foo").join("..").join("foo").join("index.html");
-    assert_eq!(f.goto(&roundabout.display().to_string()), ["foo/index.html"]);
+    assert_eq!(
+        f.goto(&roundabout.display().to_string()),
+        ["foo/index.html"]
+    );
     let dir = f.root.join("foo").display().to_string();
     assert_eq!(f.goto(&dir), ["foo/"]);
     // Excluded content too, whatever the scope.
