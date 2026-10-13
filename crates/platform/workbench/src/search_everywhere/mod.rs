@@ -223,6 +223,12 @@ pub struct OpenContext {
     pub actions: Vec<ActionItem>,
     /// Open documents with unsaved changes (searched instead of the file).
     pub overrides: HashMap<PathBuf, text::Rope>,
+    /// The project's source roots (locations, the footer's path).
+    pub source_roots: Arc<Vec<PathBuf>>,
+    /// What the product's language adds (locations, package folders).
+    pub navigation: crate::app::NavigationHooks,
+    /// The home folder (`~/` paths).
+    pub home: Option<PathBuf>,
 }
 
 /// What the popup asks of the workbench.
@@ -473,6 +479,8 @@ impl SearchEverywhere {
                 "non_project": f.non_project,
                 "recent": f.recent,
                 "weight": f.weight,
+                "location": f.location,
+                "package": f.package,
             }),
             Row::Action(i) => {
                 let a = &self.context.actions[*i];
@@ -965,6 +973,7 @@ impl SearchEverywhere {
                     self.context.current_file.as_ref(),
                     &text,
                     self.limit(p),
+                    &self.places(),
                 )),
                 Provider::Actions => found.push(providers::actions(
                     &self.context.actions,
@@ -1024,11 +1033,22 @@ impl SearchEverywhere {
             non_project: self.everywhere(),
             open_files: self.context.open_files.clone(),
             current: self.context.current_file.clone(),
-            home: dirs::home_dir(),
+            home: self.context.home.clone(),
             hidden_types: hidden,
             types: (*self.file_types).clone(),
             limit: self.limit(Provider::Files),
+            places: self.places(),
         })
+    }
+
+    /// Where rows are shown from (locations, the footer).
+    fn places(&self) -> providers::Places {
+        providers::Places {
+            root: self.context.root.clone(),
+            source_roots: self.context.source_roots.clone(),
+            hooks: self.context.navigation,
+            home: self.context.home.clone(),
+        }
     }
 
     /// The Text tab's search (on All: plain, no mask).

@@ -167,7 +167,12 @@ impl Workbench {
         let host = cx.entity().downgrade();
         find_in_files.update(cx, |p, _| p.set_host(host));
         let search_everywhere = cx.new(|cx| SearchEverywhere::new(file_types.clone(), window, cx));
-        let project_files = cx.new(|_| ProjectFiles::new());
+        let find_roots = product.navigation.source_roots;
+        let project_files = cx.new(|_| {
+            let mut files = ProjectFiles::new();
+            files.set_source_roots_finder(find_roots);
+            files
+        });
         let recent_place = search_everywhere::settings(cx).recent_files;
         let recent_files =
             cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));
@@ -1012,6 +1017,9 @@ impl Workbench {
             current_file: self.active.map(|i| self.tabs[i].path.clone()),
             recent_files: recent,
             actions,
+            source_roots: self.project_files.read(cx).source_roots(),
+            navigation: self.product.navigation,
+            home: dirs::home_dir(),
         }
     }
 

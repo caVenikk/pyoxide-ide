@@ -23,7 +23,7 @@ pub mod settings;
 mod shot;
 pub mod workbench;
 
-pub use app::{Product, StripeItem, init, open_main_window, run};
+pub use app::{NavigationHooks, Product, StripeItem, init, open_main_window, run};
 pub use file_types::{FileType, HighlighterFactory};
 pub use project::AutoExclusions;
 pub use settings::SaveSettings;

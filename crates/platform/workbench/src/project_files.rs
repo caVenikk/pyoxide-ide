@@ -6,6 +6,7 @@
 //! [`ProjectFiles::apply`] (files created, deleted or renamed by the
 //! application, and later the changes a file watcher reports).
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -16,6 +17,9 @@ use project::Filter;
 
 pub struct ProjectFiles {
     index: Option<Arc<FileIndex>>,
+    /// The product's source roots of the project (found with the index).
+    source_roots: Arc<Vec<PathBuf>>,
+    find_source_roots: Option<fn(&Path) -> Vec<PathBuf>>,
     filter: Option<Filter>,
     /// The build running and its cancel flag.
     task: Option<Task<()>>,
@@ -31,6 +35,8 @@ impl ProjectFiles {
     pub fn new() -> Self {
         Self {
             index: None,
+            source_roots: Arc::default(),
+            find_source_roots: None,
             filter: None,
             task: None,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -38,6 +44,16 @@ impl ProjectFiles {
             build_time: None,
             generation: 0,
         }
+    }
+
+    /// How the product finds a project's source roots.
+    pub fn set_source_roots_finder(&mut self, find: Option<fn(&Path) -> Vec<PathBuf>>) {
+        self.find_source_roots = find;
+    }
+
+    /// The project's source roots, found when the index was built.
+    pub fn source_roots(&self) -> Arc<Vec<PathBuf>> {
+        self.source_roots.clone()
     }
 
     /// The index, once built (it may lag behind a running rebuild).
@@ -66,6 +82,7 @@ impl ProjectFiles {
         self.generation += 1;
         self.task = None;
         self.index = None;
+        self.source_roots = Arc::default();
         self.filter = None;
         cx.notify();
     }
@@ -131,10 +148,13 @@ impl ProjectFiles {
         self.generation += 1;
         let generation = self.generation;
         let non_project = self.non_project;
+        let find_roots = self.find_source_roots;
         let build = cx.background_spawn(async move {
             let start = std::time::Instant::now();
             let index = FileIndex::build(&root, &filter, non_project, &cancel);
-            index.map(|i| (i, start.elapsed()))
+            let time = start.elapsed();
+            let roots = find_roots.map(|find| find(&root)).unwrap_or_default();
+            index.map(|i| (i, time, roots))
         });
         self.task = Some(cx.spawn(async move |this, cx| {
             let built = build.await;
@@ -143,9 +163,10 @@ impl ProjectFiles {
                     return;
                 }
                 this.task = None;
-                if let Some((index, time)) = built {
+                if let Some((index, time, roots)) = built {
                     this.index = Some(Arc::new(index));
                     this.build_time = Some(time);
+                    this.source_roots = Arc::new(roots);
                 }
                 // Asked for non-project items while this build ran.
                 if this.non_project && this.index.as_ref().is_some_and(|i| !i.has_non_project()) {

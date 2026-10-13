@@ -25,6 +25,21 @@ pub struct StripeItem {
     pub title: &'static str,
 }
 
+/// What the product's language adds to Go to File and Search Everywhere.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NavigationHooks {
+    /// The source roots of a project, found when it opens (run in the
+    /// background): folders below the project folder that hold the code.
+    pub source_roots: Option<fn(&std::path::Path) -> Vec<std::path::PathBuf>>,
+    /// The location shown after a file's name, from the file name and its
+    /// folder relative to its source root (or the project folder), with
+    /// `/` separators; `None` shows the folder relative to the project.
+    pub file_location: Option<fn(&str, &str) -> Option<String>>,
+    /// Files that make the folder holding them a package (it shows the
+    /// package icon).
+    pub package_markers: &'static [&'static str],
+}
+
 /// What a product tells the workbench about itself.
 #[derive(Debug, Clone, Default)]
 pub struct Product {
@@ -45,6 +60,8 @@ pub struct Product {
     /// Folders the product excludes from a project on its own, such as a
     /// virtual environment (ADR 0008).
     pub auto_excluded: project::AutoExclusions,
+    /// Source roots, locations and package folders for Go to File.
+    pub navigation: NavigationHooks,
 }
 
 /// Default size of the main window's content.

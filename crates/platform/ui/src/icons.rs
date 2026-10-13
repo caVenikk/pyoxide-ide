@@ -48,6 +48,9 @@ impl IconName {
     pub const DEBUG: Self = Self("run/debug");
     pub const BRANCH: Self = Self("vcs/branch");
     pub const FOLDER: Self = Self("nodes/folder");
+    pub const PACKAGE: Self = Self("nodes/package");
+    pub const PREVIEW: Self = Self("general/previewHorizontally");
+    pub const OPEN_IN_TOOL_WINDOW: Self = Self("general/openInToolWindow");
     pub const MODULE: Self = Self("nodes/module");
     pub const EXCLUDED_FOLDER: Self = Self("nodes/excludeRoot");
     pub const SYMLINK: Self = Self("nodes/symlink");
@@ -120,10 +123,12 @@ platform_icons! {
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/down", "general/expandAll", "general/filter", "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
-        "general/moreHorizontal", "general/moreVertical", "general/pin", "general/search@20x20", "general/settings@20x20", "general/showAsTree", "general/up",
+        "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
+        "general/previewHorizontally", "general/search@20x20", "general/settings@20x20",
+        "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
-        "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/symlink",
+        "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/package", "nodes/symlink",
         "run/debug", "run/run",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",

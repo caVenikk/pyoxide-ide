@@ -359,7 +359,7 @@ impl SearchEverywhere {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let location = self.location(&file.path);
+                let location = file.location.clone();
                 // The matched parts show on the selected row only.
                 let (name_ranges, location_ranges) = if selected {
                     file_highlights(&text, &name, &location)
@@ -369,6 +369,8 @@ impl SearchEverywhere {
                 let icon = if file.is_dir {
                     if file.non_project {
                         IconName::EXCLUDED_FOLDER
+                    } else if file.package {
+                        IconName::PACKAGE
                     } else {
                         IconName::FOLDER
                     }
@@ -470,16 +472,6 @@ impl SearchEverywhere {
                 }))
             })
             .into_any_element()
-    }
-
-    /// The folder of a file as rows show it, relative to the project.
-    fn location(&self, path: &Path) -> String {
-        let parent = path.parent().map(|p| self.rel(p)).unwrap_or_default();
-        if parent.is_empty() || parent == "." {
-            String::new()
-        } else {
-            parent
-        }
     }
 
     /// What an empty list says.
@@ -831,10 +823,12 @@ fn file_highlights(
         if let Some(fragments) = matcher.find_chars(&name_chars) {
             let folder: String = sanitized[..i].iter().collect();
             let folder = folder.trim_end_matches('/');
+            // A dotted location (a package path) matches as a path.
+            let location = location.replace('.', "/");
             let location_ranges = if folder.is_empty() {
                 Vec::new()
             } else {
-                qualifier_matcher(folder).find(location).unwrap_or_default()
+                qualifier_matcher(folder).find(&location).unwrap_or_default()
             };
             return (fragments, location_ranges);
         }
