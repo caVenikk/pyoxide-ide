@@ -120,6 +120,32 @@ anything. The path may be a directory inside the project, its `pyproject.toml` o
 - `parse_requirement` splits a PEP 508 string into name (normalized per PEP 503),
   extras, specifier, marker and URL.
 
+## Environments on disk
+`py_env::venv` reads environments without starting Python, cheap enough to
+run whenever a project opens:
+
+- `PyvenvCfg`: the `key = value` lines of `pyvenv.cfg`. The version is
+  `version_info` (uv, virtualenv; virtualenv's `3.12.1.final.0` becomes
+  `3.12.1`) or `version` (the `venv` module); a `uv` key marks an
+  environment uv created.
+- `inspect(dir)`: a folder with an interpreter (`bin/python`,
+  `Scripts\python.exe`, or `python.exe` of a conda prefix on Windows) is a
+  virtual environment (`pyvenv.cfg`), a conda environment (`conda-meta`,
+  the version from its `python-X.Y.Z-*.json` record) or an installation.
+- `project_environments(root, UV_PROJECT_ENVIRONMENT)`: the environments of
+  a project as the reference IDE finds them when a folder opens
+  (`VirtualEnvReader.findVenvsInDir`): `UV_PROJECT_ENVIRONMENT` first, then
+  every folder directly in the project root that holds an interpreter, by
+  name, then the project environment of a parent folder; each once.
+
+The IDE's interpreter widget lists these environments and selects the
+project environment (`find_project_venv`) unless the person chose another
+one, which is kept in the personal project state (ADR 0009). uv may write a
+version without the patch level into `pyvenv.cfg` (`version_info = 3.14`);
+the widget then asks the interpreter
+(`python --version`, in the background, at most 5 s, remembered while the
+file is unchanged), as the reference shows the full version.
+
 ## Operations
 Each is a typed function with a request struct; the command line it runs is
 deterministic and unit-tested.

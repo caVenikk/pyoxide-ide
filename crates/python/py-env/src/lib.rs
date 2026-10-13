@@ -7,6 +7,8 @@
 //! - [`uv`] and [`pip`]: typed wrappers around the command-line tools, with
 //!   progress lines, cancellation, timeouts and typed errors.
 //! - [`search`]: package metadata from PyPI behind the [`search::PackageIndex`] trait.
+//! - [`venv`]: environments on disk (`pyvenv.cfg`, the environments of a
+//!   project) read without starting Python.
 //! - [`ops`] and [`commands`]: the `env.*` operations and their registration
 //!   in the command registry (ADR 0001).
 //!
@@ -26,6 +28,7 @@ pub mod project;
 pub mod search;
 pub mod service;
 pub mod uv;
+pub mod venv;
 pub mod version;
 
 pub use commands::register;

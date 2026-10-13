@@ -5107,8 +5107,10 @@ dependencies = [
 name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
+ "dirs 7.0.0",
  "editor",
  "gpui",
+ "project",
  "py-env",
  "py-run",
  "py-syntax",
@@ -7350,6 +7352,7 @@ dependencies = [
  "gpui",
  "image",
  "libc",
+ "name-match",
  "objc",
  "raw-window-handle",
  "resvg",

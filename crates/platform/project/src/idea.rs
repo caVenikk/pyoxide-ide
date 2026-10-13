@@ -30,6 +30,13 @@
 //! inside `.idea`. Without `modules.xml` the module files directly in `.idea`
 //! are read. Excluded folders outside the project are dropped; exclude
 //! patterns are taken from the content root at the project folder only.
+//!
+//! A module names its SDK with `<orderEntry type="jdk" jdkName="…"
+//! jdkType="…"/>`, or inherits the project's (`inheritedJdk`), which
+//! `.idea/misc.xml` names: `<component name="ProjectRootManager"
+//! project-jdk-name="…" project-jdk-type="…"/>`. The SDKs themselves are in
+//! the IDE's SDK table, `options/jdk.table.xml` of its configuration
+//! directory ([`read_sdk_table`]), for the interpreter import of ADR 0009.
 
 use std::path::{Path, PathBuf};
 
@@ -142,6 +149,106 @@ fn expand_macros(path: &str, project_dir: &Path, module_dir: &Path) -> Option<Pa
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Module {
     contents: Vec<Content>,
+    /// The SDK of the module: `Some(None)` inherits the project's.
+    sdk: Option<Option<SdkRef>>,
+}
+
+/// An SDK as a project names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SdkRef {
+    pub name: String,
+    /// The SDK type (`Python SDK`).
+    pub type_id: String,
+}
+
+/// An SDK of the IDE's SDK table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SdkEntry {
+    pub name: String,
+    pub type_id: String,
+    /// The version string (`Python 3.13.1`).
+    pub version: Option<String>,
+    /// The home path (for a Python SDK its interpreter), `$USER_HOME$`
+    /// expanded; `None` when it uses another path variable.
+    pub home: Option<PathBuf>,
+}
+
+/// The SDK of the reference IDE's project in `root`: the first module's
+/// own, or the project's (`misc.xml`) when the module inherits it or there
+/// is no module file. `None` without `.idea` or an SDK.
+pub fn project_sdk(root: &Path) -> Option<SdkRef> {
+    let idea = root.join(IDEA_DIR);
+    if !idea.is_dir() {
+        return None;
+    }
+    let module = module_files(root, &idea)
+        .into_iter()
+        .find_map(|f| parse_module(&std::fs::read_to_string(f).ok()?).ok());
+    if let Some(Module {
+        sdk: Some(Some(sdk)),
+        ..
+    }) = module
+    {
+        return Some(sdk);
+    }
+    let text = std::fs::read_to_string(idea.join("misc.xml")).ok()?;
+    let mut out = None;
+    walk(&text, |path, e| {
+        if path.names.len() == 1
+            && e.name().as_ref() == "component"
+            && attr(e, "name").as_deref() == Some("ProjectRootManager")
+            && let (Some(name), Some(type_id)) =
+                (attr(e, "project-jdk-name"), attr(e, "project-jdk-type"))
+        {
+            out = Some(SdkRef { name, type_id });
+        }
+    })
+    .ok()?;
+    out
+}
+
+/// The SDKs of an IDE's SDK table file (`options/jdk.table.xml`); empty
+/// when it cannot be read.
+pub fn read_sdk_table(file: &Path) -> Vec<SdkEntry> {
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return Vec::new();
+    };
+    let mut out: Vec<SdkEntry> = Vec::new();
+    let mut in_table = false;
+    let _ = walk(&text, |path, e| {
+        let name = e.name();
+        if path.names.len() == 1 && name.as_ref() == "component" {
+            in_table = attr(e, "name").as_deref() == Some("ProjectJdkTable");
+            return;
+        }
+        if !in_table {
+            return;
+        }
+        if path.names.len() == 2 && name.as_ref() == "jdk" {
+            out.push(SdkEntry {
+                name: String::new(),
+                type_id: String::new(),
+                version: None,
+                home: None,
+            });
+            return;
+        }
+        if path.names.len() != 3 || path.names[2] != "jdk" {
+            return;
+        }
+        let (Some(entry), Some(value)) = (out.last_mut(), attr(e, "value")) else {
+            return;
+        };
+        match name.as_ref() {
+            "name" => entry.name = value,
+            "type" => entry.type_id = value,
+            "version" => entry.version = Some(value),
+            "homePath" => entry.home = expand_macros(&value, Path::new(""), Path::new("")),
+            _ => {}
+        }
+    });
+    out.retain(|e| !e.name.is_empty());
+    out
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -228,6 +335,19 @@ fn parse_module(text: &str) -> Result<Module, quick_xml::Error> {
             return;
         }
         match name.as_ref() {
+            "orderEntry" if path.names.len() == 2 && out.sdk.is_none() => {
+                match attr(e, "type").as_deref() {
+                    Some("jdk") => {
+                        if let (Some(name), Some(type_id)) =
+                            (attr(e, "jdkName"), attr(e, "jdkType"))
+                        {
+                            out.sdk = Some(Some(SdkRef { name, type_id }));
+                        }
+                    }
+                    Some("inheritedJdk") => out.sdk = Some(None),
+                    _ => {}
+                }
+            }
             "content" if path.names.len() == 2 => {
                 if let Some(url) = attr(e, "url") {
                     out.contents.push(Content {
@@ -395,6 +515,94 @@ mod tests {
         .unwrap();
         assert_eq!(m.contents.len(), 1);
         assert_eq!(m.contents[0].exclude_folders, ["file://$MODULE_DIR$/b"]);
+    }
+
+    #[test]
+    fn the_project_sdk_of_the_module_or_misc_xml() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(project_sdk(root), None);
+        write(root, ".idea/modules.xml", MODULES);
+        write(root, ".idea/demo.iml", IML);
+        let python = |name: &str| SdkRef {
+            name: name.into(),
+            type_id: "Python SDK".into(),
+        };
+        assert_eq!(project_sdk(root), Some(python("Python 3.13 (demo)")));
+        // The module inherits the project's SDK.
+        write(
+            root,
+            ".idea/demo.iml",
+            &IML.replace(
+                r#"<orderEntry type="jdk" jdkName="Python 3.13 (demo)" jdkType="Python SDK" />"#,
+                r#"<orderEntry type="inheritedJdk" />"#,
+            ),
+        );
+        assert_eq!(project_sdk(root), None);
+        write(
+            root,
+            ".idea/misc.xml",
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black"><option name="sdkName" value="x" /></component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="uv (demo)" project-jdk-type="Python SDK" />
+</project>
+"#,
+        );
+        assert_eq!(project_sdk(root), Some(python("uv (demo)")));
+    }
+
+    #[test]
+    fn reads_the_sdk_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("jdk.table.xml");
+        assert!(read_sdk_table(&file).is_empty());
+        std::fs::write(
+            &file,
+            r#"<application>
+  <component name="ProjectJdkTable">
+    <jdk version="2">
+      <name value="uv (demo)" />
+      <type value="Python SDK" />
+      <version value="Python 3.13.14" />
+      <homePath value="$USER_HOME$/work/demo/.venv/bin/python" />
+      <roots>
+        <classPath><root type="composite"><root url="file://$USER_HOME$/x" type="simple" /></root></classPath>
+      </roots>
+      <additional UV_WORKING_DIR="$USER_HOME$/work/demo" />
+    </jdk>
+    <jdk version="2">
+      <name value="Python 3.12" />
+      <type value="Python SDK" />
+      <homePath value="/usr/bin/python3.12" />
+    </jdk>
+    <jdk version="2">
+      <name value="remote" />
+      <type value="Python SDK" />
+      <homePath value="$APPLICATION_HOME_DIR$/python" />
+    </jdk>
+  </component>
+</application>
+"#,
+        )
+        .unwrap();
+        let table = read_sdk_table(&file);
+        assert_eq!(table.len(), 3);
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(PathBuf::from)
+            .unwrap();
+        assert_eq!(
+            table[0],
+            SdkEntry {
+                name: "uv (demo)".into(),
+                type_id: "Python SDK".into(),
+                version: Some("Python 3.13.14".into()),
+                home: Some(home.join("work/demo/.venv/bin/python")),
+            }
+        );
+        assert_eq!(table[1].home, Some(PathBuf::from("/usr/bin/python3.12")));
+        assert_eq!(table[1].version, None);
+        assert_eq!(table[2].home, None);
     }
 
     #[test]

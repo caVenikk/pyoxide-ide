@@ -1,5 +1,6 @@
 //! Pyoxide's own project folder ([`STORE_DIR`] in the project root) and the
-//! shared project settings in it (ADR 0008).
+//! shared project settings in it (ADR 0008). The personal project state
+//! next to them is [`crate::workspace`] (ADR 0009).
 //!
 //! `project.toml` is meant to be committed with the project. It is created
 //! only when there is something to store, keys it does not know survive a
@@ -138,12 +139,14 @@ pub fn settings_file(root: &Path) -> PathBuf {
     root.join(STORE_DIR).join(SETTINGS_FILE)
 }
 
-/// Whether the project has its own folder yet.
+/// Whether the project has shared settings yet. Only the shared settings
+/// count: the personal state ([`crate::workspace`]) in the same folder
+/// does not stop the reference IDE's exclusions being read (ADR 0009).
 pub fn has_store(root: &Path) -> bool {
-    root.join(STORE_DIR).is_dir()
+    settings_file(root).is_file()
 }
 
-fn read_document(path: &Path) -> Result<Option<DocumentMut>, StoreError> {
+pub(crate) fn read_document(path: &Path) -> Result<Option<DocumentMut>, StoreError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -162,10 +165,15 @@ fn read_document(path: &Path) -> Result<Option<DocumentMut>, StoreError> {
         })
 }
 
-fn version(doc: &DocumentMut) -> i64 {
+/// The `version` of a store file; `default` when it has none.
+pub(crate) fn version_of(doc: &DocumentMut, default: i64) -> i64 {
     doc.get("version")
         .and_then(Item::as_integer)
-        .unwrap_or(SETTINGS_VERSION)
+        .unwrap_or(default)
+}
+
+fn version(doc: &DocumentMut) -> i64 {
+    version_of(doc, SETTINGS_VERSION)
 }
 
 /// The exclusions of the project settings; `None` when the settings file
@@ -296,9 +304,9 @@ fn lines<'a>(items: impl IntoIterator<Item = &'a String>) -> Array {
 
 /// Replaces `path` with `text` at once: a temporary file next to it,
 /// flushed to disk, then renamed over it.
-fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let dir = path.parent().expect("a settings file has a folder");
+    let dir = path.parent().expect("a store file has a folder");
     std::fs::create_dir_all(dir)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let tmp = dir.join(format!(
