@@ -166,6 +166,23 @@ pub enum EditorEvent {
     Edited(Vec<AppliedEdit>),
     /// Carets or selections moved.
     SelectionsChanged,
+    /// Input the editor forwards instead of editing
+    /// ([`Editor::set_forward_input`]).
+    Input(ForwardedInput),
+    /// A hyperlink (a char range of a line, see
+    /// [`Highlighter::line_links`]) was clicked.
+    LinkClicked { line: usize, range: Range<usize> },
+}
+
+/// Input of an editor that forwards it (a console's standard input).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForwardedInput {
+    /// Typed or pasted text (line breaks as `\n`).
+    Text(String),
+    Enter,
+    Tab,
+    Backspace,
+    Delete,
 }
 
 /// Clipboard metadata: the text is whole lines copied without a selection.
@@ -233,6 +250,17 @@ pub struct Editor {
     /// Bring this char offset into the middle of the view on the next
     /// frame when it is not visible.
     pub(crate) reveal: Option<usize>,
+    /// A console: no line numbers, no caret row, no room below the last
+    /// line, the console's colours.
+    pub(crate) console: bool,
+    /// Typing, Enter, Tab, Backspace, Delete and Paste are reported as
+    /// [`EditorEvent::Input`] instead of editing the text.
+    pub(crate) forward_input: bool,
+    /// Scroll to the end of the text on the next frame.
+    pub(crate) scroll_to_end: bool,
+    /// The link under the last mouse press (line, char range, position):
+    /// it is followed when the mouse is released at the same point.
+    pub(crate) pressed_link: Option<(usize, Range<usize>, gpui::Point<Pixels>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -285,8 +313,100 @@ impl Editor {
             transparent: false,
             search: None,
             reveal: None,
+            console: false,
+            forward_input: false,
+            scroll_to_end: false,
+            pressed_link: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Makes this editor a console view, as the reference IDE sets up its
+    /// console editor (`ConsoleViewUtil.setupConsoleEditor`): no line
+    /// numbers, no caret row highlight, no extra page below the last line,
+    /// the console's background and text colours.
+    pub fn set_console(&mut self, console: bool) {
+        self.console = console;
+    }
+
+    pub fn is_console(&self) -> bool {
+        self.console
+    }
+
+    /// Reports typing, Enter, Tab, Backspace, Delete and Paste as
+    /// [`EditorEvent::Input`] instead of editing (a console that sends
+    /// them to a process).
+    pub fn set_forward_input(&mut self, forward: bool) {
+        self.forward_input = forward;
+    }
+
+    /// Replaces text outside the undo history, also when the buffer is
+    /// read-only (a console's output). Each edit is in the coordinates of
+    /// the text left by the previous one; selections move with the text.
+    pub fn replace_untracked(&mut self, edits: Vec<Edit>, cx: &mut Context<Self>) {
+        if edits.is_empty() {
+            return;
+        }
+        let mut applied = Vec::with_capacity(edits.len());
+        for edit in edits {
+            let a = self.buffer.replace_untracked(edit.range, &edit.text);
+            let map = |pos: usize| -> usize {
+                if pos <= a.start {
+                    pos
+                } else if pos >= a.old_end {
+                    pos - a.old_end + a.new_end
+                } else {
+                    a.start
+                }
+            };
+            self.selections.update(|s| {
+                s.anchor = map(s.anchor);
+                s.head = map(s.head);
+            });
+            applied.push(a);
+        }
+        self.selections.clamp(self.buffer.len_chars());
+        self.marked = None;
+        if let Some(h) = &mut self.highlighter {
+            h.edited(&self.buffer, &applied);
+        }
+        if let Some(search) = &mut self.search {
+            search.edited(&applied);
+        }
+        self.schedule_highlighting(cx);
+        cx.emit(EditorEvent::Edited(applied));
+        cx.notify();
+    }
+
+    /// Reports input instead of editing when the editor forwards it.
+    fn forwarded(
+        &mut self,
+        input: impl FnOnce() -> ForwardedInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.forward_input {
+            return false;
+        }
+        cx.emit(EditorEvent::Input(input()));
+        true
+    }
+
+    /// Scrolls to the end of the text on the next frame (the last line at
+    /// the bottom of the view).
+    pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
+        self.scroll_to_end = true;
+        cx.notify();
+    }
+
+    /// The view shows the end of the text (or will on the next frame).
+    pub fn is_scrolled_to_end(&self) -> bool {
+        if self.scroll_to_end {
+            return true;
+        }
+        let Some(layout) = &self.layout else {
+            return true;
+        };
+        self.scroll.y + px(0.5) >= self.max_scroll_y_for(layout.bounds.size.height)
     }
 
     /// Makes this editor a one-line text field (dialogs, search fields).
@@ -1024,6 +1144,9 @@ impl Editor {
     // ---- editing --------------------------------------------------------------
 
     fn type_text(&mut self, a: &Type, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Text(a.text.clone()), cx) {
+            return;
+        }
         self.type_str(&a.text, cx);
     }
 
@@ -1189,6 +1312,9 @@ impl Editor {
     }
 
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Enter, cx) {
+            return;
+        }
         // Enter between an empty bracket pair puts the closing bracket on a
         // line of its own below the caret line.
         if self.selections.len() == 1 && self.selections.primary().is_empty() {
@@ -1219,6 +1345,9 @@ impl Editor {
     }
 
     fn start_new_line(&mut self, _: &StartNewLine, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Enter, cx) {
+            return;
+        }
         let edits = self
             .selections
             .iter()
@@ -1242,6 +1371,9 @@ impl Editor {
     }
 
     fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Tab, cx) {
+            return;
+        }
         let multiline = self
             .selections
             .iter()
@@ -1322,6 +1454,9 @@ impl Editor {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Backspace, cx) {
+            return;
+        }
         let indent = self.config.indent;
         let edits = self
             .selections
@@ -1353,6 +1488,9 @@ impl Editor {
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        if self.forwarded(|| ForwardedInput::Delete, cx) {
+            return;
+        }
         let edits = self
             .selections
             .iter()
@@ -1897,6 +2035,12 @@ impl Editor {
         let Some(text) = item.text() else {
             return;
         };
+        if self.forwarded(
+            || ForwardedInput::Text(text::normalize_line_endings(&text).into()),
+            cx,
+        ) {
+            return;
+        }
         let whole_lines = item.entries().iter().any(|e| {
             matches!(e, ClipboardEntry::String(s)
                 if s.metadata_json::<LineCopy>().is_some_and(|m| m.whole_lines))
@@ -2029,8 +2173,23 @@ impl Editor {
     }
 
     pub(crate) fn max_scroll_y(&self) -> Pixels {
+        let height = self
+            .layout
+            .as_ref()
+            .map_or(px(0.0), |l| l.bounds.size.height);
+        self.max_scroll_y_for(height)
+    }
+
+    /// How far the text scrolls in a view of `view_height`: until the last
+    /// line is at the top, or for a console until it is at the bottom.
+    pub(crate) fn max_scroll_y_for(&self, view_height: Pixels) -> Pixels {
         let line_height = self.layout.as_ref().map_or(px(20.0), |l| l.line_height);
-        line_height * self.buffer.len_lines().saturating_sub(1) as f32
+        let lines = self.buffer.len_lines();
+        if self.console {
+            (line_height * lines as f32 - view_height).max(px(0.0))
+        } else {
+            line_height * lines.saturating_sub(1) as f32
+        }
     }
 
     pub(crate) fn set_scroll_y(&mut self, y: Pixels, cx: &mut Context<Self>) {

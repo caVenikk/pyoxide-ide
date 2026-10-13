@@ -23,6 +23,19 @@ use themes::TextRole;
 /// A styled range of one line: chars from the start of the line.
 pub type Span = (Range<usize>, TextRole);
 
+/// An explicit style of a range of a line, drawn over the role spans (for
+/// example a console's ANSI colours). Unset parts keep the text's style.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct InlineStyle {
+    pub color: Option<gpui::Hsla>,
+    pub background: Option<gpui::Hsla>,
+    pub bold: bool,
+    pub italic: bool,
+    /// Underline thickness in logical pixels.
+    pub underline: Option<f32>,
+    pub strikethrough: bool,
+}
+
 /// Work for a background thread and its result.
 pub type JobResult = Box<dyn Any + Send>;
 pub type Job = Box<dyn FnOnce() -> JobResult + Send>;
@@ -50,6 +63,21 @@ pub trait Highlighter: 'static {
 
     /// Appends the char ranges of `line` to mark as syntax errors.
     fn line_errors(&self, _line: usize, _out: &mut Vec<Range<usize>>) {}
+
+    /// Appends explicit styles of `line` (char ranges, sorted, not
+    /// overlapping), drawn over its spans; colours come from `theme`.
+    fn line_styles(
+        &self,
+        _line: usize,
+        _theme: &ui::theme::Theme,
+        _out: &mut Vec<(Range<usize>, InlineStyle)>,
+    ) {
+    }
+
+    /// Appends the char ranges of `line` that are hyperlinks (sorted, not
+    /// overlapping): drawn in the link style, with the hand pointer; a click
+    /// reports [`EditorEvent::LinkClicked`](crate::EditorEvent).
+    fn line_links(&self, _line: usize, _out: &mut Vec<Range<usize>>) {}
 
     /// Highlighting reflects the current text (no parse pending).
     fn is_current(&self) -> bool {
