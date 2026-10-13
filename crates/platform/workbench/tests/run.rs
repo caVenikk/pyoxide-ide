@@ -242,8 +242,10 @@ fn run_shows_output_and_the_exit_code(cx: &mut TestAppContext) {
     let lines = console_lines(&s, 0);
     assert!(lines[0].ends_with(' '), "the command line: {lines:?}");
     assert_eq!(line_kinds(&s, 0, 0), ["system"]);
-    assert_eq!(lines[1].trim_end(), "hello");
-    assert_eq!(line_kinds(&s, 0, 1), ["normal"]);
+    // Standard output and standard error are separate pipes: their lines
+    // may arrive in either order.
+    let hello = lines.iter().position(|l| l.trim_end() == "hello").unwrap();
+    assert_eq!(line_kinds(&s, 0, hello), ["normal"]);
     let oops = lines.iter().position(|l| l.trim_end() == "oops").unwrap();
     assert_eq!(line_kinds(&s, 0, oops), ["error"]);
     let n = lines.len();
