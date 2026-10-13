@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 39%** `████████░░░░░░░░░░░░`
+**Overall parity: 41%** `████████░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -11,12 +11,12 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 44% `████░░░░░░` | 1 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 8% `█░░░░░░░░░` | 0 | 1 | 6 |
-| run-debug | 0% `░░░░░░░░░░` | 0 | 0 | 4 |
+| run-debug | 21% `██░░░░░░░░` | 1 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 45% `████░░░░░░` | 0 | 8 | 1 |
+| python-env | 50% `█████░░░░░` | 0 | 9 | 0 |
 
 ✅ done · 🟡 partial · ⬜ not started. Features marked (own) are additions beyond the reference and are not part of the parity score.
 
@@ -74,7 +74,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | 🟡 | Text buffer and editing | must | rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); no reload of files changed on disk |
-| 🟡 | Main window chrome (toolbar, tool-window stripes, status bar) | must | New UI layout and Islands themes; toolbar file path; stripe buttons, run widget and status bar widgets are placeholders; native caption on Windows/Linux |
+| 🟡 | Main window chrome (toolbar, tool-window stripes, status bar) | must | New UI layout and Islands themes; toolbar file path; run widget and Run tool window work for Current File; interpreter status widget; other stripe buttons and status widgets are placeholders; native caption on Windows/Linux |
 | ✅ | Python syntax highlighting | must | tree-sitter off the UI thread mapped to theme text roles |
 | 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
 | 🟡 | File tree and project model | must | open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; no file operations or drag and drop |
@@ -98,7 +98,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; no UI yet |
+| 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75 |
 | ⬜ | Completion | must | LSP |
 | ⬜ | Go to definition and find usages | must | LSP |
 | ⬜ | Hover and signature help | must | LSP |
@@ -110,7 +110,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Run configurations | must |  |
+| ✅ | Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun) | must | #45; uv run for uv environments; soft wraps, print and console find later |
+| ⬜ | Run configurations | must | #74 |
 | ⬜ | Debugger (breakpoints / stepping / variables) | must | DAP / debugpy |
 | ⬜ | Test runner (pytest) | should |  |
 | ⬜ | Integrated terminal | must |  |
@@ -153,6 +154,6 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Package manager panel (list / install / upgrade / remove) | must | engine and CLI (env packages/add/remove, outdated); panel UI todo |
 | 🟡 | Package search and version picker | should | PyPI lookup (env search); picker UI todo |
 | 🟡 | Dependency groups and extras in pyproject.toml | should | read and edit via uv add --group/--optional; no UI yet |
-| ⬜ | uv run as run configuration | should |  |
+| 🟡 | uv run as run configuration | should | the current file runs through uv run in a uv environment (#45); configurations: #74 |
 | 🟡 | PEP 723 inline script dependencies | could | parsed by the project model |
 | 🟡 | Other managers (poetry / conda / pipenv / pip) | should | discovery of Poetry/conda/Pipenv, pip fallback for packages |
