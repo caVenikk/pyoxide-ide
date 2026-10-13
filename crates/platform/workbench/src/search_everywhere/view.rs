@@ -407,7 +407,10 @@ impl SearchEverywhere {
                 } else {
                     Vec::new()
                 };
+                // An empty icon keeps the title in line with file names, as
+                // in the reference.
                 base.when(!a.available, |d| d.text_color(muted))
+                    .child(div().flex_none().size(px(16.0)))
                     .child(
                         div().flex_none().child(
                             StyledText::new(title.clone())
