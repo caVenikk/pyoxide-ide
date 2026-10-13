@@ -10,7 +10,8 @@ checklist from the skill pack, adapted to a desktop IDE.
 | Connection profiles, diagnostics, `db.*` commands | `db-service` | M1, #5 #6 |
 | Secret stores (OS store, KeePass, memory) | `secrets` | M1, #5 #7 |
 | Settings import from PyCharm | `settings-import` | #7 (data sources), #14 (themes) |
-| LSP client, ruff, type checker | - | M3 |
+| LSP client (framing, sync, encodings, diagnostics, routing) | `lsp-client` over `process`, model `code-intel` | M3 (ADR 0010) |
+| Python language services: ruff, ty | `py-lsp` | M3 (ADR 0010, 0011) |
 | DAP client (debugpy) | - | M4 |
 | Git | - | M5 |
 | Docker | - | M7 |
@@ -20,6 +21,17 @@ Detected and version-checked at runtime; the IDE degrades gracefully when one
 is missing. Database: Oracle Instant Client is optional (only the
 `oracle-odpi` backend needs it; `pyoxide-db backends` and `diagnose` report
 it).
+
+Python language services (M3):
+
+| tool | lookup | version check | when missing |
+|---|---|---|---|
+| ruff (`ruff server`) | interpreter `bin`/`Scripts` -> custom path or PATH and per-user folders -> `uvx ruff` (Lookup sdk / path / uvx, as the reference) | `ruff --version` | not started; Language Services widget hidden or row Terminated with the error output |
+| ty (`ty server`) | same | `ty --version`, minimum version (ADR 0011) | not started; the editor works without code intelligence; notice in the widget |
+
+Servers are stopped on project close and on quit; a crash leaves a
+Terminated row with the server's standard error and a Restart action (no
+automatic restart). Server memory is reported next to the application's.
 
 ## Security checklist
 | item | state |
@@ -36,3 +48,6 @@ it).
 | Imports never read real secrets without explicit consent; dry-run shows presence only | #7 |
 | Parsers of untrusted input fuzzed (profiles TOML, Oracle connect strings, JDBC URLs, `.icls`/`.theme.json`) | todo |
 | Plugins sandboxed (WASM) | M7 |
+| LSP frames from servers parsed defensively (length limits, invalid UTF-8, malformed JSON); framing fuzzed | M3 |
+| Workspace edits from servers applied only to files of the project or open documents, as one undo step | M3 |
+| `uvx` fallback downloads a tool on first use (the reference does it silently); whether Pyoxide asks first | M3, open decision |

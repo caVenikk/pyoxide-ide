@@ -85,6 +85,19 @@ One repository, one Cargo workspace: a language-agnostic platform layer and
 one product layer per language, composed at compile time into one binary per
 product (ADR 0005). Pyoxide is the Python product.
 
+## Planned: language services (M3, ADR 0010, 0011)
+- `code-intel` (platform): the language-agnostic model and `CodeIntel`
+  trait of code intelligence (diagnostics, completion, documentation,
+  signatures, locations, edits, code actions, server status).
+- `lsp-client` (platform): the LSP client over `process` and
+  `LspCodeIntel`, `CodeIntel` over several servers with routing per
+  feature.
+- `code-intel-ui` (platform, GPUI): completion, documentation, parameter
+  info, navigation and intention popups, the Language Services widget,
+  `code.*` commands; `ui::markdown` renders documentation.
+- `py-lsp` (Python): ruff and ty server specs, executable lookup,
+  settings and the one-time import of the reference's tool settings.
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded
