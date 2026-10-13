@@ -10,6 +10,7 @@ rust-version.workspace = true
 commands.workspace = true
 gpui.workspace = true
 image = { version = "0.25", default-features = false }
+name-match.workspace = true
 resvg.workspace = true
 serde.workspace = true
 serde_json.workspace = true
