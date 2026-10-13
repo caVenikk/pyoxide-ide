@@ -12,16 +12,19 @@
 //!   out); other CSI sequences, `ESC =` and `ESC >` are dropped; any other
 //!   escape sequence (OSC included) stays in the text as the reference
 //!   leaves it;
-//! - `\r\n` is a line break, a lone `\r` clears the current line (the
-//!   following text replaces it), `\b` deletes the previous character of the
+//! - `\r\n` is a line break, also when a chunk ends between the two (a
+//!   trailing `\r` is held until the stream's next chunk, as the reference's
+//!   output reader joins them); a lone `\r` clears the current line, so the
+//!   following text replaces it (no column overwrite: the reference does
+//!   not emulate a terminal); `\b` deletes the previous character of the
 //!   current line.
 //!
 //! Lines are kept in a cycle buffer like the reference's (1024 KB by
 //! default, counted in UTF-16 units as the reference's document is; the
-//! oldest text is cut off at the front). Each line carries style runs with
-//! the [`ContentKind`] of its text and the hyperlinks found by the
-//! [`LinkFilter`]s. [`Console::take_changes`] tells a view which lines to
-//! reload.
+//! oldest text is cut off exactly at the front, so the first line may lose
+//! its start). Each line carries style runs with the [`ContentKind`] of its
+//! text and the hyperlinks found by the [`LinkFilter`]s.
+//! [`Console::take_changes`] tells a view which lines to reload.
 //!
 //! No UI toolkit and no theme here: styles are data, a view maps them to its
 //! theme.
@@ -29,6 +32,7 @@
 mod ansi;
 mod buffer;
 mod link;
+mod utf8;
 
 pub use ansi::{Color, Style, Underline};
 pub use buffer::{Changes, Console, DEFAULT_CYCLE_BUFFER_SIZE, Line, StyleRun};
