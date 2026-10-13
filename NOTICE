@@ -304,8 +304,8 @@ here with: source URL, commit, file(s), license, and what was changed.
   https://github.com/kohsuke/winp, files native/winp.cpp
   (KillProcessTreeWinHelper) and native/sendctrlc/main.cpp.
   Changes: reimplemented in Rust; the process starts in its own process
-  group, which a kill also signals; the Windows Ctrl+C is sent from the
-  IDE's process instead of a helper program.
+  group, which a kill also signals; the Windows Ctrl+C helper is the
+  application itself, started with a hidden argument.
 
 - crates/platform/console
   Closely adapted from IntelliJ Platform Community (Apache-2.0),

@@ -145,13 +145,16 @@ impl ProcessHandle {
     /// Graceful termination, the reference's first Stop: `SIGINT` to every
     /// process of the tree on Unix (descendants first, as the reference's
     /// `UnixProcessManager.sendSigIntToProcessTree`); on Windows a Ctrl+C
-    /// event to the process's console, followed by a `0xFF` byte on standard
-    /// input to unblock a pending console read, as the reference does. Does
-    /// nothing when the process already exited. An error means no interrupt
-    /// could be sent (on Windows, for example, when the IDE itself is
-    /// attached to a console: then only [`ProcessHandle::kill`] works).
+    /// event to the process's console, sent by the interrupt helper process
+    /// (see [`set_interrupt_helper`](crate::set_interrupt_helper)) and
+    /// followed by a `0xFF` byte on standard input to unblock a pending
+    /// console read, as the reference does. Does nothing when the process
+    /// already exited. An error means no interrupt could be sent (on Windows
+    /// also: no helper set, or the helper failed); then only
+    /// [`ProcessHandle::kill`] works.
     ///
-    /// Walks the process table: takes a few milliseconds.
+    /// Takes a few milliseconds on Unix (a walk of the process table); on
+    /// Windows it waits for the helper process, tens of milliseconds.
     pub fn interrupt(&self) -> io::Result<()> {
         if !self.is_running() {
             return Ok(());
@@ -180,6 +183,8 @@ impl ProcessHandle {
     /// The reference's Stop action: the first call interrupts
     /// ([`ProcessHandle::interrupt`], or kills when no interrupt could be
     /// sent), any further call while the process still runs kills the tree.
+    /// On Windows the first call returns at once and interrupts on a
+    /// background thread (the interrupt helper takes a while to start).
     pub fn stop(&self) -> io::Result<()> {
         let first = {
             let mut state = self.inner.state();
@@ -188,7 +193,23 @@ impl ProcessHandle {
             }
             !std::mem::replace(&mut state.stop_requested, true)
         };
-        if first && self.interrupt().is_ok() {
+        if !first {
+            return self.kill();
+        }
+        if cfg!(windows) {
+            // The interrupt helper takes a while to start: not on the
+            // caller's thread. A failed interrupt kills, as on Unix.
+            let handle = self.clone();
+            thread::Builder::new()
+                .name("process stop".to_owned())
+                .spawn(move || {
+                    if handle.interrupt().is_err() {
+                        let _ = handle.kill();
+                    }
+                })?;
+            return Ok(());
+        }
+        if self.interrupt().is_ok() {
             return Ok(());
         }
         self.kill()

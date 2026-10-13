@@ -16,8 +16,9 @@
 //! Stopping follows the reference IDE's stop action (`KillableProcessHandler`
 //! and `StopAction` of IntelliJ Platform): the first [`ProcessHandle::stop`]
 //! terminates gracefully (Ctrl+C: `SIGINT` on Unix, a console Ctrl+C event on
-//! Windows), the next one kills the whole process tree. Dropping the handle
-//! does not stop the process; closing a console must stop it explicitly.
+//! Windows, sent by a helper process: see [`set_interrupt_helper`]), the next
+//! one kills the whole process tree. Dropping the handle does not stop the
+//! process; closing a console must stop it explicitly.
 //!
 //! No UI toolkit and no async runtime here: the receiver is a
 //! [`flume::Receiver`], usable both blocking (`recv`) and from any executor
@@ -26,12 +27,16 @@
 mod command;
 mod exit;
 mod handle;
+mod helper;
 mod sys;
 
 pub use command::CommandLine;
 pub use exit::ExitStatus;
 pub use flume::{self, Receiver};
 pub use handle::{ProcessHandle, spawn};
+pub use helper::{
+    INTERRUPT_HELPER_ARG, InterruptHelper, run_interrupt_helper_if_requested, set_interrupt_helper,
+};
 
 /// An event of a running process, in the order the process produced it
 /// (per stream). [`ProcessEvent::Exited`] is always the last event.

@@ -2,36 +2,32 @@ use std::collections::HashSet;
 use std::io;
 use std::os::windows::io::{AsHandle, AsRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
-use std::process::{Child, Command};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, Once, OnceLock};
-use std::time::{Duration, Instant};
+use std::process::{Child, Command, Stdio};
 
-use windows_sys::Win32::Foundation::{CloseHandle, FALSE, FILETIME, HANDLE, TRUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, FALSE, FILETIME, GetLastError, HANDLE, STILL_ACTIVE, TRUE, WAIT_OBJECT_0,
+};
 use windows_sys::Win32::System::Console::{
-    AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent,
-    GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler,
-    SetStdHandle,
+    AttachConsole, CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_TERMINATE, TerminateProcess,
+    CREATE_NO_WINDOW, GetExitCodeProcess, GetProcessTimes, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
 use crate::ExitStatus;
+use crate::helper::{INTERRUPT_HELPER_ARG, interrupt_helper};
 
 /// The exit code a killed process gets: `(UINT)-1`, as WinP's
 /// `TerminateProcess(hProcess, -1)`.
 const KILLED_EXIT_CODE: u32 = u32::MAX;
 
-/// Serialises spawning with sending Ctrl+C: while the IDE is attached to a
-/// child's console and ignores Ctrl+C, a new child would inherit the
-/// "ignore Ctrl+C" flag. One console at a time.
-static CONSOLE_LOCK: Mutex<()> = Mutex::new(());
+/// How long the interrupt helper may take to start, attach and send.
+const HELPER_TIMEOUT_MS: u32 = 10_000;
 
 /// What interrupt and kill need: the id and an owned handle, which keeps the
 /// process object (and so its id) from being reused while we hold it.
@@ -54,7 +50,6 @@ impl OsProcess {
 /// still receive a console Ctrl+C event.
 pub(crate) fn spawn(command: &mut Command) -> io::Result<Child> {
     command.creation_flags(CREATE_NO_WINDOW);
-    let _console = CONSOLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     command.spawn()
 }
 
@@ -90,74 +85,71 @@ pub(crate) fn exit_status(status: std::process::ExitStatus) -> ExitStatus {
     }
 }
 
-/// Sends a console Ctrl+C event to the process's console, as the reference
-/// does through WinP's `sendctrlc` helper (`FreeConsole`, `AttachConsole`,
-/// `SetConsoleCtrlHandler(NULL, TRUE)`, `GenerateConsoleCtrlEvent(CTRL_C_EVENT,
-/// 0)`), but inside the IDE's process: the IDE ignores the event itself and
-/// detaches again. Fails, without touching anything, when the IDE is
-/// attached to a console of its own (a console-subsystem build started from
-/// a terminal): detaching from it could not be undone.
+/// Sends a console Ctrl+C event to the process's console the way the
+/// reference does, from a separate helper process (WinP's `sendctrlc`):
+/// starts the [`interrupt_helper`] with [`INTERRUPT_HELPER_ARG`] and the
+/// process id, without a window, and waits for its exit code. This process
+/// never attaches to the child's console, so the event cannot reach it.
+/// Fails when no helper is set, the helper cannot start, does not answer in
+/// time, or reports an error (its exit code is the Windows error).
 pub(crate) fn interrupt(process: &OsProcess) -> io::Result<()> {
-    let _console = CONSOLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    install_ctrl_handler();
-    // SAFETY: console and standard handle calls of the own process, under
-    // the console lock; every state change is undone before returning.
+    let helper = interrupt_helper().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "no interrupt helper is set (process::set_interrupt_helper)",
+        )
+    })?;
+    let mut child = Command::new(&helper.program)
+        .args(&helper.args)
+        .arg(INTERRUPT_HELPER_ARG)
+        .arg(process.pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    // SAFETY: waits on the helper's own process handle, which `child` keeps
+    // open.
+    let waited = unsafe { WaitForSingleObject(child.as_raw_handle() as HANDLE, HELPER_TIMEOUT_MS) };
+    if waited != WAIT_OBJECT_0 {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the interrupt helper did not answer",
+        ));
+    }
+    match child.wait()?.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(io::Error::from_raw_os_error(code)),
+        None => Err(io::Error::other("the interrupt helper failed")),
+    }
+}
+
+/// The interrupt helper's work, in the helper process (WinP's
+/// `sendctrlc/main.cpp`): leave the own console, attach to the target's,
+/// ignore Ctrl+C here, and send Ctrl+C to every process of that console.
+/// Returns the exit code: 0, or the Windows error of the failed call.
+pub(crate) fn send_ctrl_c(pid: u32) -> i32 {
+    // SAFETY: console calls of this short-lived helper process only.
     unsafe {
-        let saved = [
-            GetStdHandle(STD_INPUT_HANDLE),
-            GetStdHandle(STD_OUTPUT_HANDLE),
-            GetStdHandle(STD_ERROR_HANDLE),
-        ];
-        if AttachConsole(process.pid) == 0 {
-            return Err(io::Error::last_os_error());
+        FreeConsole();
+        if AttachConsole(pid) == 0 {
+            return last_error_code();
         }
         SetConsoleCtrlHandler(None, TRUE);
-        swallow_ctrl_events_for(Duration::from_secs(5));
-        let sent = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
-        let err = io::Error::last_os_error();
-        FreeConsole();
-        SetStdHandle(STD_INPUT_HANDLE, saved[0]);
-        SetStdHandle(STD_OUTPUT_HANDLE, saved[1]);
-        SetStdHandle(STD_ERROR_HANDLE, saved[2]);
-        // Children started from now on must not inherit "ignore Ctrl+C". The
-        // event may reach this process later; the handler swallows it.
-        SetConsoleCtrlHandler(None, FALSE);
-        if sent == 0 { Err(err) } else { Ok(()) }
+        if GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) == 0 {
+            return last_error_code();
+        }
     }
+    0
 }
 
-/// Monotonic milliseconds until which Ctrl+C and Ctrl+Break reaching this
-/// process are swallowed (they come from our own interrupts).
-static SWALLOW_UNTIL: AtomicU64 = AtomicU64::new(0);
-
-fn now_millis() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_millis() as u64
-}
-
-fn swallow_ctrl_events_for(duration: Duration) {
-    SWALLOW_UNTIL.store(
-        now_millis() + duration.as_millis() as u64,
-        Ordering::Release,
-    );
-}
-
-unsafe extern "system" fn ctrl_handler(ctrl_type: u32) -> i32 {
-    let ours = ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT;
-    if ours && now_millis() < SWALLOW_UNTIL.load(Ordering::Acquire) {
-        TRUE
-    } else {
-        FALSE
-    }
-}
-
-fn install_ctrl_handler() {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| {
-        now_millis();
-        // SAFETY: registers a handler routine that lives for the whole program.
-        unsafe { SetConsoleCtrlHandler(Some(ctrl_handler), TRUE) };
-    });
+/// `GetLastError` as a non-zero exit code.
+fn last_error_code() -> i32 {
+    // SAFETY: reads the calling thread's last error.
+    let code = unsafe { GetLastError() } as i32;
+    if code == 0 { 1 } else { code }
 }
 
 /// Kills the process tree the way the reference's WinP does
@@ -190,10 +182,7 @@ pub(crate) fn kill(process: &OsProcess) -> io::Result<()> {
     // Access denied after the process exited: nothing left to kill.
     let mut code: u32 = 0;
     // SAFETY: reads the exit code through our own handle.
-    let exited = unsafe {
-        windows_sys::Win32::System::Threading::GetExitCodeProcess(root, &mut code) != 0
-            && code != windows_sys::Win32::Foundation::STILL_ACTIVE as u32
-    };
+    let exited = unsafe { GetExitCodeProcess(root, &mut code) != 0 && code != STILL_ACTIVE as u32 };
     if exited { Ok(()) } else { Err(err) }
 }
 

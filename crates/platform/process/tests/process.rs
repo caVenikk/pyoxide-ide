@@ -3,13 +3,22 @@
 
 use std::time::{Duration, Instant};
 
-use process::{CommandLine, ExitStatus, ProcessEvent, ProcessHandle, Receiver, spawn};
+use process::{
+    CommandLine, ExitStatus, InterruptHelper, ProcessEvent, ProcessHandle, Receiver, spawn,
+};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_process-test-helper");
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 fn helper(args: &[&str]) -> CommandLine {
     CommandLine::new(HELPER).args(args)
+}
+
+/// The helper program sends Ctrl+C on Windows, as the application does with
+/// itself (see `process::set_interrupt_helper`).
+fn use_interrupt_helper() {
+    process::set_interrupt_helper(Some(InterruptHelper::new(HELPER)));
+    os::enable_ctrl_c_in_children();
 }
 
 #[derive(Default, Debug)]
@@ -176,7 +185,7 @@ fn a_missing_program_is_an_error() {
 /// handling: `SIGINT` on Unix, `STATUS_CONTROL_C_EXIT` on Windows.
 #[test]
 fn interrupt_stops_a_process() {
-    os::prepare_interrupt();
+    use_interrupt_helper();
     let (handle, rx) = spawn(&helper(&["sleep"])).unwrap();
     let mut out = Output::default();
     wait_stdout(&rx, &mut out, "ready");
@@ -203,7 +212,7 @@ fn interrupt_stops_a_process() {
 /// interrupt.
 #[test]
 fn stop_twice_kills_a_process_that_ignores_interrupts() {
-    os::prepare_interrupt();
+    use_interrupt_helper();
     let (handle, rx) = spawn(&helper(&["ignore-interrupt"])).unwrap();
     let mut out = Output::default();
     wait_stdout(&rx, &mut out, "ready");
@@ -256,7 +265,7 @@ fn kill_ends_a_descendant_outside_the_process_group() {
 
 #[test]
 fn interrupt_reaches_a_descendant_outside_the_process_group() {
-    os::prepare_interrupt();
+    use_interrupt_helper();
     let (handle, rx) = spawn(&helper(&["tree", "detached"])).unwrap();
     let mut out = Output::default();
     wait_stdout(&rx, &mut out, "ready");
@@ -326,7 +335,7 @@ fn dropping_the_handle_does_not_stop_the_process() {
 
 #[cfg(unix)]
 mod os {
-    pub fn prepare_interrupt() {}
+    pub fn enable_ctrl_c_in_children() {}
 
     pub fn alive(pid: u32) -> bool {
         let pid = pid as libc::pid_t;
@@ -352,24 +361,20 @@ mod os {
 
 #[cfg(windows)]
 mod os {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-    use windows_sys::Win32::System::Console::FreeConsole;
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
         TerminateProcess,
     };
 
-    /// The IDE is a GUI application without a console; a test runner may
-    /// have one, which makes a console Ctrl+C impossible to send from this
-    /// process (see `ProcessHandle::interrupt`).
-    /// Once, before any interrupt: tests run in parallel, and detaching
-    /// while another test is attached to a child's console would break it.
-    pub fn prepare_interrupt() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        // SAFETY: detaches this test process from its console, if any.
-        ONCE.call_once(|| unsafe {
-            FreeConsole();
-        });
+    /// Children inherit "ignore Ctrl+C" from this process; a test runner
+    /// may have been started with it (a new process group). The IDE is
+    /// started normally, so its children handle Ctrl+C.
+    pub fn enable_ctrl_c_in_children() {
+        // SAFETY: restores normal Ctrl+C processing of this process only; it
+        // never attaches to a child's console, so no event reaches it.
+        unsafe { SetConsoleCtrlHandler(None, FALSE) };
     }
 
     pub fn alive(pid: u32) -> bool {

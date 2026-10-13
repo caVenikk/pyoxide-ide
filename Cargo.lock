@@ -5110,6 +5110,7 @@ dependencies = [
  "dirs 7.0.0",
  "editor",
  "gpui",
+ "process",
  "project",
  "py-env",
  "py-run",

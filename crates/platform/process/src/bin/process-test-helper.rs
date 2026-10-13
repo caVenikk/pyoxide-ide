@@ -26,6 +26,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 fn main() {
+    // The tests use this program as the interrupt helper too.
+    process::run_interrupt_helper_if_requested();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
     let out = io::stdout();

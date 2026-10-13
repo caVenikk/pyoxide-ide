@@ -20,6 +20,7 @@ runtime-shaders = ["gpui/runtime_shaders"]
 dirs = "7"
 editor.workspace = true
 gpui.workspace = true
+process.workspace = true
 project.workspace = true
 py-env.workspace = true
 py-run.workspace = true

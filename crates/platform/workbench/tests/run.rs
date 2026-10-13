@@ -339,6 +339,24 @@ fn stop_interrupts_then_kills(cx: &mut TestAppContext) {
     );
 }
 
+/// Without an interrupt helper (the tests set none; the application sets
+/// itself) Stop cannot send Ctrl+C on Windows and kills at once, as the
+/// reference falls back to a hard destroy.
+#[cfg(windows)]
+#[gpui::test]
+fn stop_without_an_interrupt_helper_kills(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    h.open("a.py");
+    set_script(&long_running());
+    h.invoke("run.run", json!(null));
+    h.wait_text(0, "started");
+    h.press(keys("cmd-f2", "ctrl-f2"));
+    let s = h.wait_status(0, "terminated");
+    assert_eq!(s["tabs"][0]["exit_text"], json!("-1"));
+    let lines = console_lines(&s, 0);
+    assert_eq!(lines[lines.len() - 2], "Process finished with exit code -1");
+}
+
 /// Rerun (⌘R / Ctrl+F5) in the Run tool window stops the process and runs
 /// it again in the same tab without asking; in the editor ⌘R stays Replace.
 #[gpui::test]
