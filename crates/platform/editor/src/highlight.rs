@@ -91,6 +91,28 @@ pub trait Highlighter: 'static {
     }
 }
 
+/// Drops a value on a thread of its own, one value after another.
+fn drop_off_thread<T: Send + 'static>(value: T) {
+    use std::sync::Mutex;
+    use std::sync::mpsc::{Sender, channel};
+    type Garbage = Box<dyn Send>;
+    static DROPPER: Mutex<Option<Sender<Garbage>>> = Mutex::new(None);
+    let mut dropper = DROPPER.lock().unwrap_or_else(|e| e.into_inner());
+    let sender = dropper.get_or_insert_with(|| {
+        let (tx, rx) = channel::<Garbage>();
+        let _ = std::thread::Builder::new()
+            .name("editor drop".to_owned())
+            .spawn(move || {
+                for garbage in rx {
+                    drop(garbage)
+                }
+            });
+        tx
+    });
+    // If the thread is gone, the value is dropped here instead.
+    let _ = sender.send(Box::new(value));
+}
+
 /// Highlighting with a tree-sitter grammar of the `syntax` crate.
 pub struct SyntaxHighlighter {
     language: Arc<syntax::Language>,
@@ -206,7 +228,11 @@ impl Highlighter for SyntaxHighlighter {
             for edit in self.edits_during_job.drain(..) {
                 tree.edit(&edit);
             }
-            self.tree = Some(tree);
+            // Freeing the tree of a large file takes long (hundreds of
+            // milliseconds under memory pressure): not on the UI thread.
+            if let Some(old) = self.tree.replace(tree) {
+                drop_off_thread(old);
+            }
             if let Some(mut states) = states {
                 if let Some(row) = first_edited {
                     states.invalidate_after(row);

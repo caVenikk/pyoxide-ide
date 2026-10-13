@@ -30,6 +30,10 @@ use ui::theme::{Theme, color};
 /// How long output waits before it is shown: about one frame, so that a
 /// process printing at full speed costs one repaint per frame.
 pub const FLUSH_DELAY: Duration = Duration::from_millis(16);
+/// While output keeps coming, the view takes it at most this often: fewer
+/// frames while a process floods the console, so typing elsewhere keeps
+/// the window's frames (the reference shows output every 200 ms).
+pub const FLOOD_INTERVAL: Duration = Duration::from_millis(100);
 
 /// One style run of a console line, in chars.
 #[derive(Debug, Clone, PartialEq)]
@@ -216,6 +220,8 @@ pub struct ConsoleView {
     /// Typed text of the current line not sent yet.
     pending_input: String,
     flush_scheduled: bool,
+    /// When output was last taken (executor clock).
+    last_flush: Option<std::time::Instant>,
     /// The link followed last (line, char range), where Up and Down the
     /// Stack Trace continue.
     followed: Option<(usize, Range<usize>)>,
@@ -259,6 +265,7 @@ impl ConsoleView {
             input: None,
             pending_input: String::new(),
             flush_scheduled: false,
+            last_flush: None,
             followed: None,
             _subscriptions: subscriptions,
         }
@@ -307,14 +314,22 @@ impl ConsoleView {
         self.flush(cx);
     }
 
-    /// New output is waiting: show it within a frame.
+    /// New output is waiting: show it within a frame, or, while output
+    /// keeps coming, [`FLOOD_INTERVAL`] after it was last shown.
     pub fn request_flush(&mut self, cx: &mut Context<Self>) {
         if self.flush_scheduled {
             return;
         }
         self.flush_scheduled = true;
+        let now = cx.background_executor().now();
+        let delay = match self.last_flush {
+            Some(last) => FLOOD_INTERVAL
+                .saturating_sub(now.saturating_duration_since(last))
+                .max(FLUSH_DELAY),
+            None => FLUSH_DELAY,
+        };
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(FLUSH_DELAY).await;
+            cx.background_executor().timer(delay).await;
             let _ = this.update(cx, |this, cx| {
                 this.flush_scheduled = false;
                 this.flush(cx);
@@ -342,6 +357,7 @@ impl ConsoleView {
         let Some(changes) = model.take_changes() else {
             return;
         };
+        self.last_flush = Some(cx.background_executor().now());
         let editor = self.editor.clone();
         let stick = editor.read(cx).is_scrolled_to_end();
         let joined = |model: &console::Console, from: usize| -> String {
