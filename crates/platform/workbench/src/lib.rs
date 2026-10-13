@@ -15,12 +15,15 @@ pub mod file_types;
 pub mod find_in_files;
 pub mod keymap;
 pub mod popup;
+pub mod project_files;
 pub mod project_panel;
+pub mod recent_files;
+pub mod search_everywhere;
 pub mod settings;
 mod shot;
 pub mod workbench;
 
-pub use app::{Product, StripeItem, init, open_main_window, run};
+pub use app::{NavigationHooks, Product, StripeItem, init, open_main_window, run};
 pub use file_types::{FileType, HighlighterFactory};
 pub use project::AutoExclusions;
 pub use settings::SaveSettings;

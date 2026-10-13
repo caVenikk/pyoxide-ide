@@ -2,11 +2,12 @@
 //! with what is specific to Python (file type icons, tool windows, the
 //! interpreter widget).
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use editor::SyntaxHighlighter;
 use ui::icons::{IconName, IconSvg};
-use workbench::{AutoExclusions, FileType, Product, StripeItem};
+use workbench::{AutoExclusions, FileType, NavigationHooks, Product, StripeItem};
 
 /// Icons of the Python product (IntelliJ Platform Community, Apache-2.0,
 /// see NOTICE).
@@ -61,6 +62,59 @@ const EXCLUDED: AutoExclusions = AutoExclusions {
     root_dir_markers: &["pyvenv.cfg"],
 };
 
+/// Source roots as the reference IDE marks them when a folder opens as a
+/// project: the root package folder that `setup.py` names
+/// (`package_dir={"": "lib"}`), and the folder `src`.
+fn source_roots(root: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(root.join("setup.py"))
+        && let Some(dir) = root_package_dir(&text)
+    {
+        let dir = root.join(dir);
+        if dir.is_dir() {
+            roots.push(dir);
+        }
+    }
+    let src = root.join("src");
+    if src.is_dir() && !roots.contains(&src) {
+        roots.push(src);
+    }
+    roots
+}
+
+/// The folder of the root package in a `setup(...)` call: the value of the
+/// empty key of its `package_dir` dictionary.
+fn root_package_dir(setup_py: &str) -> Option<String> {
+    let at = setup_py.find("package_dir")?;
+    let rest = &setup_py[at + "package_dir".len()..];
+    let rest = rest.trim_start().strip_prefix('=')?.trim_start();
+    let body = rest.strip_prefix('{')?;
+    let body = &body[..body.find('}')?];
+    let strings = |text: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        let mut chars = text.chars();
+        while let Some(c) = chars.next() {
+            if c == '"' || c == '\'' {
+                out.push(chars.by_ref().take_while(|&x| x != c).collect());
+            }
+        }
+        out
+    };
+    body.split(',').find_map(|pair| {
+        let (key, value) = pair.split_once(':')?;
+        let key = strings(key);
+        let value = strings(value);
+        (key.len() == 1 && key[0].is_empty() && value.len() == 1).then(|| value[0].clone())
+    })
+}
+
+/// A Python file's location in Go to File: its package, the folder from
+/// its source root with dots (`flask.sansio`).
+fn file_location(name: &str, folder: &str) -> Option<String> {
+    let python = [".py", ".pyi", ".pyw"].iter().any(|e| name.ends_with(e));
+    python.then(|| folder.replace('/', "."))
+}
+
 fn product() -> Product {
     Product {
         name: "Pyoxide",
@@ -85,6 +139,11 @@ fn product() -> Product {
             "*.py", "*.xml", "*.html", "*.css", "*.ipynb", "*.pyi", "*.pyx", "*.pxd", "*.pxi",
         ],
         auto_excluded: EXCLUDED,
+        navigation: NavigationHooks {
+            source_roots: Some(source_roots),
+            file_location: Some(file_location),
+            package_markers: &["__init__.py"],
+        },
     }
 }
 
@@ -96,6 +155,28 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_roots_as_the_reference_marks_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(source_roots(root).is_empty());
+        std::fs::create_dir(root.join("src")).unwrap();
+        assert_eq!(source_roots(root), [root.join("src")]);
+        std::fs::create_dir(root.join("lib")).unwrap();
+        std::fs::write(
+            root.join("setup.py"),
+            "setup(\n    name='x',\n    package_dir={'': \"lib\"},\n)\n",
+        )
+        .unwrap();
+        assert_eq!(source_roots(root), [root.join("lib"), root.join("src")]);
+        assert_eq!(root_package_dir("setup(package_dir = {'x': 'y'})"), None);
+        assert_eq!(
+            file_location("app.py", "flask/sansio").as_deref(),
+            Some("flask.sansio")
+        );
+        assert_eq!(file_location("app.rst", "docs"), None);
+    }
 
     #[test]
     fn product_icons_rasterize() {

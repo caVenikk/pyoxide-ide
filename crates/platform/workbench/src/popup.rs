@@ -66,6 +66,9 @@ pub struct PopupFrame {
     drag: Option<Drag>,
     /// The bounds of the last frame.
     last: Option<Bounds<Pixels>>,
+    /// Shown with its fixed part only, this high (Search Everywhere with
+    /// nothing to list); its height is then not resized.
+    collapsed: Option<Pixels>,
 }
 
 impl PopupFrame {
@@ -78,7 +81,18 @@ impl PopupFrame {
             size: None,
             drag: None,
             last: None,
+            collapsed: None,
         }
+    }
+
+    /// Distance of the default place from the top of the window.
+    pub fn set_top(&mut self, top: Pixels) {
+        self.top = top;
+    }
+
+    /// Shows only the fixed part, `Some(height)` high, or the whole popup.
+    pub fn set_collapsed(&mut self, height: Option<Pixels>) {
+        self.collapsed = height;
     }
 
     /// Restores a place kept from an earlier session.
@@ -117,11 +131,12 @@ impl PopupFrame {
             .max(self.min_size.width)
             .min(viewport.width - px(2.0 * MARGIN))
             .max(px(1.0));
-        let height = wanted
-            .height
-            .max(self.min_size.height)
-            .min(viewport.height - self.top.min(viewport.height / 4.0) - px(MARGIN))
-            .max(px(1.0));
+        let height = match self.collapsed {
+            Some(h) => h,
+            None => wanted.height.max(self.min_size.height),
+        }
+        .min(viewport.height - self.top.min(viewport.height / 4.0) - px(MARGIN))
+        .max(px(1.0));
         let x = ((viewport.width - width) / 2.0 + self.offset.x)
             .clamp(px(0.0), (viewport.width - width).max(px(0.0)));
         let y = (self.top + self.offset.y).clamp(px(0.0), (viewport.height - height).max(px(0.0)));
@@ -136,7 +151,11 @@ impl PopupFrame {
         });
     }
 
-    fn start_resize(&mut self, edges: Edges, mouse: Point<Pixels>) {
+    fn start_resize(&mut self, mut edges: Edges, mouse: Point<Pixels>) {
+        if self.collapsed.is_some() {
+            edges.top = false;
+            edges.bottom = false;
+        }
         if let Some(bounds) = self.last {
             self.drag = Some(Drag::Resize {
                 edges,
@@ -176,7 +195,11 @@ impl PopupFrame {
                     bottom = (bottom + d.y).max(top + self.min_size.height);
                 }
                 let width = right - left;
-                let height = bottom - top;
+                // Collapsed, the height to expand to stays.
+                let height = match self.collapsed {
+                    Some(_) => self.size.unwrap_or(self.default_size).height,
+                    None => bottom - top,
+                };
                 self.size = Some(size(width, height));
                 // The default place of this size, and the offset from it.
                 let x0 = (viewport.width - width) / 2.0;

@@ -9,11 +9,13 @@ members = [
     "crates/platform/db-sqlite",
     "crates/platform/db-service",
     "crates/platform/db-testkit",
+    "crates/platform/name-match",
     "crates/platform/project",
     "crates/platform/project-search",
     "crates/platform/search",
     "crates/platform/db-cli",
     "crates/platform/editor",
+    "crates/platform/file-index",
     "crates/platform/secrets",
     "crates/platform/settings-import",
     "crates/platform/syntax",
@@ -53,6 +55,8 @@ resvg = { version = "0.45", default-features = false }
 commands = { path = "crates/platform/commands" }
 db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
+name-match = { path = "crates/platform/name-match" }
+file-index = { path = "crates/platform/file-index" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
 db-oracle-odpi = { path = "crates/platform/db-oracle-odpi" }
 db-postgres = { path = "crates/platform/db-postgres" }

@@ -52,7 +52,7 @@ mod replace;
 mod settings;
 mod view;
 
-use settings::update_settings;
+pub(crate) use settings::update_settings;
 pub use settings::{FindInFilesSettings, init, load_settings, settings, settings_file};
 
 ui::ui_commands! {
@@ -706,6 +706,29 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.open {
+            self.take_shared(cx);
+        }
+        self.show(replace, context, window, cx);
+    }
+
+    /// The options and the mask are shared with Search Everywhere's Text
+    /// tab: takes them as they are now.
+    fn take_shared(&mut self, cx: &mut Context<Self>) {
+        let shared = settings(cx);
+        self.options = shared.options();
+        self.mask_on = shared.file_mask.is_some();
+        let mask = shared.shown_mask();
+        set_field_text(&self.mask, &mask, cx);
+    }
+
+    fn show(
+        &mut self,
+        replace: bool,
+        context: OpenContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut text = self.query.read(cx).text();
         if let Some(selected) = context
             .selection
@@ -775,6 +798,9 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.open {
+            self.take_shared(cx);
+        }
         let options = SearchOptions {
             case_sensitive: args.case_sensitive.unwrap_or(self.options.case_sensitive),
             whole_words: args.whole_words.unwrap_or(self.options.whole_words),
@@ -798,7 +824,7 @@ impl FindInFiles {
             set_field_text(&self.directory, &dir, cx);
         }
         let replace = args.replace.is_some() || (self.open && self.replace_mode);
-        self.open(replace, context, window, cx);
+        self.show(replace, context, window, cx);
         match args.scope.as_deref() {
             Some("project") => self.scope = ScopeKind::Project,
             Some("module") => self.scope = ScopeKind::Module,

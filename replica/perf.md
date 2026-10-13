@@ -194,6 +194,33 @@ matches as the reference does.
 | 2026-10-12 | mac-1 | 20k files / 300 MB, 10 matches in 10 files: first rows / end | p50 114 ms / 252 ms | p90 201 ms / 368 ms; longest frame meanwhile 8.4 ms; 102 MB RSS after the runs |
 | 2026-10-12 | mac-1 | 20k files / 300 MB, `cache` (stops at 100): first rows / end | p50 0.9 ms / 1.9 ms | |
 
+### Go to File
+Engine: `FILE_INDEX_BENCH=<dir> cargo test --release -p file-index bench --
+--ignored --nocapture` builds the index of a folder (median of 10 builds) and
+types the words of `FILE_INDEX_BENCH_TYPE` one char at a time (median of 20
+searches with the final sort per prefix). In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=go-to-file:<query>`
+opens the project, waits for its index, then 5 times opens Go to File with an
+empty field and types the query one key every 150 ms; time from key dispatch
+to the end of the first painted frame that shows that prefix's rows (display
+frames), which includes the popup's 100 ms pause after a key, and the search
+alone (on a background thread, to the rows on the UI thread). Flask 3.1.0
+and the generated 20,000-file tree of the Find in Files rows.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-12 | mac-1 | engine, Flask (301 entries): index build | p50 2.9 ms | |
+| 2026-10-12 | mac-1 | engine, Flask: a key while typing | p50 0.06 ms, max 0.2 ms | |
+| 2026-10-12 | mac-1 | engine, 20k files (20,450 entries): index build | p50 36 ms | |
+| 2026-10-12 | mac-1 | engine, 20k files: a key while typing | p50 0.17-3.5 ms, max 8.9 ms | `pkg0`, 13.5k results |
+| 2026-10-12 | mac-1 | Flask, `flaskapp`: index build in the application | 2.2 ms | |
+| 2026-10-12 | mac-1 | Flask, `flaskapp`: key to rows / search | p50 115 ms / 0.26 ms | p90 127 ms / 0.36 ms; the 100 ms pause included |
+| 2026-10-12 | mac-1 | 20k files, `mod_1234`: index build in the application | 40 ms | 117 MB RSS after the runs |
+| 2026-10-12 | mac-1 | 20k files, `mod_1234`: key to rows / search | p50 131 ms / 16 ms | p90 146 ms / 22 ms; `m` matches every file |
+| 2026-10-12 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 128 ms / 1.3 ms | p90 141 ms / 26 ms |
+| 2026-10-13 | mac-1 | Flask, `flaskapp`: key to rows / search | p50 125 ms / 0.29 ms | p90 127 ms / 0.42 ms; every match ranked by the popup's rule, 15 rows |
+| 2026-10-13 | mac-1 | 20k files, `mod_1234`: key to rows / search | p50 143 ms / 23 ms | p90 146 ms / 29 ms; ranking every match (`m` matches every file) |
+| 2026-10-13 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 127 ms / 1.4 ms | p90 157 ms / 31 ms |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

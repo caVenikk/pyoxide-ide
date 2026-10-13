@@ -12,13 +12,22 @@
 //! ```
 //!
 //! Keystrokes use GPUI's syntax (`cmd-shift-z`, `alt-left`, `ctrl-f4`).
+//! A modifier written twice (`"shift shift"`) is a double tap of that key
+//! ([`gesture`]), bound everywhere.
+
+mod gesture;
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use gpui::{App, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate};
+use gpui::{
+    Action, App, DummyKeyboardMapper, Global, KeyBinding, KeyBindingContextPredicate, Keystroke,
+    Modifiers, Window,
+};
 use serde::Deserialize;
 use serde_json::Value as Json;
+
+pub use gesture::{DoubleTap, ModifierKey, double_tap_text, parse_double_tap};
 
 /// The default keymap of macOS.
 pub const MACOS: &str = include_str!("../keymaps/macos.toml");
@@ -112,6 +121,7 @@ impl Keymap {
 pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
     let mut errors = Vec::new();
     let mut out = Vec::new();
+    let mut taps = Vec::new();
     for b in &keymap.bindings {
         let action = match cx.build_action(&b.command, b.args.clone()) {
             Ok(action) => action,
@@ -120,6 +130,10 @@ pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
                 continue;
             }
         };
+        if let Some(key) = parse_double_tap(&b.keys) {
+            taps.push((key, b.command.clone(), action));
+            continue;
+        }
         let predicate = match &b.context {
             Some(context) => match KeyBindingContextPredicate::parse(context) {
                 Ok(p) => Some(Rc::new(p)),
@@ -143,7 +157,72 @@ pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
         }
     }
     cx.bind_keys(out);
+    cx.set_global(Gestures {
+        taps,
+        state: DoubleTap::default(),
+    });
     errors
+}
+
+/// The double-tap bindings of the installed keymap and the tap in
+/// progress.
+#[derive(Default)]
+struct Gestures {
+    taps: Vec<(ModifierKey, String, Box<dyn Action>)>,
+    state: DoubleTap,
+}
+
+impl Global for Gestures {}
+
+/// The modifiers changed in a window: a completed double tap runs its
+/// command there.
+pub fn modifiers_changed(modifiers: Modifiers, window: &mut Window, cx: &mut App) {
+    let now = cx.background_executor().now();
+    let Some(gestures) = cx.try_global::<Gestures>() else {
+        return;
+    };
+    if gestures.taps.is_empty() {
+        return;
+    }
+    let tapped = cx
+        .global_mut::<Gestures>()
+        .state
+        .modifiers_changed(modifiers, now);
+    let action = tapped.and_then(|key| {
+        cx.global::<Gestures>()
+            .taps
+            .iter()
+            .find(|(k, _, _)| *k == key)
+            .map(|(_, _, action)| action.boxed_clone())
+    });
+    if let Some(action) = action {
+        window.dispatch_action(action, cx);
+    }
+}
+
+/// A key went down: a double tap in progress is over (a modifier on its
+/// own is not a key here).
+pub fn key_pressed(keystroke: &Keystroke, cx: &mut App) {
+    if matches!(
+        keystroke.key.as_str(),
+        "shift" | "control" | "alt" | "platform" | "function"
+    ) {
+        return;
+    }
+    let now = cx.background_executor().now();
+    let guard = !matches!(keystroke.key.as_str(), "escape" | "tab");
+    if cx.has_global::<Gestures>() {
+        cx.global_mut::<Gestures>().state.key_pressed(now, guard);
+    }
+}
+
+/// The modifier whose double tap runs `command`, if one does.
+pub fn double_tap_for(command: &str, cx: &App) -> Option<ModifierKey> {
+    cx.try_global::<Gestures>()?
+        .taps
+        .iter()
+        .find(|(_, c, _)| c == command)
+        .map(|(k, _, _)| *k)
 }
 
 #[cfg(test)]

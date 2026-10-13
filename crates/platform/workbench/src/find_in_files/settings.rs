@@ -63,7 +63,7 @@ impl FindInFilesSettings {
         }
     }
 
-    pub(super) fn options(&self) -> SearchOptions {
+    pub(crate) fn options(&self) -> SearchOptions {
         SearchOptions {
             case_sensitive: self.case_sensitive,
             whole_words: self.whole_words,
@@ -72,14 +72,14 @@ impl FindInFilesSettings {
     }
 
     /// The mask shown in the field: the one in use, else the most recent.
-    pub(super) fn shown_mask(&self) -> String {
+    pub(crate) fn shown_mask(&self) -> String {
         self.file_mask
             .clone()
             .or_else(|| self.recent_masks.first().cloned())
             .unwrap_or_default()
     }
 
-    pub(super) fn remember_mask(&mut self, mask: &str) {
+    pub(crate) fn remember_mask(&mut self, mask: &str) {
         remember(&mut self.recent_masks, mask);
     }
 
@@ -148,7 +148,7 @@ pub fn settings(cx: &App) -> FindInFilesSettings {
 }
 
 /// Changes the settings and writes them in the background.
-pub(super) fn update_settings(cx: &mut App, f: impl FnOnce(&mut FindInFilesSettings)) {
+pub(crate) fn update_settings(cx: &mut App, f: impl FnOnce(&mut FindInFilesSettings)) {
     let store = cx.default_global::<SettingsStore>();
     let before = store.settings.clone();
     f(&mut store.settings);

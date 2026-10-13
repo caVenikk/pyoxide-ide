@@ -1,0 +1,16 @@
+[package]
+name = "file-index"
+description = "File name index of Pyoxide IDE: the project's files and folders by name, built in the background with the project tree's rules and kept current, and Go to File's matching and ranking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ignore = "0.4"
+name-match.workspace = true
+project.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

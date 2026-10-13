@@ -70,6 +70,9 @@ const TREE_TOP: f32 = 4.0;
 pub enum PanelEvent {
     /// The person asked to open a file.
     OpenFile(PathBuf),
+    /// The project's hide and exclude rules were read or changed
+    /// ([`ProjectPanel::filter`]).
+    RulesChanged,
 }
 
 pub struct ProjectPanel {
@@ -194,6 +197,7 @@ impl ProjectPanel {
                 for id in std::mem::take(&mut this.waiting) {
                     this.list(id, cx);
                 }
+                cx.emit(PanelEvent::RulesChanged);
                 cx.notify();
             });
         })
@@ -532,6 +536,7 @@ impl ProjectPanel {
         }
         self.filter = Some(filter);
         self.save_settings(cx);
+        cx.emit(PanelEvent::RulesChanged);
         cx.notify();
     }
 

@@ -45,6 +45,12 @@ Platform (`crates/platform/`, language-agnostic):
   out), file masks, a parallel cancellable search that streams the matching
   lines and stops at a limit (later passes skip the lines shown), the
   results as ordered rows, and replacing in files on disk.
+- `name-match`: the reference IDE's name matcher (camel humps, word
+  starts, wildcards, middle matches) and its matching degree, for Go to
+  File, actions and speed search.
+- `file-index`: the project's files and folders by name, built in the
+  background with the project tree's rules and kept current, and Go to
+  File's matching and ranking (`name:line:column` included).
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
   commands) and its find bar (Find / Replace in the file).
@@ -56,8 +62,9 @@ Platform (`crates/platform/`, language-agnostic):
   `command::invoke`).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar, a movable and resizable popup frame, the Find in Files
-  and Replace in Files popup with its preview), keymaps, application
-  start-up, environment switches and in-app measurements.
+  and Replace in Files popup with its preview, Search Everywhere and Go to
+  File, Recent Files), keymaps (with double taps of a modifier),
+  application start-up, environment switches and in-app measurements.
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model

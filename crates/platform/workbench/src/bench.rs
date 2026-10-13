@@ -14,6 +14,7 @@ use gpui::{App, AppContext as _, AsyncApp, Entity, Keystroke, WindowHandle};
 use serde_json::json;
 
 use crate::env::{self, Bench};
+use crate::search_everywhere::SearchEverywhere;
 use crate::workbench::Workbench;
 
 /// Text typed by the typing measurement: 200 characters of a comment, the
@@ -43,6 +44,8 @@ struct Frame {
     highlighted: bool,
     /// The query whose matches the find bar showed.
     find_text: Option<String>,
+    /// The text whose rows Search Everywhere showed.
+    se_text: Option<String>,
 }
 
 #[derive(Default)]
@@ -62,9 +65,16 @@ pub fn frame_started() {
 
 /// Called from a canvas painted after everything else (the end of the
 /// frame's paint).
-pub fn frame_painted(editor: Option<&Entity<Editor>>, find: Option<&Entity<FindBar>>, cx: &App) {
+pub fn frame_painted(
+    editor: Option<&Entity<Editor>>,
+    find: Option<&Entity<FindBar>>,
+    se: &Entity<SearchEverywhere>,
+    cx: &App,
+) {
     let end = Instant::now();
     let find_text = find.and_then(|f| f.read(cx).searched_text().map(str::to_owned));
+    let se = se.read(cx);
+    let se_text = (se.is_open() && !se.is_searching()).then(|| se.field().read(cx).text());
     let (version, path, lines, highlighted) = match editor {
         Some(e) => {
             let e = e.read(cx);
@@ -88,6 +98,7 @@ pub fn frame_painted(editor: Option<&Entity<Editor>>, find: Option<&Entity<FindB
             lines,
             highlighted,
             find_text,
+            se_text,
         });
     });
 }
@@ -186,6 +197,7 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
             Bench::Cursor => cursor(window, cx).await,
             Bench::Find(query) => find(window, query, cx).await,
             Bench::FindInFiles(query) => find_in_files(window, query, cx).await,
+            Bench::GoToFile(query) => go_to_file(window, query, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -603,6 +615,124 @@ async fn find_in_files(window: WindowHandle<Workbench>, query: String, cx: &mut 
             "first_rows_ms": stats(first),
             "done_ms": stats(done),
             "longest_frame_ms": stats(longest),
+        })
+    ));
+}
+
+/// Typing a query into Go to File: the index of the project's file names
+/// is built first (its time is reported); then `RUNS` runs open the popup
+/// with an empty field and type the query char by char. For each key, the
+/// time from its dispatch to the end of the first frame drawn after its
+/// rows came (the popup's pause after the last key included), and the
+/// search itself.
+async fn go_to_file(window: WindowHandle<Workbench>, query: String, cx: &mut AsyncApp) {
+    const RUNS: usize = 5;
+    const KEY_INTERVAL: Duration = Duration::from_millis(150);
+    let until = Instant::now() + Duration::from_secs(60);
+    while Instant::now() < until {
+        let ready = window
+            .read_with(cx, |w, cx| {
+                let files = w.project_files().read(cx);
+                !w.is_busy(cx) && files.index().is_some() && !files.is_building()
+            })
+            .unwrap_or(false);
+        if ready {
+            break;
+        }
+        sleep(cx, Duration::from_millis(20)).await;
+    }
+    let (build, entries) = window
+        .read_with(cx, |w, cx| {
+            let files = w.project_files().read(cx);
+            (
+                files.build_time().map(ms),
+                files.index().map(|i| i.project_len()),
+            )
+        })
+        .unwrap_or_default();
+    sleep(cx, Duration::from_secs(1)).await;
+    let display = display_frames(window, cx).await;
+    let se = window
+        .read_with(cx, |w, _| w.search_everywhere().clone())
+        .ok();
+    let Some(se) = se else {
+        return;
+    };
+    let (mut latency, mut search, mut handling) = (Vec::new(), Vec::new(), Vec::new());
+    let mut missed = 0;
+    let mut rows = 0;
+    for _ in 0..RUNS {
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            let args = json!({ "text": "", "tab": "files" });
+            let _ = ui::command::invoke("search-everywhere.search", args, window, cx);
+        });
+        sleep(cx, Duration::from_millis(500)).await;
+        let mut typed = String::new();
+        for c in query.chars() {
+            typed.push(c);
+            let key = if c == ' ' {
+                "space".to_owned()
+            } else {
+                c.to_string()
+            };
+            let Ok(keystroke) = Keystroke::parse(&key) else {
+                continue;
+            };
+            if !display {
+                force_frame(window, cx);
+            }
+            let sent = Instant::now();
+            let _ = cx.update_window(window.into(), |_, window, cx| {
+                window.dispatch_keystroke(keystroke, cx);
+            });
+            handling.push(ms(sent.elapsed()));
+            // The first frame that draws the rows of `typed`.
+            let until = Instant::now() + Duration::from_secs(10);
+            let mut shown = None;
+            while Instant::now() < until {
+                sleep(cx, Duration::from_millis(1)).await;
+                if !display {
+                    force_frame(window, cx);
+                }
+                shown = frames()
+                    .into_iter()
+                    .find(|f| f.start >= sent && f.se_text.as_deref() == Some(typed.as_str()));
+                if shown.is_some() {
+                    break;
+                }
+            }
+            match shown {
+                Some(f) => latency.push(ms(f.end - sent)),
+                None => missed += 1,
+            }
+            if let Some((t, n)) = se
+                .read_with(cx, |s, _| (s.timing(), s.rows().len()))
+                .ok()
+                .and_then(|(t, n)| t.map(|t| (t, n)))
+            {
+                search.push(ms(t));
+                rows = n;
+            }
+            sleep(cx, KEY_INTERVAL).await;
+        }
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            let _ = ui::command::invoke("search-everywhere.close", json!(null), window, cx);
+        });
+        sleep(cx, Duration::from_millis(300)).await;
+    }
+    env::marker(&format!(
+        "go_to_file {}",
+        json!({
+            "frames": frame_source(display),
+            "query": query,
+            "index_entries": entries,
+            "index_build_ms": build,
+            "keys": RUNS * query.chars().count(),
+            "frames_missing": missed,
+            "rows": rows,
+            "key_to_rows_ms": stats(latency),
+            "search_ms": stats(search),
+            "key_handling_ms": stats(handling),
         })
     ));
 }

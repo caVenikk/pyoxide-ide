@@ -26,7 +26,10 @@ use crate::commands::*;
 use crate::env;
 use crate::file_types::FileTypes;
 use crate::find_in_files::{self, FindInFiles, FindInFilesEvent, OpenContext};
+use crate::project_files::ProjectFiles;
 use crate::project_panel::{self, PanelEvent, ProjectPanel};
+use crate::recent_files::{self, RecentFiles, RecentFilesEvent};
+use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
 /// Default width of the project tool window.
@@ -137,6 +140,12 @@ pub struct Workbench {
     idle_save_pending: bool,
     /// The Find in Files popup (shown while it is open).
     find_in_files: Entity<FindInFiles>,
+    /// Search Everywhere and Go to File (shown while open).
+    search_everywhere: Entity<SearchEverywhere>,
+    /// The project's file name index.
+    project_files: Entity<ProjectFiles>,
+    /// Recent Files (shown while open).
+    recent_files: Entity<RecentFiles>,
     /// Where the focus was when the popup opened; Escape returns it there.
     return_focus: Option<FocusHandle>,
     /// A file being opened goes to this point once it is loaded.
@@ -157,6 +166,16 @@ impl Workbench {
         let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
         let host = cx.entity().downgrade();
         find_in_files.update(cx, |p, _| p.set_host(host));
+        let search_everywhere = cx.new(|cx| SearchEverywhere::new(file_types.clone(), window, cx));
+        let find_roots = product.navigation.source_roots;
+        let project_files = cx.new(|_| {
+            let mut files = ProjectFiles::new();
+            files.set_source_roots_finder(find_roots);
+            files
+        });
+        let recent_place = search_everywhere::settings(cx).recent_files;
+        let recent_files =
+            cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&find_in_files, window, |this, _, event, window, cx| {
                 match event {
@@ -176,9 +195,34 @@ impl Workbench {
                 cx.notify();
             }),
             cx.observe(&find_in_files, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&panel, window, |this, _, event, window, cx| match event {
-                PanelEvent::OpenFile(path) => this.open_file(path.clone(), window, cx),
+            cx.subscribe_in(&search_everywhere, window, |this, _, event, window, cx| {
+                this.search_everywhere_event(event, window, cx)
             }),
+            cx.observe(&search_everywhere, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&recent_files, window, |this, _, event, window, cx| {
+                this.recent_files_event(event, window, cx)
+            }),
+            cx.observe(&recent_files, |_, _, cx| cx.notify()),
+            // The index follows the project's rules; the popup follows the
+            // index.
+            cx.observe(&project_files, |this, files, cx| {
+                let index = files.read(cx).index();
+                this.search_everywhere
+                    .update(cx, |p, cx| p.set_index(index, cx));
+            }),
+            cx.subscribe_in(
+                &panel,
+                window,
+                |this, panel, event, window, cx| match event {
+                    PanelEvent::OpenFile(path) => this.open_file(path.clone(), window, cx),
+                    PanelEvent::RulesChanged => {
+                        if let Some(filter) = panel.read(cx).filter().cloned() {
+                            this.project_files
+                                .update(cx, |files, cx| files.set_rules(filter, cx));
+                        }
+                    }
+                },
+            ),
             // Files are saved when the window loses the focus, as in the
             // reference IDE.
             cx.observe_window_activation(window, |this, window, cx| {
@@ -205,6 +249,9 @@ impl Workbench {
             last_input: None,
             idle_save_pending: false,
             find_in_files,
+            search_everywhere,
+            project_files,
+            recent_files,
             return_focus: None,
             pending_go_to: None,
             recently_viewed: Vec::new(),
@@ -315,6 +362,9 @@ impl Workbench {
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
             "find_in_files": self.find_in_files.read(cx).is_open(),
+            "search_everywhere": self.search_everywhere.read(cx).is_open(),
+            "recent_files": self.recent_files.read(cx).is_open(),
+            "file_index": self.project_files.read(cx).index().map(|i| i.len()),
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
             "theme": cx.theme().id(),
@@ -335,6 +385,7 @@ impl Workbench {
         self.tabs.clear();
         self.active = None;
         self.project_visible = true;
+        self.project_files.update(cx, |files, cx| files.clear(cx));
         self.panel
             .update(cx, |panel, cx| panel.set_project(Project::new(path), cx));
         window.focus(&self.panel.focus_handle(cx));
@@ -823,9 +874,280 @@ impl Workbench {
     }
 
     fn remember_focus(&mut self, window: &Window, cx: &App) {
-        if !self.find_in_files.read(cx).is_open() {
+        if !self.find_in_files.read(cx).is_open()
+            && !self.search_everywhere.read(cx).is_open()
+            && !self.recent_files.read(cx).is_open()
+        {
             self.return_focus = window.focused(cx);
         }
+    }
+
+    /// The Recent Files popup.
+    pub fn recent_files(&self) -> &Entity<RecentFiles> {
+        &self.recent_files
+    }
+
+    fn open_recent_files(
+        &mut self,
+        _: &recent_files::Open,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self.recent_files.read(cx).is_open();
+        if !open {
+            self.remember_focus(window, cx);
+        }
+        let mut viewed = self.recently_viewed.clone();
+        for tab in &self.tabs {
+            if !viewed.contains(&tab.path) {
+                viewed.push(tab.path.clone());
+            }
+        }
+        let current = self.active.map(|i| self.tabs[i].path.clone());
+        // The current file first.
+        if let Some(c) = &current {
+            viewed.retain(|p| p != c);
+            viewed.insert(0, c.clone());
+        }
+        let shortcut =
+            ui::keys::shortcut_in(&recent_files::Open, &self.focus, window).map(Into::into);
+        let tool_windows = vec![recent_files::ToolWindowItem {
+            id: "project",
+            title: "Project",
+            shortcut: ui::keys::shortcut_in(&ToggleProject, &self.focus, window).map(Into::into),
+        }];
+        let context = recent_files::OpenContext {
+            root: self.project(cx).map(|p| p.root().to_owned()),
+            viewed,
+            edited: self.recently_changed.clone(),
+            current,
+            tool_windows,
+            shortcut,
+        };
+        self.recent_files
+            .update(cx, |p, cx| p.show(context, window, cx));
+        cx.notify();
+    }
+
+    fn recent_files_event(
+        &mut self,
+        event: &RecentFilesEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            RecentFilesEvent::OpenFile(path) => self.open_file(path.clone(), window, cx),
+            RecentFilesEvent::ShowToolWindow(_) => {
+                self.project_visible = true;
+                window.focus(&self.panel.focus_handle(cx));
+            }
+            RecentFilesEvent::Remove { path, edited } => {
+                self.recently_viewed.retain(|p| p != path);
+                if *edited {
+                    self.recently_changed.retain(|p| p != path);
+                }
+                if let Some(i) = self.tabs.iter().position(|t| &t.path == path) {
+                    self.close_tab(i, window, cx);
+                    // The popup stays open with the focus.
+                    window.focus(&self.recent_files.focus_handle(cx));
+                }
+            }
+            RecentFilesEvent::GoToFile(text) => {
+                let action = search_everywhere::Search {
+                    text: text.clone(),
+                    tab: Some("files".to_owned()),
+                    non_project: None,
+                };
+                self.search_everywhere_for(&action, window, cx);
+            }
+            RecentFilesEvent::Dismissed => match self.return_focus.take() {
+                Some(focus) => window.focus(&focus),
+                None => self.focus_editor(&FocusEditor, window, cx),
+            },
+        }
+        cx.notify();
+    }
+
+    /// The popup of Find in Files.
+    pub fn search_everywhere(&self) -> &Entity<SearchEverywhere> {
+        &self.search_everywhere
+    }
+
+    /// The project's file name index.
+    pub fn project_files(&self) -> &Entity<ProjectFiles> {
+        &self.project_files
+    }
+
+    /// What Search Everywhere opens with: the editor's selection while it
+    /// has the focus, the index, the open and recent files, and the
+    /// commands as they are available where the focus is.
+    fn search_everywhere_context(
+        &self,
+        window: &Window,
+        cx: &mut App,
+    ) -> search_everywhere::OpenContext {
+        let selection = self
+            .active_editor()
+            .filter(|e| e.focus_handle(cx).contains_focused(window, cx))
+            .map(|e| {
+                let e = e.read(cx);
+                e.buffer().slice(e.selections().primary().range())
+            });
+        let mut recent = self.recently_viewed.clone();
+        for tab in &self.tabs {
+            if !recent.contains(&tab.path) {
+                recent.push(tab.path.clone());
+            }
+        }
+        let focus = window.focused(cx);
+        let actions = search_everywhere::actions::collect(focus.as_ref(), window, cx);
+        let overrides = self
+            .tabs
+            .iter()
+            .filter(|t| t.editor.read(cx).is_modified())
+            .map(|t| (t.path.clone(), t.editor.read(cx).buffer().rope().clone()))
+            .collect();
+        search_everywhere::OpenContext {
+            root: self.project(cx).map(|p| p.root().to_owned()),
+            index: self.project_files.read(cx).index(),
+            filter: self.panel.read(cx).filter().cloned(),
+            overrides,
+            selection,
+            open_files: self.tab_paths(),
+            current_file: self.active.map(|i| self.tabs[i].path.clone()),
+            recent_files: recent,
+            actions,
+            source_roots: self.project_files.read(cx).source_roots(),
+            navigation: self.product.navigation,
+            home: dirs::home_dir(),
+        }
+    }
+
+    fn show_search_everywhere(&mut self, tab: SeTab, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self.search_everywhere.read(cx).is_open();
+        let context = if open {
+            search_everywhere::OpenContext::default()
+        } else {
+            self.remember_focus(window, cx);
+            self.search_everywhere_context(window, cx)
+        };
+        self.search_everywhere
+            .update(cx, |p, cx| p.show(tab, context, window, cx));
+        cx.notify();
+    }
+
+    fn open_search_everywhere(
+        &mut self,
+        _: &search_everywhere::Open,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_search_everywhere(SeTab::All, window, cx);
+    }
+
+    fn go_to_file(
+        &mut self,
+        _: &search_everywhere::GoToFile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_search_everywhere(SeTab::Files, window, cx);
+    }
+
+    fn go_to_action(
+        &mut self,
+        _: &search_everywhere::GoToAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_search_everywhere(SeTab::Actions, window, cx);
+    }
+
+    fn go_to_text(
+        &mut self,
+        _: &search_everywhere::GoToText,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_search_everywhere(SeTab::Text, window, cx);
+    }
+
+    fn search_everywhere_for(
+        &mut self,
+        action: &search_everywhere::Search,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tab = action
+            .tab
+            .as_deref()
+            .and_then(SeTab::from_name)
+            .unwrap_or(SeTab::All);
+        let context = if self.search_everywhere.read(cx).is_open() {
+            search_everywhere::OpenContext::default()
+        } else {
+            self.remember_focus(window, cx);
+            self.search_everywhere_context(window, cx)
+        };
+        let text = action.text.clone();
+        let non_project = action.non_project;
+        self.search_everywhere.update(cx, |p, cx| {
+            p.search_for(tab, &text, non_project, context, window, cx)
+        });
+        cx.notify();
+    }
+
+    fn search_everywhere_event(
+        &mut self,
+        event: &SearchEverywhereEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SearchEverywhereEvent::OpenFile { path, line, column } => match line {
+                Some(line) => {
+                    let point = text::Point {
+                        line: *line,
+                        column: column.unwrap_or(0),
+                    };
+                    self.open_file_at(path.clone(), point, None, window, cx)
+                }
+                None => self.open_file(path.clone(), window, cx),
+            },
+            SearchEverywhereEvent::RevealFolder(path) => {
+                self.project_visible = true;
+                self.panel.update(cx, |panel, cx| panel.reveal(path, cx));
+                window.focus(&self.panel.focus_handle(cx));
+            }
+            SearchEverywhereEvent::Run(id) => {
+                if let Ok(action) = cx.build_action(id, Some(json!({}))) {
+                    window.dispatch_action(action, cx);
+                }
+            }
+            SearchEverywhereEvent::Dismissed => match self.return_focus.take() {
+                Some(focus) => window.focus(&focus),
+                None => self.focus_editor(&FocusEditor, window, cx),
+            },
+            SearchEverywhereEvent::WantNonProject => {
+                self.project_files
+                    .update(cx, |files, cx| files.want_non_project(cx));
+            }
+            SearchEverywhereEvent::FindInFiles(text) => {
+                let action = find_in_files::Search {
+                    text: text.clone(),
+                    case_sensitive: None,
+                    whole_words: None,
+                    regex: None,
+                    mask: None,
+                    replace: None,
+                    scope: None,
+                    directory: None,
+                    recursive: None,
+                };
+                self.search_in_files(&action, window, cx);
+            }
+        }
+        cx.notify();
     }
 
     fn open_find_in_files(
@@ -1374,12 +1696,12 @@ impl Workbench {
     }
 
     /// The lines of the empty editor area: the reference IDE's hints, in its
-    /// order, for the actions Pyoxide has (Search Everywhere, Go to File,
-    /// Recent Files and Navigation Bar are not there yet). An action's hint
-    /// shows its shortcut and is left out when it has none; the Project
-    /// View hint shows only while the project tool window is hidden.
-    /// Without a project the first line says how to start. None while a
-    /// file is open.
+    /// order, for the actions Pyoxide has (the Navigation Bar is not there
+    /// yet): Search Everywhere, Project View, Go to File, Recent Files. An
+    /// action's hint shows its shortcut ("Double ⇧" for a double tap) and is
+    /// left out when it has none; the Project View hint shows only while
+    /// the project tool window is hidden. Without a project the first line
+    /// says how to start. None while a file is open.
     pub fn empty_text(&self, window: &Window, cx: &App) -> Vec<(&'static str, Option<String>)> {
         let mut lines = Vec::new();
         if !self.tabs.is_empty() {
@@ -1388,11 +1710,27 @@ impl Workbench {
         if self.project(cx).is_none() {
             lines.push(("Open a folder to start", None));
         }
-        if !self.project_visible
-            && let Some(keys) = ui::keys::shortcut_in(&ToggleProject, &self.focus, window)
-        {
-            lines.push(("Project View", Some(keys)));
+        let keys = |command: &str| {
+            if let Some(key) = crate::keymap::double_tap_for(command, cx) {
+                return Some(crate::keymap::double_tap_text(
+                    key,
+                    cfg!(target_os = "macos"),
+                ));
+            }
+            let action = cx.build_action(command, None).ok()?;
+            ui::keys::shortcut_in(action.as_ref(), &self.focus, window)
+        };
+        let mut hint = |text: &'static str, command: &str| {
+            if let Some(keys) = keys(command) {
+                lines.push((text, Some(keys)));
+            }
+        };
+        hint("Search Everywhere", "search-everywhere.open");
+        if !self.project_visible {
+            hint("Project View", "workbench.toggle-project");
         }
+        hint("Go to File", "search-everywhere.go-to-file");
+        hint("Recent Files", "recent-files.open");
         lines.push(("Drop files here to open them", None));
         lines
     }
@@ -1665,6 +2003,12 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_find_in_files))
             .on_action(cx.listener(Self::open_replace_in_files))
             .on_action(cx.listener(Self::search_in_files))
+            .on_action(cx.listener(Self::open_search_everywhere))
+            .on_action(cx.listener(Self::go_to_file))
+            .on_action(cx.listener(Self::go_to_action))
+            .on_action(cx.listener(Self::go_to_text))
+            .on_action(cx.listener(Self::open_recent_files))
+            .on_action(cx.listener(Self::search_everywhere_for))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {
@@ -1673,6 +2017,10 @@ impl Render for Workbench {
                     bar.update(cx, |bar, cx| bar.clear_hint(cx));
                 }
             }))
+            // Double taps of a modifier (Shift Shift).
+            .on_modifiers_changed(|e: &gpui::ModifiersChangedEvent, window, cx| {
+                crate::keymap::modifiers_changed(e.modifiers, window, cx)
+            })
             .on_mouse_move(cx.listener(Self::resize_project))
             .when(env::debug_cursor(), |d| {
                 d.on_mouse_move(|e: &MouseMoveEvent, window, _| {
@@ -1735,17 +2083,24 @@ impl Render for Workbench {
             .when(self.find_in_files.read(cx).is_open(), |d| {
                 d.child(self.find_in_files.clone())
             })
+            .when(self.search_everywhere.read(cx).is_open(), |d| {
+                d.child(self.search_everywhere.clone())
+            })
+            .when(self.recent_files.read(cx).is_open(), |d| {
+                d.child(self.recent_files.clone())
+            })
             .children(self.render_find_hint(window.viewport_size().height, cx))
             .children(first_frame)
             // Measurements: the end of the frame's paint.
             .when(bench, |d| {
                 let editor = self.active_editor().cloned();
                 let find = self.active_find_bar().cloned();
+                let se = self.search_everywhere.clone();
                 d.child(
                     canvas(
                         |_, _, _| (),
                         move |_, _, _, cx| {
-                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), cx)
+                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), &se, cx)
                         },
                     )
                     .absolute()

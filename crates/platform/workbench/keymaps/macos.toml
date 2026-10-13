@@ -18,6 +18,11 @@
 "ctrl-left" = "tabs.previous"
 "cmd-shift-f" = "find-in-files.open"
 "cmd-shift-r" = "find-in-files.open-replace"
+"shift shift" = "search-everywhere.open"
+"cmd-shift-o" = "search-everywhere.go-to-file"
+"cmd-shift-a" = "search-everywhere.go-to-action"
+"cmd-alt-shift-e" = "search-everywhere.go-to-text"
+"cmd-e" = "recent-files.open"
 
 [[context]]
 name = "ProjectTree"
@@ -262,3 +267,63 @@ name = "ReplaceInFiles > Editor"
 name = "FindInFilesDirectory > Editor"
 [context.bindings]
 "shift-enter" = "find-in-files.browse-directory"
+
+# Search Everywhere: Tab and Shift+Tab (and the next and previous tab
+# keys) switch tabs, Up and Down move through the results (round), Page
+# Up and Cmd+Up go to the first, Page Down and Cmd+Down to the last;
+# Option+Up and Option+Down go through the tab's searches. Enter opens or
+# runs the selected result (Shift+Enter too). Ctrl+Option+N and Option+N
+# include non-project items.
+[[context]]
+name = "SearchEverywhere > Editor"
+[context.bindings]
+"tab" = "search-everywhere.next-tab"
+"shift-tab" = "search-everywhere.previous-tab"
+"cmd-}" = "search-everywhere.next-tab"
+"cmd-{" = "search-everywhere.previous-tab"
+"ctrl-right" = "search-everywhere.next-tab"
+"ctrl-left" = "search-everywhere.previous-tab"
+"down" = "search-everywhere.down"
+"up" = "search-everywhere.up"
+"pagedown" = "search-everywhere.next-group"
+"cmd-down" = "search-everywhere.next-group"
+"pageup" = "search-everywhere.previous-group"
+"cmd-up" = "search-everywhere.previous-group"
+"enter" = "search-everywhere.select"
+"shift-enter" = "search-everywhere.select"
+"escape" = "search-everywhere.close"
+"alt-up" = "search-everywhere.history-previous"
+"alt-down" = "search-everywhere.history-next"
+"ctrl-alt-n" = "search-everywhere.toggle-everywhere"
+"alt-n" = "search-everywhere.toggle-everywhere"
+# The scope list's mnemonics: O chooses, P toggles.
+"ctrl-alt-o" = "search-everywhere.choose-scope"
+"ctrl-alt-p" = "search-everywhere.toggle-everywhere"
+
+# The Text tab's options: Ctrl+Option and Option with the letter.
+[[context]]
+name = "SearchEverywhereText > Editor"
+[context.bindings]
+"ctrl-alt-c" = "search-everywhere.toggle-case"
+"alt-c" = "search-everywhere.toggle-case"
+"ctrl-alt-w" = "search-everywhere.toggle-words"
+"alt-w" = "search-everywhere.toggle-words"
+"ctrl-alt-x" = "search-everywhere.toggle-regex"
+"alt-x" = "search-everywhere.toggle-regex"
+
+# Recent Files: Up and Down (round), Left and Right between the tool
+# windows and the files, Enter opens, Escape clears the speed search or
+# closes, Delete and Backspace take a file off the list (or a char off the
+# speed search).
+[[context]]
+name = "RecentFiles"
+[context.bindings]
+"up" = "recent-files.up"
+"down" = "recent-files.down"
+"left" = "recent-files.left"
+"right" = "recent-files.right"
+"enter" = "recent-files.select"
+"escape" = "recent-files.close"
+"delete" = "recent-files.delete"
+"backspace" = "recent-files.delete"
+"cmd-backspace" = "recent-files.delete"
