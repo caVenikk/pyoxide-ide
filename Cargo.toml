@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/platform/commands",
+    "crates/platform/console",
     "crates/platform/db-core",
     "crates/platform/db-oracle-thin",
     "crates/platform/db-oracle-odpi",
@@ -10,6 +11,7 @@ members = [
     "crates/platform/db-service",
     "crates/platform/db-testkit",
     "crates/platform/name-match",
+    "crates/platform/process",
     "crates/platform/project",
     "crates/platform/project-search",
     "crates/platform/search",
@@ -24,6 +26,7 @@ members = [
     "crates/platform/ui",
     "crates/platform/workbench",
     "crates/python/py-env",
+    "crates/python/py-run",
     "crates/python/py-syntax",
     "crates/python/pyoxide-cli",
     "crates/python/pyoxide-ide",
@@ -53,9 +56,11 @@ gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
 resvg = { version = "0.45", default-features = false }
 commands = { path = "crates/platform/commands" }
+console = { path = "crates/platform/console" }
 db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
 name-match = { path = "crates/platform/name-match" }
+process = { path = "crates/platform/process" }
 file-index = { path = "crates/platform/file-index" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
 db-oracle-odpi = { path = "crates/platform/db-oracle-odpi" }
@@ -74,6 +79,7 @@ themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
+py-run = { path = "crates/python/py-run" }
 py-syntax = { path = "crates/python/py-syntax" }
 
 # Dependencies (GPUI, tree-sitter, ropey, ...) are optimized in debug builds

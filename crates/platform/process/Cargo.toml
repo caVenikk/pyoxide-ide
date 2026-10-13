@@ -1,0 +1,29 @@
+[package]
+name = "process"
+description = "External processes of Pyoxide IDE for the Run tool window: spawning a command line with piped standard streams, raw output chunks with backpressure, standard input, interrupt and kill of the process tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flume = "0.11"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+] }
+
+# A small program the integration tests start instead of Python or shell
+# tools, so the tests behave the same on every OS.
+[[bin]]
+name = "process-test-helper"
+path = "src/bin/process-test-helper.rs"
+test = false
+doc = false
