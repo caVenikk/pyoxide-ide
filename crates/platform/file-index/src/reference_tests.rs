@@ -77,7 +77,7 @@ impl Fixture {
     fn ranked(&self, text: &str) -> Vec<String> {
         let query = self.query(text, false, None);
         let mut hits = self.index.goto_file(&query, &|| false);
-        rank(&mut hits);
+        rank_by_weight(&mut hits);
         self.names(&hits)
     }
 }

@@ -17,8 +17,16 @@
 //!   ranked by how well their folder path matches it;
 //! - folders come after the files of a round.
 //!
-//! Each file gets a weight, the matching degree (folders 0); the list is
-//! finally ordered by weight, keeping this order between equal weights.
+//! Each file gets a weight, the matching degree (folders 0); the
+//! reference's own list is finally ordered by weight, keeping this order
+//! between equal weights.
+//!
+//! The reference IDE sorts its Files tab with a machine-learning model by
+//! default (its Advanced Settings "Sort results in the Files tab based on
+//! machine learning"), which a trained model decides and no source shows.
+//! [`rank`] is Pyoxide's fixed rule that gives the top results it shows:
+//! the name match first (the name starts with the typed name, then a match
+//! at a word start, then inside a word), the folder part only filters.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -95,14 +103,55 @@ pub struct FileHit {
     pub is_dir: bool,
     /// Not project content (inside an excluded folder).
     pub non_project: bool,
-    /// Higher first.
+    /// The reference's weight: higher first.
     pub weight: i32,
+    /// The round that found it: how many letters of the name pattern went
+    /// to the folder part (0: the whole name pattern matched the name).
+    pub round: u16,
+    /// Where the name matched.
+    pub class: MatchClass,
+    /// The name's matching degree.
+    pub degree: i32,
+    /// A path typed in full (absolute, or the end of its path).
+    pub exact: bool,
+}
+
+/// Where a name pattern matched a name, the better first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MatchClass {
+    /// The name starts with it.
+    Start,
+    /// At the start of a word (`app` in `test_appctx.py`).
+    WordStart,
+    /// Inside a word (`app` in `wrappers.py`).
+    Middle,
+}
+
+impl MatchClass {
+    fn of(name: &[char], m: &name_match::Match) -> Self {
+        match m.fragments.first().map(|f| f.start) {
+            None | Some(0) => MatchClass::Start,
+            Some(i) if name_match::is_word_start(name, i) => MatchClass::WordStart,
+            Some(_) => MatchClass::Middle,
+        }
+    }
 }
 
 /// One name that matched, with its degree.
 struct NameMatch {
     name: u32,
     degree: i32,
+    class: MatchClass,
+}
+
+/// An entry found in a round, before the folder part is matched.
+#[derive(Clone, Copy)]
+struct Found {
+    entry: EntryId,
+    degree: i32,
+    class: MatchClass,
+    weight: i32,
+    exact: bool,
 }
 
 impl FileIndex {
@@ -118,7 +167,14 @@ impl FileIndex {
         };
         let text = query.text;
         if let Some(id) = absolute_path(text, query.home).and_then(|p| self.find(&p)) {
-            emit(self.hit(id, EXACT_MATCH_DEGREE), &mut out);
+            let found = Found {
+                entry: id,
+                degree: EXACT_MATCH_DEGREE,
+                class: MatchClass::Start,
+                weight: EXACT_MATCH_DEGREE,
+                exact: true,
+            };
+            emit(self.hit(found, 0), &mut out);
         }
         let text = text
             .strip_prefix("./")
@@ -152,12 +208,17 @@ impl FileIndex {
         out
     }
 
-    fn hit(&self, id: EntryId, weight: i32) -> FileHit {
+    fn hit(&self, found: Found, round: usize) -> FileHit {
+        let id = found.entry;
         FileHit {
             id,
             is_dir: self.is_dir(id),
             non_project: self.is_excluded(id),
-            weight,
+            weight: found.weight,
+            round: round.min(u16::MAX as usize) as u16,
+            class: found.class,
+            degree: found.degree,
+            exact: found.exact,
         }
     }
 
@@ -177,9 +238,63 @@ impl FileIndex {
     }
 }
 
-/// Orders hits by weight, keeping the order of equal ones.
-pub fn rank(hits: &mut [FileHit]) {
+/// Orders hits by the reference's weight, keeping the order of equal ones
+/// (the reference's list without its machine-learning order).
+pub fn rank_by_weight(hits: &mut [FileHit]) {
     hits.sort_by_key(|h| std::cmp::Reverse(h.weight));
+}
+
+/// Orders hits as Pyoxide's popup shows them: a path typed in full or a
+/// file named as typed (`app` for `app.py`) first; then the longer the
+/// name match (the earlier round), the better; then where the name matched
+/// ([`MatchClass`]), the matching degree, and the name without its
+/// extension; then open files, files in the current file's folder,
+/// project before non-project items, the shallower, and by path. Folders
+/// rank as files do; the folder part of the pattern only filters.
+pub fn rank(index: &FileIndex, query: &GotoQuery, hits: &mut [FileHit]) {
+    let open: HashSet<EntryId> = query
+        .open_files
+        .iter()
+        .filter_map(|p| index.find(p))
+        .collect();
+    let context_dir = query
+        .context
+        .and_then(|p| index.find(p))
+        .map(|id| index.entries[id as usize].parent);
+    let sanitized = sanitized_pattern(query.text);
+    let typed = sanitized
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let named_as_typed = |name: &str| {
+        !typed.is_empty()
+            && (name == typed
+                || !typed.contains('.') && name.rsplit_once('.').is_some_and(|(stem, _)| stem == typed))
+    };
+    hits.sort_by_cached_key(|h| {
+        let name = index.name(h.id);
+        let exact = h.exact || !h.is_dir && named_as_typed(name);
+        let stem = match name.rsplit_once('.') {
+            Some((stem, _)) if !h.is_dir && !stem.is_empty() => stem,
+            _ => name,
+        };
+        let full = index.full_name(h.id);
+        let same_dir = context_dir.is_none_or(|d| index.entries[h.id as usize].parent == d);
+        (
+            !exact,
+            h.round,
+            h.class,
+            std::cmp::Reverse(h.degree),
+            stem.to_lowercase(),
+            !open.contains(&h.id),
+            !same_dir,
+            h.non_project,
+            full.matches('/').count(),
+            full,
+        )
+    });
 }
 
 /// The matcher of a folder pattern: `*` before it and around each `/`.
@@ -234,7 +349,7 @@ impl Search<'_> {
             let Some(group) = grouper.next_group(self.index, index) else {
                 break;
             };
-            self.process(&group, &dirs, &complete, &mut out);
+            self.process(&group, index, &dirs, &complete, &mut out);
             match dirs.append_char(self, name_pattern[index]) {
                 Some(next) => dirs = next,
                 None => break,
@@ -248,6 +363,7 @@ impl Search<'_> {
     fn process(
         &self,
         group: &SuffixGroup,
+        round: usize,
         dirs: &DirMatcher,
         complete: &str,
         out: &mut Vec<FileHit>,
@@ -272,9 +388,9 @@ impl Search<'_> {
         for degree_group in names.chunk_by(|a, b| degree_order(a, b) == Ordering::Equal) {
             let mut by_name = degree_group.to_vec();
             by_name.sort_by_cached_key(base_name);
-            let mut files: Vec<(EntryId, i32)> = Vec::new();
+            let mut files: Vec<Found> = Vec::new();
             for same in by_name.chunk_by(|a, b| base_name(a) == base_name(b)) {
-                let mut items: Vec<(EntryId, i32)> = same
+                let mut items: Vec<Found> = same
                     .iter()
                     .flat_map(|m| {
                         idx.entries_of(m.name)
@@ -284,11 +400,17 @@ impl Search<'_> {
                                     && (!self.folders_only || idx.is_dir(e))
                                     && dirs.contains(idx, e)
                             })
-                            .map(move |&e| (e, m.degree))
+                            .map(move |&e| Found {
+                                entry: e,
+                                degree: m.degree,
+                                class: m.class,
+                                weight: m.degree,
+                                exact: false,
+                            })
                     })
                     .collect();
                 if items.len() > 1 {
-                    items.sort_by_cached_key(|&(e, _)| self.proximity_key(e));
+                    items.sort_by_cached_key(|f| self.proximity_key(f.entry));
                 }
                 files.extend(items);
             }
@@ -298,12 +420,13 @@ impl Search<'_> {
             };
             // Folders after the files of the round, with no weight.
             let (folders, files): (Vec<_>, Vec<_>) =
-                matched.into_iter().partition(|&(e, _)| idx.is_dir(e));
-            for (e, weight) in files {
-                out.push(idx.hit(e, weight));
+                matched.into_iter().partition(|f| idx.is_dir(f.entry));
+            for found in files {
+                out.push(idx.hit(found, round));
             }
-            for (e, _) in folders {
-                out.push(idx.hit(e, DIRECTORY_MATCH_DEGREE));
+            for found in folders {
+                let weight = DIRECTORY_MATCH_DEGREE;
+                out.push(idx.hit(Found { weight, ..found }, round));
             }
         }
     }
@@ -311,29 +434,34 @@ impl Search<'_> {
     /// With a folder part: the files whose folder path matches it, by how
     /// well (minus the unmatched end of the path), a path typed in full
     /// first.
-    fn match_qualifiers(
-        &self,
-        matcher: &Matcher,
-        files: Vec<(EntryId, i32)>,
-        complete: &str,
-    ) -> Vec<(EntryId, i32)> {
+    fn match_qualifiers(&self, matcher: &Matcher, files: Vec<Found>, complete: &str) -> Vec<Found> {
         let idx = self.index;
         let typed = complete.trim_end().replace('\\', "/");
         let mut matching = Vec::new();
-        for (e, _) in files {
+        for found in files {
+            let e = found.entry;
             let qualifier: Vec<char> = idx.qualifier(e).chars().collect();
             let exact = idx.full_name(e).ends_with(&typed);
             let bonus = if exact { EXACT_MATCH_DEGREE } else { 0 };
             match matcher.match_chars(&qualifier) {
                 Some(m) => {
                     let gap = m.fragments.last().map_or(0, |f| qualifier.len() - f.end) as i32;
-                    matching.push((e, m.degree - gap + bonus));
+                    let weight = m.degree - gap + bonus;
+                    matching.push(Found {
+                        weight,
+                        exact,
+                        ..found
+                    });
                 }
-                None if exact => matching.push((e, EXACT_MATCH_DEGREE)),
+                None if exact => matching.push(Found {
+                    weight: EXACT_MATCH_DEGREE,
+                    exact,
+                    ..found
+                }),
                 None => {}
             }
         }
-        matching.sort_by_key(|m| std::cmp::Reverse(m.1));
+        matching.sort_by_key(|m| std::cmp::Reverse(m.weight));
         matching
     }
 
@@ -440,10 +568,12 @@ impl NameGrouper {
         let names = std::mem::take(&mut self.buckets[index]);
         let mut matches = Vec::new();
         for name in names {
-            match matcher.match_chars(&index_data.names[name as usize].chars) {
+            let chars = &index_data.names[name as usize].chars;
+            match matcher.match_chars(chars) {
                 Some(m) => matches.push(NameMatch {
                     name,
                     degree: m.degree,
+                    class: MatchClass::of(chars, &m),
                 }),
                 None if index + 1 < self.pattern.len() => self.buckets[index + 1].push(name),
                 None => {}

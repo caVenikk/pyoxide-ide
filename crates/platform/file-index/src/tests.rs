@@ -61,7 +61,7 @@ fn find(index: &FileIndex, text: &str) -> Vec<String> {
 
 fn find_with(index: &FileIndex, query: &GotoQuery) -> Vec<String> {
     let mut hits = index.goto_file(query, &|| false);
-    rank(&mut hits);
+    rank(index, query, &mut hits);
     hits.iter()
         .map(|h| {
             let rel = index.relative(h.id);
@@ -91,27 +91,27 @@ fn the_walk_leaves_out_hidden_names_and_excluded_content() {
 }
 
 #[test]
-fn names_rank_as_in_the_reference() {
+fn names_rank_by_where_they_match() {
     let p = project();
     assert_eq!(
         find(&p.index, "app"),
         [
-            // Start matches; one name (without its extension) in the
-            // shallower folder first.
+            // Named as typed; one name in the shallower folder first.
             "app.py",
             "docs/app.rst",
             "src/flask/app.py",
+            // Start matches, by degree (the folder ends with the match),
+            // folders among the files.
+            "app/",
             "application.py",
             // A word start.
             "tests/test_app.py",
-            // Found with "a" as a folder ("app/") and "pp" as the name.
-            "app/__init__.py",
             // Inside a word.
             "myapp.py",
-            // Folders weigh nothing.
-            "app/",
-            // "a" as a folder ("flask"), "pp" as the humps of the name.
+            // Shorter name matches: "a" as a folder ("flask"), "pp" as the
+            // humps of the name; "a" as the folder "app/".
             "src/flask/json/provider.py",
+            "app/__init__.py",
         ]
     );
     assert_eq!(find(&p.index, "help"), ["src/flask/helpers.py"]);
@@ -265,7 +265,7 @@ fn bench() {
                     ..Default::default()
                 };
                 let mut hits = index.goto_file(&query, &|| false);
-                rank(&mut hits);
+                rank(&index, &query, &mut hits);
                 runs.push(start.elapsed());
                 found = hits.len();
             }
