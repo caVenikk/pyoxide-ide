@@ -77,13 +77,16 @@ fn the_run_tool_window_spans_below_the_editor(cx: &mut TestAppContext) {
     // absence is checked through the state.)
     assert!(bounds(cx, window, "run-tool-window").is_none());
     let editor_before = bounds(cx, window, "editor-area").unwrap();
-    assert!(bounds(cx, window, "stripe-run").is_some());
+    // The Run tool window does not exist before its first activation.
+    assert!(bounds(cx, window, "stripe-run").is_none());
 
     invoke(cx, window, "workbench.toggle-run", json!(null));
     let state = invoke(cx, window, "workbench.state", json!(null));
     assert_eq!(state["tool_windows"]["run"]["visible"], json!(true));
     assert_eq!(focused(cx, window), Some(ToolWindow::Run));
     let run = bounds(cx, window, "run-tool-window").unwrap();
+    assert!(bounds(cx, window, "stripe-run").is_some());
+    assert!(bounds(cx, window, "run-empty").is_some(), "the empty state");
     let project = bounds(cx, window, "project-tool-window").unwrap();
     let editor = bounds(cx, window, "editor-area").unwrap();
     assert_eq!(run.left(), project.left());
@@ -231,6 +234,11 @@ impl gpui::Global for InitRan {}
 #[gpui::test]
 fn the_run_stripe_button_toggles_the_tool_window(cx: &mut TestAppContext) {
     let window = open(cx, test_product());
+    // The first activation creates the tool window and its button.
+    invoke(cx, window, "workbench.toggle-run", json!(null));
+    invoke(cx, window, "workbench.hide-tool-window", json!(null));
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["run"]["visible"], json!(false));
     let button = bounds(cx, window, "stripe-run").unwrap().center();
     let click = |cx: &mut TestAppContext| {
         let mut vcx = VisualTestContext::from_window(window.into(), cx);

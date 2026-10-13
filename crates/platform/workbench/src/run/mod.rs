@@ -7,7 +7,10 @@
 //! starts the process, shows its output in the Run tool window and handles
 //! Stop and Rerun.
 
-mod tool_window;
+pub mod commands;
+pub mod console_view;
+pub mod tool_window;
+pub mod widget;
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -16,28 +19,13 @@ use std::sync::Arc;
 use gpui::{App, Task};
 use ui::icons::IconName;
 
-pub use tool_window::{RunToolWindow, RunToolWindowEvent};
+pub use console_view::{ConsoleEvent, ConsoleView};
+pub use tool_window::{RunTab, RunToolWindow, RunToolWindowEvent, TabStatus};
 
-// Stand-ins for the `process` and `console` crates until they land.
-#[doc(hidden)]
-pub mod process {
-    use std::ffi::OsString;
-    use std::path::PathBuf;
-
-    /// A command line to start.
-    #[derive(Debug, Clone, Default, PartialEq)]
-    pub struct CommandLine {
-        pub program: PathBuf,
-        pub args: Vec<OsString>,
-        pub cwd: Option<PathBuf>,
-        pub env: Vec<(OsString, Option<OsString>)>,
-    }
-}
-
-#[doc(hidden)]
-pub mod console {
-    /// Finds links in a line of output.
-    pub trait LinkFilter: Send + Sync {}
+/// Registers the run commands.
+pub fn init(cx: &mut App) {
+    ui::command::register(cx, commands::COMMANDS);
+    ui::command::register(cx, commands::TOOL_WINDOW_COMMANDS);
 }
 
 /// What the workbench asks the product to run: the current file.
@@ -55,14 +43,18 @@ pub struct RunRequest {
 
 /// A process ready to start, as the product prepared it.
 pub struct RunSpec {
-    /// Title of the run's tab in the Run tool window (for a file, its name).
+    /// Title of the run's tab in the Run tool window: the configuration's
+    /// name (for a file, its name without the extension, `main`).
     pub title: String,
-    /// Icon of the run's tab and of the run widget.
+    /// Icon of the run's tab.
     pub icon: IconName,
     /// The process to start.
     pub command: process::CommandLine,
-    /// Finders of links in the output (for example tracebacks to
-    /// `file:line`), applied after the platform's URL links.
+    /// The console's first line: the command line as the reference prints
+    /// it.
+    pub display: String,
+    /// Finders of links in the output (tracebacks to `file:line`, URLs), in
+    /// order.
     pub link_filters: Vec<Arc<dyn console::LinkFilter>>,
 }
 
@@ -71,9 +63,9 @@ impl std::fmt::Debug for RunSpec {
         f.debug_struct("RunSpec")
             .field("title", &self.title)
             .field("icon", &self.icon)
-            .field("command", &self.command)
+            .field("display", &self.display)
             .field("link_filters", &self.link_filters.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

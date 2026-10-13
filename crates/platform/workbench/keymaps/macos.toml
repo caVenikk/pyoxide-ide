@@ -24,6 +24,40 @@
 "cmd-shift-a" = "search-everywhere.go-to-action"
 "cmd-alt-shift-e" = "search-everywhere.go-to-text"
 "cmd-e" = "recent-files.open"
+# Run: the current file (Current File is the only configuration yet);
+# Run Context Configuration runs it as well; Stop stops the run, a second
+# Stop kills it.
+"ctrl-r" = "run.run"
+"ctrl-shift-r" = "run.current-file"
+"cmd-f2" = "run.stop"
+
+# The Run tool window: Rerun, Close Tab, Up and Down the Stack Trace;
+# Escape goes to the editor, Shift+Escape hides the tool window.
+[[context]]
+name = "RunToolWindow"
+[context.bindings]
+"cmd-r" = "run.rerun"
+"cmd-w" = "run.close-tab"
+"cmd-alt-up" = "run.console.previous-link"
+"cmd-alt-down" = "run.console.next-link"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+# The Run console is an editor: Rerun and Send EOF take the keys of
+# Replace and Duplicate Line, Escape leaves it.
+[[context]]
+name = "RunConsole > Editor"
+[context.bindings]
+"cmd-r" = "run.rerun"
+"cmd-d" = "run.console.send-eof"
+"escape" = "workbench.focus-editor"
+
+# A message dialog: Enter chooses the default button, Escape cancels.
+[[context]]
+name = "Dialog"
+[context.bindings]
+"enter" = "dialog.confirm"
+"escape" = "dialog.cancel"
 
 [[context]]
 name = "ProjectTree"

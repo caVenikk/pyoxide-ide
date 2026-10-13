@@ -5110,6 +5110,7 @@ dependencies = [
  "editor",
  "gpui",
  "py-env",
+ "py-run",
  "py-syntax",
  "serde_json",
  "tempfile",
@@ -8490,6 +8491,7 @@ name = "workbench"
 version = "0.0.1"
 dependencies = [
  "commands",
+ "console",
  "core-graphics 0.24.0",
  "dirs 7.0.0",
  "editor",
@@ -8499,6 +8501,7 @@ dependencies = [
  "image",
  "name-match",
  "objc",
+ "process",
  "project",
  "project-search",
  "raw-window-handle",
