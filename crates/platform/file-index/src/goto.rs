@@ -271,7 +271,8 @@ pub fn rank(index: &FileIndex, query: &GotoQuery, hits: &mut [FileHit]) {
     let named_as_typed = |name: &str| {
         !typed.is_empty()
             && (name == typed
-                || !typed.contains('.') && name.rsplit_once('.').is_some_and(|(stem, _)| stem == typed))
+                || !typed.contains('.')
+                    && name.rsplit_once('.').is_some_and(|(stem, _)| stem == typed))
     };
     hits.sort_by_cached_key(|h| {
         let name = index.name(h.id);

@@ -171,7 +171,10 @@ mod tests {
         .unwrap();
         assert_eq!(source_roots(root), [root.join("lib"), root.join("src")]);
         assert_eq!(root_package_dir("setup(package_dir = {'x': 'y'})"), None);
-        assert_eq!(file_location("app.py", "flask/sansio").as_deref(), Some("flask.sansio"));
+        assert_eq!(
+            file_location("app.py", "flask/sansio").as_deref(),
+            Some("flask.sansio")
+        );
         assert_eq!(file_location("app.rst", "docs"), None);
     }
 

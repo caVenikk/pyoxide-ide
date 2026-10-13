@@ -76,7 +76,11 @@ const FIRST_PAGE_REST: [&str; 8] = [
 ];
 
 fn first_page() -> Vec<&'static str> {
-    REFERENCE_TOP.iter().chain(&FIRST_PAGE_REST).copied().collect()
+    REFERENCE_TOP
+        .iter()
+        .chain(&FIRST_PAGE_REST)
+        .copied()
+        .collect()
 }
 
 #[test]
@@ -127,7 +131,10 @@ fn a_folder_without_a_slash() {
             "{folder}"
         );
         // Then "flaska" or "flaskap" as the folder.
-        assert_eq!(rows[11], "tests/test_apps/blueprintapp/__init__.py", "{folder}");
+        assert_eq!(
+            rows[11], "tests/test_apps/blueprintapp/__init__.py",
+            "{folder}"
+        );
     }
 }
 

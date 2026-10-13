@@ -296,6 +296,9 @@ name = "SearchEverywhere > Editor"
 "alt-down" = "search-everywhere.history-next"
 "ctrl-alt-n" = "search-everywhere.toggle-everywhere"
 "alt-n" = "search-everywhere.toggle-everywhere"
+# The scope list's mnemonics: O chooses, P toggles.
+"ctrl-alt-o" = "search-everywhere.choose-scope"
+"ctrl-alt-p" = "search-everywhere.toggle-everywhere"
 
 # The Text tab's options: Ctrl+Option and Option with the letter.
 [[context]]

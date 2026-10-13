@@ -19,8 +19,9 @@
 //! - All: recently opened files that match on top, then everything by
 //!   weight (text last); with an empty field the recent files.
 //!
-//! Rows load as the list is scrolled (a spinner row ends the list while
-//! there are more). Typing searches again [`DEBOUNCE`] after the last key
+//! A tab shows a page of each kind (15, on Actions and Text 30, as the
+//! reference's legacy popup does) and a "… more" row that shows the next
+//! page. Typing searches again [`DEBOUNCE`] after the last key
 //! (at once for an empty field); the rows shown stay until the new ones
 //! come. A search that finds nothing widens the tab's scope by itself,
 //! until the text no longer contains the text that found nothing.
@@ -102,6 +103,9 @@ ui::ui_commands! {
     /// Open or run the selected row.
     Select => "search-everywhere.select", "Open Result",
         "Opens the selected file (at the line and column typed after its name) or line, or runs the selected action.";
+    /// The scope list (its mnemonic).
+    ChooseScope => "search-everywhere.choose-scope", "Choose Scope",
+        "Opens the scope list of the Files or Text tab.";
     /// Widen the scope.
     ToggleEverywhere => "search-everywhere.toggle-everywhere", "Include Non-Project Items",
         "Switches the tab's scope: non-project items on All, All Places on Files and Text, disabled actions on Actions.";
@@ -122,8 +126,10 @@ ui::ui_commands! {
         "Switches Regex of the Text tab (shared with Find in Files).";
 }
 
-/// Rows of each kind asked for at a time.
-pub const PAGE: usize = 50;
+/// Rows of each kind a page shows: on All and Files (the reference's Files
+/// tab has more than one kind of result), and on the other tabs.
+pub const PAGE: usize = 15;
+pub const SINGLE_PAGE: usize = 30;
 /// Wait after a key before searching (the reference's).
 pub const DEBOUNCE: Duration = Duration::from_millis(100);
 /// Searches kept per tab.
@@ -498,7 +504,7 @@ impl SearchEverywhere {
                 "line": t.line + 1,
                 "text": t.text,
             }),
-            Row::Loading => json!({ "kind": "loading" }),
+            Row::More => json!({ "kind": "more" }),
         }
     }
 
@@ -928,7 +934,15 @@ impl SearchEverywhere {
     }
 
     fn limit(&self, provider: Provider) -> usize {
-        self.limits.get(&provider).copied().unwrap_or(PAGE)
+        self.limits.get(&provider).copied().unwrap_or(self.page())
+    }
+
+    /// Rows of each kind a page shows on this tab.
+    fn page(&self) -> usize {
+        match self.tab {
+            Tab::All | Tab::Files => PAGE,
+            Tab::Actions | Tab::Text => SINGLE_PAGE,
+        }
     }
 
     fn cancel_search(&mut self) {
@@ -1130,7 +1144,7 @@ impl SearchEverywhere {
             }
         }
         if !self.more.is_empty() {
-            rows.push(Row::Loading);
+            rows.push(Row::More);
         }
         let nothing = rows.is_empty();
         let new_from = self.frozen;
@@ -1147,14 +1161,12 @@ impl SearchEverywhere {
             self.search_now(cx);
             return;
         }
-        let real = self.real_rows();
+        let real = self.rows.len();
         self.selected = if real == 0 {
             None
         } else if new_from > 0 {
-            // More rows below: the selection stays.
-            previous_index(&self.rows, previous.as_ref())
-                .or(self.selected)
-                .map(|i| i.min(real - 1))
+            // The next page: its first row, where "… more" was.
+            Some(new_from.min(real - 1))
         } else if self.selection_moved {
             previous_index(&self.rows, previous.as_ref()).or(Some(0))
         } else {
@@ -1174,37 +1186,17 @@ impl SearchEverywhere {
             .position(|r| row_key(r).as_ref() == Some(&key))
     }
 
-    /// Rows that are results (not the spinner row).
-    fn real_rows(&self) -> usize {
-        self.rows.iter().filter(|r| **r != Row::Loading).count()
-    }
-
-    /// The list was scrolled near its end: more rows.
-    pub(crate) fn wants_more(&self) -> bool {
-        if self.more.is_empty() || self.is_searching() {
-            return false;
-        }
-        let list = self.list.0.borrow();
-        let handle = &list.base_handle;
-        let extent = handle.max_offset().height;
-        let rest = extent + handle.offset().y;
-        let viewport = handle.bounds().size.height;
-        // Not laid out yet: wait for the frame that shows the rows.
-        if viewport <= px(0.0) {
-            return false;
-        }
-        extent <= px(0.0) || rest < (viewport / 2.0).max(px(50.0))
-    }
-
-    /// Every kind that has more shows a page more; the rows shown stay.
+    /// "… more": every kind that has more shows a page more; the rows
+    /// shown stay where they are.
     pub(crate) fn load_more(&mut self, cx: &mut Context<Self>) {
         if self.more.is_empty() || self.is_searching() {
             return;
         }
-        self.rows.retain(|r| *r != Row::Loading);
+        self.rows.retain(|r| *r != Row::More);
         self.frozen = self.rows.len();
+        let page = self.page();
         for p in self.more.clone() {
-            let limit = self.limit(p) + PAGE;
+            let limit = self.limit(p) + page;
             self.limits.insert(p, limit);
         }
         self.search_now(cx);
@@ -1213,31 +1205,16 @@ impl SearchEverywhere {
     // ---- moving and choosing ----------------------------------------------
 
     /// Up and Down; past the ends round to the other end (Up only once
-    /// all rows are there). Down at the end while more come loads them.
+    /// the search is over, as more rows may still come).
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let n = self.real_rows();
+        let n = self.rows.len();
         if n == 0 {
             return;
         }
-        let complete = self.more.is_empty() && !self.is_searching();
         let next = match self.selected {
             None => 0,
-            Some(i) if delta < 0 && i == 0 => {
-                if complete {
-                    n - 1
-                } else {
-                    0
-                }
-            }
-            Some(i) if delta > 0 && i + 1 >= n => {
-                if complete {
-                    0
-                } else {
-                    self.load_more(cx);
-                    i
-                }
-            }
-            Some(i) => (i as isize + delta) as usize,
+            Some(0) if delta < 0 && self.is_searching() => 0,
+            Some(i) => (i as isize + delta).rem_euclid(n as isize) as usize,
         };
         self.select_row(next, cx);
     }
@@ -1253,7 +1230,7 @@ impl SearchEverywhere {
     }
 
     pub(crate) fn select_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.real_rows() {
+        if index >= self.rows.len() {
             return;
         }
         self.selected = Some(index);
@@ -1276,7 +1253,7 @@ impl SearchEverywhere {
             return;
         };
         match row {
-            Row::Loading => {}
+            Row::More => self.load_more(cx),
             Row::File(file) => {
                 let text = self.field.read(cx).text();
                 let position = parse_position(&text);
@@ -1333,10 +1310,9 @@ impl SearchEverywhere {
         self.move_selection(-1, cx);
     }
 
-    /// Page Down: a page further, keeping a few rows of the last page (not
-    /// onto the spinner row).
+    /// Page Down: a page further, keeping a few rows of the last page.
     fn next_group_action(&mut self, _: &NextGroup, _: &mut Window, cx: &mut Context<Self>) {
-        let n = self.real_rows();
+        let n = self.rows.len();
         if n == 0 {
             return;
         }
@@ -1353,6 +1329,15 @@ impl SearchEverywhere {
         if let Some(i) = self.selected {
             self.choose(i, window, cx);
         }
+    }
+
+    /// The scope list's mnemonic: on the Files and Text tabs.
+    fn choose_scope_action(&mut self, _: &ChooseScope, _: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.tab, Tab::Files | Tab::Text) {
+            cx.propagate();
+            return;
+        }
+        self.show_dropdown(Dropdown::Scope, cx);
     }
 
     fn toggle_everywhere_action(
@@ -1409,14 +1394,13 @@ fn row_key(row: &Row) -> Option<RowKey> {
         Row::File(f) => Some(RowKey::Path(f.path.clone())),
         Row::Action(_) => None,
         Row::Text(t) => Some(RowKey::Line(t.path.clone(), t.line)),
-        Row::Loading => None,
+        Row::More => None,
     }
 }
 
 fn previous_index(rows: &[Row], previous: Option<&Row>) -> Option<usize> {
     let previous = previous?;
-    rows.iter()
-        .position(|r| r == previous && *r != Row::Loading)
+    rows.iter().position(|r| r == previous && *r != Row::More)
 }
 
 /// Registers the commands.
@@ -1444,6 +1428,7 @@ popup_actions! {
     NextGroup => next_group_action,
     PreviousGroup => previous_group_action,
     Select => select_action,
+    ChooseScope => choose_scope_action,
     ToggleEverywhere => toggle_everywhere_action,
     HistoryPrevious => history_previous_action,
     HistoryNext => history_next_action,

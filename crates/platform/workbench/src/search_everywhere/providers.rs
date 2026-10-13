@@ -58,8 +58,8 @@ pub enum Row {
     File(FileRow),
     Action(usize),
     Text(TextRow),
-    /// More rows come as the list scrolls.
-    Loading,
+    /// "… more": Enter or a click shows the next page.
+    More,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,8 +1,9 @@
-//! Drawing Search Everywhere: the tabs and the tab's scope and filter over
-//! the search field (with the history button and, on Text, the options),
-//! then the results. With an empty field and nothing to list only the tabs
-//! and the field show; lists of scopes, filter items, searches and masks
-//! open over it.
+//! Drawing Search Everywhere: the tabs and the tab's scope, preview, filter
+//! and find-window buttons over the search field (with the history button
+//! and, on Text, the options), then the results and a footer with the
+//! selected row's path and "Open In Right Split". With an empty field and
+//! nothing to list only the tabs and the field show; lists of scopes,
+//! filter items, searches and masks open over it.
 
 use std::ops::Range;
 
@@ -26,6 +27,8 @@ const PAD: f32 = 12.0;
 const MASK_WIDTH: f32 = 125.0;
 /// Width of the lists over the popup.
 const DROPDOWN_WIDTH: f32 = 220.0;
+/// Height of the footer under the list.
+pub(super) const FOOTER_HEIGHT: f32 = 28.0;
 
 impl SearchEverywhere {
     /// The shortcut of a command where the field has the focus.
@@ -142,13 +145,29 @@ impl SearchEverywhere {
                 );
             }
             Tab::Files | Tab::Text => {
-                items.push(self.combo(
+                let name = self.scope_name().to_owned();
+                // The mnemonic: the first P (toggle) or O (choose).
+                let mnemonic = name
+                    .chars()
+                    .position(|c| matches!(c.to_ascii_uppercase(), 'P' | 'O'));
+                let scope = self.combo(
                     "search-everywhere-scope",
-                    self.scope_name().to_owned(),
+                    name,
                     Dropdown::Scope,
                     None,
+                    mnemonic,
                     cx,
-                ));
+                );
+                items.push(
+                    div()
+                        .id("search-everywhere-scope-tip")
+                        .child(scope)
+                        .tooltip(Tooltip::text(
+                            "Choose scope",
+                            self.shortcut(&ChooseScope, window, cx),
+                        ))
+                        .into_any_element(),
+                );
             }
         }
         if self.tab == Tab::Text {
@@ -161,8 +180,18 @@ impl SearchEverywhere {
                 mask,
                 Dropdown::Masks,
                 Some(MASK_WIDTH),
+                None,
                 cx,
             ));
+        }
+        // The preview comes later: shown, not available yet.
+        if self.tab != Tab::Actions {
+            items.push(
+                small_icon_button("search-everywhere-preview", IconName::PREVIEW, false, cx)
+                    .debug_selector(|| "search-everywhere-preview".into())
+                    .tooltip(Tooltip::text("Preview", None))
+                    .into_any_element(),
+            );
         }
         let filter = match self.tab {
             Tab::All => Some((
@@ -186,6 +215,20 @@ impl SearchEverywhere {
                     .into_any_element(),
             );
         }
+        // The results in the Find tool window come with it (#65).
+        if self.tab != Tab::Actions {
+            items.push(
+                small_icon_button(
+                    "search-everywhere-find-window",
+                    IconName::OPEN_IN_TOOL_WINDOW,
+                    false,
+                    cx,
+                )
+                .debug_selector(|| "search-everywhere-find-window".into())
+                .tooltip(Tooltip::text("Open Results in Find Window", None))
+                .into_any_element(),
+            );
+        }
         div()
             .flex()
             .flex_row()
@@ -196,17 +239,37 @@ impl SearchEverywhere {
             .into_any_element()
     }
 
-    /// A list button: its text and an arrow; a click opens its list.
+    /// A list button: its text (with an underlined mnemonic) and an arrow;
+    /// a click opens its list.
     fn combo(
         &self,
         id: &'static str,
         text: String,
         kind: Dropdown,
         width: Option<f32>,
+        mnemonic: Option<usize>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
         let hover = theme.color(UiRole::Hover);
+        let underline = mnemonic
+            .and_then(|i| {
+                let start = text.char_indices().nth(i)?.0;
+                let end = text.char_indices().nth(i + 1).map_or(text.len(), |c| c.0);
+                Some(vec![(
+                    start..end,
+                    HighlightStyle {
+                        underline: Some(gpui::UnderlineStyle {
+                            thickness: px(1.0),
+                            color: None,
+                            wavy: false,
+                        }),
+                        ..HighlightStyle::default()
+                    },
+                )])
+            })
+            .unwrap_or_default();
+        let label = StyledText::new(text).with_highlights(underline);
         div()
             .id(id)
             .debug_selector(move || id.into())
@@ -224,7 +287,7 @@ impl SearchEverywhere {
                     .flex_1()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .child(text),
+                    .child(label),
             )
             .child(Icon::new(IconName::CHEVRON_DOWN).size(px(14.0)))
             .on_click(
@@ -459,18 +522,16 @@ impl SearchEverywhere {
                             .child(format!("{file} {}", line.line + 1)),
                     )
             }
-            Row::Loading => base
-                .debug_selector(|| "search-everywhere-loading".into())
-                .child(spinner(("search-everywhere-loading", index), cx)),
+            Row::More => base
+                .debug_selector(|| "search-everywhere-more".into())
+                .text_color(muted)
+                .child(div().pl(px(4.0)).child("\u{2026} more")),
         };
-        let clickable = *row != Row::Loading;
         base.when(selected, |d| d.bg(theme.color(UiRole::Selection)))
-            .when(clickable, |d| {
-                d.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.select_row(index, cx);
-                    this.choose(index, window, cx);
-                }))
-            })
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.select_row(index, cx);
+                this.choose(index, window, cx);
+            }))
             .into_any_element()
     }
 
@@ -591,7 +652,67 @@ impl SearchEverywhere {
         .flex_1()
         .py(px(4.0));
         rows.style().restrict_scroll_to_axis = Some(true);
-        rows.into_any_element()
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.0))
+            .child(rows)
+            .child(self.render_footer(cx))
+            .into_any_element()
+    }
+
+    /// Under the list: the selected row's path (from its source root) or
+    /// the action's description, and "Open In Right Split" for a file
+    /// (editor splits come later: it opens the file in the editor).
+    fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let row = self.selected.and_then(|i| self.rows.get(i));
+        let (text, file) = match row {
+            Some(Row::File(f)) if !f.is_dir => (self.places().footer_path(&f.path), true),
+            Some(Row::File(f)) => (self.places().footer_path(&f.path), false),
+            Some(Row::Text(t)) => (self.places().footer_path(&t.path), true),
+            Some(Row::Action(i)) => (self.context.actions[*i].description.to_string(), false),
+            _ => (String::new(), false),
+        };
+        let link = theme.color(UiRole::TextLink);
+        div()
+            .id("search-everywhere-footer")
+            .debug_selector(|| "search-everywhere-footer".into())
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .gap(px(8.0))
+            .h(px(FOOTER_HEIGHT))
+            .px(px(PAD))
+            .text_size(px(12.0))
+            .text_color(theme.color(UiRole::TextMuted))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(text),
+            )
+            .when(file, |d| {
+                d.child(
+                    div()
+                        .id("search-everywhere-right-split")
+                        .debug_selector(|| "search-everywhere-right-split".into())
+                        .flex_none()
+                        .text_color(link)
+                        .cursor_pointer()
+                        .child("Open In Right Split")
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            if let Some(i) = this.selected {
+                                this.choose(i, window, cx);
+                            }
+                        })),
+                )
+            })
+            .into_any_element()
     }
 
     /// The list over the popup that is open: under the header's right end
@@ -828,7 +949,9 @@ fn file_highlights(
             let location_ranges = if folder.is_empty() {
                 Vec::new()
             } else {
-                qualifier_matcher(folder).find(&location).unwrap_or_default()
+                qualifier_matcher(folder)
+                    .find(&location)
+                    .unwrap_or_default()
             };
             return (fragments, location_ranges);
         }
@@ -909,9 +1032,6 @@ impl Render for SearchEverywhere {
             .when(!collapsed, |d| d.child(self.render_list(window, cx)))
             .children(self.render_dropdown(cx));
         let content = Self::bind_actions(content, cx);
-        if self.wants_more() {
-            cx.defer_in(window, |this, _, cx| this.load_more(cx));
-        }
         self.frame
             .render(
                 "search-everywhere",

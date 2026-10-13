@@ -880,6 +880,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
                 assert_ne!(first, second, "{what}");
             }
         }
+        "search-everywhere.choose-scope" => {
+            h.search_everywhere("files", "a.py");
+            h.press(keys);
+            assert_eq!(h.se()["dropdown"], json!("scope"), "{what}");
+            h.invoke("search-everywhere.close", json!(null));
+        }
         "search-everywhere.toggle-everywhere" => {
             h.search_everywhere("all", "a.py");
             h.press(keys);

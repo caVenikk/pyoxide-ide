@@ -6,10 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use editor::Editor;
-use gpui::{
-    AppContext as _, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
-    VisualTestContext, WindowHandle, point,
-};
+use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use serde_json::{Value, json};
 use workbench::keymap::{self, Keymap};
 use workbench::search_everywhere::DEBOUNCE;
@@ -107,7 +104,7 @@ impl H<'_> {
             .iter()
             .map(|r| match r["kind"].as_str().unwrap() {
                 "action" => format!("action:{}", r["id"].as_str().unwrap()),
-                "loading" => "loading".to_owned(),
+                "more" => "more".to_owned(),
                 kind => format!("{kind}:{}", r["path"].as_str().unwrap()),
             })
             .collect()
@@ -155,20 +152,6 @@ impl H<'_> {
             .unwrap_or_else(|| panic!("{selector} is not drawn"));
         self.vcx()
             .simulate_click(bounds.center(), Modifiers::none());
-        self.draw();
-    }
-
-    fn scroll_rows(&mut self, delta: ScrollDelta) {
-        let bounds = self
-            .vcx()
-            .debug_bounds("search-everywhere-rows")
-            .expect("the results are drawn");
-        self.vcx().simulate_event(ScrollWheelEvent {
-            position: bounds.center(),
-            delta,
-            modifiers: Modifiers::none(),
-            touch_phase: TouchPhase::Moved,
-        });
         self.draw();
     }
 }
@@ -446,7 +429,7 @@ fn actions_run_from_the_actions_tab(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn more_rows_load_as_the_list_scrolls(cx: &mut TestAppContext) {
+fn the_more_row_shows_the_next_page(cx: &mut TestAppContext) {
     both(cx, |h| {
         for i in 0..120 {
             std::fs::write(h.root.join(format!("pkg/mod_{i:03}.py")), "").unwrap();
@@ -461,31 +444,37 @@ fn more_rows_load_as_the_list_scrolls(cx: &mut TestAppContext) {
         h.type_text("mod_");
         h.settle();
         let rows = h.rows();
-        assert_eq!(rows.len(), 51, "a page and the spinner row");
-        assert_eq!(rows[50], "loading");
+        assert_eq!(rows.len(), 16, "a page and the more row");
+        assert_eq!(rows[15], "more");
         let first = rows[0].clone();
-        // Page Down goes a page on; Up on the first row stays while more
-        // rows are to come.
+        // Page Down goes a page on; Up on the first row goes round.
         h.press(h.keys.last);
         let page = h.state()["selected"].as_u64().unwrap();
-        assert!(page > 1 && page < 50, "{page}");
+        assert!(page > 1 && page < 16, "{page}");
         h.press(h.keys.first);
         h.press("up");
-        assert_eq!(h.state()["selected"], json!(0));
-        // Scrolled to the end: the next pages, the rows shown stay.
-        h.scroll_rows(ScrollDelta::Lines(point(0.0, -200.0)));
-        h.draw();
+        assert_eq!(h.state()["selected"], json!(15), "the more row");
+        // A click on it: the next page below the rows shown, its first row
+        // selected.
+        h.click("search-everywhere-more");
+        h.settle();
         let rows = h.rows();
-        assert!(rows.len() > 51, "{}", rows.len());
+        assert_eq!(rows.len(), 31);
         assert_eq!(rows[0], first, "the rows shown stay");
-        // Down to the end: all of them, no spinner row.
-        for _ in 0..130 {
-            h.press("down");
+        assert_eq!(h.state()["selected"], json!(15));
+        // Enter on it, up to the last page: all of them, no more row.
+        for _ in 0..10 {
+            if h.rows().last().map(String::as_str) != Some("more") {
+                break;
+            }
+            h.press(h.keys.first);
+            h.press("up");
+            h.press("enter");
+            h.settle();
         }
-        h.draw();
         let rows = h.rows();
-        assert_eq!(rows.len(), 120, "all, no spinner row");
-        assert!(!rows.contains(&"loading".to_owned()));
+        assert_eq!(rows.len(), 120, "all, no more row");
+        assert!(!rows.contains(&"more".to_owned()));
         h.press("escape");
     });
 }
