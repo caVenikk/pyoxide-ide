@@ -63,8 +63,8 @@ Platform (`crates/platform/`, language-agnostic):
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar, a movable and resizable popup frame, the Find in Files
   and Replace in Files popup with its preview, Search Everywhere and Go to
-  File), keymaps (with double taps of a modifier), application start-up,
-  environment switches and in-app measurements.
+  File, Recent Files), keymaps (with double taps of a modifier),
+  application start-up, environment switches and in-app measurements.
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model
