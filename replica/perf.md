@@ -217,6 +217,9 @@ and the generated 20,000-file tree of the Find in Files rows.
 | 2026-10-12 | mac-1 | 20k files, `mod_1234`: index build in the application | 40 ms | 117 MB RSS after the runs |
 | 2026-10-12 | mac-1 | 20k files, `mod_1234`: key to rows / search | p50 131 ms / 16 ms | p90 146 ms / 22 ms; `m` matches every file |
 | 2026-10-12 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 128 ms / 1.3 ms | p90 141 ms / 26 ms |
+| 2026-10-13 | mac-1 | Flask, `flaskapp`: key to rows / search | p50 125 ms / 0.29 ms | p90 127 ms / 0.42 ms; every match ranked by the popup's rule, 15 rows |
+| 2026-10-13 | mac-1 | 20k files, `mod_1234`: key to rows / search | p50 143 ms / 23 ms | p90 146 ms / 29 ms; ranking every match (`m` matches every file) |
+| 2026-10-13 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 127 ms / 1.4 ms | p90 157 ms / 31 ms |
 
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file

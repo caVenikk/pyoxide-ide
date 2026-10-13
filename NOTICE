@@ -175,6 +175,18 @@ here with: source URL, commit, file(s), license, and what was changed.
   order keeps open files, the current file's folder and project content
   (there are no modules, source roots or usage statistics).
 
+- crates/platform/workbench/src/search_everywhere/ (pages, footer, scope
+  mnemonics), crates/python/pyoxide-ide/src/main.rs (source roots)
+  Follow the IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/261.27258.51:
+  the page sizes of platform/lang-impl/src/com/intellij/ide/actions/
+  searcheverywhere/SearchEverywhereUI.java, the mnemonics of
+  ScopeChooserAction.java, the footer's path of footer/ExtendedInfoImpl.kt,
+  and the source roots that python/ide/impl/src/com/intellij/pycharm/
+  community/ide/impl/PythonSourceRootConfigurator.java marks when a folder
+  opens. Reimplemented in Rust; `setup.py` is read as text, not parsed as
+  Python.
+
 - crates/platform/workbench/src/workbench.rs (file drops, empty editor area)
   The handling of files dropped onto the main window follows the IntelliJ
   Platform Community (Apache-2.0), https://github.com/JetBrains/intellij-community

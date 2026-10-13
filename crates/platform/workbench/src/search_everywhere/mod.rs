@@ -10,9 +10,12 @@
 //! editor, else the tab's last search, selected.
 //!
 //! - Files: the project's file name index ([`crate::project_files`]) finds
-//!   files and folders as the reference ranks them (`file-index`);
-//!   `name:line:column` opens at that place. A filter leaves out file
-//!   types; the scope (persisted) adds non-project items.
+//!   files and folders as the reference does and ranks them by where the
+//!   name matches (`file_index::rank`); rows show a location from the
+//!   product (a Python package path) and package folders; the footer the
+//!   path from its source root. `name:line:column` opens at that place. A
+//!   filter leaves out file types; the scope (persisted) adds non-project
+//!   items.
 //! - Actions: the registered commands by title ([`actions`]).
 //! - Text: lines of the project's files (`project-search`), with Match
 //!   Case, Words and Regex and the file mask shared with Find in Files.
