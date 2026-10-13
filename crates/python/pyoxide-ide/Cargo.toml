@@ -19,6 +19,7 @@ runtime-shaders = ["gpui/runtime_shaders"]
 [dependencies]
 editor.workspace = true
 gpui.workspace = true
+py-env.workspace = true
 py-syntax.workspace = true
 themes.workspace = true
 ui.workspace = true

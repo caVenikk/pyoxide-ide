@@ -7,9 +7,12 @@ ui::ui_commands! {
     /// Show, focus or hide the project tool window.
     ToggleProject => "workbench.toggle-project", "Project",
         "Shows and focuses the project tool window; hides it when it has the focus.";
+    /// Show, focus or hide the Run tool window.
+    ToggleRun => "workbench.toggle-run", "Run",
+        "Shows and focuses the Run tool window; hides it when it has the focus.";
     /// Hide the active tool window.
     HideToolWindow => "workbench.hide-tool-window", "Hide Active Tool Window",
-        "Hides the project tool window and moves the focus to the editor.";
+        "Hides the tool window that has the focus (or was used last) and moves the focus to the editor.";
     /// Select the active editor's file in the project tool window.
     LocateFile => "project.tree.locate", "Select Opened File",
         "Selects the active editor's file in the project tool window.";

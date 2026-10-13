@@ -9,6 +9,7 @@
 [[context]]
 [context.bindings]
 "alt-1" = "workbench.toggle-project"
+"alt-4" = "workbench.toggle-run"
 "ctrl-s" = "workbench.save-all"
 "ctrl-f4" = "tabs.close"
 "alt-right" = "tabs.next"

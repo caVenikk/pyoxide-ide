@@ -133,6 +133,15 @@ impl H<'_> {
         self.focus(handle);
     }
 
+    fn run_focused(&mut self) -> bool {
+        let run = self.workbench(|w, _| w.run_window().clone());
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                run.focus_handle(cx).contains_focused(window, cx)
+            })
+            .unwrap()
+    }
+
     fn editor_focused(&mut self) -> bool {
         let editor = self.editor();
         self.cx
@@ -375,6 +384,13 @@ impl H<'_> {
         }
         while self.state()["recent_files"] == json!(true) {
             self.invoke("recent-files.close", json!(null));
+        }
+        if self.state()["tool_windows"]["run"]["visible"] == json!(true) {
+            // Focused first, then hidden.
+            self.invoke("workbench.toggle-run", json!(null));
+            if self.state()["tool_windows"]["run"]["visible"] == json!(true) {
+                self.invoke("workbench.toggle-run", json!(null));
+            }
         }
         while self.state()["tabs"]
             .as_array()
@@ -1191,6 +1207,24 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let s = h.state();
             assert_eq!(
                 s["tool_windows"]["project"]["visible"],
+                json!(false),
+                "{what}: second press hides it"
+            );
+            assert!(h.editor_focused(), "{what}");
+        }
+        "workbench.toggle-run" => {
+            h.press(keys);
+            let s = h.state();
+            assert_eq!(s["tool_windows"]["run"]["visible"], json!(true), "{what}");
+            assert!(
+                h.run_focused(),
+                "{what}: first press focuses the Run tool window"
+            );
+            assert!(!h.editor_focused(), "{what}");
+            h.press(keys);
+            let s = h.state();
+            assert_eq!(
+                s["tool_windows"]["run"]["visible"],
                 json!(false),
                 "{what}: second press hides it"
             );

@@ -5082,6 +5082,7 @@ version = "0.0.1"
 dependencies = [
  "editor",
  "gpui",
+ "py-env",
  "py-syntax",
  "serde_json",
  "tempfile",
