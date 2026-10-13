@@ -761,12 +761,22 @@ impl ContextMenu {
             .map(|(ix, item)| {
                 let id = SharedString::from(format!("menu-{level}-{ix}"));
                 if let MenuItem::Separator = item {
+                    let selector = format!("menu-separator-{level}-{ix}");
+                    // A column, so that the line stretches across.
                     return div()
                         .id(id)
+                        .flex()
+                        .flex_col()
                         .h(px(SEPARATOR_HEIGHT))
                         .pt(px(SEPARATOR_INDENT))
                         .px(px(m.separator_x))
-                        .child(div().h(px(1.0)).w_full().bg(line))
+                        .child(
+                            div()
+                                .debug_selector(move || selector.clone())
+                                .h(px(1.0))
+                                .w_full()
+                                .bg(line),
+                        )
                         .into_any_element();
                 }
                 let enabled = item.selectable();
@@ -852,6 +862,7 @@ impl ContextMenu {
                         .pl(px(SEARCH_LEFT))
                         .pb(px(SEARCH_BOTTOM))
                         .child(Icon::new(IconName::SEARCH))
+                        .text_color(text)
                         .child(div().whitespace_nowrap().child(self.filter.clone())),
                 )
         });
@@ -876,6 +887,7 @@ impl ContextMenu {
                     .pb(px(TITLE_BOTTOM))
                     .px(px(TITLE_X))
                     .font_weight(FontWeight::BOLD)
+                    .text_color(text)
                     .whitespace_nowrap()
                     .child(title)
             }))
@@ -1202,6 +1214,11 @@ mod tests {
         assert_eq!(selected(&menu, cx), [Some(0)]);
         let title = cx.debug_bounds("menu-title");
         assert!(title.is_some(), "the title is drawn");
+        let row = cx.debug_bounds("menu-item:Python 3.12 (demo)").unwrap();
+        let line = cx.debug_bounds("menu-separator-0-1").unwrap();
+        assert_eq!(line.size.height, px(1.0));
+        // The line spans the popup less `Popup.separatorInsets` (8).
+        assert_eq!(line.size.width, row.size.width - px(2.0 * LIST.separator_x));
     }
 
     #[gpui::test]

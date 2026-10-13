@@ -14,8 +14,9 @@
 //! reference's own interpreter of the project (`.idea` and its SDK table)
 //! is imported there once, with its SDK name (`uv (demo) [3.13.1]`).
 //!
-//! Everything that reads files runs on the background executor; nothing
-//! starts a Python process (versions come from `pyvenv.cfg`).
+//! Everything that reads files runs on the background executor. Versions
+//! come from `pyvenv.cfg`; only when it holds an incomplete one (uv may
+//! write `3.14`) is the interpreter asked, in the background.
 
 mod widget;
 
@@ -155,7 +156,7 @@ impl FoundInterpreter {
             python: env.python.clone(),
             dir: env.dir.clone(),
             kind,
-            version: env.version.clone(),
+            version: full_version(env.version.as_deref(), &env.python),
             uv: env.is_uv(),
             name: sdk_name(env),
             path_derived: true,
@@ -168,7 +169,7 @@ impl FoundInterpreter {
             python: python.to_owned(),
             dir: python.parent().unwrap_or(python).to_owned(),
             kind: InterpreterKind::System,
-            version: None,
+            version: full_version(None, python),
             uv: false,
             name: project::display_path(python),
             path_derived: true,
@@ -242,6 +243,90 @@ impl FoundInterpreter {
             "uv": self.uv,
         })
     }
+}
+
+/// The version shown after the name (`3.14.6`): the one the files tell
+/// when it is complete, else the one the interpreter reports, as the
+/// reference reads it from the SDK's version string (uv may write
+/// `version_info = 3.14` into `pyvenv.cfg`).
+fn full_version(files: Option<&str>, python: &Path) -> Option<String> {
+    let complete =
+        |v: &str| v.split('.').count() >= 3 && v.starts_with(|c: char| c.is_ascii_digit());
+    match files {
+        Some(v) if complete(v) => Some(v.to_owned()),
+        _ => reported_version(python).or_else(|| files.map(str::to_owned)),
+    }
+}
+
+/// How long an interpreter may take to tell its version.
+const VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The version `python --version` prints (`Python 3.14.6` gives `3.14.6`,
+/// the reference's `\d+\.\S+`). Blocking (background only), bounded by
+/// [`VERSION_TIMEOUT`], stdin closed; remembered per interpreter while the
+/// file is unchanged.
+fn reported_version(python: &Path) -> Option<String> {
+    use std::io::Read as _;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{Instant, SystemTime};
+
+    type Cache = HashMap<PathBuf, (Option<SystemTime>, Option<String>)>;
+    static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
+    let modified = std::fs::metadata(python).and_then(|m| m.modified()).ok();
+    if let Some((at, version)) = CACHE.lock().ok()?.get(python)
+        && *at == modified
+    {
+        return version.clone();
+    }
+    let mut command = std::process::Command::new(python);
+    command
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // No console window.
+        command.creation_flags(0x0800_0000);
+    }
+    let version = (|| {
+        let mut child = command.spawn().ok()?;
+        let start = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if start.elapsed() < VERSION_TIMEOUT => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let mut out = String::new();
+        child.stdout.take()?.read_to_string(&mut out).ok()?;
+        if out.trim().is_empty() {
+            // Python 2 printed its version to stderr.
+            child.stderr.take()?.read_to_string(&mut out).ok()?;
+        }
+        version_in(&out)
+    })();
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.insert(python.to_owned(), (modified, version.clone()));
+    }
+    version
+}
+
+/// The first `\d+\.\S+` of a version string.
+fn version_in(text: &str) -> Option<String> {
+    text.split_whitespace().find_map(|word| {
+        let digits = word.find(|c: char| !c.is_ascii_digit())?;
+        (digits > 0 && word[digits..].starts_with('.') && word.len() > digits + 1)
+            .then(|| word.to_owned())
+    })
 }
 
 /// The name the reference gives an interpreter it sets up for a folder it
@@ -815,6 +900,31 @@ mod tests {
         idea_project_sdk(&root, "other");
         assert!(!scan_with(&root, None, || vec![config.clone()]).chosen);
         assert!(!root.join(".oxide").exists());
+    }
+
+    #[test]
+    fn versions_from_the_files_or_the_interpreter() {
+        assert_eq!(version_in("Python 3.14.6\n").as_deref(), Some("3.14.6"));
+        assert_eq!(version_in("Python 3.15.0b3").as_deref(), Some("3.15.0b3"));
+        assert_eq!(version_in("Python\n"), None);
+        let missing = Path::new("/nowhere/bin/python");
+        assert_eq!(
+            full_version(Some("3.12.13"), missing).as_deref(),
+            Some("3.12.13")
+        );
+        // Incomplete, and the interpreter cannot tell: what the files say.
+        assert_eq!(full_version(Some("3.14"), missing).as_deref(), Some("3.14"));
+        assert_eq!(full_version(None, missing), None);
+    }
+
+    /// uv may write `3.14` into `pyvenv.cfg`; the interpreter tells the
+    /// full one. Needs a Python on `PATH`.
+    #[test]
+    #[ignore = "starts the Python interpreter found on PATH"]
+    fn an_incomplete_version_is_asked_from_the_interpreter() {
+        let python = py_env::paths::find_on_path("python3").expect("python3 on PATH");
+        let version = full_version(Some("3"), &python).unwrap();
+        assert!(version.split('.').count() >= 3, "{version}");
     }
 
     #[test]

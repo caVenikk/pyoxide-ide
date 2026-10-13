@@ -140,7 +140,11 @@ run whenever a project opens:
 
 The IDE's interpreter widget lists these environments and selects the
 project environment (`find_project_venv`) unless the person chose another
-one, which is kept in the personal project state (ADR 0009).
+one, which is kept in the personal project state (ADR 0009). uv may write a
+version without the patch level into `pyvenv.cfg` (`version_info = 3.14`);
+the widget then asks the interpreter
+(`python --version`, in the background, at most 5 s, remembered while the
+file is unchanged), as the reference shows the full version.
 
 ## Operations
 Each is a typed function with a request struct; the command line it runs is
