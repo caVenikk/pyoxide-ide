@@ -8,9 +8,11 @@ use std::time::Duration;
 use editor::Editor;
 use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 use workbench::keymap::{self, Keymap};
 use workbench::search_everywhere::DEBOUNCE;
-use workbench::{Product, Workbench};
+
+use workbench::{NavigationHooks, Product, Workbench};
 
 struct Keys {
     go_to_file: &'static str,
@@ -170,6 +172,8 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys)
         ("pkg/util.py", "x = 1\n\n\n# needle here\nneedle = 2\n"),
         ("pkg/application.py", "y = 2\n"),
         ("tests/test_app.py", "z = 3\n"),
+        ("src/lib/__init__.py", ""),
+        ("src/lib/core.py", "c = 1\n"),
         (".git/config", "x\n"),
         (".venv/lib/site.py", "s = 1\n"),
         (".venv/pyvenv.cfg", "home = /usr\n"),
@@ -184,6 +188,11 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys)
         auto_excluded: project::AutoExclusions {
             dir_names: &[".venv"],
             root_dir_markers: &[],
+        },
+        navigation: NavigationHooks {
+            source_roots: Some(source_roots),
+            file_location: Some(dotted_location),
+            package_markers: &["__init__.py"],
         },
         ..Product::default()
     };
@@ -214,6 +223,17 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys)
     let s = h.invoke("workbench.state", json!(null));
     assert!(s["file_index"].as_u64().is_some_and(|n| n > 0), "{s}");
     h
+}
+
+/// The Python product's source roots, as a product hook: `src`.
+fn source_roots(root: &Path) -> Vec<PathBuf> {
+    let src = root.join("src");
+    if src.is_dir() { vec![src] } else { Vec::new() }
+}
+
+/// The Python product's locations: a module's package.
+fn dotted_location(name: &str, folder: &str) -> Option<String> {
+    name.ends_with(".py").then(|| folder.replace('/', "."))
 }
 
 fn both(cx: &mut TestAppContext, test: fn(&mut H)) {
@@ -288,6 +308,45 @@ fn folders_in_the_pattern(cx: &mut TestAppContext) {
         h.press("enter");
         let s = h.invoke("workbench.state", json!(null));
         assert_eq!(s["search_everywhere"], json!(false));
+    });
+}
+
+#[gpui::test]
+fn locations_package_folders_and_the_footer(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let row = |h: &mut H, i: usize, key: &str| h.state()["rows"][i][key].clone();
+        h.press(h.keys.go_to_file);
+        h.type_text("core");
+        h.settle();
+        assert_eq!(h.rows(), ["file:src/lib/core.py"]);
+        // A module's package from its source root; the footer's path too.
+        assert_eq!(row(h, 0, "location"), json!("lib"));
+        assert_eq!(h.state()["footer"], json!("lib/core.py"));
+        h.press(h.keys.select_all);
+        h.type_text("lib");
+        h.settle();
+        assert_eq!(h.rows()[0], "folder:src/lib");
+        // A folder shows its own path; one with `__init__.py` is a package.
+        assert_eq!(row(h, 0, "location"), json!("src/lib"));
+        assert_eq!(row(h, 0, "package"), json!(true));
+        h.press(h.keys.select_all);
+        h.type_text("tests");
+        h.settle();
+        assert_eq!(h.rows()[0], "folder:tests");
+        assert_eq!(row(h, 0, "package"), json!(false));
+        h.press(h.keys.select_all);
+        h.type_text("notes");
+        h.settle();
+        // Not Python: the folder; at the project folder, nothing.
+        assert_eq!(row(h, 0, "location"), json!(""));
+        let footer = h.state()["footer"].as_str().unwrap().replace('\\', "/");
+        assert!(footer.ends_with("proj/notes.txt"), "{footer}");
+        assert!(
+            h.vcx()
+                .debug_bounds("search-everywhere-right-split")
+                .is_some()
+        );
+        h.press("escape");
     });
 }
 

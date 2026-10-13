@@ -667,14 +667,7 @@ impl SearchEverywhere {
     /// (editor splits come later: it opens the file in the editor).
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let row = self.selected.and_then(|i| self.rows.get(i));
-        let (text, file) = match row {
-            Some(Row::File(f)) if !f.is_dir => (self.places().footer_path(&f.path), true),
-            Some(Row::File(f)) => (self.places().footer_path(&f.path), false),
-            Some(Row::Text(t)) => (self.places().footer_path(&t.path), true),
-            Some(Row::Action(i)) => (self.context.actions[*i].description.to_string(), false),
-            _ => (String::new(), false),
-        };
+        let (text, file) = self.footer();
         let link = theme.color(UiRole::TextLink);
         div()
             .id("search-everywhere-footer")

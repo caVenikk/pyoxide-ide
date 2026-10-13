@@ -474,6 +474,7 @@ impl SearchEverywhere {
             "rows": rows,
             "selected": self.selected,
             "dropdown": self.dropdown.as_ref().map(|d| format!("{d:?}").to_lowercase()),
+            "footer": self.footer().0,
         })
     }
 
@@ -1053,6 +1054,18 @@ impl SearchEverywhere {
             limit: self.limit(Provider::Files),
             places: self.places(),
         })
+    }
+
+    /// The footer's text for the selected row (its path from its source
+    /// root, or an action's description), and whether it offers "Open In
+    /// Right Split" (a file).
+    pub(crate) fn footer(&self) -> (String, bool) {
+        match self.selected.and_then(|i| self.rows.get(i)) {
+            Some(Row::File(f)) => (self.places().footer_path(&f.path), !f.is_dir),
+            Some(Row::Text(t)) => (self.places().footer_path(&t.path), true),
+            Some(Row::Action(i)) => (self.context.actions[*i].description.to_string(), false),
+            _ => (String::new(), false),
+        }
     }
 
     /// Where rows are shown from (locations, the footer).
