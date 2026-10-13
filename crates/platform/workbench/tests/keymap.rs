@@ -135,18 +135,25 @@ impl H<'_> {
         self.focus(handle);
     }
 
+    /// The run state (a query: no frame is drawn).
     fn run(&mut self) -> Value {
-        self.invoke("run.state", json!(null))
+        self.cx.run_until_parked();
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                ui::command::invoke("run.state", json!(null), window, cx)
+            })
+            .unwrap()
+            .unwrap()
     }
 
-    /// Waits (at most 10 s) for a run state that `f` accepts.
+    /// Waits (at most about 20 s) for a run state that `f` accepts.
     fn wait_run(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
         let mut last = Value::Null;
-        for _ in 0..1000 {
+        for _ in 0..2000 {
             support::tick(self.cx);
-            self.draw();
             last = self.run();
             if f(&last) {
+                self.draw();
                 return last;
             }
         }

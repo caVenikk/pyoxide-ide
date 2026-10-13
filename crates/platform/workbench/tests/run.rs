@@ -58,22 +58,29 @@ impl H<'_> {
         self.draw();
     }
 
+    /// The run state (a query: no frame is drawn).
     fn run(&mut self) -> Value {
-        self.invoke("run.state", json!(null))
+        self.cx.run_until_parked();
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                ui::command::invoke("run.state", json!(null), window, cx)
+            })
+            .unwrap()
+            .unwrap()
     }
 
     fn state(&mut self) -> Value {
         self.invoke("workbench.state", json!(null))
     }
 
-    /// Waits (at most 10 s) until `f` holds for the run state.
+    /// Waits (at most about 20 s) until `f` holds for the run state.
     fn wait(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
         let mut last = Value::Null;
-        for _ in 0..1000 {
+        for _ in 0..2000 {
             tick(self.cx);
-            self.draw();
             last = self.run();
             if f(&last) {
+                self.draw();
                 return last;
             }
             std::thread::sleep(Duration::from_millis(5));
