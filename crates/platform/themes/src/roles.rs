@@ -255,6 +255,7 @@ roles! {
         InlayHint => ("inlay-hint", "Editor decoration", "Inline type and parameter hints"),
         ConsoleError => ("console-error", "Editor decoration", "Error output in the run console"),
         ConsoleInput => ("console-input", "Editor decoration", "User input in the run console"),
+        ConsoleSystem => ("console-system", "Editor decoration", "The IDE's own lines in the run console (command line, exit code)"),
     }
 }
 

@@ -381,6 +381,7 @@ the token.
 | `syntax.inlay-hint` | `INLAY_DEFAULT`, `INLINE_PARAMETER_HINT` | Inline type and parameter hints |
 | `syntax.console-error` | `CONSOLE_ERROR_OUTPUT` | Error output in the run console |
 | `syntax.console-input` | `CONSOLE_USER_INPUT` | User input in the run console |
+| `syntax.console-system` | `CONSOLE_SYSTEM_OUTPUT` | The IDE's own lines in the run console (command line, exit code) |
 
 ### Fallback roles for text roles
 

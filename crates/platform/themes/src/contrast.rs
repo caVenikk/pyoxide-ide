@@ -149,7 +149,11 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
 const DIMMED: &[TextRole] = &[TextRole::DiagnosticUnused];
 
 /// Text roles drawn on the terminal background instead of the editor's.
-const CONSOLE: &[TextRole] = &[TextRole::ConsoleError, TextRole::ConsoleInput];
+const CONSOLE: &[TextRole] = &[
+    TextRole::ConsoleError,
+    TextRole::ConsoleInput,
+    TextRole::ConsoleSystem,
+];
 
 /// Checks every pair of [`UI_PAIRS`] and every text role of the theme.
 ///

@@ -357,6 +357,7 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         InlayHint => &["INLAY_DEFAULT", "INLINE_PARAMETER_HINT"],
         ConsoleError => &["CONSOLE_ERROR_OUTPUT"],
         ConsoleInput => &["CONSOLE_USER_INPUT"],
+        ConsoleSystem => &["CONSOLE_SYSTEM_OUTPUT"],
     }
 }
 

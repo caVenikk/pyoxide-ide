@@ -316,6 +316,9 @@ fg = "#f75464"
 fg = "#6aab73"
 italic = true
 
+[syntax.console-system]
+fg = "#bcbec4"
+
 [font]
 ui-family = [
     "Inter",

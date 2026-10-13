@@ -219,6 +219,7 @@ folded-text = { fg = "$fg-muted", bg = "#ffffff12" }
 inlay-hint = { fg = "#8e98aa", bg = "#ffffff0d", italic = true }
 console-error = { fg = "$red" }
 console-input = { fg = "$teal-light" }
+console-system = { fg = "$fg" }
 
 [font]
 # Inter and JetBrains Mono ship with the IDE (crates/platform/ui/assets/fonts).
