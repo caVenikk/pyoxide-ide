@@ -46,6 +46,17 @@ impl IconName {
     pub const SETTINGS: Self = Self("general/settings@20x20");
     pub const RUN: Self = Self("run/run");
     pub const DEBUG: Self = Self("run/debug");
+    pub const RERUN: Self = Self("run/rerun");
+    pub const STOP: Self = Self("run/stop");
+    pub const KILL_PROCESS: Self = Self("run/killProcess");
+    /// White variants for the coloured buttons of the run widget.
+    pub const RUN_STROKE: Self = Self("run/run_stroke");
+    pub const RERUN_STROKE: Self = Self("run/rerun_stroke");
+    pub const STOP_STROKE: Self = Self("run/stop_stroke");
+    pub const DELETE: Self = Self("general/delete");
+    pub const PRINT: Self = Self("general/print");
+    pub const SOFT_WRAP: Self = Self("general/softWrap");
+    pub const SCROLL_DOWN: Self = Self("general/scrollDown");
     pub const BRANCH: Self = Self("vcs/branch");
     pub const FOLDER: Self = Self("nodes/folder");
     pub const PACKAGE: Self = Self("nodes/package");
@@ -121,15 +132,17 @@ platform_icons! {
         "fileTypes/unknown", "fileTypes/xml", "fileTypes/yaml",
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
-        "general/collapseAll", "general/down", "general/expandAll", "general/filter", "general/hide",
+        "general/collapseAll", "general/delete", "general/down", "general/expandAll", "general/filter",
+        "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
-        "general/previewHorizontally", "general/search@20x20", "general/settings@20x20",
+        "general/previewHorizontally", "general/print", "general/scrollDown", "general/search@20x20",
+        "general/settings@20x20", "general/softWrap",
         "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
         "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/package", "nodes/symlink",
-        "run/debug", "run/run",
+        "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
@@ -138,7 +151,9 @@ platform_icons! {
         "vcs/branch",
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
-    light_only: ["fileTypes/gitignore"]
+    light_only: [
+        "fileTypes/gitignore", "run/rerun_stroke", "run/run_stroke", "run/stop_stroke",
+    ]
 }
 
 /// A rasterized icon: name, dark variant, size in device pixels.

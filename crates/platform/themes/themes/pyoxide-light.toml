@@ -98,6 +98,8 @@ progress = "$copper"
 progress-track = "$line"
 notification = "$bg-white"
 non-project-file = "#fbf3e7"
+run-widget-running = "$leaf"
+run-widget-stop = "$red"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"
