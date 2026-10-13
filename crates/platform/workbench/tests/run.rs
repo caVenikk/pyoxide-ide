@@ -536,7 +536,7 @@ fn tabs_are_reused_unless_running_or_pinned(cx: &mut TestAppContext) {
 
 /// Closing a tab whose process runs (⌘W / Ctrl+F4 in the Run tool window)
 /// asks; Terminate stops the process and closes the tab; the last tab
-/// closed hides the tool window.
+/// closed hides the tool window and removes its stripe button.
 #[gpui::test]
 fn closing_a_running_tab_asks_to_terminate(cx: &mut TestAppContext) {
     let (mut h, _dir) = setup(cx);
@@ -562,6 +562,7 @@ fn closing_a_running_tab_asks_to_terminate(cx: &mut TestAppContext) {
     let s = h.run();
     assert!(s["tabs"].as_array().unwrap().is_empty());
     assert_eq!(s["visible"], json!(false));
+    assert_eq!(s["registered"], json!(false));
     assert!(h.state()["dialog"].is_null());
 }
 

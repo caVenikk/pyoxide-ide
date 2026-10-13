@@ -32,8 +32,8 @@ const ICON: f32 = 16.0;
 pub enum RunToolWindowEvent {
     /// The Hide button was pressed.
     Hide,
-    /// The last tab was closed: the tool window hides
-    /// (`setToHideOnEmptyContent`).
+    /// The last tab was closed: the tool window hides and its stripe
+    /// button goes away (`setToHideOnEmptyContent`).
     Emptied,
     /// A console link was followed.
     OpenLink(LinkTarget),

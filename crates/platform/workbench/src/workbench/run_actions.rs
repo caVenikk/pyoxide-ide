@@ -490,9 +490,14 @@ impl Workbench {
         match event {
             RunToolWindowEvent::Hide => self.hide(ToolWindow::Run, window, cx),
             RunToolWindowEvent::Emptied => {
+                // `ToolWindowContentUi.contentRemoved`: a tool window that
+                // hides on empty content also leaves the stripe; the next
+                // run or ⌘4 brings its button back.
                 if self.run_visible {
                     self.hide(ToolWindow::Run, window, cx);
                 }
+                self.run_registered = false;
+                cx.notify();
             }
             RunToolWindowEvent::OpenLink(target) => self.open_link(target, window, cx),
             RunToolWindowEvent::Message(message) => {
