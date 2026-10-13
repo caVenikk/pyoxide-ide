@@ -11,6 +11,7 @@ use gpui::{
     Pixels, Point, Subscription, Task, Window, point, px,
 };
 use serde_json::json;
+use ui::icons::IconName;
 use ui::menu::{ContextMenu, MenuItem};
 
 use super::{ToolWindow, Workbench};
@@ -153,16 +154,17 @@ impl Workbench {
                         ),
                         vec![
                             DialogButton {
-                                id: "stop-and-rerun",
-                                label: "Stop and Rerun".into(),
-                            },
-                            DialogButton {
                                 id: "cancel",
                                 label: "Cancel".into(),
+                            },
+                            DialogButton {
+                                id: "stop-and-rerun",
+                                label: "Stop and Rerun".into(),
                             },
                         ],
                         cx,
                     )
+                    .with_icon(IconName::QUESTION_DIALOG)
                     .with_option("Do not show this dialog in the future")
                 });
                 self.open_dialog(dialog, PendingDialog::Rerun(tab), window, cx);
@@ -558,21 +560,22 @@ impl Workbench {
                 format!("Do you want to terminate the process '{name}'?"),
                 vec![
                     DialogButton {
-                        id: "terminate",
-                        label: "&Terminate".into(),
+                        id: "cancel",
+                        label: "Cancel".into(),
                     },
                     DialogButton {
                         id: "disconnect",
                         label: "&Disconnect".into(),
                     },
                     DialogButton {
-                        id: "cancel",
-                        label: "Cancel".into(),
+                        id: "terminate",
+                        label: "&Terminate".into(),
                     },
                 ],
                 cx,
             )
-            .with_option("Do not show this dialog in the future")
+            .with_icon(IconName::WARNING_DIALOG)
+            .with_option("Don't ask again")
         });
         self.open_dialog(dialog, PendingDialog::CloseRunning(tab), window, cx);
     }

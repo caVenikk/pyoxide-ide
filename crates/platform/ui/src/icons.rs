@@ -57,6 +57,8 @@ impl IconName {
     pub const PRINT: Self = Self("general/print");
     pub const SOFT_WRAP: Self = Self("general/softWrap");
     pub const SCROLL_DOWN: Self = Self("general/scrollDown");
+    pub const QUESTION_DIALOG: Self = Self("general/questionDialog");
+    pub const WARNING_DIALOG: Self = Self("general/warningDialog");
     pub const BRANCH: Self = Self("vcs/branch");
     pub const FOLDER: Self = Self("nodes/folder");
     pub const PACKAGE: Self = Self("nodes/package");
@@ -136,7 +138,8 @@ platform_icons! {
         "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
-        "general/previewHorizontally", "general/print", "general/scrollDown", "general/search@20x20",
+        "general/previewHorizontally", "general/print", "general/questionDialog", "general/scrollDown",
+        "general/search@20x20", "general/warningDialog",
         "general/settings@20x20", "general/softWrap",
         "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",

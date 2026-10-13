@@ -31,34 +31,6 @@
 "ctrl-shift-r" = "run.current-file"
 "cmd-f2" = "run.stop"
 
-# The Run tool window: Rerun, Close Tab, Up and Down the Stack Trace;
-# Escape goes to the editor, Shift+Escape hides the tool window.
-[[context]]
-name = "RunToolWindow"
-[context.bindings]
-"cmd-r" = "run.rerun"
-"cmd-w" = "run.close-tab"
-"cmd-alt-up" = "run.console.previous-link"
-"cmd-alt-down" = "run.console.next-link"
-"escape" = "workbench.focus-editor"
-"shift-escape" = "workbench.hide-tool-window"
-
-# The Run console is an editor: Rerun and Send EOF take the keys of
-# Replace and Duplicate Line, Escape leaves it.
-[[context]]
-name = "RunConsole > Editor"
-[context.bindings]
-"cmd-r" = "run.rerun"
-"cmd-d" = "run.console.send-eof"
-"escape" = "workbench.focus-editor"
-
-# A message dialog: Enter chooses the default button, Escape cancels.
-[[context]]
-name = "Dialog"
-[context.bindings]
-"enter" = "dialog.confirm"
-"escape" = "dialog.cancel"
-
 [[context]]
 name = "ProjectTree"
 [context.bindings]
@@ -362,3 +334,35 @@ name = "RecentFiles"
 "delete" = "recent-files.delete"
 "backspace" = "recent-files.delete"
 "cmd-backspace" = "recent-files.delete"
+
+# The Run tool window: Rerun, Close Tab, Up and Down the Stack Trace;
+# Escape goes to the editor, Shift+Escape hides the tool window. (A
+# binding without a context counts as one of the innermost context, so
+# these sections come last; the console, an editor, repeats the keys that
+# the editor or the whole window bind.)
+[[context]]
+name = "RunToolWindow"
+[context.bindings]
+"cmd-r" = "run.rerun"
+"cmd-w" = "run.close-tab"
+"cmd-alt-up" = "run.console.previous-link"
+"cmd-alt-down" = "run.console.next-link"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+# The Run console: Rerun, Close Tab and Send EOF take the keys of Replace,
+# Close and Duplicate Line; Escape leaves it.
+[[context]]
+name = "RunConsole > Editor"
+[context.bindings]
+"cmd-r" = "run.rerun"
+"cmd-w" = "run.close-tab"
+"cmd-d" = "run.console.send-eof"
+"escape" = "workbench.focus-editor"
+
+# A message dialog: Enter chooses the default button, Escape cancels.
+[[context]]
+name = "Dialog"
+[context.bindings]
+"enter" = "dialog.confirm"
+"escape" = "dialog.cancel"

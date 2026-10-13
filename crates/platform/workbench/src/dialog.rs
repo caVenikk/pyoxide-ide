@@ -10,6 +10,7 @@ use gpui::{
 };
 use themes::{Metric, UiRole};
 use ui::components::{checkbox, popup_shadow};
+use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
 ui::ui_commands! {
@@ -28,6 +29,8 @@ ui::ui_commands! {
         "Toggles the open dialog's check box.";
 }
 
+/// Size of the dialog's icon (`questionDialog`, `warningDialog`).
+const ICON: f32 = 28.0;
 /// Width of a message dialog.
 const WIDTH: f32 = 420.0;
 
@@ -55,15 +58,19 @@ pub struct Dialog {
     message: SharedString,
     /// The check box's label and state.
     option: Option<(SharedString, bool)>,
+    /// Buttons from left to right; the last one is the default.
     buttons: Vec<DialogButton>,
     /// Index of the default button.
     default: usize,
+    icon: Option<IconName>,
     focus: FocusHandle,
 }
 
 impl EventEmitter<DialogEvent> for Dialog {}
 
 impl Dialog {
+    /// A dialog with `buttons` from left to right; the rightmost is the
+    /// default, as in the reference IDE's message dialogs.
     pub fn new(
         title: impl Into<SharedString>,
         message: impl Into<SharedString>,
@@ -74,10 +81,17 @@ impl Dialog {
             title: title.into(),
             message: message.into(),
             option: None,
+            default: buttons.len().saturating_sub(1),
             buttons,
-            default: 0,
+            icon: None,
             focus: cx.focus_handle(),
         }
+    }
+
+    /// The icon left of the title (question, warning).
+    pub fn with_icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
     }
 
     /// Adds a check box, off.
@@ -91,8 +105,8 @@ impl Dialog {
         serde_json::json!({
             "title": self.title.to_string(),
             "message": self.message.to_string(),
-            "buttons": self.buttons.iter().map(|b| b.label.to_string()).collect::<Vec<_>>(),
-            "default": self.buttons.get(self.default).map(|b| b.label.to_string()),
+            "buttons": self.buttons.iter().map(|b| b.label.replace('&', "")).collect::<Vec<_>>(),
+            "default": self.buttons.get(self.default).map(|b| b.label.replace('&', "")),
             "option": self.option.as_ref().map(|(label, on)| serde_json::json!({
                 "label": label.to_string(),
                 "checked": on,
@@ -199,7 +213,7 @@ impl Render for Dialog {
             .on_action(cx.listener(Self::toggle_option))
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .w(px(WIDTH))
             .p(px(20.0))
             .rounded(px(10.0))
@@ -209,16 +223,33 @@ impl Render for Dialog {
             .shadow(popup_shadow())
             .child(
                 div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.title.clone()),
+                    .flex()
+                    .flex_row()
+                    .gap(px(16.0))
+                    .children(
+                        self.icon
+                            .map(|icon| div().flex_none().child(Icon::new(icon).size(px(ICON)))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(self.title.clone()),
+                            )
+                            .children(
+                                self.message
+                                    .split('\n')
+                                    .map(|line| div().child(SharedString::from(line.to_owned())))
+                                    .collect::<Vec<_>>(),
+                            )
+                            .children(option.map(|o| o.mt(px(4.0)))),
+                    ),
             )
-            .children(
-                self.message
-                    .split('\n')
-                    .map(|line| div().child(SharedString::from(line.to_owned())))
-                    .collect::<Vec<_>>(),
-            )
-            .children(option)
             .child(
                 div()
                     .flex()

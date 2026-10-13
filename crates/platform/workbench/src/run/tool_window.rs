@@ -57,6 +57,20 @@ pub enum TabStatus {
     Ended(Option<ExitStatus>),
 }
 
+/// Stops a process off the UI thread (signalling the process tree walks
+/// the process table) and redraws the window once it is sent, so that the
+/// Stop button turns into Kill.
+fn stop_process(process: ProcessHandle, cx: &mut Context<RunToolWindow>) {
+    let stop = cx.background_spawn(async move {
+        let _ = process.stop();
+    });
+    cx.spawn(async move |this, cx| {
+        stop.await;
+        let _ = this.update(cx, |_, cx| cx.notify());
+    })
+    .detach();
+}
+
 /// One run.
 pub struct RunTab {
     id: u64,
@@ -448,7 +462,7 @@ impl RunToolWindow {
         if tab.is_alive()
             && let Some(p) = &tab.process
         {
-            let _ = p.stop();
+            stop_process(p.clone(), cx);
         }
         cx.notify();
     }
@@ -476,7 +490,7 @@ impl RunToolWindow {
             if !tab.is_stopping()
                 && let Some(p) = &tab.process
             {
-                let _ = p.stop();
+                stop_process(p.clone(), cx);
             }
             tab.restart = true;
             detach(saved);
@@ -519,7 +533,7 @@ impl RunToolWindow {
             && tab.is_alive()
             && let Some(p) = &tab.process
         {
-            let _ = p.stop();
+            stop_process(p.clone(), cx);
         }
         self.selected = match self.selected {
             _ if self.tabs.is_empty() => None,
