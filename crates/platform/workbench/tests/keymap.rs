@@ -4,6 +4,8 @@
 //! its effect. A binding without a check here fails the test, so a new
 //! binding comes with its check.
 
+mod support;
+
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -131,6 +133,66 @@ impl H<'_> {
         let panel = self.workbench(|w, _| w.panel().clone());
         let handle = self.cx.update(|cx| panel.focus_handle(cx));
         self.focus(handle);
+    }
+
+    fn run(&mut self) -> Value {
+        self.invoke("run.state", json!(null))
+    }
+
+    /// Waits (at most 10 s) for a run state that `f` accepts.
+    fn wait_run(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+        let mut last = Value::Null;
+        for _ in 0..1000 {
+            support::tick(self.cx);
+            self.draw();
+            last = self.run();
+            if f(&last) {
+                return last;
+            }
+        }
+        panic!("timed out waiting for {what}: {last:#}");
+    }
+
+    /// Runs a.py with `script` until it prints `marker` (or ends when the
+    /// marker is empty); returns the process id while it runs.
+    fn start_run(&mut self, script: &str, marker: &str) -> Value {
+        support::set_script(script);
+        self.invoke("run.run", json!(null));
+        if marker.is_empty() {
+            self.wait_run("the run to end", |s| {
+                s["tabs"][0]["status"] == json!("terminated")
+            });
+            return Value::Null;
+        }
+        let s = self.wait_run(marker, |s| {
+            s["tabs"][0]["console"]["lines"]
+                .as_array()
+                .is_some_and(|l| {
+                    l.iter()
+                        .any(|l| l["text"].as_str().unwrap().contains(marker))
+                })
+        });
+        s["tabs"][0]["pid"].clone()
+    }
+
+    /// The Run console, or the Run tool window itself, gets the focus.
+    fn focus_run(&mut self, console: bool) {
+        let run = self.workbench(|w, _| w.run_window().clone());
+        let handle = self.cx.update(|cx| {
+            if console {
+                run.read(cx).content_focus(cx)
+            } else {
+                run.focus_handle(cx)
+            }
+        });
+        self.focus(handle);
+    }
+
+    fn focus_dialog(&mut self) {
+        let dialog = self.workbench(|w, cx| w.dialog_focus(cx));
+        if let Some(handle) = dialog {
+            self.focus(handle);
+        }
     }
 
     fn run_focused(&mut self) -> bool {
@@ -368,6 +430,22 @@ impl H<'_> {
         while !self.state()["tree"]["context_menu"].is_null() {
             self.invoke("menu.cancel", json!(null));
         }
+        // No dialog, no run menu, no runs.
+        if !self.state()["dialog"].is_null() {
+            self.focus_dialog();
+            self.invoke("dialog.cancel", json!(null));
+        }
+        if !self.run()["menu"].is_null() {
+            self.invoke("menu.cancel", json!(null));
+        }
+        if self.run()["alive"] == json!(true) {
+            self.invoke("run.stop-all", json!(null));
+            self.invoke("run.stop-all", json!(null));
+            self.wait_run("no process alive", |s| s["alive"] == json!(false));
+        }
+        if !self.run()["tabs"].as_array().unwrap().is_empty() {
+            self.invoke("run.close-all-tabs", json!(null));
+        }
         if self.state()["go_to_line"].is_string() {
             self.invoke("go-to-line.cancel", json!(null));
         }
@@ -413,6 +491,7 @@ impl H<'_> {
 }
 
 fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile::TempDir) {
+    support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
     for (path, text) in [
@@ -429,6 +508,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
     let product = Product {
         name: "Test IDE",
         file_types: vec![python()],
+        run: Some(support::run_hook()),
         ..Product::default()
     };
     let keymap = Keymap::parse(keymap_text).unwrap();
@@ -528,6 +608,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
         .context
         .as_deref()
         .is_some_and(|c| c.starts_with("FindInFiles"));
+    // The Run tool window and its console.
+    let run_context = b.context.as_deref().is_some_and(|c| c.starts_with("Run"));
+    let console_context = b
+        .context
+        .as_deref()
+        .is_some_and(|c| c.starts_with("RunConsole"));
     match b.command.as_str() {
         "find.toggle-case" | "find.toggle-words" | "find.toggle-regex" if in_popup => {
             h.search_in_files(" = ");
@@ -1230,6 +1316,19 @@ fn check(h: &mut H, b: &Binding) -> bool {
             );
             assert!(h.editor_focused(), "{what}");
         }
+        "workbench.hide-tool-window" if run_context => {
+            h.invoke("workbench.toggle-run", json!(null));
+            h.focus_run(false);
+            h.press(keys);
+            let s = h.state();
+            assert_eq!(s["tool_windows"]["run"]["visible"], json!(false), "{what}");
+            assert_eq!(
+                s["tool_windows"]["project"]["visible"],
+                json!(true),
+                "{what}"
+            );
+            assert!(h.editor_focused(), "{what}");
+        }
         "workbench.hide-tool-window" => {
             h.focus_tree();
             h.press(keys);
@@ -1237,10 +1336,93 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["tool_windows"]["project"]["visible"], json!(false));
             assert!(h.editor_focused(), "{what}");
         }
+        "workbench.focus-editor" if run_context => {
+            h.start_run(&support::script("echo done", "echo done"), "");
+            h.focus_run(console_context);
+            h.press(keys);
+            assert!(h.editor_focused(), "{what}");
+        }
         "workbench.focus-editor" => {
             h.focus_tree();
             h.press(keys);
             assert!(h.editor_focused(), "{what}");
+        }
+        "run.run" | "run.current-file" => {
+            support::set_script(&support::script("echo done", "echo done"));
+            h.press(keys);
+            let s = h.wait_run("the run", |s| s["tabs"][0]["status"] == json!("terminated"));
+            assert_eq!(s["tabs"][0]["title"], json!("a"), "{what}");
+            assert_eq!(s["visible"], json!(true), "{what}");
+            assert!(h.editor_focused(), "{what}: the editor keeps the focus");
+        }
+        "run.stop" => {
+            h.start_run(&support::long_running(), "started");
+            h.press(keys);
+            h.wait_run("the stop", |s| s["tabs"][0]["status"] != json!("running"));
+        }
+        "run.rerun" => {
+            let first = h.start_run(&support::long_running(), "started");
+            h.focus_run(console_context);
+            h.press(keys);
+            h.wait_run("the rerun", |s| {
+                s["tabs"][0]["pid"].is_number() && s["tabs"][0]["pid"] != first
+            });
+            assert_eq!(h.run()["tabs"].as_array().unwrap().len(), 1, "{what}");
+        }
+        "run.close-tab" => {
+            h.start_run(&support::script("echo done", "echo done"), "");
+            h.focus_run(console_context);
+            h.press(keys);
+            assert!(h.run()["tabs"].as_array().unwrap().is_empty(), "{what}");
+        }
+        "run.console.previous-link" | "run.console.next-link" => {
+            let a = h.root.join("a.py").display().to_string();
+            let b_path = h.root.join("b.py").display().to_string();
+            h.start_run(
+                &support::script(
+                    &format!("echo 'at {a}:1'; echo 'at {b_path}:1'"),
+                    &format!("echo at {a}:1& echo at {b_path}:1"),
+                ),
+                "",
+            );
+            h.focus_run(false);
+            h.press(keys);
+            // From no link, Down goes to the first link, Up to the last.
+            let expected = if b.command.ends_with("next-link") {
+                "a.py"
+            } else {
+                "b.py"
+            };
+            let path = h.state()["editor"]["path"].as_str().unwrap().to_owned();
+            assert!(path.ends_with(expected), "{what}: {path}");
+        }
+        "run.console.send-eof" => {
+            h.start_run(
+                &support::script(
+                    "echo started; cat; echo done",
+                    "echo started& more& echo done",
+                ),
+                "started",
+            );
+            h.focus_run(true);
+            h.press(keys);
+            h.wait_run("the end of the input", |s| {
+                s["tabs"][0]["status"] == json!("terminated")
+            });
+        }
+        "dialog.confirm" | "dialog.cancel" => {
+            let first = h.start_run(&support::long_running(), "started");
+            h.invoke("run.run", json!(null));
+            assert!(!h.state()["dialog"].is_null(), "{what}");
+            h.press(keys);
+            assert!(h.state()["dialog"].is_null(), "{what}");
+            if b.command == "dialog.confirm" {
+                h.wait_run("Stop and Rerun", |s| {
+                    s["tabs"][0]["pid"].is_number() && s["tabs"][0]["pid"] != first
+                });
+            } else {
+                assert_eq!(h.run()["tabs"][0]["pid"], first, "{what}");
+            }
         }
         "workbench.save-all" => {
             h.set_editor("|");

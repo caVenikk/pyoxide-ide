@@ -686,7 +686,12 @@ impl RunToolWindow {
             .pr(px(4.0))
             .gap(px(4.0))
             .rounded(theme.metric(Metric::ButtonRadius))
-            .when(selected, |d| d.bg(theme.color(UiRole::Pressed)))
+            .border_1()
+            .when(selected, |d| {
+                d.bg(theme.color(UiRole::TabActive))
+                    .border_color(theme.color(UiRole::TabUnderline))
+            })
+            .when(!selected, |d| d.border_color(gpui::transparent_black()))
             .when(!selected, |d| d.hover(move |s| s.bg(hover)))
             .child(icon)
             .child(
@@ -849,6 +854,14 @@ impl RunToolWindow {
             .gap(px(2.0))
             .child(rerun)
             .child(stop)
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h(px(16.0))
+                    .mx(px(3.0))
+                    .bg(cx.theme().color(UiRole::Border)),
+            )
             .child(more)
     }
 

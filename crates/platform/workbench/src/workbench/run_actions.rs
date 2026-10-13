@@ -640,6 +640,11 @@ impl Workbench {
         cx.notify();
     }
 
+    /// The open dialog's focus.
+    pub fn dialog_focus(&self, cx: &App) -> Option<FocusHandle> {
+        self.dialog.as_ref().map(|d| d.dialog.focus_handle(cx))
+    }
+
     /// The open popup menu of the run widget or a Run tab.
     pub(super) fn render_run_menu(&self, window: &Window) -> Option<AnyElement> {
         let open = self.run_menu.as_ref()?;

@@ -29,9 +29,9 @@ const GUTTER_LEFT: f32 = 8.0;
 const GUTTER_RIGHT: f32 = 42.5;
 /// Space between the gutter and column 0 of the text.
 const TEXT_LEFT: f32 = 6.0;
-/// Width of a console's gutter (the reference shows the folding outline
-/// there and no line numbers).
-const CONSOLE_GUTTER: f32 = 12.0;
+/// Room left of a console's text (the reference shows no gutter there;
+/// its folding outline is empty).
+const CONSOLE_GUTTER: f32 = 6.0;
 /// Smallest scrollbar thumb.
 const MIN_THUMB: f32 = 24.0;
 /// Height of a search match mark on the scrollbar.
