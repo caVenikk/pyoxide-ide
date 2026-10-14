@@ -422,6 +422,27 @@ here with: source URL, commit, file(s), license, and what was changed.
   platform-api/src/com/intellij/openapi/keymap/MacKeymapUtil.java. Only
   behaviour and strings are used; reimplemented in Rust, no code is copied.
 
+- crates/platform/ui/src/markdown.rs, crates/platform/code-intel-ui/src/
+  doc.rs, hover.rs, signature.rs, actions.rs
+  Follow the IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2): the tooltip delay of
+  platform/ide-core-impl/src/com/intellij/openapi/editor/ex/
+  EditorSettingsExternalizable.java (500 ms), the parameter info delay of
+  platform/analysis-impl/src/com/intellij/codeInsight/CodeInsightSettings.java
+  (1000 ms), the problem text of platform/lsp/src/api/customization/
+  LspDiagnosticsCustomizer.kt (message, a non-breaking space, the source
+  and the rule as a link), and the keystrokes of QuickJavaDoc,
+  ParameterInfo and ShowErrorDescription in the keymap files; and @
+  2bf84a9b80f1fb7dc2ca7dd23aefa96ef4a16643 (master): the documentation
+  layout of platform/lsp-impl/src/impl/features/documentation/
+  LspDocumentationData.kt (a leading fenced code block is the declaration,
+  a rule right after it is left out), the parameter ranges and current
+  parameter of .../features/parameterInfo/LspParameterInfoHandler.kt, and
+  the names-only parameter list of python/src/com/jetbrains/python/
+  PyParameterInfoHandler.java. Only behaviour, numbers and formats are
+  used; reimplemented in Rust, no code is copied.
+
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,
   and JetBrains Mono 2.304 (c) 2020 The JetBrains Mono Project Authors,

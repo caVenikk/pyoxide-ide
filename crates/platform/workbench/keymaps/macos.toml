@@ -133,6 +133,28 @@ name = "Editor"
 # Code completion
 "ctrl-space" = "code.complete"
 
+# Documentation, parameter info and the problems at the caret. Their
+# popups leave the focus in the editor; Escape closes them (the completion
+# popup's section comes later, so its Escape wins while it shows).
+[[context]]
+name = "Editor"
+[context.bindings]
+"f1" = "code.quick-doc"
+"ctrl-j" = "code.quick-doc"
+"cmd-p" = "code.parameter-info"
+"cmd-f1" = "code.error-description"
+"alt-shift-enter" = "code.apply-first-fix"
+
+[[context]]
+name = "ParameterInfo > Editor"
+[context.bindings]
+"escape" = "parameter-info.close"
+
+[[context]]
+name = "Documentation > Editor"
+[context.bindings]
+"escape" = "documentation.close"
+
 # The completion popup leaves the focus in the editor; while it shows,
 # Enter inserts the selected item, Tab replaces the identifier at the
 # caret with it, Escape closes it, and the keys that move the caret up
