@@ -313,10 +313,18 @@ fn ty_and_ruff_together() {
         assert!(help.signatures[0].label.contains("name"), "{help:#?}");
     }
 
-    // A restart of ty: its items go, ruff's stay; then come back.
+    // A restart of ty: its items go, ruff's stay; then they come back.
+    // (`os` is used now: ruff's F401 is gone once it pulls again, F821
+    // stays.)
     intel.restart(Some(&code_intel::ServerId::new("ty")));
     diagnostics(&events, &main, |items| {
-        has(items, "ty", "invalid-argument-type") && has(items, "ruff", "F401")
+        !items
+            .iter()
+            .any(|d| d.server.as_ref().is_some_and(|s| s.as_str() == "ty"))
+            && has(items, "ruff", "F821")
+    });
+    diagnostics(&events, &main, |items| {
+        has(items, "ty", "invalid-argument-type") && has(items, "ruff", "F821")
     });
     assert_eq!(block_on(intel.shutdown()), Ok(()));
 }
