@@ -29,6 +29,7 @@ members = [
     "crates/platform/ui",
     "crates/platform/workbench",
     "crates/python/py-env",
+    "crates/python/py-lsp",
     "crates/python/py-run",
     "crates/python/py-syntax",
     "crates/python/pyoxide-cli",
@@ -92,6 +93,7 @@ themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
+py-lsp = { path = "crates/python/py-lsp" }
 py-run = { path = "crates/python/py-run" }
 py-syntax = { path = "crates/python/py-syntax" }
 
