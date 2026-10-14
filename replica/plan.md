@@ -68,24 +68,25 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 
 Recon: `replica/recon.md` (area python-intel), scenarios in
 `tests/scenarios/python-intel/`, ADR 0010 (language services over LSP) and
-ADR 0011 (type server: ty), both proposed. Milestone "M3 Python
+ADR 0011 (type server: ty by default, basedpyright as an option), both
+accepted. Defaults: ruff and ty on (Pyoxide has no engine of its own). Milestone "M3 Python
 intelligence".
 
 | issue | owner | crates / files | depends on | status |
 |---|---|---|---|---|
-| #82 Contracts: model, crate skeletons, ADRs | lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | todo |
+| #82 Contracts: model, crate skeletons, ADRs | sub-agent contracts, reviewed by the lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | in progress |
 | #83 LSP client | sub-agent lsp | `crates/platform/lsp-client`, `code-intel` impl parts, fake server binary | #82 | todo |
 | #84 Problems in the editor, hover input | sub-agent editor | `crates/platform/editor` (`editor.rs`, `element.rs`, new `diagnostics.rs`), F2 bindings | #82 | todo |
 | #85 Completion, controller, Language Services widget | sub-agent intel-ui | `crates/platform/code-intel-ui`, `workbench.rs` integration hunks, keymaps, `tests/keymap.rs` | #82, events of #84 | todo |
 | #86 Quick doc, parameter info, navigation, intentions, reformat | sub-agent intel-ui-2 | `code-intel-ui` (own modules), `ui/src/markdown.rs` | #85 first checkpoint | todo |
-| #87 Python services: ruff and ty | sub-agent py-lsp | `crates/python/py-lsp`, `pyoxide-ide` (provider, type engine widget, ruff intentions, interpreter observer) | #82, #83 for live runs | todo |
+| #87 Python services: ruff, ty, basedpyright option | sub-agent py-lsp | `crates/python/py-lsp`, `pyoxide-ide` (provider, type engine widget, ruff intentions, interpreter observer) | #82, #83 for live runs | todo |
 
 Order: #82 on `main`, then #83, #84, #85, #87 in parallel, #86 from #85's
 first checkpoint. Merge order #84, #83, #87, #85, #86 (the integration and
 keymaps rebase last). Later in M3: Find Usages tool window, rename,
 highlight usages, Problems tool window, Go to Class / Symbol and File
 Structure, file watcher and reload from disk, the External Tools settings
-page, basedpyright and pyrefly as alternatives, inlay hints, semantic
+page, pyrefly as an alternative, inlay hints, semantic
 highlighting.
 
 Queue: M3 (#82-#87), then #13 control channel, then #50 (find filters for comments and string

@@ -95,7 +95,7 @@ product (ADR 0005). Pyoxide is the Python product.
 - `code-intel-ui` (platform, GPUI): completion, documentation, parameter
   info, navigation and intention popups, the Language Services widget,
   `code.*` commands; `ui::markdown` renders documentation.
-- `py-lsp` (Python): ruff and ty server specs, executable lookup,
+- `py-lsp` (Python): ruff, ty and basedpyright server specs, executable lookup,
   settings and the one-time import of the reference's tool settings.
 
 ## Planned layers

@@ -27,7 +27,8 @@ Python language services (M3):
 | tool | lookup | version check | when missing |
 |---|---|---|---|
 | ruff (`ruff server`) | interpreter `bin`/`Scripts` -> custom path or PATH and per-user folders -> `uvx ruff` (Lookup sdk / path / uvx, as the reference) | `ruff --version` | not started; Language Services widget hidden or row Terminated with the error output |
-| ty (`ty server`) | same | `ty --version`, minimum version (ADR 0011) | not started; the editor works without code intelligence; notice in the widget |
+| ty (`ty server`), default type server | same | `ty --version`, minimum version (ADR 0011) | not started; the editor works without code intelligence; notice in the widget |
+| basedpyright (`basedpyright-langserver --stdio`), alternative type server | same | `basedpyright --version` | same |
 
 Servers are stopped on project close and on quit; a crash leaves a
 Terminated row with the server's standard error and a Restart action (no
@@ -50,4 +51,4 @@ automatic restart). Server memory is reported next to the application's.
 | Plugins sandboxed (WASM) | M7 |
 | LSP frames from servers parsed defensively (length limits, invalid UTF-8, malformed JSON); framing fuzzed | M3 |
 | Workspace edits from servers applied only to files of the project or open documents, as one undo step | M3 |
-| `uvx` fallback downloads a tool on first use (the reference does it silently); whether Pyoxide asks first | M3, open decision |
+| `uvx` fallback downloads a tool on first use: asked once for Pyoxide's default tools, silent for tools the user enabled, as the reference (ADR 0010) | M3 |

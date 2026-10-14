@@ -1,7 +1,7 @@
 # 0010. Language services over LSP
 
-- Status: proposed
-- Date: 2026-10-13
+- Status: accepted
+- Date: 2026-10-14
 
 ## Context
 The reference IDE highlights problems, completes code, shows documentation
@@ -48,7 +48,7 @@ Option 2, split into a model, a client, a UI layer and the product.
 | `code-intel-ui` | platform | yes | per-window controller attached to tab editors, the completion popup, quick documentation and hover, parameter info, declaration navigation and the usages popup, the intention actions popup, reformat and optimize imports commands, the Language Services status widget and popup, the `code.*` commands and the product hook. |
 | `ui` (module `markdown`) | platform | yes | Markdown to GPUI elements (`pulldown-cmark`, MIT), code blocks coloured by a lexer the caller passes. |
 | `editor` (extended) | platform | yes | the diagnostics of an editor (moved through edits), their painting, the error stripe and inspection widget, next and previous problem, hover and modifier events, a link highlight, geometry queries for popups. |
-| `py-lsp` | python | no | Python language services: server specs for ruff (`ruff server`) and ty (`ty server`), executable lookup, settings, initialization options and `workspace/configuration` answers, ruff rule names, the one-time import of the reference's tool settings. |
+| `py-lsp` | python | no | Python language services: server specs for ruff (`ruff server`), ty (`ty server`) and basedpyright (`basedpyright-langserver --stdio`), executable lookup, settings, initialization options and `workspace/configuration` answers, ruff rule names, the one-time import of the reference's tool settings. |
 | `pyoxide-ide` (extended) | python | yes | the product's `CodeIntelProvider`, the type engine widget, ruff's extra intentions (disable a rule for a file or the project), interpreter changes forwarded to the services. |
 
 Dependencies: `lsp-client` -> `code-intel`, `process`, `text`;
@@ -128,7 +128,7 @@ formatting = true
 import-optimizer = true
 
 [python.type-engine]
-name = "ty"             # the type server (ADR 0011)
+name = "ty"             # ty | basedpyright (ADR 0011)
 ```
 
 ```toml
@@ -140,7 +140,12 @@ path = "/opt/tools/ruff"   # optional custom executable
 Executable lookup follows the reference: `sdk` tries the folder of the
 project interpreter (`bin`, `Scripts` on Windows), then a custom path or
 PATH and per-user tool folders, then `uvx`; `path` skips the interpreter;
-`uvx` always runs `uvx <tool>`. The reference's settings are imported once
+`uvx` always runs `uvx <tool>`. Tools that are on only because they are
+Pyoxide's defaults (ruff, the type server) do not download anything
+without asking: when lookup would end at `uvx`, the Language Services
+widget offers to run the tool through uv once and remembers the answer in
+the personal state. Tools enabled in the settings or imported from the
+reference behave as there (`uvx` without asking). The reference's settings are imported once
 from `.idea/pyLspTools.xml` (`PyToolsState`, and the older form inside
 `RuffConfiguration` and its peers) and `.idea/pyTypeEngine.xml` while
 `project.toml` has no `[python.tools]` table; `.idea` is never written.

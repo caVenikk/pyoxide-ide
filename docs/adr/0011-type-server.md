@@ -1,7 +1,7 @@
 # 0011. Type server for Python
 
-- Status: proposed
-- Date: 2026-10-13
+- Status: accepted
+- Date: 2026-10-14
 
 ## Context
 Without its own engine (ADR 0010) Pyoxide needs one language server that
@@ -52,11 +52,25 @@ ty#3909).
 4. pyright: no semantic tokens, inlay hints or import quick fixes.
 
 ## Decision
-ty is the default type server (`[python.type-engine] name = "ty"`). The
-LSP client stays generic, so basedpyright and pyrefly can be offered as
-alternatives later through server specs, without changes to the platform
+ty is the default type server (`[python.type-engine] name = "ty"`), for its
+speed and memory and because Pyoxide's Python toolchain is Astral's
+throughout: uv for environments, ruff for lint and formatting, ty for
+types, with the same configuration conventions (`pyproject.toml`).
+
+basedpyright is offered as an alternative from the first version
+(`name = "basedpyright"`), for projects that want pyright's semantics:
+
+- started as `basedpyright-langserver --stdio`, found like the other tools;
+- `basedpyright.analysis.typeCheckingMode = "standard"` unless the project
+  configures it, and its unused-symbol rules off while ruff runs;
+- utf-16 positions, documentation through `completionItem/resolve`.
+
+pyrefly can follow through a server spec without changes to the platform
 crates.
 
+- ruff and the type server are enabled by default: Pyoxide has no engine
+  of its own, so without them a Python file gets no code intelligence (the
+  reference runs its own engine and leaves its LSP tools off).
 - A minimum ty version is checked at start (`ty --version`); an older one
   shows in the Language Services widget. An ignored integration test runs
   against the latest ty.
