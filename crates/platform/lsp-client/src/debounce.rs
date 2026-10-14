@@ -123,19 +123,24 @@ mod tests {
         let debouncer = Debouncer::new("test debounce", move |key: &'static str, value: u32| {
             let _ = tx.send((key, value, Instant::now()));
         });
-        let start = Instant::now();
-        debouncer.schedule("a", 1, Duration::from_millis(100));
+        // "a" is due far in the future, so no scheduler delay of a busy
+        // machine can fire it before it is rescheduled below.
+        debouncer.schedule("a", 1, Duration::from_secs(60));
         debouncer.schedule("b", 2, Duration::from_millis(10));
-        thread::sleep(Duration::from_millis(30));
-        debouncer.schedule("a", 3, Duration::from_millis(100));
         let (key, value, _) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!((key, value), ("b", 2));
+        let rescheduled = Instant::now();
+        debouncer.schedule("a", 3, Duration::from_millis(50));
         let (key, value, at) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!((key, value), ("a", 3));
-        assert!(at - start >= Duration::from_millis(125), "{:?}", at - start);
-        debouncer.schedule("c", 4, Duration::from_millis(20));
+        assert!(
+            at - rescheduled >= Duration::from_millis(50),
+            "{:?}",
+            at - rescheduled
+        );
+        debouncer.schedule("c", 4, Duration::from_millis(300));
         debouncer.cancel(&"c");
-        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
         debouncer.schedule("d", 5, Duration::ZERO);
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap().1, 5);
     }
