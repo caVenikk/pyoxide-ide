@@ -788,10 +788,10 @@ mod tests {
             json!({"jsonrpc": "2.0", "id": 5, "method": "client/registerCapability", "params": {}}),
         );
         wait_until(|| recorder.responders.lock().unwrap().len() == 2);
-        assert_eq!(
-            recorder.log(),
-            [r#"window/logMessage {"message":"hi","type":4}"#]
-        );
+        // Formatted as the handler formats it, whatever the key order of
+        // JSON objects is in this build.
+        let expected = format!("window/logMessage {}", json!({"type": 4, "message": "hi"}));
+        assert_eq!(recorder.log(), [expected]);
         let mut responders = std::mem::take(&mut *recorder.responders.lock().unwrap());
         let (method, _, unanswered) = responders.pop().unwrap();
         assert_eq!(method, "client/registerCapability");
