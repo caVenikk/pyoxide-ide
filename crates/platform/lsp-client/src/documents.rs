@@ -65,9 +65,21 @@ impl Mapper {
         self.edits.is_empty()
     }
 
+    /// Moves an offset as a range marker of the editor moves: text
+    /// inserted at a range's start goes before it, text inserted at its
+    /// end stays outside it; a range end inside replaced text goes to the
+    /// replacement's end, a start to its start.
     pub fn map(&self, mut offset: usize, bias: Bias) -> usize {
         for edit in &self.edits {
-            offset = if offset < edit.start || (offset == edit.start && bias == Bias::Start) {
+            let insertion = edit.start == edit.old_end;
+            offset = if offset < edit.start {
+                offset
+            } else if offset == edit.start && insertion {
+                match bias {
+                    Bias::Start => edit.new_end,
+                    Bias::End => offset,
+                }
+            } else if offset == edit.start {
                 offset
             } else if offset >= edit.old_end {
                 offset - edit.old_end + edit.new_end
@@ -256,6 +268,8 @@ mod tests {
         }
         assert!(docs.mapper(&doc, 0).is_none());
         let (_, mapper) = docs.mapper(&doc, 20).unwrap();
-        assert_eq!(mapper.map(0, Bias::End), HISTORY + 10 - 20);
+        // Text inserted at a start goes before it, at an end after it.
+        assert_eq!(mapper.map(0, Bias::Start), HISTORY + 10 - 20);
+        assert_eq!(mapper.map(0, Bias::End), 0);
     }
 }

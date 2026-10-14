@@ -143,13 +143,33 @@ impl Events {
 
     /// Waits until every one of the servers is Running, in any order.
     pub fn running_all(&self, ids: &[&str]) -> BTreeMap<String, ServerStatus> {
+        self.all(ids, "running", |status| {
+            status.state == ServerState::Running
+        })
+    }
+
+    /// Waits until every one of the servers has a document open, in any
+    /// order.
+    pub fn opened_all(&self, ids: &[&str]) -> BTreeMap<String, ServerStatus> {
+        self.all(ids, "with a document", |status| {
+            !status.documents.is_empty()
+        })
+    }
+
+    /// Waits until a status of each server that `accept` takes came, in any
+    /// order.
+    pub fn all(
+        &self,
+        ids: &[&str],
+        what: &str,
+        accept: impl Fn(&ServerStatus) -> bool,
+    ) -> BTreeMap<String, ServerStatus> {
         let mut waiting: BTreeSet<&str> = ids.iter().copied().collect();
         let mut found = BTreeMap::new();
         while !waiting.is_empty() {
-            let status = self.next(&format!("{waiting:?} running"), |event| match event {
+            let status = self.next(&format!("{waiting:?} {what}"), |event| match event {
                 IntelEvent::Status(status)
-                    if status.state == ServerState::Running
-                        && waiting.contains(status.id.as_str()) =>
+                    if waiting.contains(status.id.as_str()) && accept(status) =>
                 {
                     Some(status.clone())
                 }

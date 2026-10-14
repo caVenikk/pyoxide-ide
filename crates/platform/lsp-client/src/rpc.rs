@@ -478,8 +478,15 @@ fn read_loop(shared: &Weak<Shared>, events: &flume::Receiver<ProcessEvent>, hand
                             let dispatched = catch_unwind(AssertUnwindSafe(|| {
                                 dispatch(shared, handler, message);
                             }));
-                            if dispatched.is_err() {
-                                handler.protocol_error("a message could not be handled".into());
+                            if let Err(panic) = dispatched {
+                                let reason = panic
+                                    .downcast_ref::<String>()
+                                    .map(String::as_str)
+                                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                                    .unwrap_or("a panic");
+                                handler.protocol_error(format!(
+                                    "a message could not be handled: {reason}"
+                                ));
                             }
                         }
                         Err(error) => handler.protocol_error(error.to_string()),
