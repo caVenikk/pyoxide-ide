@@ -13,9 +13,10 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, LazyLock, Weak};
 
 use code_intel::{CodeIntel, ServerStatus};
+use code_intel_ui::completion::Parentheses;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, Global, Task};
 use py_lsp::lookup::SearchPaths;
 use py_lsp::ruff::{RuffCustomizer, load_rules};
@@ -45,24 +46,82 @@ ui::ui_commands! {
 pub const RUFF_ICON: IconName = IconName("python/ruff");
 pub const TY_ICON: IconName = IconName("python/ty");
 pub const BASEDPYRIGHT_ICON: IconName = IconName("python/basedpyright");
+/// The same in one colour, for the status bar (the reference colourizes a
+/// server's icon there); ty's placeholder is one colour already.
+pub const RUFF_STATUS_ICON: IconName = IconName("python/ruffStatus");
+pub const BASEDPYRIGHT_STATUS_ICON: IconName = IconName("python/basedpyrightStatus");
 
-const ICONS: &[IconSvg] = &[
-    IconSvg {
-        name: RUFF_ICON.0,
-        light: include_bytes!("../assets/icons/ruff.svg"),
-        dark: Some(include_bytes!("../assets/icons/ruff_dark.svg")),
-    },
-    IconSvg {
-        name: BASEDPYRIGHT_ICON.0,
-        light: include_bytes!("../assets/icons/basedpyright.svg"),
-        dark: Some(include_bytes!("../assets/icons/basedpyright_dark.svg")),
-    },
-    IconSvg {
-        name: TY_ICON.0,
-        light: include_bytes!("../assets/icons/typeServer.svg"),
-        dark: Some(include_bytes!("../assets/icons/typeServer_dark.svg")),
-    },
-];
+const RUFF_SVG: &[u8] = include_bytes!("../assets/icons/ruff.svg");
+const RUFF_DARK_SVG: &[u8] = include_bytes!("../assets/icons/ruff_dark.svg");
+const BASEDPYRIGHT_SVG: &[u8] = include_bytes!("../assets/icons/basedpyright.svg");
+const BASEDPYRIGHT_DARK_SVG: &[u8] = include_bytes!("../assets/icons/basedpyright_dark.svg");
+
+/// The colour of one-colour icons (the platform icons' grey) in the light
+/// and the dark theme.
+const MONOCHROME: [&str; 2] = ["#6C707E", "#CED0D6"];
+
+/// The one-colour copies of ruff's and basedpyright's icons, light and
+/// dark.
+static MONOCHROME_SVGS: LazyLock<[Vec<u8>; 4]> = LazyLock::new(|| {
+    [
+        (RUFF_SVG, MONOCHROME[0]),
+        (RUFF_DARK_SVG, MONOCHROME[1]),
+        (BASEDPYRIGHT_SVG, MONOCHROME[0]),
+        (BASEDPYRIGHT_DARK_SVG, MONOCHROME[1]),
+    ]
+    .map(|(svg, colour)| monochrome(&String::from_utf8_lossy(svg), colour).into_bytes())
+});
+
+fn icons() -> [IconSvg; 5] {
+    let m = &*MONOCHROME_SVGS;
+    [
+        IconSvg {
+            name: RUFF_ICON.0,
+            light: RUFF_SVG,
+            dark: Some(RUFF_DARK_SVG),
+        },
+        IconSvg {
+            name: BASEDPYRIGHT_ICON.0,
+            light: BASEDPYRIGHT_SVG,
+            dark: Some(BASEDPYRIGHT_DARK_SVG),
+        },
+        IconSvg {
+            name: TY_ICON.0,
+            light: include_bytes!("../assets/icons/typeServer.svg"),
+            dark: Some(include_bytes!("../assets/icons/typeServer_dark.svg")),
+        },
+        IconSvg {
+            name: RUFF_STATUS_ICON.0,
+            light: &m[0],
+            dark: Some(&m[1]),
+        },
+        IconSvg {
+            name: BASEDPYRIGHT_STATUS_ICON.0,
+            light: &m[2],
+            dark: Some(&m[3]),
+        },
+    ]
+}
+
+/// Every `#rgb` and `#rrggbb` colour of an SVG replaced by `colour`.
+fn monochrome(svg: &str, colour: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(at) = rest.find('#') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let hex = after.chars().take_while(char::is_ascii_hexdigit).count();
+        if hex == 3 || hex == 6 {
+            out.push_str(colour);
+            rest = &after[hex..];
+        } else {
+            out.push('#');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
 
 /// The icon of a server by its icon key (the tool id).
 pub fn server_icon(key: &str) -> Option<IconName> {
@@ -70,6 +129,15 @@ pub fn server_icon(key: &str) -> Option<IconName> {
         Tool::Ruff => Some(RUFF_ICON),
         Tool::Ty => Some(TY_ICON),
         Tool::Basedpyright => Some(BASEDPYRIGHT_ICON),
+    }
+}
+
+/// The one-colour icon of a server for the status bar.
+pub fn server_status_bar_icon(key: &str) -> Option<IconName> {
+    match Tool::parse(key)? {
+        Tool::Ruff => Some(RUFF_STATUS_ICON),
+        Tool::Ty => Some(TY_ICON),
+        Tool::Basedpyright => Some(BASEDPYRIGHT_STATUS_ICON),
     }
 }
 
@@ -141,6 +209,31 @@ impl CodeIntelProvider for PythonCodeIntel {
 
     fn server_icon(&self, server: &ServerStatus) -> Option<IconName> {
         server_icon(server.icon.as_deref()?)
+    }
+
+    fn server_status_bar_icon(&self, server: &ServerStatus) -> Option<IconName> {
+        server_status_bar_icon(server.icon.as_deref()?)
+    }
+
+    /// The tool's name (`Ruff`, while its server calls itself `ruff`).
+    fn server_title(&self, server: &ServerStatus) -> String {
+        server
+            .icon
+            .as_deref()
+            .and_then(Tool::parse)
+            .map_or_else(|| server.name.clone(), |tool| tool.name().to_owned())
+    }
+
+    fn settings_file(&self, project_root: &Path) -> Option<PathBuf> {
+        Some(project::store::settings_file(project_root))
+    }
+
+    /// Python functions and methods are called with parentheses; `self`
+    /// and `cls` are not passed (the reference's `PyFunctionInsertHandler`).
+    fn parentheses(&self, language: &str) -> Option<Parentheses> {
+        (language == py_lsp::servers::PYTHON).then_some(Parentheses {
+            implicit_first: &["self", "cls"],
+        })
     }
 }
 
@@ -400,7 +493,7 @@ fn active_services(cx: &mut App) -> Option<Entity<PythonServices>> {
 /// Registers the icons and commands, and prepares the servers again when
 /// a project's interpreter changes (the product's `init`).
 pub fn init(cx: &mut App) {
-    ui::icons::register(cx, ICONS);
+    ui::icons::register(cx, &icons());
     ui::command::register(cx, COMMANDS);
     crate::interpreter::on_changed(cx, refresh_root);
     cx.on_action(|action: &AllowUvx, cx| {
@@ -502,7 +595,30 @@ mod tests {
         assert_eq!(server_icon("basedpyright"), Some(BASEDPYRIGHT_ICON));
         assert_eq!(server_icon("ty"), Some(TY_ICON));
         assert_eq!(server_icon("pyrefly"), None);
-        for icon in ICONS {
+        assert_eq!(server_status_bar_icon("ruff"), Some(RUFF_STATUS_ICON));
+        assert_eq!(server_status_bar_icon("ty"), Some(TY_ICON));
+        assert_eq!(
+            monochrome(
+                r##"<rect fill="#FFAF0F"/><path stroke="#fff" clip-path="url(#a)"/>"##,
+                "#6C707E"
+            ),
+            r##"<rect fill="#6C707E"/><path stroke="#6C707E" clip-path="url(#a)"/>"##
+        );
+        let provider = PythonCodeIntel::with_search(SearchPaths::default());
+        let mut ruff = ServerStatus::new(code_intel::ServerId::new("ruff"), "ruff");
+        assert_eq!(provider.server_title(&ruff), "ruff");
+        ruff.icon = Some("ruff".into());
+        assert_eq!(provider.server_title(&ruff), "Ruff");
+        assert_eq!(
+            provider.parentheses("python").map(|p| p.implicit_first),
+            Some(&["self", "cls"][..])
+        );
+        assert_eq!(provider.parentheses("toml"), None);
+        assert_eq!(
+            provider.settings_file(Path::new("/p")),
+            Some(Path::new("/p").join(".oxide").join("project.toml"))
+        );
+        for icon in icons() {
             assert!(
                 ui::icons::rasterize(icon.light, 32).is_some(),
                 "{}",

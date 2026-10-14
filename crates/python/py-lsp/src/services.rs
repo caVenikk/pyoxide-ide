@@ -158,12 +158,10 @@ impl ProjectState {
     }
 }
 
-/// The LSP client takes a project's specs with `LspCodeIntel::set_specs`
-/// (lsp-client, #83); until that lands, the client keeps the specs it was
-/// made with and these are dropped.
+/// The LSP client of a project takes the specs as they are.
 impl SpecTarget for lsp_client::LspCodeIntel {
     fn set_specs(&self, specs: Vec<ServerSpec>) {
-        let _ = specs;
+        lsp_client::LspCodeIntel::set_specs(self, specs);
     }
 }
 

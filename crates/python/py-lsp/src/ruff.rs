@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use code_intel::{
-    CodeAction, CodeActionKind, Diagnostic, DocumentId, FileEdits, Point, ServerId, TextEdit,
+    CodeAction, CodeActionKind, Diagnostic, DocumentId, FileEdits, Point, Rope, ServerId, TextEdit,
     WorkspaceEdit,
 };
 use lsp_client::ServerCustomizer;
@@ -250,14 +250,14 @@ impl ServerCustomizer for RuffCustomizer {
     fn code_actions(
         &self,
         doc: &DocumentId,
+        text: &Rope,
         _: std::ops::Range<Point>,
         _: &code_intel::CodeActionContext,
         actions: &mut Vec<CodeAction>,
     ) {
-        // Customizers do not get the document's text: the file on disk
-        // stands in for it (auto-save keeps it close).
-        let text = std::fs::read_to_string(doc.path()).ok();
-        self.customize_actions(doc, text.as_deref(), actions);
+        // "Disable for this file" looks at the first two lines only.
+        let head: String = text.lines().take(2).map(|line| line.to_string()).collect();
+        self.customize_actions(doc, Some(&head), actions);
     }
 }
 

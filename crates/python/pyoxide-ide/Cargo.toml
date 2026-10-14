@@ -18,6 +18,7 @@ runtime-shaders = ["gpui/runtime_shaders"]
 
 [dependencies]
 code-intel.workspace = true
+code-intel-ui.workspace = true
 dirs = "7"
 editor.workspace = true
 gpui.workspace = true
