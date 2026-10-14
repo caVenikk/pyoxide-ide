@@ -22,7 +22,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use code_intel::{
-    EditReply, EventHub, IntelEvent, MessageLevel, ServerId, ServerState, ServerStatus,
+    DocumentId, EditReply, EventHub, IntelEvent, MessageLevel, ServerId, ServerState, ServerStatus,
 };
 use futures::FutureExt;
 use futures::channel::oneshot;
@@ -32,11 +32,18 @@ use serde_json::{Value, json};
 
 use crate::capabilities::{self, ServerInfo};
 use crate::convert;
+use crate::debounce::Debouncer;
+use crate::diagnostics::Diagnostics;
+use crate::documents::Documents;
 use crate::encoding::{PositionEncoding, Text};
-use crate::rpc::{self, Connection, Handler, Params, Responder, RpcError};
+use crate::rpc::{self, Connection, Handler, Params, Request, Responder, RpcError};
 use crate::spec::ServerSpec;
-use crate::texts;
+use crate::texts::FileTexts;
 use crate::uri;
+
+mod sync;
+
+pub(crate) use sync::{PULL_DELAY, Synced};
 
 /// How long the client waits for a server at each step of its life. The
 /// defaults are the reference's.
@@ -71,6 +78,40 @@ pub(crate) const MAX_ERROR_OUTPUT: usize = 1024 * 1024;
 pub(crate) struct Context {
     pub hub: EventHub,
     pub timeouts: Timeouts,
+    pub documents: Documents,
+    pub diagnostics: Diagnostics,
+    pub files: FileTexts,
+    /// Pulls of diagnostics, by server and document.
+    pub pulls: Debouncer<(ServerId, DocumentId), Weak<LanguageServer>>,
+}
+
+impl Context {
+    pub fn new(timeouts: Timeouts) -> Arc<Self> {
+        Arc::new(Self {
+            hub: EventHub::new(),
+            timeouts,
+            documents: Documents::default(),
+            diagnostics: Diagnostics::default(),
+            files: FileTexts::default(),
+            pulls: Debouncer::new(
+                "lsp diagnostics",
+                |(_, doc), server: Weak<LanguageServer>| {
+                    if let Some(server) = server.upgrade() {
+                        server.pull(&doc);
+                    }
+                },
+            ),
+        })
+    }
+
+    /// The text of a file for converting positions: the open document, or
+    /// the file on disk.
+    pub fn text_of(&self, path: &Path) -> Result<Text, String> {
+        match self.documents.get(&DocumentId::from(path)) {
+            Some(snapshot) => Ok(Text::new(snapshot.text)),
+            None => self.files.text(path),
+        }
+    }
 }
 
 /// One server of a project and its current process, if any.
@@ -102,6 +143,13 @@ pub(crate) struct Session {
     pub connection: Connection,
     process: ProcessHandle,
     pub state: Arc<SessionState>,
+    /// The documents open on the server.
+    docs: Mutex<HashMap<DocumentId, Synced>>,
+    /// The diagnostics pull in flight per document (replacing one cancels
+    /// it).
+    pulls: Mutex<HashMap<DocumentId, Request<()>>>,
+    /// The `resultId` of each document's last pulled report.
+    result_ids: Mutex<HashMap<DocumentId, String>>,
 }
 
 /// What a session learns while it runs; shared with its reader thread.
@@ -297,6 +345,9 @@ impl LanguageServer {
             connection,
             process,
             state,
+            docs: Mutex::new(HashMap::new()),
+            pulls: Mutex::new(HashMap::new()),
+            result_ids: Mutex::new(HashMap::new()),
         });
         {
             let mut slot = self.slot();
@@ -336,7 +387,6 @@ impl LanguageServer {
     fn initialized(&self, session: &Arc<Session>, result: &Value) {
         let info = ServerInfo::from_initialize_result(result);
         let _ = session.state.info.set(info.clone());
-        session.connection.notify("initialized", json!({}));
         let (status, spec) = {
             let mut slot = self.slot();
             if slot.generation != session.generation
@@ -344,6 +394,10 @@ impl LanguageServer {
             {
                 return;
             }
+            // Queued under the lock that makes it Running: nothing about
+            // documents goes out before it, and an exit right after it is
+            // seen once it runs.
+            session.connection.notify("initialized", json!({}));
             if let Some(name) = info.name {
                 slot.status.name = name;
                 slot.reported_name = true;
@@ -365,6 +419,9 @@ impl LanguageServer {
         if let Some(customizer) = &spec.customizer {
             customizer.initialized(&status);
         }
+        // The documents opened before (the reference's
+        // `openForOpenedOrUnsavedFiles`).
+        self.open_all(session);
     }
 
     /// The session cannot go on (no or a failed answer to `initialize`):
@@ -397,7 +454,16 @@ impl LanguageServer {
         };
         slot.session = None;
         slot.status.state = ServerState::Terminated { error_output };
+        slot.status.documents.clear();
         self.emit(slot);
+        self.forget_diagnostics();
+    }
+
+    /// The server's diagnostics go with it.
+    fn forget_diagnostics(&self) {
+        let cx = &self.cx;
+        cx.diagnostics
+            .clear_server(&cx.documents, &cx.hub, &self.id);
     }
 
     /// Ends a session's process on a thread of its own: gracefully
@@ -449,29 +515,36 @@ impl LanguageServer {
         slot.generation += 1;
         if slot.status.state != ServerState::Stopped {
             slot.status.state = ServerState::Stopped;
+            slot.status.documents.clear();
             self.emit(&slot);
         }
         if let Some(session) = slot.session.take() {
+            self.forget_diagnostics();
             self.retire(&mut slot, session, true);
         }
     }
 
     /// The text of a file for converting positions: the open document, or
     /// the file on disk.
-    pub fn text_for(&self, path: &Path) -> Result<Text, String> {
-        texts::read(path)
+    pub fn text_of(&self, path: &Path) -> Result<Text, String> {
+        self.cx.text_of(path)
     }
 
-    fn registered(&self, _generation: u64, _methods: &[String]) {
-        // Document sync and pull diagnostics react to registrations.
+    /// The current session if it is run `generation`.
+    fn session_of(&self, generation: u64) -> Option<Arc<Session>> {
+        let slot = self.slot();
+        if slot.generation != generation {
+            return None;
+        }
+        slot.session.clone()
     }
 
-    fn refresh_diagnostics(&self, _generation: u64) {
-        // Pull diagnostics again for the open documents.
-    }
-
-    fn published_diagnostics(&self, _generation: u64, _params: Value) {
-        // Push diagnostics.
+    fn registered(&self, generation: u64, methods: &[String]) {
+        // A new pull registration makes earlier pulled results stale (the
+        // reference's `restartHighlightingIfNeeded`).
+        if methods.iter().any(|m| m == "textDocument/diagnostic") {
+            self.refresh_diagnostics(generation);
+        }
     }
 }
 
@@ -482,10 +555,6 @@ impl Session {
 
     pub fn encoding(&self) -> PositionEncoding {
         self.state.encoding()
-    }
-
-    pub fn registrations(&self) -> Vec<Registration> {
-        self.state.registrations().clone()
     }
 
     /// The graceful end: `shutdown`, `exit`, then interrupt and kill when
@@ -806,7 +875,7 @@ impl SessionHandler {
                     .map(str::to_owned);
                 let edit = params.get("edit").cloned().unwrap_or(Value::Null);
                 let converted =
-                    convert::workspace_edit(&edit, encoding, &|path| server.text_for(path));
+                    convert::workspace_edit(&edit, encoding, &|path| server.text_of(path));
                 let edit = match converted {
                     Ok(edit) => edit,
                     Err(reason) => {

@@ -2,7 +2,9 @@
 //! scripted fake server built with the crate (`src/bin/lsp-fake-server.rs`),
 //! through the public API.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,149 +17,11 @@ use lsp_client::{LspCodeIntel, ServerCustomizer, ServerSpec, Timeouts};
 use process::CommandLine;
 use serde_json::{Value, json};
 
-const FAKE: &str = env!("CARGO_BIN_EXE_lsp-fake-server");
-const WAIT: Duration = Duration::from_secs(20);
-
-/// Short waits, so stopping a server that does not cooperate is quick.
-const QUICK: Timeouts = Timeouts {
-    initialize: Duration::from_millis(1500),
-    shutdown: Duration::from_millis(500),
-    exit: Duration::from_millis(300),
-};
-
-/// A folder of its own for each test, removed at its end.
-struct TestDir(PathBuf);
-
-impl std::ops::Deref for TestDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn root(test: &str) -> TestDir {
-    let dir = std::env::temp_dir().join(format!("lsp-client-{}-{test}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    TestDir(dir)
-}
-
-/// The URI of a path without characters that need escaping.
-fn file_uri(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('\\', "/");
-    match text.as_bytes() {
-        [drive, b':', ..] if cfg!(windows) => {
-            format!(
-                "file:///{}%3A{}",
-                (*drive as char).to_ascii_lowercase(),
-                &text[2..]
-            )
-        }
-        _ => format!("file://{text}"),
-    }
-}
-
-fn spec(id: &str, root: &Path, steps: Vec<Value>) -> ServerSpec {
-    let command =
-        CommandLine::new(FAKE).with_env("LSP_FAKE_SCRIPT", Value::Array(steps).to_string());
-    ServerSpec::new(id, command, root)
-        .with_languages(["python"])
-        .with_features(Features::all())
-}
-
-/// `initialize` answered with `result`, then `initialized`.
-fn handshake(result: Value) -> Vec<Value> {
-    vec![
-        json!({"expect": "initialize"}),
-        json!({"reply": result}),
-        json!({"expect": "initialized", "params": {}}),
-    ]
-}
-
-fn steps(parts: impl IntoIterator<Item = Vec<Value>>) -> Vec<Value> {
-    parts.into_iter().flatten().collect()
-}
+use common::*;
 
 fn open(intel: &dyn CodeIntel, root: &Path) {
     let doc = DocumentId::new(root.join("main.py"));
     intel.did_open(&doc, "python", 1, &Rope::from_str("import os\n"));
-}
-
-struct Events(flume::Receiver<IntelEvent>);
-
-impl Events {
-    fn of(intel: &dyn CodeIntel) -> Self {
-        Self(intel.events())
-    }
-
-    /// The first event `wanted` accepts, skipping others.
-    fn next<T>(&self, what: &str, mut wanted: impl FnMut(IntelEvent) -> Option<T>) -> T {
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let left = deadline.saturating_duration_since(Instant::now());
-            match self.0.recv_timeout(left) {
-                Ok(event) => {
-                    if let Some(found) = wanted(event) {
-                        return found;
-                    }
-                }
-                Err(_) => panic!("no {what} within {WAIT:?}"),
-            }
-        }
-    }
-
-    /// The next status of server `id` in a state `state` accepts; a
-    /// termination it does not accept fails the test.
-    fn status(&self, id: &str, state: impl Fn(&ServerState) -> bool) -> ServerStatus {
-        self.next(&format!("status of {id}"), |event| match event {
-            IntelEvent::Status(status) if status.id.as_str() == id => {
-                if state(&status.state) {
-                    return Some(status);
-                }
-                if let ServerState::Terminated { error_output } = &status.state {
-                    panic!("{id} terminated: {error_output}");
-                }
-                None
-            }
-            _ => None,
-        })
-    }
-
-    fn running(&self, id: &str) -> ServerStatus {
-        self.status(id, |s| *s == ServerState::Running)
-    }
-
-    fn terminated(&self, id: &str) -> String {
-        match self
-            .status(id, |s| matches!(s, ServerState::Terminated { .. }))
-            .state
-        {
-            ServerState::Terminated { error_output } => error_output,
-            _ => unreachable!(),
-        }
-    }
-
-    /// Waits for a `window/logMessage` marker of the script.
-    fn log(&self, text: &str) {
-        self.next(&format!("log {text:?}"), |event| match event {
-            IntelEvent::Message {
-                level: MessageLevel::Log,
-                text: t,
-                ..
-            } if t == text => Some(()),
-            IntelEvent::Status(ServerStatus {
-                state: ServerState::Terminated { error_output },
-                ..
-            }) => panic!("terminated: {error_output}"),
-            _ => None,
-        })
-    }
 }
 
 #[derive(Default)]
@@ -348,22 +212,18 @@ fn the_server_asks_and_the_client_answers() {
             percentage,
             done,
         } => {
-            assert_eq!(server, ServerId::new("fake"));
-            progress.push((title, message, percentage, done));
+            assert_eq!(*server, ServerId::new("fake"));
+            progress.push((title.clone(), message.clone(), *percentage, *done));
             None
         }
         IntelEvent::Message { level, text, .. } if text == "requests done" => {
-            assert_eq!(level, MessageLevel::Log);
+            assert_eq!(*level, MessageLevel::Log);
             Some(())
         }
         IntelEvent::Message { level, text, .. } => {
-            messages.push((level, text));
+            messages.push((*level, text.clone()));
             None
         }
-        IntelEvent::Status(ServerStatus {
-            state: ServerState::Terminated { error_output },
-            ..
-        }) => panic!("{error_output}"),
         _ => None,
     });
     assert_eq!(
@@ -434,7 +294,7 @@ fn edits_the_server_asks_for_go_to_the_application() {
                 edit,
                 reply,
             } => {
-                assert_eq!(server, ServerId::new("fake"));
+                assert_eq!(*server, ServerId::new("fake"));
                 assert_eq!(label.as_deref(), Some("Fix it"));
                 assert_eq!(edit.files.len(), 1);
                 assert_eq!(edit.files[0].path, file);
@@ -518,14 +378,16 @@ fn servers_that_cannot_start_are_terminated() {
     let intel = LspCodeIntel::with_timeouts(vec![missing, failing, silent], QUICK);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
-    let error = events.terminated("missing");
+    // Each in its own time, in any order.
+    let errors = events.terminated_all(&["missing", "failing", "silent"]);
+    let error = &errors["missing"];
     assert!(error.starts_with("Cannot run program"), "{error}");
-    let error = events.terminated("failing");
+    let error = &errors["failing"];
     assert!(
         error.contains("failed to initialize: no workspace"),
         "{error}"
     );
-    let error = events.terminated("silent");
+    let error = &errors["silent"];
     assert!(
         error.contains("did not answer initialize in 1.5 s"),
         "{error}"
@@ -645,9 +507,8 @@ fn specs_are_replaced_while_documents_are_open() {
     let mut renamed = spec("a", &root, script()).with_features(Features::NONE);
     renamed.name = "renamed".into();
     intel.set_specs(vec![renamed]);
-    let status = events.status("a", |_| true);
+    let status = events.status_where("a", |s| s.name == "renamed");
     assert_eq!(status.state, ServerState::Running);
-    assert_eq!(status.name, "renamed");
     assert!(status.features.is_empty());
     assert_eq!(intel.specs()[0].name, "renamed");
 
@@ -655,9 +516,8 @@ fn specs_are_replaced_while_documents_are_open() {
     let resettled = spec("a", &root, script()).with_settings(json!({"x": 1}));
     intel.set_specs(vec![resettled, spec("b", &root, script())]);
     events.status("a", |s| *s == ServerState::Stopped);
-    events.status("a", |s| *s == ServerState::Initializing);
-    events.running("a");
-    events.running("b");
+    // The two start on threads of their own: either may run first.
+    events.running_all(&["a", "b"]);
     let ids: Vec<String> = intel.status().iter().map(|s| s.id.to_string()).collect();
     assert_eq!(ids, ["a", "b"]);
 
@@ -671,7 +531,7 @@ fn specs_are_replaced_while_documents_are_open() {
     intel.did_close(&DocumentId::new(root.join("main.py")));
     intel.set_specs(vec![spec("c", &root, script())]);
     events.status("b", |s| *s == ServerState::Stopped);
-    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(intel.status()[0].id, ServerId::new("c"));
     assert_eq!(intel.status()[0].state, ServerState::Stopped);
     assert_eq!(block_on(intel.shutdown()), Ok(()));
 }

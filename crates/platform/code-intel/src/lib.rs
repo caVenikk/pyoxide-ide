@@ -139,6 +139,13 @@ pub trait CodeIntel: Send + Sync + 'static {
     /// as they are.
     fn resolve_completion(&self, doc: &DocumentId, item: CompletionItem) -> Intel<CompletionItem>;
 
+    /// The characters that open completion when typed in the document (the
+    /// servers' trigger characters, such as `.`).
+    fn completion_triggers(&self, doc: &DocumentId) -> Vec<char> {
+        let _ = doc;
+        Vec::new()
+    }
+
     /// Documentation of the symbol at a position (quick documentation,
     /// hover).
     fn hover(&self, doc: &DocumentId, at: Point) -> Intel<Option<Hover>>;

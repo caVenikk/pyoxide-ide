@@ -3,8 +3,11 @@
 //! file, an edit of a file the user has not opened). Read off the UI
 //! thread, bounded in size.
 
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
+use std::time::SystemTime;
 
 use text::Rope;
 
@@ -12,6 +15,43 @@ use crate::encoding::Text;
 
 /// The largest file read to convert positions.
 pub(crate) const MAX_FILE_SIZE: u64 = 64 * 1024 * 1024;
+
+/// A file's text and the modification time and size it was read at.
+type Cached = (Option<SystemTime>, u64, Text);
+
+/// Files kept by [`FileTexts`].
+const CACHED_FILES: usize = 128;
+
+/// Texts of files read before, kept while their modification time and size
+/// stay the same (the usages of a symbol come from the same files again and
+/// again).
+#[derive(Debug, Default)]
+pub(crate) struct FileTexts {
+    cache: Mutex<HashMap<PathBuf, Cached>>,
+}
+
+impl FileTexts {
+    pub fn text(&self, path: &Path) -> Result<Text, String> {
+        let metadata =
+            fs::metadata(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let stamp = (metadata.modified().ok(), metadata.len());
+        {
+            let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((modified, len, text)) = cache.get(path)
+                && (*modified, *len) == stamp
+            {
+                return Ok(text.clone());
+            }
+        }
+        let text = read(path)?;
+        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        if cache.len() >= CACHED_FILES {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), (stamp.0, stamp.1, text.clone()));
+        Ok(text)
+    }
+}
 
 /// The text of a file on disk, decoded as the editor decodes it (BOM,
 /// UTF-16, line breaks normalised to `\n`).

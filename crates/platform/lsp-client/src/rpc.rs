@@ -34,7 +34,6 @@ use crate::framing::{self, FrameDecoder};
 
 /// JSON-RPC and LSP error codes.
 pub(crate) mod code {
-    pub const INVALID_PARAMS: i64 = -32602;
     pub const METHOD_NOT_FOUND: i64 = -32601;
     pub const INTERNAL_ERROR: i64 = -32603;
     pub const REQUEST_CANCELLED: i64 = -32800;
@@ -49,6 +48,8 @@ pub(crate) enum RpcError {
     Server { code: i64, message: String },
     /// The connection is closed: the server exited or is being stopped.
     Closed,
+    /// The answer came for a text that has changed since.
+    Outdated,
     /// The answer did not have the expected form.
     Malformed(String),
 }
@@ -88,6 +89,7 @@ impl fmt::Display for RpcError {
         match self {
             RpcError::Server { code, message } => write!(f, "{message} ({code})"),
             RpcError::Closed => f.write_str("the connection is closed"),
+            RpcError::Outdated => f.write_str("the text changed"),
             RpcError::Malformed(message) => f.write_str(message),
         }
     }
@@ -387,6 +389,7 @@ pub(crate) struct Request<T> {
 }
 
 impl<T> Request<T> {
+    #[cfg(test)]
     pub fn id(&self) -> i64 {
         self.id
     }

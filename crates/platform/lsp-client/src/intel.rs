@@ -1,17 +1,20 @@
 //! [`CodeIntel`] over the language servers of a project.
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use code_intel::{
-    AppliedEdit, CodeAction, CodeActionContext, CodeIntel, CompletionItem, CompletionTrigger,
-    Completions, DocumentId, EventHub, FileChange, FormatOptions, Hover, Intel, IntelEvent,
-    Location, Point, Rope, ServerId, ServerStatus, SignatureContext, SignatureHelp, TextEdit,
-    ready, unsupported,
+    AppliedEdit, CodeAction, CodeActionContext, CodeActionKind, CodeIntel, Command, CompletionItem,
+    CompletionTrigger, Completions, DocumentHighlight, DocumentId, Feature, FileChange,
+    FileChangeKind, FormatOptions, Hover, Intel, IntelError, IntelEvent, Location, Point, Rope,
+    ServerId, ServerState, ServerStatus, SignatureContext, SignatureHelp, TextEdit, WorkspaceEdit,
+    ready,
 };
+use serde_json::json;
 
+use crate::convert::Raw;
+use crate::features::{self, Request, Target};
 use crate::server::{Context, LanguageServer, Timeouts};
 use crate::spec::ServerSpec;
 
@@ -19,14 +22,19 @@ use crate::spec::ServerSpec;
 /// goes to the servers of its language, each request to the servers that
 /// serve its feature. Servers start when the first document of theirs
 /// opens.
+///
+/// Routing, as ADR 0010: a feature goes to the running servers whose spec
+/// lists it and that offer it. Completion, definitions, references and code
+/// actions are merged from all of them (code actions quick fixes first);
+/// hover and signature help come from the first that has one; formatting,
+/// rename and highlights from the first server only. Diagnostics of a
+/// document arrive with every server's items.
 pub struct LspCodeIntel {
     cx: Arc<Context>,
     servers: Mutex<Vec<Arc<LanguageServer>>>,
     /// Servers replaced or removed by [`LspCodeIntel::set_specs`] whose
     /// processes may still be stopping.
     retired: Mutex<Vec<Arc<LanguageServer>>>,
-    /// The language of each open document.
-    open: Mutex<HashMap<DocumentId, String>>,
     /// Shut down: no server starts again.
     closed: AtomicBool,
 }
@@ -45,10 +53,7 @@ impl LspCodeIntel {
     /// With other waiting times than the reference's (tests, slow
     /// machines).
     pub fn with_timeouts(specs: Vec<ServerSpec>, timeouts: Timeouts) -> Arc<Self> {
-        let cx = Arc::new(Context {
-            hub: EventHub::new(),
-            timeouts,
-        });
+        let cx = Context::new(timeouts);
         let servers = specs
             .into_iter()
             .map(|spec| LanguageServer::new(spec, cx.clone()))
@@ -57,7 +62,6 @@ impl LspCodeIntel {
             cx,
             servers: Mutex::new(servers),
             retired: Mutex::new(Vec::new()),
-            open: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
         })
     }
@@ -74,8 +78,9 @@ impl LspCodeIntel {
     /// interpreter or the settings changed). A server whose spec is gone,
     /// or changed in how it starts (command line, folder, initialization
     /// options, settings), is stopped; a changed or new one starts when a
-    /// document of its languages is open. A server with only a new name,
-    /// icon, features, languages or customizer keeps running.
+    /// document of its languages is open, and gets the open documents. A
+    /// server with only a new name, icon, features, languages or customizer
+    /// keeps running.
     pub fn set_specs(&self, specs: Vec<ServerSpec>) {
         let mut stopping = Vec::new();
         let mut fresh = Vec::new();
@@ -113,7 +118,13 @@ impl LspCodeIntel {
         if self.is_closed() {
             return;
         }
-        let languages: Vec<String> = lock(&self.open).values().cloned().collect();
+        let languages: Vec<String> = self
+            .cx
+            .documents
+            .all()
+            .into_iter()
+            .map(|(_, s)| s.language)
+            .collect();
         for server in fresh {
             let spec = server.spec();
             if languages.iter().any(|language| spec.serves(language)) {
@@ -123,8 +134,17 @@ impl LspCodeIntel {
     }
 
     /// The settings or the customizers' answers changed: the running
-    /// servers are told (`workspace/didChangeConfiguration`).
-    pub fn configuration_changed(&self) {}
+    /// servers are told with an empty `workspace/didChangeConfiguration`
+    /// and ask for their settings again (`workspace/configuration`).
+    pub fn configuration_changed(&self) {
+        for server in self.servers() {
+            if let Some(session) = server.running_session() {
+                session
+                    .connection
+                    .notify("workspace/didChangeConfiguration", json!({"settings": {}}));
+            }
+        }
+    }
 
     fn servers(&self) -> Vec<Arc<LanguageServer>> {
         lock(&self.servers).clone()
@@ -137,86 +157,317 @@ impl LspCodeIntel {
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
+
+    /// The servers of the document's language whose spec lists `feature`.
+    fn candidates(&self, language: &str, feature: Feature) -> Vec<Arc<LanguageServer>> {
+        self.servers()
+            .into_iter()
+            .filter(|s| {
+                let spec = s.spec();
+                spec.serves(language) && spec.features.contains(feature)
+            })
+            .collect()
+    }
+
+    /// Where a request about `doc` goes: the running servers that serve
+    /// `feature` and offer `capability`. Unsupported when no server serves
+    /// it, NotRunning when the ones that would are not running.
+    fn route(
+        &self,
+        doc: &DocumentId,
+        features: &[Feature],
+        capability: (&str, &str),
+    ) -> Result<(Request, Vec<Target>), IntelError> {
+        let snapshot = self.cx.documents.get(doc).ok_or(IntelError::Unsupported)?;
+        let mut candidates: Vec<Arc<LanguageServer>> = Vec::new();
+        for feature in features {
+            for server in self.candidates(&snapshot.language, *feature) {
+                if !candidates.iter().any(|c| Arc::ptr_eq(c, &server)) {
+                    candidates.push(server);
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return Err(IntelError::Unsupported);
+        }
+        let mut waiting = false;
+        let mut targets = Vec::new();
+        for server in candidates {
+            let Some(session) = server.running_session() else {
+                waiting |= server.status().state != ServerState::Running;
+                continue;
+            };
+            if !session.provides(capability.0, capability.1) {
+                continue;
+            }
+            let Some(uri) = session.uri_of(doc) else {
+                waiting = true;
+                continue;
+            };
+            targets.push(Target {
+                server,
+                session,
+                uri,
+            });
+        }
+        if targets.is_empty() {
+            return Err(if waiting {
+                IntelError::NotRunning
+            } else {
+                IntelError::Unsupported
+            });
+        }
+        let request = Request {
+            cx: self.cx.clone(),
+            doc: doc.clone(),
+            snapshot,
+        };
+        Ok((request, targets))
+    }
+
+    fn route_feature(
+        &self,
+        doc: &DocumentId,
+        feature: Feature,
+    ) -> Result<(Request, Vec<Target>), IntelError> {
+        self.route(doc, &[feature], features::provider(feature))
+    }
+
+    /// The running server of a token's value, if it still runs that
+    /// session.
+    fn target_of(&self, doc: &DocumentId, raw: &Raw) -> Option<(Request, Target)> {
+        let server = self.server(&raw.server)?;
+        let session = server.running_session()?;
+        if session.generation != raw.generation {
+            return None;
+        }
+        let snapshot = self.cx.documents.get(doc)?;
+        let uri = session.uri_of(doc)?;
+        Some((
+            Request {
+                cx: self.cx.clone(),
+                doc: doc.clone(),
+                snapshot,
+            },
+            Target {
+                server,
+                session,
+                uri,
+            },
+        ))
+    }
+}
+
+fn routed<T: Send + 'static>(
+    route: Result<(Request, Vec<Target>), IntelError>,
+    call: impl FnOnce(Request, Vec<Target>) -> Intel<T>,
+) -> Intel<T> {
+    match route {
+        Ok((request, targets)) => call(request, targets),
+        Err(error) => ready(Err(error)),
+    }
 }
 
 impl CodeIntel for LspCodeIntel {
-    fn did_open(&self, doc: &DocumentId, language: &str, _: u64, _: &Rope) {
-        lock(&self.open).insert(doc.clone(), language.to_owned());
+    fn did_open(&self, doc: &DocumentId, language: &str, version: u64, text: &Rope) {
+        self.cx.documents.open(doc, language, version, text);
         if self.is_closed() {
             return;
         }
         for server in self.servers() {
             if server.spec().serves(language) {
                 server.ensure_started();
+                server.open(doc);
             }
         }
     }
 
-    fn did_change(&self, _: &DocumentId, _: u64, _: &[AppliedEdit], _: &Rope) {}
+    fn did_change(&self, doc: &DocumentId, version: u64, edits: &[AppliedEdit], text: &Rope) {
+        let Some(base) = self.cx.documents.change(doc, version, Some(edits), text) else {
+            return;
+        };
+        for server in self.servers() {
+            server.change(doc, Some(base), version, edits, text);
+        }
+    }
 
-    fn did_reload(&self, _: &DocumentId, _: u64, _: &Rope) {}
+    fn did_reload(&self, doc: &DocumentId, version: u64, text: &Rope) {
+        if self.cx.documents.change(doc, version, None, text).is_none() {
+            return;
+        }
+        for server in self.servers() {
+            server.change(doc, None, version, &[], text);
+        }
+    }
 
-    fn did_save(&self, _: &DocumentId, _: &Rope) {}
+    fn did_save(&self, doc: &DocumentId, text: &Rope) {
+        let change = [FileChange::new(doc.path(), FileChangeKind::Changed)];
+        for server in self.servers() {
+            server.save(doc, text);
+            server.files_changed(&change);
+        }
+    }
 
     fn did_close(&self, doc: &DocumentId) {
-        lock(&self.open).remove(doc);
+        self.cx.documents.close(doc);
+        self.cx.diagnostics.close(doc);
+        for server in self.servers() {
+            server.close(doc);
+        }
     }
 
-    fn files_changed(&self, _: &[FileChange]) {}
-
-    fn completion(&self, _: &DocumentId, _: Point, _: CompletionTrigger) -> Intel<Completions> {
-        unsupported()
+    fn files_changed(&self, changes: &[FileChange]) {
+        for server in self.servers() {
+            server.files_changed(changes);
+        }
     }
 
-    fn resolve_completion(&self, _: &DocumentId, item: CompletionItem) -> Intel<CompletionItem> {
-        ready(Ok(item))
+    fn completion(
+        &self,
+        doc: &DocumentId,
+        at: Point,
+        trigger: CompletionTrigger,
+    ) -> Intel<Completions> {
+        routed(self.route_feature(doc, Feature::Completion), |r, t| {
+            features::completion(r, t, at, trigger)
+        })
     }
 
-    fn hover(&self, _: &DocumentId, _: Point) -> Intel<Option<Hover>> {
-        unsupported()
+    fn resolve_completion(&self, doc: &DocumentId, item: CompletionItem) -> Intel<CompletionItem> {
+        let found = Raw::of(item.token.as_ref()).and_then(|raw| self.target_of(doc, raw));
+        match found {
+            Some((request, target)) => features::resolve_completion(request, Some(target), item),
+            None => ready(Ok(item)),
+        }
+    }
+
+    fn completion_triggers(&self, doc: &DocumentId) -> Vec<char> {
+        match self.route_feature(doc, Feature::Completion) {
+            Ok((_, targets)) => features::completion_triggers(&targets),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn hover(&self, doc: &DocumentId, at: Point) -> Intel<Option<Hover>> {
+        routed(self.route_feature(doc, Feature::Hover), |r, t| {
+            features::hover(r, t, at)
+        })
     }
 
     fn signature_help(
         &self,
-        _: &DocumentId,
-        _: Point,
-        _: SignatureContext,
+        doc: &DocumentId,
+        at: Point,
+        context: SignatureContext,
     ) -> Intel<Option<SignatureHelp>> {
-        unsupported()
+        routed(self.route_feature(doc, Feature::SignatureHelp), |r, t| {
+            features::signature_help(r, t, at, context)
+        })
     }
 
-    fn definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
-        unsupported()
+    fn definition(&self, doc: &DocumentId, at: Point) -> Intel<Vec<Location>> {
+        routed(self.route_feature(doc, Feature::Definition), |r, t| {
+            features::locations(r, t, "textDocument/definition", at, None)
+        })
     }
 
-    fn type_definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
-        unsupported()
+    fn type_definition(&self, doc: &DocumentId, at: Point) -> Intel<Vec<Location>> {
+        routed(self.route_feature(doc, Feature::TypeDefinition), |r, t| {
+            features::locations(r, t, "textDocument/typeDefinition", at, None)
+        })
     }
 
-    fn references(&self, _: &DocumentId, _: Point, _: bool) -> Intel<Vec<Location>> {
-        unsupported()
+    fn references(
+        &self,
+        doc: &DocumentId,
+        at: Point,
+        include_declaration: bool,
+    ) -> Intel<Vec<Location>> {
+        routed(self.route_feature(doc, Feature::References), |r, t| {
+            features::locations(
+                r,
+                t,
+                "textDocument/references",
+                at,
+                Some(include_declaration),
+            )
+        })
     }
 
     fn code_actions(
         &self,
-        _: &DocumentId,
-        _: Range<Point>,
-        _: CodeActionContext,
+        doc: &DocumentId,
+        range: Range<Point>,
+        context: CodeActionContext,
     ) -> Intel<Vec<CodeAction>> {
-        unsupported()
+        // Optimize Imports also goes to servers that only organize imports.
+        let mut features = vec![Feature::CodeActions];
+        if context.wants(&CodeActionKind::organize_imports()) {
+            features.push(Feature::OrganizeImports);
+        }
+        let route = self.route(doc, &features, features::provider(Feature::CodeActions));
+        routed(route, |r, t| features::code_actions(r, t, range, context))
     }
 
-    fn resolve_code_action(&self, _: &DocumentId, action: CodeAction) -> Intel<CodeAction> {
-        ready(Ok(action))
+    fn resolve_code_action(&self, doc: &DocumentId, action: CodeAction) -> Intel<CodeAction> {
+        let found = Raw::of(action.token.as_ref()).and_then(|raw| self.target_of(doc, raw));
+        match found {
+            Some((request, target)) => features::resolve_code_action(request, Some(target), action),
+            None => ready(Ok(action)),
+        }
     }
 
     fn format(
         &self,
-        _: &DocumentId,
-        _: Option<Range<Point>>,
-        _: FormatOptions,
+        doc: &DocumentId,
+        range: Option<Range<Point>>,
+        options: FormatOptions,
     ) -> Intel<Vec<TextEdit>> {
-        unsupported()
+        let capability = match range {
+            Some(_) => (
+                "documentRangeFormattingProvider",
+                "textDocument/rangeFormatting",
+            ),
+            None => features::provider(Feature::Formatting),
+        };
+        // One server formats: the first the product lists.
+        routed(
+            self.route(doc, &[Feature::Formatting], capability),
+            |r, mut t| features::format(r, t.swap_remove(0), range, options),
+        )
+    }
+
+    fn execute_command(&self, command: Command) -> Intel<()> {
+        let Some(raw) = command.token.downcast_ref::<Raw>() else {
+            return ready(Err(IntelError::Unsupported));
+        };
+        let Some(server) = self.server(&raw.server) else {
+            return ready(Err(IntelError::NotRunning));
+        };
+        match server.running_session() {
+            Some(session) if session.generation == raw.generation => features::execute_command(
+                Target {
+                    server,
+                    session,
+                    uri: String::new(),
+                },
+                raw,
+            ),
+            _ => ready(Err(IntelError::NotRunning)),
+        }
+    }
+
+    fn rename(&self, doc: &DocumentId, at: Point, new_name: String) -> Intel<WorkspaceEdit> {
+        routed(self.route_feature(doc, Feature::Rename), |r, mut t| {
+            features::rename(r, t.swap_remove(0), at, new_name)
+        })
+    }
+
+    fn document_highlights(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DocumentHighlight>> {
+        routed(
+            self.route_feature(doc, Feature::DocumentHighlights),
+            |r, mut t| features::document_highlights(r, t.swap_remove(0), at),
+        )
     }
 
     fn status(&self) -> Vec<ServerStatus> {
@@ -297,6 +548,12 @@ mod tests {
             block_on(intel.completion(&doc, Point::new(0, 1), CompletionTrigger::Invoked)),
             Err(IntelError::Unsupported)
         );
+        // A document that is not open.
+        assert_eq!(
+            block_on(intel.hover(&DocumentId::new("/p/b.py"), Point::new(0, 0))),
+            Err(IntelError::Unsupported)
+        );
+        assert!(intel.completion_triggers(&doc).is_empty());
         assert_eq!(block_on(intel.shutdown()), Ok(()));
     }
 }

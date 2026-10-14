@@ -19,22 +19,25 @@
 //! - `capabilities`: what the client advertises and reads at `initialize`;
 //! - `encoding`: position encodings and conversion between the model's
 //!   points and LSP positions;
-//! - `server`: one server's lifecycle and the requests it sends the client;
+//! - `server`: one server's lifecycle and the requests it sends the client,
+//!   with `server::sync`: its documents and their diagnostics;
+//! - `documents`, `diagnostics`: the open documents with their recent
+//!   history, and every server's diagnostics of them;
+//! - `features`, `convert`: the language features and the conversion of
+//!   answers to the model;
+//! - `glob`: the file watchers servers register;
 //! - `intel`: [`LspCodeIntel`].
-//!
-//! Servers start, initialize, report their states and stop; document sync
-//! and the language features are not routed yet (they answer
-//! [`code_intel::IntelError::Unsupported`]).
-
-// Checkpoint of #83: the conversions and requests the feature routing will
-// use are in place before the routing itself.
-#![allow(dead_code, reason = "used by the feature routing, next stage")]
 
 mod capabilities;
 mod convert;
 mod customizer;
+mod debounce;
+mod diagnostics;
+mod documents;
 mod encoding;
+mod features;
 mod framing;
+mod glob;
 mod intel;
 mod rpc;
 mod server;

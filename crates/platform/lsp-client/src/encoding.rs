@@ -1,14 +1,14 @@
 //! Positions: the model's char-based [`Point`]s and LSP positions in the
 //! encoding negotiated with each server.
 //!
-//! LSP counts lines by `\n` (the text has no other separators: `\r\n` and
-//! `\r` are normalised on load) and columns in UTF-8 bytes, UTF-16 code
-//! units or UTF-32 units (chars). The rope also breaks lines at vertical
-//! tab, form feed, NEL and the Unicode line and paragraph separators, so
-//! in a text with any of those its line numbers differ from the server's;
-//! [`Text`] notices them once and converts through char offsets then.
+//! Lines are the same on both sides: the text breaks lines at `\n` only (it
+//! normalises `\r\n` and `\r` on load; the `text` crate's rope does not take
+//! form feeds or Unicode separators as breaks), as LSP does. Columns are
+//! chars in the model and UTF-8 bytes, UTF-16 code units or UTF-32 units
+//! (chars) for a server.
 
-use lsp_types::Position;
+use code_intel::AppliedEdit;
+use lsp_types::{Position, Range};
 use text::{Point, Rope};
 
 /// How a server counts columns, negotiated at `initialize`.
@@ -34,6 +34,7 @@ impl PositionEncoding {
         }
     }
 
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             PositionEncoding::Utf8 => "utf-8",
@@ -50,46 +51,54 @@ impl PositionEncoding {
             PositionEncoding::Utf32 => s.chars().count(),
         }
     }
+
+    /// The byte index in `s` of `units` units of this encoding (clamped to
+    /// the end, rounded down to a char boundary).
+    pub fn byte_index(self, s: &str, units: usize) -> usize {
+        let mut counted = 0;
+        for (i, c) in s.char_indices() {
+            let len = match self {
+                PositionEncoding::Utf8 => c.len_utf8(),
+                PositionEncoding::Utf16 => c.len_utf16(),
+                PositionEncoding::Utf32 => 1,
+            };
+            if counted + len > units {
+                return i;
+            }
+            counted += len;
+        }
+        s.len()
+    }
+
+    /// The LSP range an applied edit replaced, from the positions it
+    /// carries (`None` for UTF-32, which needs the text before the edit).
+    pub fn applied_range(self, edit: &AppliedEdit) -> Option<Range> {
+        let (start, end) = match self {
+            PositionEncoding::Utf8 => (edit.start_position.1, edit.old_end_position.1),
+            PositionEncoding::Utf16 => (edit.start_utf16_col, edit.old_end_utf16_col),
+            PositionEncoding::Utf32 => return None,
+        };
+        Some(Range::new(
+            Position::new(saturating_u32(edit.start_position.0), saturating_u32(start)),
+            Position::new(saturating_u32(edit.old_end_position.0), saturating_u32(end)),
+        ))
+    }
 }
 
-/// Chars the rope takes as line breaks besides `\n`.
-fn is_extra_break(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0B}' | '\u{0C}' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'
-    )
-}
-
-/// The text has a line break the rope knows and LSP does not.
-pub(crate) fn has_extra_breaks(s: &str) -> bool {
-    // Every such char starts with one of these bytes; check the cheap way
-    // first.
-    s.bytes()
-        .any(|b| matches!(b, 0x0B | 0x0C | b'\r' | 0xC2 | 0xE2))
-        && s.chars().any(is_extra_break)
-}
-
-/// A text snapshot with what position conversions need.
+/// A text snapshot for position conversions.
 #[derive(Debug, Clone)]
 pub(crate) struct Text {
     rope: Rope,
-    /// The rope's lines are the server's lines (no extra breaks).
-    plain: bool,
 }
 
 impl Text {
     pub fn new(rope: Rope) -> Self {
-        let plain = !rope.chunks().any(has_extra_breaks);
-        Self { rope, plain }
+        Self { rope }
     }
 
+    #[cfg(test)]
     pub fn rope(&self) -> &Rope {
         &self.rope
-    }
-
-    /// The rope's lines are the server's lines.
-    pub fn is_plain(&self) -> bool {
-        self.plain
     }
 
     /// The char offset of a point (lines and columns past the end are
@@ -97,8 +106,7 @@ impl Text {
     pub fn point_to_offset(&self, point: Point) -> usize {
         let rope = &self.rope;
         let line = point.line.min(rope.len_lines().saturating_sub(1));
-        let start = rope.line_to_char(line);
-        start + point.column.min(rope_line_len(rope, line))
+        rope.line_to_char(line) + point.column.min(line_len(rope, line))
     }
 
     pub fn offset_to_point(&self, offset: usize) -> Point {
@@ -116,20 +124,25 @@ impl Text {
     /// The point at an LSP position. Positions past the end of a line are
     /// at its end, lines past the end of the text at the end of the text;
     /// a position inside a character is at its start.
+    #[cfg(test)]
     pub fn point(&self, position: Position, encoding: PositionEncoding) -> Point {
         self.offset_to_point(self.position_offset(position, encoding))
+    }
+
+    /// The LSP range of a char range.
+    pub fn range(&self, range: std::ops::Range<Point>, encoding: PositionEncoding) -> Range {
+        Range::new(
+            self.position(range.start, encoding),
+            self.position(range.end, encoding),
+        )
     }
 
     /// The LSP position of a char offset.
     pub fn offset_position(&self, offset: usize, encoding: PositionEncoding) -> Position {
         let rope = &self.rope;
         let offset = offset.min(rope.len_chars());
-        let (line, start) = if self.plain {
-            let line = rope.char_to_line(offset);
-            (line, rope.line_to_char(line))
-        } else {
-            self.lsp_line_of(offset)
-        };
+        let line = rope.char_to_line(offset);
+        let start = rope.line_to_char(line);
         let column = match encoding {
             PositionEncoding::Utf8 => rope.char_to_byte(offset) - rope.char_to_byte(start),
             PositionEncoding::Utf16 => rope.char_to_utf16_cu(offset) - rope.char_to_utf16_cu(start),
@@ -141,9 +154,12 @@ impl Text {
     /// The char offset of an LSP position (clamped as [`Text::point`]).
     pub fn position_offset(&self, position: Position, encoding: PositionEncoding) -> usize {
         let rope = &self.rope;
-        let Some((start, end)) = self.lsp_line_range(position.line as usize) else {
+        let line = position.line as usize;
+        if line >= rope.len_lines() {
             return rope.len_chars();
-        };
+        }
+        let start = rope.line_to_char(line);
+        let end = start + line_len(rope, line);
         let column = position.character as usize;
         match encoding {
             PositionEncoding::Utf8 => {
@@ -166,72 +182,20 @@ impl Text {
             PositionEncoding::Utf32 => start + column.min(end - start),
         }
     }
-
-    /// The server's line of a char offset and the offset where it starts
-    /// (for texts with extra breaks).
-    fn lsp_line_of(&self, offset: usize) -> (usize, usize) {
-        let rope = &self.rope;
-        let rope_line = rope.char_to_line(offset);
-        let mut line = 0;
-        let mut start = 0;
-        for l in 0..rope_line {
-            let next = rope.line_to_char(l + 1);
-            if rope.char(next - 1) == '\n' {
-                line += 1;
-                start = next;
-            }
-        }
-        (line, start)
-    }
-
-    /// Start and end (before the `\n`) of a server line, `None` past the
-    /// last line.
-    fn lsp_line_range(&self, line: usize) -> Option<(usize, usize)> {
-        let rope = &self.rope;
-        if self.plain {
-            if line >= rope.len_lines() {
-                return None;
-            }
-            let start = rope.line_to_char(line);
-            return Some((start, start + rope_line_len(rope, line)));
-        }
-        let lines = rope.len_lines();
-        let mut current = 0;
-        let mut start = 0;
-        for l in 0..lines {
-            let last = l + 1 == lines;
-            let next = if last {
-                rope.len_chars()
-            } else {
-                rope.line_to_char(l + 1)
-            };
-            // A line other than the last ends with its break.
-            let ends_line = !last && rope.char(next - 1) == '\n';
-            if ends_line || last {
-                if current == line {
-                    let end = if ends_line { next - 1 } else { next };
-                    return Some((start, end));
-                }
-                current += 1;
-                start = next;
-            }
-        }
-        None
-    }
 }
 
-/// Chars of a rope line without its break.
-fn rope_line_len(rope: &Rope, line: usize) -> usize {
+/// Chars of a line without its `\n`.
+fn line_len(rope: &Rope, line: usize) -> usize {
     let slice = rope.line(line);
     let len = slice.len_chars();
-    if len > 0 && (slice.char(len - 1) == '\n' || is_extra_break(slice.char(len - 1))) {
+    if len > 0 && slice.char(len - 1) == '\n' {
         len - 1
     } else {
         len
     }
 }
 
-fn saturating_u32(n: usize) -> u32 {
+pub(crate) fn saturating_u32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
@@ -260,12 +224,15 @@ mod tests {
         assert_eq!(Utf16.len("a🦀中"), 4);
         assert_eq!(Utf8.len("a🦀中"), 8);
         assert_eq!(Utf32.len("a🦀中"), 3);
+        assert_eq!(Utf16.byte_index("a🦀中", 3), 5);
+        assert_eq!(Utf16.byte_index("a🦀中", 2), 1);
+        assert_eq!(Utf8.byte_index("a🦀中", 99), 8);
+        assert_eq!(Utf32.byte_index("a🦀中", 2), 5);
     }
 
     #[test]
     fn ascii_is_the_same_in_every_encoding() {
         let t = text("import os\nx = 1\n");
-        assert!(t.is_plain());
         for enc in [Utf8, Utf16, Utf32] {
             assert_eq!(t.position(Point::new(1, 4), enc), pos(1, 4));
             assert_eq!(t.point(pos(1, 4), enc), Point::new(1, 4));
@@ -322,38 +289,17 @@ mod tests {
     }
 
     #[test]
-    fn form_feeds_and_unicode_separators_are_not_server_lines() {
-        // The rope sees four lines, the server two.
+    fn form_feeds_and_unicode_separators_stay_inside_a_line() {
         let t = text("a\u{0C}b\nc\u{2028}d🦀");
-        assert!(!t.is_plain());
-        assert_eq!(t.rope().len_lines(), 4);
-        // `b` is rope line 1, column 0; server line 0, column 2.
-        assert_eq!(t.position(Point::new(1, 0), Utf16), pos(0, 2));
-        assert_eq!(t.point(pos(0, 2), Utf16), Point::new(1, 0));
-        // `d` is rope line 3; server line 1, column 2.
-        assert_eq!(t.position(Point::new(3, 0), Utf8), pos(1, 4));
-        assert_eq!(t.point(pos(1, 4), Utf8), Point::new(3, 0));
-        assert_eq!(t.point(pos(1, 2), Utf16), Point::new(3, 0));
-        // End of the text.
-        assert_eq!(t.position(Point::new(3, 2), Utf16), pos(1, 5));
-        assert_eq!(t.point(pos(1, 99), Utf32), Point::new(3, 2));
-        assert_eq!(t.point(pos(5, 0), Utf32), Point::new(3, 2));
-        // Every offset goes there and back.
-        for s in ["a\u{0C}b\nc\u{2028}d🦀", "x\u{0B}\n\n\u{85}y\n", "\u{2029}"] {
-            let t = text(s);
-            for offset in 0..=t.rope().len_chars() {
-                for enc in [Utf8, Utf16, Utf32] {
-                    let p = t.offset_position(offset, enc);
-                    assert_eq!(t.position_offset(p, enc), offset, "{s:?} {enc:?} {offset}");
-                }
+        assert_eq!(t.rope().len_lines(), 2);
+        assert_eq!(t.position(Point::new(0, 2), Utf16), pos(0, 2));
+        assert_eq!(t.point(pos(1, 4), Utf8), Point::new(1, 2));
+        assert_eq!(t.position(Point::new(1, 4), Utf16), pos(1, 5));
+        for offset in 0..=t.rope().len_chars() {
+            for enc in [Utf8, Utf16, Utf32] {
+                let p = t.offset_position(offset, enc);
+                assert_eq!(t.position_offset(p, enc), offset, "{enc:?} {offset}");
             }
         }
-        // The server's lines of the second text: "x\v", "", "\u{85}y", "".
-        let t = text("x\u{0B}\n\n\u{85}y\n");
-        assert_eq!(t.offset_position(5, Utf16), pos(2, 1));
-        assert_eq!(t.offset_position(5, Utf8), pos(2, 2));
-        assert_eq!(t.point(pos(3, 0), Utf16), Point::new(5, 0));
-        assert!(has_extra_breaks("x\u{85}y"));
-        assert!(!has_extra_breaks("é中🦀\n\t"));
     }
 }

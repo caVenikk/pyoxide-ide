@@ -101,6 +101,7 @@ impl FrameDecoder {
     }
 
     /// Bytes received but not yet part of a returned frame.
+    #[cfg(test)]
     pub fn buffered(&self) -> usize {
         self.buf.len() - self.pos
     }

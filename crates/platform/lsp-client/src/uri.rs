@@ -16,6 +16,7 @@ pub(crate) fn from_path(path: &Path) -> Url {
 }
 
 /// The path of a `file:` URI; `None` for other schemes.
+#[cfg(test)]
 pub(crate) fn to_path(uri: &Url) -> Option<PathBuf> {
     decode(uri.as_str(), cfg!(windows)).map(PathBuf::from)
 }
