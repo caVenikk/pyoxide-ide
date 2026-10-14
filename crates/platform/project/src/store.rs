@@ -27,10 +27,11 @@
 //! keeps its settings in its own tables (`[python.tools.ruff]`, ADR 0010)
 //! under the same rules.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Condvar, LazyLock, Mutex, PoisonError};
 
 use toml_edit::{Array, DocumentMut, Item, Table, TableLike, Value};
 
@@ -230,12 +231,13 @@ pub fn load_or_import(root: &Path) -> Result<Exclusions, StoreError> {
 /// only when the project has no folder of its own yet and `.idea` names
 /// exclusions. Returns them when they were written.
 pub fn import_idea(root: &Path) -> Result<Option<Exclusions>, StoreError> {
+    let _lock = lock_root(root);
     if has_store(root) {
         return Ok(None);
     }
     match idea::read_exclusions(root) {
         Some(exclusions) if !exclusions.is_empty() => {
-            save(root, &exclusions)?;
+            save_locked(root, &exclusions)?;
             Ok(Some(exclusions))
         }
         _ => Ok(None),
@@ -246,6 +248,11 @@ pub fn import_idea(root: &Path) -> Result<Option<Exclusions>, StoreError> {
 /// else in the file. Nothing is created while there is nothing to store.
 /// Returns whether the file was written.
 pub fn save(root: &Path, exclusions: &Exclusions) -> Result<bool, StoreError> {
+    let _lock = lock_root(root);
+    save_locked(root, exclusions)
+}
+
+fn save_locked(root: &Path, exclusions: &Exclusions) -> Result<bool, StoreError> {
     let path = settings_file(root);
     let existing = read_document(&path)?;
     if existing.is_none() && exclusions.is_empty() {
@@ -387,6 +394,7 @@ pub fn save_values(
     table: &str,
     values: &[(&str, Option<toml::Value>)],
 ) -> Result<bool, StoreError> {
+    let _lock = lock_root(root);
     let path = settings_file(root);
     let existing = read_document(&path)?;
     if existing.is_none() && values.iter().all(|(_, v)| v.is_none()) {
@@ -453,6 +461,39 @@ fn lines<'a>(items: impl IntoIterator<Item = &'a String>) -> Array {
         array.set_trailing_comma(true);
     }
     array
+}
+
+/// The project roots whose store files are being written in this process.
+static WRITING: LazyLock<(Mutex<HashSet<PathBuf>>, Condvar)> = LazyLock::new(Default::default);
+
+/// Holds the right to write the store files of one project root.
+pub(crate) struct RootLock(PathBuf);
+
+/// Waits until no other thread of this process writes the store files of
+/// `root`, and holds them until the lock is dropped. Writes read, change
+/// and replace a whole file: two writers at once (the import of the
+/// reference IDE's exclusions and a product's settings, on background
+/// threads) would each drop the other's change.
+pub(crate) fn lock_root(root: &Path) -> RootLock {
+    let key = std::fs::canonicalize(root).unwrap_or_else(|_| lexical(root));
+    let (writing, released) = &*WRITING;
+    let mut busy = writing.lock().unwrap_or_else(PoisonError::into_inner);
+    while busy.contains(&key) {
+        busy = released.wait(busy).unwrap_or_else(PoisonError::into_inner);
+    }
+    busy.insert(key.clone());
+    RootLock(key)
+}
+
+impl Drop for RootLock {
+    fn drop(&mut self) {
+        let (writing, released) = &*WRITING;
+        writing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.0);
+        released.notify_all();
+    }
 }
 
 /// Replaces `path` with `text` at once: a temporary file next to it,
@@ -717,5 +758,73 @@ mod tests {
         let mut want = ex(&["a", "b/c"]);
         want.add_pattern("*.tmp");
         assert_eq!(load(root).unwrap(), Some(want));
+    }
+
+    /// Writers on other threads (the exclusions import of the project
+    /// panel, a product's settings) do not lose each other's changes.
+    #[test]
+    fn concurrent_writes_keep_every_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_owned();
+        let writer = |table: &'static str| {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                for i in 0..40 {
+                    let key = format!("k{i}");
+                    save_values(&root, table, &[(&key, Some(toml::Value::from(i)))]).unwrap();
+                }
+            })
+        };
+        let exclusions = {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                for i in 0..40 {
+                    let mut e = load(&root).unwrap().unwrap_or_default();
+                    e.add(&format!("dir{i}"));
+                    save(&root, &e).unwrap();
+                }
+            })
+        };
+        let threads = [
+            writer("python.tools.ruff"),
+            writer("other.product"),
+            exclusions,
+        ];
+        for t in threads {
+            t.join().unwrap();
+        }
+        for table in ["python.tools.ruff", "other.product"] {
+            assert_eq!(
+                load_table(&root, table).unwrap().unwrap().len(),
+                40,
+                "{table}"
+            );
+        }
+        assert!(!load(&root).unwrap().unwrap().is_empty());
+        // The workspace file follows the same lock.
+        let personal = |n: usize| {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                for i in 0..20 {
+                    let key = format!("t{n}k{i}");
+                    crate::workspace::save_value(&root, "python", &key, Some("x")).unwrap();
+                }
+            })
+        };
+        let threads = [personal(1), personal(2)];
+        for t in threads {
+            t.join().unwrap();
+        }
+        for n in 1..=2 {
+            for i in 0..20 {
+                let key = format!("t{n}k{i}");
+                assert!(
+                    crate::workspace::load_value(&root, "python", &key)
+                        .unwrap()
+                        .is_some(),
+                    "{key}"
+                );
+            }
+        }
     }
 }
