@@ -9,6 +9,8 @@ rust-version.workspace = true
 [dependencies]
 code-intel.workspace = true
 editor.workspace = true
+flume.workspace = true
+futures.workspace = true
 gpui.workspace = true
 name-match.workspace = true
 serde_json.workspace = true

@@ -257,9 +257,18 @@ impl Workbench {
             cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));
         let run_provider = product.run.clone();
         let run_window = cx.new(|cx| RunToolWindow::new(run_provider, window, cx));
+        // The completion measurement brings a service of its own.
+        let bench_intel = match env::bench() {
+            Some(env::Bench::Completion(latency)) => Some(code_intel_ui::bench::hook(
+                std::time::Duration::from_millis(*latency),
+                crate::bench::COMPLETION_ITEMS,
+            )),
+            _ => None,
+        };
         let code_intel = product
             .code_intel
             .clone()
+            .or(bench_intel)
             .map(|hook| cx.new(|cx| CodeIntelView::new(hook, cx)));
         let mut subscriptions = vec![
             cx.subscribe_in(&run_window, window, |this, _, event, window, cx| {
@@ -2630,11 +2639,22 @@ impl Render for Workbench {
                 let editor = self.active_editor().cloned();
                 let find = self.active_find_bar().cloned();
                 let se = self.search_everywhere.clone();
+                let completion = self.code_intel.as_ref().is_some_and(|v| {
+                    v.read(cx)
+                        .popups()
+                        .is_shown(code_intel_ui::completion::CONTEXT)
+                });
                 d.child(
                     canvas(
                         |_, _, _| (),
                         move |_, _, _, cx| {
-                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), &se, cx)
+                            crate::bench::frame_painted(
+                                editor.as_ref(),
+                                find.as_ref(),
+                                &se,
+                                completion,
+                                cx,
+                            )
                         },
                     )
                     .absolute()

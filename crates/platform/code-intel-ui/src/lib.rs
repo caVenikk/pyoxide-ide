@@ -22,6 +22,7 @@
 // Matched parts of names are lists of ranges, often of one.
 #![allow(clippy::single_range_in_vec_init)]
 
+pub mod bench;
 pub mod commands;
 pub mod completion;
 pub mod document;

@@ -31,7 +31,9 @@ const ICON_GAP: f32 = 5.0;
 /// Space kept between the tail text and the type text.
 const TYPE_GAP: f32 = 16.0;
 const FOOTER_HEIGHT: f32 = 24.0;
-/// The popup gets no wider; long type texts end in an ellipsis.
+/// The popup gets no narrower and no wider (rows longer than that are
+/// cut).
+const MIN_WIDTH: f32 = 200.0;
 const MAX_WIDTH: f32 = 900.0;
 
 /// One row as drawn.
@@ -60,11 +62,12 @@ impl Row {
         }
     }
 
-    /// Chars of the row's texts (to pick the widest row).
-    fn width_chars(&self) -> usize {
-        self.label.chars().count()
-            + self.tail.as_ref().map_or(0, |t| t.chars().count())
-            + self.type_text.as_ref().map_or(0, |t| t.chars().count() + 2)
+    /// Chars of the name and tail, and of the type text.
+    fn chars(&self) -> (usize, usize) {
+        (
+            self.label.chars().count() + self.tail.as_ref().map_or(0, |t| t.chars().count()),
+            self.type_text.as_ref().map_or(0, |t| t.chars().count()),
+        )
     }
 }
 
@@ -134,6 +137,32 @@ impl CompletionList {
     /// The height of the popup with `rows` rows.
     pub fn height(rows: usize, cx: &App) -> Pixels {
         row_height(cx) * rows.min(VISIBLE_ROWS) as f32 + px(FOOTER_HEIGHT) + px(2.0)
+    }
+
+    /// The width of the widest row (the reference's lookup is as wide as
+    /// its widest item), in the editor's monospace font, within limits.
+    fn width(&self, window: &Window, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let font = editor_font(cx);
+        let ts = window.text_system();
+        let id = ts.resolve_font(&font);
+        let size = theme.editor_size();
+        let char_width = ts
+            .advance(id, size, '0')
+            .map(|s| s.width)
+            .unwrap_or(size * 0.6);
+        let (name, type_text) = self.rows.iter().fold((0, 0), |(n, t), row| {
+            let (rn, rt) = row.chars();
+            (n.max(rn), t.max(rt))
+        });
+        let types = if type_text > 0 {
+            px(TYPE_GAP) + char_width * type_text as f32
+        } else {
+            px(0.0)
+        };
+        (px(2.0 + 2.0 * ROW_PAD + ICON + ICON_GAP) + char_width * name as f32 + types)
+            .ceil()
+            .clamp(px(MIN_WIDTH), px(MAX_WIDTH))
     }
 
     /// How far the name of a row is right of the popup's left edge: the
@@ -213,15 +242,11 @@ impl CompletionList {
                     .map(|tail| div().flex_none().text_color(muted).child(tail)),
             )
             .child(div().flex_1().min_w(px(TYPE_GAP)))
-            .children(row.type_text.clone().map(|t| {
-                div()
-                    .flex_shrink()
-                    .min_w(px(0.0))
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .text_color(muted)
-                    .child(t)
-            }))
+            .children(
+                row.type_text
+                    .clone()
+                    .map(|t| div().flex_none().text_color(muted).child(t)),
+            )
             .into_any_element()
     }
 }
@@ -246,6 +271,17 @@ fn shortcut(action: &dyn Action, cx: &App) -> Option<String> {
         .bindings_for_action(action)
         .next_back()
         .map(ui::keys::binding_text)
+}
+
+/// The editor's font, ligatures as the editor has them (names and types
+/// are code).
+fn editor_font(cx: &App) -> gpui::Font {
+    let theme = cx.theme();
+    let mut font = gpui::font(theme.mono_family());
+    if !theme.raw().fonts.editor_ligatures {
+        font.features = gpui::FontFeatures::disable_ligatures();
+    }
+    font
 }
 
 /// Rows as high as the editor's lines (about 15 pt with the default font,
@@ -297,15 +333,10 @@ fn merge_highlights(
 }
 
 impl Render for CompletionList {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
-        let widest = self
-            .rows
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, r)| r.width_chars())
-            .map(|(i, _)| i);
+        let width = self.width(window, cx);
         let visible = self.rows.len().min(VISIBLE_ROWS);
         let list = uniform_list(
             "completion-rows",
@@ -316,22 +347,20 @@ impl Render for CompletionList {
         )
         .debug_selector(|| "completion-rows".into())
         .track_scroll(self.scroll.clone())
-        .with_width_from_item(widest)
         .h(row_height(cx) * visible as f32);
         let hint = hint(cx);
         div()
             .debug_selector(|| "completion-popup".into())
             .flex()
             .flex_col()
-            .min_w(px(200.0))
-            .max_w(px(MAX_WIDTH))
+            .w(width)
             .rounded(px(4.0))
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::CompletionPopup))
             .shadow(ui::components::popup_shadow())
             .overflow_hidden()
-            .font_family(theme.mono_family())
+            .font(editor_font(cx))
             .text_size(theme.editor_size())
             .text_color(theme.color(UiRole::Text))
             .child(list)

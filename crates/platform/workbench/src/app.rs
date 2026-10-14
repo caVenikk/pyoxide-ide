@@ -359,8 +359,11 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
             }
             None => Vec::new(),
         };
-        if !commands.is_empty() || env::shot_path().is_some() {
-            run_commands_and_shot(window, commands, env::shot_path(), cx);
+        // The completion measurement takes its own picture (of its popup).
+        let shot =
+            env::shot_path().filter(|_| !matches!(env::bench(), Some(env::Bench::Completion(_))));
+        if !commands.is_empty() || shot.is_some() {
+            run_commands_and_shot(window, commands, shot, cx);
         }
         crate::bench::start(window, cx);
         if !env::background() {

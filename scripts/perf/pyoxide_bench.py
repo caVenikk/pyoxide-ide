@@ -2,7 +2,9 @@
 # Pyoxide measurements on the same generated files as the reference runs
 # (replica/perf.md): start-up to the first frame, typing at line 50,000 of a
 # 100,000-line file (3 x 200 keys, one every 50 ms, the text of
-# pycharm_typing.py), opening a 10 MB file and scrolling it. Runs the release
+# pycharm_typing.py), opening a 10 MB file and scrolling it, and the
+# completion popup in the 200-line file against a service that answers after
+# a fixed latency (--latency, ms). Runs the release
 # binary with PYOXIDE_BENCH; the window opens without taking the focus
 # (PYOXIDE_BACKGROUND=1). Measure on an idle machine: the load average is
 # printed first. `--marks N` shows N problems spread over the big file during
@@ -10,6 +12,7 @@
 #
 #     cargo build --release -p pyoxide-ide
 #     python3 scripts/perf/pyoxide_bench.py --work <empty dir> [--runs 3] [--marks 1000]
+#         [--only completion --latency 50]
 import argparse, json, os, statistics, subprocess, sys
 from pathlib import Path
 
@@ -43,13 +46,14 @@ def main():
     ap.add_argument("--work", required=True, type=Path)
     ap.add_argument("--binary", type=Path, default=ROOT / "target/release/pyoxide-ide")
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--only", choices=["startup", "typing", "open"])
+    ap.add_argument("--only", choices=["startup", "typing", "open", "completion"])
     ap.add_argument("--marks", type=int, default=0)
+    ap.add_argument("--latency", type=int, default=50)
     a = ap.parse_args()
     print("load average", " ".join(f"{v:.2f}" for v in os.getloadavg()), flush=True)
     work = a.work.resolve()
-    results = {"startup": [], "typing": [], "open": []}
-    kinds = [a.only] if a.only else ["startup", "typing", "open"]
+    results = {"startup": [], "typing": [], "open": [], "completion": []}
+    kinds = [a.only] if a.only else ["startup", "typing", "open", "completion"]
     for kind in kinds:
         for _ in range(a.runs):
             # Fresh files: a typing run leaves the big file unchanged on disk,
@@ -63,6 +67,10 @@ def main():
                 big = files["bigfile"]
                 m = run(a.binary, [big, big / "big.py"], "typing", 300, a.marks)
                 r = {**m.get("typing", {"error": m}), **m.get("memory", {})}
+            elif kind == "completion":
+                small = files["small"]
+                m = run(a.binary, [small, small / "main.py"], f"completion:{a.latency}", 300)
+                r = {**m.get("completion", {"error": m}), **m.get("memory", {})}
             else:
                 huge = files["hugefile"]
                 m = run(a.binary, [huge], f"open:{huge / 'huge.py'}", 300)
