@@ -12,8 +12,9 @@ mod element;
 pub mod find;
 pub mod highlight;
 mod input;
+mod inspection;
 
-pub use diagnostics::{DiagnosticMark, MarkMessage, MarkSeverity};
+pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
 pub use editor::{
     BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, SearchHighlights,
     forward_actions, new_editor,

@@ -1071,6 +1071,39 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.state()["go_to_line"], json!("2:2"), "{what}");
         }
+        "code.next-problem" | "code.previous-problem" => {
+            // Errors before the nearer warning; forward from the caret, or
+            // back around the start.
+            h.set_editor("a = 1|\nb = undefined\nc = x == None");
+            let editor = h.editor();
+            h.cx.update(|cx| {
+                editor.update(cx, |e, cx| {
+                    let problem =
+                        |range: std::ops::Range<usize>, severity| editor::DiagnosticMark {
+                            range,
+                            severity,
+                            unnecessary: false,
+                            deprecated: false,
+                            messages: Vec::new(),
+                        };
+                    e.set_diagnostics(
+                        vec![
+                            problem(0..1, editor::MarkSeverity::Warning),
+                            problem(10..19, editor::MarkSeverity::Error),
+                            problem(24..33, editor::MarkSeverity::Error),
+                        ],
+                        cx,
+                    );
+                })
+            });
+            h.press(keys);
+            let expected = if b.command == "code.next-problem" {
+                "a = 1\nb = |undefined\nc = x == None"
+            } else {
+                "a = 1\nb = undefined\nc = |x == None"
+            };
+            assert_eq!(h.editor_marked(), expected, "{what}");
+        }
         "go-to-line.confirm" => {
             h.set_editor("a\nb\nc|");
             h.invoke("workbench.go-to-line", json!(null));

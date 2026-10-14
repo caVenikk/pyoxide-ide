@@ -60,6 +60,7 @@ fn mark(range: std::ops::Range<usize>, severity: MarkSeverity) -> DiagnosticMark
         unnecessary: false,
         deprecated: false,
         messages: vec![MarkMessage {
+            severity,
             text: "`os` imported but unused".into(),
             source: Some("Ruff".into()),
             code: Some("unused-import".into()),
@@ -262,6 +263,7 @@ fn the_state_reports_the_marks_and_the_link_highlight(cx: &mut TestAppContext) {
             "unnecessary": true,
             "deprecated": false,
             "messages": [{
+                "severity": "warning",
                 "text": "`os` imported but unused",
                 "source": "Ruff",
                 "code": "unused-import",

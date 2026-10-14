@@ -15,7 +15,7 @@ use text::movement;
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
 use ui::theme::{Theme, ThemeExt, color};
 
-use crate::diagnostics::{Look, line_looks};
+use crate::diagnostics::{Analysis, Look, MarkSeverity, line_looks};
 use crate::editor::{DragUnit, Editor, EditorEvent};
 use crate::highlight::InlineStyle;
 
@@ -91,8 +91,69 @@ pub(crate) struct LayoutInfo {
     pub lines: Vec<LineLayout>,
     pub viewport_lines: usize,
     pub scrollbar: Option<Scrollbar>,
+    /// The error stripe at the right edge (the scrollbar's track when the
+    /// text scrolls): marks of problems and search matches.
+    pub stripe: Option<Bounds<Pixels>>,
+    /// Problem marks on the error stripe, in paint order (the most severe
+    /// last).
+    pub problem_stripes: Vec<StripeMark>,
     /// Hyperlinks on the visible lines.
     pub links: Vec<LinkRect>,
+}
+
+/// A problem's mark on the error stripe.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StripeMark {
+    pub bounds: Bounds<Pixels>,
+    pub color: Hsla,
+    /// Index of the problem in the editor's marks.
+    pub mark: usize,
+}
+
+/// How far from a stripe mark the mouse still hovers or clicks it (the
+/// reference's twice the smallest mark height on either side).
+const STRIPE_SLOP: f32 = STRIPE_MARK * 2.0;
+
+impl LayoutInfo {
+    /// The problems whose stripe marks are near a window y, the nearest
+    /// (by the top of its mark) first; each problem once.
+    pub fn stripe_marks_near(&self, y: Pixels) -> Vec<usize> {
+        let slop = px(STRIPE_SLOP);
+        let mut near: Vec<(Pixels, usize)> = self
+            .problem_stripes
+            .iter()
+            .filter(|s| y >= s.bounds.top() - slop && y <= s.bounds.bottom() + slop)
+            .map(|s| ((s.bounds.top() - y).abs(), s.mark))
+            .collect();
+        near.sort_by(|a, b| {
+            f32::from(a.0)
+                .total_cmp(&f32::from(b.0))
+                .then(a.1.cmp(&b.1))
+        });
+        let mut marks: Vec<usize> = Vec::with_capacity(near.len());
+        for (_, mark) in near {
+            if !marks.contains(&mark) {
+                marks.push(mark);
+            }
+        }
+        marks
+    }
+
+    /// The window y of the middle of a problem's stripe mark.
+    pub fn stripe_mark_middle(&self, mark: usize) -> Option<Pixels> {
+        self.problem_stripes
+            .iter()
+            .find(|s| s.mark == mark)
+            .map(|s| s.bounds.center().y)
+    }
+
+    /// Whether a window position is over the text (not the gutter, the
+    /// error stripe or outside).
+    pub fn over_text(&self, position: gpui::Point<Pixels>) -> bool {
+        self.bounds.contains(&position)
+            && position.x >= self.text_x
+            && self.stripe.is_none_or(|s| position.x < s.left())
+    }
 }
 
 /// A hyperlink's part on one visible line.
@@ -159,6 +220,50 @@ impl Editor {
             size(layout.char_width, layout.line_height),
         ))
     }
+
+    /// The char under a window position in the last frame: `None` outside
+    /// the text area, below the last line and past the end of a line,
+    /// except over a problem drawn after the end of its line (then the
+    /// line end).
+    pub fn char_at(&self, position: gpui::Point<Pixels>) -> Option<usize> {
+        let layout = self.layout.as_ref()?;
+        if !layout.over_text(position) {
+            return None;
+        }
+        let y = position.y - layout.bounds.top() + self.scroll.y;
+        let line = (y / layout.line_height).floor();
+        if line < 0.0 || line as usize >= self.buffer.len_lines() {
+            return None;
+        }
+        let line = line as usize;
+        let x = position.x - layout.text_x + self.scroll.x;
+        let len = self.buffer.line_len(line);
+        let (col, end_x) = match layout.line(line) {
+            Some(l) => {
+                let col = l.col_for_x(x);
+                // The char whose cell holds `x`, not the nearest boundary.
+                let col = if col > 0 && l.x_for_col(col) > x {
+                    col - 1
+                } else {
+                    col
+                };
+                (col, l.x_for_col(len))
+            }
+            None => (
+                (x / layout.char_width).floor().max(0.0) as usize,
+                layout.char_width * len as f32,
+            ),
+        };
+        let line_start = self.buffer.line_start(line);
+        if col < len {
+            return Some(line_start + col);
+        }
+        // The cell after the line end shows the empty problems of the line.
+        if x >= end_x + layout.char_width {
+            return None;
+        }
+        self.diagnostics.empty_in(line_start..line_start + len)
+    }
 }
 
 pub(crate) struct EditorElement {
@@ -197,6 +302,8 @@ pub(crate) struct Prepaint {
     placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
     /// Hitboxes of the hyperlinks (hand pointer).
     link_hitboxes: Vec<Hitbox>,
+    /// Hitboxes of the link highlight (hand pointer).
+    link_highlight_hitboxes: Vec<Hitbox>,
     /// Dotted underlines of problems (the text runs draw only solid and
     /// wavy ones).
     dotted: Vec<Dotted>,
@@ -529,6 +636,8 @@ struct LineExtras<'a> {
     links: &'a [Range<usize>],
     /// Problems (char columns of the line) and how they look.
     diagnostics: &'a [(Range<usize>, Look)],
+    /// The link highlight's char columns on the line.
+    link_highlight: Option<Range<usize>>,
 }
 
 /// Text runs for a line from highlight spans (char columns of the line),
@@ -634,6 +743,14 @@ fn runs(
     for (range, look) in extras.diagnostics {
         out = map_range(out, byte_of(range.start)..byte_of(range.end), |r| {
             apply_look(r, look)
+        });
+    }
+    // The symbol under the mouse with the navigation modifier, over the
+    // problems (the reference's hyperlink layer is above them).
+    if let Some(range) = extras.link_highlight {
+        let style = link_style(theme, default);
+        out = map_range(out, byte_of(range.start)..byte_of(range.end), |r| {
+            apply_inline(r, &style)
         });
     }
     // Underline the input method's composition.
@@ -827,6 +944,8 @@ impl Element for EditorElement {
         // char columns, colour) and the looks after line ends.
         let mut line_dotted: Vec<(usize, Range<usize>, Hsla)> = Vec::new();
         let mut line_after_end: Vec<(usize, Look)> = Vec::new();
+        // The link highlight's parts: (line, char columns).
+        let mut link_highlight_cols: Vec<(usize, Range<usize>)> = Vec::new();
         for line in visible.clone() {
             let len = editor.buffer.line_len(line);
             let cols = if len > LONG_LINE {
@@ -865,11 +984,18 @@ impl Element for EditorElement {
             if let Some(look) = looks.after_end {
                 line_after_end.push((line, look));
             }
+            let line_end = line_start + len;
             let marked = editor.marked.as_ref().and_then(|r| {
-                let line_end = line_start + len;
                 (r.start < line_end.max(line_start + 1) && r.end > line_start)
                     .then(|| r.start.max(line_start) - line_start..r.end.min(line_end) - line_start)
             });
+            let link_highlight = editor.link_highlight.as_ref().and_then(|r| {
+                (r.start < line_end && r.end > line_start)
+                    .then(|| r.start.max(line_start) - line_start..r.end.min(line_end) - line_start)
+            });
+            if let Some(cols) = &link_highlight {
+                link_highlight_cols.push((line, cols.clone()));
+            }
             let text_runs = runs(
                 &spans,
                 LineExtras {
@@ -877,6 +1003,7 @@ impl Element for EditorElement {
                     styles: &styles,
                     links: &line_links,
                     diagnostics: &looks.ranges,
+                    link_highlight,
                 },
                 &cols,
                 col_bytes.as_ref(),
@@ -1125,28 +1252,80 @@ impl Element for EditorElement {
             Scrollbar { track, thumb }
         });
 
-        // Search matches on the scrollbar: a mark per line, drawn once per
+        // The error stripe: the scrollbar's track, or the same strip when
+        // the text does not scroll but problems are shown (as the
+        // reference's editor always has its error stripe).
+        let shows_problems = editor.analysis != Analysis::Off || !editor.diagnostics().is_empty();
+        let stripe = scrollbar.map(|s| s.track).or_else(|| {
+            (!single_line && !console && shows_problems).then(|| {
+                Bounds::new(
+                    point(bounds.right() - scrollbar_width, bounds.top()),
+                    size(scrollbar_width, bounds.size.height),
+                )
+            })
+        });
+        // A line's y on the stripe: where it is in the view while the whole
+        // text fits, else in proportion (the reference's error stripe).
+        let stripe_y = |track: &Bounds<Pixels>, line: usize| -> Pixels {
+            let y = lh * line as f32;
+            let target = track.size.height;
+            let y = if content <= target {
+                y
+            } else {
+                y * (target / content)
+            };
+            (track.top() + y).floor()
+        };
+        let mark_bounds = |track: &Bounds<Pixels>, top: Pixels, bottom: Pixels| {
+            Bounds::from_corners(
+                point(track.left() + px(2.0), top),
+                point(track.right() - px(2.0), bottom.max(top + px(STRIPE_MARK))),
+            )
+        };
+
+        // Search matches on the stripe: a mark per line, drawn once per
         // pixel row.
         let mut stripe_marks = Vec::new();
-        if let (Some(bar), Some(h)) = (&scrollbar, &editor.search) {
-            let total = len_lines.max(1) as f32;
-            let free = f32::from(bar.track.size.height) - STRIPE_MARK;
+        if let (Some(track), Some(h)) = (&stripe, &editor.search) {
             let mut last_y = None;
             for &line in &h.lines {
-                let y = (f32::from(bar.track.top()) + free * (line as f32 / total)).round();
+                let y = stripe_y(track, line);
                 if last_y == Some(y) {
                     continue;
                 }
                 last_y = Some(y);
-                stripe_marks.push(Bounds::new(
-                    point(bar.track.left() + px(2.0), px(y)),
-                    size(bar.track.size.width - px(4.0), px(STRIPE_MARK)),
-                ));
+                stripe_marks.push(mark_bounds(track, y, y));
+            }
+        }
+        // Problems on the stripe in the severity's stripe colour, from the
+        // start line to the end line, the most severe drawn last;
+        // information has no mark.
+        let mut problem_stripes = Vec::new();
+        if let Some(track) = &stripe {
+            let marks = editor.diagnostics();
+            let mut order: Vec<usize> = (0..marks.len())
+                .filter(|&i| marks[i].severity != MarkSeverity::Information)
+                .collect();
+            order.sort_by_key(|&i| std::cmp::Reverse(marks[i].severity));
+            for i in order {
+                let m = &marks[i];
+                let role = match m.severity {
+                    MarkSeverity::Error => UiRole::DiagnosticErrorStripe,
+                    MarkSeverity::Warning => UiRole::DiagnosticWarningStripe,
+                    _ => UiRole::DiagnosticWeakWarningStripe,
+                };
+                let top = stripe_y(track, editor.buffer.char_to_line(m.range.start));
+                let bottom = stripe_y(track, editor.buffer.char_to_line(m.range.end));
+                problem_stripes.push(StripeMark {
+                    bounds: mark_bounds(track, top, bottom),
+                    color: theme.color(role),
+                    mark: i,
+                });
             }
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        let text_right = scrollbar.map_or(bounds.right(), |s| s.track.left());
+        let text_right = stripe.map_or(bounds.right(), |s| s.left());
         let text_hitbox = window.insert_hitbox(
             Bounds::from_corners(
                 point(bounds.left() + gutter_width, bounds.top()),
@@ -1164,6 +1343,24 @@ impl Element for EditorElement {
                 window.insert_hitbox(visible, HitboxBehavior::Normal)
             })
             .collect();
+        // The link highlight: the hand pointer over it.
+        let text_area = Bounds::from_corners(
+            point(bounds.left() + gutter_width, bounds.top()),
+            point(text_right, bounds.bottom()),
+        );
+        let link_highlight_hitboxes = link_highlight_cols
+            .into_iter()
+            .filter_map(|(line, cols)| {
+                let l = layout_of(line)?;
+                let rect = Bounds::from_corners(
+                    point(line_x(l, cols.start), top_of(line)),
+                    point(line_x(l, cols.end), top_of(line) + lh),
+                )
+                .intersect(&text_area);
+                (rect.size.width > px(0.0))
+                    .then(|| window.insert_hitbox(rect, HitboxBehavior::Normal))
+            })
+            .collect();
         let layout = LayoutInfo {
             bounds,
             text_x,
@@ -1173,6 +1370,8 @@ impl Element for EditorElement {
             lines,
             viewport_lines,
             scrollbar,
+            stripe,
+            problem_stripes,
             links: link_rects,
         };
         let stored = layout.clone();
@@ -1190,6 +1389,7 @@ impl Element for EditorElement {
             stripe_marks,
             placeholder,
             link_hitboxes,
+            link_highlight_hitboxes,
             dotted,
             after_end,
             colors,
@@ -1221,7 +1421,7 @@ impl Element for EditorElement {
         // Arrow over the gutter and the scrollbar, I-beam over the text.
         ui::pointer::request(CursorStyle::Arrow, &p.hitbox, window);
         ui::pointer::request(CursorStyle::IBeam, &p.text_hitbox, window);
-        for link in &p.link_hitboxes {
+        for link in p.link_hitboxes.iter().chain(&p.link_highlight_hitboxes) {
             ui::pointer::request(CursorStyle::PointingHand, link, window);
         }
 
@@ -1322,6 +1522,9 @@ impl Element for EditorElement {
         for r in &p.stripe_marks {
             window.paint_quad(fill(*r, p.colors.search_stripe));
         }
+        for s in &p.layout.problem_stripes {
+            window.paint_quad(fill(s.bounds, s.color));
+        }
         if let Some(bar) = p.layout.scrollbar {
             let hovered =
                 window.mouse_position().x >= bar.track.left() && p.hitbox.is_hovered(window);
@@ -1342,16 +1545,46 @@ impl Element for EditorElement {
                 return;
             }
             editor.update(cx, |ed, cx| {
-                if let Some(bar) = ed.layout.as_ref().and_then(|l| l.scrollbar)
-                    && bar.track.contains(&e.position)
+                let Some(layout) = ed.layout.clone() else {
+                    return;
+                };
+                if layout.stripe.is_some_and(|s| s.contains(&e.position)) {
+                    // A problem's mark is clicked (pressed and released in
+                    // place; at once when the thumb is not under it); else
+                    // the thumb is dragged or moved here.
+                    let mark = layout.stripe_marks_near(e.position.y).first().copied();
+                    let on_thumb = layout
+                        .scrollbar
+                        .is_some_and(|b| b.thumb.contains(&e.position));
+                    if let Some(mark) = mark
+                        && !on_thumb
+                    {
+                        ed.stripe_clicked(mark, window, cx);
+                        return;
+                    }
+                    ed.pressed_stripe = mark.map(|m| (m, e.position));
+                    if let Some(bar) = layout.scrollbar {
+                        let grab = if on_thumb {
+                            e.position.y - bar.thumb.top()
+                        } else {
+                            bar.thumb.size.height / 2.0
+                        };
+                        ed.drag = Some(DragUnit::Scrollbar(grab));
+                        ed.drag_scrollbar(e.position.y, cx);
+                    }
+                    return;
+                }
+                // Cmd+click (Ctrl+click) on a char is reported for
+                // navigation; the caret stays.
+                if e.modifiers.secondary()
+                    && e.click_count == 1
+                    && let Some(offset) = ed.char_at(e.position)
                 {
-                    let grab = if bar.thumb.contains(&e.position) {
-                        e.position.y - bar.thumb.top()
-                    } else {
-                        bar.thumb.size.height / 2.0
-                    };
-                    ed.drag = Some(DragUnit::Scrollbar(grab));
-                    ed.drag_scrollbar(e.position.y, cx);
+                    window.focus(ed.focus_handle_ref());
+                    cx.emit(EditorEvent::ModifiedClick {
+                        offset,
+                        modifiers: e.modifiers,
+                    });
                     return;
                 }
                 // A link is followed when the mouse is released where it
@@ -1366,6 +1599,19 @@ impl Element for EditorElement {
                 ed.mouse_down(pos, e.click_count, e.modifiers.shift, window, cx);
             });
             cx.stop_propagation();
+        });
+        // Hover: the char under the mouse, the stripe marks under it.
+        let editor = self.editor.clone();
+        let (text_hitbox, hitbox) = (p.text_hitbox.clone(), p.hitbox.clone());
+        window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+            if !phase.bubble() || e.pressed_button.is_some() {
+                return;
+            }
+            let over_text = text_hitbox.is_hovered(window);
+            let over_editor = hitbox.is_hovered(window);
+            editor.update(cx, |ed, cx| {
+                ed.mouse_moved(e.position, e.modifiers, over_text, over_editor, cx)
+            });
         });
         let editor = self.editor.clone();
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
@@ -1391,16 +1637,22 @@ impl Element for EditorElement {
             });
         });
         let editor = self.editor.clone();
-        window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+        window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
             if phase.bubble() && e.button == MouseButton::Left {
+                let in_place = |at: gpui::Point<Pixels>| {
+                    (e.position.x - at.x).abs() <= px(1.0) && (e.position.y - at.y).abs() <= px(1.0)
+                };
                 editor.update(cx, |ed, cx| {
                     ed.mouse_up(cx);
-                    if let Some((line, range, at)) = ed.pressed_link.take() {
-                        let moved = (e.position.x - at.x).abs() > px(1.0)
-                            || (e.position.y - at.y).abs() > px(1.0);
-                        if !moved {
-                            cx.emit(EditorEvent::LinkClicked { line, range });
-                        }
+                    if let Some((line, range, at)) = ed.pressed_link.take()
+                        && in_place(at)
+                    {
+                        cx.emit(EditorEvent::LinkClicked { line, range });
+                    }
+                    if let Some((mark, at)) = ed.pressed_stripe.take()
+                        && in_place(at)
+                    {
+                        ed.stripe_clicked(mark, window, cx);
                     }
                 });
             }
@@ -1540,6 +1792,7 @@ mod tests {
                 styles: &[],
                 links: &[],
                 diagnostics: &looks.ranges,
+                link_highlight: None,
             },
             &(0..text.len()),
             None,
@@ -1626,7 +1879,7 @@ mod tests {
         assert_eq!(wave_color(1), role_color(TextRole::DiagnosticInfo));
         assert_eq!(wave_color(7), role_color(TextRole::DiagnosticWarning));
         assert_ne!(wave_color(1), wave_color(7));
-        // Information: the reference's schemes draw nothing.
+        // Information: a dotted line, painted apart from the runs.
         assert!(run_at(&runs, 10).underline.is_none());
     }
 

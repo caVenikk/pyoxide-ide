@@ -25,9 +25,10 @@ pub enum MarkSeverity {
     Warning,
     /// A wave in the weak warning colour; counted.
     WeakWarning,
-    /// Not counted; drawn as the theme's information (hint) attributes,
-    /// which the reference's default colour schemes leave empty, so
-    /// usually not drawn at all. Its messages show in the tooltip.
+    /// Not counted, not visited by next / previous problem, no error stripe
+    /// mark; drawn as the theme's hint attributes (a grey dotted line in
+    /// the default themes, as the reference's Python language services
+    /// draw a hint). Its messages show in the tooltip.
     Information,
 }
 
@@ -41,6 +42,14 @@ impl MarkSeverity {
             MarkSeverity::Information => "information",
         }
     }
+
+    /// The levels the inspection widget counts and next / previous problem
+    /// visits, from the most severe.
+    pub const COUNTED: [MarkSeverity; 3] = [
+        MarkSeverity::Error,
+        MarkSeverity::Warning,
+        MarkSeverity::WeakWarning,
+    ];
 
     /// Paint order: marks of a higher layer are drawn over lower ones (the
     /// reference's highlighter layers ERROR > WARNING > WEAK_WARNING >
@@ -56,9 +65,12 @@ impl MarkSeverity {
 }
 
 /// One message of a mark (marks of several services at one range carry
-/// all their messages).
+/// all their messages). Each message is one problem for the counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkMessage {
+    /// The message's own level; the mark's [`DiagnosticMark::severity`] is
+    /// the most severe of its messages.
+    pub severity: MarkSeverity,
     pub text: SharedString,
     /// Who reports it (`Ruff`), shown grey after the text.
     pub source: Option<SharedString>,
@@ -75,6 +87,8 @@ pub struct DiagnosticMark {
     /// the end of the line; any other empty range becomes the char after it
     /// when the marks are set.
     pub range: Range<usize>,
+    /// The most severe level of its messages: how it is drawn, its error
+    /// stripe mark and the order of next / previous problem.
     pub severity: MarkSeverity,
     /// Greyed like unused code, without the severity's wave.
     pub unnecessary: bool,
@@ -102,6 +116,118 @@ impl DiagnosticMark {
             }
         }
     }
+}
+
+/// How far the analysis of the text is, for the inspection widget (set by
+/// whoever has the language services).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Analysis {
+    /// Nothing analyses the text: no inspection widget.
+    #[default]
+    Off,
+    /// The services are analysing it: the widget shows what it has,
+    /// translucent.
+    Running,
+    /// The marks are the services' answer for the text.
+    Done,
+}
+
+impl Analysis {
+    /// Name in `editor.state`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Analysis::Off => "off",
+            Analysis::Running => "running",
+            Analysis::Done => "done",
+        }
+    }
+}
+
+/// Problems by level, as the inspection widget counts them: every message
+/// is one problem (two services reporting one range count twice), by its
+/// own level; information is not counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProblemCounts {
+    pub errors: usize,
+    pub warnings: usize,
+    pub weak_warnings: usize,
+}
+
+impl ProblemCounts {
+    pub fn get(&self, severity: MarkSeverity) -> usize {
+        match severity {
+            MarkSeverity::Error => self.errors,
+            MarkSeverity::Warning => self.warnings,
+            MarkSeverity::WeakWarning => self.weak_warnings,
+            MarkSeverity::Information => 0,
+        }
+    }
+
+    fn add(&mut self, severity: MarkSeverity) {
+        match severity {
+            MarkSeverity::Error => self.errors += 1,
+            MarkSeverity::Warning => self.warnings += 1,
+            MarkSeverity::WeakWarning => self.weak_warnings += 1,
+            MarkSeverity::Information => {}
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        self.errors + self.warnings + self.weak_warnings
+    }
+}
+
+/// The mark next / previous problem goes to from the caret at `from`
+/// (`None`: before the text), as the reference's "next highlighted
+/// error": while there are errors only errors are visited, then warnings,
+/// then weak warnings; forward the first mark starting after `from`,
+/// wrapping to the first one; backward the last mark starting before it,
+/// wrapping to the last one. Information is never visited.
+pub(crate) fn problem_to_go(
+    marks: &[DiagnosticMark],
+    from: Option<usize>,
+    forward: bool,
+) -> Option<usize> {
+    for min in MarkSeverity::COUNTED {
+        // (index, position) of the best mark so far.
+        let mut best: Option<(usize, usize)> = None;
+        for (i, m) in marks.iter().enumerate() {
+            if m.severity > min {
+                continue;
+            }
+            let pos = m.range.start;
+            let better = match (best, from) {
+                (None, _) => true,
+                (Some((_, old)), None) => {
+                    if forward {
+                        pos < old
+                    } else {
+                        pos > old
+                    }
+                }
+                (Some((_, old)), Some(caret)) => {
+                    if forward {
+                        if (caret < old) != (caret < pos) {
+                            caret < pos
+                        } else {
+                            pos < old
+                        }
+                    } else if (caret <= old) != (caret <= pos) {
+                        caret > pos
+                    } else {
+                        pos > old
+                    }
+                }
+            };
+            if better {
+                best = Some((i, pos));
+            }
+        }
+        if let Some((i, _)) = best {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// Moving more marks through more edits than this (marks times edits)
@@ -200,6 +326,49 @@ impl Marks {
 
     pub fn get(&self, index: usize) -> &DiagnosticMark {
         &self.list[index]
+    }
+
+    /// Indices of the marks at a char offset: the marks over the char, and
+    /// the empty marks there (drawn after the end of their line); the most
+    /// severe first, then in text order.
+    pub fn at(&self, offset: usize) -> Vec<usize> {
+        let mut found: Vec<usize> = self
+            .near(offset..offset + 1)
+            .filter(|&i| {
+                let r = &self.list[i].range;
+                if r.is_empty() {
+                    r.start == offset
+                } else {
+                    r.start <= offset && offset < r.end
+                }
+            })
+            .collect();
+        found.sort_by_key(|&i| self.list[i].severity);
+        found
+    }
+
+    /// The position of the first empty mark in the chars `range` (a line:
+    /// such marks are drawn after the end of their line).
+    pub fn empty_in(&self, range: Range<usize>) -> Option<usize> {
+        self.near(range.clone())
+            .map(|i| &self.list[i].range)
+            .find(|r| r.is_empty() && range.start <= r.start && r.start <= range.end)
+            .map(|r| r.start)
+    }
+
+    /// The problems counted by level: each message by its own level; a mark
+    /// without messages counts once by its level.
+    pub fn counts(&self) -> ProblemCounts {
+        let mut counts = ProblemCounts::default();
+        for m in &self.list {
+            if m.messages.is_empty() {
+                counts.add(m.severity);
+            }
+            for msg in &m.messages {
+                counts.add(msg.severity);
+            }
+        }
+        counts
     }
 }
 
@@ -519,7 +688,8 @@ mod tests {
             })
         };
         // The default dark theme draws waves for the three counted levels
-        // and nothing for information (the reference's empty attributes).
+        // and a grey dotted line for information (the reference's Python
+        // services draw a hint so).
         assert_eq!(
             looks
                 .ranges
@@ -530,6 +700,13 @@ mod tests {
                 (0..2, wave(TextRole::DiagnosticError)),
                 (3..5, wave(TextRole::DiagnosticWarning)),
                 (6..8, wave(TextRole::DiagnosticInfo)),
+                (
+                    9..11,
+                    Some(Underline {
+                        kind: ThemeUnderline::Dotted,
+                        color: Some(color(themes::Rgba::rgb(0x80, 0x80, 0x80))),
+                    })
+                ),
             ]
         );
         assert!(looks.after_end.is_none());
@@ -606,6 +783,97 @@ mod tests {
         assert_eq!(ranges, [0..2, 4..5]);
         let after = looks.after_end.expect("the empty error at the line end");
         assert_eq!(after.underline.map(|u| u.kind), Some(ThemeUnderline::Wavy));
+    }
+
+    #[test]
+    fn next_problem_visits_errors_first_and_wraps() {
+        let marks = [
+            mark(0..1, MarkSeverity::Warning),
+            mark(5..6, MarkSeverity::Error),
+            mark(10..11, MarkSeverity::Warning),
+            mark(15..16, MarkSeverity::Error),
+            mark(20..21, MarkSeverity::Information),
+        ];
+        let go = |from, forward| problem_to_go(&marks, from, forward).map(|i| marks[i].range.start);
+        // While there are errors, only errors: after the caret, then around.
+        assert_eq!(go(Some(0), true), Some(5));
+        assert_eq!(go(Some(5), true), Some(15));
+        assert_eq!(go(Some(15), true), Some(5));
+        assert_eq!(go(Some(12), false), Some(5));
+        assert_eq!(go(Some(5), false), Some(15));
+        assert_eq!(go(Some(3), false), Some(15));
+        // The first problem: the first error.
+        assert_eq!(go(None, true), Some(5));
+        // Without errors: warnings; information never.
+        let warnings = [
+            mark(0..1, MarkSeverity::WeakWarning),
+            mark(4..5, MarkSeverity::Warning),
+            mark(8..9, MarkSeverity::Information),
+        ];
+        let go = |from, forward| {
+            problem_to_go(&warnings, from, forward).map(|i| warnings[i].range.start)
+        };
+        assert_eq!(go(Some(4), true), Some(4));
+        assert_eq!(go(Some(6), false), Some(4));
+        let weak = [
+            mark(0..1, MarkSeverity::WeakWarning),
+            mark(4..5, MarkSeverity::Information),
+        ];
+        assert_eq!(problem_to_go(&weak, Some(3), true), Some(0));
+        assert_eq!(problem_to_go(&weak[1..], Some(0), true), None);
+    }
+
+    #[test]
+    fn every_message_counts_by_its_own_level() {
+        let buffer = Buffer::new("undefined_function()\nimport os\n");
+        let message = |severity| MarkMessage {
+            severity,
+            text: "m".into(),
+            source: None,
+            code: None,
+            href: None,
+        };
+        let mut marks = Marks::default();
+        marks.set(
+            vec![
+                // Two services report one range: two problems.
+                DiagnosticMark {
+                    messages: vec![message(MarkSeverity::Error), message(MarkSeverity::Warning)],
+                    ..mark(0..18, MarkSeverity::Error)
+                },
+                DiagnosticMark {
+                    unnecessary: true,
+                    messages: vec![message(MarkSeverity::Warning)],
+                    ..mark(21..30, MarkSeverity::Warning)
+                },
+                DiagnosticMark {
+                    messages: vec![message(MarkSeverity::Information)],
+                    ..mark(28..30, MarkSeverity::Information)
+                },
+                mark(30..30, MarkSeverity::WeakWarning),
+            ],
+            &buffer,
+        );
+        let counts = marks.counts();
+        assert_eq!(
+            (counts.errors, counts.warnings, counts.weak_warnings),
+            (1, 2, 1)
+        );
+        assert_eq!(counts.total(), 4);
+        // At an offset: the marks over the char, the most severe first, and
+        // the empty one at the line end.
+        let at = |offset| -> Vec<Range<usize>> {
+            marks
+                .at(offset)
+                .into_iter()
+                .map(|i| marks.get(i).range.clone())
+                .collect()
+        };
+        assert_eq!(at(28), [21..30, 28..30]);
+        assert_eq!((at(30).len(), at(30).first()), (1, Some(&(30..30))));
+        assert!(at(18).is_empty());
+        assert_eq!(marks.empty_in(21..30), Some(30));
+        assert_eq!(marks.empty_in(0..20), None);
     }
 
     #[test]
