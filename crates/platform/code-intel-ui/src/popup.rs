@@ -119,13 +119,12 @@ impl PopupHost {
                 }
                 let line = editor.bounds_for_range(anchor..anchor)?;
                 let x = line.left() - popup.inset;
-                let below = match popup.placement {
-                    Placement::Above => false,
-                    Placement::Below => popup.height.is_none_or(|h| {
-                        line.bottom() + h + px(MARGIN) <= viewport.height
-                            || line.top() - h - px(MARGIN) < px(0.0)
-                    }),
-                };
+                let room_below = viewport.height - line.bottom() - px(MARGIN);
+                let room_above = line.top() - px(MARGIN);
+                let below = below(popup.placement, popup.height, room_below, room_above);
+                // A popup higher than the room on its side gets that room;
+                // its content scrolls (popups whose content can shrink).
+                let room = if below { room_below } else { room_above };
                 let (position, corner) = if below {
                     (point(x, line.bottom()), Corner::TopLeft)
                 } else {
@@ -145,6 +144,9 @@ impl PopupHost {
                                     // Clicks stay in the popup: the editor
                                     // under it keeps its caret and focus.
                                     .occlude()
+                                    .flex()
+                                    .flex_col()
+                                    .max_h(room.max(px(0.0)))
                                     .child(popup.content.clone()),
                             ),
                     )
@@ -153,6 +155,17 @@ impl PopupHost {
                 )
             })
             .collect()
+    }
+}
+
+/// Whether a popup goes under its line: on its preferred side when its
+/// height (when known) fits there, else on the other side when it fits
+/// there, else on the side with more room.
+pub fn below(placement: Placement, height: Option<Pixels>, below: Pixels, above: Pixels) -> bool {
+    let fits = |room: Pixels| height.is_none_or(|h| h <= room);
+    match placement {
+        Placement::Below => fits(below) || (!fits(above) && below >= above),
+        Placement::Above => !fits(above) && (fits(below) || below > above),
     }
 }
 
@@ -189,5 +202,29 @@ impl Render for TextHint {
             .text_color(theme.color(UiRole::Text))
             .whitespace_nowrap()
             .child(self.text.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popups_go_where_they_fit() {
+        let (h, room) = (Some(px(100.0)), |v: f32| px(v));
+        // Room on the preferred side.
+        assert!(below(Placement::Below, h, room(150.0), room(50.0)));
+        assert!(!below(Placement::Above, h, room(150.0), room(120.0)));
+        // Not there, but on the other side.
+        assert!(!below(Placement::Below, h, room(50.0), room(150.0)));
+        assert!(below(Placement::Above, h, room(150.0), room(50.0)));
+        // Nowhere: the side with more room.
+        assert!(below(Placement::Below, h, room(80.0), room(60.0)));
+        assert!(!below(Placement::Below, h, room(60.0), room(80.0)));
+        assert!(below(Placement::Above, h, room(80.0), room(60.0)));
+        assert!(!below(Placement::Above, h, room(60.0), room(80.0)));
+        // Height not known: the preferred side.
+        assert!(below(Placement::Below, None, room(0.0), room(500.0)));
+        assert!(!below(Placement::Above, None, room(500.0), room(0.0)));
     }
 }

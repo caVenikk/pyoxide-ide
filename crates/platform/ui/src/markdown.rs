@@ -271,6 +271,40 @@ impl Markdown {
         self.blocks.is_empty()
     }
 
+    /// About how many lines the document takes: lines of text wrapped at
+    /// `per_line` chars, and lines of code (to size a popup before it is
+    /// drawn).
+    pub fn line_counts(&self, per_line: usize) -> (usize, usize) {
+        fn wrapped(text: &str, per_line: usize) -> usize {
+            text.lines()
+                .map(|l| l.chars().count().div_ceil(per_line.max(1)).max(1))
+                .sum()
+        }
+        fn count(blocks: &[Block], per_line: usize) -> (usize, usize) {
+            blocks
+                .iter()
+                .fold((0, 0), |(text, code), block| match block {
+                    Block::Paragraph(t) | Block::Heading { text: t, .. } => {
+                        (text + wrapped(&t.text, per_line), code)
+                    }
+                    Block::Code(c) => (text, code + c.text.lines().count().max(1)),
+                    Block::List { items, .. } => {
+                        let (t, c) = items.iter().fold((0, 0), |(t, c), item| {
+                            let (it, ic) = count(item, per_line.saturating_sub(3));
+                            (t + it, c + ic)
+                        });
+                        (text + t, code + c)
+                    }
+                    Block::Quote(blocks) => {
+                        let (t, c) = count(blocks, per_line.saturating_sub(2));
+                        (text + t, code + c)
+                    }
+                    Block::Rule => (text, code),
+                })
+        }
+        count(&self.blocks, per_line)
+    }
+
     /// The block tree as JSON (for tests and state queries).
     pub fn to_json(&self) -> Json {
         blocks_json(&self.blocks)
@@ -1047,6 +1081,17 @@ mod tests {
             ]
         );
         assert!(Markdown::parse("  \n", None).is_empty());
+    }
+
+    #[test]
+    fn line_counts() {
+        let md = Markdown::parse(
+            "A paragraph of twenty.\n\n```\na\nb\n```\n\n- one\n- two\n\n---",
+            None,
+        );
+        // 22 chars at 10 a line: 3 lines; two items; two lines of code.
+        assert_eq!(md.line_counts(10), (5, 2));
+        assert_eq!(Markdown::default().line_counts(10), (0, 0));
     }
 
     #[test]

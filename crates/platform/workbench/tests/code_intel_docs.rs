@@ -661,3 +661,68 @@ fn other_overloads_show_when_asked_for(cx: &mut TestAppContext) {
     assert_eq!(h.signature()["lines"], json!(["a", "b"]));
     assert!(h.editor_focused());
 }
+
+#[gpui::test]
+fn popups_fit_a_small_window(cx: &mut TestAppContext) {
+    let text: String = (0..40).map(|i| format!("f(x{i})\n")).collect();
+    let mut h = H::new(cx, &[("app.py", &text)]);
+    VisualTestContext::from_window(h.window.into(), h.cx)
+        .simulate_resize(gpui::size(px(900.0), px(320.0)));
+    h.draw();
+    let window =
+        h.cx.update_window(h.window.into(), |_, window, _| window.viewport_size())
+            .unwrap();
+    assert_eq!(window.height, px(320.0));
+    // A long description: higher than the window.
+    let long: String = (0..30)
+        .map(|i| format!("Paragraph {i} of a long description.\n\n"))
+        .collect();
+    let markdown = format!("```python\ndef f(x) -> None\n```\n---\n{long}");
+    h.fake.on_hover(move |_, _| {
+        Ok(Some(Hover {
+            contents: Markup::markdown(markdown.clone()),
+            range: None,
+        }))
+    });
+    h.fake.on_signature_help(|_, _, _| {
+        Ok(Some(SignatureHelp {
+            signatures: vec![Signature {
+                label: "(x)".into(),
+                documentation: None,
+                parameters: vec![ParameterInfo {
+                    label: 1..2,
+                    documentation: None,
+                }],
+                active_parameter: None,
+            }],
+            active_signature: 0,
+            active_parameter: Some(0),
+        }))
+    });
+    let inside = |popup: gpui::Bounds<gpui::Pixels>, caret: gpui::Bounds<gpui::Pixels>| {
+        assert!(popup.top() >= px(0.0), "{popup:?}");
+        assert!(popup.bottom() <= window.height + px(0.5), "{popup:?}");
+        // Under the caret's line or over it, never on it.
+        assert!(
+            popup.top() >= caret.bottom() - px(1.0) || popup.bottom() <= caret.top() + px(1.0),
+            "{popup:?} {caret:?}"
+        );
+    };
+    for line in ["f(x2", "f(x20", "f(x39"] {
+        h.open("app.py", line);
+        h.invoke("code.quick-doc", json!(null));
+        assert!(!h.popup().is_null(), "{line}");
+        let popup = h.bounds("documentation-popup").expect("drawn");
+        let caret = h.caret_bounds();
+        inside(popup, caret);
+        // The content scrolls inside the room it has.
+        let scroll = h.bounds("documentation-scroll").unwrap();
+        assert!(scroll.size.height < px(360.0), "{line}: {scroll:?}");
+        h.press("escape");
+
+        h.invoke("code.parameter-info", json!(null));
+        let popup = h.bounds("parameter-info-popup").expect("drawn");
+        inside(popup, h.caret_bounds());
+        h.press("escape");
+    }
+}

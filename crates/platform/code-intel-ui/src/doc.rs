@@ -17,8 +17,9 @@ use code_intel::{CodeAction, Markup, MarkupKind};
 use editor::{DiagnosticMark, MarkSeverity};
 use gpui::{
     Action, App, Context, FontWeight, InteractiveElement, InteractiveText, IntoElement,
-    MouseButton, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
-    Styled, StyledText, TextRun, WeakEntity, Window, div, font, prelude::FluentBuilder, px,
+    MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, TextRun, WeakEntity, Window, div, font,
+    prelude::FluentBuilder, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
@@ -333,6 +334,43 @@ impl DocContent {
         self.problems.is_empty() && self.documentation.is_none()
     }
 
+    /// About how high the popup is, from the lines of its text wrapped at
+    /// the popup's width (to choose between below and above the line
+    /// before it is drawn); at most the popup's highest.
+    pub fn estimated_height(&self, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let text_line = theme.ui_size() * 1.4;
+        let code_line = theme.editor_size() * theme.editor_line_spacing().max(1.2);
+        // Chars of a wrapped line: the popup's width over an average char.
+        let per_line = ((MAX_WIDTH - 2.0 * PAD_X) / (f32::from(theme.ui_size()) * 0.55)) as usize;
+        let wrapped = |text: &str| {
+            text.lines()
+                .map(|l| l.chars().count().div_ceil(per_line.max(1)).max(1))
+                .sum::<usize>() as f32
+        };
+        let section = px(2.0 * PAD_Y + 1.0);
+        let mut height = px(2.0);
+        for problem in &self.problems {
+            height += text_line * wrapped(&problem.text) + section;
+        }
+        if self.fix.is_some() || self.more_actions {
+            height += text_line + section;
+        }
+        if let Some(doc) = &self.documentation {
+            height += section;
+            if doc.location.is_some() {
+                height += text_line + px(8.0);
+            }
+            if let Some(code) = &doc.definition {
+                height += code_line * code.text.lines().count() as f32 + px(9.0);
+            }
+            let (text, code) = doc.body.line_counts(per_line);
+            height += text_line * text as f32 + code_line * code as f32;
+            height += px(6.0) * doc.body.blocks.len() as f32;
+        }
+        height.min(px(MAX_HEIGHT + 2.0))
+    }
+
     pub fn to_json(&self) -> Json {
         json!({
             "kind": self.kind.name(),
@@ -617,6 +655,10 @@ impl Render for DocPopup {
             .text_size(theme.ui_size())
             .text_color(theme.color(UiRole::Text))
             .font_weight(FontWeight::NORMAL)
+            // Shrinks to the room the window has; the content scrolls.
+            .flex()
+            .flex_col()
+            .min_h(px(0.0))
             .on_hover(move |inside, _, cx| {
                 if let Some(owner) = owner.upgrade() {
                     owner.update(cx, |v, cx| v.doc_mouse_inside(*inside, cx));
@@ -625,7 +667,10 @@ impl Render for DocPopup {
             .child(
                 div()
                     .id("documentation-scroll")
+                    .debug_selector(|| "documentation-scroll".into())
                     .max_h(px(MAX_HEIGHT))
+                    .min_h(px(0.0))
+                    .flex_shrink()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .flex()

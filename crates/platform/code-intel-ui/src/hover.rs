@@ -334,6 +334,7 @@ impl CodeIntelView {
             return;
         }
         let kind = content.kind;
+        let height = content.estimated_height(cx);
         self.docs.popup.update(cx, |p, cx| p.set(content, cx));
         self.docs.shown = Some(Shown {
             editor: editor.entity_id(),
@@ -348,7 +349,7 @@ impl CodeIntelView {
             anchor: range.start,
             placement: Placement::Below,
             inset: gpui::px(0.0),
-            height: None,
+            height: Some(height),
             content: popup.into(),
         });
         cx.notify();

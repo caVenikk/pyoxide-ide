@@ -171,6 +171,30 @@ impl ListPopup {
         self.dismissed
     }
 
+    /// The height of the popup: its title and rows (at most the rows shown
+    /// at once).
+    pub fn height(&self, cx: &App) -> gpui::Pixels {
+        let row = Self::row_height(cx);
+        let rows: f32 = self
+            .items
+            .iter()
+            .take(MAX_ROWS)
+            .map(|i| {
+                if i.row().is_some() {
+                    row
+                } else {
+                    SEPARATOR_HEIGHT
+                }
+            })
+            .sum();
+        let title = if self.options.title.is_some() {
+            TITLE_TOP + row + TITLE_BOTTOM
+        } else {
+            PAD_Y
+        };
+        px(title + rows + PAD_Y + 2.0)
+    }
+
     /// Closes the popup and gives the focus back.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.dismissed {

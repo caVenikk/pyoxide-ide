@@ -341,13 +341,14 @@ impl CodeIntelView {
             editor: editor.clone(),
             _subscriptions: vec![chosen, dismissed],
         });
+        let height = popup.read(cx).height(cx);
         self.popups_mut().show(CaretPopup {
             context: LIST_CONTEXT,
             editor: editor.clone(),
             anchor: offset,
             placement: Placement::Below,
             inset: gpui::px(0.0),
-            height: None,
+            height: Some(height),
             content: popup.into(),
         });
         cx.emit(CodeIntelEvent::Redraw);

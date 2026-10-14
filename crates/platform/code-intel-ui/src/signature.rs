@@ -14,7 +14,8 @@ use code_intel::{IntelError, SignatureContext, SignatureHelp, SignatureTrigger};
 use editor::{Editor, EditorEvent};
 use gpui::{
     App, Context, Entity, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Render, SharedString, Styled, StyledText, Task, TextRun, WeakEntity, Window, div, font, px,
+    Pixels, Render, SharedString, Styled, StyledText, Task, TextRun, WeakEntity, Window, div, font,
+    px,
 };
 use serde_json::{Value as Json, json};
 use text::Buffer;
@@ -292,6 +293,7 @@ impl CodeIntelView {
         self.signatures
             .popup
             .update(cx, |p, cx| p.set(lines, link, cx));
+        let height = self.signatures.popup.read(cx).height(cx);
         let content = self.signatures.popup.clone().into();
         self.popups_mut().show(CaretPopup {
             context: CONTEXT,
@@ -299,7 +301,7 @@ impl CodeIntelView {
             anchor,
             placement: Placement::Above,
             inset: px(0.0),
-            height: None,
+            height: Some(height),
             content,
         });
         cx.notify();
@@ -464,6 +466,18 @@ impl SignaturePopup {
 
     pub fn lines(&self) -> &[Line] {
         &self.lines
+    }
+
+    /// The height of the popup: its lines, the link and the padding.
+    pub fn height(&self, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let line = theme.editor_size() * theme.editor_line_spacing().max(1.2);
+        let link = if self.link.is_some() {
+            theme.ui_size() * 1.4 + px(4.0)
+        } else {
+            px(0.0)
+        };
+        line * self.lines.len() as f32 + px(2.0) * self.lines.len() as f32 + link + px(10.0)
     }
 }
 
