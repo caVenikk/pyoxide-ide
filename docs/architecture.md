@@ -38,9 +38,9 @@ Platform (`crates/platform/`, language-agnostic):
   theme text roles; grammars and queries come from the products.
 - `project`: an opened folder, its lazily listed file tree with hidden and
   excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
-  project settings and the one-time import of the reference IDE's
-  exclusions (ADR 0008), the personal project state (ADR 0009), reading
-  and writing documents.
+  project settings (exclusions, and values by dotted table for products)
+  and the one-time import of the reference IDE's exclusions (ADR 0008),
+  the personal project state (ADR 0009), reading and writing documents.
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching
@@ -54,7 +54,21 @@ Platform (`crates/platform/`, language-agnostic):
   File's matching and ranking (`name:line:column` included).
 - `editor`: the code editor entity and element (virtualized painting,
   carets, selections, clipboard, input method, highlighting, editing
-  commands) and its find bar (Find / Replace in the file).
+  commands) and its find bar (Find / Replace in the file); diagnostic
+  marks, a link highlight, hover events and geometry for popups (stored
+  and reported; painting comes with the problems in the editor).
+- `code-intel`: the language-agnostic model and `CodeIntel` trait of code
+  intelligence (ADR 0010): documents, positions as `text::Point`,
+  diagnostics, completion items, documentation, signatures, locations,
+  text and workspace edits, code actions, server status and events; an
+  in-memory `FakeCodeIntel` (feature `fake`) for tests.
+- `lsp-client`: the LSP client (ADR 0010): server specs, the product's
+  `ServerCustomizer`, and `LspCodeIntel`, `CodeIntel` over several
+  servers. A skeleton: servers are not started yet.
+- `code-intel-ui`: the code intelligence of a main window: the product
+  hook (`CodeIntelProvider`, `CodeIntelHook`), the `CodeIntelView` the
+  workbench reports editors to, the `code.*` and `completion.*` commands.
+  A skeleton: the commands do nothing yet.
 - `themes`: theme model and tokens, default themes, import of PyCharm colour
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
@@ -74,6 +88,9 @@ Python product (`crates/python/`):
 - `pyoxide-cli`: `pyoxide`, the product's command line over the platform and
   Python command registries.
 - `py-syntax`: the Python grammar and highlight query for `syntax`.
+- `py-lsp`: Python language services (ADR 0010, 0011): the tools (ruff,
+  ty, basedpyright), their lookup modes, settings and server specs, the
+  import of the reference's tool settings. A skeleton.
 - `pyoxide-ide`: `pyoxide-ide`, the product's GUI application: the
   workbench with Python file types. Run it with
   `cargo run --release -p pyoxide-ide [folder] [files]`.
@@ -86,17 +103,22 @@ one product layer per language, composed at compile time into one binary per
 product (ADR 0005). Pyoxide is the Python product.
 
 ## Planned: language services (M3, ADR 0010, 0011)
-- `code-intel` (platform): the language-agnostic model and `CodeIntel`
-  trait of code intelligence (diagnostics, completion, documentation,
-  signatures, locations, edits, code actions, server status).
-- `lsp-client` (platform): the LSP client over `process` and
-  `LspCodeIntel`, `CodeIntel` over several servers with routing per
-  feature.
-- `code-intel-ui` (platform, GPUI): completion, documentation, parameter
-  info, navigation and intention popups, the Language Services widget,
-  `code.*` commands; `ui::markdown` renders documentation.
-- `py-lsp` (Python): ruff, ty and basedpyright server specs, executable lookup,
-  settings and the one-time import of the reference's tool settings.
+The crates exist with their public API (see above); planned is what fills
+them:
+- `lsp-client`: framing over `process`, requests with cancellation,
+  document sync, position encodings, pull and push diagnostics, routing
+  per feature.
+- `code-intel-ui`: completion, documentation, parameter info, navigation
+  and intention popups, the Language Services widget; `ui::markdown`
+  renders documentation.
+- `editor`: painting of diagnostics, the error stripe, the inspection
+  widget, next and previous problem, hover input.
+- `py-lsp`: executable lookup, settings, server configuration and the
+  one-time import of the reference's tool settings.
+- Layering (`scripts/check-layers.py`): `code-intel`, `lsp-client` and
+  `py-lsp` know no UI toolkit; only `lsp-client` sees protocol types;
+  platform UI crates depend on `code-intel`, never on `lsp-client`; the
+  editor does not depend on `code-intel`.
 
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,

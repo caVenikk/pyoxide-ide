@@ -110,10 +110,11 @@ quick fixes of its own. Formatting goes to one server only.
 
 ### Product hook
 `workbench::Product` gets `code_intel: Option<CodeIntelHook>`; the
-product's `CodeIntelProvider` builds the services of a project, can rename
-and nest code actions (ruff: rule names, Disable for this line as a
-sub-action) and adds its own intentions. `FileType` gets a language id
-(`"python"`).
+product's `CodeIntelProvider` builds the services of a project. Through
+the `lsp_client::ServerCustomizer` of its server specs it answers
+`workspace/configuration`, renames diagnostics and code actions, nests
+them (ruff: rule names, Disable for this line as a sub-action) and adds
+its own intentions. `FileType` gets a language id (`"python"`).
 
 ### Settings
 Shared settings in `.oxide/project.toml`, personal executable paths in
