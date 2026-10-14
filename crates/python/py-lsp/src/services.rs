@@ -301,8 +301,6 @@ pub fn probe(state: &mut ProjectState, timeout: Duration) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::lookup::Lookup;
     use crate::settings::TypeEngine;
@@ -508,6 +506,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn versions_and_rule_names() {
+        use std::collections::HashMap;
+
         let p = Project::new();
         let bin = p.python.parent().unwrap().to_owned();
         let ruff = tool_file(
