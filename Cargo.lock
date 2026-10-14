@@ -5139,11 +5139,20 @@ name = "py-lsp"
 version = "0.0.1"
 dependencies = [
  "code-intel",
+ "dirs 7.0.0",
+ "futures",
  "lsp-client",
  "process",
  "project",
  "py-env",
+ "quick-xml 0.42.0",
+ "regex",
+ "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]
@@ -5186,12 +5195,16 @@ dependencies = [
 name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
+ "code-intel",
+ "code-intel-ui",
  "dirs 7.0.0",
  "editor",
  "gpui",
+ "lsp-client",
  "process",
  "project",
  "py-env",
+ "py-lsp",
  "py-run",
  "py-syntax",
  "serde_json",

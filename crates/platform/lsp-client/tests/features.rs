@@ -86,6 +86,56 @@ fn completion_with_triggers_incomplete_lists_and_resolve() {
     assert_eq!(block_on(intel.shutdown()), Ok(()));
 }
 
+/// A product that shows its own text for the server's items and drops
+/// some.
+struct Presenting;
+
+impl ServerCustomizer for Presenting {
+    fn completion_items(&self, doc: &DocumentId, items: &mut Vec<code_intel::CompletionItem>) {
+        assert!(doc.path().ends_with("a.py"));
+        items.retain(|i| i.label != "hidden");
+        for item in items.iter_mut() {
+            item.type_text = item.detail.as_ref().map(|d| format!("<{d}>"));
+        }
+    }
+}
+
+#[test]
+fn completion_items_as_the_product_presents_them() {
+    let root = root("completion-customized");
+    let script = steps([
+        handshake(json!({"capabilities": {
+            "textDocumentSync": 2,
+            "completionProvider": {"resolveProvider": true},
+        }})),
+        vec![
+            json!({"expect": "textDocument/completion"}),
+            json!({"reply": [
+                {"label": "path", "detail": "module", "data": 1},
+                {"label": "hidden"},
+            ]}),
+            json!({"expect": "completionItem/resolve"}),
+            json!({"reply": {"label": "path", "detail": "module os.path", "data": 1}}),
+        ],
+    ]);
+    let intel = LspCodeIntel::with_timeouts(
+        vec![spec("ty", &root, script).with_customizer(Arc::new(Presenting))],
+        QUICK,
+    );
+    let events = Events::of(intel.as_ref());
+    let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
+    events.opened_all(&["ty"]);
+    let answer =
+        block_on(intel.completion(&editor.doc, Point::new(1, 3), CompletionTrigger::Invoked))
+            .unwrap();
+    assert_eq!(answer.items.len(), 1);
+    assert_eq!(answer.items[0].type_text.as_deref(), Some("<module>"));
+    let resolved =
+        block_on(intel.resolve_completion(&editor.doc, answer.items[0].clone())).unwrap();
+    assert_eq!(resolved.type_text.as_deref(), Some("<module os.path>"));
+    assert_eq!(block_on(intel.shutdown()), Ok(()));
+}
+
 #[test]
 fn documentation_signatures_and_navigation() {
     let root = root("navigation");

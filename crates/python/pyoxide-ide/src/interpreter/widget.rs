@@ -404,6 +404,8 @@ impl InterpreterWidget {
                     cx.notify();
                 }
             });
+            // The language services follow the new interpreter.
+            let _ = cx.update(|cx| super::changed(&root, cx));
         });
     }
 

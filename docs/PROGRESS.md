@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 35%** `███████░░░░░░░░░░░░░`
+**Overall parity: 50%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -10,7 +10,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 44% `████░░░░░░` | 1 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
-| python-intel | 3% `░░░░░░░░░░` | 0 | 1 | 20 |
+| python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 21% `██░░░░░░░░` | 1 | 0 | 4 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -99,21 +99,21 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75 |
-| ⬜ | Language services over LSP (start, stop, restart, status widget) | must | Community; Language Services widget and popup, Terminated state, server error output |
-| ⬜ | External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly) | must | Community; Lookup Sdk / Path / uvx, .idea/pyLspTools.xml import; the Settings page needs the settings window |
-| ⬜ | Type engine choice (Types widget) | could | Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here (ty / basedpyright) |
-| ⬜ | Problems highlighted in the editor (severity, unused, deprecated, tooltip) | must | Community; from ruff and the type server |
-| ⬜ | Error stripe, inspection widget, next / previous problem (F2) | must | Community |
+| ✅ | Language services over LSP (start, stop, restart, status widget) | must | Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85) |
+| 🟡 | External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly) | must | Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings page: #92; Pyright / Pyrefly not offered yet |
+| ✅ | Type engine choice (Types widget) | could | Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here: ty / basedpyright (#87) |
+| ✅ | Problems highlighted in the editor (severity, unused, deprecated, tooltip) | must | Community; from ruff and the type server (#84, #86: one hover popup with problems, first fix and documentation) |
+| ✅ | Error stripe, inspection widget, next / previous problem (F2) | must | Community (#84) |
 | ⬜ | Problems tool window | should | Community; needs generic tool windows |
-| ⬜ | Type checking | must | Community; reference: PSI inspections or an LSP tool; Pyoxide: ty by ADR |
-| ⬜ | Code completion (basic, auto-popup, auto-import) | must | Community |
-| ⬜ | Quick documentation (F1 / hover) | must | Community |
-| ⬜ | Parameter info | must | Community |
-| ⬜ | Go to declaration (Cmd+B / Cmd+click) and type declaration | must | Community |
-| ⬜ | Find usages and Show Usages popup | must | Community |
+| ✅ | Type checking | must | Community in the reference (PSI inspections or an LSP tool); Pyoxide: ty (ADR 0011), basedpyright as an option; type problems shown as warnings as the built-in engine does |
+| ✅ | Code completion (basic, auto-popup, auto-import) | must | Community (#85, #87); completion characters, documentation in the lookup and postfix templates later |
+| ✅ | Quick documentation (F1 / hover) | must | Community (#86) |
+| ✅ | Parameter info | must | Community (#86) |
+| 🟡 | Go to declaration (Cmd+B / Cmd+click) and type declaration | must | Community; Cmd+B, Cmd+click, chooser, usages on the declaration (#86); Go to Type Declaration and Back (#103) missing |
+| 🟡 | Find usages and Show Usages popup | must | Community; Show Usages popup (#86); Find Usages tool window later |
 | ⬜ | Highlight usages of the symbol at the caret | should | Community |
-| ⬜ | Quick fixes and intention actions (Alt+Enter) | must | Community; ruff fixes with Disable for line / file / project |
-| ⬜ | Reformat code and optimize imports with ruff | must | Community; ruff Formatting and Import optimizer features |
+| ✅ | Quick fixes and intention actions (Alt+Enter) | must | Community; ruff fixes with Disable for file / line / project (#86, #87); intention preview later |
+| ✅ | Reformat code and optimize imports with ruff | must | Community (#86, #87) |
 | ⬜ | Rename (Shift+F6) | should | Community |
 | ⬜ | Other refactorings (extract, inline, move, change signature) | could | Community |
 | ⬜ | Go to Class / Go to Symbol and File Structure | should | Community; Search Everywhere Classes and Symbols tabs |

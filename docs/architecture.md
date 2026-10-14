@@ -102,19 +102,18 @@ One repository, one Cargo workspace: a language-agnostic platform layer and
 one product layer per language, composed at compile time into one binary per
 product (ADR 0005). Pyoxide is the Python product.
 
-## Planned: language services (M3, ADR 0010, 0011)
-The crates exist with their public API (see above); planned is what fills
-them:
-- `lsp-client`: framing over `process`, requests with cancellation,
-  document sync, position encodings, pull and push diagnostics, routing
-  per feature.
-- `code-intel-ui`: completion, documentation, parameter info, navigation
-  and intention popups, the Language Services widget; `ui::markdown`
-  renders documentation.
-- `editor`: painting of diagnostics, the error stripe, the inspection
-  widget, next and previous problem, hover input.
-- `py-lsp`: executable lookup, settings, server configuration and the
-  one-time import of the reference's tool settings.
+## Language services (M3, ADR 0010, 0011)
+First version done (#82-#87): `lsp-client` (framing over `process`,
+cancellation, document sync, position encodings, pull and push
+diagnostics, routing per feature), `code-intel-ui` (completion,
+documentation, parameter info, navigation, intention and usages popups,
+the Language Services widget; `ui::markdown`), `editor` (painting of
+diagnostics, error stripe, inspection widget, next / previous problem,
+hover input) and `py-lsp` (ruff, ty and basedpyright: lookup, settings,
+server configuration, the one-time import of the reference's tool
+settings, ruff rule names and Disable actions, the type engine widget).
+Later: Find Usages tool window, rename, Problems tool window, inlay hints,
+semantic tokens, a file watcher.
 - Layering (`scripts/check-layers.py`): `code-intel`, `lsp-client` and
   `py-lsp` know no UI toolkit; only `lsp-client` sees protocol types;
   platform UI crates depend on `code-intel`, never on `lsp-client`; the

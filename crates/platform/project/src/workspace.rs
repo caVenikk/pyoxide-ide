@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item};
 
 use crate::store::{
-    STORE_DIR, StoreError, find_table, find_table_mut, read_document, version_of, write_atomic,
+    STORE_DIR, StoreError, find_table, find_table_mut, lock_root, read_document, version_of,
+    write_atomic,
 };
 
 /// The personal state in [`STORE_DIR`].
@@ -83,6 +84,7 @@ pub fn save_values(
     table: &str,
     values: &[(&str, Option<&str>)],
 ) -> Result<bool, StoreError> {
+    let _lock = lock_root(root);
     let path = workspace_file(root);
     let existing = read_document(&path)?;
     let created = existing.is_none();

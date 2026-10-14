@@ -168,13 +168,17 @@ pub(crate) fn completion(
                 "context": context,
             });
             request.call(target, "textDocument/completion", params, |r, t, value| {
-                convert::completions(
+                let mut completions = convert::completions(
                     &value,
                     &r.text(),
                     t.session.encoding(),
                     t.server.id(),
                     t.session.generation,
-                )
+                );
+                if let Some(customizer) = &t.server.spec().customizer {
+                    customizer.completion_items(&r.doc, &mut completions.items);
+                }
+                completions
             })
         })
         .collect();
@@ -230,13 +234,19 @@ pub(crate) fn resolve_completion(
     }
     let params = raw.value.clone();
     let call = request.call(&target, "completionItem/resolve", params, |r, t, value| {
-        convert::completion_item(
+        let item = convert::completion_item(
             &value,
             &r.text(),
             t.session.encoding(),
             t.server.id(),
             t.session.generation,
-        )
+        )?;
+        let Some(customizer) = &t.server.spec().customizer else {
+            return Some(item);
+        };
+        let mut items = vec![item];
+        customizer.completion_items(&r.doc, &mut items);
+        items.pop()
     });
     Box::pin(async move { Ok(call.await?.unwrap_or(item)) })
 }

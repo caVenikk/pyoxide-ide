@@ -4,7 +4,8 @@ use std::ops::Range;
 use std::path::Path;
 
 use code_intel::{
-    CodeAction, CodeActionContext, Diagnostic, DocumentId, Point, Rope, ServerStatus,
+    CodeAction, CodeActionContext, CompletionItem, Diagnostic, DocumentId, Point, Rope,
+    ServerStatus,
 };
 use serde_json::Value;
 
@@ -32,6 +33,14 @@ pub trait ServerCustomizer: Send + Sync + 'static {
     /// severity, message or code (ruff's rule names instead of codes).
     fn diagnostic(&self, diagnostic: &mut Diagnostic) {
         let _ = diagnostic;
+    }
+
+    /// Adjusts the server's completion items for a document before they
+    /// are shown, and an item again once it was resolved: how a language
+    /// presents them (the tail and type text of a Python function), or
+    /// which are offered.
+    fn completion_items(&self, doc: &DocumentId, items: &mut Vec<CompletionItem>) {
+        let _ = (doc, items);
     }
 
     /// Adjusts the server's code actions at a range: renames them, nests

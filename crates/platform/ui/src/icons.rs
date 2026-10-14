@@ -90,6 +90,7 @@ impl IconName {
     pub const ARROW_UP: Self = Self("general/up");
     pub const ARROW_DOWN: Self = Self("general/down");
     pub const FILTER: Self = Self("general/filter");
+    pub const CHECKED: Self = Self("actions/checked");
     pub const IN_SELECTION: Self = Self("actions/inSelection");
     pub const MATCH_CASE: Self = Self("inline/matchCase");
     pub const WORDS: Self = Self("inline/exactWords");
@@ -157,7 +158,7 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
-        "actions/inSelection", "actions/stopAndRestart",
+        "actions/checked", "actions/inSelection", "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/config", "fileTypes/css",
         "fileTypes/csv", "fileTypes/docker", "fileTypes/html", "fileTypes/image",

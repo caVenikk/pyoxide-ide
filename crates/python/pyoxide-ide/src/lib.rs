@@ -1,9 +1,12 @@
 //! `pyoxide-ide`: the Pyoxide Python IDE. Composes the platform workbench
 //! with what is specific to Python (file type icons, tool windows, the
-//! interpreter widget, running files).
+//! interpreter widget, running files, the language services and the type
+//! engine widget).
 
 pub mod interpreter;
 pub mod run;
+pub mod services;
+pub mod type_engine;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -123,6 +126,8 @@ fn file_location(name: &str, folder: &str) -> Option<String> {
 /// workbench at the end of its `init`).
 fn init(cx: &mut gpui::App) {
     interpreter::init(cx);
+    services::init(cx);
+    type_engine::init(cx);
 }
 
 /// The Pyoxide product for the workbench.
@@ -143,7 +148,8 @@ pub fn product() -> Product {
                 title: "Python Console",
             },
         ],
-        status_widgets: vec![interpreter::status_widget()],
+        // The reference's order: the type engine, then the interpreter.
+        status_widgets: vec![type_engine::status_widget(), interpreter::status_widget()],
         // The reference IDE's masks for Python: the language's files, then
         // markup and styles, then notebooks, stubs and Cython.
         find_file_masks: vec![
@@ -157,8 +163,21 @@ pub fn product() -> Product {
         },
         init: Some(init),
         run: Some(RunHook::new(run::PythonRunProvider)),
-        // Language services come with the Python services package (#87).
-        code_intel: None,
+        code_intel: Some(workbench::CodeIntelHook::new(
+            services::PythonCodeIntel::new(),
+        )),
+    }
+}
+
+/// The product with its language services finding tools only in the
+/// project interpreter's folder and in `search`, for tests: the tools of
+/// the machine never start.
+pub fn product_with_tools(search: py_lsp::SearchPaths) -> Product {
+    Product {
+        code_intel: Some(workbench::CodeIntelHook::new(
+            services::PythonCodeIntel::with_search(search),
+        )),
+        ..product()
     }
 }
 
@@ -214,7 +233,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("app.py"), "def main():\n    return 1\n").unwrap();
-        let product = std::rc::Rc::new(product());
+        let product = std::rc::Rc::new(product_with_tools(Default::default()));
         let window = cx.update(|cx| {
             workbench::init(cx, &product);
             workbench::open_main_window(cx, product.clone())
@@ -269,7 +288,7 @@ mod tests {
             "def func_0(a, b=None):\n    return a\n",
         )
         .unwrap();
-        let product = std::rc::Rc::new(product());
+        let product = std::rc::Rc::new(product_with_tools(Default::default()));
         let window = cx.update(|cx| {
             workbench::init(cx, &product);
             workbench::open_main_window(cx, product.clone())
@@ -327,7 +346,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("app.py"), "x = foo(bar, \"baz qux\")\n").unwrap();
-        let product = std::rc::Rc::new(product());
+        let product = std::rc::Rc::new(product_with_tools(Default::default()));
         let window = cx.update(|cx| {
             workbench::init(cx, &product);
             workbench::open_main_window(cx, product.clone())
