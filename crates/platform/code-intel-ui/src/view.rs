@@ -18,14 +18,20 @@ use serde_json::{Value as Json, json};
 use text::{CaretPlacement, EditKind, Point, SelectionSet};
 use themes::TextRole;
 
+use crate::actions::Reported;
 use crate::commands::*;
 use crate::completion::list::CompletionList;
 use crate::completion::{self, Session, identifier_start, is_identifier_char};
+use crate::doc::{self, DocPopup};
 use crate::document::Document;
 use crate::hook::CodeIntelHook;
+use crate::hover::DocState;
+use crate::intentions::IntentionState;
 use crate::marks;
+use crate::navigation::NavState;
 use crate::popup::{CaretPopup, Placement, PopupHost, TextHint};
 use crate::services::{self, InlineAction, ServerItem, ServicesPopup, WidgetBounds};
+use crate::signature::{self, SignaturePopup, SignatureState};
 
 /// The key context of the hint shown when Basic Completion finds nothing.
 pub const HINT_CONTEXT: &str = "CompletionHint";
@@ -56,6 +62,9 @@ pub enum CodeIntelEvent {
     OpenFile(PathBuf),
     /// Open a text that is no file in a read-only tab titled `title`.
     OpenText { title: String, text: String },
+    /// Open a file in a tab with the caret at a position (a navigation
+    /// target).
+    OpenLocation { path: PathBuf, at: Point },
 }
 
 /// The code intelligence of a main window: the project's language
@@ -83,6 +92,18 @@ pub struct CodeIntelView {
     /// The Language Services popup, while it is open.
     services_popup: Option<(Entity<ServicesPopup>, Subscription)>,
     widget_bounds: WidgetBounds,
+    /// Quick documentation, the popup over the text, Error Description.
+    pub(crate) docs: DocState,
+    /// Parameter info.
+    pub(crate) signatures: SignatureState,
+    /// The diagnostics of the documents as the services reported them.
+    pub(crate) reported: Reported,
+    /// Go to Declaration, Show Usages and the list popups.
+    pub(crate) nav: NavState,
+    /// Show Context Actions and the bulb.
+    pub(crate) intentions: IntentionState,
+    /// Reformat Code or Optimize Imports in flight.
+    pub(crate) format_request: Option<Task<()>>,
     /// Receives the services' events.
     _events: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -108,7 +129,9 @@ impl CodeIntelView {
             }
         });
         let owner = cx.weak_entity();
-        let completion_list = cx.new(|_| CompletionList::new(owner));
+        let completion_list = cx.new(|_| CompletionList::new(owner.clone()));
+        let doc_popup = cx.new(|_| DocPopup::new(owner.clone()));
+        let signature_popup = cx.new(|_| SignaturePopup::new(owner));
         Self {
             hook,
             services: None,
@@ -122,6 +145,12 @@ impl CodeIntelView {
             empty_auto: None,
             services_popup: None,
             widget_bounds: WidgetBounds::default(),
+            docs: DocState::new(doc_popup),
+            signatures: SignatureState::new(signature_popup),
+            reported: Reported::default(),
+            nav: NavState::default(),
+            intentions: IntentionState::new(cx.weak_entity()),
+            format_request: None,
             _events: None,
             _subscriptions: vec![quit, keys],
         }
@@ -151,6 +180,11 @@ impl CodeIntelView {
         self.documents
             .values()
             .find(|d| d.editor.entity_id() == editor.entity_id())
+    }
+
+    /// The documents of the window's tabs.
+    pub fn documents(&self) -> impl Iterator<Item = &Document> {
+        self.documents.values()
     }
 
     /// The document of the active tab.
@@ -195,6 +229,11 @@ impl CodeIntelView {
             cx.background_spawn(old.shutdown()).detach();
         }
         self.close_completion(cx);
+        self.close_doc(cx);
+        self.reset_signature(cx);
+        self.reset_navigation(cx);
+        self.clear_bulb(cx);
+        self.reported.clear();
         self.popups.clear();
         self.documents.clear();
         self.services_popup = None;
@@ -223,6 +262,7 @@ impl CodeIntelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.tab_opened(path, editor, window, cx);
         let (Some(language), Some(services)) = (language, self.services.clone()) else {
             return;
         };
@@ -254,6 +294,15 @@ impl CodeIntelView {
         if self.completion.as_ref().is_some_and(|s| s.path == path) {
             self.close_completion(cx);
         }
+        if self
+            .popups
+            .get(doc::CONTEXT)
+            .is_some_and(|p| p.editor == doc.editor)
+        {
+            self.close_doc(cx);
+        }
+        self.signature_file_closed(path, cx);
+        self.reported.forget(path);
         self.popups.hide_editor(doc.editor.entity_id());
         if let Some(services) = &self.services {
             services.did_close(&doc.id);
@@ -291,12 +340,22 @@ impl CodeIntelView {
         }
         self.active = path.map(Path::to_owned);
         self.close_completion(cx);
+        self.close_doc(cx);
+        self.reset_signature(cx);
+        self.reset_navigation(cx);
+        self.clear_bulb(cx);
         self.popups.clear();
         self.refresh_services_popup(cx);
         cx.notify();
     }
 
     fn editor_event(&mut self, path: &Path, event: &EditorEvent, cx: &mut Context<Self>) {
+        if let Some(editor) = self.documents.get(path).map(|d| d.editor.clone()) {
+            self.doc_editor_event(&editor, event, cx);
+            self.signature_editor_event(&editor, event, cx);
+            self.nav_editor_event(&editor, event, cx);
+            self.intention_editor_event(&editor, event, cx);
+        }
         match event {
             EditorEvent::Edited(applied) => {
                 let Some(doc) = self.documents.get_mut(path) else {
@@ -351,6 +410,8 @@ impl CodeIntelView {
     }
 
     fn editor_blurred(&mut self, editor: EntityId, cx: &mut Context<Self>) {
+        self.signature_blurred(editor, cx);
+        self.doc_blurred(editor, cx);
         if self
             .completion
             .as_ref()
@@ -383,6 +444,7 @@ impl CodeIntelView {
                     .editor
                     .update(cx, |e, cx| e.set_diagnostics(marks, cx));
                 self.update_analysis(doc.path(), cx);
+                self.diagnostics_reported(&doc, version, &items);
             }
             IntelEvent::Status(_) => {
                 // Servers starting, stopping or taking documents change
@@ -687,7 +749,7 @@ impl CodeIntelView {
 
     /// A one-line hint at a position of an editor (closed by the next key,
     /// edit or caret move).
-    fn show_hint(
+    pub(crate) fn show_hint(
         &mut self,
         editor: &Entity<Editor>,
         anchor: usize,
@@ -963,6 +1025,7 @@ impl CodeIntelView {
     /// its content.
     pub fn render_overlay(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
         let mut overlay = self.popups.render(window, cx);
+        overlay.extend(self.render_bulb(cx));
         if let Some((popup, _)) = &self.services_popup
             && !popup.read(cx).is_dismissed()
         {
@@ -1016,6 +1079,10 @@ impl CodeIntelView {
             "problems": problems,
             "widget": services::WidgetState::new(&items).map(|w| w.state_json()),
             "services_popup": self.services_popup.as_ref().map(|(p, _)| p.read(cx).state_json()),
+            "popup": self.doc_state_json(cx),
+            "signature": self.signature_state_json(cx),
+            "list": self.list_state_json(cx),
+            "bulb": self.bulb_state_json(),
         })
     }
 
@@ -1032,21 +1099,81 @@ impl CodeIntelView {
 
     // ---- commands ----------------------------------------------------------
 
-    fn quick_doc(&mut self, _: &QuickDoc, _: &mut Window, _: &mut Context<Self>) {}
+    fn active_editor(&self) -> Option<Entity<Editor>> {
+        self.active_document().map(|d| d.editor.clone())
+    }
 
-    fn parameter_info(&mut self, _: &ParameterInfo, _: &mut Window, _: &mut Context<Self>) {}
+    fn quick_doc(&mut self, _: &QuickDoc, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.quick_doc_at_caret(&editor, cx);
+        }
+    }
 
-    fn go_to_declaration(&mut self, _: &GoToDeclaration, _: &mut Window, _: &mut Context<Self>) {}
+    fn parameter_info(&mut self, _: &ParameterInfo, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.parameter_info_at_caret(&editor, cx);
+        }
+    }
 
-    fn show_usages(&mut self, _: &ShowUsages, _: &mut Window, _: &mut Context<Self>) {}
+    fn apply_first_fix(&mut self, _: &ApplyFirstFix, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.apply_first_fix_at_caret(&editor, cx);
+        }
+    }
 
-    fn show_intentions(&mut self, _: &ShowIntentions, _: &mut Window, _: &mut Context<Self>) {}
+    fn close_documentation(
+        &mut self,
+        _: &CloseDocumentation,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_doc(cx);
+    }
 
-    fn reformat(&mut self, _: &Reformat, _: &mut Window, _: &mut Context<Self>) {}
+    fn close_parameter_info(
+        &mut self,
+        _: &CloseParameterInfo,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reset_signature(cx);
+    }
 
-    fn optimize_imports(&mut self, _: &OptimizeImports, _: &mut Window, _: &mut Context<Self>) {}
+    fn go_to_declaration(&mut self, _: &GoToDeclaration, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.go_to_declaration_at_caret(&editor, cx);
+        }
+    }
 
-    fn error_description(&mut self, _: &ErrorDescription, _: &mut Window, _: &mut Context<Self>) {}
+    fn show_usages(&mut self, _: &ShowUsages, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.show_usages_at_caret(&editor, cx);
+        }
+    }
+
+    fn show_intentions(&mut self, _: &ShowIntentions, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.show_intentions_at_caret(&editor, cx);
+        }
+    }
+
+    fn reformat(&mut self, _: &Reformat, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.reformat_editor(&editor, cx);
+        }
+    }
+
+    fn optimize_imports(&mut self, _: &OptimizeImports, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.optimize_imports_in(&editor, cx);
+        }
+    }
+
+    fn error_description(&mut self, _: &ErrorDescription, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.error_description_at_caret(&editor, cx);
+        }
+    }
 
     fn restart_servers(&mut self, action: &RestartServers, _: &mut Window, cx: &mut Context<Self>) {
         let server = action.server.as_deref().map(ServerId::new);
@@ -1113,6 +1240,7 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
         Reformat => reformat,
         OptimizeImports => optimize_imports,
         ErrorDescription => error_description,
+        ApplyFirstFix => apply_first_fix,
         RestartServers => restart_servers,
         StopServer => stop_server,
     )
@@ -1143,6 +1271,28 @@ pub fn editor_container<E: InteractiveElement>(
         .popups
         .get(completion::CONTEXT)
         .is_some_and(|p| p.editor.entity_id() == editor.entity_id());
+    // The popups of documentation and parameter info close with Escape.
+    let shown = |context| {
+        v.popups
+            .get(context)
+            .is_some_and(|p| p.editor.entity_id() == editor.entity_id())
+    };
+    if shown(doc::CONTEXT) {
+        el = el.on_action({
+            let view = view.clone();
+            move |a: &CloseDocumentation, window, cx| {
+                view.update(cx, |v, cx| v.close_documentation(a, window, cx))
+            }
+        });
+    }
+    if shown(signature::CONTEXT) {
+        el = el.on_action({
+            let view = view.clone();
+            move |a: &CloseParameterInfo, window, cx| {
+                view.update(cx, |v, cx| v.close_parameter_info(a, window, cx))
+            }
+        });
+    }
     if completion {
         macro_rules! bind {
             ($el:expr, $($action:ty => $method:ident),* $(,)?) => {

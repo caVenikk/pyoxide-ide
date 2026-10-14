@@ -88,6 +88,7 @@ impl CodeIntelProvider for Intel {
                 incomplete: false,
             })
         });
+        script_docs(&fake);
         fake
     }
 }
@@ -1671,6 +1672,17 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.completion()["selected"], json!(31 - 11), "{what}");
         }
+        "code.quick-doc"
+        | "documentation.close"
+        | "code.parameter-info"
+        | "parameter-info.close"
+        | "code.error-description"
+        | "code.apply-first-fix"
+        | "code.show-intentions"
+        | "code.go-to-declaration"
+        | "code.show-usages"
+        | "code.reformat"
+        | "code.optimize-imports" => check_docs(h, &b.command, keys, &what),
         _ => return false,
     }
     true
@@ -1710,4 +1722,179 @@ fn every_macos_binding_works(cx: &mut TestAppContext) {
 #[gpui::test]
 fn every_windows_and_linux_binding_works(cx: &mut TestAppContext) {
     check_keymap(cx, keymap::DEFAULT);
+}
+
+// ---- documentation, parameter info and quick fixes ----------------------
+
+/// Answers of the services for the documentation checks: documentation
+/// anywhere, the signature `(a, b)` with the parameter by the column, and a
+/// quick fix that removes the first line.
+fn script_docs(fake: &FakeCodeIntel) {
+    use code_intel::{
+        CodeAction, CodeActionKind, FileEdits, Hover, Markup, ParameterInfo, Point, Signature,
+        SignatureHelp, TextEdit, WorkspaceEdit,
+    };
+    fake.on_hover(|_, _| {
+        Ok(Some(Hover {
+            contents: Markup::markdown("```python\ndef alpha() -> int\n```\n---\nThe first."),
+            range: None,
+        }))
+    });
+    fake.on_signature_help(|_, at, _| {
+        let parameter = |label| ParameterInfo {
+            label,
+            documentation: None,
+        };
+        Ok(Some(SignatureHelp {
+            signatures: vec![Signature {
+                label: "(a, b)".into(),
+                documentation: None,
+                parameters: vec![parameter(1..2), parameter(4..5)],
+                active_parameter: None,
+            }],
+            active_signature: 0,
+            active_parameter: Some(usize::from(at.column >= 4)),
+        }))
+    });
+    let edit = |doc: &code_intel::DocumentId, edits| {
+        Some(WorkspaceEdit {
+            files: vec![FileEdits {
+                path: doc.path().to_owned(),
+                edits,
+            }],
+        })
+    };
+    fake.on_code_actions(move |doc, _, context| {
+        // Optimize Imports asks for the organize imports action only.
+        if context.only.is_some() {
+            let mut organize =
+                CodeAction::new("Organize imports", CodeActionKind::organize_imports());
+            organize.edit = edit(
+                doc,
+                vec![TextEdit::new(
+                    Point::new(0, 0)..Point::new(2, 0),
+                    "import a\nimport b\n",
+                )],
+            );
+            return Ok(vec![organize]);
+        }
+        let mut fix = CodeAction::new("Remove unused import", CodeActionKind::QuickFix);
+        fix.edit = edit(
+            doc,
+            vec![TextEdit::new(Point::new(0, 0)..Point::new(1, 0), "")],
+        );
+        Ok(vec![fix])
+    });
+    // The declaration and the usages of anything: the start of line 2.
+    let second_line = |doc: &code_intel::DocumentId| code_intel::Location {
+        path: doc.path().to_owned(),
+        range: Point::new(1, 0)..Point::new(1, 1),
+    };
+    fake.on_definition(move |doc, _| Ok(vec![second_line(doc)]));
+    fake.on_references(move |doc, _, _| Ok(vec![second_line(doc)]));
+    fake.on_format(|_, _, _| {
+        Ok(vec![TextEdit::new(
+            Point::new(0, 1)..Point::new(0, 2),
+            " = ",
+        )])
+    });
+}
+
+/// A warning on `os` of `import os` in the active editor.
+fn mark_os(h: &mut H) {
+    let editor = h.editor();
+    let mark = editor::DiagnosticMark {
+        range: 7..9,
+        severity: editor::MarkSeverity::Warning,
+        unnecessary: true,
+        deprecated: false,
+        messages: vec![editor::MarkMessage {
+            severity: editor::MarkSeverity::Warning,
+            text: "`os` imported but unused".into(),
+            source: Some("Ruff".into()),
+            code: None,
+            href: None,
+        }],
+    };
+    h.cx.update(|cx| editor.update(cx, |e, cx| e.set_diagnostics(vec![mark], cx)));
+    h.draw();
+}
+
+fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
+    let state = |h: &mut H| h.invoke("code.state", json!(null));
+    match command {
+        "code.quick-doc" => {
+            h.set_editor("x = al|pha");
+            h.press(keys);
+            assert_eq!(state(h)["popup"]["kind"], "quick-doc", "{what}");
+            assert!(h.editor_focused(), "{what}: the editor keeps the focus");
+        }
+        "documentation.close" => {
+            h.set_editor("x = al|pha");
+            h.invoke("code.quick-doc", json!(null));
+            assert!(!state(h)["popup"].is_null(), "{what}");
+            h.press(keys);
+            assert!(state(h)["popup"].is_null(), "{what}");
+            assert_eq!(h.editor_marked(), "x = al|pha", "{what}");
+        }
+        "code.parameter-info" => {
+            h.set_editor("f(a, |b)");
+            h.press(keys);
+            assert_eq!(state(h)["signature"]["current"], "b", "{what}");
+            assert!(h.editor_focused(), "{what}: the editor keeps the focus");
+        }
+        "parameter-info.close" => {
+            h.set_editor("f(a, |b)");
+            h.invoke("code.parameter-info", json!(null));
+            assert_eq!(state(h)["signature"]["shown"], true, "{what}");
+            h.press(keys);
+            assert!(state(h)["signature"].is_null(), "{what}");
+            assert_eq!(h.editor_marked(), "f(a, |b)", "{what}");
+        }
+        "code.error-description" => {
+            h.set_editor("import os|\n");
+            mark_os(h);
+            h.press(keys);
+            assert_eq!(state(h)["popup"]["kind"], "error-description", "{what}");
+        }
+        "code.apply-first-fix" => {
+            h.set_editor("import os|\nx\n");
+            mark_os(h);
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "|x\n", "{what}");
+        }
+        "code.show-intentions" => {
+            h.set_editor("import os|\nx\n");
+            mark_os(h);
+            h.press(keys);
+            assert_eq!(state(h)["list"]["name"], "intentions", "{what}");
+            assert_eq!(
+                state(h)["list"]["selected"],
+                "Remove unused import",
+                "{what}"
+            );
+        }
+        "code.go-to-declaration" => {
+            h.set_editor("a|bc\nx\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "abc\n|x\n", "{what}");
+        }
+        "code.show-usages" => {
+            h.set_editor("a|bc\nx\n");
+            h.press(keys);
+            assert_eq!(state(h)["list"]["name"], "usages", "{what}");
+            assert_eq!(state(h)["list"]["items"][0]["text"], "x", "{what}");
+        }
+        "code.reformat" => {
+            h.set_editor("x=1|\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "x = 1|\n", "{what}");
+        }
+        "code.optimize-imports" => {
+            h.set_editor("import b|\nimport a\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "import a\nimport b\n|", "{what}");
+        }
+        _ => unreachable!("{command}"),
+    }
 }

@@ -11,6 +11,7 @@ pub mod components;
 pub mod fonts;
 pub mod icons;
 pub mod keys;
+pub mod markdown;
 pub mod menu;
 pub mod pointer;
 pub mod theme;

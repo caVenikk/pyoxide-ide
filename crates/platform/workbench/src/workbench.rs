@@ -403,6 +403,9 @@ impl Workbench {
             CodeIntelEvent::OpenText { title, text } => {
                 self.open_text(title.clone(), text.clone(), window, cx)
             }
+            CodeIntelEvent::OpenLocation { path, at } => {
+                self.open_file_at(path.clone(), *at, None, window, cx)
+            }
         }
     }
 

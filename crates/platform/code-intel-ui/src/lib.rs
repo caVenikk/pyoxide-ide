@@ -13,6 +13,12 @@
 //!   context (`Completion > Editor`).
 //! - [`completion`]: the completion popup, opened by Basic Completion or
 //!   by typing.
+//! - [`doc`]: the documentation popup (quick documentation, the popup
+//!   over the text under the mouse, Error Description).
+//! - [`signature`]: parameter info.
+//! - [`navigation`]: Go to Declaration or Usages, Show Usages, and the
+//!   list popups ([`list_popup`]).
+//! - [`intentions`]: Show Context Actions and the bulb.
 //! - [`services`]: the Language Services widget of the status bar and its
 //!   popup.
 //!
@@ -22,18 +28,27 @@
 // Matched parts of names are lists of ranges, often of one.
 #![allow(clippy::single_range_in_vec_init)]
 
+mod actions;
 pub mod bench;
 pub mod commands;
 pub mod completion;
+pub mod doc;
 pub mod document;
+mod format;
 mod hook;
+mod hover;
+pub mod intentions;
+pub mod list_popup;
 mod marks;
+pub mod navigation;
 pub mod popup;
 pub mod services;
+pub mod signature;
 mod view;
 
 pub use code_intel;
-pub use hook::{CodeIntelHook, CodeIntelProvider};
+pub use hook::{CodeIntelHook, CodeIntelProvider, DocLocation};
+pub use syntax;
 pub use view::{
     CaretQuery, CodeIntelEvent, CodeIntelView, HINT_CONTEXT, NO_SUGGESTIONS, editor_container,
     forward_actions,
@@ -44,4 +59,6 @@ pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::COMPLETION_COMMANDS);
     ui::command::register(cx, commands::SERVICE_COMMANDS);
+    ui::command::register(cx, commands::DOCUMENTATION_COMMANDS);
+    ui::command::register(cx, commands::PARAMETER_INFO_COMMANDS);
 }

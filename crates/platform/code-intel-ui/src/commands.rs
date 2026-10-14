@@ -25,6 +25,20 @@ ui::ui_commands! {
         "Sorts the imports of the file.";
     ErrorDescription => "code.error-description", "Error Description",
         "Shows the description of the problem at the caret.";
+    ApplyFirstFix => "code.apply-first-fix", "Apply First Quick Fix",
+        "Applies the first quick fix of the problem at the caret.";
+}
+
+ui::ui_commands! {
+    DOCUMENTATION_COMMANDS, scope = "Documentation";
+    CloseDocumentation => "documentation.close", "Close Documentation",
+        "Closes the documentation popup.";
+}
+
+ui::ui_commands! {
+    PARAMETER_INFO_COMMANDS, scope = "ParameterInfo";
+    CloseParameterInfo => "parameter-info.close", "Close Parameter Info",
+        "Closes the parameter info popup.";
 }
 
 ui::ui_commands! {

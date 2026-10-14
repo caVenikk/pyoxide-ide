@@ -52,6 +52,29 @@ pub trait CodeIntelProvider: 'static {
         let _ = language;
         None
     }
+
+    /// The lexer that colours code of a language (`"python"`) in
+    /// documentation: signatures and fenced code blocks. `None` leaves the
+    /// code in the plain text colour.
+    fn lexer(&self, language: &str) -> Option<Arc<dyn syntax::Lexer>> {
+        let _ = language;
+        None
+    }
+
+    /// The header of the documentation of a symbol declared in a file: the
+    /// module the file is (`json` for `.../json/__init__.pyi`) and its
+    /// icon. By default the file's name without its extension.
+    fn doc_location(&self, path: &Path) -> Option<DocLocation> {
+        crate::doc::default_location(path)
+    }
+}
+
+/// Where a symbol is declared, as the header of its documentation shows
+/// it: an icon and a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocLocation {
+    pub name: String,
+    pub icon: IconName,
 }
 
 /// The product's [`CodeIntelProvider`] in a `workbench::Product`.
