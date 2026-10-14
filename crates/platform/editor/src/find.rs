@@ -339,7 +339,11 @@ impl FindBar {
             cx.subscribe_in(&editor, window, |this, _, event, window, cx| match event {
                 EditorEvent::Edited(applied) => this.editor_edited(applied, window, cx),
                 EditorEvent::SelectionsChanged => this.editor_selection_changed(cx),
-                EditorEvent::Input(_) | EditorEvent::LinkClicked { .. } => {}
+                EditorEvent::Input(_)
+                | EditorEvent::LinkClicked { .. }
+                | EditorEvent::Hovered { .. }
+                | EditorEvent::ModifiedClick { .. }
+                | EditorEvent::Reloaded => {}
             }),
             cx.on_blur(&history_focus, window, |this, _, cx| {
                 if this.history.take().is_some() {
