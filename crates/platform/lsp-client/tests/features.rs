@@ -235,7 +235,8 @@ fn code_actions_of_two_servers_formatting_from_one() {
                 json!({"reply": [
                     {"title": "Organize imports", "kind": "source.organizeImports.lint", "data": 1},
                     {"title": "Remove import", "kind": "quickfix", "isPreferred": true,
-                     "diagnostics": [{"range": r(0, 7, 0, 9), "message": "unused", "code": "F401", "data": {"fix": true}}],
+                     // Echoed normalised: another order, no `data`, a severity.
+                     "diagnostics": [{"severity": 2, "code": "F401", "message": "unused", "range": r(0, 7, 0, 9)}],
                      "edit": {"changes": {uri.clone(): [{"range": r(0, 0, 1, 0), "newText": ""}]}}},
                     {"title": "Fix all", "command": "lint.fixAll", "arguments": [uri]},
                 ]}),

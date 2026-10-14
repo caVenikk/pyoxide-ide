@@ -221,6 +221,9 @@ fn ruff_diagnostics_quick_fixes_and_formatting() {
         actions[0].title
     );
     assert!(actions[0].edit.is_some());
+    // It fixes that problem (ruff sends it back in its own form).
+    assert_eq!(actions[0].diagnostics.len(), 1, "{actions:#?}");
+    assert_eq!(actions[0].diagnostics[0].code.as_deref(), Some("F401"));
     let organize = block_on(intel.code_actions(
         &main.doc,
         Point::new(0, 0)..Point::new(0, 0),

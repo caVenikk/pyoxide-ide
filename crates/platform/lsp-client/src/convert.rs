@@ -566,10 +566,20 @@ pub(crate) fn code_action(
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|raw| {
+        .filter_map(|echoed| {
+            fn sent(d: &Diagnostic) -> Option<&Value> {
+                Raw::of(d.token.as_ref()).map(|r| &r.value)
+            }
+            // The very value, else the same problem as the server
+            // normalised it (members dropped or added, defaults left out).
             diagnostics
                 .iter()
-                .find(|d| Raw::of(d.token.as_ref()).is_some_and(|r| r.value == *raw))
+                .find(|d| sent(d) == Some(echoed))
+                .or_else(|| {
+                    diagnostics
+                        .iter()
+                        .find(|d| sent(d).is_some_and(|s| same_diagnostic(s, echoed)))
+                })
                 .cloned()
         })
         .collect();
@@ -588,6 +598,36 @@ pub(crate) fn code_action(
     action.server = Some(server.clone());
     action.token = Some(Raw::token(server, generation, value));
     Some(action)
+}
+
+/// Two LSP diagnostics are the same problem: the same range, and the same
+/// code, source and message where both name them.
+fn same_diagnostic(sent: &Value, echoed: &Value) -> bool {
+    fn ends(diagnostic: &Value) -> Option<[Position; 2]> {
+        let range = diagnostic.get("range")?;
+        Some([position(range.get("start")?)?, position(range.get("end")?)?])
+    }
+    fn code(diagnostic: &Value) -> Option<String> {
+        match diagnostic.get("code")? {
+            Value::String(code) => Some(code.clone()),
+            Value::Number(code) => Some(code.to_string()),
+            _ => None,
+        }
+    }
+    fn text<'a>(diagnostic: &'a Value, key: &str) -> Option<&'a str> {
+        diagnostic.get(key).and_then(Value::as_str)
+    }
+    fn agree<T: PartialEq>(a: Option<T>, b: Option<T>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        }
+    }
+    ends(sent).is_some()
+        && ends(sent) == ends(echoed)
+        && agree(code(sent), code(echoed))
+        && agree(text(sent, "source"), text(echoed, "source"))
+        && agree(text(sent, "message"), text(echoed, "message"))
 }
 
 /// A document highlight answer.
@@ -925,6 +965,38 @@ mod tests {
         assert_eq!(
             command.token.downcast_ref::<Raw>().unwrap().value["command"],
             "ruff.applyFormat"
+        );
+    }
+
+    /// Servers send the diagnostics of an action back normalised: members
+    /// in another order, `data` or defaults left out, a severity added.
+    #[test]
+    fn actions_find_their_diagnostics_as_the_server_echoes_them() {
+        let ruff = ServerId::new("ruff");
+        let text = Text::new(Rope::from_str("import os\nx = 1\n"));
+        let sent = json!({"range": r(0, 7, 0, 9), "message": "unused", "code": "F401",
+            "source": "Ruff", "data": {"fix": 1}, "tags": [1]});
+        let other = json!({"range": r(1, 0, 1, 1), "message": "unused", "code": "F841"});
+        let numeric = json!({"range": r(1, 4, 1, 5), "message": "seven", "code": 7});
+        let model: Vec<Diagnostic> = [&sent, &other, &numeric]
+            .iter()
+            .map(|d| diagnostic(d, &text, Utf16, &ruff, 1).unwrap().diagnostic)
+            .collect();
+        let answer = json!([{"title": "Fix", "kind": "quickfix", "diagnostics": [
+            {"severity": 2, "code": "F401", "range": r(0, 7, 0, 9), "message": "unused"},
+            {"code": "7", "range": r(1, 4, 1, 5)},
+            // Same code and message, another range: not the same problem.
+            {"range": r(0, 0, 0, 1), "message": "unused", "code": "F401"},
+            {"range": r(0, 7, 0, 9), "message": "something else", "code": "F401"},
+        ]}]);
+        let actions = code_actions(&answer, Utf16, &ruff, 1, &model, &texts);
+        assert_eq!(actions[0].diagnostics, [model[0].clone(), model[2].clone()]);
+        // The original token stays, for the next request.
+        assert_eq!(
+            Raw::of(actions[0].diagnostics[0].token.as_ref())
+                .unwrap()
+                .value,
+            sent
         );
     }
 
