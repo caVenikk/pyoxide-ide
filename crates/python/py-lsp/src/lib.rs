@@ -12,6 +12,8 @@
 //!   initialization options and `workspace/configuration` settings.
 //! - [`completion`]: the type servers' completion items as the reference
 //!   presents Python items (`check(self, value)`, `Point`).
+//! - [`type_server`]: the type server's adjustments (completion items,
+//!   the severities of its problems).
 //! - [`ruff`]: ruff's adjustments (rule names, nested and added actions).
 //! - [`idea`]: the import of `.idea/pyLspTools.xml` and
 //!   `.idea/pyTypeEngine.xml`.
@@ -29,6 +31,7 @@ pub mod ruff;
 pub mod servers;
 pub mod services;
 pub mod settings;
+pub mod type_server;
 
 pub use lookup::{Executable, Lookup, LookupContext, Resolution, SearchPaths};
 pub use services::{ProjectState, SpecTarget};

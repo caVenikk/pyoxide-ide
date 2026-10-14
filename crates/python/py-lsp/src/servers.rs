@@ -30,10 +30,10 @@ use code_intel::{Feature, Features};
 use lsp_client::ServerSpec;
 use serde_json::{Value, json};
 
-use crate::completion::TypeServerCustomizer;
 use crate::lookup::Executable;
 use crate::ruff::RuffCustomizer;
 use crate::settings::{Settings, Tool};
+use crate::type_server::TypeServerCustomizer;
 
 /// The language id of Python documents.
 pub const PYTHON: &str = "python";
@@ -120,7 +120,7 @@ pub fn spec(
         spec = spec.with_customizer(ruff.clone());
     }
     if tool.is_type_server() {
-        spec = spec.with_customizer(Arc::new(TypeServerCustomizer));
+        spec = spec.with_customizer(Arc::new(TypeServerCustomizer::new(tool)));
     }
     if tool == Tool::Basedpyright {
         // The pyright family asks for its settings once told they changed

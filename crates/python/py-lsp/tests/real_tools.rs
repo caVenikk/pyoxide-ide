@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use code_intel::{
     CodeActionContext, CodeIntel, CompletionItem, CompletionTrigger, Diagnostic, DocumentId,
-    IntelEvent, Rope, ServerState,
+    IntelEvent, Rope, ServerState, Severity,
 };
 use futures::executor::block_on;
 use lsp_client::LspCodeIntel;
@@ -294,6 +294,16 @@ fn ruff_and_ty_on_a_sample_project() {
     let items = wait(&events, &app, &mut timing, |items| {
         has(items, "ruff", "unused-import") && has(items, "ty", "invalid-argument-type")
     });
+    // ty's type checks are warnings, as the reference's engine's are; an
+    // undefined name stays an error.
+    let severity = |code: &str| {
+        items
+            .iter()
+            .find(|d| from(d, "ty") && d.code.as_deref() == Some(code))
+            .map(|d| d.severity)
+    };
+    assert_eq!(severity("invalid-argument-type"), Some(Severity::Warning));
+    assert_eq!(severity("unresolved-reference"), Some(Severity::Error));
     // Rule names instead of codes.
     let unused = items
         .iter()

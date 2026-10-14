@@ -15,21 +15,7 @@
 //! with `*`, `/`, `*args` and `**kwargs` as written; a bound method starts
 //! with `self`, one bound to the class (a class method) with `cls`.
 
-use code_intel::{CompletionItem, DocumentId, SymbolKind};
-use lsp_client::ServerCustomizer;
-
-/// The type server's [`ServerCustomizer`]: its completion items as the
-/// reference presents Python items.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TypeServerCustomizer;
-
-impl ServerCustomizer for TypeServerCustomizer {
-    fn completion_items(&self, _: &DocumentId, items: &mut Vec<CompletionItem>) {
-        for item in items.iter_mut() {
-            present(item);
-        }
-    }
-}
+use code_intel::{CompletionItem, SymbolKind};
 
 /// Sets the tail and type text of an item from its description, when the
 /// description is one of the forms above; other items stay as they are.
@@ -238,11 +224,9 @@ mod tests {
         item
     }
 
-    /// The tail and type text of an item after the customizer.
-    fn shown(item: CompletionItem) -> (Option<String>, Option<String>) {
-        let mut items = vec![item];
-        TypeServerCustomizer.completion_items(&DocumentId::new("/p/a.py"), &mut items);
-        let item = items.pop().unwrap();
+    /// The tail and type text of an item as presented.
+    fn shown(mut item: CompletionItem) -> (Option<String>, Option<String>) {
+        present(&mut item);
         (item.tail_text, item.type_text)
     }
 
