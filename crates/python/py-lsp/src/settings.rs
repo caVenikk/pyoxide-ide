@@ -466,6 +466,21 @@ pub fn has_tool_settings(root: &Path) -> Result<bool, StoreError> {
     Ok(store::load_table(root, TOOLS_TABLE)?.is_some())
 }
 
+/// Creates an empty `[python.tools]` table when there is none (it ends
+/// the one-time import of the reference's settings). Returns whether the
+/// file was written.
+pub fn ensure_tools_table(root: &Path) -> Result<bool, StoreError> {
+    if has_tool_settings(root)? {
+        return Ok(false);
+    }
+    // The store creates a table only with a value in it: write a
+    // placeholder and remove it, which leaves the table.
+    const PLACEHOLDER: &str = "imported";
+    store::save_values(root, TOOLS_TABLE, &[(PLACEHOLDER, Some(true.into()))])?;
+    store::save_values(root, TOOLS_TABLE, &[(PLACEHOLDER, None)])?;
+    Ok(true)
+}
+
 /// The person chose a type engine: it is stored with its tool turned on
 /// explicitly. Returns the settings now in effect.
 pub fn select_type_engine(root: &Path, engine: TypeEngine) -> Result<Settings, StoreError> {

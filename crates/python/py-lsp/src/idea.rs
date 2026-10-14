@@ -42,9 +42,14 @@
 //!   default) keeps Pyoxide's default: Pyoxide has no engine of its own.
 //! - Lookup modes and features are taken as they are; custom executables
 //!   become personal paths in `.oxide/workspace.toml`.
-//! - The type engine: ty when the reference's type engine is ty;
-//!   basedpyright when it is enabled and ty is not; ty otherwise. Pyright
-//!   and Pyrefly have no counterpart and are left out.
+//! - Pyright enabled (without basedpyright) becomes basedpyright, its fork
+//!   with the closest semantics, with Pyright's lookup mode.
+//! - The type engine: ty when the reference's type engine is ty or
+//!   Pyrefly (not supported yet), or ty is enabled; basedpyright when it
+//!   (or Pyright) is enabled; ty otherwise.
+//! - What Pyoxide does differently is listed in [`Imported::notes`].
+//! - Once imported, `[python.tools]` exists (empty if nothing else went
+//!   there), so the import does not repeat.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -63,6 +68,14 @@ pub const TYPE_ENGINE_FILE: &str = "pyTypeEngine.xml";
 
 const TOOLS_STATE: &str = "PyToolsState";
 const TYPE_ENGINE_SETTINGS: &str = "PyTypeEngineProjectSettings";
+const PYRIGHT: &str = "pyright";
+const PYREFLY: &str = "pyrefly";
+
+/// The note of an import that found Pyright enabled.
+pub const NOTE_PYRIGHT: &str =
+    "Pyright is enabled in the reference IDE: basedpyright, a fork of it, runs instead";
+/// The note of an import that found Pyrefly enabled or as the type engine.
+pub const NOTE_PYREFLY: &str = "Pyrefly is not supported yet: ty runs as the type server instead";
 
 /// The reference's tool settings of a project, as Pyoxide's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,10 +85,14 @@ pub struct Imported {
     pub settings: Settings,
     /// Custom executables, personal in Pyoxide.
     pub paths: BTreeMap<Tool, PathBuf>,
+    /// What Pyoxide does differently from the reference's settings, for
+    /// the log.
+    pub notes: Vec<String>,
 }
 
 /// The reference's tool settings of a project; `None` when `.idea` has
-/// none for ruff, ty or basedpyright (or the files cannot be read).
+/// none for ruff, ty, basedpyright, Pyright or Pyrefly (or the files
+/// cannot be read).
 pub fn read_tool_settings(root: &Path) -> Option<Imported> {
     let idea = root.join(IDEA_DIR);
     if !idea.is_dir() {
@@ -110,6 +127,9 @@ pub fn import_tool_settings(root: &Path) -> Result<Option<Imported>, StoreError>
         imported.settings.set_type_engine(engine);
     }
     settings::save(root, &imported.settings)?;
+    // Nothing shared to write (only custom paths, or notes): the table
+    // still closes the one-time import.
+    settings::ensure_tools_table(root)?;
     for (tool, path) in &imported.paths {
         settings::set_custom_path(root, *tool, Some(path))?;
     }
@@ -219,26 +239,45 @@ fn expand(path: &str, root: &Path) -> PathBuf {
 }
 
 /// The reference's settings as Pyoxide's; `None` when they say nothing
-/// about ruff, ty or basedpyright.
+/// about ruff, ty, basedpyright, Pyright or Pyrefly.
 fn convert(tools: &ToolsFile, engine: Option<&str>, root: &Path) -> Option<Imported> {
-    let entries = tools.entries();
-    let enabled = |tool: Tool| {
+    let mut entries = tools.entries();
+    let enabled = |entries: &HashMap<String, Entry>, package: &str| {
         entries
-            .get(tool.package())
+            .get(package)
             .and_then(|e| e.enabled)
             .unwrap_or(false)
     };
-    let ty_engine = engine.is_some_and(|e| e.eq_ignore_ascii_case("TY"));
-    let type_engine = if ty_engine {
+    let mut notes = Vec::new();
+    let mut any = false;
+
+    // Pyright: basedpyright, its fork, has the closest semantics.
+    if enabled(&entries, PYRIGHT) && !enabled(&entries, Tool::Basedpyright.package()) {
+        let lookup = entries.get(PYRIGHT).and_then(|e| e.lookup);
+        let entry = entries
+            .entry(Tool::Basedpyright.package().to_owned())
+            .or_default();
+        entry.enabled = Some(true);
+        entry.lookup = entry.lookup.or(lookup);
+        notes.push(NOTE_PYRIGHT.to_owned());
+        any = true;
+    }
+    let engine = engine.map(str::to_ascii_uppercase);
+    let pyrefly_engine = engine.as_deref() == Some("PYREFLY");
+    if pyrefly_engine || enabled(&entries, PYREFLY) {
+        notes.push(NOTE_PYREFLY.to_owned());
+        any = true;
+    }
+    let ty_engine = engine.as_deref() == Some("TY");
+    let type_engine = if ty_engine || pyrefly_engine || enabled(&entries, Tool::Ty.package()) {
         TypeEngine::Ty
-    } else if enabled(Tool::Basedpyright) && !enabled(Tool::Ty) {
+    } else if enabled(&entries, Tool::Basedpyright.package()) {
         TypeEngine::Basedpyright
     } else {
         TypeEngine::Ty
     };
     let mut settings = Settings::with_type_engine(type_engine);
     let mut paths = BTreeMap::new();
-    let mut any = false;
     for tool in Tool::ALL {
         let defaults = Settings::default_tool(tool, type_engine);
         let out = settings.tool_mut(tool);
@@ -274,7 +313,11 @@ fn convert(tools: &ToolsFile, engine: Option<&str>, root: &Path) -> Option<Impor
         settings.ty.explicit = true;
         any = true;
     }
-    any.then_some(Imported { settings, paths })
+    any.then_some(Imported {
+        settings,
+        paths,
+        notes,
+    })
 }
 
 /// Reads `pyLspTools.xml`.
@@ -535,30 +578,84 @@ mod tests {
         assert!(s.ty.explicit);
 
         let dir = project(&[(TYPE_ENGINE_FILE, TY_ENGINE)]);
-        let s = read_tool_settings(dir.path()).unwrap().settings;
-        assert!(s.ty.explicit && s.ty.uvx_without_asking());
+        let imported = read_tool_settings(dir.path()).unwrap();
+        assert!(imported.settings.ty.explicit && imported.settings.ty.uvx_without_asking());
+        assert!(imported.notes.is_empty());
 
-        // The built-in engine and Pyrefly have no counterpart.
-        for engine in ["PYCHARM", "PYREFLY"] {
-            let text = TY_ENGINE.replace("TY", engine);
-            let dir = project(&[(TYPE_ENGINE_FILE, &text)]);
-            assert_eq!(read_tool_settings(dir.path()), None, "{engine}");
-        }
+        // The built-in engine has no counterpart.
+        let text = TY_ENGINE.replace("TY", "PYCHARM");
+        let dir = project(&[(TYPE_ENGINE_FILE, &text)]);
+        assert_eq!(read_tool_settings(dir.path()), None);
+
+        // Pyrefly is not supported yet: ty, with a note, even next to an
+        // enabled basedpyright.
+        let text = TY_ENGINE.replace("TY", "PYREFLY");
+        let dir = project(&[(TOOLS_FILE, CURRENT), (TYPE_ENGINE_FILE, &text)]);
+        let imported = read_tool_settings(dir.path()).unwrap();
+        assert_eq!(imported.settings.type_engine, TypeEngine::Ty);
+        assert_eq!(imported.settings.servers(), [Tool::Ruff, Tool::Ty]);
+        assert!(!imported.settings.ty.explicit);
+        assert_eq!(imported.notes, [NOTE_PYREFLY]);
+        let dir = project(&[(TYPE_ENGINE_FILE, &text)]);
+        let imported = read_tool_settings(dir.path()).unwrap();
+        assert_eq!(imported.settings, Settings::default());
+        assert_eq!(imported.notes, [NOTE_PYREFLY]);
+    }
+
+    #[test]
+    fn pyright_becomes_basedpyright() {
+        let pyright = r#"<project version="4">
+  <component name="PyToolsState"><option name="tools"><map>
+    <entry key="pyright"><value><ToolEntry>
+      <option name="enabled" value="true" />
+      <option name="discoveryMode" value="UVX" />
+      <option name="customPathToExecutable" value="/opt/node/bin/pyright-langserver" />
+    </ToolEntry></value></entry>
+  </map></option></component>
+</project>"#;
+        let dir = project(&[(TOOLS_FILE, pyright)]);
+        let imported = read_tool_settings(dir.path()).unwrap();
+        let s = &imported.settings;
+        assert_eq!(s.type_engine, TypeEngine::Basedpyright);
+        assert_eq!(s.servers(), [Tool::Ruff, Tool::Basedpyright]);
+        assert!(s.basedpyright.explicit);
+        assert_eq!(s.basedpyright.lookup, Lookup::Uvx);
+        // Pyright's own executable is not basedpyright's.
+        assert!(imported.paths.is_empty());
+        assert_eq!(imported.notes, [NOTE_PYRIGHT]);
+
+        // The older form, and ty enabled next to it: ty is the engine.
+        let legacy = r#"<project version="4">
+  <component name="PyrightConfiguration"><option name="enabled" value="true" /></component>
+  <component name="TyConfiguration"><option name="enabled" value="true" /></component>
+</project>"#;
+        let dir = project(&[(TOOLS_FILE, legacy)]);
+        let s = read_tool_settings(dir.path()).unwrap().settings;
+        assert_eq!(s.type_engine, TypeEngine::Ty);
+        assert!(s.ty.explicit && s.basedpyright.explicit);
+        assert_eq!(s.servers(), [Tool::Ruff, Tool::Ty]);
+
+        // Pyright only at its defaults: nothing.
+        let dir = project(&[(
+            TOOLS_FILE,
+            LEGACY.replace("RuffConfiguration", "Other").as_str(),
+        )]);
+        assert_eq!(read_tool_settings(dir.path()), None);
     }
 
     #[test]
     fn nothing_to_import() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read_tool_settings(dir.path()), None);
-        // Only tools without a counterpart, or defaults.
-        let pyright_only = r#"<project version="4">
+        // Defaults only.
+        let defaults = r#"<project version="4">
   <component name="PyToolsState"><option name="tools"><map>
-    <entry key="pyright"><value><ToolEntry><option name="enabled" value="true" /></ToolEntry></value></entry>
     <entry key="ruff"><value><ToolEntry><option name="discoveryMode" value="INTERPRETER" /></ToolEntry></value></entry>
+    <entry key="black"><value><ToolEntry><option name="enabled" value="true" /></ToolEntry></value></entry>
   </map></option></component>
   <component name="RuffConfiguration"><option name="inspections" value="true" /></component>
 </project>"#;
-        let dir = project(&[(TOOLS_FILE, pyright_only)]);
+        let dir = project(&[(TOOLS_FILE, defaults)]);
         assert_eq!(read_tool_settings(dir.path()), None);
         assert_eq!(import_tool_settings(dir.path()).unwrap(), None);
         assert!(!store::settings_file(dir.path()).exists());
@@ -568,6 +665,30 @@ mod tests {
             (TYPE_ENGINE_FILE, ""),
         ]);
         assert_eq!(read_tool_settings(dir.path()), None);
+    }
+
+    #[test]
+    fn an_import_of_a_path_only_happens_once() {
+        let only_path = r#"<project version="4">
+  <component name="PyToolsState"><option name="tools"><map>
+    <entry key="ruff"><value><ToolEntry>
+      <option name="customPathToExecutable" value="$PROJECT_DIR$/bin/ruff" />
+    </ToolEntry></value></entry>
+  </map></option></component>
+</project>"#;
+        let dir = project(&[(TOOLS_FILE, only_path)]);
+        let root = dir.path();
+        let imported = import_tool_settings(root).unwrap().unwrap();
+        assert_eq!(imported.settings, Settings::default());
+        let text = std::fs::read_to_string(store::settings_file(root)).unwrap();
+        assert!(text.contains("[python.tools]\n"), "{text}");
+        assert!(!text.contains("imported"), "{text}");
+        assert!(settings::has_tool_settings(root).unwrap());
+        assert_eq!(settings::load(root).unwrap(), Settings::default());
+        // The person removes the path: it does not come back.
+        settings::set_custom_path(root, Tool::Ruff, None).unwrap();
+        assert_eq!(import_tool_settings(root).unwrap(), None);
+        assert_eq!(settings::custom_path(root, Tool::Ruff).unwrap(), None);
     }
 
     #[test]
