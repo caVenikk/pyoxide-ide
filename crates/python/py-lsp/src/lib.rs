@@ -13,6 +13,8 @@
 //! - [`ruff`]: ruff's adjustments (rule names, nested and added actions).
 //! - [`idea`]: the import of `.idea/pyLspTools.xml` and
 //!   `.idea/pyTypeEngine.xml`.
+//! - [`services`]: a project as a whole: imports, settings, every tool's
+//!   lookup, version and problem, and its server specs.
 //!
 //! No UI toolkit here, and nothing that waits runs on the caller's behalf:
 //! lookups read the file system and the version check runs a process, so
@@ -22,7 +24,9 @@ pub mod idea;
 pub mod lookup;
 pub mod ruff;
 pub mod servers;
+pub mod services;
 pub mod settings;
 
 pub use lookup::{Executable, Lookup, LookupContext, Resolution, SearchPaths};
+pub use services::{ProjectState, SpecTarget};
 pub use settings::{Settings, Tool, ToolSettings, TypeEngine};

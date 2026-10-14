@@ -266,6 +266,22 @@ pub fn rules_command(executable: &Executable) -> CommandLine {
     executable.command_line(&["rule", "--output-format", "json", "--all"])
 }
 
+/// The most output of [`rules_command`] that is read (about 1.5 MB with
+/// ruff 0.15).
+const RULES_OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
+
+/// Ruff's rule names, code to name (blocking: runs [`rules_command`] for
+/// at most `timeout`); empty when it fails.
+pub fn load_rules(
+    executable: &Executable,
+    timeout: std::time::Duration,
+) -> HashMap<String, String> {
+    match crate::lookup::run_for_output(&rules_command(executable), timeout, RULES_OUTPUT_LIMIT) {
+        Ok((stdout, _, true)) => parse_rules(&stdout),
+        _ => HashMap::new(),
+    }
+}
+
 /// Rule code to name from the output of [`rules_command`]: an array of
 /// objects with `code` and `name`.
 pub fn parse_rules(json: &str) -> HashMap<String, String> {

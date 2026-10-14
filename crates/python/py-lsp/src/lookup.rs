@@ -453,7 +453,7 @@ pub fn probe_version(
     timeout: Duration,
 ) -> Result<String, VersionError> {
     let command = version_command(tool, executable).ok_or(VersionError::NoCommand)?;
-    let (stdout, stderr, success) = run_for_output(&command, timeout)?;
+    let (stdout, stderr, success) = run_for_output(&command, timeout, VERSION_OUTPUT_LIMIT)?;
     if let Some(version) = parse_version(tool, &stdout) {
         return Ok(version);
     }
@@ -471,10 +471,12 @@ pub fn probe_version(
     })
 }
 
-/// The standard output, standard error and success of a short command.
-fn run_for_output(
+/// The standard output, standard error and success of a short command,
+/// each cut at `limit` bytes.
+pub(crate) fn run_for_output(
     command: &CommandLine,
     timeout: Duration,
+    limit: usize,
 ) -> Result<(String, String, bool), VersionError> {
     let (handle, events) =
         process::spawn(command).map_err(|e| VersionError::Failed(e.to_string()))?;
@@ -482,7 +484,7 @@ fn run_for_output(
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let keep = |into: &mut Vec<u8>, chunk: Vec<u8>| {
-        let room = VERSION_OUTPUT_LIMIT.saturating_sub(into.len());
+        let room = limit.saturating_sub(into.len());
         into.extend_from_slice(&chunk[..chunk.len().min(room)]);
     };
     let success = loop {
