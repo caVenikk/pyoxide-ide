@@ -2264,6 +2264,9 @@ mod tests {
             start_position: (0, 0),
             old_end_position: (0, 0),
             new_end_position: (0, 0),
+            start_utf16_col: 0,
+            old_end_utf16_col: 0,
+            text: "".into(),
         };
         // Before: shifted; inside: grows; after: unchanged.
         assert_eq!(map_range(10..20, &[edit(2, 4, 7)]), 13..23);
