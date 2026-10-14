@@ -24,9 +24,11 @@
 
 use std::path::{Path, PathBuf};
 
-use toml_edit::{DocumentMut, Item, Table};
+use toml_edit::{DocumentMut, Item};
 
-use crate::store::{STORE_DIR, StoreError, read_document, version_of, write_atomic};
+use crate::store::{
+    STORE_DIR, StoreError, find_table, find_table_mut, read_document, version_of, write_atomic,
+};
 
 /// The personal state in [`STORE_DIR`].
 pub const WORKSPACE_FILE: &str = "workspace.toml";
@@ -47,24 +49,21 @@ pub fn workspace_file(root: &Path) -> PathBuf {
     root.join(STORE_DIR).join(WORKSPACE_FILE)
 }
 
-/// The string value of `key` in `[table]`; `None` when the file, the table
+/// The string value of `key` in `[table]` (a dotted path such as
+/// `python.tools.ruff` for a nested table); `None` when the file, the table
 /// or the key is missing, or the value is not a string.
 pub fn load_value(root: &Path, table: &str, key: &str) -> Result<Option<String>, StoreError> {
     let path = workspace_file(root);
     let Some(doc) = read_document(&path)? else {
         return Ok(None);
     };
-    let Some(item) = doc.get(table) else {
+    let Some(table) = find_table(&doc, table, &path)? else {
         return Ok(None);
     };
-    let table = item.as_table_like().ok_or_else(|| StoreError::Invalid {
-        path: path.clone(),
-        message: format!("`{table}` is not a table"),
-    })?;
     Ok(table.get(key).and_then(Item::as_str).map(str::to_owned))
 }
 
-/// Sets `key` in `[table]` to `value`, or removes it with `None`, keeping
+/// Sets `key` in `[table]` (a dotted path) to `value`, or removes it with `None`, keeping
 /// everything else in the file. Creates the file only when there is a value
 /// to store, together with `.oxide/.gitignore` unless that exists. A file
 /// of a newer version is not rewritten. Returns whether the file was
@@ -106,27 +105,17 @@ pub fn save_values(
     if doc.get("version").and_then(Item::as_integer) != Some(WORKSPACE_VERSION) {
         doc["version"] = toml_edit::value(WORKSPACE_VERSION);
     }
-    let invalid = || StoreError::Invalid {
-        path: path.clone(),
-        message: format!("`{table}` is not a table"),
-    };
     let mut changed = false;
     for (key, value) in values {
+        let Some(t) = find_table_mut(&mut doc, table, &path, value.is_some())? else {
+            continue;
+        };
         match value {
             Some(value) => {
-                if doc.get(table).is_none() {
-                    doc[table] = Item::Table(Table::new());
-                }
-                let t = doc[table].as_table_like_mut().ok_or_else(invalid)?;
                 t.insert(key, toml_edit::value(*value));
                 changed = true;
             }
-            None => {
-                if let Some(item) = doc.get_mut(table) {
-                    let t = item.as_table_like_mut().ok_or_else(invalid)?;
-                    changed |= t.remove(key).is_some();
-                }
-            }
+            None => changed |= t.remove(key).is_some(),
         }
     }
     if !changed {
@@ -292,6 +281,36 @@ mod tests {
             Err(StoreError::Invalid { .. })
         ));
         assert!(save_value(root, "python", "interpreter", Some("y")).is_err());
+    }
+
+    #[test]
+    fn nested_tables_by_dotted_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(save_value(root, "python.tools.ruff", "path", Some("/opt/tools/ruff")).unwrap());
+        save_value(root, "python", "interpreter", Some(".venv/bin/python")).unwrap();
+        let text = std::fs::read_to_string(workspace_file(root)).unwrap();
+        assert!(
+            text.contains("[python.tools.ruff]\npath = \"/opt/tools/ruff\"\n"),
+            "{text}"
+        );
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "path")
+                .unwrap()
+                .as_deref(),
+            Some("/opt/tools/ruff")
+        );
+        assert_eq!(
+            load_value(root, "python", "interpreter")
+                .unwrap()
+                .as_deref(),
+            Some(".venv/bin/python")
+        );
+        assert_eq!(load_value(root, "python.tools.ty", "path").unwrap(), None);
+        assert!(save_value(root, "python.tools.ruff", "path", None).unwrap());
+        assert_eq!(load_value(root, "python.tools.ruff", "path").unwrap(), None);
+        // Removing from a table that is not there writes nothing.
+        assert!(!save_value(root, "python.tools.ty", "path", None).unwrap());
     }
 
     #[test]
