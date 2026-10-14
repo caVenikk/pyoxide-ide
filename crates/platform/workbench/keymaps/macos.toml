@@ -130,6 +130,26 @@ name = "Editor"
 # Problems
 "f2" = "code.next-problem"
 "shift-f2" = "code.previous-problem"
+# Code completion
+"ctrl-space" = "code.complete"
+
+# The completion popup leaves the focus in the editor; while it shows,
+# Enter inserts the selected item, Tab replaces the identifier at the
+# caret with it, Escape closes it, and the keys that move the caret up
+# and down move the selection (the reference's lookup handles the editor
+# actions Up, Down, Page Up and Page Down this way).
+[[context]]
+name = "Completion > Editor"
+[context.bindings]
+"enter" = "completion.accept"
+"tab" = "completion.replace"
+"escape" = "completion.cancel"
+"up" = "completion.select-previous"
+"ctrl-p" = "completion.select-previous"
+"down" = "completion.select-next"
+"ctrl-n" = "completion.select-next"
+"pageup" = "completion.page-up"
+"pagedown" = "completion.page-down"
 
 # The Go to Line field is a one-line editor: Enter and Escape close it.
 [[context]]

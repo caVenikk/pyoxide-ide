@@ -1,25 +1,62 @@
-//! The code intelligence of one main window.
+//! The code intelligence of one main window: the controller between the
+//! editors of its tabs and the project's language services.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use code_intel::{CodeIntel, FileChange};
-use editor::Editor;
-use gpui::{AnyElement, App, AppContext as _, Context, Entity, InteractiveElement, Window};
+use code_intel::{
+    CodeIntel, CompletionTrigger, Completions, DocumentId, FileChange, IntelError, IntelEvent,
+};
+use editor::{Editor, EditorEvent};
+use gpui::{
+    AnyElement, App, AppContext as _, Context, Entity, EntityId, Focusable as _,
+    InteractiveElement, Subscription, Task, Window,
+};
 use serde_json::{Value as Json, json};
+use text::{CaretPlacement, EditKind, Point, SelectionSet};
 
 use crate::commands::*;
+use crate::completion::list::CompletionList;
+use crate::completion::{self, Session, identifier_start, is_identifier_char};
+use crate::document::Document;
 use crate::hook::CodeIntelHook;
+use crate::marks;
+use crate::popup::{CaretPopup, Placement, PopupHost};
+
+/// Where a request about the caret of an editor is made: the document,
+/// the caret as a char offset and as a position, and the version of the
+/// text they are in.
+#[derive(Debug, Clone)]
+pub struct CaretQuery {
+    pub path: PathBuf,
+    pub doc: DocumentId,
+    pub offset: usize,
+    pub at: Point,
+    pub version: u64,
+}
 
 /// The code intelligence of a main window: the project's language
 /// services, the documents of the window's editor tabs and the popups over
-/// them. The workbench reports editors and saves; the view does the rest.
+/// them. The workbench reports the project, editors, saves and the active
+/// tab; the view does the rest.
 pub struct CodeIntelView {
     hook: CodeIntelHook,
     /// The services of the open project.
     services: Option<Arc<dyn CodeIntel>>,
     root: Option<PathBuf>,
-    _quit: gpui::Subscription,
+    /// The documents, by path.
+    documents: HashMap<PathBuf, Document>,
+    /// The file of the active tab.
+    active: Option<PathBuf>,
+    popups: PopupHost,
+    completion: Option<Session>,
+    completion_list: Entity<CompletionList>,
+    /// Completion sessions started so far (their ids).
+    sessions: u64,
+    /// Receives the services' events.
+    _events: Option<Task<()>>,
+    _quit: Subscription,
 }
 
 impl CodeIntelView {
@@ -33,10 +70,19 @@ impl CodeIntelView {
                 }
             })
         });
+        let owner = cx.weak_entity();
+        let completion_list = cx.new(|_| CompletionList::new(owner));
         Self {
             hook,
             services: None,
             root: None,
+            documents: HashMap::new(),
+            active: None,
+            popups: PopupHost::default(),
+            completion: None,
+            completion_list,
+            sessions: 0,
+            _events: None,
             _quit: quit,
         }
     }
@@ -55,6 +101,52 @@ impl CodeIntelView {
         self.root.as_deref()
     }
 
+    /// The document of a file open in a tab.
+    pub fn document(&self, path: &Path) -> Option<&Document> {
+        self.documents.get(path)
+    }
+
+    /// The document whose editor this is.
+    pub fn document_of(&self, editor: &Entity<Editor>) -> Option<&Document> {
+        self.documents
+            .values()
+            .find(|d| d.editor.entity_id() == editor.entity_id())
+    }
+
+    /// The document of the active tab.
+    pub fn active_document(&self) -> Option<&Document> {
+        self.documents.get(self.active.as_deref()?)
+    }
+
+    /// The caret popups (for the code intelligence features).
+    pub fn popups(&self) -> &PopupHost {
+        &self.popups
+    }
+
+    pub fn popups_mut(&mut self) -> &mut PopupHost {
+        &mut self.popups
+    }
+
+    /// Where a request about the caret of a document's editor is made;
+    /// `None` when the editor is not a document or has several carets.
+    pub fn caret_query(&self, editor: &Entity<Editor>, cx: &App) -> Option<CaretQuery> {
+        let doc = self.document_of(editor)?;
+        let e = editor.read(cx);
+        if e.selections().len() != 1 {
+            return None;
+        }
+        let offset = e.selections().primary().head;
+        Some(CaretQuery {
+            path: doc.id.path().to_owned(),
+            doc: doc.id.clone(),
+            offset,
+            at: e.buffer().offset_to_point(offset),
+            version: doc.version(),
+        })
+    }
+
+    // ---- project and documents ---------------------------------------------
+
     /// A project was opened in the window: its services replace the
     /// previous project's, which shut down. The editors of the previous
     /// project are gone (no `editor_closed` for them).
@@ -62,8 +154,21 @@ impl CodeIntelView {
         if let Some(old) = self.services.take() {
             cx.background_spawn(old.shutdown()).detach();
         }
+        self.close_completion(cx);
+        self.popups.clear();
+        self.documents.clear();
+        self.active = None;
         self.root = Some(root.to_owned());
-        self.services = Some(self.hook.0.start(root, cx));
+        let services = self.hook.0.start(root, cx);
+        let events = services.events();
+        self._events = Some(cx.spawn(async move |this, cx| {
+            while let Ok(event) = events.recv_async().await {
+                if this.update(cx, |v, cx| v.service_event(event, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+        self.services = Some(services);
         cx.notify();
     }
 
@@ -74,39 +179,471 @@ impl CodeIntelView {
         path: &Path,
         language: Option<&str>,
         editor: &Entity<Editor>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let _ = (path, language, editor, cx);
+        let (Some(language), Some(services)) = (language, self.services.clone()) else {
+            return;
+        };
+        if self.documents.contains_key(path) {
+            self.editor_closed(path, cx);
+        }
+        let key = path.to_owned();
+        let events = cx.subscribe(editor, move |this, _, event: &EditorEvent, cx| {
+            this.editor_event(&key, event, cx)
+        });
+        let blur = cx.on_blur(&editor.focus_handle(cx), window, {
+            let editor = editor.entity_id();
+            move |this, _, cx| this.editor_blurred(editor, cx)
+        });
+        let id = DocumentId::new(path);
+        let text = editor.read(cx).buffer().rope().clone();
+        let doc = Document::new(id, language, editor.clone(), text, vec![events, blur]);
+        services.did_open(&doc.id, language, doc.version(), doc.versions.text());
+        self.documents.insert(path.to_owned(), doc);
     }
 
     /// The editor tab of a file was closed.
     pub fn editor_closed(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let _ = (path, cx);
+        let Some(doc) = self.documents.remove(path) else {
+            return;
+        };
+        if self.completion.as_ref().is_some_and(|s| s.path == path) {
+            self.close_completion(cx);
+        }
+        self.popups.hide_editor(doc.editor.entity_id());
+        if let Some(services) = &self.services {
+            services.did_close(&doc.id);
+        }
+        cx.notify();
     }
 
     /// The file of an editor tab was written to disk.
     pub fn file_saved(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let _ = (path, cx);
+        let (Some(doc), Some(services)) = (self.documents.get(path), &self.services) else {
+            return;
+        };
+        let text = doc.editor.read(cx).buffer().rope().clone();
+        services.did_save(&doc.id, &text);
     }
 
     /// The application changed files on disk (outside the editors).
-    pub fn files_changed(&mut self, changes: &[FileChange], cx: &mut Context<Self>) {
-        let _ = (changes, cx);
+    pub fn files_changed(&mut self, changes: &[FileChange], _: &mut Context<Self>) {
+        if let Some(services) = &self.services
+            && !changes.is_empty()
+        {
+            services.files_changed(changes);
+        }
     }
+
+    /// Another tab became the active one (`None`: no tab).
+    pub fn active_file_changed(&mut self, path: Option<&Path>, cx: &mut Context<Self>) {
+        if self.active.as_deref() == path {
+            return;
+        }
+        self.active = path.map(Path::to_owned);
+        self.close_completion(cx);
+        self.popups.clear();
+        cx.notify();
+    }
+
+    fn editor_event(&mut self, path: &Path, event: &EditorEvent, cx: &mut Context<Self>) {
+        match event {
+            EditorEvent::Edited(applied) => {
+                let Some(doc) = self.documents.get_mut(path) else {
+                    return;
+                };
+                let version = doc
+                    .versions
+                    .edited(applied, doc.editor.read(cx).buffer().rope());
+                if let Some(services) = &self.services {
+                    services.did_change(&doc.id, version, applied, doc.versions.text());
+                }
+                // A change before the completed identifier ends the popup.
+                if let Some(session) = &self.completion
+                    && session.path == path
+                    && applied.iter().any(|e| e.start < session.start)
+                {
+                    self.close_completion(cx);
+                }
+            }
+            EditorEvent::Reloaded => {
+                let Some(doc) = self.documents.get_mut(path) else {
+                    return;
+                };
+                let text = doc.editor.read(cx).buffer().rope().clone();
+                let version = doc.versions.reloaded(&text);
+                if let Some(services) = &self.services {
+                    services.did_reload(&doc.id, version, &text);
+                }
+                let editor = doc.editor.entity_id();
+                if self.completion.as_ref().is_some_and(|s| s.path == path) {
+                    self.close_completion(cx);
+                }
+                self.popups.hide_editor(editor);
+                cx.notify();
+            }
+            EditorEvent::SelectionsChanged
+                if self.completion.as_ref().is_some_and(|s| s.path == path) =>
+            {
+                self.completion_moved(cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn editor_blurred(&mut self, editor: EntityId, cx: &mut Context<Self>) {
+        if self
+            .completion
+            .as_ref()
+            .is_some_and(|s| s.editor.entity_id() == editor)
+        {
+            self.close_completion(cx);
+        }
+    }
+
+    fn service_event(&mut self, event: IntelEvent, cx: &mut Context<Self>) {
+        match event {
+            IntelEvent::Diagnostics {
+                doc,
+                version,
+                items,
+            } => {
+                let Some(document) = self.documents.get(doc.path()) else {
+                    return;
+                };
+                // A report for a text that is not known any more: a newer
+                // one follows.
+                let Some(marks) = marks::marks(&document.versions, version, &items) else {
+                    return;
+                };
+                document
+                    .editor
+                    .update(cx, |e, cx| e.set_diagnostics(marks, cx));
+            }
+            IntelEvent::Status(_) => cx.notify(),
+            _ => {}
+        }
+    }
+
+    // ---- completion -----------------------------------------------------------
+
+    /// Basic Completion in an editor: the popup for the identifier at the
+    /// caret, filled when the services answer.
+    pub fn complete(&mut self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
+        let Some(query) = self.caret_query(editor, cx) else {
+            return;
+        };
+        if !editor.read(cx).selections().primary().is_empty() {
+            return;
+        }
+        let start = identifier_start(editor.read(cx).buffer(), query.offset);
+        self.start_completion(editor, query.path, start, true, cx);
+        self.request_completion(CompletionTrigger::Invoked, cx);
+    }
+
+    fn start_completion(
+        &mut self,
+        editor: &Entity<Editor>,
+        path: PathBuf,
+        start: usize,
+        explicit: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_completion(cx);
+        self.sessions += 1;
+        self.completion = Some(Session::new(
+            self.sessions,
+            path,
+            editor.clone(),
+            start,
+            explicit,
+        ));
+    }
+
+    /// Asks the services for the items at the caret of the session's
+    /// editor; the request in flight, if any, is cancelled.
+    fn request_completion(&mut self, trigger: CompletionTrigger, cx: &mut Context<Self>) {
+        let Some(services) = self.services.clone() else {
+            return;
+        };
+        let Some(session) = &self.completion else {
+            return;
+        };
+        let editor = session.editor.clone();
+        let Some(query) = self.caret_query(&editor, cx) else {
+            return;
+        };
+        let Some(session) = self.completion.as_mut() else {
+            return;
+        };
+        let buffer = editor.read(cx).buffer();
+        session.requested_prefix = buffer.slice(session.start..query.offset.max(session.start));
+        let future = services.completion(&query.doc, query.at, trigger);
+        let (id, version) = (session.id, query.version);
+        session.request = Some(cx.spawn(async move |this, cx| {
+            let result = future.await;
+            let _ = this.update(cx, |this, cx| {
+                this.completion_answered(id, version, result, cx)
+            });
+        }));
+        cx.notify();
+    }
+
+    fn completion_answered(
+        &mut self,
+        id: u64,
+        version: u64,
+        result: Result<Completions, IntelError>,
+        cx: &mut Context<Self>,
+    ) {
+        // An answer for a popup that is gone.
+        let Some(session) = self.completion.as_mut().filter(|s| s.id == id) else {
+            return;
+        };
+        session.request = None;
+        let Ok(answer) = result else {
+            self.close_completion(cx);
+            return;
+        };
+        session.items = answer.items;
+        session.incomplete = answer.incomplete;
+        session.answer_version = version;
+        session.answered = true;
+        self.completion_filter(cx);
+    }
+
+    /// The identifier typed so far in the session's editor, `None` when
+    /// the caret left it (or a selection or another caret appeared).
+    fn completion_prefix(&self, cx: &App) -> Option<String> {
+        let session = self.completion.as_ref()?;
+        let editor = session.editor.read(cx);
+        let selections = editor.selections();
+        let caret = selections.primary().head;
+        if selections.len() != 1 || !selections.primary().is_empty() || caret < session.start {
+            return None;
+        }
+        Some(editor.buffer().slice(session.start..caret))
+            .filter(|p| p.chars().all(is_identifier_char))
+    }
+
+    /// The caret or the text of the session's editor changed: the popup
+    /// follows the identifier typed, or closes when the caret leaves it.
+    fn completion_moved(&mut self, cx: &mut Context<Self>) {
+        let Some(prefix) = self.completion_prefix(cx) else {
+            self.close_completion(cx);
+            return;
+        };
+        if self
+            .completion
+            .as_ref()
+            .is_some_and(|s| s.answered && s.prefix != prefix)
+        {
+            self.completion_filter(cx);
+        }
+    }
+
+    /// Filters the items with the typed prefix and shows them; an answer
+    /// the server marked incomplete is asked for again with the new prefix.
+    fn completion_filter(&mut self, cx: &mut Context<Self>) {
+        let Some(prefix) = self.completion_prefix(cx) else {
+            self.close_completion(cx);
+            return;
+        };
+        let Some(session) = self.completion.as_mut() else {
+            return;
+        };
+        session.refilter(&prefix);
+        if session.incomplete && prefix != session.requested_prefix {
+            self.request_completion(CompletionTrigger::Incomplete, cx);
+        }
+        self.show_completion(cx);
+    }
+
+    /// Shows the session's items, or closes the popup when none matches
+    /// (and typing more cannot bring any).
+    fn show_completion(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = &self.completion else {
+            return;
+        };
+        if session.shown.is_empty() {
+            if session.incomplete || session.request.is_some() {
+                self.popups.hide(completion::CONTEXT);
+                cx.notify();
+            } else {
+                self.close_completion(cx);
+            }
+            return;
+        }
+        let editor = session.editor.clone();
+        let rows = session.shown.len();
+        self.completion_list
+            .update(cx, |list, cx| list.set(session, cx));
+        self.popups.show(CaretPopup {
+            context: completion::CONTEXT,
+            editor,
+            anchor: session.start,
+            placement: Placement::Below,
+            inset: CompletionList::text_inset(),
+            height: Some(CompletionList::height(rows, cx)),
+            content: self.completion_list.clone().into(),
+        });
+        cx.notify();
+    }
+
+    /// Closes the completion popup; the request in flight is cancelled.
+    fn close_completion(&mut self, cx: &mut Context<Self>) {
+        let had_session = self.completion.take().is_some();
+        let had_popup = self.popups.hide(completion::CONTEXT);
+        if had_session || had_popup {
+            cx.notify();
+        }
+    }
+
+    fn completion_shown(&self) -> bool {
+        self.popups.is_shown(completion::CONTEXT)
+    }
+
+    fn select_completion(&mut self, f: impl FnOnce(&mut Session), cx: &mut Context<Self>) {
+        if let Some(session) = self.completion.as_mut() {
+            f(session);
+            self.show_completion(cx);
+        }
+    }
+
+    /// Inserts the selected item: in place of the typed prefix, or of the
+    /// whole identifier at the caret (`replace`), with the item's other
+    /// edits, as one undo step.
+    fn accept_completion(&mut self, replace: bool, cx: &mut Context<Self>) {
+        if !self.completion_shown() {
+            return;
+        }
+        let Some(session) = self.completion.take() else {
+            return;
+        };
+        self.popups.hide(completion::CONTEXT);
+        cx.notify();
+        let (Some(index), Some(doc)) = (session.selected_item(), self.documents.get(&session.path))
+        else {
+            return;
+        };
+        let item = &session.items[index];
+        session.editor.update(cx, |e, cx| {
+            let caret = e.selections().primary().head;
+            let (edits, caret) = completion::insertion(
+                item,
+                &doc.versions,
+                session.answer_version,
+                e.buffer(),
+                session.start,
+                caret,
+                replace,
+            );
+            e.edit(
+                edits,
+                EditKind::Other,
+                CaretPlacement::Explicit(SelectionSet::caret(caret)),
+                cx,
+            );
+        });
+    }
+
+    /// A click on a row of the completion popup inserts its item.
+    pub(crate) fn click_completion_row(
+        &mut self,
+        index: usize,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session) = self.completion.as_mut() {
+            session.select(index);
+        }
+        self.accept_completion(false, cx);
+    }
+
+    fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_completion(|s| s.select_by(1, true), cx);
+    }
+
+    fn select_previous(&mut self, _: &SelectPrevious, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_completion(|s| s.select_by(-1, true), cx);
+    }
+
+    fn page_down(&mut self, _: &PageDown, _: &mut Window, cx: &mut Context<Self>) {
+        let page = completion::list::VISIBLE_ROWS as isize;
+        self.select_completion(|s| s.select_by(page, false), cx);
+    }
+
+    fn page_up(&mut self, _: &PageUp, _: &mut Window, cx: &mut Context<Self>) {
+        let page = completion::list::VISIBLE_ROWS as isize;
+        self.select_completion(|s| s.select_by(-page, false), cx);
+    }
+
+    fn first(&mut self, _: &First, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_completion(|s| s.select(0), cx);
+    }
+
+    fn last(&mut self, _: &Last, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_completion(|s| s.select(s.shown.len().saturating_sub(1)), cx);
+    }
+
+    fn accept(&mut self, _: &Accept, _: &mut Window, cx: &mut Context<Self>) {
+        self.accept_completion(false, cx);
+    }
+
+    fn replace(&mut self, _: &Replace, _: &mut Window, cx: &mut Context<Self>) {
+        self.accept_completion(true, cx);
+    }
+
+    fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        self.close_completion(cx);
+    }
+
+    // ---- drawing and state ------------------------------------------------------
 
     /// The popups over the editor (completion, documentation, parameter
     /// info), drawn by the workbench above its content.
-    pub fn render_overlay(&self, window: &Window, cx: &App) -> Option<AnyElement> {
-        let _ = (window, cx);
-        None
+    pub fn render_overlay(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
+        self.popups.render(window, cx)
     }
 
     /// The state reported by `code.state`.
     pub fn state_json(&self, cx: &App) -> Json {
-        let _ = cx;
+        let mut documents: Vec<Json> = self
+            .documents
+            .values()
+            .map(|d| {
+                json!({
+                    "path": d.id.path().display().to_string(),
+                    "language": d.language,
+                    "version": d.version(),
+                })
+            })
+            .collect();
+        documents.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+        // Every message of a mark is a problem (the reference counts per
+        // problem, not per range).
+        let problems = self.active_document().map(|d| {
+            d.editor
+                .read(cx)
+                .diagnostics()
+                .iter()
+                .filter(|m| m.severity != editor::MarkSeverity::Information)
+                .map(|m| m.messages.len())
+                .sum::<usize>()
+        });
         json!({
             "project": self.root.as_ref().map(|r| r.display().to_string()),
             "services": self.services.is_some(),
+            "documents": documents,
+            "active": self.active.as_ref().map(|p| p.display().to_string()),
+            "popups": self.popups.contexts().collect::<Vec<_>>(),
+            "completion": self.completion.as_ref().map(|s| {
+                let mut state = s.state_json(self.completion_shown());
+                state["hint"] = completion::list::hint(cx).into();
+                state
+            }),
+            "problems": problems,
         })
     }
 
@@ -122,8 +659,6 @@ impl CodeIntelView {
     }
 
     // ---- commands ----------------------------------------------------------
-
-    fn complete(&mut self, _: &Complete, _: &mut Window, _: &mut Context<Self>) {}
 
     fn quick_doc(&mut self, _: &QuickDoc, _: &mut Window, _: &mut Context<Self>) {}
 
@@ -156,7 +691,8 @@ impl CodeIntelView {
 }
 
 /// Adds handlers to `el` (the workbench root) that send the code
-/// intelligence commands to `view`, wherever the focus is in the window.
+/// intelligence commands that do not depend on the focused editor to
+/// `view`, wherever the focus is in the window.
 pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>) -> E {
     macro_rules! forward {
         ($el:expr, $($action:ty => $method:ident),* $(,)?) => {
@@ -167,7 +703,6 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
         };
     }
     forward!(el,
-        Complete => complete,
         QuickDoc => quick_doc,
         ParameterInfo => parameter_info,
         GoToDeclaration => go_to_declaration,
@@ -179,6 +714,55 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
         RestartServers => restart_servers,
         StopServer => stop_server,
     )
+}
+
+/// The container of a tab's editor as the workbench draws it, with what
+/// code intelligence adds around a document's editor: the commands that
+/// act at its caret (Basic Completion) and, while a popup shows for it,
+/// the popup's key context and keys. Other elements come back unchanged.
+pub fn editor_container<E: InteractiveElement>(
+    el: E,
+    view: &Entity<CodeIntelView>,
+    editor: &Entity<Editor>,
+    cx: &App,
+) -> E {
+    let v = view.read(cx);
+    if v.document_of(editor).is_none() {
+        return el;
+    }
+    let mut el = el.on_action({
+        let (view, editor) = (view.clone(), editor.clone());
+        move |_: &Complete, _, cx| view.update(cx, |v, cx| v.complete(&editor, cx))
+    });
+    if let Some(context) = v.popups.key_context(editor.entity_id()) {
+        el = el.key_context(context.as_str());
+    }
+    let completion = v
+        .popups
+        .get(completion::CONTEXT)
+        .is_some_and(|p| p.editor.entity_id() == editor.entity_id());
+    if completion {
+        macro_rules! bind {
+            ($el:expr, $($action:ty => $method:ident),* $(,)?) => {
+                $el $(.on_action({
+                    let view = view.clone();
+                    move |a: &$action, window, cx| view.update(cx, |v, cx| v.$method(a, window, cx))
+                }))*
+            };
+        }
+        el = bind!(el,
+            SelectNext => select_next,
+            SelectPrevious => select_previous,
+            PageDown => page_down,
+            PageUp => page_up,
+            First => first,
+            Last => last,
+            Accept => accept,
+            Replace => replace,
+            Cancel => cancel,
+        );
+    }
+    el
 }
 
 #[cfg(test)]

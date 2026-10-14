@@ -1210,7 +1210,10 @@ dependencies = [
  "code-intel",
  "editor",
  "gpui",
+ "name-match",
  "serde_json",
+ "text",
+ "themes",
  "ui",
 ]
 

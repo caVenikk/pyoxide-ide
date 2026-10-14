@@ -10,8 +10,8 @@ use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase,
-    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render,
+    Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render,
     ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
@@ -254,7 +254,7 @@ impl Workbench {
             .code_intel
             .clone()
             .map(|hook| cx.new(|cx| CodeIntelView::new(hook, cx)));
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe_in(&run_window, window, |this, _, event, window, cx| {
                 this.run_window_event(event, window, cx)
             }),
@@ -315,6 +315,10 @@ impl Workbench {
                 }
             }),
         ];
+        // Code intelligence popups and key contexts are drawn by the root.
+        if let Some(view) = &code_intel {
+            subscriptions.push(cx.observe(view, |_, _, cx| cx.notify()));
+        }
         Self {
             product,
             file_types,
@@ -411,6 +415,9 @@ impl Workbench {
         let active = self.active_file(cx);
         if active != self.reported_active_file {
             self.reported_active_file = active.clone();
+            if let Some(view) = &self.code_intel {
+                view.update(cx, |v, cx| v.active_file_changed(active.as_deref(), cx));
+            }
             cx.emit(WorkbenchEvent::ActiveFileChanged(active));
         }
     }
@@ -749,7 +756,9 @@ impl Workbench {
             .update(cx, |p, cx| p.tab_opened(&path, &editor, cx));
         if let Some(view) = &self.code_intel {
             let language = file_type.as_ref().and_then(|t| t.language_id);
-            view.update(cx, |v, cx| v.editor_opened(&path, language, &editor, cx));
+            view.update(cx, |v, cx| {
+                v.editor_opened(&path, language, &editor, window, cx)
+            });
         }
         let index = self.tabs.len();
         self.tabs.push(Tab {
@@ -2125,6 +2134,16 @@ impl Workbench {
             )
     }
 
+    /// The active tab's editor, with what code intelligence adds around
+    /// it (its commands, and the key context of a popup over it).
+    fn editor_container(&self, editor: &Entity<Editor>, cx: &App) -> Div {
+        let container = div().flex_1().min_h(px(0.0)).child(editor.clone());
+        match &self.code_intel {
+            Some(view) => code_intel_ui::editor_container(container, view, editor, cx),
+            None => container,
+        }
+    }
+
     fn render_editor_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(active) = self.active {
             let theme = cx.theme();
@@ -2157,12 +2176,7 @@ impl Workbench {
                         .is_open()
                         .then(|| self.tabs[active].find.clone()),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .child(self.tabs[active].editor.clone()),
-                )
+                .child(self.editor_container(&self.tabs[active].editor, cx))
                 .into_any_element();
         }
         // As the reference IDE's text painter draws them: a 16 px label
@@ -2510,7 +2524,8 @@ impl Render for Workbench {
             .children(
                 self.code_intel
                     .as_ref()
-                    .and_then(|view| view.read(cx).render_overlay(window, cx)),
+                    .map(|view| view.read(cx).render_overlay(window, cx))
+                    .unwrap_or_default(),
             )
             .children(first_frame)
             // Measurements: the end of the frame's paint.
