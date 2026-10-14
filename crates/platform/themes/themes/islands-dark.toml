@@ -122,6 +122,9 @@ diagnostic-error = "#fa6675"
 diagnostic-warning = "#f2c55c"
 diagnostic-info = "#857042"
 diagnostic-hint = "#929cab"
+diagnostic-error-stripe = "#d64d5b"
+diagnostic-warning-stripe = "#c29e4a"
+diagnostic-weak-warning-stripe = "#756d56"
 terminal-background = "#191a1c"
 terminal-foreground = "#bcbec4"
 terminal-black = "#000000"
@@ -274,6 +277,10 @@ underline-color = "#f2c55c"
 [syntax.diagnostic-info]
 underline = "wavy"
 underline-color = "#857042"
+
+[syntax.diagnostic-hint]
+underline = "dotted"
+underline-color = "#808080"
 
 [syntax.diagnostic-unresolved]
 fg = "#f75464"

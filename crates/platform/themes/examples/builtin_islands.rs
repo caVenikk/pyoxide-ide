@@ -16,6 +16,24 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use themes::import::{Imported, Library};
+use themes::{Rgba, TextRole, TextStyle, UnderlineStyle};
+
+/// Attributes the reference product draws in code rather than through its
+/// colour schemes: the Python language services draw a hint (LSP severity
+/// Hint, the information level) as a grey bold dotted line
+/// (`PyLspToolIntegrationProvider.getEnforcedTextAttributes`, IntelliJ
+/// Community, Apache-2.0), where the schemes leave the information
+/// attributes empty.
+fn product_attributes(theme: &mut themes::Theme) {
+    let hint = &mut theme.text[TextRole::DiagnosticHint];
+    if hint.is_plain() {
+        *hint = TextStyle {
+            underline: Some(UnderlineStyle::Dotted),
+            underline_color: Some(Rgba::rgb(0x80, 0x80, 0x80)),
+            ..TextStyle::default()
+        };
+    }
+}
 
 /// Files read from the checkout. The first two are imported; the others
 /// supply parent themes, editor schemes and the Python attributes.
@@ -88,6 +106,7 @@ fn run(checkout: &Path, commit: &str, out_dir: &Path) -> Result<(), String> {
         theme.name = (*display).to_owned();
         theme.author = None;
         theme.description = Some((*description).to_owned());
+        product_attributes(&mut theme);
         let source = FILES
             .iter()
             .find(|f| f.contains(&format!("ManyIslands{}", &name["Islands ".len()..])))

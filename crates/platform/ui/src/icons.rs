@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui::{
-    App, Global, ImageSource, IntoElement, Pixels, RenderImage, RenderOnce, Styled, Window, div,
-    img, px,
+    App, Global, Hsla, ImageSource, IntoElement, Pixels, RenderImage, RenderOnce, Styled, Window,
+    div, img, px,
 };
 use resvg::{tiny_skia, usvg};
 
@@ -189,8 +189,9 @@ platform_icons! {
     ]
 }
 
-/// A rasterized icon: name, dark variant, size in device pixels.
-type ImageKey = (&'static str, bool, u32);
+/// A rasterized icon: name, dark variant, size in device pixels, tint
+/// (RGBA).
+type ImageKey = (&'static str, bool, u32, Option<u32>);
 
 /// Registered icons and the rasterized images.
 #[derive(Default)]
@@ -230,12 +231,20 @@ pub fn platform_names() -> impl Iterator<Item = &'static str> {
 }
 
 /// The icon as an image of `size` logical pixels for the current theme and
-/// the window's scale, rasterized once and cached.
-fn image(name: IconName, size: Pixels, window: &Window, cx: &App) -> Option<Arc<RenderImage>> {
+/// the window's scale, rasterized once and cached; a `tint` colours every
+/// pixel and keeps the shape's alpha.
+fn image(
+    name: IconName,
+    size: Pixels,
+    tint: Option<Hsla>,
+    window: &Window,
+    cx: &App,
+) -> Option<Arc<RenderImage>> {
     let icons = cx.try_global::<Icons>()?;
     let dark = cx.theme().is_dark();
     let pixels = (f32::from(size) * window.scale_factor()).round().max(1.0) as u32;
-    let key = (name.0, dark, pixels);
+    let tint = tint.map(rgba8);
+    let key = (name.0, dark, pixels, tint.map(u32::from_be_bytes));
     if let Some(image) = icons.images.borrow().get(&key) {
         return image.clone();
     }
@@ -245,9 +254,42 @@ fn image(name: IconName, size: Pixels, window: &Window, cx: &App) -> Option<Arc<
     } else {
         source.light
     };
-    let image = rasterize(svg, pixels).map(Arc::new);
+    let image = match tint {
+        Some(tint) => rasterize_tinted(svg, pixels, tint),
+        None => rasterize(svg, pixels),
+    }
+    .map(Arc::new);
     icons.images.borrow_mut().insert(key, image.clone());
     image
+}
+
+/// A colour as 8-bit RGBA.
+fn rgba8(color: Hsla) -> [u8; 4] {
+    let c = gpui::Rgba::from(color);
+    [c.r, c.g, c.b, c.a].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// Renders an SVG in one colour: the shape's alpha times the colour's (the
+/// reference colours its white severity masks this way).
+pub fn rasterize_tinted(svg: &[u8], pixels: u32, rgba: [u8; 4]) -> Option<RenderImage> {
+    let tree = usvg::Tree::from_data(svg, &usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(pixels, pixels)?;
+    let size = tree.size();
+    let transform = tiny_skia::Transform::from_scale(
+        pixels as f32 / size.width(),
+        pixels as f32 / size.height(),
+    );
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let mut data = pixmap.take();
+    let [r, g, b, a] = rgba;
+    for pixel in data.as_chunks_mut::<4>().0 {
+        let alpha = (u32::from(pixel[3]) * u32::from(a) + 127) / 255;
+        *pixel = [b, g, r, alpha as u8];
+    }
+    let buffer = image::RgbaImage::from_raw(pixels, pixels, data)?;
+    Some(RenderImage::new(smallvec::smallvec![image::Frame::new(
+        buffer
+    )]))
 }
 
 /// Renders an SVG into a square image of `pixels` device pixels, as straight
@@ -282,6 +324,7 @@ pub fn rasterize(svg: &[u8], pixels: u32) -> Option<RenderImage> {
 pub struct Icon {
     name: IconName,
     size: Pixels,
+    tint: Option<Hsla>,
 }
 
 impl Icon {
@@ -290,6 +333,7 @@ impl Icon {
         Self {
             name,
             size: px(16.0),
+            tint: None,
         }
     }
 
@@ -297,12 +341,18 @@ impl Icon {
         self.size = size;
         self
     }
+
+    /// Draws the icon's shape in one colour (the white severity masks).
+    pub fn tint(mut self, color: Hsla) -> Self {
+        self.tint = Some(color);
+        self
+    }
 }
 
 impl RenderOnce for Icon {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let size = self.size;
-        match image(self.name, size, window, cx) {
+        match image(self.name, size, self.tint, window, cx) {
             Some(image) => img(ImageSource::Render(image))
                 .flex_none()
                 .size(size)
@@ -330,6 +380,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_tint_colours_the_shape_and_keeps_its_alpha() {
+        let svg = br##"<svg width="2" height="2" viewBox="0 0 2 2" xmlns="http://www.w3.org/2000/svg"><rect width="1" height="2" fill="white"/></svg>"##;
+        let image = rasterize_tinted(svg, 2, [0xd6, 0x4d, 0x5b, 0xff]).unwrap();
+        let bytes = image.as_bytes(0).unwrap();
+        // Blue, green, red, alpha: the left column is the colour, the right
+        // one stays transparent.
+        assert_eq!(&bytes[..4], &[0x5b, 0x4d, 0xd6, 0xff]);
+        assert_eq!(bytes[7], 0);
+        assert_eq!(rgba8(gpui::white()), [255, 255, 255, 255]);
     }
 
     #[test]

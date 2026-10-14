@@ -250,6 +250,9 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Effect("INFORMATION_ATTRIBUTES"),
             Stripe("INFORMATION_ATTRIBUTES"),
         ],
+        DiagnosticErrorStripe => &[Stripe("ERRORS_ATTRIBUTES")],
+        DiagnosticWarningStripe => &[Stripe("WARNING_ATTRIBUTES")],
+        DiagnosticWeakWarningStripe => &[Stripe("INFO_ATTRIBUTES")],
 
         TerminalBackground => &[Color("CONSOLE_BACKGROUND_KEY")],
         TerminalForeground => &[Fg("CONSOLE_NORMAL_OUTPUT")],
