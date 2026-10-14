@@ -19,6 +19,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+# Edits of ruff's configuration that keep the rest of the file (the
+# version `project` uses).
+toml_edit = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn ruff_and_the_type_server() {
         let settings = Settings::default();
-        let ruff = Arc::new(RuffCustomizer::new());
+        let ruff = Arc::new(RuffCustomizer::new("/p"));
         let interpreter = PathBuf::from("/p/.venv/bin/python");
         let context = SpecContext {
             root: Path::new("/p"),
