@@ -20,7 +20,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use code_intel::{
-    CodeActionContext, CodeIntel, Diagnostic, DocumentId, IntelEvent, Rope, ServerState,
+    CodeActionContext, CodeIntel, CompletionItem, CompletionTrigger, Diagnostic, DocumentId,
+    IntelEvent, Rope, ServerState,
 };
 use futures::executor::block_on;
 use lsp_client::LspCodeIntel;
@@ -369,6 +370,14 @@ fn ruff_and_ty_on_a_sample_project() {
         }
     }
 
+    // ty's items read as Python's: the parameters, the owner class.
+    let (check, x) = point_members(intel.as_ref(), &root);
+    assert_eq!(check.tail_text.as_deref(), Some("(self, value)"));
+    assert_eq!(check.type_text.as_deref(), Some("Point"));
+    assert!(check.detail.as_deref().unwrap().contains("Point.check("));
+    assert_eq!(x.tail_text, None);
+    assert_eq!(x.type_text.as_deref(), Some("float"));
+
     timing.print();
     print_memory();
     assert_eq!(block_on(intel.shutdown()), Ok(()));
@@ -416,7 +425,38 @@ fn basedpyright_on_a_sample_project() {
             "{items:#?}"
         );
     }
+    // Its items say nothing until resolved; then they read as Python's.
+    let (check, _) = point_members(intel.as_ref(), &root);
+    assert_eq!(check.tail_text, None);
+    let check = block_on(intel.resolve_completion(&check_doc(&root), check)).unwrap();
+    assert_eq!(check.tail_text.as_deref(), Some("(self, value)"));
     timing.print();
     print_memory();
     assert_eq!(block_on(intel.shutdown()), Ok(()));
+}
+
+/// A class and the members of one of its instances.
+const POINTS: &str = "class Point:\n    def __init__(self, x: float, y: float) -> None:\n        self.x = x\n        self.y = y\n\n    def check(self, value: int | None = None) -> None:\n        print(value)\n\n\np = Point(1, 2)\np.\n";
+
+fn check_doc(root: &Path) -> DocumentId {
+    DocumentId::new(root.join("points.py"))
+}
+
+/// Completion after `p.` in [`POINTS`]: the items `check` and `x`.
+fn point_members(intel: &dyn CodeIntel, root: &Path) -> (CompletionItem, CompletionItem) {
+    let doc = check_doc(root);
+    intel.did_open(&doc, "python", 1, &Rope::from_str(POINTS));
+    let at = code_intel::Point::new(10, 2);
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let answer = block_on(intel.completion(&doc, at, CompletionTrigger::Character('.')));
+        if let Ok(answer) = answer {
+            let find = |label: &str| answer.items.iter().find(|i| i.label == label).cloned();
+            if let (Some(check), Some(x)) = (find("check"), find("x")) {
+                return (check, x);
+            }
+        }
+        assert!(Instant::now() < deadline, "no completion of `p.`");
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }

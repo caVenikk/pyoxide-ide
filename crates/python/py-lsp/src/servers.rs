@@ -30,6 +30,7 @@ use code_intel::{Feature, Features};
 use lsp_client::ServerSpec;
 use serde_json::{Value, json};
 
+use crate::completion::TypeServerCustomizer;
 use crate::lookup::Executable;
 use crate::ruff::RuffCustomizer;
 use crate::settings::{Settings, Tool};
@@ -117,6 +118,9 @@ pub fn spec(
         && let Some(ruff) = context.ruff
     {
         spec = spec.with_customizer(ruff.clone());
+    }
+    if tool.is_type_server() {
+        spec = spec.with_customizer(Arc::new(TypeServerCustomizer));
     }
     if tool == Tool::Basedpyright {
         // The pyright family asks for its settings once told they changed
@@ -257,7 +261,7 @@ mod tests {
         let (r, ty) = (&specs[0], &specs[1]);
         assert_eq!(r.name, "Ruff");
         assert_eq!(r.icon.as_deref(), Some("ruff"));
-        assert!(r.customizer.is_some() && ty.customizer.is_none());
+        assert!(r.customizer.is_some() && ty.customizer.is_some());
         assert!(r.features.contains(Feature::Formatting));
         assert!(!r.features.contains(Feature::Completion));
         assert!(!ty.features.contains(Feature::Formatting));

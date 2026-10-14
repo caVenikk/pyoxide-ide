@@ -10,6 +10,8 @@
 //!   asking it for its version.
 //! - [`servers`]: the server specs for `lsp-client`: features,
 //!   initialization options and `workspace/configuration` settings.
+//! - [`completion`]: the type servers' completion items as the reference
+//!   presents Python items (`check(self, value)`, `Point`).
 //! - [`ruff`]: ruff's adjustments (rule names, nested and added actions).
 //! - [`idea`]: the import of `.idea/pyLspTools.xml` and
 //!   `.idea/pyTypeEngine.xml`.
@@ -20,6 +22,7 @@
 //! lookups read the file system and the version check runs a process, so
 //! the product calls them off the UI thread.
 
+pub mod completion;
 pub mod idea;
 pub mod lookup;
 pub mod ruff;
