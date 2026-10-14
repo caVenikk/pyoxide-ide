@@ -298,6 +298,9 @@ pub(crate) struct Prepaint {
     search: Vec<SearchRect>,
     /// Marks of search matches on the scrollbar.
     stripe_marks: Vec<Bounds<Pixels>>,
+    /// The problems' stripe marks as painted: one rectangle per run of
+    /// pixel rows in one colour.
+    problem_spans: Vec<(Bounds<Pixels>, Hsla)>,
     /// The placeholder of an empty one-line field and where it goes.
     placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
     /// Hitboxes of the hyperlinks (hand pointer).
@@ -1325,6 +1328,7 @@ impl Element for EditorElement {
                 });
             }
         }
+        let problem_spans = stripe_spans(stripe.as_ref(), &problem_stripes);
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let text_right = stripe.map_or(bounds.right(), |s| s.left());
@@ -1389,6 +1393,7 @@ impl Element for EditorElement {
             caret,
             search: search_rects,
             stripe_marks,
+            problem_spans,
             placeholder,
             link_hitboxes,
             link_highlight_hitboxes,
@@ -1524,8 +1529,8 @@ impl Element for EditorElement {
         for r in &p.stripe_marks {
             window.paint_quad(fill(*r, p.colors.search_stripe));
         }
-        for s in &p.layout.problem_stripes {
-            window.paint_quad(fill(s.bounds, s.color));
+        for (bounds, color) in &p.problem_spans {
+            window.paint_quad(fill(*bounds, *color));
         }
         if let Some(bar) = p.layout.scrollbar {
             let hovered =
@@ -1674,6 +1679,62 @@ impl Element for EditorElement {
             });
         }
     }
+}
+
+/// The problems' stripe marks as painted: each pixel row of the stripe in
+/// the colour of the last mark over it (the marks come in paint order, the
+/// most severe last), merged into runs. A thousand quads cost more of a
+/// frame than the rest of the editor.
+fn stripe_spans(
+    stripe: Option<&Bounds<Pixels>>,
+    marks: &[StripeMark],
+) -> Vec<(Bounds<Pixels>, Hsla)> {
+    let (Some(track), Some(first)) = (stripe, marks.first()) else {
+        return Vec::new();
+    };
+    let top = f32::from(track.top());
+    let rows = f32::from(track.size.height).ceil().max(0.0) as usize + STRIPE_MARK as usize;
+    let mut colors: Vec<Hsla> = Vec::new();
+    let mut row_color: Vec<u8> = vec![u8::MAX; rows];
+    for m in marks {
+        let index = match colors.iter().position(|c| *c == m.color) {
+            Some(i) => i,
+            None => {
+                colors.push(m.color);
+                colors.len() - 1
+            }
+        };
+        let row = |y: Pixels, round: fn(f32) -> f32| {
+            (round(f32::from(y) - top).max(0.0) as usize).min(rows)
+        };
+        let (r0, r1) = (
+            row(m.bounds.top(), f32::floor),
+            row(m.bounds.bottom(), f32::ceil),
+        );
+        row_color[r0..r1.max(r0)].fill(index.min(254) as u8);
+    }
+    let (left, right) = (first.bounds.left(), first.bounds.right());
+    let mut spans = Vec::new();
+    let mut r = 0;
+    while r < rows {
+        let c = row_color[r];
+        if c == u8::MAX {
+            r += 1;
+            continue;
+        }
+        let start = r;
+        while r < rows && row_color[r] == c {
+            r += 1;
+        }
+        spans.push((
+            Bounds::from_corners(
+                point(left, px(top + start as f32)),
+                point(right, px(top + r as f32)),
+            ),
+            colors[c as usize],
+        ));
+    }
+    spans
 }
 
 /// The left edges of the dots of a dotted underline from `x0` to `x1`:
@@ -1900,6 +1961,46 @@ mod tests {
         let bg = theme.text_style(TextRole::DiagnosticWarning).bg.map(color);
         assert!(bg.is_some());
         assert_eq!(run_at(&runs, 3).background_color, bg);
+    }
+
+    #[test]
+    fn stripe_marks_are_painted_as_runs_of_rows_the_last_on_top() {
+        let track = Bounds::new(point(px(100.0), px(10.0)), size(px(10.0), px(100.0)));
+        let mark = |top: f32, bottom: f32, color: Hsla, mark: usize| StripeMark {
+            bounds: Bounds::from_corners(point(px(102.0), px(top)), point(px(108.0), px(bottom))),
+            color,
+            mark,
+        };
+        let (warning, error) = (gpui::yellow(), gpui::red());
+        // In paint order: two touching warnings, an error over the second.
+        let spans = stripe_spans(
+            Some(&track),
+            &[
+                mark(20.0, 22.0, warning, 0),
+                mark(22.0, 30.0, warning, 1),
+                mark(25.0, 27.0, error, 2),
+                mark(50.0, 52.0, error, 3),
+            ],
+        );
+        let rows: Vec<(f32, f32, Hsla)> = spans
+            .iter()
+            .map(|(b, c)| (f32::from(b.top()), f32::from(b.bottom()), *c))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (20.0, 25.0, warning),
+                (25.0, 27.0, error),
+                (27.0, 30.0, warning),
+                (50.0, 52.0, error),
+            ]
+        );
+        assert!(
+            spans
+                .iter()
+                .all(|(b, _)| b.left() == px(102.0) && b.right() == px(108.0))
+        );
+        assert!(stripe_spans(None, &[mark(20.0, 22.0, error, 0)]).is_empty());
     }
 
     #[test]

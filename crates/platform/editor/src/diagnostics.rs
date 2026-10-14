@@ -237,6 +237,9 @@ pub(crate) fn problem_to_go(
 /// text, and a big batch (reformatting a large file) stays cheap.
 const MAX_MOVES: usize = 1 << 22;
 
+/// The first and last line of every mark, by index.
+pub(crate) type MarkLines = Rc<Vec<(usize, usize)>>;
+
 /// The marks of an editor, sorted by range and moved through edits.
 #[derive(Debug, Default)]
 pub(crate) struct Marks {
@@ -247,7 +250,7 @@ pub(crate) struct Marks {
     /// Changes whenever the lines the marks are on may have changed.
     lines_generation: u64,
     /// The lines of the marks for a generation ([`Marks::lines`]).
-    lines_cache: RefCell<Option<(u64, Rc<Vec<(usize, usize)>>)>>,
+    lines_cache: RefCell<Option<(u64, MarkLines)>>,
 }
 
 impl Marks {
@@ -294,14 +297,14 @@ impl Marks {
     /// The first and last line of every mark (by index). Kept from frame to
     /// frame while edits stay within lines (typing), so drawing the error
     /// stripe does not look up a thousand lines per keystroke.
-    pub fn lines(&self, buffer: &Buffer) -> Rc<Vec<(usize, usize)>> {
+    pub fn lines(&self, buffer: &Buffer) -> MarkLines {
         let mut cache = self.lines_cache.borrow_mut();
         if let Some((generation, lines)) = cache.as_ref()
             && *generation == self.lines_generation
         {
             return lines.clone();
         }
-        let lines: Rc<Vec<(usize, usize)>> = Rc::new(
+        let lines: MarkLines = Rc::new(
             self.list
                 .iter()
                 .map(|m| {
