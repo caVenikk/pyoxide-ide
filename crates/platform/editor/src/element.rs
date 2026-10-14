@@ -1303,6 +1303,7 @@ impl Element for EditorElement {
         let mut problem_stripes = Vec::new();
         if let Some(track) = &stripe {
             let marks = editor.diagnostics();
+            let lines = editor.diagnostics.lines(&editor.buffer);
             let mut order: Vec<usize> = (0..marks.len())
                 .filter(|&i| marks[i].severity != MarkSeverity::Information)
                 .collect();
@@ -1314,8 +1315,9 @@ impl Element for EditorElement {
                     MarkSeverity::Warning => UiRole::DiagnosticWarningStripe,
                     _ => UiRole::DiagnosticWeakWarningStripe,
                 };
-                let top = stripe_y(track, editor.buffer.char_to_line(m.range.start));
-                let bottom = stripe_y(track, editor.buffer.char_to_line(m.range.end));
+                let (first, last) = lines[i];
+                let top = stripe_y(track, first);
+                let bottom = stripe_y(track, last);
                 problem_stripes.push(StripeMark {
                     bounds: mark_bounds(track, top, bottom),
                     color: theme.color(role),

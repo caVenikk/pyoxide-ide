@@ -8,7 +8,9 @@
 //! range markers do; each is drawn with the editor colour scheme's
 //! attributes of its kind, the most severe on top.
 
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::{Hsla, SharedString};
 use text::{AppliedEdit, Buffer};
@@ -242,6 +244,10 @@ pub(crate) struct Marks {
     /// Length of the longest mark, to find the marks over a range without
     /// looking at all of them.
     longest: usize,
+    /// Changes whenever the lines the marks are on may have changed.
+    lines_generation: u64,
+    /// The lines of the marks for a generation ([`Marks::lines`]).
+    lines_cache: RefCell<Option<(u64, Rc<Vec<(usize, usize)>>)>>,
 }
 
 impl Marks {
@@ -272,6 +278,7 @@ impl Marks {
         }
         self.list = marks;
         self.update_longest();
+        self.lines_generation += 1;
         true
     }
 
@@ -280,7 +287,33 @@ impl Marks {
         let had = !self.list.is_empty();
         self.list.clear();
         self.longest = 0;
+        self.lines_generation += 1;
         had
+    }
+
+    /// The first and last line of every mark (by index). Kept from frame to
+    /// frame while edits stay within lines (typing), so drawing the error
+    /// stripe does not look up a thousand lines per keystroke.
+    pub fn lines(&self, buffer: &Buffer) -> Rc<Vec<(usize, usize)>> {
+        let mut cache = self.lines_cache.borrow_mut();
+        if let Some((generation, lines)) = cache.as_ref()
+            && *generation == self.lines_generation
+        {
+            return lines.clone();
+        }
+        let lines: Rc<Vec<(usize, usize)>> = Rc::new(
+            self.list
+                .iter()
+                .map(|m| {
+                    (
+                        buffer.char_to_line(m.range.start),
+                        buffer.char_to_line(m.range.end),
+                    )
+                })
+                .collect(),
+        );
+        *cache = Some((self.lines_generation, lines.clone()));
+        lines
     }
 
     fn update_longest(&mut self) {
@@ -298,7 +331,12 @@ impl Marks {
             self.clear();
             return;
         }
+        let count = self.list.len();
+        // Edits within one line keep every mark on its lines.
+        let mut lines_moved = false;
         for e in edits {
+            lines_moved |= e.start_position.0 != e.old_end_position.0
+                || e.start_position.0 != e.new_end_position.0;
             self.list
                 .retain_mut(|m| match move_range(m.range.clone(), e) {
                     Some(r) => {
@@ -311,6 +349,10 @@ impl Marks {
         // A replaced prefix can move a start past the next mark's.
         if !self.list.is_sorted_by_key(|m| (m.range.start, m.range.end)) {
             self.list.sort_by_key(|m| (m.range.start, m.range.end));
+            lines_moved = true;
+        }
+        if lines_moved || self.list.len() != count {
+            self.lines_generation += 1;
         }
         self.update_longest();
     }
@@ -874,6 +916,38 @@ mod tests {
         assert!(at(18).is_empty());
         assert_eq!(marks.empty_in(21..30), Some(30));
         assert_eq!(marks.empty_in(0..20), None);
+    }
+
+    #[test]
+    fn the_lines_of_marks_are_kept_while_typing_within_lines() {
+        use text::{CaretPlacement, Edit, EditKind, SelectionSet};
+        let mut buffer = Buffer::new("a\nbb\ncc\n");
+        let mut marks = Marks::default();
+        marks.set(
+            vec![
+                mark(2..4, MarkSeverity::Warning),
+                mark(5..7, MarkSeverity::Error),
+            ],
+            &buffer,
+        );
+        let lines = marks.lines(&buffer);
+        assert_eq!(*lines, [(1, 1), (2, 2)]);
+        fn type_at(buffer: &mut Buffer, marks: &mut Marks, pos: usize, text: &str) {
+            let mut carets = SelectionSet::caret(pos);
+            let applied = buffer.transact(
+                &mut carets,
+                vec![Edit::insert(pos, text)],
+                EditKind::Typing,
+                CaretPlacement::AfterEachEdit,
+            );
+            marks.edited(&applied);
+        }
+        // Typing within a line: the same lines, not looked up again.
+        type_at(&mut buffer, &mut marks, 0, "x");
+        assert!(Rc::ptr_eq(&lines, &marks.lines(&buffer)));
+        // A line break moves the marks below it.
+        type_at(&mut buffer, &mut marks, 0, "\n");
+        assert_eq!(*marks.lines(&buffer), [(2, 2), (3, 3)]);
     }
 
     #[test]
