@@ -22,6 +22,7 @@ mod widget;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use gpui::{App, AppContext as _, Global, Task};
 use py_env::InterpreterKind;
@@ -93,6 +94,34 @@ fn set_chosen(root: &Path, python: Option<PathBuf>, cx: &mut App) {
         Some(python) => chosen.0.insert(root.to_owned(), python),
         None => chosen.0.remove(root),
     };
+}
+
+/// Called with the project root after its interpreter was chosen.
+type Listener = Rc<dyn Fn(&Path, &mut App)>;
+
+/// Who is told about a change of a project's interpreter.
+#[derive(Default)]
+struct Listeners(Vec<Listener>);
+
+impl Global for Listeners {}
+
+/// Calls `listener` with the project root whenever a project's
+/// interpreter was chosen in the interpreter widget (the language
+/// services restart the type server with it).
+pub fn on_changed(cx: &mut App, listener: impl Fn(&Path, &mut App) + 'static) {
+    cx.default_global::<Listeners>().0.push(Rc::new(listener));
+}
+
+/// Tells the listeners that the interpreter of the project at `root`
+/// changed.
+fn changed(root: &Path, cx: &mut App) {
+    let listeners = cx
+        .try_global::<Listeners>()
+        .map(|l| l.0.clone())
+        .unwrap_or_default();
+    for listener in listeners {
+        listener(root, cx);
+    }
 }
 
 /// A path the person gave: relative to the project, or absolute.

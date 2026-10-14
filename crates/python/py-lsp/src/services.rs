@@ -158,6 +158,15 @@ impl ProjectState {
     }
 }
 
+/// The LSP client takes a project's specs with `LspCodeIntel::set_specs`
+/// (lsp-client, #83); until that lands, the client keeps the specs it was
+/// made with and these are dropped.
+impl SpecTarget for lsp_client::LspCodeIntel {
+    fn set_specs(&self, specs: Vec<ServerSpec>) {
+        let _ = specs;
+    }
+}
+
 /// How [`prepare`] runs.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PrepareOptions<'a> {

@@ -1,9 +1,12 @@
 //! `pyoxide-ide`: the Pyoxide Python IDE. Composes the platform workbench
 //! with what is specific to Python (file type icons, tool windows, the
-//! interpreter widget, running files).
+//! interpreter widget, running files, the language services and the type
+//! engine widget).
 
 pub mod interpreter;
 pub mod run;
+pub mod services;
+pub mod type_engine;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -123,6 +126,8 @@ fn file_location(name: &str, folder: &str) -> Option<String> {
 /// workbench at the end of its `init`).
 fn init(cx: &mut gpui::App) {
     interpreter::init(cx);
+    services::init(cx);
+    type_engine::init(cx);
 }
 
 /// The Pyoxide product for the workbench.
@@ -143,7 +148,8 @@ pub fn product() -> Product {
                 title: "Python Console",
             },
         ],
-        status_widgets: vec![interpreter::status_widget()],
+        // The reference's order: the type engine, then the interpreter.
+        status_widgets: vec![type_engine::status_widget(), interpreter::status_widget()],
         // The reference IDE's masks for Python: the language's files, then
         // markup and styles, then notebooks, stubs and Cython.
         find_file_masks: vec![
@@ -157,8 +163,9 @@ pub fn product() -> Product {
         },
         init: Some(init),
         run: Some(RunHook::new(run::PythonRunProvider)),
-        // Language services come with the Python services package (#87).
-        code_intel: None,
+        code_intel: Some(workbench::CodeIntelHook::new(
+            services::PythonCodeIntel::new(),
+        )),
     }
 }
 

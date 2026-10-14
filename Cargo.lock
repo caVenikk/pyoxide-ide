@@ -5194,12 +5194,15 @@ dependencies = [
 name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
+ "code-intel",
  "dirs 7.0.0",
  "editor",
  "gpui",
+ "lsp-client",
  "process",
  "project",
  "py-env",
+ "py-lsp",
  "py-run",
  "py-syntax",
  "serde_json",
