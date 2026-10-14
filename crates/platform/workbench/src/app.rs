@@ -4,6 +4,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use code_intel_ui::CodeIntelHook;
 use gpui::{
     AnyView, App, AppContext as _, Application, Bounds, Menu, MenuItem, TitlebarOptions,
     WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions, point, px, size,
@@ -93,6 +94,10 @@ pub struct Product {
     /// Runs files of the product's languages (the run widget, the Run tool
     /// window and the `run.*` commands); without it nothing can be run.
     pub run: Option<RunHook>,
+    /// Language services of the product's languages (ADR 0010): editor
+    /// tabs of file types with a language id get code intelligence; without
+    /// it they get none.
+    pub code_intel: Option<CodeIntelHook>,
 }
 
 /// Default size of the main window's content.
@@ -117,6 +122,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::search_everywhere::init(cx);
     crate::recent_files::init(cx);
     crate::run::init(cx);
+    code_intel_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
@@ -211,6 +217,26 @@ pub fn init(cx: &mut App, product: &Product) {
             let popup = workbench(window)?.read(cx).search_everywhere().clone();
             Ok(popup.read(cx).state_json(cx))
         }),
+    );
+    fn code_intel(
+        window: &mut gpui::Window,
+        cx: &App,
+    ) -> Result<gpui::Entity<code_intel_ui::CodeIntelView>, CommandError> {
+        workbench(window)?
+            .read(cx)
+            .code_intel()
+            .cloned()
+            .ok_or_else(|| CommandError::new("not_available", "no language services"))
+    }
+    ui::command::register_query(
+        cx,
+        "code.state",
+        Rc::new(|_, window, cx| Ok(code_intel(window, cx)?.read(cx).state_json(cx))),
+    );
+    ui::command::register_query(
+        cx,
+        "code.servers",
+        Rc::new(|_, window, cx| Ok(code_intel(window, cx)?.read(cx).servers_json(cx))),
     );
     cx.on_action(|_: &Quit, cx| cx.quit());
     // Any key ends a double tap of a modifier in progress.

@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, ClipboardEntry, ClipboardItem, Context, Div, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
-    SharedString, Styled, Subscription, Task, Window, div, point, px,
+    App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, Div, Entity,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, Modifiers,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, Task, Window, div, point,
+    px,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,6 +18,7 @@ use text::movement::{self, WordStop};
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point, Selection, SelectionSet};
 
 use crate::commands::*;
+use crate::diagnostics::DiagnosticMark;
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
 
@@ -172,6 +174,20 @@ pub enum EditorEvent {
     /// A hyperlink (a char range of a line, see
     /// [`Highlighter::line_links`]) was clicked.
     LinkClicked { line: usize, range: Range<usize> },
+    /// The mouse moved over the text without a button pressed, to another
+    /// char or with other modifiers: the char offset under it (`None` when
+    /// it left the text) and its window position.
+    Hovered {
+        offset: Option<usize>,
+        position: gpui::Point<Pixels>,
+        modifiers: Modifiers,
+    },
+    /// A click with the platform modifier (Cmd on macOS, Ctrl elsewhere,
+    /// navigation) at a char offset; the caret did not move.
+    ModifiedClick { offset: usize, modifiers: Modifiers },
+    /// The whole text was replaced (reloaded from disk, or set by the
+    /// editor's owner): positions from before are meaningless.
+    Reloaded,
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -261,6 +277,11 @@ pub struct Editor {
     /// The link under the last mouse press (line, char range, position):
     /// it is followed when the mouse is released at the same point.
     pub(crate) pressed_link: Option<(usize, Range<usize>, gpui::Point<Pixels>)>,
+    /// Problems in the text, sorted by range.
+    pub(crate) diagnostics: Vec<DiagnosticMark>,
+    /// A char range drawn as a link (the symbol under the mouse with the
+    /// navigation modifier).
+    pub(crate) link_highlight: Option<Range<usize>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -317,6 +338,8 @@ impl Editor {
             forward_input: false,
             scroll_to_end: false,
             pressed_link: None,
+            diagnostics: Vec::new(),
+            link_highlight: None,
             _subscriptions: subscriptions,
         }
     }
@@ -512,6 +535,75 @@ impl Editor {
                 cx.notify();
             }
         }
+    }
+
+    // ---- diagnostics and links -----------------------------------------------
+
+    /// Replaces the problems shown in the text (char ranges in the current
+    /// text; sorted here by range).
+    pub fn set_diagnostics(&mut self, marks: Vec<DiagnosticMark>, cx: &mut Context<Self>) {
+        let mut marks = marks;
+        marks.sort_by_key(|m| (m.range.start, m.range.end));
+        if self.diagnostics != marks {
+            self.diagnostics = marks;
+            cx.notify();
+        }
+    }
+
+    /// The problems shown in the text, sorted by range.
+    pub fn diagnostics(&self) -> &[DiagnosticMark] {
+        &self.diagnostics
+    }
+
+    /// Draws a char range as a link with the hand pointer (the symbol
+    /// under the mouse while the navigation modifier is held), or removes
+    /// it.
+    pub fn set_link_highlight(&mut self, range: Option<Range<usize>>, cx: &mut Context<Self>) {
+        if self.link_highlight != range {
+            self.link_highlight = range;
+            cx.notify();
+        }
+    }
+
+    pub fn link_highlight(&self) -> Option<Range<usize>> {
+        self.link_highlight.clone()
+    }
+
+    // ---- geometry ----------------------------------------------------------
+
+    /// The char offset nearest to a window position over the text, from
+    /// the last frame; `None` before the first frame and outside the text
+    /// area (gutter, scrollbar, outside the editor).
+    pub fn offset_at(&self, position: gpui::Point<Pixels>) -> Option<usize> {
+        let layout = self.layout.as_ref()?;
+        let inside = layout.bounds.contains(&position)
+            && position.x >= layout.text_x
+            && layout
+                .scrollbar
+                .is_none_or(|s| !s.track.contains(&position));
+        inside.then(|| self.offset_for_position(position))
+    }
+
+    /// Window bounds of a char range in the last frame: from its start to
+    /// its end on one line; for a range over several lines, the box around
+    /// both ends. An empty range has the width of a char (where popups
+    /// about a position go). `None` before the first frame.
+    pub fn bounds_for_range(&self, range: Range<usize>) -> Option<Bounds<Pixels>> {
+        let start = self.bounds_for_offset(range.start)?;
+        if range.end <= range.start {
+            return Some(start);
+        }
+        let end = self.bounds_for_offset(range.end)?;
+        if end.top() == start.top() {
+            return Some(Bounds::from_corners(
+                start.origin,
+                point(end.left().max(start.left()), start.bottom()),
+            ));
+        }
+        Some(Bounds::from_corners(
+            point(start.left().min(end.left()), start.top()),
+            point(start.right().max(end.left()), end.bottom()),
+        ))
     }
 
     /// Scrolls `pos` into the middle of the view on the next frame unless
@@ -795,6 +887,7 @@ impl Editor {
         }
         self.highlight_task = None;
         self.schedule_highlighting(cx);
+        cx.emit(EditorEvent::Reloaded);
         cx.emit(EditorEvent::SelectionsChanged);
         cx.notify();
     }

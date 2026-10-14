@@ -24,9 +24,20 @@ with the skill loop described in [agent-workflow.md](agent-workflow.md).
       fallback, `uv run` run configurations; poetry/conda/pipenv afterwards.
       In progress: engine and `pyoxide env` command line done; panels need the
       application shell (#15)
-- [ ] **M3 Python intelligence**: LSP client; ruff (lint, format); type checker
-      choice (ty, basedpyright or pyrefly) by ADR; completion, hover, go to
-      definition, find usages, rename, code actions
+- [ ] **MVP** (milestone "MVP", built first): the first version that is usable
+      for daily Python work and is announced to the open-source community.
+      Python intelligence first version (M3: ruff and ty, problems in the
+      editor, completion, documentation, parameter info, go to declaration
+      and usages, Alt+Enter, reformat; ADR 0010, 0011), files reloaded when
+      they change on disk (#36), file operations in the project tree (#37),
+      run configurations (#74), configured interpreters (#75), terminal
+      (#89), debugger with debugpy (#90), basic git (#91, #28), a settings
+      window with the basic pages (#92, #40), the rebrand (#93) and release
+      builds for Windows (per-user and per-machine installer, portable zip),
+      macOS and Linux (#94). The rest of M3-M7 follows the MVP.
+- [ ] **M3 Python intelligence**: LSP client; ruff (lint, format); ty as the
+      type server with basedpyright as an option (ADR 0011); completion, hover,
+      go to definition, find usages, rename, code actions
 - [ ] **M4 Run and debug**: run configurations, pytest runner with result tree,
       terminal, DAP client for debugpy
 - [ ] **M5 Version control**: git status, diff, blame, commit UI

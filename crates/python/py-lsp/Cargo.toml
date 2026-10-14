@@ -1,0 +1,15 @@
+[package]
+name = "py-lsp"
+description = "Python language services of Pyoxide IDE: ruff, ty and basedpyright server specs, executable lookup, settings and the import of the reference's tool settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+code-intel.workspace = true
+lsp-client.workspace = true
+process.workspace = true
+project.workspace = true
+py-env.workspace = true
+serde_json.workspace = true

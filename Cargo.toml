@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/platform/code-intel",
+    "crates/platform/code-intel-ui",
     "crates/platform/commands",
     "crates/platform/console",
     "crates/platform/db-core",
@@ -18,6 +20,7 @@ members = [
     "crates/platform/db-cli",
     "crates/platform/editor",
     "crates/platform/file-index",
+    "crates/platform/lsp-client",
     "crates/platform/secrets",
     "crates/platform/settings-import",
     "crates/platform/syntax",
@@ -26,6 +29,7 @@ members = [
     "crates/platform/ui",
     "crates/platform/workbench",
     "crates/python/py-env",
+    "crates/python/py-lsp",
     "crates/python/py-run",
     "crates/python/py-syntax",
     "crates/python/pyoxide-cli",
@@ -51,14 +55,24 @@ toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 zeroize = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# Language services (ADR 0010): channels and futures without an async
+# runtime, protocol types kept private to lsp-client, Markdown parsing for
+# documentation.
+flume = "0.11"
+futures = "0.3"
+lsp-types = "=0.95.1"
+pulldown-cmark = { version = "0.13", default-features = false }
 # UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
 resvg = { version = "0.45", default-features = false }
+code-intel = { path = "crates/platform/code-intel" }
+code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }
 console = { path = "crates/platform/console" }
 db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
+lsp-client = { path = "crates/platform/lsp-client" }
 name-match = { path = "crates/platform/name-match" }
 process = { path = "crates/platform/process" }
 file-index = { path = "crates/platform/file-index" }
@@ -79,6 +93,7 @@ themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
+py-lsp = { path = "crates/python/py-lsp" }
 py-run = { path = "crates/python/py-run" }
 py-syntax = { path = "crates/python/py-syntax" }
 

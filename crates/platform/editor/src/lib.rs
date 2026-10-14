@@ -6,12 +6,14 @@
 //! an editor and shows the matches in it.
 
 pub mod commands;
+mod diagnostics;
 mod editor;
 mod element;
 pub mod find;
 pub mod highlight;
 mod input;
 
+pub use diagnostics::{DiagnosticMark, MarkMessage, MarkSeverity};
 pub use editor::{
     BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, SearchHighlights,
     forward_actions, new_editor,

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
+use code_intel_ui::CodeIntelView;
 use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
@@ -116,8 +117,10 @@ enum Dropped {
     File(PathBuf, Option<Result<text::Buffer, project::LoadError>>),
 }
 
-/// What happens in the main window that a product may follow.
+/// What happens in the main window that a product may follow. More kinds
+/// of events may come.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum WorkbenchEvent {
     /// A folder was opened as the project.
     ProjectOpened(PathBuf),
@@ -218,6 +221,9 @@ pub struct Workbench {
     dialog: Option<run_actions::OpenDialog>,
     /// Where the run widget's popups open.
     run_anchors: crate::run::widget::Anchors,
+    /// Code intelligence of the editor tabs, when the product has language
+    /// services.
+    code_intel: Option<Entity<CodeIntelView>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -244,6 +250,10 @@ impl Workbench {
             cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));
         let run_provider = product.run.clone();
         let run_window = cx.new(|cx| RunToolWindow::new(run_provider, window, cx));
+        let code_intel = product
+            .code_intel
+            .clone()
+            .map(|hook| cx.new(|cx| CodeIntelView::new(hook, cx)));
         let subscriptions = vec![
             cx.subscribe_in(&run_window, window, |this, _, event, window, cx| {
                 this.run_window_event(event, window, cx)
@@ -342,8 +352,15 @@ impl Workbench {
             run_menu: None,
             dialog: None,
             run_anchors: crate::run::widget::Anchors::default(),
+            code_intel,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Code intelligence of the window, when the product has language
+    /// services.
+    pub fn code_intel(&self) -> Option<&Entity<CodeIntelView>> {
+        self.code_intel.as_ref()
     }
 
     /// Creates the product's status bar widgets (once, after the workbench
@@ -536,6 +553,9 @@ impl Workbench {
         });
         window.focus(&self.panel.focus_handle(cx));
         self.report_active_file(cx);
+        if let Some(view) = &self.code_intel {
+            view.update(cx, |v, cx| v.project_opened(&path, cx));
+        }
         cx.emit(WorkbenchEvent::ProjectOpened(path));
         cx.notify();
     }
@@ -727,6 +747,10 @@ impl Workbench {
         }
         self.find_in_files
             .update(cx, |p, cx| p.tab_opened(&path, &editor, cx));
+        if let Some(view) = &self.code_intel {
+            let language = file_type.as_ref().and_then(|t| t.language_id);
+            view.update(cx, |v, cx| v.editor_opened(&path, language, &editor, cx));
+        }
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -828,10 +852,15 @@ impl Workbench {
             let _ = this.update(cx, |this, cx| {
                 this.pending -= 1;
                 match result {
-                    Ok(()) => editor.update(cx, |e, cx| {
-                        e.buffer_mut().mark_saved_at(point);
-                        cx.notify();
-                    }),
+                    Ok(()) => {
+                        editor.update(cx, |e, cx| {
+                            e.buffer_mut().mark_saved_at(point);
+                            cx.notify();
+                        });
+                        if let Some(view) = &this.code_intel {
+                            view.update(cx, |v, cx| v.file_saved(&path, cx));
+                        }
+                    }
                     Err(e) => {
                         this.message = Some(format!("Cannot save {}: {e}", path.display()).into())
                     }
@@ -871,7 +900,10 @@ impl Workbench {
             return;
         }
         self.save_tab(index, cx);
-        self.tabs.remove(index);
+        let tab = self.tabs.remove(index);
+        if let Some(view) = &self.code_intel {
+            view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
+        }
         self.active = match self.active {
             _ if self.tabs.is_empty() => None,
             Some(a) if a > index => Some(a - 1),
@@ -2415,6 +2447,9 @@ impl Render for Workbench {
         if let Some(bar) = self.active_find_bar() {
             root = editor::find::forward_actions(root, bar.clone());
         }
+        if let Some(view) = &self.code_intel {
+            root = code_intel_ui::forward_actions(root, view.clone());
+        }
         root = project_panel::forward_actions(root, self.panel.clone());
         root.flex()
             .flex_col()
@@ -2472,6 +2507,11 @@ impl Render for Workbench {
                 d.child(self.recent_files.clone())
             })
             .children(self.render_find_hint(window.viewport_size().height, cx))
+            .children(
+                self.code_intel
+                    .as_ref()
+                    .and_then(|view| view.read(cx).render_overlay(window, cx)),
+            )
             .children(first_frame)
             // Measurements: the end of the frame's paint.
             .when(bench, |d| {

@@ -53,6 +53,7 @@ fn python() -> FileType {
         // String prefixes: raw, bytes, formatted, template, unicode.
         string_prefixes: &['r', 'R', 'b', 'B', 'f', 'F', 't', 'T', 'u', 'U'],
         highlighter: Some(Arc::new(SyntaxHighlighter::factory(py_syntax::language()))),
+        language_id: Some("python"),
     }
 }
 
@@ -156,6 +157,8 @@ pub fn product() -> Product {
         },
         init: Some(init),
         run: Some(RunHook::new(run::PythonRunProvider)),
+        // Language services come with the Python services package (#87).
+        code_intel: None,
     }
 }
 

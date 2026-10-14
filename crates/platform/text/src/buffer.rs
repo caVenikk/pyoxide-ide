@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use ropey::{Rope, RopeSlice};
@@ -54,8 +55,15 @@ impl Edit {
 /// One replacement as applied, in the coordinates of the text at that
 /// moment. Replacements of one change are reported in the order they were
 /// applied (from the end of the text to the start), so applying them one by
-/// one to a syntax tree or a highlight map keeps every position valid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// one to a syntax tree, a highlight map or a copy of the text keeps every
+/// position valid.
+///
+/// An edit is self-contained: `start..old_end` of the text before it is
+/// replaced with `text`. Positions are given in chars, bytes, row and byte
+/// column (tree-sitter, LSP `utf-8`) and row and UTF-16 column (LSP
+/// `utf-16`), so a language server gets one incremental change per edit
+/// without looking at the text in between.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedEdit {
     pub start: usize,
     pub old_end: usize,
@@ -67,6 +75,13 @@ pub struct AppliedEdit {
     pub start_position: (usize, usize),
     pub old_end_position: (usize, usize),
     pub new_end_position: (usize, usize),
+    /// UTF-16 column of `start` in its row, in the text before the edit.
+    pub start_utf16_col: usize,
+    /// UTF-16 column of `old_end` in its row (`old_end_position.0`), in the
+    /// text before the edit.
+    pub old_end_utf16_col: usize,
+    /// The inserted text (empty for a deletion), with `\n` line breaks.
+    pub text: Arc<str>,
 }
 
 /// The state of a buffer when a write started ([`Buffer::begin_save`]).
@@ -265,6 +280,11 @@ impl Buffer {
         )
     }
 
+    /// UTF-16 column of a char offset in row `line` (the row of `pos`).
+    fn utf16_column(&self, line: usize, pos: usize) -> usize {
+        self.rope.char_to_utf16_cu(pos) - self.rope.char_to_utf16_cu(self.rope.line_to_char(line))
+    }
+
     /// Applies edits (char ranges in the current text, any order, not
     /// overlapping) as one undoable change and moves the carets.
     ///
@@ -355,6 +375,8 @@ impl Buffer {
         let old_end_byte = self.rope.char_to_byte(old_end);
         let start_position = self.position(start);
         let old_end_position = self.position(old_end);
+        let start_utf16_col = self.utf16_column(start_position.0, start);
+        let old_end_utf16_col = self.utf16_column(old_end_position.0, old_end);
         if old_len > 0 {
             self.rope.remove(start..old_end);
         }
@@ -373,6 +395,9 @@ impl Buffer {
             start_position,
             old_end_position,
             new_end_position: self.position(new_end),
+            start_utf16_col,
+            old_end_utf16_col,
+            text: Arc::from(new),
         }
     }
 
@@ -679,6 +704,153 @@ mod tests {
             .is_empty()
         );
         assert_eq!(b.version(), 0);
+    }
+
+    /// Applies reported edits to a copy of `before` the way a language
+    /// server does: by row and UTF-16 column, and separately by row and
+    /// byte column, checking both against the char offsets.
+    fn replay(before: &str, applied: &[AppliedEdit]) -> String {
+        let mut by_utf16 = Rope::from_str(before);
+        let mut by_bytes = Rope::from_str(before);
+        for e in applied {
+            let utf16 = |rope: &Rope, row: usize, col: usize| {
+                rope.utf16_cu_to_char(rope.char_to_utf16_cu(rope.line_to_char(row)) + col)
+            };
+            let start = utf16(&by_utf16, e.start_position.0, e.start_utf16_col);
+            let end = utf16(&by_utf16, e.old_end_position.0, e.old_end_utf16_col);
+            assert_eq!((start, end), (e.start, e.old_end), "utf-16 range of {e:?}");
+            by_utf16.remove(start..end);
+            by_utf16.insert(start, &e.text);
+
+            let byte = |rope: &Rope, (row, col): (usize, usize)| {
+                rope.byte_to_char(rope.line_to_byte(row) + col)
+            };
+            let start = byte(&by_bytes, e.start_position);
+            let end = byte(&by_bytes, e.old_end_position);
+            assert_eq!((start, end), (e.start, e.old_end), "byte range of {e:?}");
+            by_bytes.remove(start..end);
+            by_bytes.insert(start, &e.text);
+
+            assert_eq!(e.new_end, e.start + e.text.chars().count());
+            assert_eq!(e.new_end_byte, e.start_byte + e.text.len());
+        }
+        assert_eq!(by_utf16, by_bytes);
+        by_utf16.to_string()
+    }
+
+    #[test]
+    fn edits_carry_their_text_and_utf16_columns() {
+        // An emoji is two UTF-16 units and four bytes, a CJK character one
+        // unit and three bytes, a tab one of each.
+        let before = "a😀b\n中文\tx\nlast";
+        let mut b = Buffer::new(before);
+        let after_emoji = 2;
+        let after_tab = b.line_start(1) + 3;
+        let mut sel = SelectionSet::from_vec(vec![
+            Selection::caret(after_emoji),
+            Selection::caret(after_tab),
+        ]);
+        let applied = b.transact(
+            &mut sel,
+            vec![
+                Edit::insert(after_emoji, "é"),
+                Edit::insert(after_tab, "🎉"),
+            ],
+            EditKind::Typing,
+            CaretPlacement::AfterEachEdit,
+        );
+        assert_eq!(b.text(), "a😀éb\n中文\t🎉x\nlast");
+        // Applied from the end: the second row first.
+        assert_eq!(applied[0].start_position, (1, 7));
+        assert_eq!(applied[0].start_utf16_col, 3);
+        assert_eq!(&*applied[0].text, "🎉");
+        assert_eq!(applied[1].start_position, (0, 5));
+        assert_eq!(applied[1].start_utf16_col, 3);
+        assert_eq!(applied[1].old_end_utf16_col, 3);
+        assert_eq!(&*applied[1].text, "é");
+        assert_eq!(replay(before, &applied), b.text());
+    }
+
+    #[test]
+    fn multi_line_replacements_report_the_old_end_in_the_text_before() {
+        let before = "x = 1\n# 😀😀 ok\n\tend";
+        let mut b = Buffer::new(before);
+        // From after "x = " to the middle of row 1 (after both emoji).
+        let start = 4;
+        let end = b.line_start(1) + 4;
+        let mut sel = SelectionSet::single(Selection::new(start, end));
+        let applied = b.transact(
+            &mut sel,
+            vec![Edit::new(start..end, "(\r\n    2,\n)")],
+            EditKind::Other,
+            CaretPlacement::AfterEachEdit,
+        );
+        assert_eq!(b.text(), "x = (\n    2,\n) ok\n\tend");
+        let e = &applied[0];
+        assert_eq!(e.old_end_position, (1, 10));
+        assert_eq!(e.old_end_utf16_col, 6);
+        // Line breaks of the inserted text are normalised.
+        assert_eq!(&*e.text, "(\n    2,\n)");
+        assert_eq!(e.new_end_position, (2, 1));
+        assert_eq!(replay(before, &applied), b.text());
+
+        // A deletion has no text.
+        let before = b.text();
+        let applied = b.transact(
+            &mut sel,
+            vec![Edit::delete(0..6)],
+            EditKind::Other,
+            CaretPlacement::AfterEachEdit,
+        );
+        assert_eq!(&*applied[0].text, "");
+        assert_eq!(
+            (applied[0].old_end_position, applied[0].old_end_utf16_col),
+            ((1, 0), 0)
+        );
+        assert_eq!(replay(&before, &applied), b.text());
+    }
+
+    #[test]
+    fn undo_and_redo_report_replayable_edits() {
+        let mut b = Buffer::new("中\n😀");
+        let mut texts = vec![b.text()];
+        for (at, text) in [(1, "文"), (2, "\n\t"), (0, "🎉 ")] {
+            let mut sel = set(at);
+            b.transact(
+                &mut sel,
+                vec![Edit::insert(at, text)],
+                EditKind::Other,
+                CaretPlacement::AfterEachEdit,
+            );
+            texts.push(b.text());
+        }
+        // Two caret edits in one step, then undo and redo across all steps.
+        let before = b.text();
+        let mut sel = SelectionSet::from_vec(vec![Selection::caret(0), Selection::caret(4)]);
+        let applied = b.transact(
+            &mut sel,
+            vec![Edit::insert(0, "a"), Edit::new(4..6, "b")],
+            EditKind::Other,
+            CaretPlacement::AfterEachEdit,
+        );
+        assert_eq!(replay(&before, &applied), b.text());
+        let mut current = b.text();
+        while let Some((applied, _)) = b.undo() {
+            assert_eq!(replay(&current, &applied), b.text());
+            current = b.text();
+        }
+        assert_eq!(current, texts[0]);
+        while let Some((applied, _)) = b.redo() {
+            assert_eq!(replay(&current, &applied), b.text());
+            current = b.text();
+        }
+        assert_eq!(current, b.text());
+
+        // Untracked replacements too (a console's output).
+        let before = b.text();
+        let applied = b.replace_untracked(1..3, "x\r\ny");
+        assert_eq!(&*applied.text, "x\ny");
+        assert_eq!(replay(&before, &[applied]), b.text());
     }
 
     #[test]

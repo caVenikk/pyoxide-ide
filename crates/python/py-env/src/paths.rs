@@ -101,6 +101,22 @@ pub(crate) fn is_executable(p: &Path) -> bool {
     std::fs::metadata(p).map(|m| m.is_file()).unwrap_or(false)
 }
 
+/// A tool installed next to an interpreter: the executable `name` in the
+/// interpreter's folder (`<env>/bin/ruff`, `<env>\Scripts\ruff.exe`) or, on
+/// Windows, in the `Scripts` folder beside a base or conda interpreter
+/// (`C:\Python313\Scripts\ruff.exe`), as the reference's "Sdk" lookup
+/// does. `PATHEXT` extensions are tried on Windows. The interpreter's path
+/// is used as given: a virtual environment's `python` link is not resolved
+/// to the base interpreter.
+pub fn env_tool(python: &Path, name: &str) -> Option<PathBuf> {
+    let dir = python.parent()?;
+    let mut dirs = vec![dir.to_path_buf()];
+    if cfg!(windows) && !dir.ends_with("Scripts") {
+        dirs.push(dir.join("Scripts"));
+    }
+    find_in_dirs(name, dirs)
+}
+
 /// The interpreter inside a virtual environment directory.
 pub fn venv_python(root: &Path) -> PathBuf {
     #[cfg(windows)]
@@ -211,6 +227,69 @@ mod tests {
         assert_eq!(venv_root_of(&py), None);
         std::fs::write(root.join("pyvenv.cfg"), "home = /x\n").unwrap();
         assert_eq!(venv_root_of(&py), Some(root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_tool_next_to_the_interpreter() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let python = venv_python(&dir.path().join(".venv"));
+        let bin = python.parent().unwrap();
+        std::fs::create_dir_all(bin).unwrap();
+        std::fs::write(&python, "").unwrap();
+        assert_eq!(env_tool(&python, "ruff"), None);
+        let ruff = bin.join("ruff");
+        std::fs::write(&ruff, "#!/bin/sh\n").unwrap();
+        // Not executable: not a tool.
+        assert_eq!(env_tool(&python, "ruff"), None);
+        std::fs::set_permissions(&ruff, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(env_tool(&python, "ruff"), Some(ruff.clone()));
+        // The interpreter itself need not exist; its folder counts.
+        assert_eq!(env_tool(&bin.join("python3.13"), "ruff"), Some(ruff));
+        assert_eq!(env_tool(&python, "ty"), None);
+        // A link to the base interpreter is not followed.
+        let base = dir.path().join("base").join("bin");
+        std::fs::create_dir_all(&base).unwrap();
+        let base_python = base.join("python3");
+        std::fs::write(&base_python, "").unwrap();
+        let linked = dir.path().join("env").join("bin");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::os::unix::fs::symlink(&base_python, linked.join("python")).unwrap();
+        let ty = linked.join("ty");
+        std::fs::write(&ty, "").unwrap();
+        std::fs::set_permissions(&ty, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(env_tool(&linked.join("python"), "ty"), Some(ty));
+        assert_eq!(env_tool(Path::new("python"), "ty"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn finds_a_tool_in_scripts_with_pathext() {
+        let dir = tempfile::tempdir().unwrap();
+        // A virtual environment: the interpreter is in `Scripts`.
+        let python = venv_python(&dir.path().join(".venv"));
+        let scripts = python.parent().unwrap();
+        std::fs::create_dir_all(scripts).unwrap();
+        std::fs::write(&python, "").unwrap();
+        assert_eq!(env_tool(&python, "ruff"), None);
+        let ruff = scripts.join("ruff.exe");
+        std::fs::write(&ruff, "").unwrap();
+        assert_eq!(env_tool(&python, "ruff"), Some(ruff));
+        // A base or conda interpreter: tools are in `Scripts` beside it.
+        let base = dir.path().join("Python313");
+        std::fs::create_dir_all(base.join("Scripts")).unwrap();
+        std::fs::write(base.join("python.exe"), "").unwrap();
+        let ty = base.join("Scripts").join("ty.exe");
+        std::fs::write(&ty, "").unwrap();
+        assert_eq!(env_tool(&base.join("python.exe"), "ty"), Some(ty));
+        // `.cmd` shims (npm-installed language servers) through PATHEXT.
+        let shim = base.join("Scripts").join("basedpyright-langserver.cmd");
+        std::fs::write(&shim, "").unwrap();
+        assert_eq!(
+            env_tool(&base.join("python.exe"), "basedpyright-langserver"),
+            Some(shim)
+        );
     }
 
     #[cfg(unix)]

@@ -21,13 +21,18 @@
 //! Paths are relative to the project root with `/` separators on every OS;
 //! patterns are file name masks matched below the root (see
 //! [`NameMasks`](crate::NameMasks)).
+//!
+//! Other settings are values by table and key ([`load_table`],
+//! [`load_value`], [`save_values`]); tables are dotted paths, so a product
+//! keeps its settings in its own tables (`[python.tools.ruff]`, ADR 0010)
+//! under the same rules.
 
 use std::collections::BTreeSet;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use toml_edit::{Array, DocumentMut, Item, Table, Value};
+use toml_edit::{Array, DocumentMut, Item, Table, TableLike, Value};
 
 use crate::idea;
 
@@ -285,6 +290,154 @@ pub fn save(root: &Path, exclusions: &Exclusions) -> Result<bool, StoreError> {
     Ok(true)
 }
 
+// ---- values by table and key ----------------------------------------------
+
+/// The table at a dotted path (`python.tools.ruff`) of a store file;
+/// `None` when a part of the path is missing. A part that is not a table
+/// is an error.
+pub(crate) fn find_table<'a>(
+    doc: &'a DocumentMut,
+    table: &str,
+    path: &Path,
+) -> Result<Option<&'a dyn TableLike>, StoreError> {
+    let mut current: &dyn TableLike = doc.as_table();
+    for part in table.split('.') {
+        let Some(item) = current.get(part) else {
+            return Ok(None);
+        };
+        current = item
+            .as_table_like()
+            .ok_or_else(|| not_a_table(path, table))?;
+    }
+    Ok(Some(current))
+}
+
+/// The table at a dotted path, created when missing (its parents as
+/// implicit tables, so only `[python.tools.ruff]` is written); `None`
+/// when it is missing and `create` is false.
+pub(crate) fn find_table_mut<'a>(
+    doc: &'a mut DocumentMut,
+    table: &str,
+    path: &Path,
+    create: bool,
+) -> Result<Option<&'a mut dyn TableLike>, StoreError> {
+    let parts: Vec<&str> = table.split('.').collect();
+    let mut current: &mut dyn TableLike = doc.as_table_mut();
+    for (i, part) in parts.iter().enumerate() {
+        if current.get(part).is_none() {
+            if !create {
+                return Ok(None);
+            }
+            let mut new = Table::new();
+            new.set_implicit(i + 1 < parts.len());
+            current.insert(part, Item::Table(new));
+        }
+        current = current
+            .get_mut(part)
+            .and_then(Item::as_table_like_mut)
+            .ok_or_else(|| not_a_table(path, table))?;
+    }
+    Ok(Some(current))
+}
+
+fn not_a_table(path: &Path, table: &str) -> StoreError {
+    StoreError::Invalid {
+        path: path.to_owned(),
+        message: format!("`{table}` is not a table"),
+    }
+}
+
+/// The table at a dotted path (`python.tools.ruff`) of the project
+/// settings, with the values as they are stored; `None` when the file or
+/// the table does not exist. Products deserialize their own settings from
+/// it (`toml::Table::try_into`).
+pub fn load_table(root: &Path, table: &str) -> Result<Option<toml::Table>, StoreError> {
+    let path = settings_file(root);
+    let Some(doc) = read_document(&path)? else {
+        return Ok(None);
+    };
+    let Some(found) = find_table(&doc, table, &path)? else {
+        return Ok(None);
+    };
+    let mut copy = DocumentMut::new();
+    for (key, item) in found.iter() {
+        copy.insert(key, item.clone());
+    }
+    toml::from_str(&copy.to_string())
+        .map(Some)
+        .map_err(|e| StoreError::Invalid {
+            path,
+            message: e.to_string(),
+        })
+}
+
+/// The value of `key` in the table at a dotted path of the project
+/// settings; `None` when the file, the table or the key is missing.
+pub fn load_value(root: &Path, table: &str, key: &str) -> Result<Option<toml::Value>, StoreError> {
+    Ok(load_table(root, table)?.and_then(|mut t| t.remove(key)))
+}
+
+/// Sets keys of the table at a dotted path of the project settings
+/// (`None` removes a key), keeping everything else in the file, as
+/// [`save`] does: the file is created only when there is a value to
+/// store, a file of a newer version is not rewritten, and the write
+/// replaces the file at once. Returns whether the file was written.
+pub fn save_values(
+    root: &Path,
+    table: &str,
+    values: &[(&str, Option<toml::Value>)],
+) -> Result<bool, StoreError> {
+    let path = settings_file(root);
+    let existing = read_document(&path)?;
+    if existing.is_none() && values.iter().all(|(_, v)| v.is_none()) {
+        return Ok(false);
+    }
+    let mut doc = match existing {
+        Some(doc) => doc,
+        None => format!("{HEADER}version = {SETTINGS_VERSION}\n")
+            .parse()
+            .expect("the header is valid TOML"),
+    };
+    let stored = version(&doc);
+    if stored > SETTINGS_VERSION {
+        return Err(StoreError::Newer {
+            path,
+            version: stored,
+        });
+    }
+    if doc.get("version").and_then(Item::as_integer) != Some(SETTINGS_VERSION) {
+        doc["version"] = toml_edit::value(SETTINGS_VERSION);
+    }
+    let mut changed = false;
+    for (key, value) in values {
+        let create = value.is_some();
+        let Some(t) = find_table_mut(&mut doc, table, &path, create)? else {
+            continue;
+        };
+        match value {
+            Some(value) => {
+                t.insert(key, to_item(value));
+                changed = true;
+            }
+            None => changed |= t.remove(key).is_some(),
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+    write_atomic(&path, &doc.to_string()).map_err(|source| StoreError::Io { path, source })?;
+    Ok(true)
+}
+
+/// A value in the form `toml_edit` keeps (a table becomes a table).
+fn to_item(value: &toml::Value) -> Item {
+    let mut wrapper = toml::Table::new();
+    wrapper.insert("v".to_owned(), value.clone());
+    let text = toml::to_string(&wrapper).expect("a TOML value serializes");
+    let doc: DocumentMut = text.parse().expect("serialized TOML parses");
+    doc.get("v").cloned().expect("the value is there")
+}
+
 /// An array of strings, one per line.
 fn lines<'a>(items: impl IntoIterator<Item = &'a String>) -> Array {
     let mut array = Array::new();
@@ -435,6 +588,120 @@ mod tests {
 
         std::fs::write(settings_file(root), "exclusions = 3\n").unwrap();
         assert!(matches!(load(root), Err(StoreError::Invalid { .. })));
+    }
+
+    #[test]
+    fn values_by_dotted_table_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Nothing to store: nothing is created.
+        assert!(!save_values(root, "python.tools.ruff", &[("enabled", None)]).unwrap());
+        assert!(!root.join(STORE_DIR).exists());
+        assert_eq!(load_table(root, "python.tools.ruff").unwrap(), None);
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "enabled").unwrap(),
+            None
+        );
+
+        assert!(
+            save_values(
+                root,
+                "python.tools.ruff",
+                &[
+                    ("enabled", Some(true.into())),
+                    ("lookup", Some("sdk".into()))
+                ],
+            )
+            .unwrap()
+        );
+        let text = std::fs::read_to_string(settings_file(root)).unwrap();
+        assert!(text.starts_with(HEADER), "{text}");
+        // Parents are implicit: only the table itself gets a header.
+        assert!(
+            text.ends_with(
+                "version = 1\n\n[python.tools.ruff]\nenabled = true\nlookup = \"sdk\"\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "lookup").unwrap(),
+            Some(toml::Value::from("sdk"))
+        );
+        save_values(root, "python.type-engine", &[("name", Some("ty".into()))]).unwrap();
+        let args = toml::Value::Array(vec!["--preview".into(), 3.into()]);
+        save_values(root, "python.tools.ruff", &[("args", Some(args.clone()))]).unwrap();
+        let ruff = load_table(root, "python.tools.ruff").unwrap().unwrap();
+        assert_eq!(ruff.get("enabled"), Some(&toml::Value::Boolean(true)));
+        assert_eq!(ruff.get("args"), Some(&args));
+        let python = load_table(root, "python").unwrap().unwrap();
+        assert_eq!(python["type-engine"]["name"], toml::Value::from("ty"));
+        assert_eq!(python["tools"]["ruff"]["lookup"], toml::Value::from("sdk"));
+
+        // Removing keys; missing tables and keys write nothing.
+        assert!(save_values(root, "python.tools.ruff", &[("lookup", None)]).unwrap());
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "lookup").unwrap(),
+            None
+        );
+        assert!(!save_values(root, "python.tools.ruff", &[("lookup", None)]).unwrap());
+        assert!(!save_values(root, "python.tools.ty", &[("enabled", None)]).unwrap());
+
+        // Exclusions and values live side by side.
+        save(root, &ex(&["venv"])).unwrap();
+        assert_eq!(load(root).unwrap(), Some(ex(&["venv"])));
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "enabled").unwrap(),
+            Some(toml::Value::Boolean(true))
+        );
+    }
+
+    #[test]
+    fn values_keep_the_rest_of_the_file_and_refuse_newer_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        let original = "# shared\nversion = 1\n\n[exclusions]\npaths = [\"a\"]\n\n[python.tools.ruff]\nenabled = false # off for now\nfuture = \"keep\"\n";
+        std::fs::write(settings_file(root), original).unwrap();
+        save_values(root, "python.tools.ruff", &[("enabled", Some(true.into()))]).unwrap();
+        let text = std::fs::read_to_string(settings_file(root)).unwrap();
+        for kept in [
+            "# shared",
+            "[exclusions]\npaths = [\"a\"]",
+            "future = \"keep\"",
+        ] {
+            assert!(text.contains(kept), "{kept} lost:\n{text}");
+        }
+        assert_eq!(load(root).unwrap(), Some(ex(&["a"])));
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "enabled").unwrap(),
+            Some(toml::Value::Boolean(true))
+        );
+
+        let newer = "version = 2\n[python.tools.ruff]\nenabled = true\n";
+        std::fs::write(settings_file(root), newer).unwrap();
+        assert_eq!(
+            load_value(root, "python.tools.ruff", "enabled").unwrap(),
+            Some(toml::Value::Boolean(true))
+        );
+        assert!(matches!(
+            save_values(
+                root,
+                "python.tools.ruff",
+                &[("enabled", Some(false.into()))]
+            ),
+            Err(StoreError::Newer { version: 2, .. })
+        ));
+        assert_eq!(std::fs::read_to_string(settings_file(root)).unwrap(), newer);
+
+        std::fs::write(settings_file(root), "python = 3\n").unwrap();
+        assert!(matches!(
+            load_table(root, "python.tools"),
+            Err(StoreError::Invalid { .. })
+        ));
+        assert!(matches!(
+            save_values(root, "python.tools", &[("x", Some(1.into()))]),
+            Err(StoreError::Invalid { .. })
+        ));
     }
 
     #[test]

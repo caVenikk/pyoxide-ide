@@ -574,6 +574,9 @@ mod tests {
             start_position: (0, 1),
             old_end_position: (0, 2),
             new_end_position: (1, 1),
+            start_utf16_col: 1,
+            old_end_utf16_col: 2,
+            text: "a\nb".into(),
         };
         let ie = input_edit(&e);
         assert_eq!(ie.new_end_position, Point { row: 1, column: 1 });
