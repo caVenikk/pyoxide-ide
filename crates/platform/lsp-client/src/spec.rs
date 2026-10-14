@@ -36,6 +36,11 @@ pub struct ServerSpec {
     pub icon: Option<String>,
     /// The product's adjustments; none when `None`.
     pub customizer: Option<Arc<dyn ServerCustomizer>>,
+    /// Send an empty `workspace/didChangeConfiguration` once the server
+    /// runs: servers of the pyright family ask for their settings
+    /// (`workspace/configuration`) only after one, as the reference's
+    /// `PyrightEmptyConfigurationSender` knows.
+    pub empty_configuration_change: bool,
 }
 
 impl ServerSpec {
@@ -52,7 +57,14 @@ impl ServerSpec {
             settings: Value::Null,
             icon: None,
             customizer: None,
+            empty_configuration_change: false,
         }
+    }
+
+    /// See [`ServerSpec::empty_configuration_change`].
+    pub fn with_empty_configuration_change(mut self) -> Self {
+        self.empty_configuration_change = true;
+        self
     }
 
     pub fn with_languages<S: Into<String>>(
