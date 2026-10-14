@@ -1,0 +1,23 @@
+[package]
+name = "code-intel-ui"
+description = "Code intelligence UI of Pyoxide IDE on GPUI: the per-window controller of the editors' language services, its popups, the Language Services widget and the code.* commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+code-intel.workspace = true
+editor.workspace = true
+gpui.workspace = true
+serde_json.workspace = true
+ui.workspace = true
+
+[dev-dependencies]
+code-intel = { workspace = true, features = ["fake"] }
+gpui = { workspace = true, features = ["test-support"] }
+
+# Metal shaders are compiled at start-up on machines without Xcode
+# (ADR 0007).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

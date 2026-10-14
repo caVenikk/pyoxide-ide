@@ -276,6 +276,7 @@ impl InterpreterWidget {
                             this.active_file = file.clone();
                             cx.notify();
                         }
+                        _ => {}
                     },
                 ),
             );

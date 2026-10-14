@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+code-intel-ui.workspace = true
 commands.workspace = true
 console.workspace = true
 dirs = "7"
@@ -36,6 +37,7 @@ objc = "0.2"
 raw-window-handle = "0.6"
 
 [dev-dependencies]
+code-intel = { workspace = true, features = ["fake"] }
 gpui = { workspace = true, features = ["test-support"] }
 # The list type of GPUI's `ExternalPaths` (tests/drop.rs).
 smallvec = "1"

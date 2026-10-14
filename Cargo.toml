@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/platform/code-intel",
+    "crates/platform/code-intel-ui",
     "crates/platform/commands",
     "crates/platform/console",
     "crates/platform/db-core",
@@ -65,6 +66,7 @@ gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
 resvg = { version = "0.45", default-features = false }
 code-intel = { path = "crates/platform/code-intel" }
+code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }
 console = { path = "crates/platform/console" }
 db-core = { path = "crates/platform/db-core" }

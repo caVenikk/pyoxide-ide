@@ -35,6 +35,9 @@ pub struct FileType {
     /// Letters allowed as a string prefix right before a quote.
     pub string_prefixes: &'static [char],
     pub highlighter: Option<HighlighterFactory>,
+    /// The language id language services know the files by (`"python"`);
+    /// editor tabs of a type without one get no code intelligence.
+    pub language_id: Option<&'static str>,
 }
 
 impl std::fmt::Debug for FileType {
@@ -64,6 +67,7 @@ impl FileType {
             triple_quotes: false,
             string_prefixes: &[],
             highlighter: None,
+            language_id: None,
         }
     }
 
