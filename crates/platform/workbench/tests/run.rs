@@ -94,10 +94,15 @@ impl H<'_> {
         })
     }
 
-    /// Waits until the console of `tab` shows `text`.
+    /// Waits until the console of `tab` shows `text` below the command
+    /// line. The command line holds the script, so text the script prints
+    /// is in it from the start, before the process has printed anything.
     fn wait_text(&mut self, tab: usize, text: &str) -> Value {
         self.wait(&format!("{text:?} in tab {tab}"), |s| {
-            console_text(s, tab).contains(text)
+            console_lines(s, tab)
+                .iter()
+                .skip(1)
+                .any(|line| line.contains(text))
         })
     }
 
@@ -165,6 +170,8 @@ fn console_lines(state: &Value, tab: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The whole console text (only the Unix-only long output test needs it).
+#[cfg(unix)]
 fn console_text(state: &Value, tab: usize) -> String {
     console_lines(state, tab).join("\n")
 }
@@ -420,8 +427,10 @@ fn running_a_running_file_asks_first(cx: &mut TestAppContext) {
 fn typing_in_the_console_feeds_standard_input(cx: &mut TestAppContext) {
     let (mut h, _dir) = setup(cx);
     h.open("a.py");
+    // The prompt comes a moment after the start, as from a slowly starting
+    // interpreter (cmd.exe on CI): the test types only once it shows.
     set_script(&script(
-        "printf 'x? '; read x; echo \"got $x\"; cat; echo done",
+        "sleep 0.2; printf 'x? '; read x; echo \"got $x\"; cat; echo done",
         "set /p x=x? & echo got !x!& more & echo done",
     ));
     h.invoke("run.run", json!(null));
@@ -439,7 +448,11 @@ fn typing_in_the_console_feeds_standard_input(cx: &mut TestAppContext) {
     assert_eq!(line_kinds(&s, 0, prompt), ["normal", "input"]);
     h.press(keys("cmd-d", "ctrl-d"));
     let s = h.wait_status(0, "terminated");
-    assert!(console_text(&s, 0).contains("done"));
+    let lines = console_lines(&s, 0);
+    assert!(
+        lines[1..].iter().any(|l| l.trim_end() == "done"),
+        "{lines:?}"
+    );
     assert_eq!(s["tabs"][0]["exit_code"], json!(0));
 }
 
