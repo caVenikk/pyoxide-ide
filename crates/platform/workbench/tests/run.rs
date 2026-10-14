@@ -170,6 +170,8 @@ fn console_lines(state: &Value, tab: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The whole console text (only the Unix-only long output test needs it).
+#[cfg(unix)]
 fn console_text(state: &Value, tab: usize) -> String {
     console_lines(state, tab).join("\n")
 }
