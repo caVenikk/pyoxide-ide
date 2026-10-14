@@ -1,0 +1,18 @@
+[package]
+name = "lsp-client"
+description = "Language Server Protocol client of Pyoxide IDE: servers over standard streams, document sync, diagnostics and the CodeIntel implementation over several servers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+code-intel.workspace = true
+flume.workspace = true
+futures.workspace = true
+# Protocol types stay private to this crate (ADR 0010): nothing public
+# mentions them.
+lsp-types.workspace = true
+process.workspace = true
+serde_json.workspace = true
+text.workspace = true
