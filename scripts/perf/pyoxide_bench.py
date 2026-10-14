@@ -5,10 +5,11 @@
 # pycharm_typing.py), opening a 10 MB file and scrolling it. Runs the release
 # binary with PYOXIDE_BENCH; the window opens without taking the focus
 # (PYOXIDE_BACKGROUND=1). Measure on an idle machine: the load average is
-# printed first.
+# printed first. `--marks N` shows N problems spread over the big file during
+# the typing runs (underlines, error stripe, inspection widget).
 #
 #     cargo build --release -p pyoxide-ide
-#     python3 scripts/perf/pyoxide_bench.py --work <empty dir> [--runs 3]
+#     python3 scripts/perf/pyoxide_bench.py --work <empty dir> [--runs 3] [--marks 1000]
 import argparse, json, os, statistics, subprocess, sys
 from pathlib import Path
 
@@ -18,8 +19,9 @@ import pycharm_baseline as base
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run(binary: Path, args, bench: str, timeout: int):
-    env = dict(os.environ, PYOXIDE_BACKGROUND="1", PYOXIDE_BENCH=bench)
+def run(binary: Path, args, bench: str, timeout: int, marks: int = 0):
+    env = dict(os.environ, PYOXIDE_BACKGROUND="1", PYOXIDE_BENCH=bench,
+               PYOXIDE_BENCH_MARKS=str(marks))
     proc = subprocess.run([str(binary), *map(str, args)], env=env, capture_output=True,
                           text=True, timeout=timeout)
     markers = {}
@@ -42,6 +44,7 @@ def main():
     ap.add_argument("--binary", type=Path, default=ROOT / "target/release/pyoxide-ide")
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--only", choices=["startup", "typing", "open"])
+    ap.add_argument("--marks", type=int, default=0)
     a = ap.parse_args()
     print("load average", " ".join(f"{v:.2f}" for v in os.getloadavg()), flush=True)
     work = a.work.resolve()
@@ -58,7 +61,7 @@ def main():
                 r = {"first_frame_ms": float(first) if first else None}
             elif kind == "typing":
                 big = files["bigfile"]
-                m = run(a.binary, [big, big / "big.py"], "typing", 300)
+                m = run(a.binary, [big, big / "big.py"], "typing", 300, a.marks)
                 r = {**m.get("typing", {"error": m}), **m.get("memory", {})}
             else:
                 huge = files["hugefile"]

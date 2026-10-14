@@ -177,6 +177,9 @@ roles! {
         DiagnosticWarning => ("diagnostic-warning", "Diagnostics", "Warning marker, underline and stripe"),
         DiagnosticInfo => ("diagnostic-info", "Diagnostics", "Weak warning and information marker"),
         DiagnosticHint => ("diagnostic-hint", "Diagnostics", "Hint marker"),
+        DiagnosticErrorStripe => ("diagnostic-error-stripe", "Diagnostics", "Error mark on the error stripe and error icon"),
+        DiagnosticWarningStripe => ("diagnostic-warning-stripe", "Diagnostics", "Warning mark on the error stripe and warning icon"),
+        DiagnosticWeakWarningStripe => ("diagnostic-weak-warning-stripe", "Diagnostics", "Weak warning mark on the error stripe and weak warning icon"),
 
         TerminalBackground => ("terminal-background", "Terminal", "Terminal and console background"),
         TerminalForeground => ("terminal-foreground", "Terminal", "Terminal default text"),
@@ -368,6 +371,9 @@ impl UiRole {
             NonProjectFile => Some(SurfaceAlt),
             RunWidgetRunning => Some(Success),
             RunWidgetStop => Some(Danger),
+            DiagnosticErrorStripe => Some(DiagnosticError),
+            DiagnosticWarningStripe => Some(DiagnosticWarning),
+            DiagnosticWeakWarningStripe => Some(DiagnosticInfo),
             _ => None,
         }
     }

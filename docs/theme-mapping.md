@@ -74,7 +74,10 @@ cargo run -p themes --example builtin_islands -- ic <commit>
 
 Roles the Community files do not define, the metrics and the fonts come from
 the pyoxide themes, so layout changes go into `pyoxide-*.toml` first and the
-islands themes are regenerated afterwards.
+islands themes are regenerated afterwards. One attribute the reference draws
+in code rather than through its schemes is added by the generator: a hint
+of the Python language services (`syntax.diagnostic-hint`, empty in the
+schemes) is a grey bold dotted line.
 
 ## What is read
 
@@ -261,6 +264,9 @@ report says which parent was missing.
 | `ui.diagnostic-warning` | `WARNING_ATTRIBUTES` effect color, `WARNING_ATTRIBUTES` error stripe color, `WARNING_ATTRIBUTES` foreground | Warning marker, underline and stripe |
 | `ui.diagnostic-info` | `INFO_ATTRIBUTES` effect color, `INFO_ATTRIBUTES` error stripe color, `INFO_ATTRIBUTES` foreground | Weak warning and information marker |
 | `ui.diagnostic-hint` | `INFORMATION_ATTRIBUTES` effect color, `INFORMATION_ATTRIBUTES` error stripe color | Hint marker |
+| `ui.diagnostic-error-stripe` | `ERRORS_ATTRIBUTES` error stripe color | Error mark on the error stripe and error icon |
+| `ui.diagnostic-warning-stripe` | `WARNING_ATTRIBUTES` error stripe color | Warning mark on the error stripe and warning icon |
+| `ui.diagnostic-weak-warning-stripe` | `INFO_ATTRIBUTES` error stripe color | Weak warning mark on the error stripe and weak warning icon |
 
 ### Terminal
 

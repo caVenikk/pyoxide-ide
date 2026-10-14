@@ -18,7 +18,7 @@ use text::movement::{self, WordStop};
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point, Selection, SelectionSet};
 
 use crate::commands::*;
-use crate::diagnostics::DiagnosticMark;
+use crate::diagnostics::{Analysis, DiagnosticMark, Marks, ProblemCounts, problem_to_go};
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
 
@@ -277,12 +277,40 @@ pub struct Editor {
     /// The link under the last mouse press (line, char range, position):
     /// it is followed when the mouse is released at the same point.
     pub(crate) pressed_link: Option<(usize, Range<usize>, gpui::Point<Pixels>)>,
-    /// Problems in the text, sorted by range.
-    pub(crate) diagnostics: Vec<DiagnosticMark>,
+    /// Problems in the text, sorted by range, moved through edits.
+    pub(crate) diagnostics: Marks,
     /// A char range drawn as a link (the symbol under the mouse with the
     /// navigation modifier).
     pub(crate) link_highlight: Option<Range<usize>>,
+    /// How far the analysis of the text is (the inspection widget).
+    pub(crate) analysis: Analysis,
+    /// The mouse over the text without a button, as last reported in
+    /// [`EditorEvent::Hovered`].
+    pub(crate) hover: Option<Hover>,
+    /// The problems whose error stripe marks are under the mouse (their
+    /// tooltip).
+    pub(crate) stripe_hover: Option<StripeHover>,
+    /// A press on a problem's stripe mark (index, position): followed when
+    /// released in place.
+    pub(crate) pressed_stripe: Option<(usize, gpui::Point<Pixels>)>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The mouse over the text: the char under it and the modifiers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hover {
+    pub offset: Option<usize>,
+    pub position: gpui::Point<Pixels>,
+    pub modifiers: Modifiers,
+}
+
+/// Problems under the mouse on the error stripe.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StripeHover {
+    /// Indices of the marks, the nearest first.
+    pub marks: Vec<usize>,
+    /// Window y of the middle of the nearest mark (where the tooltip goes).
+    pub y: Pixels,
 }
 
 impl EventEmitter<EditorEvent> for Editor {}
@@ -338,8 +366,12 @@ impl Editor {
             forward_input: false,
             scroll_to_end: false,
             pressed_link: None,
-            diagnostics: Vec::new(),
+            diagnostics: Marks::default(),
             link_highlight: None,
+            analysis: Analysis::Off,
+            hover: None,
+            stripe_hover: None,
+            pressed_stripe: None,
             _subscriptions: subscriptions,
         }
     }
@@ -396,6 +428,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.text_edited(&applied);
         self.schedule_highlighting(cx);
         cx.emit(EditorEvent::Edited(applied));
         cx.notify();
@@ -540,19 +573,179 @@ impl Editor {
     // ---- diagnostics and links -----------------------------------------------
 
     /// Replaces the problems shown in the text (char ranges in the current
-    /// text; sorted here by range).
+    /// text, clamped to it; sorted here by range). An empty range at a line
+    /// end is drawn after the end of the line; any other empty range covers
+    /// the char after it. The marks then move with the text (typing, undo)
+    /// until they are replaced.
     pub fn set_diagnostics(&mut self, marks: Vec<DiagnosticMark>, cx: &mut Context<Self>) {
-        let mut marks = marks;
-        marks.sort_by_key(|m| (m.range.start, m.range.end));
-        if self.diagnostics != marks {
-            self.diagnostics = marks;
+        if self.diagnostics.set(marks, &self.buffer) {
+            self.stripe_hover = None;
+            self.pressed_stripe = None;
             cx.notify();
         }
     }
 
-    /// The problems shown in the text, sorted by range.
+    /// The problems shown in the text, sorted by range, in the current text.
     pub fn diagnostics(&self) -> &[DiagnosticMark] {
-        &self.diagnostics
+        self.diagnostics.as_slice()
+    }
+
+    /// The problems at a char offset (the char under the mouse, the caret):
+    /// those over the char and the empty ones there (drawn after the end
+    /// of their line), the most severe first. The data of the hover popup.
+    pub fn diagnostics_at(&self, offset: usize) -> Vec<&DiagnosticMark> {
+        self.diagnostics
+            .at(offset)
+            .into_iter()
+            .map(|i| self.diagnostics.get(i))
+            .collect()
+    }
+
+    /// The problems by level as the inspection widget counts them (every
+    /// message by its own level).
+    pub fn problem_counts(&self) -> ProblemCounts {
+        self.diagnostics.counts()
+    }
+
+    /// Tells the editor how far the analysis of its text is: the inspection
+    /// widget shows from [`Analysis::Running`] on, translucent until
+    /// [`Analysis::Done`].
+    pub fn set_analysis(&mut self, analysis: Analysis, cx: &mut Context<Self>) {
+        if self.analysis != analysis {
+            self.analysis = analysis;
+            cx.notify();
+        }
+    }
+
+    pub fn analysis(&self) -> Analysis {
+        self.analysis
+    }
+
+    /// Moves the caret to the next (`forward`) or previous problem, as the
+    /// reference's Next / Previous Highlighted Error: errors first, wrapping
+    /// around; information is skipped. Returns whether there was one.
+    pub fn go_to_problem(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let caret = self.selections.primary().head;
+        match problem_to_go(self.diagnostics(), Some(caret), forward) {
+            Some(i) => {
+                self.show_problem(i, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Moves the caret to the first problem (errors first): the inspection
+    /// widget's click until the Problems tool window exists.
+    pub fn go_to_first_problem(&mut self, cx: &mut Context<Self>) -> bool {
+        match problem_to_go(self.diagnostics(), None, true) {
+            Some(i) => {
+                self.show_problem(i, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The caret at the start of a problem (no selection, one caret), its
+    /// line brought into the middle of the view when hidden.
+    fn show_problem(&mut self, index: usize, cx: &mut Context<Self>) {
+        let pos = self.diagnostics.get(index).range.start;
+        self.set_selections(SelectionSet::caret(pos), cx);
+        self.reveal(pos, cx);
+    }
+
+    /// A problem's error stripe mark was clicked: the caret goes to the
+    /// problem, its line to the middle of the view, the focus to the
+    /// editor.
+    pub(crate) fn stripe_clicked(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus);
+        if index < self.diagnostics().len() {
+            let pos = self.diagnostics.get(index).range.start;
+            self.set_selections(SelectionSet::caret(pos), cx);
+            self.center_caret = true;
+        }
+    }
+
+    // ---- hover --------------------------------------------------------------
+
+    /// The mouse moved without a button: reports the char under it when it
+    /// or the modifiers change ([`EditorEvent::Hovered`], `None` when it
+    /// leaves the text), and finds the stripe marks under it.
+    pub(crate) fn mouse_moved(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        modifiers: Modifiers,
+        over_text: bool,
+        over_editor: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let stripe = self.layout.as_ref().filter(|_| over_editor).and_then(|l| {
+            if !l.stripe?.contains(&position) {
+                return None;
+            }
+            let marks = l.stripe_marks_near(position.y);
+            let y = l.stripe_mark_middle(*marks.first()?)?;
+            Some(StripeHover { marks, y })
+        });
+        if self.stripe_hover != stripe {
+            self.stripe_hover = stripe;
+            cx.notify();
+        }
+        let offset = if over_text {
+            self.char_at(position)
+        } else {
+            None
+        };
+        let changed = match self.hover {
+            None => offset.is_some(),
+            Some(last) => {
+                last.offset != offset
+                    || (last.modifiers != modifiers && (last.offset.is_some() || offset.is_some()))
+            }
+        };
+        self.hover = over_text.then_some(Hover {
+            offset,
+            position,
+            modifiers,
+        });
+        if changed {
+            cx.emit(EditorEvent::Hovered {
+                offset,
+                position,
+                modifiers,
+            });
+        }
+    }
+
+    /// Modifiers changed while the editor has the focus: reported while the
+    /// mouse is over a char.
+    pub(crate) fn modifiers_changed(&mut self, modifiers: Modifiers, cx: &mut Context<Self>) {
+        let Some(hover) = &mut self.hover else {
+            return;
+        };
+        if hover.modifiers == modifiers {
+            return;
+        }
+        hover.modifiers = modifiers;
+        if let Some(offset) = hover.offset {
+            cx.emit(EditorEvent::Hovered {
+                offset: Some(offset),
+                position: hover.position,
+                modifiers,
+            });
+        }
+    }
+
+    /// The char under the mouse as last reported (`None` when the mouse is
+    /// not over a char).
+    pub fn hovered(&self) -> Option<usize> {
+        self.hover.and_then(|h| h.offset)
     }
 
     /// Draws a char range as a link with the hand pointer (the symbol
@@ -576,12 +769,20 @@ impl Editor {
     /// area (gutter, scrollbar, outside the editor).
     pub fn offset_at(&self, position: gpui::Point<Pixels>) -> Option<usize> {
         let layout = self.layout.as_ref()?;
-        let inside = layout.bounds.contains(&position)
-            && position.x >= layout.text_x
-            && layout
-                .scrollbar
-                .is_none_or(|s| !s.track.contains(&position));
-        inside.then(|| self.offset_for_position(position))
+        layout
+            .over_text(position)
+            .then(|| self.offset_for_position(position))
+    }
+
+    /// Window bounds of the text area in the last frame (without the
+    /// gutter and the error stripe), for placing popups.
+    pub fn text_area_bounds(&self) -> Option<Bounds<Pixels>> {
+        let layout = self.layout.as_ref()?;
+        let right = layout.stripe.map_or(layout.bounds.right(), |s| s.left());
+        Some(Bounds::from_corners(
+            point(layout.text_x, layout.bounds.top()),
+            point(right, layout.bounds.bottom()),
+        ))
     }
 
     /// Window bounds of a char range in the last frame: from its start to
@@ -791,6 +992,7 @@ impl Editor {
             json!({ "line": p.line, "column": p.column })
         };
         let (chars, breaks) = self.selection_stats();
+        let counts = self.problem_counts();
         json!({
             "path": self.path.as_ref().map(|p| p.display().to_string()),
             "lines": self.buffer.len_lines(),
@@ -810,6 +1012,30 @@ impl Editor {
             "can_undo": self.buffer.can_undo(),
             "can_redo": self.buffer.can_redo(),
             "visible_lines": self.visible_lines().map(|r| json!([r.start, r.end])),
+            "diagnostics": self.diagnostics().iter().map(|m| json!({
+                "range": { "start": point(m.range.start), "end": point(m.range.end) },
+                "severity": m.severity.name(),
+                "unnecessary": m.unnecessary,
+                "deprecated": m.deprecated,
+                "messages": m.messages.iter().map(|msg| json!({
+                    "severity": msg.severity.name(),
+                    "text": msg.text,
+                    "source": msg.source,
+                    "code": msg.code,
+                    "href": msg.href,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "link_highlight": self.link_highlight.as_ref().map(|r| json!({
+                "start": point(r.start),
+                "end": point(r.end),
+            })),
+            "analysis": self.analysis.name(),
+            "problems": {
+                "errors": counts.errors,
+                "warnings": counts.warnings,
+                "weak_warnings": counts.weak_warnings,
+            },
+            "hovered": self.hovered().map(point),
         })
     }
 
@@ -839,6 +1065,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.text_edited(&applied);
         self.schedule_highlighting(cx);
         self.autoscroll = true;
         self.caret_visible = true;
@@ -879,9 +1106,24 @@ impl Editor {
         self.edit(edits, kind, CaretPlacement::AfterEachEdit, cx);
     }
 
+    /// Moves what is anchored in the text through applied edits: the
+    /// problems move with it; the link highlight was about the old text.
+    fn text_edited(&mut self, applied: &[AppliedEdit]) {
+        self.diagnostics.edited(applied);
+        self.link_highlight = None;
+        // Indices of marks may have changed.
+        self.stripe_hover = None;
+        self.pressed_stripe = None;
+    }
+
     /// Notifies observers that the buffer was replaced from disk or saved.
     pub fn buffer_reloaded(&mut self, cx: &mut Context<Self>) {
         self.selections.clamp(self.buffer.len_chars());
+        // Positions in the old text mean nothing in the new one.
+        self.diagnostics.clear();
+        self.link_highlight = None;
+        self.stripe_hover = None;
+        self.pressed_stripe = None;
         if let Some(h) = &mut self.highlighter {
             h.reset(&self.buffer);
         }
@@ -1209,6 +1451,14 @@ impl Editor {
 
     fn go_to_line(&mut self, a: &GoToLine, _: &mut Window, cx: &mut Context<Self>) {
         self.go_to(a.line, a.column, cx);
+    }
+
+    fn next_problem(&mut self, _: &NextProblem, _: &mut Window, cx: &mut Context<Self>) {
+        self.go_to_problem(true, cx);
+    }
+
+    fn previous_problem(&mut self, _: &PreviousProblem, _: &mut Window, cx: &mut Context<Self>) {
+        self.go_to_problem(false, cx);
     }
 
     /// Moves the caret to a one-based line and column (both clamped) and
@@ -2368,10 +2618,14 @@ editor_actions! {
     ToggleComment => toggle_comment,
     GoToLine => go_to_line,
     ScrollToLine => scroll_to_line,
+    NextProblem => next_problem,
+    PreviousProblem => previous_problem,
 }
 
 impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let widget = crate::inspection::widget(self, cx);
+        let tooltip = crate::inspection::stripe_tooltip(self, cx);
         let el = div()
             .key_context(if self.single_line {
                 "Editor single_line"
@@ -2379,8 +2633,16 @@ impl Render for Editor {
                 "Editor"
             })
             .track_focus(&self.focus)
+            // On the focused element itself: GPUI sends modifier changes
+            // along the focus path only.
+            .on_modifiers_changed(cx.listener(|this, e: &gpui::ModifiersChangedEvent, _, cx| {
+                this.modifiers_changed(e.modifiers, cx)
+            }))
             .size_full()
-            .child(EditorElement::new(cx.entity()));
+            .relative()
+            .child(EditorElement::new(cx.entity()))
+            .children(widget)
+            .children(tooltip);
         Self::bind_actions(el, cx)
     }
 }

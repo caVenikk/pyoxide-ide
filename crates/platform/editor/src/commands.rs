@@ -120,4 +120,10 @@ ui::ui_commands! {
         "Moves the caret to a one-based line and optional column.", r#"{"line": 10, "column": 1}"#;
     ScrollToLine { line: usize } => "editor.scroll-to", "Scroll to Line",
         "Scrolls so that a zero-based line is at the top of the view.", r#"{"line": 100}"#;
+    // The problems are the editor's marks, so moving between them is the
+    // editor's command (ids of code intelligence, ADR 0010).
+    NextProblem => "code.next-problem", "Next Highlighted Error",
+        "Moves the caret to the next problem in the file, errors first.";
+    PreviousProblem => "code.previous-problem", "Previous Highlighted Error",
+        "Moves the caret to the previous problem in the file, errors first.";
 }

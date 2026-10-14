@@ -8,6 +8,7 @@
 //! | `PYOXIDE_RUN=<json>` | run UI commands once the window settled, e.g. `[["find.search", {"text": "def"}]]` (before `PYOXIDE_SHOT`) |
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
 //! | `PYOXIDE_BENCH=typing` | type 3 x 200 keys at line 50,000 of the open file, print key-to-frame times, quit |
+//! | `PYOXIDE_BENCH_MARKS=<n>` | with `typing`: show `n` problems spread over the file first (underlines, error stripe, inspection widget) |
 //! | `PYOXIDE_BENCH=open:<file>` | open a file, print the time to its first painted text and to highlighting, scroll it, quit |
 //! | `PYOXIDE_BENCH=find:<query>` | type a query into the find bar of the open file char by char (5 runs), print key-to-highlight times, quit |
 //! | `PYOXIDE_BENCH=find-in-files:<query>` | search the open project for a query with Find in Files (5 runs), print the times to the first row and to the end of the search, quit |

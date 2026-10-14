@@ -139,10 +139,6 @@ impl CodeIntelView {
 
     fn optimize_imports(&mut self, _: &OptimizeImports, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn next_problem(&mut self, _: &NextProblem, _: &mut Window, _: &mut Context<Self>) {}
-
-    fn previous_problem(&mut self, _: &PreviousProblem, _: &mut Window, _: &mut Context<Self>) {}
-
     fn error_description(&mut self, _: &ErrorDescription, _: &mut Window, _: &mut Context<Self>) {}
 
     fn restart_servers(&mut self, action: &RestartServers, _: &mut Window, _: &mut Context<Self>) {
@@ -179,8 +175,6 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
         ShowIntentions => show_intentions,
         Reformat => reformat,
         OptimizeImports => optimize_imports,
-        NextProblem => next_problem,
-        PreviousProblem => previous_problem,
         ErrorDescription => error_description,
         RestartServers => restart_servers,
         StopServer => stop_server,

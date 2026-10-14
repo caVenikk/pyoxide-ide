@@ -2,7 +2,8 @@
 //! action texts (IntelliJ Platform Community, `ActionsBundle.properties`,
 //! see NOTICE); its "Basic" of the Code Completion menu is "Basic
 //! Completion" here. No default key bindings yet: each comes with its
-//! feature and its keystroke check.
+//! feature and its keystroke check. Next and previous problem are editor
+//! commands (`editor::commands`): the problems are the editor's marks.
 
 ui::ui_commands! {
     COMMANDS, scope = "Editor";
@@ -22,10 +23,6 @@ ui::ui_commands! {
         "Reformats the file, or the selected lines.";
     OptimizeImports => "code.optimize-imports", "Optimize Imports",
         "Sorts the imports of the file.";
-    NextProblem => "code.next-problem", "Next Highlighted Error",
-        "Moves the caret to the next problem in the file, errors first.";
-    PreviousProblem => "code.previous-problem", "Previous Highlighted Error",
-        "Moves the caret to the previous problem in the file, errors first.";
     ErrorDescription => "code.error-description", "Error Description",
         "Shows the description of the problem at the caret.";
 }

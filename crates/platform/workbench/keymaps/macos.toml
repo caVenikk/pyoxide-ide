@@ -127,6 +127,9 @@ name = "Editor"
 "cmd-r" = "find.replace"
 "cmd-g" = "find.next"
 "cmd-shift-g" = "find.previous"
+# Problems
+"f2" = "code.next-problem"
+"shift-f2" = "code.previous-problem"
 
 # The Go to Line field is a one-line editor: Enter and Escape close it.
 [[context]]
