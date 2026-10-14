@@ -11,7 +11,10 @@
 //! - [`popup`]: popups at a position in an editor that leave the focus in
 //!   the editor; while one shows, the editor's container gets its key
 //!   context (`Completion > Editor`).
-//! - [`completion`]: the completion popup.
+//! - [`completion`]: the completion popup, opened by Basic Completion or
+//!   by typing.
+//! - [`services`]: the Language Services widget of the status bar and its
+//!   popup.
 //!
 //! The UI depends on the `code-intel` traits only, never on the LSP
 //! client; tests use `code_intel::fake::FakeCodeIntel`.
@@ -25,11 +28,15 @@ pub mod document;
 mod hook;
 mod marks;
 pub mod popup;
+pub mod services;
 mod view;
 
 pub use code_intel;
 pub use hook::{CodeIntelHook, CodeIntelProvider};
-pub use view::{CaretQuery, CodeIntelView, editor_container, forward_actions};
+pub use view::{
+    CaretQuery, CodeIntelEvent, CodeIntelView, HINT_CONTEXT, NO_SUGGESTIONS, editor_container,
+    forward_actions,
+};
 
 /// Registers the code intelligence commands with the command index.
 pub fn init(cx: &mut gpui::App) {

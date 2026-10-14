@@ -6,15 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use code_intel::{
-    CodeIntel, CompletionTrigger, Completions, DocumentId, FileChange, IntelError, IntelEvent,
+    AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, FileChange, FileChangeKind,
+    IntelError, IntelEvent, ServerId,
 };
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EntityId, Focusable as _,
-    InteractiveElement, Subscription, Task, Window,
+    AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EntityId, EventEmitter,
+    Focusable as _, InteractiveElement, SharedString, Subscription, Task, Window,
 };
 use serde_json::{Value as Json, json};
 use text::{CaretPlacement, EditKind, Point, SelectionSet};
+use themes::TextRole;
 
 use crate::commands::*;
 use crate::completion::list::CompletionList;
@@ -22,7 +24,13 @@ use crate::completion::{self, Session, identifier_start, is_identifier_char};
 use crate::document::Document;
 use crate::hook::CodeIntelHook;
 use crate::marks;
-use crate::popup::{CaretPopup, Placement, PopupHost};
+use crate::popup::{CaretPopup, Placement, PopupHost, TextHint};
+use crate::services::{self, InlineAction, ServerItem, ServicesPopup, WidgetBounds};
+
+/// The key context of the hint shown when Basic Completion finds nothing.
+pub const HINT_CONTEXT: &str = "CompletionHint";
+/// The hint (`completion.no.suggestions` of the reference).
+pub const NO_SUGGESTIONS: &str = "No suggestions";
 
 /// Where a request about the caret of an editor is made: the document,
 /// the caret as a char offset and as a position, and the version of the
@@ -34,6 +42,20 @@ pub struct CaretQuery {
     pub offset: usize,
     pub at: Point,
     pub version: u64,
+}
+
+/// What the window does for the code intelligence.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeIntelEvent {
+    /// A popup appeared or changed without a key press (an answer came):
+    /// it should be drawn at once, not at the next refresh.
+    Redraw,
+    /// A notice for the status bar (the reference shows a balloon).
+    Notice(String),
+    /// Open a file in a tab.
+    OpenFile(PathBuf),
+    /// Open a text that is no file in a read-only tab titled `title`.
+    OpenText { title: String, text: String },
 }
 
 /// The code intelligence of a main window: the project's language
@@ -54,10 +76,19 @@ pub struct CodeIntelView {
     completion_list: Entity<CompletionList>,
     /// Completion sessions started so far (their ids).
     sessions: u64,
+    /// An automatic popup found nothing for the identifier that starts
+    /// here (editor, offset): typing on in it opens none (the reference's
+    /// `EmptyAutoPopup` phase).
+    empty_auto: Option<(EntityId, usize)>,
+    /// The Language Services popup, while it is open.
+    services_popup: Option<(Entity<ServicesPopup>, Subscription)>,
+    widget_bounds: WidgetBounds,
     /// Receives the services' events.
     _events: Option<Task<()>>,
-    _quit: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<CodeIntelEvent> for CodeIntelView {}
 
 impl CodeIntelView {
     pub fn new(hook: CodeIntelHook, cx: &mut Context<Self>) -> Self {
@@ -69,6 +100,12 @@ impl CodeIntelView {
                     let _ = services.shutdown().await;
                 }
             })
+        });
+        // Any key closes a hint.
+        let keys = cx.observe_keystrokes(|this, _, _, cx| {
+            if this.popups.hide(HINT_CONTEXT) {
+                cx.notify();
+            }
         });
         let owner = cx.weak_entity();
         let completion_list = cx.new(|_| CompletionList::new(owner));
@@ -82,8 +119,11 @@ impl CodeIntelView {
             completion: None,
             completion_list,
             sessions: 0,
+            empty_auto: None,
+            services_popup: None,
+            widget_bounds: WidgetBounds::default(),
             _events: None,
-            _quit: quit,
+            _subscriptions: vec![quit, keys],
         }
     }
 
@@ -157,6 +197,7 @@ impl CodeIntelView {
         self.close_completion(cx);
         self.popups.clear();
         self.documents.clear();
+        self.services_popup = None;
         self.active = None;
         self.root = Some(root.to_owned());
         let services = self.hook.0.start(root, cx);
@@ -201,6 +242,7 @@ impl CodeIntelView {
         let doc = Document::new(id, language, editor.clone(), text, vec![events, blur]);
         services.did_open(&doc.id, language, doc.version(), doc.versions.text());
         self.documents.insert(path.to_owned(), doc);
+        cx.notify();
     }
 
     /// The editor tab of a file was closed.
@@ -218,13 +260,18 @@ impl CodeIntelView {
         cx.notify();
     }
 
-    /// The file of an editor tab was written to disk.
+    /// The file of an editor tab was written to disk: the services see the
+    /// save of a document and the change of the file (servers that watch
+    /// files, such as configuration files, reload them).
     pub fn file_saved(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let (Some(doc), Some(services)) = (self.documents.get(path), &self.services) else {
+        let Some(services) = &self.services else {
             return;
         };
-        let text = doc.editor.read(cx).buffer().rope().clone();
-        services.did_save(&doc.id, &text);
+        if let Some(doc) = self.documents.get(path) {
+            let text = doc.editor.read(cx).buffer().rope().clone();
+            services.did_save(&doc.id, &text);
+        }
+        services.files_changed(&[FileChange::new(path, FileChangeKind::Changed)]);
     }
 
     /// The application changed files on disk (outside the editors).
@@ -244,6 +291,7 @@ impl CodeIntelView {
         self.active = path.map(Path::to_owned);
         self.close_completion(cx);
         self.popups.clear();
+        self.refresh_services_popup(cx);
         cx.notify();
     }
 
@@ -259,6 +307,10 @@ impl CodeIntelView {
                 if let Some(services) = &self.services {
                     services.did_change(&doc.id, version, applied, doc.versions.text());
                 }
+                let editor = doc.editor.entity_id();
+                if self.popups.hide(HINT_CONTEXT) {
+                    cx.notify();
+                }
                 // A change before the completed identifier ends the popup.
                 if let Some(session) = &self.completion
                     && session.path == path
@@ -266,6 +318,7 @@ impl CodeIntelView {
                 {
                     self.close_completion(cx);
                 }
+                self.typed(path, editor, applied, cx);
             }
             EditorEvent::Reloaded => {
                 let Some(doc) = self.documents.get_mut(path) else {
@@ -300,6 +353,7 @@ impl CodeIntelView {
         {
             self.close_completion(cx);
         }
+        self.popups.hide(HINT_CONTEXT);
     }
 
     fn service_event(&mut self, event: IntelEvent, cx: &mut Context<Self>) {
@@ -321,7 +375,10 @@ impl CodeIntelView {
                     .editor
                     .update(cx, |e, cx| e.set_diagnostics(marks, cx));
             }
-            IntelEvent::Status(_) => cx.notify(),
+            IntelEvent::Status(_) => {
+                self.refresh_services_popup(cx);
+                cx.notify();
+            }
             _ => {}
         }
     }
@@ -337,9 +394,87 @@ impl CodeIntelView {
         if !editor.read(cx).selections().primary().is_empty() {
             return;
         }
+        self.popups.hide(HINT_CONTEXT);
         let start = identifier_start(editor.read(cx).buffer(), query.offset);
         self.start_completion(editor, query.path, start, true, cx);
         self.request_completion(CompletionTrigger::Invoked, cx);
+    }
+
+    /// A char was typed in a document's editor: an identifier char or a
+    /// trigger char of its servers opens the popup by itself (the
+    /// reference's `CompletionAutoPopupHandler` and
+    /// `LspAutoPopupTypedHandler`), except in strings and comments and in
+    /// numbers.
+    fn typed(
+        &mut self,
+        path: &Path,
+        editor_id: EntityId,
+        applied: &[AppliedEdit],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(c) = typed_char(applied) else {
+            self.empty_auto = None;
+            return;
+        };
+        let (Some(doc), Some(services)) = (self.documents.get(path), self.services.clone()) else {
+            return;
+        };
+        let editor = doc.editor.clone();
+        let e = editor.read(cx);
+        let selections = e.selections();
+        let caret = selections.primary().head;
+        // Undo and redo put text back too; a typed char clears the redo
+        // history.
+        if e.buffer().can_redo()
+            || selections.len() != 1
+            || !selections.primary().is_empty()
+            || caret != applied[0].new_end
+        {
+            return;
+        }
+        let identifier = is_identifier_char(c);
+        let trigger = !identifier && services.completion_triggers(&doc.id).contains(&c);
+        if !identifier {
+            self.empty_auto = None;
+        }
+        // An open popup follows the identifier typed in it; another char
+        // ends it.
+        if let Some(session) = &self.completion
+            && session.editor.entity_id() == editor_id
+        {
+            if identifier && caret > session.start {
+                return;
+            }
+            self.close_completion(cx);
+        }
+        if !identifier && !trigger {
+            return;
+        }
+        let start = if identifier {
+            identifier_start(editor.read(cx).buffer(), caret)
+        } else {
+            caret
+        };
+        if identifier
+            && (editor
+                .read(cx)
+                .buffer()
+                .char_at(start)
+                .is_some_and(|c| c.is_ascii_digit())
+                || self.empty_auto == Some((editor_id, start)))
+        {
+            return;
+        }
+        if in_string_or_comment(&editor, caret - 1, cx) {
+            return;
+        }
+        self.start_completion(&editor, path.to_owned(), start, false, cx);
+        let trigger = if trigger {
+            CompletionTrigger::Character(c)
+        } else {
+            CompletionTrigger::Invoked
+        };
+        self.request_completion(trigger, cx);
     }
 
     fn start_completion(
@@ -411,6 +546,7 @@ impl CodeIntelView {
         session.answer_version = version;
         session.answered = true;
         self.completion_filter(cx);
+        cx.emit(CodeIntelEvent::Redraw);
     }
 
     /// The identifier typed so far in the session's editor, `None` when
@@ -460,18 +596,35 @@ impl CodeIntelView {
         self.show_completion(cx);
     }
 
-    /// Shows the session's items, or closes the popup when none matches
-    /// (and typing more cannot bring any).
+    /// Shows the session's items. Without any (and nothing more coming)
+    /// the popup closes: Basic Completion says so in a hint, an automatic
+    /// popup opens no more while the identifier is typed on. An automatic
+    /// popup whose items are all typed out already closes too.
     fn show_completion(&mut self, cx: &mut Context<Self>) {
         let Some(session) = &self.completion else {
             return;
         };
-        if session.shown.is_empty() {
-            if session.incomplete || session.request.is_some() {
-                self.popups.hide(completion::CONTEXT);
-                cx.notify();
+        let pending = session.incomplete || session.request.is_some();
+        let meaningless = !session.explicit
+            && !session.focused
+            && !session.shown.is_empty()
+            && session
+                .shown
+                .iter()
+                .all(|s| session.items[s.item].insert.text() == session.prefix);
+        if session.shown.is_empty() && pending {
+            self.popups.hide(completion::CONTEXT);
+            cx.notify();
+            return;
+        }
+        if session.shown.is_empty() || meaningless {
+            let (editor, start, explicit) =
+                (session.editor.clone(), session.start, session.explicit);
+            self.close_completion(cx);
+            if explicit {
+                self.show_hint(&editor, start, NO_SUGGESTIONS, cx);
             } else {
-                self.close_completion(cx);
+                self.empty_auto = Some((editor.entity_id(), start));
             }
             return;
         }
@@ -491,6 +644,30 @@ impl CodeIntelView {
         cx.notify();
     }
 
+    /// A one-line hint at a position of an editor (closed by the next key,
+    /// edit or caret move).
+    fn show_hint(
+        &mut self,
+        editor: &Entity<Editor>,
+        anchor: usize,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let text = SharedString::from(text.to_owned());
+        let content = cx.new(|_| TextHint::new(text));
+        self.popups.show(CaretPopup {
+            context: HINT_CONTEXT,
+            editor: editor.clone(),
+            anchor,
+            placement: Placement::Below,
+            inset: gpui::px(0.0),
+            height: None,
+            content: content.into(),
+        });
+        cx.emit(CodeIntelEvent::Redraw);
+        cx.notify();
+    }
+
     /// Closes the completion popup; the request in flight is cancelled.
     fn close_completion(&mut self, cx: &mut Context<Self>) {
         let had_session = self.completion.take().is_some();
@@ -504,8 +681,10 @@ impl CodeIntelView {
         self.popups.is_shown(completion::CONTEXT)
     }
 
+    /// Moves the selection; it also focuses an automatic popup.
     fn select_completion(&mut self, f: impl FnOnce(&mut Session), cx: &mut Context<Self>) {
         if let Some(session) = self.completion.as_mut() {
+            session.focused = true;
             f(session);
             self.show_completion(cx);
         }
@@ -528,6 +707,7 @@ impl CodeIntelView {
             return;
         };
         let item = &session.items[index];
+        let parentheses = self.hook.0.parentheses(&doc.language);
         session.editor.update(cx, |e, cx| {
             let caret = e.selections().primary().head;
             let (edits, caret) = completion::insertion(
@@ -538,6 +718,7 @@ impl CodeIntelView {
                 session.start,
                 caret,
                 replace,
+                parentheses,
             );
             e.edit(
                 edits,
@@ -599,12 +780,154 @@ impl CodeIntelView {
         self.close_completion(cx);
     }
 
+    // ---- Language Services ------------------------------------------------------
+
+    /// The servers of the project as the widget shows them, errors first.
+    pub fn server_items(&self, cx: &App) -> Vec<ServerItem> {
+        let Some(services) = &self.services else {
+            return Vec::new();
+        };
+        let current = self.active_document().map(|d| d.id.clone());
+        let provider = &self.hook.0;
+        let mut items: Vec<ServerItem> = services
+            .status()
+            .iter()
+            .map(|status| {
+                ServerItem::new(
+                    status,
+                    provider.server_title(status),
+                    provider.server_icon(status),
+                    provider.server_status_bar_icon(status),
+                    current.as_ref().is_some_and(|doc| status.serves(doc)),
+                )
+            })
+            .collect();
+        let _ = cx;
+        items.sort_by_key(|i| !i.error);
+        items
+    }
+
+    pub(crate) fn widget_bounds(&self) -> WidgetBounds {
+        self.widget_bounds.clone()
+    }
+
+    /// Opens the Language Services popup over the widget, or closes it.
+    pub fn toggle_services_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.services_popup.take().is_some() {
+            cx.notify();
+            return;
+        }
+        let items = self.server_items(cx);
+        if items.is_empty() {
+            return;
+        }
+        let popup = ServicesPopup::open(cx.weak_entity(), items, window, cx);
+        let subscription = cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+            this.services_popup = None;
+            cx.notify();
+        });
+        self.services_popup = Some((popup, subscription));
+        cx.notify();
+    }
+
+    fn refresh_services_popup(&mut self, cx: &mut Context<Self>) {
+        let items = self.server_items(cx);
+        if let Some((popup, _)) = &self.services_popup {
+            popup.update(cx, |p, cx| {
+                p.set_items(items);
+                cx.notify();
+            });
+        }
+    }
+
+    /// An action of a server's row in the popup.
+    pub(crate) fn run_server_action(
+        &mut self,
+        item: &ServerItem,
+        action: InlineAction,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            InlineAction::Restart => self.restart_server(Some(&item.id), cx),
+            InlineAction::Stop => self.stop_server_by_id(&item.id, cx),
+            InlineAction::ErrorOutput => {
+                if let Some(text) = &item.error_output {
+                    cx.emit(CodeIntelEvent::OpenText {
+                        title: format!("{} Server Error Output", item.title),
+                        text: text.clone(),
+                    });
+                }
+            }
+            InlineAction::Settings => self.open_settings(cx),
+        }
+    }
+
+    /// Restarts a server, or all; a notice names each (the reference's
+    /// balloon "Ruff server restarted").
+    fn restart_server(&mut self, server: Option<&ServerId>, cx: &mut Context<Self>) {
+        let Some(services) = self.services.clone() else {
+            return;
+        };
+        let titles: Vec<String> = self
+            .server_items(cx)
+            .into_iter()
+            .filter(|i| server.is_none_or(|s| *s == i.id))
+            .map(|i| i.title)
+            .collect();
+        services.restart(server);
+        for title in titles {
+            cx.emit(CodeIntelEvent::Notice(format!("{title} server restarted")));
+        }
+    }
+
+    /// Stops a server; it starts again when a document needs it.
+    fn stop_server_by_id(&mut self, server: &ServerId, cx: &mut Context<Self>) {
+        let Some(services) = self.services.clone() else {
+            return;
+        };
+        let title = self
+            .server_items(cx)
+            .into_iter()
+            .find(|i| i.id == *server)
+            .map(|i| i.title);
+        services.stop(server);
+        if let Some(title) = title {
+            cx.emit(CodeIntelEvent::Notice(format!(
+                "{title} server stopped. The server will restart automatically when needed"
+            )));
+        }
+    }
+
+    /// The settings of the language services: the project's settings
+    /// file, until there is a settings window.
+    fn open_settings(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        match self.hook.0.settings_file(root) {
+            Some(file) if file.is_file() => cx.emit(CodeIntelEvent::OpenFile(file)),
+            Some(file) => cx.emit(CodeIntelEvent::Notice(format!(
+                "The project has no settings file yet ({})",
+                file.strip_prefix(root).unwrap_or(&file).display()
+            ))),
+            None => {}
+        }
+    }
+
     // ---- drawing and state ------------------------------------------------------
 
     /// The popups over the editor (completion, documentation, parameter
-    /// info), drawn by the workbench above its content.
+    /// info) and the Language Services popup, drawn by the workbench above
+    /// its content.
     pub fn render_overlay(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
-        self.popups.render(window, cx)
+        let mut overlay = self.popups.render(window, cx);
+        if let Some((popup, _)) = &self.services_popup
+            && !popup.read(cx).is_dismissed()
+        {
+            overlay.push(services::overlay(popup, self.widget_bounds.get(), window));
+        }
+        overlay
     }
 
     /// The state reported by `code.state`.
@@ -632,6 +955,7 @@ impl CodeIntelView {
                 .map(|m| m.messages.len())
                 .sum::<usize>()
         });
+        let items = self.server_items(cx);
         json!({
             "project": self.root.as_ref().map(|r| r.display().to_string()),
             "services": self.services.is_some(),
@@ -643,7 +967,14 @@ impl CodeIntelView {
                 state["hint"] = completion::list::hint(cx).into();
                 state
             }),
+            "hint": self
+                .popups
+                .get(HINT_CONTEXT)
+                .and_then(|p| p.content.clone().downcast::<TextHint>().ok())
+                .map(|h| h.read(cx).text().to_string()),
             "problems": problems,
+            "widget": services::WidgetState::new(&items).map(|w| w.state_json()),
+            "services_popup": self.services_popup.as_ref().map(|(p, _)| p.read(cx).state_json()),
         })
     }
 
@@ -676,18 +1007,48 @@ impl CodeIntelView {
 
     fn error_description(&mut self, _: &ErrorDescription, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn restart_servers(&mut self, action: &RestartServers, _: &mut Window, _: &mut Context<Self>) {
-        if let Some(services) = &self.services {
-            let server = action.server.as_deref().map(code_intel::ServerId::new);
-            services.restart(server.as_ref());
-        }
+    fn restart_servers(&mut self, action: &RestartServers, _: &mut Window, cx: &mut Context<Self>) {
+        let server = action.server.as_deref().map(ServerId::new);
+        self.restart_server(server.as_ref(), cx);
     }
 
-    fn stop_server(&mut self, action: &StopServer, _: &mut Window, _: &mut Context<Self>) {
-        if let Some(services) = &self.services {
-            services.stop(&code_intel::ServerId::new(&action.server));
-        }
+    fn stop_server(&mut self, action: &StopServer, _: &mut Window, cx: &mut Context<Self>) {
+        self.stop_server_by_id(&ServerId::new(&action.server), cx);
     }
+}
+
+/// The char typed by an edit: one char inserted without replacing
+/// anything (`None` for anything else, such as a paste or a deletion).
+fn typed_char(applied: &[AppliedEdit]) -> Option<char> {
+    let [edit] = applied else {
+        return None;
+    };
+    let mut chars = edit.text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if edit.start == edit.old_end => Some(c),
+        _ => None,
+    }
+}
+
+/// The char at an offset is in a string or a comment, as the editor's
+/// highlighting (the language's lexer) colours it.
+fn in_string_or_comment(editor: &Entity<Editor>, offset: usize, cx: &mut App) -> bool {
+    editor.update(cx, |e, _| {
+        let point = e.buffer().offset_to_point(offset);
+        e.highlights(point.line).iter().any(|(range, role)| {
+            range.contains(&point.column)
+                && matches!(
+                    role,
+                    TextRole::String
+                        | TextRole::StringEscape
+                        | TextRole::StringEscapeInvalid
+                        | TextRole::Comment
+                        | TextRole::Docstring
+                        | TextRole::DocstringTag
+                        | TextRole::Todo
+                )
+        })
+    })
 }
 
 /// Adds handlers to `el` (the workbench root) that send the code
@@ -798,5 +1159,27 @@ mod tests {
         view.update(cx, |v, cx| v.project_opened(Path::new("/q"), cx));
         cx.run_until_parked();
         assert_eq!(fake.calls(), [Call::Shutdown]);
+    }
+
+    #[test]
+    fn typed_chars() {
+        let edit = |start, old_end, text: &str| AppliedEdit {
+            start,
+            old_end,
+            new_end: start + text.chars().count(),
+            start_byte: start,
+            old_end_byte: old_end,
+            new_end_byte: start + text.len(),
+            start_position: (0, start),
+            old_end_position: (0, old_end),
+            new_end_position: (0, start + text.len()),
+            start_utf16_col: start,
+            old_end_utf16_col: old_end,
+            text: text.into(),
+        };
+        assert_eq!(typed_char(&[edit(3, 3, ".")]), Some('.'));
+        assert_eq!(typed_char(&[edit(3, 3, "ab")]), None);
+        assert_eq!(typed_char(&[edit(3, 4, "a")]), None);
+        assert_eq!(typed_char(&[edit(3, 3, "a"), edit(5, 5, "a")]), None);
     }
 }

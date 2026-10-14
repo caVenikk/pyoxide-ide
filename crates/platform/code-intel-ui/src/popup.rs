@@ -7,9 +7,12 @@
 
 use editor::Editor;
 use gpui::{
-    AnyElement, AnyView, App, Corner, Entity, EntityId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Window, anchored, deferred, div, point, px,
+    AnyElement, AnyView, App, Context, Corner, Entity, EntityId, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Window, anchored, deferred, div, point,
+    px,
 };
+use themes::{Metric, UiRole};
+use ui::ThemeExt;
 
 /// Where a popup goes relative to the line of its anchor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,5 +153,41 @@ impl PopupHost {
                 )
             })
             .collect()
+    }
+}
+
+/// A one-line hint at a position (the reference's light hints, such as
+/// "No suggestions" when Basic Completion finds nothing).
+pub struct TextHint {
+    text: SharedString,
+}
+
+impl TextHint {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        Self { text: text.into() }
+    }
+
+    pub fn text(&self) -> &SharedString {
+        &self.text
+    }
+}
+
+impl Render for TextHint {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .debug_selector(|| "text-hint".into())
+            .px(px(8.0))
+            .py(px(4.0))
+            .rounded(theme.metric(Metric::CornerRadius))
+            .border_1()
+            .border_color(theme.color(UiRole::PopupBorder))
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .shadow(ui::components::popup_shadow())
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
+            .whitespace_nowrap()
+            .child(self.text.clone())
     }
 }

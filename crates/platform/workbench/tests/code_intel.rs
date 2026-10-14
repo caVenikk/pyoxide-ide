@@ -4,8 +4,12 @@
 //! documents whose changes reach the services; diagnostics become the
 //! editors' marks; the completion popup opens with Basic Completion and
 //! closes with Escape while the focus stays in the editor, filters on the
-//! client, drops stale answers and inserts items in one undo step. Driven
-//! against the in-memory `FakeCodeIntel` with real keystrokes.
+//! client, drops stale answers and inserts items in one undo step; typing
+//! opens it too, except in strings, comments and numbers; functions get
+//! parentheses. The Language Services widget shows the servers with their
+//! states and actions (tests/scenarios/python-intel/
+//! language-services-widget.md). Driven against the in-memory
+//! `FakeCodeIntel` with real keystrokes.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -13,15 +17,17 @@ use std::sync::Arc;
 
 use code_intel::fake::{Call, FakeCodeIntel, RequestKind};
 use code_intel::{
-    CodeIntel, CompletionItem, CompletionTrigger, Completions, Diagnostic, DocumentId, Point,
-    ServerId, ServerStatus, Severity, SymbolKind, TextEdit,
+    CodeIntel, CompletionItem, CompletionTrigger, Completions, Diagnostic, DocumentId, FileChange,
+    FileChangeKind, Point, ServerId, ServerState, ServerStatus, Severity, SymbolKind, TextEdit,
 };
-use editor::{Editor, MarkSeverity};
+use code_intel_ui::completion::Parentheses;
+use editor::{Editor, Highlighter, MarkSeverity};
 use gpui::{
     App, AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext, WindowHandle,
 };
 use serde_json::{Value, json};
 use text::{Buffer, SelectionSet};
+use themes::TextRole;
 use workbench::{CodeIntelHook, CodeIntelProvider, FileType, Product, Workbench};
 
 struct Provider(Arc<FakeCodeIntel>);
@@ -30,6 +36,64 @@ impl CodeIntelProvider for Provider {
     fn start(&self, _: &Path, _: &mut App) -> Arc<dyn CodeIntel> {
         self.0.clone()
     }
+
+    /// The tool's name: the server's, capitalised (`ruff` is `Ruff`).
+    fn server_title(&self, server: &ServerStatus) -> String {
+        let mut chars = server.name.chars();
+        chars
+            .next()
+            .map(|c| c.to_uppercase().chain(chars).collect())
+            .unwrap_or_default()
+    }
+
+    fn parentheses(&self, language: &str) -> Option<Parentheses> {
+        (language == "python").then_some(Parentheses {
+            implicit_first: &["self", "cls"],
+        })
+    }
+}
+
+/// Colours `#` comments and quoted strings, line by line (as a language's
+/// lexer does).
+#[derive(Default)]
+struct Lexer {
+    lines: Vec<String>,
+}
+
+impl Highlighter for Lexer {
+    fn reset(&mut self, buffer: &Buffer) {
+        self.lines = (0..buffer.len_lines())
+            .map(|l| buffer.line_text(l).into_owned())
+            .collect();
+    }
+
+    fn edited(&mut self, buffer: &Buffer, _: &[text::AppliedEdit]) {
+        self.reset(buffer);
+    }
+
+    fn line_spans(&self, line: usize, out: &mut Vec<editor::Span>) {
+        let Some(text) = self.lines.get(line) else {
+            return;
+        };
+        let mut quote = None;
+        for (i, c) in text.chars().enumerate() {
+            match (quote, c) {
+                (None, '#') => {
+                    out.push((i..text.chars().count(), TextRole::Comment));
+                    return;
+                }
+                (None, '"') => quote = Some(i),
+                (Some(start), '"') => {
+                    out.push((start..i + 1, TextRole::String));
+                    quote = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = quote {
+            out.push((start..text.chars().count(), TextRole::String));
+        }
+    }
 }
 
 fn open(cx: &mut TestAppContext, hook: Option<CodeIntelHook>) -> WindowHandle<Workbench> {
@@ -37,6 +101,7 @@ fn open(cx: &mut TestAppContext, hook: Option<CodeIntelHook>) -> WindowHandle<Wo
         name: "Test IDE",
         file_types: vec![FileType {
             language_id: Some("python"),
+            highlighter: Some(Arc::new(|| Box::new(Lexer::default()))),
             ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
         }],
         code_intel: hook,
@@ -265,11 +330,11 @@ impl<'a> H<'a> {
         })
     }
 
-    /// Answers completion requests with these labels (methods).
+    /// Answers completion requests with these labels (fields).
     fn complete_with(&mut self, labels: &[&str], incomplete: bool) {
         let items: Vec<CompletionItem> = labels
             .iter()
-            .map(|l| CompletionItem::new(*l).with_kind(SymbolKind::Method))
+            .map(|l| CompletionItem::new(*l).with_kind(SymbolKind::Field))
             .collect();
         self.fake.on_completion(move |_, _, _| {
             Ok(Completions {
@@ -424,14 +489,14 @@ fn basic_completion_opens_the_popup_and_escape_closes_it(cx: &mut TestAppContext
         [(Point::new(2, 14), CompletionTrigger::Invoked)]
     );
     assert!(h.popup_shown());
-    assert_eq!(h.labels(), ["name", "norm", "__ne__"]);
+    assert_eq!(h.labels(), ["norm", "name", "__ne__"]);
     let completion = h.completion();
     assert_eq!(completion["selected"], json!(0));
     assert_eq!(completion["prefix"], json!("n"));
     assert_eq!(completion["items"][0]["matched"], json!([[0, 1]]));
-    assert_eq!(completion["items"][0]["kind"], json!("method"));
+    assert_eq!(completion["items"][0]["kind"], json!("field"));
     let (insert, replace) = if cfg!(target_os = "macos") {
-        ("↩", "⇥")
+        ("⏎", "⇥")
     } else {
         ("Enter", "Tab")
     };
@@ -471,15 +536,15 @@ fn typing_filters_on_the_client_unless_the_answer_is_incomplete(cx: &mut TestApp
     h.open("app.py", "p.");
     h.complete_with(&["norm", "name", "x"], false);
     h.press("ctrl-space");
-    // Without sort texts the server's order is by label (LSP).
-    assert_eq!(h.labels(), ["name", "norm", "x"]);
+    // Without sort texts: the server's order.
+    assert_eq!(h.labels(), ["norm", "name", "x"]);
     h.type_text("n");
-    assert_eq!(h.labels(), ["name", "norm"]);
+    assert_eq!(h.labels(), ["norm", "name"]);
     h.type_text("o");
     assert_eq!(h.labels(), ["norm"]);
     // Backspace widens the list again; still one request.
     h.press("backspace");
-    assert_eq!(h.labels(), ["name", "norm"]);
+    assert_eq!(h.labels(), ["norm", "name"]);
     assert_eq!(h.completion_requests().len(), 1);
     // A character that is not part of an identifier closes the popup.
     h.type_text(" ");
@@ -572,4 +637,283 @@ fn enter_inserts_and_tab_replaces_in_one_undo_step(cx: &mut TestAppContext) {
     assert_eq!(h.text(), "from pathlib import Path\np.norm\nx = Path|\n");
     h.invoke("editor.undo", json!(null));
     assert_eq!(h.text(), "p.norm\nx = Pa|\n");
+}
+
+#[gpui::test]
+fn typing_opens_the_popup_except_in_strings_comments_and_numbers(cx: &mut TestAppContext) {
+    let mut h = H::new(
+        cx,
+        &[(
+            "app.py",
+            "class P:\n    def f(self):\n        self\n# c\ns = \"ab\"\nn = 1\n",
+        )],
+    );
+    h.fake.set_completion_triggers(&['.']);
+    h.complete_with(&["norm", "x", "__ne__"], false);
+    // A trigger char of the server opens it at once, with the first item
+    // preselected only (an automatic popup is not focused).
+    h.open("app.py", "        self");
+    h.type_text(".");
+    assert_eq!(
+        h.completion_requests(),
+        [(Point::new(2, 13), CompletionTrigger::Character('.'))]
+    );
+    assert!(h.popup_shown());
+    assert_eq!(h.labels(), ["norm", "x", "__ne__"]);
+    assert_eq!(h.completion()["focused"], json!(false));
+    // Down focuses it and moves on; Enter inserts.
+    h.press("down");
+    assert_eq!(h.completion()["selected"], json!(1));
+    assert_eq!(h.completion()["focused"], json!(true));
+    h.press("enter");
+    assert_eq!(
+        h.text(),
+        "class P:\n    def f(self):\n        self.x|\n# c\ns = \"ab\"\nn = 1\n"
+    );
+
+    // Identifier chars open it too, filtered by what is typed.
+    h.press("enter");
+    h.fake.take_calls();
+    h.type_text("n");
+    assert_eq!(
+        h.completion_requests(),
+        [(Point::new(3, 9), CompletionTrigger::Invoked)]
+    );
+    assert_eq!(h.labels(), ["norm", "__ne__"]);
+    h.press("escape");
+
+    // Not in a comment, a string or a number; no request at all.
+    h.fake.take_calls();
+    h.open("app.py", "# c");
+    h.type_text("x");
+    h.open("app.py", "\"ab");
+    h.type_text("x");
+    h.open("app.py", "n = 1");
+    h.type_text("2");
+    assert!(h.completion_requests().is_empty());
+    assert!(!h.popup_shown());
+}
+
+#[gpui::test]
+fn automatic_popups_without_items_stay_away_while_typing_on(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "x = \n")]);
+    h.complete_with(&["alpha"], false);
+    h.open("app.py", "x = ");
+    // Nothing matches `z`: no popup, and no new request while the same
+    // identifier grows.
+    h.type_text("z");
+    assert!(!h.popup_shown());
+    h.type_text("z");
+    assert_eq!(h.completion_requests().len(), 1);
+    // A new identifier asks again.
+    h.type_text(" ");
+    h.type_text("a");
+    assert_eq!(h.completion_requests().len(), 2);
+    assert_eq!(h.labels(), ["alpha"]);
+    // An automatic popup whose only item is typed out already closes.
+    h.type_text("lpha");
+    assert!(!h.popup_shown());
+    // Basic Completion with nothing to offer says so in a hint, which the
+    // next key closes.
+    h.complete_with(&[], false);
+    h.press("ctrl-space");
+    assert!(!h.popup_shown());
+    assert_eq!(h.state()["hint"], json!("No suggestions"));
+    h.press("left");
+    assert!(h.state()["hint"].is_null());
+}
+
+#[gpui::test]
+fn functions_get_parentheses(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "p.no\np.sc\nprint(p.no())\n")]);
+    let mut norm = CompletionItem::new("norm").with_kind(SymbolKind::Method);
+    norm.type_text = Some("bound method P.norm() -> float".into());
+    let mut scaled = CompletionItem::new("scaled").with_kind(SymbolKind::Method);
+    scaled.detail = Some("def scaled(self, k: float) -> P".into());
+    h.fake.on_completion(move |_, _, _| {
+        Ok(Completions {
+            items: vec![norm.clone(), scaled.clone()],
+            incomplete: false,
+        })
+    });
+    h.open("app.py", "p.no");
+    h.press("ctrl-space");
+    h.press("enter");
+    assert_eq!(h.text(), "p.norm()|\np.sc\nprint(p.no())\n");
+    h.open("app.py", "p.sc");
+    h.press("ctrl-space");
+    h.press("enter");
+    assert_eq!(h.text(), "p.norm()\np.scaled(|)\nprint(p.no())\n");
+    // Parentheses there already: none added.
+    h.open("app.py", "print(p.no");
+    h.press("ctrl-space");
+    h.press("enter");
+    assert_eq!(h.text(), "p.norm()\np.scaled()\nprint(p.norm()|)\n");
+}
+
+/// A server status with a version and documents.
+fn server(id: &str, version: &str, state: ServerState, docs: &[DocumentId]) -> ServerStatus {
+    let mut s = ServerStatus::new(ServerId::new(id), id);
+    s.version = Some(version.into());
+    s.state = state;
+    s.documents = docs.to_vec();
+    s
+}
+
+#[gpui::test]
+fn the_language_services_widget_shows_the_servers(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "x = 1\n"), ("notes.txt", "n\n")]);
+    // No servers: no widget.
+    h.open("app.py", "x");
+    assert!(h.state()["widget"].is_null());
+    let draw = |h: &mut H| {
+        h.draw();
+        VisualTestContext::from_window(h.window.into(), h.cx)
+            .debug_bounds("status-language-services")
+            .is_some()
+    };
+    assert!(!draw(&mut h));
+
+    let app = h.doc("app.py");
+    h.fake.set_status(vec![
+        server(
+            "ruff",
+            "0.15.20",
+            ServerState::Running,
+            std::slice::from_ref(&app),
+        ),
+        server("ty", "0.0.1", ServerState::Running, &[]),
+    ]);
+    h.draw();
+    let widget = h.state()["widget"].clone();
+    assert_eq!(widget["icons"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        widget["tooltip"],
+        json!("Language Services running on the current file:\n- Ruff 0.15.20")
+    );
+    assert!(draw(&mut h));
+
+    // The popup: both sections, a row per server with its actions.
+    h.cx.update_window(h.window.into(), |root, window, cx| {
+        let wb = root.downcast::<Workbench>().unwrap();
+        let view = wb.read(cx).code_intel().unwrap().clone();
+        view.update(cx, |v, cx| v.toggle_services_popup(window, cx));
+    })
+    .unwrap();
+    h.draw();
+    let popup = h.state()["services_popup"].clone();
+    assert_eq!(popup["title"], json!("Language Services"));
+    let rows = popup["rows"].as_array().unwrap().clone();
+    assert_eq!(rows[0]["header"], json!("Running on Current File"));
+    assert_eq!(rows[1]["label"], json!("ruff 0.15.20"));
+    assert_eq!(
+        rows[1]["actions"],
+        json!(["Restart Server", "Open Settings"])
+    );
+    assert_eq!(rows[2]["header"], json!("Running on Other Files"));
+    assert_eq!(rows[3]["label"], json!("ty 0.0.1"));
+    assert_eq!(
+        rows[3]["actions"],
+        json!(["Stop and Autorun Server as Needed", "Open Settings"])
+    );
+    // The popup has the focus and the keys of list popups; Escape closes it.
+    h.press("down");
+    assert_eq!(h.state()["services_popup"]["selected"], json!("ty 0.0.1"));
+    h.press("escape");
+    assert!(h.state()["services_popup"].is_null());
+
+    // Restart and stop: the services are asked, a notice says so.
+    h.fake.take_calls();
+    h.invoke("code.restart-servers", json!({ "server": "ruff" }));
+    assert!(
+        h.fake
+            .calls()
+            .contains(&Call::Restart(Some(ServerId::new("ruff"))))
+    );
+    let notice = h.invoke("workbench.state", json!(null))["notice"].clone();
+    assert_eq!(notice, json!("Ruff server restarted"));
+    h.invoke("code.stop-server", json!({ "server": "ty" }));
+    let notice = h.invoke("workbench.state", json!(null))["notice"].clone();
+    assert!(notice.as_str().unwrap().starts_with("Ty server stopped"));
+    // The notice goes after a while.
+    h.cx.executor()
+        .advance_clock(std::time::Duration::from_secs(11));
+    h.draw();
+    assert!(h.invoke("workbench.state", json!(null))["notice"].is_null());
+
+    // Another file: `{}`, the servers under Other Files.
+    h.open("notes.txt", "n");
+    let widget = h.state()["widget"].clone();
+    assert_eq!(widget["icons"][0]["icon"], json!("json/object"));
+    assert_eq!(widget["tooltip"], json!("Language Services"));
+
+    // A server that terminated: an error mark, its error output in a tab.
+    h.open("app.py", "x");
+    h.fake.set_status(vec![server(
+        "ruff",
+        "0.15.20",
+        ServerState::Terminated {
+            error_output: "thread main panicked".into(),
+        },
+        std::slice::from_ref(&app),
+    )]);
+    h.draw();
+    let widget = h.state()["widget"].clone();
+    assert_eq!(widget["icons"][0]["error"], json!(true));
+    h.cx.update_window(h.window.into(), |root, window, cx| {
+        let wb = root.downcast::<Workbench>().unwrap();
+        let view = wb.read(cx).code_intel().unwrap().clone();
+        view.update(cx, |v, cx| v.toggle_services_popup(window, cx));
+    })
+    .unwrap();
+    h.draw();
+    let rows = h.state()["services_popup"]["rows"].clone();
+    assert_eq!(rows[1]["label"], json!("ruff 0.15.20 | Terminated"));
+    assert_eq!(
+        rows[1]["actions"],
+        json!([
+            "Open Server Error Output",
+            "Restart Server",
+            "Open Settings"
+        ])
+    );
+    let action = VisualTestContext::from_window(h.window.into(), h.cx)
+        .debug_bounds("language-service:ruff 0.15.20 | Terminated")
+        .expect("the row is drawn");
+    // The first inline button is at the right end of the row, left of the
+    // two others: click it.
+    let at = gpui::point(
+        action.right() - gpui::px(8.0 + 22.0 * 2.5 + 8.0),
+        action.center().y,
+    );
+    VisualTestContext::from_window(h.window.into(), h.cx)
+        .simulate_click(at, gpui::Modifiers::none());
+    h.draw();
+    let state = h.invoke("workbench.state", json!(null));
+    let tab = state["tabs"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(tab["path"], json!("Ruff Server Error Output"));
+    let editor = h.editor();
+    let (text, read_only) = h.cx.update(|cx| {
+        let e = editor.read(cx);
+        (e.text(), e.buffer().is_read_only())
+    });
+    assert_eq!(text, "thread main panicked");
+    assert!(read_only);
+}
+
+#[gpui::test]
+fn saves_reach_the_services_as_file_changes(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "x = 1\n"), ("pyproject.toml", "[tool]\n")]);
+    h.open("pyproject.toml", "[tool]");
+    h.type_text("x");
+    h.fake.take_calls();
+    h.invoke("workbench.save-all", json!(null));
+    let path = h.root.join("pyproject.toml");
+    assert_eq!(
+        h.fake.calls(),
+        [Call::FilesChanged(vec![FileChange::new(
+            path,
+            FileChangeKind::Changed
+        )])]
+    );
 }

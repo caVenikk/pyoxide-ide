@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use code_intel_ui::CodeIntelView;
+use code_intel_ui::{CodeIntelEvent, CodeIntelView};
 use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
@@ -59,6 +59,9 @@ const INACTIVE_TAB_ALPHA: f32 = 0.75;
 const MODIFIED_DOT: f32 = 6.0;
 /// Narrowest project tool window when resizing it.
 const MIN_PROJECT_WIDTH: f32 = 120.0;
+/// How long a notice stays in the status bar (about as long as the
+/// reference's balloons stay).
+const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
 /// Narrowest editor area left when widening the project tool window.
 const MIN_EDITOR_WIDTH: f32 = 200.0;
 /// Room kept on each side of the file path in the middle of the toolbar
@@ -171,6 +174,10 @@ pub struct Workbench {
     pending: usize,
     /// Last error or notice, shown in the status bar.
     message: Option<SharedString>,
+    /// A notice shown in the status bar for a while (in place of the
+    /// reference's balloons, until there are notifications).
+    notice: Option<SharedString>,
+    notice_timer: Task<()>,
     /// The Go to Line field while it is open, and its blur subscription.
     go_to_line: Option<(Entity<Editor>, Subscription)>,
     /// Resizing the project tool window: mouse x and width at the start.
@@ -318,6 +325,9 @@ impl Workbench {
         // Code intelligence popups and key contexts are drawn by the root.
         if let Some(view) = &code_intel {
             subscriptions.push(cx.observe(view, |_, _, cx| cx.notify()));
+            subscriptions.push(cx.subscribe_in(view, window, |this, _, event, window, cx| {
+                this.code_intel_event(event, window, cx)
+            }));
         }
         Self {
             product,
@@ -331,6 +341,8 @@ impl Workbench {
             active: None,
             pending: 0,
             message: None,
+            notice: None,
+            notice_timer: Task::ready(()),
             go_to_line: None,
             resizing: None,
             save_settings: SaveSettings::default(),
@@ -365,6 +377,67 @@ impl Workbench {
     /// services.
     pub fn code_intel(&self) -> Option<&Entity<CodeIntelView>> {
         self.code_intel.as_ref()
+    }
+
+    fn code_intel_event(
+        &mut self,
+        event: &CodeIntelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            // A popup filled by an answer: drawn now, not at the next
+            // refresh (as the find bar's matches are).
+            CodeIntelEvent::Redraw => crate::shot::draw_now(window),
+            CodeIntelEvent::Notice(text) => self.show_notice(text.clone().into(), cx),
+            CodeIntelEvent::OpenFile(path) => self.open_file(path.clone(), window, cx),
+            CodeIntelEvent::OpenText { title, text } => {
+                self.open_text(title.clone(), text.clone(), window, cx)
+            }
+        }
+    }
+
+    /// A notice in the status bar for ten seconds.
+    pub fn show_notice(&mut self, text: SharedString, cx: &mut Context<Self>) {
+        self.notice = Some(text.clone());
+        self.notice_timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(NOTICE_TIME).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.notice.as_ref() == Some(&text) {
+                    this.notice = None;
+                    cx.notify();
+                }
+            });
+        });
+        cx.notify();
+    }
+
+    /// The notice shown in the status bar.
+    pub fn notice(&self) -> Option<&SharedString> {
+        self.notice.as_ref()
+    }
+
+    /// Opens a text that is no file (a server's error output) in a
+    /// read-only tab titled `title`, or shows it in that tab again.
+    pub fn open_text(
+        &mut self,
+        title: String,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = PathBuf::from(&title);
+        let mut buffer = text::Buffer::new(&text);
+        buffer.set_read_only(true);
+        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+            self.tabs[i].editor.update(cx, |e, cx| {
+                *e.buffer_mut() = buffer;
+                e.buffer_reloaded(cx);
+            });
+            self.activate(i, window, cx);
+            return;
+        }
+        self.add_tab(path, buffer, window, cx);
     }
 
     /// Creates the product's status bar widgets (once, after the workbench
@@ -536,6 +609,7 @@ impl Workbench {
             "file_index": self.project_files.read(cx).index().map(|i| i.len()),
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
+            "notice": self.notice.as_ref().map(|m| m.to_string()),
             "theme": cx.theme().id(),
         })
     }
@@ -2247,6 +2321,13 @@ impl Workbench {
                     .text_color(theme.color(UiRole::Danger))
                     .child(message.clone()),
             );
+        } else if let Some(notice) = &self.notice {
+            left = left.child(
+                div()
+                    .debug_selector(|| "status-notice".into())
+                    .whitespace_nowrap()
+                    .child(notice.clone()),
+            );
         } else if let Some(project) = self.project(cx) {
             let mut parts: Vec<String> = vec![project.name().to_owned()];
             let mut icon = None;
@@ -2276,6 +2357,12 @@ impl Workbench {
             }
         }
         let mut right = div().flex().flex_row().items_center().gap(px(2.0));
+        // The Language Services widget comes right after the caret
+        // position (first without an editor).
+        let mut language_services = self
+            .code_intel
+            .as_ref()
+            .and_then(|view| code_intel_ui::services::status_widget(view, cx));
         if let Some(editor) = self.active_editor() {
             let e = editor.read(cx);
             let p = e.caret_point();
@@ -2290,6 +2377,7 @@ impl Workbench {
             }
             right = right
                 .child(chrome::status_widget("status-caret", caret.into(), cx))
+                .children(language_services.take())
                 .child(chrome::status_widget(
                     "status-line-ending",
                     e.buffer().line_ending().label().into(),
@@ -2305,6 +2393,15 @@ impl Workbench {
                     format!("{} spaces", e.config().indent).into(),
                     cx,
                 ));
+        }
+        if let Some(widget) = language_services {
+            right = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.0))
+                .child(widget)
+                .child(right);
         }
         right = right.children(self.status_widgets.iter().cloned());
         if self

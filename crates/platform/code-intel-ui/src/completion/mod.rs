@@ -52,45 +52,107 @@ pub struct Shown {
     pub matched: Vec<Range<usize>>,
 }
 
-/// The matcher of a typed prefix: name matching that may also start in the
-/// middle of a name (`*` first), as the reference's completion matches.
-fn matcher(prefix: &str) -> Matcher {
-    Matcher::new(&format!("*{prefix}"), MatchingMode::IgnoreCase).prefer_start()
+/// How the typed prefix matches names, as the reference's completion
+/// matcher does (`CamelHumpMatcher` with its default settings): name
+/// matching from any word of the name (`*` before the prefix, "middle
+/// matching"), the case of the first letter counting ("first letter" case
+/// sensitivity), and leading underscores skipped where that first letter
+/// is concerned.
+pub struct PrefixMatcher {
+    prefix: String,
+    matcher: Matcher,
+    /// The same without regard to case: whether a match is at the start.
+    any_case: Matcher,
 }
 
-/// The items that match `prefix`, in the order the popup shows them:
-/// items whose name starts with the prefix first, then the others; in each
-/// group the server's order (its sort text, then the order of the answer).
+impl PrefixMatcher {
+    pub fn new(prefix: &str) -> Self {
+        let pattern = format!("*{prefix}");
+        Self {
+            prefix: prefix.to_owned(),
+            matcher: Matcher::new(&pattern, MatchingMode::FirstLetter),
+            any_case: Matcher::new(&pattern, MatchingMode::IgnoreCase),
+        }
+    }
+
+    /// The chars of `name` the prefix matches, `None` when it does not
+    /// match. A name that starts with `_` does not match when its first
+    /// letter after the underscores and the prefix's differ in case.
+    pub fn matches(&self, name: &str) -> Option<Vec<Range<usize>>> {
+        if self.prefix.is_empty() {
+            return Some(Vec::new());
+        }
+        if name.starts_with('_') && first_letter_case_differs(name, &self.prefix) {
+            return None;
+        }
+        self.matcher.find(name)
+    }
+
+    /// The match starts with the name (after its leading underscores):
+    /// such names come first.
+    pub fn is_start_match(&self, name: &str) -> bool {
+        if self.prefix.is_empty() {
+            return true;
+        }
+        match self.any_case.find(name) {
+            None => false,
+            Some(fragments) => fragments
+                .first()
+                .is_none_or(|f| f.start <= leading_underscores(name)),
+        }
+    }
+}
+
+fn leading_underscores(name: &str) -> usize {
+    name.chars().take_while(|c| *c == '_').count()
+}
+
+fn first_letter_case_differs(name: &str, prefix: &str) -> bool {
+    let first = |s: &str| s.chars().find(|c| *c != '_');
+    match (first(name), first(prefix)) {
+        (Some(a), Some(b)) => {
+            a.is_lowercase() != b.is_lowercase() || a.is_uppercase() != b.is_uppercase()
+        }
+        _ => false,
+    }
+}
+
+/// The items that match `prefix`, in the order the popup shows them, as
+/// the reference's sorter orders server items: names that start with the
+/// prefix (leading underscores aside) first, then the others; in each
+/// group by the server's sort text (items without one after those with
+/// one), then names that start with the prefix exactly as typed, then the
+/// order of the answer.
 pub fn filter(items: &[CompletionItem], prefix: &str) -> Vec<Shown> {
-    let matcher = (!prefix.is_empty()).then(|| matcher(prefix));
-    let mut shown: Vec<(bool, &str, Shown)> = items
+    let matcher = PrefixMatcher::new(prefix);
+    let mut shown: Vec<(bool, Option<&str>, bool, Shown)> = items
         .iter()
         .enumerate()
         .filter_map(|(i, item)| {
-            let filter: Vec<char> = item.filter_text().chars().collect();
-            let (start, fragments) = match &matcher {
-                None => (true, Vec::new()),
-                Some(m) => {
-                    let found = m.match_chars(&filter)?;
-                    (found.is_start_match(), found.fragments)
-                }
-            };
-            // Highlights are drawn on the label: only when the filter text
-            // is the label.
-            let matched = if item.filter_text.is_none() || item.filter_text() == item.label {
-                fragments
-            } else {
-                Vec::new()
-            };
-            Some((start, item.sort_text(), Shown { item: i, matched }))
+            let name = item.filter_text();
+            matcher.matches(name)?;
+            // The matched chars are drawn on the label.
+            let matched = matcher.matches(&item.label).unwrap_or_default();
+            Some((
+                matcher.is_start_match(name),
+                item.sort_text.as_deref(),
+                !prefix.is_empty() && name.starts_with(prefix),
+                Shown { item: i, matched },
+            ))
         })
         .collect();
     shown.sort_by(|a, b| {
         b.0.cmp(&a.0)
-            .then_with(|| a.1.cmp(b.1))
-            .then_with(|| a.2.item.cmp(&b.2.item))
+            .then_with(|| match (a.1, b.1) {
+                (Some(x), Some(y)) => x.cmp(y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.3.item.cmp(&b.3.item))
     });
-    shown.into_iter().map(|(_, _, s)| s).collect()
+    shown.into_iter().map(|(_, _, _, s)| s).collect()
 }
 
 /// A completion popup and the requests behind it.
@@ -103,6 +165,10 @@ pub struct Session {
     pub start: usize,
     /// Asked for by Basic Completion rather than by typing.
     pub explicit: bool,
+    /// The selection is the person's: Basic Completion, or a key moved
+    /// it. An automatic popup starts with the first item preselected only
+    /// (the reference's semi-focused lookup).
+    pub focused: bool,
     /// The items of the last answer, and the version of the text they are
     /// in.
     pub items: Vec<CompletionItem>,
@@ -135,6 +201,7 @@ impl Session {
             editor,
             start,
             explicit,
+            focused: explicit,
             items: Vec::new(),
             answer_version: 0,
             incomplete: false,
@@ -182,6 +249,7 @@ impl Session {
         json!({
             "prefix": self.prefix,
             "explicit": self.explicit,
+            "focused": self.focused,
             "shown": shown,
             "pending": self.request.is_some(),
             "incomplete": self.incomplete,
@@ -224,13 +292,28 @@ pub fn is_bold(item: &CompletionItem) -> bool {
     item.kind == Some(SymbolKind::Keyword)
 }
 
+/// Parentheses after functions and methods, as a language's insert
+/// handler adds them (the reference's `PyFunctionInsertHandler` on top of
+/// `ParenthesesInsertHandler`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Parentheses {
+    /// Names of a method's first parameter that a call does not pass
+    /// (`self`, `cls`): a method with only that parameter takes none.
+    pub implicit_first: &'static [&'static str],
+}
+
 /// The edits that insert `item` and where the caret goes after them.
 ///
 /// The item replaces the typed prefix (from `start` to the caret) with
 /// Enter, or the whole identifier at the caret with Tab (`replace`); an
-/// item with its own range replaces from that range's start. Its
-/// additional edits (an import) go into the same change. Ranges of the
-/// item are in the text of `version` and are moved to the current text.
+/// item with its own range replaces from that range's start. A snippet
+/// loses its placeholders and the caret goes to its first one. With
+/// `parentheses`, a function or method gets `()` unless a `(` follows
+/// already, the caret between them when it takes parameters, after them
+/// when not. Its additional edits (an import) go into the same change.
+/// Ranges of the item are in the text of `version` and are moved to the
+/// current text.
+#[allow(clippy::too_many_arguments)]
 pub fn insertion(
     item: &CompletionItem,
     versions: &Versions,
@@ -239,6 +322,7 @@ pub fn insertion(
     start: usize,
     caret: usize,
     replace: bool,
+    parentheses: Option<Parentheses>,
 ) -> (Vec<Edit>, usize) {
     let end = if replace {
         identifier_end(buffer, caret)
@@ -266,12 +350,45 @@ pub fn insertion(
             (edit_start..edit_end, text.as_str())
         }
     };
-    let text = if item.snippet {
-        snippet_text(text)
+    let (mut text, snippet_caret) = if item.snippet {
+        snippet(text)
     } else {
-        text.to_owned()
+        (text.to_owned(), None)
     };
-    let mut caret_after = range.start + text.chars().count();
+    let tail = range.start + text.chars().count();
+    // Positions after the replaced range, in the text after the edit.
+    let after = |old: usize| old - range.end + tail;
+    let mut caret_after = snippet_caret.map_or(tail, |c| range.start + c);
+    let callable = matches!(item.kind, Some(SymbolKind::Function | SymbolKind::Method));
+    if let Some(parens) = parentheses.filter(|_| callable && !item.snippet && !text.contains('(')) {
+        let inside = has_parameters(item, parens);
+        let mut next = range.end;
+        while matches!(buffer.char_at(next), Some(' ' | '\t')) {
+            next += 1;
+        }
+        if buffer.char_at(next) == Some('(') {
+            // Parentheses are there: Tab goes into them, Enter stays after
+            // the name, unless the function takes parameters or they hold
+            // nothing.
+            caret_after = if replace || inside {
+                after(next + 1)
+            } else {
+                tail
+            };
+            if let Some(close) = closing_parenthesis(buffer, next) {
+                let empty = buffer.slice(next + 1..close).trim().is_empty();
+                if !inside && empty {
+                    caret_after = after(close + 1);
+                } else if inside {
+                    caret_after = after(next + 1);
+                }
+            }
+        } else {
+            text.push_str("()");
+            caret_after = tail + if inside { 1 } else { 2 };
+        }
+    }
+    let mut caret_after = caret_after as isize;
     let mut edits = vec![Edit::new(range.clone(), text)];
     for extra in &item.additional_edits {
         let Some(r) = versions.range(version, extra.range.clone()) else {
@@ -282,58 +399,162 @@ pub fn insertion(
             continue;
         }
         if r.end <= range.start {
-            caret_after = caret_after + extra.text.chars().count() - r.len();
+            caret_after += extra.text.chars().count() as isize - r.len() as isize;
         }
         edits.push(Edit::new(r, extra.text.clone()));
     }
-    (edits, caret_after)
+    (edits, caret_after.max(0) as usize)
+}
+
+/// Whether a function or method item takes parameters, from the first
+/// parameter list in its detail, type or tail text (a method's implicit
+/// first parameter does not count); without one, it is taken to have some.
+pub fn has_parameters(item: &CompletionItem, parens: Parentheses) -> bool {
+    let texts = [&item.detail, &item.type_text, &item.tail_text];
+    let Some(params) = texts
+        .into_iter()
+        .flatten()
+        .find_map(|text| parameter_list(text))
+    else {
+        return true;
+    };
+    let mut params: Vec<&str> = split_top_level(params)
+        .into_iter()
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "/")
+        .collect();
+    if item.kind == Some(SymbolKind::Method)
+        && let Some(first) = params.first()
+    {
+        let name = first.split([':', '=']).next().unwrap_or_default().trim();
+        if parens.implicit_first.contains(&name) {
+            params.remove(0);
+        }
+    }
+    !params.is_empty()
+}
+
+/// The text between the first `(` of `text` and its `)`; a tail such as
+/// ` (import os)` is not a parameter list.
+fn parameter_list(text: &str) -> Option<&str> {
+    let open = text.find('(')?;
+    let mut depth = 0;
+    for (i, c) in text[open..].char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let inner = &text[open + 1..open + i];
+                    return (!inner.trim_start().starts_with("import ")).then_some(inner);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parts of a parameter list separated by commas outside brackets.
+fn split_top_level(params: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let (mut depth, mut from) = (0i32, 0);
+    for (i, c) in params.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&params[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&params[from..]);
+    parts
+}
+
+/// The `)` that closes the `(` at `open`, looked for in the rest of the
+/// text (not further than a few thousand chars).
+fn closing_parenthesis(buffer: &Buffer, open: usize) -> Option<usize> {
+    let mut depth = 0;
+    let end = buffer.len_chars().min(open + 4096);
+    for pos in open..end {
+        match buffer.char_at(pos)? {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(pos);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The text of a snippet without its placeholders' markup (`${1:name}`
-/// becomes `name`, `$1` and `$0` go).
-pub fn snippet_text(snippet: &str) -> String {
+/// becomes `name`, `$1` and `$0` go), and the char offset of its first
+/// placeholder (the lowest number, `$0` last), where the caret goes.
+pub fn snippet(snippet: &str) -> (String, Option<usize>) {
     let mut out = String::new();
+    let mut len = 0;
+    // (number, offset) of the first placeholder found so far.
+    let mut first: Option<(u32, usize)> = None;
+    let stop = |number: u32, at: usize, first: &mut Option<(u32, usize)>| {
+        let rank = if number == 0 { u32::MAX } else { number };
+        if first.is_none_or(|(r, _)| rank < r) {
+            *first = Some((rank, at));
+        }
+    };
     let mut chars = snippet.chars().peekable();
+    let number = |chars: &mut std::iter::Peekable<std::str::Chars>| {
+        let mut n = 0u32;
+        while let Some(d) = chars.peek().and_then(|c| c.to_digit(10)) {
+            n = n.saturating_mul(10).saturating_add(d);
+            chars.next();
+        }
+        n
+    };
     while let Some(c) = chars.next() {
         match c {
             '\\' => {
                 if let Some(next) = chars.next() {
                     out.push(next);
+                    len += 1;
                 }
             }
             '$' if chars.peek().is_some_and(|c| c.is_ascii_digit()) => {
-                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    chars.next();
-                }
+                let n = number(&mut chars);
+                stop(n, len, &mut first);
             }
             '$' if chars.peek() == Some(&'{') => {
                 chars.next();
-                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    chars.next();
-                }
+                let n = number(&mut chars);
+                stop(n, len, &mut first);
                 if chars.peek() == Some(&':') {
                     chars.next();
                 }
                 let mut depth = 0;
                 for c in chars.by_ref() {
                     match c {
-                        '{' => {
-                            depth += 1;
-                            out.push(c);
-                        }
                         '}' if depth == 0 => break,
-                        '}' => {
-                            depth -= 1;
-                            out.push(c);
-                        }
-                        c => out.push(c),
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        _ => {}
                     }
+                    out.push(c);
+                    len += 1;
                 }
             }
-            c => out.push(c),
+            c => {
+                out.push(c);
+                len += 1;
+            }
         }
     }
-    out
+    (out, first.map(|(_, at)| at))
 }
 
 #[cfg(test)]
@@ -362,32 +583,52 @@ mod tests {
 
     #[test]
     fn filtering_keeps_the_servers_order_with_start_matches_first() {
-        let items = items(&[
-            "x",
+        // Members of `self` after `self.` as a server sorts them (own ones,
+        // then the inherited dunders); typing `n` gives the reference's
+        // order: `norm`, `__ne__` and `__new__` start with it (underscores
+        // aside), the others match inside.
+        let mut items = items(&[
             "norm",
-            "__ne__",
+            "x",
             "__annotations__",
-            "scaled",
+            "__init__",
+            "__init_subclass__",
+            "__ne__",
             "__new__",
         ]);
+        for (i, item) in items.iter_mut().enumerate() {
+            item.sort_text = Some(format!("{i:02}"));
+        }
         // Nothing typed: everything, in the server's order.
         let all = filter(&items, "");
-        assert_eq!(labels(&items, &all).len(), 6);
+        assert_eq!(labels(&items, &all).len(), 7);
         assert!(all.iter().all(|s| s.matched.is_empty()));
         let shown = filter(&items, "n");
-        let names = labels(&items, &shown);
-        assert_eq!(names[0], "norm");
-        assert!(names.contains(&"__ne__".to_owned()));
-        assert!(!names.contains(&"x".to_owned()));
+        assert_eq!(
+            labels(&items, &shown),
+            [
+                "norm",
+                "__ne__",
+                "__new__",
+                "__annotations__",
+                "__init__",
+                "__init_subclass__"
+            ]
+        );
         assert_eq!(shown[0].matched, vec![0..1]);
-        // Case does not matter; start matches come first.
-        let names = labels(&items, &filter(&items, "NO"));
-        assert_eq!(names, ["norm", "__annotations__"]);
-        // The sort text decides the order among equal matches.
-        let mut sorted = self::items(&["b", "a"]);
-        sorted[0].sort_text = Some("0".into());
-        sorted[1].sort_text = Some("1".into());
-        assert_eq!(labels(&sorted, &filter(&sorted, "")), ["b", "a"]);
+        assert_eq!(shown[1].matched, vec![2..3]);
+        // The first letter's case counts.
+        assert!(filter(&items, "N").is_empty());
+        let names = self::items(&["Path", "path", "_Private", "_private"]);
+        // (An upper-case first letter is compared with the name's first
+        // char, the underscore, as the reference's matcher does.)
+        assert_eq!(labels(&names, &filter(&names, "P")), ["Path"]);
+        assert_eq!(labels(&names, &filter(&names, "p")), ["path", "_private"]);
+        assert_eq!(labels(&names, &filter(&names, "pa")), ["path"]);
+        // Without sort texts: the answer's order, exact-case starts first.
+        let plain = self::items(&["b", "aB", "Ab", "ab"]);
+        assert_eq!(labels(&plain, &filter(&plain, "")), ["b", "aB", "Ab", "ab"]);
+        assert_eq!(labels(&plain, &filter(&plain, "ab")), ["ab", "aB"]);
     }
 
     #[test]
@@ -406,11 +647,11 @@ mod tests {
         let versions = Versions::new(buffer.rope().clone());
         let item = CompletionItem::new("norm");
         // Enter: the prefix `no` becomes `norm`, the rest stays.
-        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 2, 4, false);
+        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 2, 4, false, None);
         assert_eq!(edits, vec![Edit::new(2..4, "norm")]);
         assert_eq!(caret, 6);
         // Tab: the whole identifier goes.
-        let (edits, _) = insertion(&item, &versions, 1, &buffer, 2, 4, true);
+        let (edits, _) = insertion(&item, &versions, 1, &buffer, 2, 4, true, None);
         assert_eq!(edits, vec![Edit::new(2..7, "norm")]);
     }
 
@@ -423,7 +664,7 @@ mod tests {
             Point::new(0, 0),
             "from pathlib import Path\n",
         )];
-        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 4, 6, false);
+        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 4, 6, false, None);
         assert_eq!(
             edits,
             vec![
@@ -455,16 +696,98 @@ mod tests {
             replace: range,
             text: "norm".into(),
         };
-        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 5, 7, false);
+        let (edits, caret) = insertion(&item, &versions, 1, &buffer, 5, 7, false, None);
         assert_eq!(edits, vec![Edit::new(5..7, "norm")]);
         assert_eq!(caret, 9);
     }
 
     #[test]
     fn snippets_lose_their_markup() {
-        assert_eq!(snippet_text("print(${1:value})$0"), "print(value)");
-        assert_eq!(snippet_text("f($1, $2)"), "f(, )");
-        assert_eq!(snippet_text(r"a\$b"), "a$b");
-        assert_eq!(snippet_text("${1:{x}}"), "{x}");
+        assert_eq!(
+            snippet("print(${1:value})$0"),
+            ("print(value)".into(), Some(6))
+        );
+        assert_eq!(snippet("f($2, $1)"), ("f(, )".into(), Some(4)));
+        assert_eq!(snippet("x$0"), ("x".into(), Some(1)));
+        assert_eq!(snippet(r"a\$b"), ("a$b".into(), None));
+        assert_eq!(snippet("${1:{x}}"), ("{x}".into(), Some(0)));
+    }
+
+    const PYTHON: Option<Parentheses> = Some(Parentheses {
+        implicit_first: &["self", "cls"],
+    });
+
+    /// Inserts `item` with Enter (or Tab) at `|` in `marked`, the typed
+    /// prefix from `start`; the text after, `|` at the caret.
+    fn insert(item: &CompletionItem, marked: &str, start: usize, replace: bool) -> String {
+        let caret = marked.find('|').unwrap();
+        let mut buffer = Buffer::new(&marked.replace('|', ""));
+        let versions = Versions::new(buffer.rope().clone());
+        let (edits, caret) = insertion(item, &versions, 1, &buffer, start, caret, replace, PYTHON);
+        let mut selections = text::SelectionSet::caret(0);
+        buffer.transact(
+            &mut selections,
+            edits,
+            text::EditKind::Other,
+            text::CaretPlacement::AfterEachEdit,
+        );
+        let mut text = buffer.text();
+        text.insert(caret, '|');
+        text
+    }
+
+    fn function(label: &str, kind: SymbolKind, detail: Option<&str>) -> CompletionItem {
+        let mut item = CompletionItem::new(label).with_kind(kind);
+        item.detail = detail.map(Into::into);
+        item
+    }
+
+    #[test]
+    fn functions_get_parentheses_as_the_python_insert_handler_adds_them() {
+        let norm = function(
+            "norm",
+            SymbolKind::Method,
+            Some("bound method Point.norm() -> float"),
+        );
+        let scaled = function(
+            "scaled",
+            SymbolKind::Method,
+            Some("def scaled(self, k: float) -> Point"),
+        );
+        let print = function("print", SymbolKind::Function, None);
+        let field = function("x", SymbolKind::Field, Some("int"));
+        // No parameters: the caret after `()`; parameters (besides `self`):
+        // between them; nothing known: between them.
+        assert_eq!(insert(&norm, "p.no|", 2, false), "p.norm()|");
+        assert_eq!(insert(&scaled, "p.sc|", 2, false), "p.scaled(|)");
+        assert_eq!(insert(&print, "pr|", 0, false), "print(|)");
+        assert_eq!(insert(&field, "p.|", 2, false), "p.x|");
+        // A `(` follows already: no new one; Enter stays after the name,
+        // or goes after empty parentheses; Tab goes into them.
+        assert_eq!(insert(&scaled, "p.sc|(2)", 2, false), "p.scaled(|2)");
+        assert_eq!(insert(&norm, "p.no|()", 2, false), "p.norm()|");
+        assert_eq!(insert(&norm, "p.no| (x)", 2, false), "p.norm| (x)");
+        assert_eq!(insert(&norm, "p.no|rm(x)", 2, true), "p.norm(|x)");
+        // Snippets and texts with their own parentheses are left alone.
+        let mut call = function("f", SymbolKind::Function, None);
+        call.insert = InsertText::Text("f(${1:a})".into());
+        call.snippet = true;
+        assert_eq!(insert(&call, "|", 0, false), "f(|a)");
+    }
+
+    #[test]
+    fn parameters_from_the_servers_texts() {
+        let mut item = function("f", SymbolKind::Method, None);
+        let has = |item: &CompletionItem| has_parameters(item, PYTHON.unwrap());
+        assert!(has(&item), "nothing known");
+        item.type_text = Some("(self) -> None".into());
+        assert!(!has(&item));
+        item.type_text = Some("(cls, /, x: dict[str, int] = {}) -> None".into());
+        assert!(has(&item));
+        item.type_text = None;
+        item.tail_text = Some(" (import os)".into());
+        assert!(has(&item), "an import tail is not a parameter list");
+        item.detail = Some("def f(self, /)".into());
+        assert!(!has(&item));
     }
 }

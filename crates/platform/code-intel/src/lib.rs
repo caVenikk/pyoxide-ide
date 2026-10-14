@@ -134,6 +134,14 @@ pub trait CodeIntel: Send + Sync + 'static {
         trigger: CompletionTrigger,
     ) -> Intel<Completions>;
 
+    /// The characters that open the completion popup when typed in the
+    /// document (the servers' `completionProvider.triggerCharacters`, for
+    /// example `.`), besides the characters of identifiers.
+    fn completion_triggers(&self, doc: &DocumentId) -> Vec<char> {
+        let _ = doc;
+        Vec::new()
+    }
+
     /// Fills in the parts of a completion item a server sends on demand
     /// (documentation, additional edits). Items without a token come back
     /// as they are.
@@ -325,6 +333,7 @@ mod tests {
         let intel: std::sync::Arc<dyn CodeIntel> = std::sync::Arc::new(Nothing(EventHub::new()));
         let doc = DocumentId::new("/p/a.py");
         assert_eq!(intel.servers_for(&doc), [ServerId::new("ruff")]);
+        assert!(intel.completion_triggers(&doc).is_empty());
         assert!(intel.servers_for(&DocumentId::new("/p/b.py")).is_empty());
 
         assert_eq!(

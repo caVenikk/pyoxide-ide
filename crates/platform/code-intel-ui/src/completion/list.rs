@@ -31,6 +31,8 @@ const ICON_GAP: f32 = 5.0;
 /// Space kept between the tail text and the type text.
 const TYPE_GAP: f32 = 16.0;
 const FOOTER_HEIGHT: f32 = 24.0;
+/// The popup gets no wider; long type texts end in an ellipsis.
+const MAX_WIDTH: f32 = 900.0;
 
 /// One row as drawn.
 #[derive(Debug, Clone)]
@@ -95,6 +97,8 @@ pub struct CompletionList {
     owner: WeakEntity<CodeIntelView>,
     rows: Vec<Row>,
     selected: usize,
+    /// The selection is the person's (else only preselected).
+    focused: bool,
     scroll: UniformListScrollHandle,
 }
 
@@ -104,6 +108,7 @@ impl CompletionList {
             owner,
             rows: Vec::new(),
             selected: 0,
+            focused: true,
             scroll: UniformListScrollHandle::new(),
         }
     }
@@ -116,6 +121,7 @@ impl CompletionList {
             .map(|s| Row::new(&session.items[s.item], &s.matched))
             .collect();
         self.selected = session.selected;
+        self.focused = session.focused;
         self.scroll
             .scroll_to_item(self.selected, ScrollStrategy::Top);
         cx.notify();
@@ -170,10 +176,19 @@ impl CompletionList {
             .items_center()
             .w_full()
             .h(row_height(cx))
+            .line_height(row_height(cx))
             .px(px(ROW_PAD))
             .whitespace_nowrap()
             .overflow_hidden()
-            .when(selected, |d| d.bg(theme.color(UiRole::CompletionSelection)))
+            .when(selected, |d| {
+                // A preselected item of an automatic popup has the inactive
+                // selection (`CompletionPopup.selectionInactiveBackground`).
+                d.bg(theme.color(if self.focused {
+                    UiRole::CompletionSelection
+                } else {
+                    UiRole::SelectionInactive
+                }))
+            })
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 cx.stop_propagation();
                 if let Some(owner) = owner.upgrade() {
@@ -198,11 +213,15 @@ impl CompletionList {
                     .map(|tail| div().flex_none().text_color(muted).child(tail)),
             )
             .child(div().flex_1().min_w(px(TYPE_GAP)))
-            .children(
-                row.type_text
-                    .clone()
-                    .map(|t| div().flex_none().text_color(muted).child(t)),
-            )
+            .children(row.type_text.clone().map(|t| {
+                div()
+                    .flex_shrink()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .text_color(muted)
+                    .child(t)
+            }))
             .into_any_element()
     }
 }
@@ -229,9 +248,11 @@ fn shortcut(action: &dyn Action, cx: &App) -> Option<String> {
         .map(ui::keys::binding_text)
 }
 
+/// Rows as high as the editor's lines (about 15 pt with the default font,
+/// as the reference's lookup measures).
 fn row_height(cx: &App) -> Pixels {
     let theme = cx.theme();
-    (theme.editor_size() * 1.5).round().max(px(20.0))
+    (theme.editor_size() * 1.2).round().max(px(14.0))
 }
 
 /// Char ranges of a text as byte ranges.
@@ -303,6 +324,7 @@ impl Render for CompletionList {
             .flex()
             .flex_col()
             .min_w(px(200.0))
+            .max_w(px(MAX_WIDTH))
             .rounded(px(4.0))
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))

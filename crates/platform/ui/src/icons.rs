@@ -121,6 +121,13 @@ impl IconName {
     /// warning uses the warning shape.
     pub const INSPECTIONS_ERROR: Self = Self("general/inspections/inspectionsError");
     pub const INSPECTIONS_WARNING: Self = Self("general/inspections/inspectionsWarning");
+    // The Language Services widget and popup: stop and restart a server,
+    // its settings, the error output of a terminated one, and the error
+    // mark on the icon of a terminated server.
+    pub const STOP_AND_RESTART: Self = Self("actions/stopAndRestart");
+    pub const SETTINGS_SMALL: Self = Self("general/settings");
+    pub const ERROR: Self = Self("status/error");
+    pub const ERROR_MARK: Self = Self("nodes/errorMark");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -150,7 +157,7 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
-        "actions/inSelection",
+        "actions/inSelection", "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/config", "fileTypes/css",
         "fileTypes/csv", "fileTypes/docker", "fileTypes/html", "fileTypes/image",
@@ -165,16 +172,18 @@ platform_icons! {
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
         "general/previewHorizontally", "general/print", "general/questionDialog", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
-        "general/settings@20x20", "general/softWrap",
+        "general/settings", "general/settings@20x20", "general/softWrap",
         "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
         "json/object",
-        "nodes/class", "nodes/constant", "nodes/enum", "nodes/excludeRoot", "nodes/field",
+        "nodes/class", "nodes/constant", "nodes/enum", "nodes/errorMark", "nodes/excludeRoot",
+        "nodes/field",
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
         "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/type", "nodes/variable", "nodes/word",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
+        "status/error",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
