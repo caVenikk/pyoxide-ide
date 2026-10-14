@@ -1677,7 +1677,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "code.parameter-info"
         | "parameter-info.close"
         | "code.error-description"
-        | "code.apply-first-fix" => check_docs(h, &b.command, keys, &what),
+        | "code.apply-first-fix"
+        | "code.show-intentions"
+        | "code.go-to-declaration"
+        | "code.show-usages"
+        | "code.reformat"
+        | "code.optimize-imports" => check_docs(h, &b.command, keys, &what),
         _ => return false,
     }
     true
@@ -1751,15 +1756,47 @@ fn script_docs(fake: &FakeCodeIntel) {
             active_parameter: Some(usize::from(at.column >= 4)),
         }))
     });
-    fake.on_code_actions(|doc, _, _| {
-        let mut fix = CodeAction::new("Remove unused import", CodeActionKind::QuickFix);
-        fix.edit = Some(WorkspaceEdit {
+    let edit = |doc: &code_intel::DocumentId, edits| {
+        Some(WorkspaceEdit {
             files: vec![FileEdits {
                 path: doc.path().to_owned(),
-                edits: vec![TextEdit::new(Point::new(0, 0)..Point::new(1, 0), "")],
+                edits,
             }],
-        });
+        })
+    };
+    fake.on_code_actions(move |doc, _, context| {
+        // Optimize Imports asks for the organize imports action only.
+        if context.only.is_some() {
+            let mut organize =
+                CodeAction::new("Organize imports", CodeActionKind::organize_imports());
+            organize.edit = edit(
+                doc,
+                vec![TextEdit::new(
+                    Point::new(0, 0)..Point::new(2, 0),
+                    "import a\nimport b\n",
+                )],
+            );
+            return Ok(vec![organize]);
+        }
+        let mut fix = CodeAction::new("Remove unused import", CodeActionKind::QuickFix);
+        fix.edit = edit(
+            doc,
+            vec![TextEdit::new(Point::new(0, 0)..Point::new(1, 0), "")],
+        );
         Ok(vec![fix])
+    });
+    // The declaration and the usages of anything: the start of line 2.
+    let second_line = |doc: &code_intel::DocumentId| code_intel::Location {
+        path: doc.path().to_owned(),
+        range: Point::new(1, 0)..Point::new(1, 1),
+    };
+    fake.on_definition(move |doc, _| Ok(vec![second_line(doc)]));
+    fake.on_references(move |doc, _, _| Ok(vec![second_line(doc)]));
+    fake.on_format(|_, _, _| {
+        Ok(vec![TextEdit::new(
+            Point::new(0, 1)..Point::new(0, 2),
+            " = ",
+        )])
     });
 }
 
@@ -1825,6 +1862,38 @@ fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
             mark_os(h);
             h.press(keys);
             assert_eq!(h.editor_marked(), "|x\n", "{what}");
+        }
+        "code.show-intentions" => {
+            h.set_editor("import os|\nx\n");
+            mark_os(h);
+            h.press(keys);
+            assert_eq!(state(h)["list"]["name"], "intentions", "{what}");
+            assert_eq!(
+                state(h)["list"]["selected"],
+                "Remove unused import",
+                "{what}"
+            );
+        }
+        "code.go-to-declaration" => {
+            h.set_editor("a|bc\nx\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "abc\n|x\n", "{what}");
+        }
+        "code.show-usages" => {
+            h.set_editor("a|bc\nx\n");
+            h.press(keys);
+            assert_eq!(state(h)["list"]["name"], "usages", "{what}");
+            assert_eq!(state(h)["list"]["items"][0]["text"], "x", "{what}");
+        }
+        "code.reformat" => {
+            h.set_editor("x=1|\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "x = 1|\n", "{what}");
+        }
+        "code.optimize-imports" => {
+            h.set_editor("import b|\nimport a\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "import a\nimport b\n|", "{what}");
         }
         _ => unreachable!("{command}"),
     }

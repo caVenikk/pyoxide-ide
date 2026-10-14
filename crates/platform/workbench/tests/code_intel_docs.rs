@@ -351,7 +351,11 @@ fn problems_fixture(h: &mut H<'_>) {
     h.fake.publish_diagnostics(&doc, 1, vec![unused]);
     let path = doc.path().to_owned();
     h.fake.on_code_actions(move |_, _, context| {
-        assert_eq!(context.diagnostics.len(), 1, "the diagnostic goes back");
+        // The fixes of the problem: found through the diagnostic sent back
+        // (the bulb asks elsewhere too).
+        if context.diagnostics.len() != 1 {
+            return Ok(Vec::new());
+        }
         let mut fix = CodeAction::new("Remove unused import: `os`", CodeActionKind::QuickFix);
         fix.edit = Some(WorkspaceEdit {
             files: vec![FileEdits {
@@ -613,4 +617,47 @@ fn parameter_info_opens_a_second_after_the_bracket(cx: &mut TestAppContext) {
     h.press("left");
     h.wait(1000);
     assert_eq!(signature_triggers(&h).len(), before);
+}
+
+#[gpui::test]
+fn other_overloads_show_when_asked_for(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "f(1)\n")]);
+    h.open("app.py", "f(");
+    h.fake.on_signature_help(|_, _, _| {
+        let signature = |label: &str| Signature {
+            label: label.into(),
+            documentation: None,
+            parameters: vec![ParameterInfo {
+                label: 1..2,
+                documentation: None,
+            }],
+            active_parameter: None,
+        };
+        Ok(Some(SignatureHelp {
+            signatures: vec![signature("(a: int)"), signature("(b: str)")],
+            active_signature: 1,
+            active_parameter: Some(0),
+        }))
+    });
+    // The active overload only, and a link to the others.
+    h.invoke("code.parameter-info", json!(null));
+    let signature = h.signature();
+    assert_eq!(signature["lines"], json!(["b"]));
+    assert_eq!(signature["link"], "Show 1 more overload");
+    assert!(h.bounds("parameter-info-overloads").is_some());
+    // Parameter Info again at the same place shows them all, and again
+    // hides them; so does the link.
+    h.invoke("code.parameter-info", json!(null));
+    let signature = h.signature();
+    assert_eq!(signature["lines"], json!(["a", "b"]));
+    assert_eq!(signature["link"], "Show less");
+    assert_eq!(signature["current"], "b");
+    h.invoke("code.parameter-info", json!(null));
+    assert_eq!(h.signature()["lines"], json!(["b"]));
+    let link = h.bounds("parameter-info-overloads").unwrap();
+    let mut vcx = VisualTestContext::from_window(h.window.into(), h.cx);
+    vcx.simulate_click(link.center(), Modifiers::default());
+    h.draw();
+    assert_eq!(h.signature()["lines"], json!(["a", "b"]));
+    assert!(h.editor_focused());
 }

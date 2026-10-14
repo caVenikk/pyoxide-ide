@@ -16,6 +16,9 @@
 //! - [`doc`]: the documentation popup (quick documentation, the popup
 //!   over the text under the mouse, Error Description).
 //! - [`signature`]: parameter info.
+//! - [`navigation`]: Go to Declaration or Usages, Show Usages, and the
+//!   list popups ([`list_popup`]).
+//! - [`intentions`]: Show Context Actions and the bulb.
 //! - [`services`]: the Language Services widget of the status bar and its
 //!   popup.
 //!
@@ -31,9 +34,13 @@ pub mod commands;
 pub mod completion;
 pub mod doc;
 pub mod document;
+mod format;
 mod hook;
 mod hover;
+pub mod intentions;
+pub mod list_popup;
 mod marks;
+pub mod navigation;
 pub mod popup;
 pub mod services;
 pub mod signature;

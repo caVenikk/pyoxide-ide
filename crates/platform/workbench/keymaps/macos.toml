@@ -133,8 +133,9 @@ name = "Editor"
 # Code completion
 "ctrl-space" = "code.complete"
 
-# Documentation, parameter info and the problems at the caret. Their
-# popups leave the focus in the editor; Escape closes them (the completion
+# Documentation, parameter info, the problems and actions at the caret,
+# navigation and formatting. The documentation and parameter info popups
+# leave the focus in the editor; Escape closes them (the completion
 # popup's section comes later, so its Escape wins while it shows).
 [[context]]
 name = "Editor"
@@ -144,6 +145,11 @@ name = "Editor"
 "cmd-p" = "code.parameter-info"
 "cmd-f1" = "code.error-description"
 "alt-shift-enter" = "code.apply-first-fix"
+"alt-enter" = "code.show-intentions"
+"cmd-b" = "code.go-to-declaration"
+"cmd-alt-f7" = "code.show-usages"
+"cmd-alt-l" = "code.reformat"
+"ctrl-alt-o" = "code.optimize-imports"
 
 [[context]]
 name = "ParameterInfo > Editor"

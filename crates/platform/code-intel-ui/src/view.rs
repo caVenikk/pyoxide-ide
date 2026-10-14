@@ -26,7 +26,9 @@ use crate::doc::{self, DocPopup};
 use crate::document::Document;
 use crate::hook::CodeIntelHook;
 use crate::hover::DocState;
+use crate::intentions::IntentionState;
 use crate::marks;
+use crate::navigation::NavState;
 use crate::popup::{CaretPopup, Placement, PopupHost, TextHint};
 use crate::services::{self, InlineAction, ServerItem, ServicesPopup, WidgetBounds};
 use crate::signature::{self, SignaturePopup, SignatureState};
@@ -60,6 +62,9 @@ pub enum CodeIntelEvent {
     OpenFile(PathBuf),
     /// Open a text that is no file in a read-only tab titled `title`.
     OpenText { title: String, text: String },
+    /// Open a file in a tab with the caret at a position (a navigation
+    /// target).
+    OpenLocation { path: PathBuf, at: Point },
 }
 
 /// The code intelligence of a main window: the project's language
@@ -93,6 +98,12 @@ pub struct CodeIntelView {
     pub(crate) signatures: SignatureState,
     /// The diagnostics of the documents as the services reported them.
     pub(crate) reported: Reported,
+    /// Go to Declaration, Show Usages and the list popups.
+    pub(crate) nav: NavState,
+    /// Show Context Actions and the bulb.
+    pub(crate) intentions: IntentionState,
+    /// Reformat Code or Optimize Imports in flight.
+    pub(crate) format_request: Option<Task<()>>,
     /// Receives the services' events.
     _events: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -119,8 +130,8 @@ impl CodeIntelView {
         });
         let owner = cx.weak_entity();
         let completion_list = cx.new(|_| CompletionList::new(owner.clone()));
-        let doc_popup = cx.new(|_| DocPopup::new(owner));
-        let signature_popup = cx.new(|_| SignaturePopup::new());
+        let doc_popup = cx.new(|_| DocPopup::new(owner.clone()));
+        let signature_popup = cx.new(|_| SignaturePopup::new(owner));
         Self {
             hook,
             services: None,
@@ -137,6 +148,9 @@ impl CodeIntelView {
             docs: DocState::new(doc_popup),
             signatures: SignatureState::new(signature_popup),
             reported: Reported::default(),
+            nav: NavState::default(),
+            intentions: IntentionState::new(cx.weak_entity()),
+            format_request: None,
             _events: None,
             _subscriptions: vec![quit, keys],
         }
@@ -217,6 +231,8 @@ impl CodeIntelView {
         self.close_completion(cx);
         self.close_doc(cx);
         self.reset_signature(cx);
+        self.reset_navigation(cx);
+        self.clear_bulb(cx);
         self.reported.clear();
         self.popups.clear();
         self.documents.clear();
@@ -246,6 +262,7 @@ impl CodeIntelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.tab_opened(path, editor, window, cx);
         let (Some(language), Some(services)) = (language, self.services.clone()) else {
             return;
         };
@@ -325,6 +342,8 @@ impl CodeIntelView {
         self.close_completion(cx);
         self.close_doc(cx);
         self.reset_signature(cx);
+        self.reset_navigation(cx);
+        self.clear_bulb(cx);
         self.popups.clear();
         self.refresh_services_popup(cx);
         cx.notify();
@@ -334,6 +353,8 @@ impl CodeIntelView {
         if let Some(editor) = self.documents.get(path).map(|d| d.editor.clone()) {
             self.doc_editor_event(&editor, event, cx);
             self.signature_editor_event(&editor, event, cx);
+            self.nav_editor_event(&editor, event, cx);
+            self.intention_editor_event(&editor, event, cx);
         }
         match event {
             EditorEvent::Edited(applied) => {
@@ -728,7 +749,7 @@ impl CodeIntelView {
 
     /// A one-line hint at a position of an editor (closed by the next key,
     /// edit or caret move).
-    fn show_hint(
+    pub(crate) fn show_hint(
         &mut self,
         editor: &Entity<Editor>,
         anchor: usize,
@@ -1004,6 +1025,7 @@ impl CodeIntelView {
     /// its content.
     pub fn render_overlay(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
         let mut overlay = self.popups.render(window, cx);
+        overlay.extend(self.render_bulb(cx));
         if let Some((popup, _)) = &self.services_popup
             && !popup.read(cx).is_dismissed()
         {
@@ -1059,6 +1081,8 @@ impl CodeIntelView {
             "services_popup": self.services_popup.as_ref().map(|(p, _)| p.read(cx).state_json()),
             "popup": self.doc_state_json(cx),
             "signature": self.signature_state_json(cx),
+            "list": self.list_state_json(cx),
+            "bulb": self.bulb_state_json(),
         })
     }
 
@@ -1115,15 +1139,35 @@ impl CodeIntelView {
         self.reset_signature(cx);
     }
 
-    fn go_to_declaration(&mut self, _: &GoToDeclaration, _: &mut Window, _: &mut Context<Self>) {}
+    fn go_to_declaration(&mut self, _: &GoToDeclaration, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.go_to_declaration_at_caret(&editor, cx);
+        }
+    }
 
-    fn show_usages(&mut self, _: &ShowUsages, _: &mut Window, _: &mut Context<Self>) {}
+    fn show_usages(&mut self, _: &ShowUsages, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.show_usages_at_caret(&editor, cx);
+        }
+    }
 
-    fn show_intentions(&mut self, _: &ShowIntentions, _: &mut Window, _: &mut Context<Self>) {}
+    fn show_intentions(&mut self, _: &ShowIntentions, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.show_intentions_at_caret(&editor, cx);
+        }
+    }
 
-    fn reformat(&mut self, _: &Reformat, _: &mut Window, _: &mut Context<Self>) {}
+    fn reformat(&mut self, _: &Reformat, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.reformat_editor(&editor, cx);
+        }
+    }
 
-    fn optimize_imports(&mut self, _: &OptimizeImports, _: &mut Window, _: &mut Context<Self>) {}
+    fn optimize_imports(&mut self, _: &OptimizeImports, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.optimize_imports_in(&editor, cx);
+        }
+    }
 
     fn error_description(&mut self, _: &ErrorDescription, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(editor) = self.active_editor() {

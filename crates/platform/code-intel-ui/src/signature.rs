@@ -13,8 +13,8 @@ use std::time::Duration;
 use code_intel::{IntelError, SignatureContext, SignatureHelp, SignatureTrigger};
 use editor::{Editor, EditorEvent};
 use gpui::{
-    App, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, Styled, StyledText, Task, TextRun, Window, div, font, px,
+    App, Context, Entity, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Render, SharedString, Styled, StyledText, Task, TextRun, WeakEntity, Window, div, font, px,
 };
 use serde_json::{Value as Json, json};
 use text::Buffer;
@@ -68,12 +68,17 @@ pub fn parameter_name(label: &str) -> String {
     if bare.is_empty() { name } else { bare }.to_owned()
 }
 
-/// The lines of a help: one per signature, the parameter names separated
-/// by commas, the current one marked.
-pub fn lines(help: &SignatureHelp) -> Vec<Line> {
+/// The lines of a help: one per signature (only the active one unless
+/// `all`, the reference hides the other overloads until asked), the
+/// parameter names separated by commas, the current one marked.
+pub fn lines(help: &SignatureHelp, all: bool) -> Vec<Line> {
+    let active = help
+        .active_signature
+        .min(help.signatures.len().saturating_sub(1));
     help.signatures
         .iter()
         .enumerate()
+        .filter(|(i, _)| all || *i == active)
         .map(|(i, signature)| {
             let names: Vec<String> = signature
                 .parameters
@@ -107,6 +112,20 @@ pub fn lines(help: &SignatureHelp) -> Vec<Line> {
             }
         })
         .collect()
+}
+
+/// The link under the lines when there are other overloads: to show them
+/// (`Show 2 more overloads`), or to hide them again (`Show less`).
+pub fn overloads_link(help: &SignatureHelp, all: bool) -> Option<String> {
+    let more = help.signatures.len().checked_sub(1).filter(|&n| n > 0)?;
+    Some(if all {
+        "Show less".to_owned()
+    } else {
+        format!(
+            "Show {more} more overload{}",
+            if more == 1 { "" } else { "s" }
+        )
+    })
 }
 
 /// The opening bracket of the call that contains `offset`: the nearest `(`
@@ -146,6 +165,11 @@ pub(crate) struct SignatureState {
     /// Opens the popup a while after `(` was typed.
     auto: Option<Task<()>>,
     popup: Entity<SignaturePopup>,
+    /// All overloads are shown.
+    all_overloads: bool,
+    /// Where Parameter Info was last invoked (editor, caret): invoked
+    /// again there it shows or hides the other overloads.
+    invoked_at: Option<(gpui::EntityId, usize)>,
 }
 
 impl SignatureState {
@@ -155,6 +179,8 @@ impl SignatureState {
             sessions: 0,
             auto: None,
             popup,
+            all_overloads: false,
+            invoked_at: None,
         }
     }
 }
@@ -167,7 +193,22 @@ impl CodeIntelView {
         editor: &Entity<Editor>,
         cx: &mut Context<Self>,
     ) {
+        let at = (
+            editor.entity_id(),
+            editor.read(cx).selections().primary().head,
+        );
+        if self.popups().is_shown(CONTEXT) && self.signatures.invoked_at == Some(at) {
+            self.toggle_overloads(cx);
+            return;
+        }
         self.signature_request(editor, SignatureTrigger::Invoked, cx);
+        self.signatures.invoked_at = Some(at);
+    }
+
+    /// Shows the other overloads, or hides them again.
+    pub(crate) fn toggle_overloads(&mut self, cx: &mut Context<Self>) {
+        self.signatures.all_overloads = !self.signatures.all_overloads;
+        self.show_signature(cx);
     }
 
     /// Asks for the signatures at the caret of an editor; the popup opens
@@ -245,9 +286,12 @@ impl CodeIntelView {
         let Some(help) = &session.help else {
             return;
         };
-        let lines = lines(help);
+        let all = self.signatures.all_overloads;
+        let (lines, link) = (lines(help, all), overloads_link(help, all));
         let (editor, anchor) = (session.editor.clone(), session.anchor);
-        self.signatures.popup.update(cx, |p, cx| p.set(lines, cx));
+        self.signatures
+            .popup
+            .update(cx, |p, cx| p.set(lines, link, cx));
         let content = self.signatures.popup.clone().into();
         self.popups_mut().show(CaretPopup {
             context: CONTEXT,
@@ -263,6 +307,8 @@ impl CodeIntelView {
 
     /// Closes parameter info; the request in flight is cancelled.
     pub(crate) fn close_signature(&mut self, cx: &mut Context<Self>) {
+        self.signatures.all_overloads = false;
+        self.signatures.invoked_at = None;
         let had = self.signatures.session.take().is_some();
         if self.popups_mut().hide(CONTEXT) || had {
             cx.notify();
@@ -367,12 +413,18 @@ impl CodeIntelView {
             return Json::Null;
         };
         let shown = self.popups().is_shown(CONTEXT);
-        let lines = self.signatures.popup.read(cx).lines.clone();
+        let popup = self.signatures.popup.read(cx);
+        let lines = popup.lines.clone();
         let help = session.help.as_ref();
         let active_signature = help.map(|h| h.active_signature);
         let active_parameter = help.and_then(|h| h.active_parameter_of(h.active_signature));
+        let current_line = if self.signatures.all_overloads {
+            active_signature.unwrap_or(0)
+        } else {
+            0
+        };
         let current = lines
-            .get(active_signature.unwrap_or(0))
+            .get(current_line)
             .and_then(|l| l.current.clone().map(|r| l.text[r].to_owned()));
         json!({
             "shown": shown,
@@ -381,6 +433,7 @@ impl CodeIntelView {
             "active_signature": active_signature,
             "active_parameter": active_parameter,
             "current": current,
+            "link": popup.link.clone(),
             "pending": session.request.is_some(),
         })
     }
@@ -388,16 +441,24 @@ impl CodeIntelView {
 
 /// The content of the parameter info popup.
 pub struct SignaturePopup {
+    owner: WeakEntity<CodeIntelView>,
     lines: Vec<Line>,
+    /// The link that shows or hides the other overloads.
+    link: Option<String>,
 }
 
 impl SignaturePopup {
-    pub fn new() -> Self {
-        Self { lines: Vec::new() }
+    pub fn new(owner: WeakEntity<CodeIntelView>) -> Self {
+        Self {
+            owner,
+            lines: Vec::new(),
+            link: None,
+        }
     }
 
-    pub fn set(&mut self, lines: Vec<Line>, cx: &mut Context<Self>) {
+    pub fn set(&mut self, lines: Vec<Line>, link: Option<String>, cx: &mut Context<Self>) {
         self.lines = lines;
+        self.link = link;
         cx.notify();
     }
 
@@ -406,18 +467,40 @@ impl SignaturePopup {
     }
 }
 
-impl Default for SignaturePopup {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Render for SignaturePopup {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let text = theme.color(UiRole::Text);
         let muted = theme.color(UiRole::TextMuted);
         let base = font(theme.mono_family());
+        let link = self.link.clone().map(|label| {
+            let owner = self.owner.clone();
+            let shortcut = window
+                .highest_precedence_binding_for_action(&crate::commands::ParameterInfo)
+                .map(|b| ui::keys::binding_text(&b));
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(6.0))
+                .pt(px(4.0))
+                .font_family(theme.ui_family())
+                .text_size(theme.ui_size())
+                .child(
+                    div()
+                        .id("parameter-info-overloads")
+                        .debug_selector(|| "parameter-info-overloads".into())
+                        .text_color(theme.color(UiRole::TextLink))
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                            cx.stop_propagation();
+                            if let Some(owner) = owner.upgrade() {
+                                owner.update(cx, |v, cx| v.toggle_overloads(cx));
+                            }
+                        })
+                        .child(label),
+                )
+                .children(shortcut.map(|s| div().text_color(muted).child(s)))
+        });
         let rows = self.lines.iter().map(|line| {
             let run = |len: usize, bold: bool| {
                 let mut font = base.clone();
@@ -461,6 +544,7 @@ impl Render for SignaturePopup {
             .font_family(theme.mono_family())
             .text_size(theme.editor_size())
             .children(rows)
+            .children(link)
     }
 }
 
@@ -518,16 +602,34 @@ mod tests {
             active_signature: 0,
             active_parameter: Some(2),
         };
-        let lines = lines(&help);
-        assert_eq!(lines[0].text, "obj, *, skipkeys, kwds");
-        assert_eq!(
-            &lines[0].text[lines[0].current.clone().unwrap()],
-            "skipkeys"
-        );
-        assert_eq!(lines[1].text, NO_PARAMETERS);
-        assert!(lines[1].disabled && lines[1].current.is_none());
+        let all = lines(&help, true);
+        assert_eq!(all[0].text, "obj, *, skipkeys, kwds");
+        assert_eq!(&all[0].text[all[0].current.clone().unwrap()], "skipkeys");
+        assert_eq!(all[1].text, NO_PARAMETERS);
+        assert!(all[1].disabled && all[1].current.is_none());
         // A signature's own current parameter wins over the help's.
-        assert_eq!(&lines[2].text[lines[2].current.clone().unwrap()], "a");
+        assert_eq!(&all[2].text[all[2].current.clone().unwrap()], "a");
+        assert_eq!(overloads_link(&help, true).as_deref(), Some("Show less"));
+
+        // The other overloads are hidden until asked for: only the active
+        // signature, and a link.
+        let help = SignatureHelp {
+            active_signature: 2,
+            ..help
+        };
+        let active = lines(&help, false);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].text, "a, b");
+        assert_eq!(
+            overloads_link(&help, false).as_deref(),
+            Some("Show 2 more overloads")
+        );
+        let one = SignatureHelp {
+            signatures: help.signatures[..1].to_vec(),
+            ..help.clone()
+        };
+        assert_eq!(lines(&one, false)[0].text, "obj, *, skipkeys, kwds");
+        assert_eq!(overloads_link(&one, false), None);
     }
 
     #[test]

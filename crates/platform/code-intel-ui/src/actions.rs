@@ -10,14 +10,16 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use code_intel::{
-    ActionTrigger, CodeAction, CodeActionContext, Diagnostic, DocumentId, WorkspaceEdit,
+    ActionTrigger, CodeAction, CodeActionContext, Diagnostic, DocumentId, FileChange,
+    FileChangeKind, Rope, TextEdit, WorkspaceEdit,
 };
 use editor::Editor;
 use gpui::{App, AppContext as _, Context, Entity};
 use text::{CaretPlacement, Edit, EditKind, SelectionSet};
 
 use crate::doc;
-use crate::view::CodeIntelView;
+use crate::document::point_to_offset;
+use crate::view::{CodeIntelEvent, CodeIntelView};
 
 /// The diagnostics of each document as last reported, with the version of
 /// the text their ranges are in.
@@ -180,34 +182,61 @@ impl CodeIntelView {
         cx: &mut Context<Self>,
     ) -> bool {
         let mut complete = true;
+        let mut on_disk = Vec::new();
         for file in &edit.files {
             if file.edits.is_empty() {
                 continue;
             }
-            let Some(document) = self.document(&file.path) else {
+            let edits = if let Some(document) = self.document(&file.path) {
+                let version = match origin {
+                    Some((path, version)) if path == file.path => version,
+                    _ => document.version(),
+                };
+                let edits: Option<Vec<Edit>> = file
+                    .edits
+                    .iter()
+                    .map(|e| {
+                        document
+                            .versions
+                            .range(version, e.range.clone())
+                            .map(|r| Edit::new(r, e.text.clone()))
+                    })
+                    .collect();
+                edits.map(|edits| (document.editor.clone(), edits))
+            } else if let Some(editor) = self.tab_editor(&file.path) {
+                // A tab that is no document: the edits are in its text.
+                let rope = editor.read(cx).buffer().rope().clone();
+                let edits = file
+                    .edits
+                    .iter()
+                    .map(|e| {
+                        let start = point_to_offset(&rope, e.range.start);
+                        let end = point_to_offset(&rope, e.range.end).max(start);
+                        Edit::new(start..end, e.text.clone())
+                    })
+                    .collect();
+                Some((editor, edits))
+            } else if self
+                .project_root()
+                .is_some_and(|root| file.path.starts_with(root))
+            {
+                on_disk.push(file.clone());
+                continue;
+            } else {
+                // Files outside the project are not changed.
+                cx.emit(CodeIntelEvent::Notice(format!(
+                    "Not changed (outside the project): {}",
+                    file.path.display()
+                )));
                 complete = false;
                 continue;
             };
-            let version = match origin {
-                Some((path, version)) if path == file.path => version,
-                _ => document.version(),
-            };
-            let edits: Option<Vec<Edit>> = file
-                .edits
-                .iter()
-                .map(|e| {
-                    document
-                        .versions
-                        .range(version, e.range.clone())
-                        .map(|r| Edit::new(r, e.text.clone()))
-                })
-                .collect();
-            let Some(edits) = edits else {
+            let Some((editor, edits)) = edits else {
                 // The text the edits were made for is gone.
                 complete = false;
                 continue;
             };
-            document.editor.clone().update(cx, |e, cx| {
+            editor.update(cx, |e, cx| {
                 let caret = map_through(e.selections().primary().head, &edits);
                 e.edit(
                     edits,
@@ -217,12 +246,73 @@ impl CodeIntelView {
                 );
             });
         }
+        if !on_disk.is_empty() {
+            // Files that are not open: changed (or created) on disk, off
+            // the UI thread, and reported to the services.
+            let write = cx.background_spawn(async move {
+                on_disk
+                    .iter()
+                    .filter_map(|f| {
+                        edit_file(&f.path, &f.edits)
+                            .ok()
+                            .map(|kind| FileChange::new(f.path.clone(), kind))
+                    })
+                    .collect::<Vec<_>>()
+            });
+            cx.spawn(async move |this, cx| {
+                let changes = write.await;
+                let _ = this.update(cx, |v, cx| v.files_changed(&changes, cx));
+            })
+            .detach();
+        }
         complete
     }
 }
 
+/// A text with edits applied (positions in the text before them, which
+/// do not overlap).
+pub fn edit_text(text: &str, edits: &[TextEdit]) -> String {
+    let crlf = text.contains("\r\n");
+    let mut rope = Rope::from_str(&text.replace("\r\n", "\n"));
+    let mut ranges: Vec<(Range<usize>, &str)> = edits
+        .iter()
+        .map(|e| {
+            let start = point_to_offset(&rope, e.range.start);
+            let end = point_to_offset(&rope, e.range.end).max(start);
+            (start..end, e.text.as_str())
+        })
+        .collect();
+    // From the end, so that earlier positions stay valid.
+    ranges.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    for (range, text) in ranges {
+        rope.remove(range.clone());
+        rope.insert(range.start, &text.replace("\r\n", "\n"));
+    }
+    let out = rope.to_string();
+    if crlf { out.replace('\n', "\r\n") } else { out }
+}
+
+/// Applies edits to a file on disk; a file that does not exist is created
+/// (with its folders) from the edits.
+pub fn edit_file(path: &Path, edits: &[TextEdit]) -> std::io::Result<FileChangeKind> {
+    let (text, kind) = match std::fs::read_to_string(path) {
+        Ok(text) => (text, FileChangeKind::Changed),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            (String::new(), FileChangeKind::Created)
+        }
+        Err(e) => return Err(e),
+    };
+    std::fs::write(path, edit_text(&text, edits))?;
+    Ok(kind)
+}
+
 #[cfg(test)]
 mod tests {
+    use code_intel::Point;
+
     use super::*;
 
     #[test]
@@ -237,5 +327,46 @@ mod tests {
         // Text inserted at the caret goes after it.
         assert_eq!(map_through(4, &[Edit::new(4..4, "xy")]), 4);
         assert_eq!(map_through(5, &[Edit::new(4..4, "xy")]), 7);
+    }
+
+    #[test]
+    fn files_on_disk_are_edited_or_created() {
+        let edits = [
+            TextEdit::insert(Point::new(0, 0), "# ruff: noqa: F401\n"),
+            TextEdit::new(Point::new(1, 0)..Point::new(1, 3), "y"),
+        ];
+        assert_eq!(
+            edit_text("import os\r\nabc = 1\r\n", &edits),
+            "# ruff: noqa: F401\r\nimport os\r\ny = 1\r\n"
+        );
+        let dir = std::env::temp_dir().join(format!("code-intel-ui-{}", std::process::id()));
+        let new = dir.join("sub/ruff.toml");
+        let kind = edit_file(
+            &new,
+            &[TextEdit::insert(
+                Point::new(0, 0),
+                "[lint]\nignore = [\"F401\"]\n",
+            )],
+        )
+        .unwrap();
+        assert_eq!(kind, FileChangeKind::Created);
+        assert_eq!(
+            std::fs::read_to_string(&new).unwrap(),
+            "[lint]\nignore = [\"F401\"]\n"
+        );
+        let kind = edit_file(
+            &new,
+            &[TextEdit::new(
+                Point::new(1, 10)..Point::new(1, 16),
+                "\"E711\"",
+            )],
+        )
+        .unwrap();
+        assert_eq!(kind, FileChangeKind::Changed);
+        assert_eq!(
+            std::fs::read_to_string(&new).unwrap(),
+            "[lint]\nignore = [\"E711\"]\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
