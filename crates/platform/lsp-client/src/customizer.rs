@@ -3,7 +3,9 @@
 use std::ops::Range;
 use std::path::Path;
 
-use code_intel::{CodeAction, CodeActionContext, Diagnostic, DocumentId, Point, ServerStatus};
+use code_intel::{
+    CodeAction, CodeActionContext, Diagnostic, DocumentId, Point, Rope, ServerStatus,
+};
 use serde_json::Value;
 
 /// A product's adjustments to one server, as the reference's LSP
@@ -34,15 +36,18 @@ pub trait ServerCustomizer: Send + Sync + 'static {
 
     /// Adjusts the server's code actions at a range: renames them, nests
     /// some under others (`children`), drops some, and adds the product's
-    /// own actions (disable a rule for the file or the project).
+    /// own actions (disable a rule for the file or the project). `text` is
+    /// the document's text the request was made for (the editor's, not the
+    /// file's on disk); the range and the actions' edits are in it.
     fn code_actions(
         &self,
         doc: &DocumentId,
+        text: &Rope,
         range: Range<Point>,
         context: &CodeActionContext,
         actions: &mut Vec<CodeAction>,
     ) {
-        let _ = (doc, range, context, actions);
+        let _ = (doc, text, range, context, actions);
     }
 
     /// The server answered `initialize`: its name and version are known.

@@ -16,3 +16,11 @@ lsp-types.workspace = true
 process.workspace = true
 serde_json.workspace = true
 text.workspace = true
+
+# A language server driven by a script, which the tests start instead of a
+# real server (the same on every OS).
+[[bin]]
+name = "lsp-fake-server"
+path = "src/bin/lsp-fake-server.rs"
+test = false
+doc = false

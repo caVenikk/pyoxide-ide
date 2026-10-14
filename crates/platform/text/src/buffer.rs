@@ -514,6 +514,30 @@ mod tests {
         assert_eq!(Buffer::new("a\n").len_lines(), 2);
     }
 
+    /// Only `\n` breaks lines, as in the reference and in LSP: form feed,
+    /// vertical tab, NEL and the Unicode line and paragraph separators stay
+    /// inside a line.
+    #[test]
+    fn only_line_feeds_break_lines() {
+        let b = Buffer::new("a\u{0C}b\u{0B}c\u{85}d\u{2028}e\u{2029}f\ng");
+        assert_eq!(b.len_lines(), 2);
+        assert_eq!(b.line_text(0), "a\u{0C}b\u{0B}c\u{85}d\u{2028}e\u{2029}f");
+        assert_eq!(b.line_len(0), 11);
+        assert_eq!(b.offset_to_point(10), Point::new(0, 10));
+        assert_eq!(b.offset_to_point(12), Point::new(1, 0));
+        assert_eq!(b.point_to_offset(Point::new(0, 99)), 11);
+        let mut b = Buffer::new("x\n");
+        let applied = b.transact(
+            &mut set(1),
+            vec![Edit::insert(1, "\u{0C}\u{2028}")],
+            EditKind::Other,
+            CaretPlacement::AfterEachEdit,
+        );
+        // `x`, a form feed (1 byte) and U+2028 (3 bytes), on line 0.
+        assert_eq!(applied[0].new_end_position, (0, 5));
+        assert_eq!(b.len_lines(), 2);
+    }
+
     #[test]
     fn untracked_replacements_skip_history_and_read_only() {
         let mut b = Buffer::new("ab\ncd");
