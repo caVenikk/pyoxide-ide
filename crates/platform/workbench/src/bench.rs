@@ -236,7 +236,17 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
     let Some(editor) = active_editor(window, cx) else {
         return;
     };
-    let _ = editor.update(cx, |e, cx| e.go_to(TYPING_LINE, Some(1), cx));
+    let marks = std::env::var("PYOXIDE_BENCH_MARKS")
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(0);
+    let _ = editor.update(cx, |e, cx| {
+        if marks > 0 {
+            e.set_diagnostics(sample_marks(e.buffer(), marks), cx);
+            e.set_analysis(editor::Analysis::Done, cx);
+        }
+        e.go_to(TYPING_LINE, Some(1), cx)
+    });
     sleep(cx, Duration::from_secs(3)).await;
     let display = display_frames(window, cx).await;
 
@@ -326,6 +336,7 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         "typing {}",
         json!({
             "frames": frame_source(display),
+            "marks": marks,
             "keys": keys.len(),
             "frames_missing": missed,
             "caret_line": line,
@@ -335,6 +346,41 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
             "frame_ms": stats(paint),
         })
     ));
+}
+
+/// `count` problems spread evenly over the lines of `buffer`, of every
+/// level, some unused or deprecated, each over the first ten chars of its
+/// line (one at the typing line).
+fn sample_marks(buffer: &text::Buffer, count: usize) -> Vec<editor::DiagnosticMark> {
+    use editor::{DiagnosticMark, MarkMessage, MarkSeverity};
+    let lines = buffer.len_lines();
+    let step = (lines / count.max(1)).max(1);
+    (0..count)
+        .map(|i| {
+            let line = (i * step).min(lines - 1);
+            let start = buffer.line_start(line);
+            let end = start + buffer.line_len(line).min(10);
+            let severity = match i % 4 {
+                0 => MarkSeverity::Error,
+                1 => MarkSeverity::Warning,
+                2 => MarkSeverity::WeakWarning,
+                _ => MarkSeverity::Information,
+            };
+            DiagnosticMark {
+                range: start..end,
+                severity,
+                unnecessary: i % 5 == 0,
+                deprecated: i % 7 == 0,
+                messages: vec![MarkMessage {
+                    severity,
+                    text: "A problem for the measurement".into(),
+                    source: Some("Bench".into()),
+                    code: Some("B001".into()),
+                    href: None,
+                }],
+            }
+        })
+        .collect()
 }
 
 /// Opening a file in the open project: from the command to the first frame
