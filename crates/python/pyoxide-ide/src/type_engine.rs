@@ -16,19 +16,20 @@ use std::rc::Rc;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity, Global,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, StatefulInteractiveElement,
-    Styled, Subscription, WeakEntity, Window, canvas, div, px,
+    Styled, Subscription, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
-use py_lsp::settings::TypeEngine;
+use py_lsp::services::{Problem, ProjectState};
+use py_lsp::settings::{Tool, TypeEngine};
 use serde_json::{Value as Json, json};
 use themes::UiRole;
 use ui::command::CommandError;
 use ui::components::Tooltip;
-use ui::icons::IconName;
+use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 use workbench::{StatusWidget, Workbench, WorkbenchEvent};
 
-use crate::services::{CHECKED_ICON, PythonServices, services_for};
+use crate::services::{AllowUvx, PythonServices, services_for};
 
 ui::ui_commands! {
     COMMANDS, scope = "Workbench";
@@ -63,10 +64,59 @@ pub fn tooltip(engine: TypeEngine) -> String {
     format!("Selected type provider for python: {}", engine.name())
 }
 
-/// The popup's rows: the engines (the current one checked), a separator,
-/// the settings; and the current engine's row.
-fn popup_items(current: TypeEngine) -> (Vec<MenuItem>, Option<usize>) {
-    let mut items = Vec::new();
+/// What needs the person: the tools waiting for the answer whether they
+/// may run through uv, and why the tools that should run do not.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Attention {
+    questions: Vec<Tool>,
+    messages: Vec<String>,
+}
+
+impl Attention {
+    fn of(state: &ProjectState) -> Self {
+        let mut out = Self::default();
+        for tool in state.tools.iter().filter(|t| t.runs) {
+            let Some(problem) = tool.problem.as_ref().filter(|p| p.stops()) else {
+                continue;
+            };
+            if *problem == Problem::NeedsUvxConsent {
+                out.questions.push(tool.tool);
+            }
+            out.messages.push(problem.message(tool.tool));
+        }
+        out
+    }
+
+    fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+}
+
+/// The row that asks whether `tool` may run through uv, with the answers
+/// behind it.
+fn uvx_row(tool: Tool) -> MenuItem {
+    let answer = |allow| AllowUvx {
+        tool: tool.id().to_owned(),
+        allow,
+    };
+    MenuItem::submenu(
+        format!("Run {} through uv (downloads it)", tool.name()),
+        vec![
+            MenuItem::action("Allow", answer(true)),
+            MenuItem::action("Don't Allow", answer(false)),
+        ],
+    )
+    .icon(IconName::INSPECTIONS_WARNING)
+}
+
+/// The popup's rows: the open uv questions and a separator, the engines
+/// (the current one checked), a separator, the settings; and the current
+/// engine's row.
+fn popup_items(current: TypeEngine, questions: &[Tool]) -> (Vec<MenuItem>, Option<usize>) {
+    let mut items: Vec<MenuItem> = questions.iter().map(|t| uvx_row(*t)).collect();
+    if !items.is_empty() {
+        items.push(MenuItem::separator());
+    }
     let mut selected = None;
     for engine in TypeEngine::ALL {
         let mut row = MenuItem::action(
@@ -77,7 +127,7 @@ fn popup_items(current: TypeEngine) -> (Vec<MenuItem>, Option<usize>) {
         );
         if engine == current {
             selected = Some(items.len());
-            row = row.icon(CHECKED_ICON);
+            row = row.icon(IconName::CHECKED);
         }
         items.push(row);
     }
@@ -256,13 +306,29 @@ impl TypeEngineWidget {
         }
     }
 
-    /// The widget's text and tooltip; `None` hides it.
-    fn presentation(&self, cx: &App) -> Option<(String, String)> {
+    /// What needs the person, from the services' last preparation.
+    fn attention(&self, cx: &App) -> Attention {
+        self.services
+            .as_ref()
+            .and_then(|(s, _)| s.read(cx).state().map(Attention::of))
+            .unwrap_or_default()
+    }
+
+    /// The widget's text, tooltip and warning mark; `None` hides it. A
+    /// tool that should run and does not (or waits for an answer) marks
+    /// the widget and says why in the tooltip.
+    fn presentation(&self, cx: &App) -> Option<(String, String, bool)> {
         if !self.in_python_file() {
             return None;
         }
         let engine = self.engine(cx)?;
-        Some((text(engine), tooltip(engine)))
+        let attention = self.attention(cx);
+        let mut tooltip = tooltip(engine);
+        for message in &attention.messages {
+            tooltip.push('\n');
+            tooltip.push_str(message);
+        }
+        Some((text(engine), tooltip, !attention.is_empty()))
     }
 
     fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -272,7 +338,7 @@ impl TypeEngineWidget {
         let Some(engine) = self.engine(cx) else {
             return;
         };
-        let (items, selected) = popup_items(engine);
+        let (items, selected) = popup_items(engine, &self.attention(cx).questions);
         let options = PopupOptions {
             title: Some(POPUP_TITLE.into()),
             speed_search: false,
@@ -319,6 +385,13 @@ impl TypeEngineWidget {
             "visible": presentation.is_some(),
             "text": presentation.as_ref().map(|p| p.0.clone()),
             "tooltip": presentation.as_ref().map(|p| p.1.clone()),
+            "warning": presentation.as_ref().is_some_and(|p| p.2),
+            "uvx-questions": self
+                .attention(cx)
+                .questions
+                .iter()
+                .map(|t| t.id())
+                .collect::<Vec<_>>(),
             "engine": self.engine(cx).map(TypeEngine::id),
             "engines": TypeEngine::ALL.map(TypeEngine::id),
             "popup": self.menu.as_ref().map(|(m, _)| m.read(cx).state_json()),
@@ -328,7 +401,7 @@ impl TypeEngineWidget {
 
 impl Render for TypeEngineWidget {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some((text, tooltip)) = self.presentation(cx) else {
+        let Some((text, tooltip, warning)) = self.presentation(cx) else {
             return div().into_any_element();
         };
         let hover = cx.theme().color(UiRole::Hover);
@@ -343,11 +416,15 @@ impl Render for TypeEngineWidget {
             .flex()
             .flex_none()
             .items_center()
+            .gap(px(2.0))
             .h(px(22.0))
             .px(px(6.0))
             .rounded(px(4.0))
             .whitespace_nowrap()
             .hover(move |s| s.bg(hover))
+            .when(warning, |d| {
+                d.child(Icon::new(IconName::INSPECTIONS_WARNING))
+            })
             .child(text)
             .tooltip(Tooltip::text(tooltip, None))
             .on_click(cx.listener(|this, _, window, cx| this.open(window, cx)))
@@ -372,7 +449,7 @@ mod tests {
             tooltip(TypeEngine::Basedpyright),
             "Selected type provider for python: Basedpyright"
         );
-        let (items, selected) = popup_items(TypeEngine::Basedpyright);
+        let (items, selected) = popup_items(TypeEngine::Basedpyright, &[]);
         let labels: Vec<_> = items
             .iter()
             .map(|i| i.label().map(|l| l.to_string()))
@@ -387,5 +464,19 @@ mod tests {
             ]
         );
         assert_eq!(selected, Some(1));
+
+        let (items, selected) = popup_items(TypeEngine::Ty, &[Tool::Ruff, Tool::Ty]);
+        let label = |i: usize| items[i].label().map(|l| l.to_string());
+        assert_eq!(
+            label(0).as_deref(),
+            Some("Run Ruff through uv (downloads it)")
+        );
+        assert_eq!(
+            label(1).as_deref(),
+            Some("Run ty through uv (downloads it)")
+        );
+        assert_eq!(label(2), None);
+        assert_eq!(label(3).as_deref(), Some("ty"));
+        assert_eq!(selected, Some(3));
     }
 }

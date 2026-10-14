@@ -45,8 +45,6 @@ ui::ui_commands! {
 pub const RUFF_ICON: IconName = IconName("python/ruff");
 pub const TY_ICON: IconName = IconName("python/ty");
 pub const BASEDPYRIGHT_ICON: IconName = IconName("python/basedpyright");
-/// The check mark of the current row of a popup (Pyoxide's own).
-pub const CHECKED_ICON: IconName = IconName("python/checked");
 
 const ICONS: &[IconSvg] = &[
     IconSvg {
@@ -63,11 +61,6 @@ const ICONS: &[IconSvg] = &[
         name: TY_ICON.0,
         light: include_bytes!("../assets/icons/typeServer.svg"),
         dark: Some(include_bytes!("../assets/icons/typeServer_dark.svg")),
-    },
-    IconSvg {
-        name: CHECKED_ICON.0,
-        light: include_bytes!("../assets/icons/checked.svg"),
-        dark: Some(include_bytes!("../assets/icons/checked_dark.svg")),
     },
 ];
 
@@ -108,6 +101,16 @@ impl PythonCodeIntel {
                 (client as Arc<dyn CodeIntel>, target)
             }),
             search: None,
+        }
+    }
+
+    /// The services over `lsp-client`, with tools searched in `search`
+    /// only (besides the interpreter's folder): tests give no folders, so
+    /// the tools of the machine never start.
+    pub fn with_search(search: SearchPaths) -> Self {
+        Self {
+            search: Some(Arc::new(search)),
+            ..Self::new()
         }
     }
 
@@ -741,6 +744,28 @@ mod tests {
         );
         assert!(recorder.last().is_empty());
 
+        // The Types widget is marked and asks in its popup.
+        std::fs::write(root.join("app.py"), "x = 1\n").unwrap();
+        invoke(cx, "project.open-file", json!({"path": "app.py"}));
+        let widget = invoke(cx, "python.type-engine.state", Json::Null);
+        assert_eq!(widget["warning"], true);
+        assert_eq!(widget["uvx-questions"], json!(["ruff", "ty"]));
+        assert!(
+            widget["tooltip"]
+                .as_str()
+                .unwrap()
+                .ends_with("ty is not installed. Run it through uv (uvx ty)?"),
+            "{widget}"
+        );
+        invoke(cx, "python.type-engine.choose", Json::Null);
+        let widget = invoke(cx, "python.type-engine.state", Json::Null);
+        let rows = &widget["popup"]["levels"][0]["items"];
+        assert_eq!(rows[0]["label"], "Run Ruff through uv (downloads it)");
+        assert_eq!(rows[0]["submenu"], true);
+        assert_eq!(rows[1]["label"], "Run ty through uv (downloads it)");
+        assert_eq!(rows[2]["separator"], true);
+        assert_eq!(rows[3]["label"], "ty");
+
         invoke(
             cx,
             "python.tools.allow-uvx",
@@ -761,5 +786,9 @@ mod tests {
         let personal = std::fs::read_to_string(root.join(".oxide/workspace.toml")).unwrap();
         assert!(personal.contains("uvx = \"allow\""), "{personal}");
         assert!(personal.contains("uvx = \"deny\""), "{personal}");
+        // ruff still does not run: the mark stays, the question is gone.
+        let widget = invoke(cx, "python.type-engine.state", Json::Null);
+        assert_eq!(widget["uvx-questions"], json!([]));
+        assert_eq!(widget["warning"], true);
     }
 }

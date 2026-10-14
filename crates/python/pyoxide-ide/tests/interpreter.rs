@@ -10,7 +10,7 @@ use workbench::Workbench;
 
 /// Opens `root` as the project in a new main window, and `file` in it.
 fn open(cx: &mut TestAppContext, root: &Path, file: Option<&str>) -> WindowHandle<Workbench> {
-    let product = Rc::new(pyoxide_ide::product());
+    let product = Rc::new(pyoxide_ide::product_with_tools(Default::default()));
     let window = cx.update(|cx| {
         workbench::init(cx, &product);
         workbench::open_main_window(cx, product.clone())
@@ -407,7 +407,7 @@ fn a_project_without_an_environment(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn the_commands_are_registered(cx: &mut TestAppContext) {
-    let product = Rc::new(pyoxide_ide::product());
+    let product = Rc::new(pyoxide_ide::product_with_tools(Default::default()));
     let window = cx.update(|cx| {
         workbench::init(cx, &product);
         workbench::open_main_window(cx, product.clone())
