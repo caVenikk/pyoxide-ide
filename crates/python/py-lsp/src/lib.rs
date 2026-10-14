@@ -5,15 +5,18 @@
 //!
 //! - [`settings`]: the shared settings in `.oxide/project.toml`
 //!   (`[python.tools.<tool>]`, `[python.type-engine]`) and the personal
-//!   executable paths in `.oxide/workspace.toml`.
-//! - [`lookup`]: finding a tool by its lookup mode (Sdk, Path, uvx).
-//! - [`servers`]: the server specs for `lsp-client`.
+//!   executable paths and `uvx` answers in `.oxide/workspace.toml`.
+//! - [`lookup`]: finding a tool by its lookup mode (Sdk, Path, uvx) and
+//!   asking it for its version.
+//! - [`servers`]: the server specs for `lsp-client`: features,
+//!   initialization options and `workspace/configuration` settings.
 //! - [`ruff`]: ruff's adjustments (rule names, nested and added actions).
 //! - [`idea`]: the import of `.idea/pyLspTools.xml` and
 //!   `.idea/pyTypeEngine.xml`.
 //!
-//! This is the skeleton: types and signatures; the bodies come with the
-//! Python services package.
+//! No UI toolkit here, and nothing that waits runs on the caller's behalf:
+//! lookups read the file system and the version check runs a process, so
+//! the product calls them off the UI thread.
 
 pub mod idea;
 pub mod lookup;
@@ -21,5 +24,5 @@ pub mod ruff;
 pub mod servers;
 pub mod settings;
 
-pub use lookup::{Executable, Lookup, LookupContext};
+pub use lookup::{Executable, Lookup, LookupContext, Resolution, SearchPaths};
 pub use settings::{Settings, Tool, ToolSettings, TypeEngine};
