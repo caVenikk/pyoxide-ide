@@ -11,12 +11,15 @@
 //! settings prepares them again; the client restarts the servers whose
 //! spec changed.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Weak};
 
 use code_intel::{CodeIntel, ServerStatus};
+use code_intel_ui::DocLocation;
 use code_intel_ui::completion::Parentheses;
+use code_intel_ui::syntax::Lexer;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, Global, Task};
 use py_lsp::lookup::SearchPaths;
 use py_lsp::ruff::{RuffCustomizer, load_rules};
@@ -149,6 +152,8 @@ pub type ClientFactory = Rc<dyn Fn() -> (Arc<dyn CodeIntel>, Weak<dyn SpecTarget
 pub struct PythonCodeIntel {
     factory: ClientFactory,
     search: Option<Arc<SearchPaths>>,
+    /// The roots of the projects started, for the modules of their files.
+    roots: RefCell<Vec<PathBuf>>,
 }
 
 impl Default for PythonCodeIntel {
@@ -169,6 +174,7 @@ impl PythonCodeIntel {
                 (client as Arc<dyn CodeIntel>, target)
             }),
             search: None,
+            roots: RefCell::default(),
         }
     }
 
@@ -188,6 +194,7 @@ impl PythonCodeIntel {
         Self {
             factory,
             search: search.map(Arc::new),
+            roots: RefCell::default(),
         }
     }
 }
@@ -195,6 +202,11 @@ impl PythonCodeIntel {
 impl CodeIntelProvider for PythonCodeIntel {
     fn start(&self, root: &Path, cx: &mut App) -> Arc<dyn CodeIntel> {
         let (client, target) = (self.factory)();
+        let mut roots = self.roots.borrow_mut();
+        if !roots.iter().any(|r| r == root) {
+            roots.push(root.to_owned());
+        }
+        drop(roots);
         let search = self.search.clone();
         let services = cx.new(|cx| PythonServices::new(root.to_owned(), target, search, cx));
         let registry = cx.default_global::<Registry>();
@@ -235,6 +247,91 @@ impl CodeIntelProvider for PythonCodeIntel {
             implicit_first: &["self", "cls"],
         })
     }
+
+    /// Code in documentation is coloured as in the editor.
+    fn lexer(&self, language: &str) -> Option<Arc<dyn Lexer>> {
+        (language == py_lsp::servers::PYTHON).then(|| Arc::new(py_syntax::PythonLexer) as _)
+    }
+
+    /// The module a Python file is (`json` for `json/__init__.pyi`), with
+    /// the module icon, as the reference heads the documentation of a
+    /// symbol; other files as the platform does.
+    fn doc_location(&self, path: &Path) -> Option<DocLocation> {
+        let name = module_name(path, &self.roots.borrow());
+        match name {
+            Some(name) => Some(DocLocation {
+                name,
+                icon: IconName::MODULE,
+            }),
+            None => code_intel_ui::doc::default_location(path),
+        }
+    }
+}
+
+/// The dotted module a Python file is: `json` for `.../json/__init__.pyi`,
+/// `json.decoder` for `.../json/decoder.pyi`, `pkg.mod` for
+/// `<project>/src/pkg/mod.py`. A file of a project (`roots`) is named from
+/// the deepest of its source roots and the project root; any other file
+/// (the standard library, site-packages, stubs) from the packages around
+/// it (folders with an `__init__.py` or `__init__.pyi`). `None` for a file
+/// that is not Python.
+pub fn module_name(path: &Path, roots: &[PathBuf]) -> Option<String> {
+    let extension = path.extension()?.to_str()?;
+    if !["py", "pyi", "pyw"].contains(&extension) {
+        return None;
+    }
+    let in_project = roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .flat_map(|root| {
+            let mut bases = crate::source_roots(root);
+            bases.push(root.clone());
+            bases
+        })
+        .filter(|base| path.starts_with(base))
+        .max_by_key(|base| base.components().count())
+        .and_then(|base| dotted(path.strip_prefix(&base).ok()?));
+    if in_project.is_some() {
+        return in_project;
+    }
+    let is_package =
+        |dir: &Path| dir.join("__init__.py").is_file() || dir.join("__init__.pyi").is_file();
+    let stem = path.file_stem()?.to_str()?;
+    let mut parts = Vec::new();
+    let mut dir = path.parent();
+    if stem == "__init__" {
+        let package = dir?;
+        parts.push(package.file_name()?.to_str()?.to_owned());
+        dir = package.parent();
+    } else {
+        parts.push(stem.to_owned());
+    }
+    while let Some(package) = dir.filter(|d| is_package(d)) {
+        parts.push(package.file_name()?.to_str()?.to_owned());
+        dir = package.parent();
+    }
+    parts.reverse();
+    Some(parts.join("."))
+}
+
+/// `pkg/mod.py` as `pkg.mod` (`pkg/__init__.py` as `pkg`); `None` when a
+/// part is not a Python name (`.venv`, `site-packages`).
+fn dotted(relative: &Path) -> Option<String> {
+    let mut parts: Vec<String> = relative
+        .with_extension("")
+        .components()
+        .map(|c| c.as_os_str().to_str().map(str::to_owned))
+        .collect::<Option<_>>()?;
+    if parts.last().is_some_and(|p| p == "__init__") {
+        parts.pop();
+    }
+    let identifier = |p: &String| {
+        p.chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && p.chars().all(|c| c.is_alphanumeric() || c == '_')
+    };
+    (!parts.is_empty() && parts.iter().all(identifier)).then(|| parts.join("."))
 }
 
 // ---- the services of a project ---------------------------------------------------
@@ -630,6 +727,76 @@ mod tests {
                 icon.name
             );
         }
+    }
+
+    #[test]
+    fn modules_of_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |path: PathBuf| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "").unwrap();
+            path
+        };
+        // Stubs and the standard library: named from the packages around.
+        let stdlib = dir.path().join("typeshed").join("stdlib");
+        let json = file(stdlib.join("json").join("__init__.pyi"));
+        let decoder = file(stdlib.join("json").join("decoder.pyi"));
+        let os_path = file(stdlib.join("os").join("path.pyi"));
+        file(stdlib.join("os").join("__init__.pyi"));
+        let abc = file(stdlib.join("abc.pyi"));
+        assert_eq!(module_name(&json, &[]).as_deref(), Some("json"));
+        assert_eq!(module_name(&decoder, &[]).as_deref(), Some("json.decoder"));
+        assert_eq!(module_name(&os_path, &[]).as_deref(), Some("os.path"));
+        assert_eq!(module_name(&abc, &[]).as_deref(), Some("abc"));
+        assert_eq!(module_name(&stdlib.join("notes.txt"), &[]), None);
+
+        // A project: from its source roots, packages with or without
+        // `__init__.py`; its environment as any other.
+        let project = dir.path().join("project");
+        let module = file(project.join("src").join("pkg").join("mod.py"));
+        let app = file(project.join("app.py"));
+        let init = file(project.join("tools").join("__init__.py"));
+        let site = project
+            .join(".venv")
+            .join("lib")
+            .join("python3.13")
+            .join("site-packages");
+        file(site.join("requests").join("__init__.py"));
+        let api = file(site.join("requests").join("api.py"));
+        let roots = [project.clone()];
+        assert_eq!(module_name(&module, &roots).as_deref(), Some("pkg.mod"));
+        assert_eq!(module_name(&app, &roots).as_deref(), Some("app"));
+        assert_eq!(module_name(&init, &roots).as_deref(), Some("tools"));
+        assert_eq!(module_name(&api, &roots).as_deref(), Some("requests.api"));
+        assert_eq!(module_name(&module, &[]).as_deref(), Some("mod"));
+
+        let provider = PythonCodeIntel::with_search(SearchPaths::default());
+        assert_eq!(
+            provider.doc_location(&json),
+            Some(DocLocation {
+                name: "json".into(),
+                icon: IconName::MODULE
+            })
+        );
+        assert_eq!(
+            provider
+                .doc_location(Path::new("/p/notes.txt"))
+                .map(|l| l.name),
+            Some("notes".into())
+        );
+    }
+
+    #[test]
+    fn python_code_in_documentation_is_coloured() {
+        let provider = PythonCodeIntel::with_search(SearchPaths::default());
+        assert!(provider.lexer("toml").is_none());
+        let lexer = provider.lexer("python").unwrap();
+        let spans = code_intel_ui::doc::lex_lines(
+            lexer.as_ref(),
+            "def dumps(obj: Any,\n          **kwds: Any) -> str",
+        );
+        assert!(spans.iter().any(|(r, _)| *r == (0..3)), "{spans:?}");
+        assert!(spans.iter().any(|(r, _)| r.start > 20), "{spans:?}");
     }
 
     #[gpui::test]
