@@ -54,21 +54,21 @@ Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes cra
 UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
 Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75"
-"Language services over LSP (start, stop, restart, status widget)",python-intel,must,yes,no,"Community; Language Services widget and popup, Terminated state, server error output"
-External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly),python-intel,must,yes,no,"Community; Lookup Sdk / Path / uvx, .idea/pyLspTools.xml import; the Settings page needs the settings window"
-Type engine choice (Types widget),python-intel,could,yes,no,"Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here (ty / basedpyright)"
-"Problems highlighted in the editor (severity, unused, deprecated, tooltip)",python-intel,must,yes,no,Community; from ruff and the type server
-"Error stripe, inspection widget, next / previous problem (F2)",python-intel,must,yes,no,Community
+"Language services over LSP (start, stop, restart, status widget)",python-intel,must,yes,yes,Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85)
+External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly),python-intel,must,yes,partial,"Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings page: #92; Pyright / Pyrefly not offered yet"
+Type engine choice (Types widget),python-intel,could,yes,yes,"Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here: ty / basedpyright (#87)"
+"Problems highlighted in the editor (severity, unused, deprecated, tooltip)",python-intel,must,yes,yes,"Community; from ruff and the type server (#84, #86: one hover popup with problems, first fix and documentation)"
+"Error stripe, inspection widget, next / previous problem (F2)",python-intel,must,yes,yes,Community (#84)
 Problems tool window,python-intel,should,yes,no,Community; needs generic tool windows
-Type checking,python-intel,must,yes,no,Community; reference: PSI inspections or an LSP tool; Pyoxide: ty by ADR
-"Code completion (basic, auto-popup, auto-import)",python-intel,must,yes,no,Community
-Quick documentation (F1 / hover),python-intel,must,yes,no,Community
-Parameter info,python-intel,must,yes,no,Community
-Go to declaration (Cmd+B / Cmd+click) and type declaration,python-intel,must,yes,no,Community
-Find usages and Show Usages popup,python-intel,must,yes,no,Community
+Type checking,python-intel,must,yes,yes,"Community in the reference (PSI inspections or an LSP tool); Pyoxide: ty (ADR 0011), basedpyright as an option; type problems shown as warnings as the built-in engine does"
+"Code completion (basic, auto-popup, auto-import)",python-intel,must,yes,yes,"Community (#85, #87); completion characters, documentation in the lookup and postfix templates later"
+Quick documentation (F1 / hover),python-intel,must,yes,yes,Community (#86)
+Parameter info,python-intel,must,yes,yes,Community (#86)
+Go to declaration (Cmd+B / Cmd+click) and type declaration,python-intel,must,yes,partial,"Community; Cmd+B, Cmd+click, chooser, usages on the declaration (#86); Go to Type Declaration and Back (#103) missing"
+Find usages and Show Usages popup,python-intel,must,yes,partial,Community; Show Usages popup (#86); Find Usages tool window later
 Highlight usages of the symbol at the caret,python-intel,should,yes,no,Community
-Quick fixes and intention actions (Alt+Enter),python-intel,must,yes,no,Community; ruff fixes with Disable for line / file / project
-Reformat code and optimize imports with ruff,python-intel,must,yes,no,Community; ruff Formatting and Import optimizer features
+Quick fixes and intention actions (Alt+Enter),python-intel,must,yes,yes,"Community; ruff fixes with Disable for file / line / project (#86, #87); intention preview later"
+Reformat code and optimize imports with ruff,python-intel,must,yes,yes,"Community (#86, #87)"
 Rename (Shift+F6),python-intel,should,yes,no,Community
 "Other refactorings (extract, inline, move, change signature)",python-intel,could,yes,no,Community
 Go to Class / Go to Symbol and File Structure,python-intel,should,yes,no,Community; Search Everywhere Classes and Symbols tabs

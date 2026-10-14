@@ -74,12 +74,12 @@ intelligence".
 
 | issue | owner | crates / files | depends on | status |
 |---|---|---|---|---|
-| #82 Contracts: model, crate skeletons, ADRs | sub-agent contracts, reviewed by the lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | review (PR #88) |
-| #83 LSP client | sub-agent lsp | `crates/platform/lsp-client`, `code-intel` impl parts, fake server binary | #82 | todo |
-| #84 Problems in the editor, hover input | sub-agent editor | `crates/platform/editor` (`editor.rs`, `element.rs`, new `diagnostics.rs`), F2 bindings | #82 | todo |
-| #85 Completion, controller, Language Services widget | sub-agent intel-ui | `crates/platform/code-intel-ui`, `workbench.rs` integration hunks, keymaps, `tests/keymap.rs` | #82, events of #84 | todo |
-| #86 Quick doc, parameter info, navigation, intentions, reformat | sub-agent intel-ui-2 | `code-intel-ui` (own modules), `ui/src/markdown.rs` | #85 first checkpoint | todo |
-| #87 Python services: ruff, ty, basedpyright option | sub-agent py-lsp | `crates/python/py-lsp`, `pyoxide-ide` (provider, type engine widget, ruff intentions, interpreter observer) | #82, #83 for live runs | todo |
+| #82 Contracts: model, crate skeletons, ADRs | sub-agent contracts, reviewed by the lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | done (PR #88) |
+| #83 LSP client | sub-agent lsp | `crates/platform/lsp-client`, `code-intel` impl parts, fake server binary | #82 | done (PR #95) |
+| #84 Problems in the editor, hover input | sub-agent editor | `crates/platform/editor` (`editor.rs`, `element.rs`, new `diagnostics.rs`), F2 bindings | #82 | done (PR #98) |
+| #85 Completion, controller, Language Services widget | sub-agent intel-ui | `crates/platform/code-intel-ui`, `workbench.rs` integration hunks, keymaps, `tests/keymap.rs` | #82, events of #84 | done (PR #100) |
+| #86 Quick doc, parameter info, navigation, intentions, reformat | sub-agent intel-ui-2 | `code-intel-ui` (own modules), `ui/src/markdown.rs` | #85 first checkpoint | done (PR #102) |
+| #87 Python services: ruff, ty, basedpyright option | sub-agent py-lsp | `crates/python/py-lsp`, `pyoxide-ide` (provider, type engine widget, ruff intentions, interpreter observer) | #82, #83 for live runs | done (PR #99) |
 
 Order: #82 on `main`, then #83, #84, #85, #87 in parallel, #86 from #85's
 first checkpoint. Merge order #84, #83, #87, #85, #86 (the integration and
