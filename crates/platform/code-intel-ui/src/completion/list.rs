@@ -50,9 +50,9 @@ pub struct Row {
 }
 
 impl Row {
-    fn new(item: &CompletionItem, matched: &[Range<usize>]) -> Self {
+    fn new(item: &CompletionItem, matched: &[Range<usize>], member: bool) -> Self {
         Self {
-            icon: item.kind.and_then(kind_icon),
+            icon: kind_icon(item.kind, member),
             label: item.label.clone().into(),
             matched: matched.to_vec(),
             tail: item.tail_text.clone().map(Into::into),
@@ -71,27 +71,53 @@ impl Row {
     }
 }
 
-/// The icon of an item's kind, as the reference's LSP client picks it
-/// (`LspCompletionCustomizer.getIcon`): none for modules, keywords,
-/// values, units, references, events and operators.
-pub fn kind_icon(kind: SymbolKind) -> Option<IconName> {
+/// The icon of an item's kind: the node icons the reference draws for
+/// server items (`LspCompletionCustomizer.getIcon`), and where that has
+/// none or draws `{}`, the icon its Python lookup gives the same names.
+/// Servers send values (instances, literals, names of no known type,
+/// ty's "struct" for an instance) for attributes and variables: they get
+/// the field icon after a `.` (`member`) and the variable icon elsewhere;
+/// modules the package icon. Keywords have none (they are bold).
+pub fn kind_icon(kind: Option<SymbolKind>, member: bool) -> Option<IconName> {
     use SymbolKind as K;
+    let value = if member {
+        IconName::NODE_FIELD
+    } else {
+        IconName::NODE_VARIABLE
+    };
+    let Some(kind) = kind else {
+        return Some(value);
+    };
     Some(match kind {
+        K::Keyword => return None,
         K::Text => IconName::NODE_WORD,
         K::Method => IconName::NODE_METHOD,
-        K::Function => IconName::NODE_FUNCTION,
+        K::Function | K::Operator => IconName::NODE_FUNCTION,
         K::Constructor | K::Class => IconName::NODE_CLASS,
         K::Field => IconName::NODE_FIELD,
-        K::Variable => IconName::NODE_VARIABLE,
+        K::Variable => value,
         K::Interface => IconName::NODE_INTERFACE,
+        K::Module | K::Namespace | K::Package => IconName::PACKAGE,
         K::Property => IconName::NODE_PROPERTY,
         K::Enum | K::EnumMember => IconName::NODE_ENUM,
         K::Snippet => IconName::NODE_TEMPLATE,
+        K::File => IconName::FILE_TEXT,
         K::Folder => IconName::FOLDER,
         K::Constant => IconName::NODE_CONSTANT,
-        K::Struct => IconName::JSON_OBJECT,
         K::TypeParameter => IconName::NODE_TYPE,
-        _ => return None,
+        K::Struct
+        | K::Value
+        | K::Unit
+        | K::Color
+        | K::Reference
+        | K::Event
+        | K::String
+        | K::Number
+        | K::Boolean
+        | K::Array
+        | K::Object
+        | K::Key
+        | K::Null => value,
     })
 }
 
@@ -121,7 +147,7 @@ impl CompletionList {
         self.rows = session
             .shown
             .iter()
-            .map(|s| Row::new(&session.items[s.item], &s.matched))
+            .map(|s| Row::new(&session.items[s.item], &s.matched, session.member))
             .collect();
         self.selected = session.selected;
         self.focused = session.focused;
@@ -388,14 +414,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kinds_and_icons() {
-        assert_eq!(kind_icon(SymbolKind::Method), Some(IconName::NODE_METHOD));
+    fn every_kind_has_an_icon_but_keywords() {
+        use SymbolKind as K;
+        let all = [
+            K::Text,
+            K::Method,
+            K::Function,
+            K::Constructor,
+            K::Field,
+            K::Variable,
+            K::Class,
+            K::Interface,
+            K::Module,
+            K::Property,
+            K::Unit,
+            K::Value,
+            K::Enum,
+            K::Keyword,
+            K::Snippet,
+            K::Color,
+            K::File,
+            K::Reference,
+            K::Folder,
+            K::EnumMember,
+            K::Constant,
+            K::Struct,
+            K::Event,
+            K::Operator,
+            K::TypeParameter,
+            K::Namespace,
+            K::Package,
+            K::String,
+            K::Number,
+            K::Boolean,
+            K::Array,
+            K::Object,
+            K::Key,
+            K::Null,
+        ];
+        for kind in all {
+            for member in [false, true] {
+                let icon = kind_icon(Some(kind), member);
+                assert_eq!(icon.is_none(), kind == K::Keyword, "{kind:?}");
+                assert_ne!(icon, Some(IconName::JSON_OBJECT), "{kind:?}");
+            }
+        }
+        // As the reference draws server items.
         assert_eq!(
-            kind_icon(SymbolKind::Constructor),
+            kind_icon(Some(K::Method), true),
+            Some(IconName::NODE_METHOD)
+        );
+        assert_eq!(
+            kind_icon(Some(K::Constructor), false),
             Some(IconName::NODE_CLASS)
         );
-        assert_eq!(kind_icon(SymbolKind::Keyword), None);
-        assert_eq!(kind_icon(SymbolKind::Module), None);
+        assert_eq!(
+            kind_icon(Some(K::Property), true),
+            Some(IconName::NODE_PROPERTY)
+        );
+        // Attributes after `.` are fields, other names variables; items of
+        // no known kind too.
+        assert_eq!(kind_icon(Some(K::Struct), true), Some(IconName::NODE_FIELD));
+        assert_eq!(
+            kind_icon(Some(K::Value), false),
+            Some(IconName::NODE_VARIABLE)
+        );
+        assert_eq!(kind_icon(None, true), Some(IconName::NODE_FIELD));
+        assert_eq!(kind_icon(Some(K::Module), false), Some(IconName::PACKAGE));
     }
 
     #[test]

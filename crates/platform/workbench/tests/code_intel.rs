@@ -17,11 +17,12 @@ use std::sync::Arc;
 
 use code_intel::fake::{Call, FakeCodeIntel, RequestKind};
 use code_intel::{
-    CodeIntel, CompletionItem, CompletionTrigger, Completions, Diagnostic, DocumentId, FileChange,
-    FileChangeKind, Point, ServerId, ServerState, ServerStatus, Severity, SymbolKind, TextEdit,
+    CodeIntel, CompletionItem, CompletionTrigger, Completions, Diagnostic, DocumentId, Feature,
+    Features, FileChange, FileChangeKind, Point, ServerId, ServerState, ServerStatus, Severity,
+    SymbolKind, TextEdit,
 };
 use code_intel_ui::completion::Parentheses;
-use editor::{Editor, Highlighter, MarkSeverity};
+use editor::{Analysis, Editor, Highlighter, MarkSeverity};
 use gpui::{
     App, AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext, WindowHandle,
 };
@@ -661,6 +662,7 @@ fn typing_opens_the_popup_except_in_strings_comments_and_numbers(cx: &mut TestAp
     assert!(h.popup_shown());
     assert_eq!(h.labels(), ["norm", "x", "__ne__"]);
     assert_eq!(h.completion()["focused"], json!(false));
+    assert_eq!(h.completion()["items"][0]["icon"], json!("nodes/field"));
     // Down focuses it and moves on; Enter inserts.
     h.press("down");
     assert_eq!(h.completion()["selected"], json!(1));
@@ -916,4 +918,60 @@ fn saves_reach_the_services_as_file_changes(cx: &mut TestAppContext) {
             FileChangeKind::Changed
         )])]
     );
+}
+
+#[gpui::test]
+fn the_inspection_widget_follows_the_analysis_of_the_servers(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "x = 1\n"), ("notes.txt", "n\n")]);
+    h.open("app.py", "x = 1");
+    let doc = h.doc("app.py");
+    let analysis = |h: &mut H| {
+        let editor = h.editor();
+        h.cx.update(|cx| editor.read(cx).analysis())
+    };
+    // No server reports on the file: no widget.
+    assert_eq!(analysis(&mut h), Analysis::Off);
+    // Two servers report diagnostics on it: running until both did, for
+    // the current text.
+    let reporting = |id: &str| {
+        let mut s = server(id, "1", ServerState::Running, std::slice::from_ref(&doc));
+        s.features = Features::of(&[Feature::Diagnostics]);
+        s
+    };
+    h.fake.set_status(vec![reporting("ruff"), reporting("ty")]);
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Running);
+    let version = h.fake.version(&doc).unwrap();
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Running);
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Done);
+    // A change: running again; reports for the older text do not count.
+    h.type_text("0");
+    assert_eq!(analysis(&mut h), Analysis::Running);
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Running);
+    let version = h.fake.version(&doc).unwrap();
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Done);
+    // A server that terminated reports nothing: the other one is enough.
+    h.type_text("0");
+    let mut crashed = reporting("ty");
+    crashed.state = ServerState::Terminated {
+        error_output: String::new(),
+    };
+    h.fake.set_status(vec![reporting("ruff"), crashed]);
+    let version = h.fake.version(&doc).unwrap();
+    h.fake.publish_diagnostics(&doc, version, Vec::new());
+    h.draw();
+    assert_eq!(analysis(&mut h), Analysis::Done);
+    // A file no service analyses has none.
+    h.open("notes.txt", "n");
+    assert_eq!(analysis(&mut h), Analysis::Off);
 }

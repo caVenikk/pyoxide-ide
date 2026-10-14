@@ -165,6 +165,9 @@ pub struct Session {
     pub start: usize,
     /// Asked for by Basic Completion rather than by typing.
     pub explicit: bool,
+    /// The completed name follows a `.`: values are attributes (their
+    /// icon).
+    pub member: bool,
     /// The selection is the person's: Basic Completion, or a key moved
     /// it. An automatic popup starts with the first item preselected only
     /// (the reference's semi-focused lookup).
@@ -201,6 +204,7 @@ impl Session {
             editor,
             start,
             explicit,
+            member: false,
             focused: explicit,
             items: Vec::new(),
             answer_version: 0,
@@ -259,6 +263,7 @@ impl Session {
                 json!({
                     "label": item.label,
                     "kind": item.kind,
+                    "icon": list::kind_icon(item.kind, self.member).map(|i| i.0),
                     "tail": item.tail_text,
                     "type": item.type_text,
                     "bold": is_bold(item),
