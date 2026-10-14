@@ -10,11 +10,12 @@
    Alt+Enter on it.
 
 ## Expected
-- Step 1: the popup lists quick fixes first; the top item reads
+- Step 1: the popup lists quick fixes first, each with a bulb icon, then a
+  separator and the intentions without icon sorted by name; the top item reads
   "Ruff (unused-import): Remove unused import: `os`" (the rule code
   replaced by its name); Enter applies it as one undo step.
-- Step 2: sub-options "Disable for this line", "Disable for this project",
-  "Disable for this file".
+- Step 2: sub-options "Disable for this file", "Disable for this line",
+  "Disable for this project" (cross icon on the last), in this order.
 - Step 3: for this file, line 1 becomes `# ruff: noqa: F401` (an existing
   `# ruff: noqa:` comment is extended); for this line, `# noqa: F401` is
   appended; for this project, `F401` is added to `ignore` in

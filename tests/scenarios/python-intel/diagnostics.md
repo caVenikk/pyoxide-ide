@@ -18,15 +18,18 @@
 - Step 2: red wavy underline (ruff F821 is an error); with a type server
   the same range shows one marker that lists both messages.
 - Step 3: yellow wave for the warning; red wave for the type error.
-- Step 4: tooltip with the message, then grey `Ruff(` + link
-  `unused-import` + `)`; the rule code is shown by its name once rule
-  information is loaded (`Ruff(F401)` before that). Clicking the link
-  expands the rule documentation in the tooltip.
+- Step 4: one hover popup: each problem at the mouse as its message lines,
+  the ruff one ending with grey `Ruff(` + link `unused-import` + `)` (the
+  rule code is shown by its name once rule information is loaded,
+  `Ruff(F401)` before that); an actions row with the first quick fix
+  (Alt+Shift+Enter) and More actions... (Alt+Enter); then the symbol's
+  documentation. Clicking the rule link opens the rule page in the browser.
 - Step 5: F2 visits errors before warnings, wrapping at the end; Shift+F2
   goes back; Cmd+F1 shows the description tooltip at the caret.
 - Step 6: one stripe mark per problem line in the severity colour (at
-  least 2 px high); the widget shows counts per severity with icons, a
-  check mark when the file is clean; clicking it opens the Problems tool
+  least 2 px high); the widget shows an icon and a count per severity
+  present, counted per problem (two servers reporting one range count
+  twice), then up / down arrows; a check mark when the file is clean; clicking it opens the Problems tool
   window (Pyoxide v1: goes to the first problem until the Problems window
   exists).
 - Step 7: highlights move with the text; stale ones are replaced when the

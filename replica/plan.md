@@ -74,7 +74,7 @@ intelligence".
 
 | issue | owner | crates / files | depends on | status |
 |---|---|---|---|---|
-| #82 Contracts: model, crate skeletons, ADRs | sub-agent contracts, reviewed by the lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | in progress |
+| #82 Contracts: model, crate skeletons, ADRs | sub-agent contracts, reviewed by the lead | new `code-intel`, skeletons `lsp-client`, `code-intel-ui`, `py-lsp`; `text` (`AppliedEdit`), `editor` stubs, `workbench` (`Product.code_intel`, `FileType.language_id`), `project` store values, `py-env` `env_tool`, icons, workspace deps | - | review (PR #88) |
 | #83 LSP client | sub-agent lsp | `crates/platform/lsp-client`, `code-intel` impl parts, fake server binary | #82 | todo |
 | #84 Problems in the editor, hover input | sub-agent editor | `crates/platform/editor` (`editor.rs`, `element.rs`, new `diagnostics.rs`), F2 bindings | #82 | todo |
 | #85 Completion, controller, Language Services widget | sub-agent intel-ui | `crates/platform/code-intel-ui`, `workbench.rs` integration hunks, keymaps, `tests/keymap.rs` | #82, events of #84 | todo |
@@ -89,7 +89,17 @@ Structure, file watcher and reload from disk, the External Tools settings
 page, pyrefly as an alternative, inlay hints, semantic
 highlighting.
 
-Queue: M3 (#82-#87), then #13 control channel, then #50 (find filters for comments and string
+## MVP (milestone "MVP", before the rest)
+
+The first usable, announceable version: M3 first version (#82-#87),
+reload from disk (#36), tree file operations (#37), run configurations
+(#74), configured interpreters (#75), terminal (#89), debugger (#90), basic
+git (#91, #28), settings window (#92, #40), rebrand (#93), release builds
+and README / CONTRIBUTING (#94). Terminal, debugger, git and settings get a
+recon (`/replica-recon`) after M3's first version. Windows release: per-user
+installer without administrator rights, per-machine installer, portable zip.
+
+Queue: MVP (M3 first version first), then #13 control channel, then #50 (find filters for comments and string
 literals, which need the Python syntax layer). Follow-ups of #18 are #24-#42;
 of the search work #48-#53 and #65-#69.
 

@@ -101,7 +101,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75 |
 | ⬜ | Language services over LSP (start, stop, restart, status widget) | must | Community; Language Services widget and popup, Terminated state, server error output |
 | ⬜ | External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly) | must | Community; Lookup Sdk / Path / uvx, .idea/pyLspTools.xml import; the Settings page needs the settings window |
-| ⬜ | Type engine choice (Types widget) | should | Community; reference: Built-in / Pyrefly; Pyoxide has no PSI engine, a type server takes its place |
+| ⬜ | Type engine choice (Types widget) | could | Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here (ty / basedpyright) |
 | ⬜ | Problems highlighted in the editor (severity, unused, deprecated, tooltip) | must | Community; from ruff and the type server |
 | ⬜ | Error stripe, inspection widget, next / previous problem (F2) | must | Community |
 | ⬜ | Problems tool window | should | Community; needs generic tool windows |

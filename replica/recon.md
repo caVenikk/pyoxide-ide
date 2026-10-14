@@ -342,19 +342,19 @@ declaration and back, fix a problem with Alt+Enter, reformat.
 
 | ID | screen | how to reach | purpose | key components | states |
 |---|---|---|---|---|---|
-| S-PI01 | Editor highlighting of problems | open a file with problems | show diagnostics in place | wavy underline per severity (error red, warning yellow, weak warning), greyed unused code, struck deprecated code, tooltip on hover: message, source and rule link (`Ruff(unused-import)`), rule docs expanded in the tooltip | none, errors, warnings, stale while typing |
-| S-PI02 | Error stripe and inspection widget | right edge and top-right of the editor | file overview | stripe marks per problem (min 2 px, colour per severity), widget with counts per severity, click opens Problems | clean (check mark), problems, analysing |
+| S-PI01 | Editor highlighting of problems | open a file with problems | show diagnostics in place | wavy underline per severity (error red, warning orange, weak warning), greyed unused code (whole unused import statement), struck deprecated name at the call site; one hover popup with every problem at the mouse (message lines, grey source and rule link `Ruff(unused-import)` that opens the rule page in the browser), an actions row (first quick fix with Alt+Shift+Enter, More actions... with Alt+Enter) and the documentation of the symbol | none, errors, warnings, stale while typing |
+| S-PI02 | Error stripe and inspection widget | right edge and top-right of the editor | file overview | stripe marks per problem (min 2 px, colour per severity), widget with an icon and count per severity present (counted per problem), up / down arrows, click opens Problems | clean (check mark), problems, analysing |
 | S-PI03 | Completion popup (lookup) | type an identifier character or `.`, Ctrl+Space | complete code | rows: kind icon, name with matched chars highlighted, grey tail text, right-aligned grey type text; keywords bold, deprecated struck; first row selected | loading, items, no suggestions, incomplete (re-query) |
 | S-PI04 | Quick documentation popup | F1 / Ctrl+J (macOS), Ctrl+Q; mouse hover after 500 ms | read docs | rendered Markdown/HTML, code blocks highlighted, links, toolbar | loading, content, nothing found |
-| S-PI05 | Parameter info popup | Cmd+P / Ctrl+P, auto after `(` (1000 ms) | show signatures | one line per overload, current parameter bold | one, several overloads, no parameters |
+| S-PI05 | Parameter info popup | Cmd+P / Ctrl+P, auto after `(` (1000 ms) | show signatures | above the call, one line per overload with parameter names only, current parameter emphasised | one, several overloads, no parameters |
 | S-PI06 | Declaration navigation | Cmd+B / Ctrl+B, Cmd/Ctrl+click, Cmd/Ctrl+hover | jump to the declaration | link underline with hand cursor on hover, chooser popup for several targets, usages popup when already on the declaration | single target, several, none ("Cannot find declaration to go to") |
 | S-PI07 | Show Usages popup | Cmd+Alt+F7 / Ctrl+Alt+F7, Cmd+B on a declaration | pick a usage | rows with file, line, code preview; header with count and scope | loading, results, none |
 | S-PI08 | Find tool window, usages view | Alt+F7 | browse all usages | tree grouped by directory/file, preview | searching, results |
-| S-PI09 | Intention actions popup | Alt+Enter, bulb in the gutter | fix or change code | list with icons, submenu arrow (Disable for this line / this project / this file for ruff), speed search | quick fixes first, intentions, none |
+| S-PI09 | Intention actions popup | Alt+Enter, bulb at the start of the caret line | fix or change code | quick fixes with a bulb icon, a separator, intentions without icon sorted by name, `⋮` on the selected row, submenu arrow (ruff: Disable for this file / this line / this project), footer "Press F1 to toggle preview", speed search | quick fixes first, intentions, none |
 | S-PI10 | Rename | Shift+F6 | rename a symbol | in-place rename for local symbols, dialog with options for others | in progress, conflicts |
 | S-PI11 | Language Services widget and popup | status bar right of the caret position | server status | icon of the services on the current file (`{}` when none), tooltip `Language Services running on the current file: - Ruff 0.15.20`; popup "Language Services" with "Running on Current File" / "Running on Other Files", rows `ruff 0.15.20`, inline Restart Server / Stop and Autorun Server as Needed / Open Settings / Open Server Error Output | hidden (no services), initializing, running, stopped, terminated (error mark) |
-| S-PI12 | Type Engine widget and popup | status bar `Types: Built-in` | choose the type engine | popup "Type Engine": engines with check mark, Beta icon on Pyrefly, "Install and Use Pyrefly", "Type Engine Settings…" | single-module project only |
-| S-PI13 | Settings > Python > Tools > External Tools | Settings, or a widget row | enable and locate tools | table: enabled check box, Tool (+ feature summary, Configure gear), Lookup (Sdk / Path / uvx), Executable Path (install / upgrade / browse); uv footer; "Configure {tool}" dialog with feature check boxes | tool found, not found, uv missing |
+| S-PI12 | Type Engine widget and popup | status bar `Types: Built-in` (Pro only, observed) | choose the type engine | tooltip "Selected type provider for python: Built-in"; popup "Type Engine": `✓ Built-in`, "Install and Use Pyrefly" with a Beta pill, separator, "Type Engine Settings..." | single-module project only |
+| S-PI13 | Settings > Python > Tools > External Tools | Settings, or a widget row | enable and locate tools | table: ON/OFF toggle, Tool (+ feature summary, Configure gear), Lookup chain with a mark per stage (`Sdk ✗ · Path ✓ · uvx ✓`), Executable Path (italic grey path or "Not found in $PATH"; install / upgrade / browse); uv footer; "Configure {tool}" dialog with feature check boxes | tool found, not found, uv missing |
 | S-PI14 | Settings > Python > Type Engine | Settings, Types popup | choose the engine | segmented button Built-in / Pyrefly (/ ty), description, Pyrefly "Other Features" | multi-module (info only) |
 | S-PI15 | Problems tool window | Cmd+6 / Alt+6, inspection widget | list problems of the current file / project | tabs File / Project Errors, rows with severity icon, message, `source(code)`, line | empty, problems |
 | S-PI16 | Server error output tab | Language Services row of a terminated server | read stderr of a crashed server | editor tab "{name} Server Error Output" | - |
@@ -396,8 +396,8 @@ F-PI04 Navigate to a declaration and back
 F-PI05 Fix a problem
     F2 jumps to the next problem (errors first), hover shows S-PI01
     tooltip -> Alt+Enter -> S-PI09 -> quick fix applied as one undo step;
-    ruff submenu: Disable for this line (`# noqa: CODE`), for this file
-    (`# ruff: noqa: CODE` on line 1), for this project (`ignore` in
+    ruff submenu: Disable for this file (`# ruff: noqa: CODE` on line 1),
+    for this line (`# noqa: CODE`), for this project (`ignore` in
     `pyproject.toml` / `ruff.toml`)
     edge: fix-all, organize imports offered as intentions on any line
 
