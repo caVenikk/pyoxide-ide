@@ -18,7 +18,7 @@ use text::movement::{self, WordStop};
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point, Selection, SelectionSet};
 
 use crate::commands::*;
-use crate::diagnostics::DiagnosticMark;
+use crate::diagnostics::{DiagnosticMark, Marks};
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
 
@@ -277,8 +277,8 @@ pub struct Editor {
     /// The link under the last mouse press (line, char range, position):
     /// it is followed when the mouse is released at the same point.
     pub(crate) pressed_link: Option<(usize, Range<usize>, gpui::Point<Pixels>)>,
-    /// Problems in the text, sorted by range.
-    pub(crate) diagnostics: Vec<DiagnosticMark>,
+    /// Problems in the text, sorted by range, moved through edits.
+    pub(crate) diagnostics: Marks,
     /// A char range drawn as a link (the symbol under the mouse with the
     /// navigation modifier).
     pub(crate) link_highlight: Option<Range<usize>>,
@@ -338,7 +338,7 @@ impl Editor {
             forward_input: false,
             scroll_to_end: false,
             pressed_link: None,
-            diagnostics: Vec::new(),
+            diagnostics: Marks::default(),
             link_highlight: None,
             _subscriptions: subscriptions,
         }
@@ -396,6 +396,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.text_edited(&applied);
         self.schedule_highlighting(cx);
         cx.emit(EditorEvent::Edited(applied));
         cx.notify();
@@ -540,19 +541,19 @@ impl Editor {
     // ---- diagnostics and links -----------------------------------------------
 
     /// Replaces the problems shown in the text (char ranges in the current
-    /// text; sorted here by range).
+    /// text, clamped to it; sorted here by range). An empty range at a line
+    /// end is drawn after the end of the line; any other empty range covers
+    /// the char after it. The marks then move with the text (typing, undo)
+    /// until they are replaced.
     pub fn set_diagnostics(&mut self, marks: Vec<DiagnosticMark>, cx: &mut Context<Self>) {
-        let mut marks = marks;
-        marks.sort_by_key(|m| (m.range.start, m.range.end));
-        if self.diagnostics != marks {
-            self.diagnostics = marks;
+        if self.diagnostics.set(marks, &self.buffer) {
             cx.notify();
         }
     }
 
-    /// The problems shown in the text, sorted by range.
+    /// The problems shown in the text, sorted by range, in the current text.
     pub fn diagnostics(&self) -> &[DiagnosticMark] {
-        &self.diagnostics
+        self.diagnostics.as_slice()
     }
 
     /// Draws a char range as a link with the hand pointer (the symbol
@@ -810,6 +811,22 @@ impl Editor {
             "can_undo": self.buffer.can_undo(),
             "can_redo": self.buffer.can_redo(),
             "visible_lines": self.visible_lines().map(|r| json!([r.start, r.end])),
+            "diagnostics": self.diagnostics().iter().map(|m| json!({
+                "range": { "start": point(m.range.start), "end": point(m.range.end) },
+                "severity": m.severity.name(),
+                "unnecessary": m.unnecessary,
+                "deprecated": m.deprecated,
+                "messages": m.messages.iter().map(|msg| json!({
+                    "text": msg.text,
+                    "source": msg.source,
+                    "code": msg.code,
+                    "href": msg.href,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "link_highlight": self.link_highlight.as_ref().map(|r| json!({
+                "start": point(r.start),
+                "end": point(r.end),
+            })),
         })
     }
 
@@ -839,6 +856,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.text_edited(&applied);
         self.schedule_highlighting(cx);
         self.autoscroll = true;
         self.caret_visible = true;
@@ -879,9 +897,19 @@ impl Editor {
         self.edit(edits, kind, CaretPlacement::AfterEachEdit, cx);
     }
 
+    /// Moves what is anchored in the text through applied edits: the
+    /// problems move with it; the link highlight was about the old text.
+    fn text_edited(&mut self, applied: &[AppliedEdit]) {
+        self.diagnostics.edited(applied);
+        self.link_highlight = None;
+    }
+
     /// Notifies observers that the buffer was replaced from disk or saved.
     pub fn buffer_reloaded(&mut self, cx: &mut Context<Self>) {
         self.selections.clamp(self.buffer.len_chars());
+        // Positions in the old text mean nothing in the new one.
+        self.diagnostics.clear();
+        self.link_highlight = None;
         if let Some(h) = &mut self.highlighter {
             h.reset(&self.buffer);
         }

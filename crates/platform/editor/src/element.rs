@@ -15,6 +15,7 @@ use text::movement;
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
 use ui::theme::{Theme, ThemeExt, color};
 
+use crate::diagnostics::{Look, line_looks};
 use crate::editor::{DragUnit, Editor, EditorEvent};
 use crate::highlight::InlineStyle;
 
@@ -36,6 +37,9 @@ const CONSOLE_GUTTER: f32 = 6.0;
 const MIN_THUMB: f32 = 24.0;
 /// Height of a search match mark on the scrollbar.
 const STRIPE_MARK: f32 = 2.0;
+/// Size of the dots of a dotted underline, and of the gaps between them
+/// (the reference's bold dotted line: dots as large as the line is thick).
+const DOT: f32 = 2.0;
 
 /// One painted line: its shaped text and the mapping from char columns to
 /// bytes of the shaped text (tabs are expanded to spaces).
@@ -193,7 +197,36 @@ pub(crate) struct Prepaint {
     placeholder: Option<(ShapedLine, gpui::Point<Pixels>)>,
     /// Hitboxes of the hyperlinks (hand pointer).
     link_hitboxes: Vec<Hitbox>,
+    /// Dotted underlines of problems (the text runs draw only solid and
+    /// wavy ones).
+    dotted: Vec<Dotted>,
+    /// Problems drawn after the end of a line.
+    after_end: Vec<AfterEnd>,
     colors: Colors,
+}
+
+/// A dotted underline from `x0` to `x1` with its top at `y`.
+#[derive(Clone, Copy, Debug)]
+struct Dotted {
+    x0: Pixels,
+    x1: Pixels,
+    y: Pixels,
+    color: Hsla,
+}
+
+/// The decoration of a problem after the end of a line: one char cell
+/// with the look of the problem, as the reference paints a highlighter
+/// "after end of line".
+#[derive(Clone, Copy, Debug)]
+struct AfterEnd {
+    cell: Bounds<Pixels>,
+    /// Top of an underline in the cell.
+    underline_y: Pixels,
+    /// Top of a strikethrough in the cell.
+    strike_y: Pixels,
+    look: Look,
+    /// The text colour, for effects without a colour of their own.
+    text: Hsla,
 }
 
 /// One line's part of a search match.
@@ -228,6 +261,10 @@ pub(crate) struct Metrics {
     font_size: Pixels,
     pub(crate) line_height: Pixels,
     char_width: Pixels,
+    /// Ascent and descent of the font (both positive), for decorations
+    /// drawn like the text's own underlines.
+    ascent: Pixels,
+    descent: Pixels,
     /// Line numbers are one size smaller than the text.
     number_size: Pixels,
     number_width: Pixels,
@@ -289,8 +326,23 @@ pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics 
         font_size,
         line_height,
         char_width: advance(font_size),
+        ascent: ts.ascent(id, font_size),
+        descent: ts.descent(id, font_size).abs(),
         number_size,
         number_width: advance(number_size),
+    }
+}
+
+impl Metrics {
+    /// Offsets from the top of a line of the underline and the
+    /// strikethrough of its text, where the text system draws them.
+    fn effect_offsets(&self) -> (Pixels, Pixels) {
+        let padding_top = (self.line_height - self.ascent - self.descent) / 2.0;
+        let baseline = padding_top + self.ascent;
+        (
+            baseline + self.descent * 0.618,
+            (self.ascent * 0.5 + baseline) * 0.5,
+        )
     }
 }
 
@@ -400,6 +452,49 @@ fn apply_inline(r: &mut TextRun, style: &InlineStyle) {
     }
 }
 
+/// Draws the look of the problems over a stretch of a run (dotted
+/// underlines are painted separately).
+fn apply_look(r: &mut TextRun, look: &Look) {
+    if let Some(fg) = look.fg {
+        r.color = fg;
+    }
+    if look.bg.is_some() {
+        r.background_color = look.bg;
+    }
+    if look.bold {
+        r.font.weight = FontWeight::BOLD;
+    }
+    if look.italic {
+        r.font.style = FontStyle::Italic;
+    }
+    if let Some(u) = look.underline {
+        r.underline = match u.kind {
+            ThemeUnderline::None | ThemeUnderline::Dotted => None,
+            kind => Some(underline_of(kind, u.color.unwrap_or(r.color))),
+        };
+    }
+    if look.strikethrough {
+        r.strikethrough = Some(StrikethroughStyle {
+            thickness: px(1.0),
+            color: Some(r.color),
+        });
+    }
+}
+
+/// A solid or wavy underline of a theme kind (double and dashed lines are
+/// drawn single).
+fn underline_of(kind: ThemeUnderline, color: Hsla) -> UnderlineStyle {
+    UnderlineStyle {
+        color: Some(color),
+        thickness: px(if kind == ThemeUnderline::Thick {
+            2.0
+        } else {
+            1.0
+        }),
+        wavy: kind == ThemeUnderline::Wavy,
+    }
+}
+
 /// The theme's link style as an explicit style.
 fn link_style(theme: &Theme, default: Hsla) -> InlineStyle {
     let style = theme.text_style(TextRole::Link);
@@ -432,11 +527,14 @@ struct LineExtras<'a> {
     errors: &'a [Range<usize>],
     styles: &'a [(Range<usize>, InlineStyle)],
     links: &'a [Range<usize>],
+    /// Problems (char columns of the line) and how they look.
+    diagnostics: &'a [(Range<usize>, Look)],
 }
 
 /// Text runs for a line from highlight spans (char columns of the line),
-/// explicit styles and links drawn over them, with error marks and the
-/// input method's composition underlined.
+/// explicit styles and links drawn over them, with syntax error marks
+/// underlined, the problems drawn over all that and the input method's
+/// composition underlined.
 #[allow(clippy::too_many_arguments)]
 fn runs(
     spans: &[(Range<usize>, TextRole)],
@@ -532,6 +630,11 @@ fn runs(
         for e in extras.errors {
             out = underline_range(out, byte_of(e.start)..byte_of(e.end), underline);
         }
+    }
+    for (range, look) in extras.diagnostics {
+        out = map_range(out, byte_of(range.start)..byte_of(range.end), |r| {
+            apply_look(r, look)
+        });
     }
     // Underline the input method's composition.
     if let Some(marked) = marked {
@@ -720,6 +823,10 @@ impl Element for EditorElement {
         let mut lines = Vec::with_capacity(visible.len());
         let visible_cols = (text_width / m.char_width).ceil() as usize + 1;
         let scroll_col = (scroll.x / m.char_width).floor() as usize;
+        // Problems the text runs do not draw: dotted underlines (line,
+        // char columns, colour) and the looks after line ends.
+        let mut line_dotted: Vec<(usize, Range<usize>, Hsla)> = Vec::new();
+        let mut line_after_end: Vec<(usize, Look)> = Vec::new();
         for line in visible.clone() {
             let len = editor.buffer.line_len(line);
             let cols = if len > LONG_LINE {
@@ -741,6 +848,23 @@ impl Element for EditorElement {
             }
             links.extend(line_links.iter().map(|r| (line, r.clone())));
             let line_start = editor.buffer.line_start(line);
+            let marks = &editor.diagnostics;
+            let looks = line_looks(
+                marks
+                    .near(line_start..line_start + len)
+                    .map(|i| marks.get(i)),
+                line_start,
+                len,
+                theme,
+            );
+            for (range, look) in &looks.ranges {
+                if let Some(color) = look.dotted(text_color) {
+                    line_dotted.push((line, range.clone(), color));
+                }
+            }
+            if let Some(look) = looks.after_end {
+                line_after_end.push((line, look));
+            }
             let marked = editor.marked.as_ref().and_then(|r| {
                 let line_end = line_start + len;
                 (r.start < line_end.max(line_start + 1) && r.end > line_start)
@@ -752,6 +876,7 @@ impl Element for EditorElement {
                     errors: &errors,
                     styles: &styles,
                     links: &line_links,
+                    diagnostics: &looks.ranges,
                 },
                 &cols,
                 col_bytes.as_ref(),
@@ -779,6 +904,34 @@ impl Element for EditorElement {
         let top_of = |line: usize| bounds.top() + lh * line as f32 - scroll.y;
         let line_x = |l: &LineLayout, col: usize| text_x - scroll.x + l.x_for_col(col);
         let layout_of = |line: usize| lines.get(line.wrapping_sub(first));
+
+        let (underline_offset, strike_offset) = m.effect_offsets();
+        let dotted: Vec<Dotted> = line_dotted
+            .into_iter()
+            .filter_map(|(line, range, color)| {
+                let l = layout_of(line)?;
+                Some(Dotted {
+                    x0: line_x(l, range.start),
+                    x1: line_x(l, range.end),
+                    y: top_of(line) + underline_offset,
+                    color,
+                })
+            })
+            .collect();
+        let after_end: Vec<AfterEnd> = line_after_end
+            .into_iter()
+            .filter_map(|(line, look)| {
+                let l = layout_of(line)?;
+                let x = line_x(l, editor.buffer.line_len(line));
+                Some(AfterEnd {
+                    cell: Bounds::new(point(x, top_of(line)), size(m.char_width, lh)),
+                    underline_y: top_of(line) + underline_offset,
+                    strike_y: top_of(line) + strike_offset,
+                    look,
+                    text: text_color,
+                })
+            })
+            .collect();
 
         // Selections: up to the end of the text on the last line, the full
         // width on lines whose line break is selected.
@@ -1037,6 +1190,8 @@ impl Element for EditorElement {
             stripe_marks,
             placeholder,
             link_hitboxes,
+            dotted,
+            after_end,
             colors,
         }
     }
@@ -1109,6 +1264,11 @@ impl Element for EditorElement {
                     );
                     let _ = l.shaped.paint_background(origin, lh, window, cx);
                 }
+                for a in &p.after_end {
+                    if let Some(bg) = a.look.bg {
+                        window.paint_quad(fill(a.cell, bg));
+                    }
+                }
                 let in_selection = p.colors.search_current_background.is_some();
                 if !in_selection {
                     paint_search(window);
@@ -1128,6 +1288,12 @@ impl Element for EditorElement {
                 }
                 if let Some((shaped, origin)) = &p.placeholder {
                     let _ = shaped.paint(*origin, lh, window, cx);
+                }
+                for d in &p.dotted {
+                    paint_dots(window, d.x0, d.x1, d.y, d.color);
+                }
+                for a in &p.after_end {
+                    paint_after_end(window, a);
                 }
                 for r in &p.search {
                     if r.excluded {
@@ -1256,6 +1422,63 @@ impl Element for EditorElement {
     }
 }
 
+/// The left edges of the dots of a dotted underline from `x0` to `x1`:
+/// gaps as large as the dots, on a grid of the window's x so that
+/// neighbouring underlines line up (the reference aligns its dots so).
+fn dot_lefts(x0: f32, x1: f32) -> impl Iterator<Item = f32> {
+    let first = (x0 / DOT).floor() * DOT;
+    (0..)
+        .map(move |i| first + i as f32 * DOT * 2.0)
+        .take_while(move |x| *x < x1)
+}
+
+/// A dotted underline from `x0` to `x1` with its top at `y`: round dots.
+fn paint_dots(window: &mut Window, x0: Pixels, x1: Pixels, y: Pixels, color: Hsla) {
+    let dot = px(DOT);
+    for x in dot_lefts(f32::from(x0), f32::from(x1)) {
+        let left = px(x).max(x0);
+        let right = (px(x) + dot).min(x1);
+        if right > left {
+            window.paint_quad(
+                fill(
+                    Bounds::from_corners(point(left, y), point(right, y + dot)),
+                    color,
+                )
+                .corner_radii(dot / 2.0),
+            );
+        }
+    }
+}
+
+/// The decoration of a problem after the end of a line: the effects of its
+/// look over one char cell (its background is painted with the text's).
+fn paint_after_end(window: &mut Window, a: &AfterEnd) {
+    let (left, width) = (a.cell.left(), a.cell.size.width);
+    let text = a.look.fg.unwrap_or(a.text);
+    if let Some(u) = a.look.underline {
+        let color = u.color.unwrap_or(text);
+        match u.kind {
+            ThemeUnderline::None => {}
+            ThemeUnderline::Dotted => paint_dots(window, left, left + width, a.underline_y, color),
+            kind => window.paint_underline(
+                point(left, a.underline_y),
+                width,
+                &underline_of(kind, color),
+            ),
+        }
+    }
+    if a.look.strikethrough {
+        window.paint_strikethrough(
+            point(left, a.strike_y),
+            width,
+            &StrikethroughStyle {
+                thickness: px(1.0),
+                color: Some(text),
+            },
+        );
+    }
+}
+
 impl Editor {
     /// Moves the thumb so that the grab point is at `y`.
     pub(crate) fn drag_scrollbar(&mut self, y: Pixels, cx: &mut gpui::Context<Self>) {
@@ -1278,6 +1501,171 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::{DiagnosticMark, MarkSeverity};
+
+    fn mark(range: Range<usize>, severity: MarkSeverity) -> DiagnosticMark {
+        DiagnosticMark {
+            range,
+            severity,
+            unnecessary: false,
+            deprecated: false,
+            messages: Vec::new(),
+        }
+    }
+
+    /// The run that draws byte `at` of a line.
+    fn run_at(runs: &[TextRun], at: usize) -> &TextRun {
+        let mut start = 0;
+        for r in runs {
+            if (start..start + r.len).contains(&at) {
+                return r;
+            }
+            start += r.len;
+        }
+        panic!("no run at {at}");
+    }
+
+    /// Runs of `text` (ASCII) highlighted as `spans`, with `marks`.
+    fn line_runs(
+        text: &str,
+        spans: &[(Range<usize>, TextRole)],
+        marks: &[DiagnosticMark],
+        theme: &Theme,
+    ) -> Vec<TextRun> {
+        let looks = line_looks(marks, 0, text.len(), theme);
+        runs(
+            spans,
+            LineExtras {
+                errors: &[],
+                styles: &[],
+                links: &[],
+                diagnostics: &looks.ranges,
+            },
+            &(0..text.len()),
+            None,
+            text.len(),
+            &gpui::font("Mono"),
+            gpui::white(),
+            theme,
+            None,
+        )
+    }
+
+    fn dark() -> Theme {
+        Theme::new(themes::builtin::default_theme(themes::ThemeKind::Dark), &[])
+    }
+
+    #[test]
+    fn problems_are_drawn_over_the_highlighting() {
+        let theme = dark();
+        let text = "import os; foo(); old()";
+        let unused = DiagnosticMark {
+            unnecessary: true,
+            ..mark(0..9, MarkSeverity::Warning)
+        };
+        let error = mark(11..14, MarkSeverity::Error);
+        let deprecated = DiagnosticMark {
+            deprecated: true,
+            ..mark(18..21, MarkSeverity::Warning)
+        };
+        let keyword = theme.text_color(TextRole::Keyword);
+        let runs = line_runs(
+            text,
+            &[(0..6, TextRole::Keyword), (11..14, TextRole::FunctionCall)],
+            &[unused, error, deprecated],
+            &theme,
+        );
+        // Unused code: grey over the keyword colour, no wave.
+        let grey = color(theme.text_style(TextRole::DiagnosticUnused).fg.unwrap());
+        assert_ne!(grey, keyword);
+        for at in [0, 7] {
+            let r = run_at(&runs, at);
+            assert_eq!(r.color, grey);
+            assert!(r.underline.is_none());
+            assert!(r.strikethrough.is_none());
+        }
+        // An error: a wave in the error colour, the highlighting kept.
+        let r = run_at(&runs, 12);
+        assert_eq!(r.color, theme.text_color(TextRole::FunctionCall));
+        let wave = r.underline.expect("a wave");
+        assert!(wave.wavy);
+        let error_color = theme
+            .text_style(TextRole::DiagnosticError)
+            .underline_colour()
+            .map(color);
+        assert_eq!(wave.color, error_color);
+        // Deprecated: struck out in the text colour, no wave.
+        let r = run_at(&runs, 19);
+        assert!(r.underline.is_none());
+        assert_eq!(r.strikethrough.and_then(|s| s.color), Some(gpui::white()));
+        // Plain text between them is left alone.
+        let r = run_at(&runs, 15);
+        assert!(r.underline.is_none() && r.strikethrough.is_none());
+        assert_eq!(r.color, gpui::white());
+    }
+
+    #[test]
+    fn warnings_and_weak_warnings_wave_in_their_colours() {
+        let theme = dark();
+        let runs = line_runs(
+            "value == None",
+            &[],
+            &[
+                mark(0..5, MarkSeverity::WeakWarning),
+                mark(6..8, MarkSeverity::Warning),
+                mark(9..13, MarkSeverity::Information),
+            ],
+            &theme,
+        );
+        let wave_color = |at| {
+            let u = run_at(&runs, at).underline.expect("a wave");
+            assert!(u.wavy);
+            u.color
+        };
+        let role_color = |role| theme.text_style(role).underline_colour().map(color);
+        assert_eq!(wave_color(1), role_color(TextRole::DiagnosticInfo));
+        assert_eq!(wave_color(7), role_color(TextRole::DiagnosticWarning));
+        assert_ne!(wave_color(1), wave_color(7));
+        // Information: the reference's schemes draw nothing.
+        assert!(run_at(&runs, 10).underline.is_none());
+    }
+
+    #[test]
+    fn a_light_theme_warning_has_its_background() {
+        let theme = Theme::new(
+            themes::builtin::default_theme(themes::ThemeKind::Light),
+            &[],
+        );
+        let runs = line_runs(
+            "x == None",
+            &[],
+            &[mark(0..9, MarkSeverity::Warning)],
+            &theme,
+        );
+        let bg = theme.text_style(TextRole::DiagnosticWarning).bg.map(color);
+        assert!(bg.is_some());
+        assert_eq!(run_at(&runs, 3).background_color, bg);
+    }
+
+    #[test]
+    fn dotted_underlines_are_painted_apart_from_the_runs() {
+        let mut theme = themes::builtin::default_theme(themes::ThemeKind::Dark);
+        theme.text[TextRole::DiagnosticHint] = themes::TextStyle {
+            underline: Some(ThemeUnderline::Dotted),
+            underline_color: Some(themes::Rgba::rgb(0x80, 0x80, 0x80)),
+            ..themes::TextStyle::default()
+        };
+        let theme = Theme::new(theme, &[]);
+        let marks = [mark(2..5, MarkSeverity::Information)];
+        let looks = line_looks(&marks, 0, 8, &theme);
+        assert_eq!(looks.ranges.len(), 1);
+        assert!(looks.ranges[0].1.dotted(gpui::white()).is_some());
+        let runs = line_runs("abcdefgh", &[], &marks, &theme);
+        assert!(run_at(&runs, 3).underline.is_none());
+        // Dots of 2 px with 2 px gaps on the window's grid.
+        assert_eq!(dot_lefts(3.0, 13.0).collect::<Vec<_>>(), [2.0, 6.0, 10.0]);
+        assert_eq!(dot_lefts(4.0, 5.0).collect::<Vec<_>>(), [4.0]);
+    }
 
     #[test]
     fn text_fields_show_characters_as_typed() {
