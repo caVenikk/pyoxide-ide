@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/platform/code-intel",
     "crates/platform/commands",
     "crates/platform/console",
     "crates/platform/db-core",
@@ -51,10 +52,18 @@ toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 zeroize = "1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# Language services (ADR 0010): channels and futures without an async
+# runtime, protocol types kept private to lsp-client, Markdown parsing for
+# documentation.
+flume = "0.11"
+futures = "0.3"
+lsp-types = "=0.95.1"
+pulldown-cmark = { version = "0.13", default-features = false }
 # UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
 resvg = { version = "0.45", default-features = false }
+code-intel = { path = "crates/platform/code-intel" }
 commands = { path = "crates/platform/commands" }
 console = { path = "crates/platform/console" }
 db-core = { path = "crates/platform/db-core" }

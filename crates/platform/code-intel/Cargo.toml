@@ -1,0 +1,22 @@
+[package]
+name = "code-intel"
+description = "Code intelligence model of Pyoxide IDE: documents, diagnostics, completion, documentation, signatures, locations, edits, code actions, server status and the CodeIntel trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# `fake::FakeCodeIntel`, an in-memory implementation for tests of the
+# crates that use the trait.
+fake = []
+
+[dependencies]
+flume.workspace = true
+futures.workspace = true
+serde.workspace = true
+text.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
