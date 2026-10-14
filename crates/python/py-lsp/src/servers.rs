@@ -118,6 +118,11 @@ pub fn spec(
     {
         spec = spec.with_customizer(ruff.clone());
     }
+    if tool == Tool::Basedpyright {
+        // The pyright family asks for its settings once told they changed
+        // (the reference's `PyrightEmptyConfigurationSender`).
+        spec = spec.with_empty_configuration_change();
+    }
     spec
 }
 
@@ -326,6 +331,8 @@ mod tests {
         );
         assert_eq!(bp.command.args, ["--stdio"]);
         assert_eq!(bp.initialization_options, Some(json!({})));
+        assert!(bp.empty_configuration_change);
+        assert!(!specs[0].empty_configuration_change);
         assert_eq!(
             answer(bp, "python"),
             json!({ "pythonPath": interpreter.to_string_lossy() })

@@ -5140,6 +5140,7 @@ version = "0.0.1"
 dependencies = [
  "code-intel",
  "dirs 7.0.0",
+ "futures",
  "lsp-client",
  "process",
  "project",
@@ -5195,6 +5196,7 @@ name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
  "code-intel",
+ "code-intel-ui",
  "dirs 7.0.0",
  "editor",
  "gpui",

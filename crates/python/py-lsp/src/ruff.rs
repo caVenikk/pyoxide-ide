@@ -142,15 +142,24 @@ impl RuffCustomizer {
         &self,
         doc: &DocumentId,
         text: Option<&str>,
+        problems: &[Diagnostic],
         actions: &mut Vec<CodeAction>,
     ) {
-        // The quick fixes of each problem, in order.
+        // The quick fixes of each problem, in order. An action that does
+        // not name its problem belongs to the problem of the request with
+        // the rule in its title (`Ruff (F401): ...`).
         let mut groups: Vec<(Diagnostic, Vec<usize>)> = Vec::new();
         for (i, action) in actions.iter().enumerate() {
             if !action.kind.is_quick_fix() {
                 continue;
             }
-            let Some(diagnostic) = action.diagnostics.first() else {
+            let diagnostic = action.diagnostics.first().or_else(|| {
+                let code = self.rule_code(title_code(&action.title)?);
+                problems
+                    .iter()
+                    .find(|d| d.code.as_deref().map(|c| self.rule_code(c)).as_ref() == Some(&code))
+            });
+            let Some(diagnostic) = diagnostic else {
                 continue;
             };
             match groups.iter_mut().find(|(d, _)| same_problem(d, diagnostic)) {
@@ -225,6 +234,13 @@ impl RuffCustomizer {
     }
 }
 
+/// The rule in a title of ruff's (`F401` of `Ruff (F401): ...`).
+fn title_code(title: &str) -> Option<&str> {
+    let start = title.find("Ruff (")? + "Ruff (".len();
+    let len = title[start..].find(')')?;
+    Some(&title[start..start + len])
+}
+
 /// An action of the product's own for a problem of ruff's.
 fn added_action(title: &str, diagnostic: &Diagnostic, edit: Option<WorkspaceEdit>) -> CodeAction {
     let mut action = CodeAction::new(title, CodeActionKind::QuickFix);
@@ -252,12 +268,12 @@ impl ServerCustomizer for RuffCustomizer {
         doc: &DocumentId,
         text: &Rope,
         _: std::ops::Range<Point>,
-        _: &code_intel::CodeActionContext,
+        context: &code_intel::CodeActionContext,
         actions: &mut Vec<CodeAction>,
     ) {
         // "Disable for this file" looks at the first two lines only.
         let head: String = text.lines().take(2).map(|line| line.to_string()).collect();
-        self.customize_actions(doc, Some(&head), actions);
+        self.customize_actions(doc, Some(&head), &context.diagnostics, actions);
     }
 }
 
@@ -742,7 +758,7 @@ mod tests {
         // The diagnostic as renamed by `diagnostic`, or not yet.
         for code in ["unused-import", "F401"] {
             let mut actions = server_actions(&unused_os(code));
-            ruff.customize_actions(&doc, Some(text), &mut actions);
+            ruff.customize_actions(&doc, Some(text), &[], &mut actions);
             let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
             assert_eq!(
                 titles,
@@ -786,6 +802,36 @@ mod tests {
         }
     }
 
+    /// Actions that do not name their problem find it in the request by
+    /// the rule in their title.
+    #[test]
+    fn problems_found_by_the_rule_in_the_title() {
+        let doc = DocumentId::new("/p/app.py");
+        let ruff = ruff_in(Path::new("/p"));
+        let problem = unused_os("unused-import");
+        let mut actions = server_actions(&problem);
+        for action in &mut actions {
+            action.diagnostics.clear();
+        }
+        ruff.customize_actions(&doc, None, std::slice::from_ref(&problem), &mut actions);
+        assert_eq!(actions.len(), 3);
+        let subs: Vec<&str> = actions[0]
+            .children
+            .iter()
+            .map(|a| a.title.as_str())
+            .collect();
+        assert_eq!(
+            subs,
+            [DISABLE_FOR_FILE, DISABLE_FOR_LINE, DISABLE_FOR_PROJECT]
+        );
+        assert_eq!(actions[0].children[0].diagnostics, [problem]);
+        assert_eq!(
+            title_code("Ruff (E711): Disable for this line"),
+            Some("E711")
+        );
+        assert_eq!(title_code("Ruff: Organize imports"), None);
+    }
+
     #[test]
     fn a_lone_disable_for_this_line_stays() {
         let doc = DocumentId::new("/p/app.py");
@@ -793,7 +839,7 @@ mod tests {
         let diagnostic = unused_os("F401");
         let mut actions = server_actions(&diagnostic);
         actions.remove(0);
-        ruff.customize_actions(&doc, None, &mut actions);
+        ruff.customize_actions(&doc, None, &[], &mut actions);
         assert_eq!(
             actions[0].title,
             "Ruff (unused-import): Disable for this line"
