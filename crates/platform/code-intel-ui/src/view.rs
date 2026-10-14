@@ -951,9 +951,9 @@ impl CodeIntelView {
                 .read(cx)
                 .diagnostics()
                 .iter()
+                .flat_map(|m| &m.messages)
                 .filter(|m| m.severity != editor::MarkSeverity::Information)
-                .map(|m| m.messages.len())
-                .sum::<usize>()
+                .count()
         });
         let items = self.server_items(cx);
         json!({

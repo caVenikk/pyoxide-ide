@@ -9,10 +9,10 @@ use editor::{DiagnosticMark, MarkMessage, MarkSeverity};
 use crate::document::Versions;
 
 /// The marks of a document's diagnostics, reported in the text of
-/// `version`: one mark per range, with a message per diagnostic (the
-/// inspection widget counts the messages, as the reference counts every
-/// problem); its severity is the most severe of them, and it is greyed or
-/// struck out when one of them says so. `None` when the version is no
+/// `version`: one mark per range, with a message per diagnostic at its
+/// own severity (the inspection widget counts the messages, as the
+/// reference counts every problem); the mark's severity is the most severe
+/// of them, and it is greyed or struck out when one of them says so. `None` when the version is no
 /// longer known (a newer report is on its way).
 pub fn marks(
     versions: &Versions,
@@ -46,6 +46,7 @@ fn mark(range: Range<usize>, mut items: Vec<&Diagnostic>) -> DiagnosticMark {
         messages: items
             .iter()
             .map(|d| MarkMessage {
+                severity: severity(d.severity),
                 text: d.message.clone().into(),
                 source: d.source.clone().map(Into::into),
                 code: d.code.clone().map(Into::into),
@@ -115,6 +116,8 @@ mod tests {
         let texts: Vec<_> = marks[1].messages.iter().map(|m| m.text.as_ref()).collect();
         assert_eq!(texts, ["Unresolved reference", "Undefined name"]);
         assert_eq!(marks[1].messages[0].source.as_ref().unwrap().as_ref(), "ty");
+        assert_eq!(marks[1].messages[0].severity, MarkSeverity::Error);
+        assert_eq!(marks[1].messages[1].severity, MarkSeverity::Warning);
         // A version that is not known gives nothing.
         assert!(super::marks(&versions, 5, &items).is_none());
         assert_eq!(super::marks(&versions, 5, &[]), Some(Vec::new()));
