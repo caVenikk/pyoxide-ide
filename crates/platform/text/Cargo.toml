@@ -7,7 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-ropey = "1.6"
+# Only `\n` breaks lines, as in the reference and in LSP: the buffer
+# normalises `\r\n` and `\r`, and form feeds, vertical tabs, NEL and the
+# Unicode line and paragraph separators stay inside a line (ropey's
+# `unicode_lines` and `cr_lines` are off; every crate that uses ropey turns
+# them off, or Cargo's feature unification brings them back).
+ropey = { version = "1.6", default-features = false, features = ["simd"] }
 serde.workspace = true
 unicode-segmentation = "1"
 unicode-width = "0.2"
