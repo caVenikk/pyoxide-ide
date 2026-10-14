@@ -97,6 +97,30 @@ impl IconName {
     pub const PRESERVE_CASE: Self = Self("inline/preserveCase");
     pub const SEARCH_HISTORY: Self = Self("inline/searchHistory");
     pub const NEW_LINE: Self = Self("inline/newLine");
+    // Code intelligence: symbol kinds of completion items (the reference's
+    // `LspCompletionCustomizer.getIcon`; keywords, modules and values have
+    // none), the intention bulbs and the Language Services widget's `{}`.
+    pub const NODE_CLASS: Self = Self("nodes/class");
+    pub const NODE_FUNCTION: Self = Self("nodes/function");
+    pub const NODE_METHOD: Self = Self("nodes/method");
+    pub const NODE_FIELD: Self = Self("nodes/field");
+    pub const NODE_VARIABLE: Self = Self("nodes/variable");
+    pub const NODE_PARAMETER: Self = Self("nodes/parameter");
+    pub const NODE_PROPERTY: Self = Self("nodes/property");
+    pub const NODE_INTERFACE: Self = Self("nodes/interface");
+    pub const NODE_ENUM: Self = Self("nodes/enum");
+    pub const NODE_CONSTANT: Self = Self("nodes/constant");
+    pub const NODE_TYPE: Self = Self("nodes/type");
+    pub const NODE_TEMPLATE: Self = Self("nodes/template");
+    pub const NODE_WORD: Self = Self("nodes/word");
+    pub const INTENTION_BULB: Self = Self("codeInsight/intentionBulb");
+    pub const QUICKFIX_BULB: Self = Self("codeInsight/quickfixBulb");
+    pub const JSON_OBJECT: Self = Self("json/object");
+    /// Severity marks: white shapes the reference colours with the
+    /// severity's error stripe colour (`HighlightDisplayLevel`); a weak
+    /// warning uses the warning shape.
+    pub const INSPECTIONS_ERROR: Self = Self("general/inspections/inspectionsError");
+    pub const INSPECTIONS_WARNING: Self = Self("general/inspections/inspectionsWarning");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -127,6 +151,7 @@ macro_rules! platform_icons {
 platform_icons! {
     both: [
         "actions/inSelection",
+        "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/config", "fileTypes/css",
         "fileTypes/csv", "fileTypes/docker", "fileTypes/html", "fileTypes/image",
         "fileTypes/javaScript", "fileTypes/json", "fileTypes/markdown", "fileTypes/rst",
@@ -144,7 +169,11 @@ platform_icons! {
         "general/showAsTree", "general/up",
         "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory",
-        "nodes/excludeRoot", "nodes/folder", "nodes/module", "nodes/package", "nodes/symlink",
+        "json/object",
+        "nodes/class", "nodes/constant", "nodes/enum", "nodes/excludeRoot", "nodes/field",
+        "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
+        "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
+        "nodes/type", "nodes/variable", "nodes/word",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
@@ -156,6 +185,7 @@ platform_icons! {
     ],
     light_only: [
         "fileTypes/gitignore", "run/rerun_stroke", "run/run_stroke", "run/stop_stroke",
+        "general/inspections/inspectionsError", "general/inspections/inspectionsWarning",
     ]
 }
 
