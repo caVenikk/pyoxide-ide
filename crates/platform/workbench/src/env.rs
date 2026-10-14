@@ -13,6 +13,7 @@
 //! | `PYOXIDE_BENCH=find:<query>` | type a query into the find bar of the open file char by char (5 runs), print key-to-highlight times, quit |
 //! | `PYOXIDE_BENCH=find-in-files:<query>` | search the open project for a query with Find in Files (5 runs), print the times to the first row and to the end of the search, quit |
 //! | `PYOXIDE_BENCH=go-to-file:<query>` | type a query into Go to File char by char (5 runs), print the index build time and key-to-rows times, quit |
+//! | `PYOXIDE_BENCH=completion[:<ms>]` | with a service that answers after `ms` (50) with 200 items, type `.` 30 times at the end of the open file, print key-to-popup and answer-to-popup times (with `PYOXIDE_SHOT`: a picture of the popup), quit |
 //! | `PYOXIDE_BENCH=cursor` | move the mouse (synthetic events) over text, gutter, splitter and toolbar, print the system cursor shown, quit |
 //! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |
 //! | `PYOXIDE_NATIVE_POINTER=0` | do not set the pointer shape on every mouse move (leave it to GPUI) |
@@ -76,7 +77,13 @@ pub enum Bench {
     FindInFiles(String),
     /// Typing a query into Go to File.
     GoToFile(String),
+    /// The completion popup in the open file, with a service that answers
+    /// after this many milliseconds (`completion` or `completion:<ms>`).
+    Completion(u64),
 }
+
+/// The latency of the completion bench's service by default.
+pub const COMPLETION_LATENCY_MS: u64 = 50;
 
 /// The requested measurement (read once).
 pub fn bench() -> Option<&'static Bench> {
@@ -88,6 +95,7 @@ pub fn bench() -> Option<&'static Bench> {
                 "startup" => Some(Bench::Startup),
                 "typing" => Some(Bench::Typing),
                 "cursor" => Some(Bench::Cursor),
+                "completion" => Some(Bench::Completion(COMPLETION_LATENCY_MS)),
                 _ => value
                     .strip_prefix("open:")
                     .map(|p| Bench::Open(p.into()))
@@ -105,6 +113,12 @@ pub fn bench() -> Option<&'static Bench> {
                         value
                             .strip_prefix("go-to-file:")
                             .map(|q| Bench::GoToFile(q.to_owned()))
+                    })
+                    .or_else(|| {
+                        value
+                            .strip_prefix("completion:")
+                            .and_then(|ms| ms.parse().ok())
+                            .map(Bench::Completion)
                     }),
             }
         })

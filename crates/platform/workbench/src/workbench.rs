@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use code_intel_ui::CodeIntelView;
+use code_intel_ui::{CodeIntelEvent, CodeIntelView};
 use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase,
-    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render,
+    Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render,
     ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
@@ -59,6 +59,9 @@ const INACTIVE_TAB_ALPHA: f32 = 0.75;
 const MODIFIED_DOT: f32 = 6.0;
 /// Narrowest project tool window when resizing it.
 const MIN_PROJECT_WIDTH: f32 = 120.0;
+/// How long a notice stays in the status bar (about as long as the
+/// reference's balloons stay).
+const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
 /// Narrowest editor area left when widening the project tool window.
 const MIN_EDITOR_WIDTH: f32 = 200.0;
 /// Room kept on each side of the file path in the middle of the toolbar
@@ -171,6 +174,10 @@ pub struct Workbench {
     pending: usize,
     /// Last error or notice, shown in the status bar.
     message: Option<SharedString>,
+    /// A notice shown in the status bar for a while (in place of the
+    /// reference's balloons, until there are notifications).
+    notice: Option<SharedString>,
+    notice_timer: Task<()>,
     /// The Go to Line field while it is open, and its blur subscription.
     go_to_line: Option<(Entity<Editor>, Subscription)>,
     /// Resizing the project tool window: mouse x and width at the start.
@@ -250,11 +257,20 @@ impl Workbench {
             cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));
         let run_provider = product.run.clone();
         let run_window = cx.new(|cx| RunToolWindow::new(run_provider, window, cx));
+        // The completion measurement brings a service of its own.
+        let bench_intel = match env::bench() {
+            Some(env::Bench::Completion(latency)) => Some(code_intel_ui::bench::hook(
+                std::time::Duration::from_millis(*latency),
+                crate::bench::COMPLETION_ITEMS,
+            )),
+            _ => None,
+        };
         let code_intel = product
             .code_intel
             .clone()
+            .or(bench_intel)
             .map(|hook| cx.new(|cx| CodeIntelView::new(hook, cx)));
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe_in(&run_window, window, |this, _, event, window, cx| {
                 this.run_window_event(event, window, cx)
             }),
@@ -315,6 +331,13 @@ impl Workbench {
                 }
             }),
         ];
+        // Code intelligence popups and key contexts are drawn by the root.
+        if let Some(view) = &code_intel {
+            subscriptions.push(cx.observe(view, |_, _, cx| cx.notify()));
+            subscriptions.push(cx.subscribe_in(view, window, |this, _, event, window, cx| {
+                this.code_intel_event(event, window, cx)
+            }));
+        }
         Self {
             product,
             file_types,
@@ -327,6 +350,8 @@ impl Workbench {
             active: None,
             pending: 0,
             message: None,
+            notice: None,
+            notice_timer: Task::ready(()),
             go_to_line: None,
             resizing: None,
             save_settings: SaveSettings::default(),
@@ -361,6 +386,67 @@ impl Workbench {
     /// services.
     pub fn code_intel(&self) -> Option<&Entity<CodeIntelView>> {
         self.code_intel.as_ref()
+    }
+
+    fn code_intel_event(
+        &mut self,
+        event: &CodeIntelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            // A popup filled by an answer: drawn now, not at the next
+            // refresh (as the find bar's matches are).
+            CodeIntelEvent::Redraw => crate::shot::draw_now(window),
+            CodeIntelEvent::Notice(text) => self.show_notice(text.clone().into(), cx),
+            CodeIntelEvent::OpenFile(path) => self.open_file(path.clone(), window, cx),
+            CodeIntelEvent::OpenText { title, text } => {
+                self.open_text(title.clone(), text.clone(), window, cx)
+            }
+        }
+    }
+
+    /// A notice in the status bar for ten seconds.
+    pub fn show_notice(&mut self, text: SharedString, cx: &mut Context<Self>) {
+        self.notice = Some(text.clone());
+        self.notice_timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(NOTICE_TIME).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.notice.as_ref() == Some(&text) {
+                    this.notice = None;
+                    cx.notify();
+                }
+            });
+        });
+        cx.notify();
+    }
+
+    /// The notice shown in the status bar.
+    pub fn notice(&self) -> Option<&SharedString> {
+        self.notice.as_ref()
+    }
+
+    /// Opens a text that is no file (a server's error output) in a
+    /// read-only tab titled `title`, or shows it in that tab again.
+    pub fn open_text(
+        &mut self,
+        title: String,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = PathBuf::from(&title);
+        let mut buffer = text::Buffer::new(&text);
+        buffer.set_read_only(true);
+        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+            self.tabs[i].editor.update(cx, |e, cx| {
+                *e.buffer_mut() = buffer;
+                e.buffer_reloaded(cx);
+            });
+            self.activate(i, window, cx);
+            return;
+        }
+        self.add_tab(path, buffer, window, cx);
     }
 
     /// Creates the product's status bar widgets (once, after the workbench
@@ -411,6 +497,9 @@ impl Workbench {
         let active = self.active_file(cx);
         if active != self.reported_active_file {
             self.reported_active_file = active.clone();
+            if let Some(view) = &self.code_intel {
+                view.update(cx, |v, cx| v.active_file_changed(active.as_deref(), cx));
+            }
             cx.emit(WorkbenchEvent::ActiveFileChanged(active));
         }
     }
@@ -529,6 +618,7 @@ impl Workbench {
             "file_index": self.project_files.read(cx).index().map(|i| i.len()),
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
+            "notice": self.notice.as_ref().map(|m| m.to_string()),
             "theme": cx.theme().id(),
         })
     }
@@ -749,7 +839,9 @@ impl Workbench {
             .update(cx, |p, cx| p.tab_opened(&path, &editor, cx));
         if let Some(view) = &self.code_intel {
             let language = file_type.as_ref().and_then(|t| t.language_id);
-            view.update(cx, |v, cx| v.editor_opened(&path, language, &editor, cx));
+            view.update(cx, |v, cx| {
+                v.editor_opened(&path, language, &editor, window, cx)
+            });
         }
         let index = self.tabs.len();
         self.tabs.push(Tab {
@@ -2125,6 +2217,16 @@ impl Workbench {
             )
     }
 
+    /// The active tab's editor, with what code intelligence adds around
+    /// it (its commands, and the key context of a popup over it).
+    fn editor_container(&self, editor: &Entity<Editor>, cx: &App) -> Div {
+        let container = div().flex_1().min_h(px(0.0)).child(editor.clone());
+        match &self.code_intel {
+            Some(view) => code_intel_ui::editor_container(container, view, editor, cx),
+            None => container,
+        }
+    }
+
     fn render_editor_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(active) = self.active {
             let theme = cx.theme();
@@ -2157,12 +2259,7 @@ impl Workbench {
                         .is_open()
                         .then(|| self.tabs[active].find.clone()),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .child(self.tabs[active].editor.clone()),
-                )
+                .child(self.editor_container(&self.tabs[active].editor, cx))
                 .into_any_element();
         }
         // As the reference IDE's text painter draws them: a 16 px label
@@ -2233,6 +2330,13 @@ impl Workbench {
                     .text_color(theme.color(UiRole::Danger))
                     .child(message.clone()),
             );
+        } else if let Some(notice) = &self.notice {
+            left = left.child(
+                div()
+                    .debug_selector(|| "status-notice".into())
+                    .whitespace_nowrap()
+                    .child(notice.clone()),
+            );
         } else if let Some(project) = self.project(cx) {
             let mut parts: Vec<String> = vec![project.name().to_owned()];
             let mut icon = None;
@@ -2262,6 +2366,12 @@ impl Workbench {
             }
         }
         let mut right = div().flex().flex_row().items_center().gap(px(2.0));
+        // The Language Services widget comes right after the caret
+        // position (first without an editor).
+        let mut language_services = self
+            .code_intel
+            .as_ref()
+            .and_then(|view| code_intel_ui::services::status_widget(view, cx));
         if let Some(editor) = self.active_editor() {
             let e = editor.read(cx);
             let p = e.caret_point();
@@ -2276,6 +2386,7 @@ impl Workbench {
             }
             right = right
                 .child(chrome::status_widget("status-caret", caret.into(), cx))
+                .children(language_services.take())
                 .child(chrome::status_widget(
                     "status-line-ending",
                     e.buffer().line_ending().label().into(),
@@ -2291,6 +2402,15 @@ impl Workbench {
                     format!("{} spaces", e.config().indent).into(),
                     cx,
                 ));
+        }
+        if let Some(widget) = language_services {
+            right = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.0))
+                .child(widget)
+                .child(right);
         }
         right = right.children(self.status_widgets.iter().cloned());
         if self
@@ -2510,7 +2630,8 @@ impl Render for Workbench {
             .children(
                 self.code_intel
                     .as_ref()
-                    .and_then(|view| view.read(cx).render_overlay(window, cx)),
+                    .map(|view| view.read(cx).render_overlay(window, cx))
+                    .unwrap_or_default(),
             )
             .children(first_frame)
             // Measurements: the end of the frame's paint.
@@ -2518,11 +2639,22 @@ impl Render for Workbench {
                 let editor = self.active_editor().cloned();
                 let find = self.active_find_bar().cloned();
                 let se = self.search_everywhere.clone();
+                let completion = self.code_intel.as_ref().is_some_and(|v| {
+                    v.read(cx)
+                        .popups()
+                        .is_shown(code_intel_ui::completion::CONTEXT)
+                });
                 d.child(
                     canvas(
                         |_, _, _| (),
                         move |_, _, _, cx| {
-                            crate::bench::frame_painted(editor.as_ref(), find.as_ref(), &se, cx)
+                            crate::bench::frame_painted(
+                                editor.as_ref(),
+                                find.as_ref(),
+                                &se,
+                                completion,
+                                cx,
+                            )
                         },
                     )
                     .absolute()

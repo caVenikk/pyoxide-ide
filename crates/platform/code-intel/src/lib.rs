@@ -325,6 +325,7 @@ mod tests {
         let intel: std::sync::Arc<dyn CodeIntel> = std::sync::Arc::new(Nothing(EventHub::new()));
         let doc = DocumentId::new("/p/a.py");
         assert_eq!(intel.servers_for(&doc), [ServerId::new("ruff")]);
+        assert!(intel.completion_triggers(&doc).is_empty());
         assert!(intel.servers_for(&DocumentId::new("/p/b.py")).is_empty());
 
         assert_eq!(

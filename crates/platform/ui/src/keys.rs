@@ -42,9 +42,11 @@ pub fn format_keystroke(keystroke: &Keystroke, macos: bool) -> String {
     }
 }
 
+/// macOS shows the symbols of the reference's `MacKeymapUtil` (Return ⏎,
+/// Delete ⌦, Home ↖, End ↘, Page Up ⇞, Page Down ⇟, ...).
 fn key_name(key: &str, macos: bool) -> String {
     let named = match key {
-        "enter" if macos => "↩",
+        "enter" if macos => "⏎",
         "escape" if macos => "⎋",
         "backspace" if macos => "⌫",
         "tab" if macos => "⇥",
@@ -52,6 +54,11 @@ fn key_name(key: &str, macos: bool) -> String {
         "down" if macos => "↓",
         "left" if macos => "←",
         "right" if macos => "→",
+        "delete" if macos => "⌦",
+        "home" if macos => "↖",
+        "end" if macos => "↘",
+        "pageup" if macos => "⇞",
+        "pagedown" if macos => "⇟",
         "enter" => "Enter",
         "escape" => "Esc",
         "backspace" => "Backspace",
@@ -117,7 +124,15 @@ mod tests {
         assert_eq!(text("cmd-g", true), "⌘G");
         assert_eq!(text("cmd-shift-g", true), "⇧⌘G");
         assert_eq!(text("ctrl-alt-x", true), "⌃⌥X");
-        assert_eq!(text("shift-enter", true), "⇧↩");
+        assert_eq!(text("shift-enter", true), "⇧⏎");
+        assert_eq!(text("delete", true), "⌦");
+        assert_eq!(text("cmd-home", true), "⌘↖");
+        assert_eq!(text("end", true), "↘");
+        assert_eq!(text("pageup", true), "⇞");
+        assert_eq!(text("alt-pagedown", true), "⌥⇟");
+        assert_eq!(text("space", true), "Space");
+        assert_eq!(text("delete", false), "Delete");
+        assert_eq!(text("pageup", false), "Page Up");
         assert_eq!(text("f3", false), "F3");
         assert_eq!(text("shift-f3", false), "Shift+F3");
         assert_eq!(text("ctrl-alt-e", false), "Ctrl+Alt+E");

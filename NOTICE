@@ -358,6 +358,18 @@ here with: source URL, commit, file(s), license, and what was changed.
   quickfixBulb), json/ (object) and general/inspections/ (light only).
   Unchanged copies.
 
+- crates/platform/ui/assets/icons/actions/stopAndRestart.svg,
+  general/settings.svg, status/error.svg, nodes/errorMark.svg (with their
+  `_dark.svg` variants)
+  Icons of the IntelliJ Platform Community (Apache-2.0, license text in
+  LICENSE-APACHE), https://github.com/JetBrains/intellij-community @
+  pycharm/2026.2.3 (404a109fe630a2b9013f10b71081f87c9dbb32e2):
+  platform/icons/src/actions/stopAndRestart.svg, platform/icons/src/expui/
+  general/settings.svg, platform/icons/src/expui/status/error.svg and
+  platform/icons/src/nodes/errorMark.svg (the icons the New UI shows for
+  AllIcons.Actions.StopAndRestart, the settings gear, AllIcons.General.Error
+  and AllIcons.Nodes.ErrorMark). Unchanged copies.
+
 - crates/platform/code-intel, crates/platform/lsp-client,
   crates/platform/code-intel-ui, crates/python/py-lsp,
   docs/adr/0010-language-services.md, docs/adr/0011-type-server.md
@@ -379,6 +391,36 @@ here with: source URL, commit, file(s), license, and what was changed.
   platform-resources-en/src/messages/ActionsBundle.properties. Only
   behaviour, formats and strings are used; reimplemented in Rust, no code
   is copied.
+
+- crates/platform/code-intel-ui (completion and the Language Services
+  widget), crates/platform/ui/src/keys.rs (macOS key symbols)
+  Follow the IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2): the lookup keys of platform/
+  lang-impl/src/com/intellij/codeInsight/lookup/impl/LookupActionHandler.java
+  and actions/ChooseItemAction.java, the row layout and match colour of
+  LookupCellRenderer.kt, the hint "Press {0} to insert, {1} to replace"
+  (completion.ad.press.0.to.insert.1.to.replace of platform/analysis-api/
+  resources/messages/CodeInsightBundle.properties) and the focus of
+  automatic popups of platform/lang-impl/src/com/intellij/codeInsight/
+  completion/CompletionProgressIndicator.java, the matching and its
+  leading-underscore rules of platform/analysis-impl/src/com/intellij/
+  codeInsight/completion/impl/CamelHumpMatcher.java, the order of
+  BaseCompletionService.defaultSorter and platform/lsp-impl/src/impl/
+  features/completion/LspCompletionWeigher.kt, the automatic popup of
+  platform/lang-impl/src/com/intellij/codeInsight/editorActions/
+  CompletionAutoPopupHandler.java and LspAutoPopupTypedHandler.kt, the
+  parentheses of platform/analysis-api/src/com/intellij/codeInsight/
+  completion/util/ParenthesesInsertHandler.java and python/python-psi-impl/
+  src/com/jetbrains/python/codeInsight/completion/PyFunctionInsertHandler.java,
+  the widget and popup of platform/lang-impl/src/com/intellij/platform/lang/
+  lsWidget/impl/LanguageServiceWidget.kt, platform/lsp/src/api/lsWidget/
+  LspClientWidgetItem.kt and platform/lsp-impl/src/impl/lsWidget/
+  LspWidgetInternalServiceImpl.kt with their strings in platform/lang-api/
+  resources/messages/LangBundle.properties and platform/lsp/resources/
+  messages/LspBundle.properties, and the macOS key symbols of platform/
+  platform-api/src/com/intellij/openapi/keymap/MacKeymapUtil.java. Only
+  behaviour and strings are used; reimplemented in Rust, no code is copied.
 
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,

@@ -214,6 +214,7 @@ struct State {
     held: HashSet<RequestKind>,
     pending: Vec<Box<dyn Pending>>,
     status: Vec<ServerStatus>,
+    completion_triggers: Vec<char>,
 }
 
 /// An in-memory [`CodeIntel`] (see the module documentation).
@@ -602,6 +603,11 @@ impl FakeCodeIntel {
         });
     }
 
+    /// The characters every document reports as completion triggers.
+    pub fn set_completion_triggers(&self, triggers: &[char]) {
+        self.lock().completion_triggers = triggers.to_vec();
+    }
+
     /// Replaces the servers' states and sends one [`IntelEvent::Status`]
     /// per server.
     pub fn set_status(&self, status: Vec<ServerStatus>) {
@@ -701,6 +707,15 @@ impl CodeIntel for FakeCodeIntel {
             },
             Err(IntelError::Unsupported),
         )
+    }
+
+    fn completion_triggers(&self, doc: &DocumentId) -> Vec<char> {
+        let state = self.lock();
+        if state.documents.contains_key(doc) {
+            state.completion_triggers.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     fn resolve_completion(&self, doc: &DocumentId, item: CompletionItem) -> Intel<CompletionItem> {
@@ -1025,6 +1040,12 @@ mod tests {
         fake.set_status(vec![ruff.clone()]);
         assert_eq!(events.try_recv().unwrap(), IntelEvent::Status(ruff));
         assert_eq!(intel.servers_for(&doc()), [ServerId::new("ruff")]);
+        // Trigger characters are those of open documents.
+        fake.set_completion_triggers(&['.']);
+        assert!(intel.completion_triggers(&doc()).is_empty());
+        intel.did_open(&doc(), "python", 1, &Rope::from_str(""));
+        assert_eq!(intel.completion_triggers(&doc()), ['.']);
+        fake.take_calls();
         let problem = Diagnostic::new(
             Point::new(0, 0)..Point::new(0, 6),
             Severity::Error,

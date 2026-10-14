@@ -46,6 +46,8 @@ struct Frame {
     find_text: Option<String>,
     /// The text whose rows Search Everywhere showed.
     se_text: Option<String>,
+    /// The completion popup was drawn.
+    completion: bool,
 }
 
 #[derive(Default)]
@@ -69,6 +71,7 @@ pub fn frame_painted(
     editor: Option<&Entity<Editor>>,
     find: Option<&Entity<FindBar>>,
     se: &Entity<SearchEverywhere>,
+    completion: bool,
     cx: &App,
 ) {
     let end = Instant::now();
@@ -99,6 +102,7 @@ pub fn frame_painted(
             highlighted,
             find_text,
             se_text,
+            completion,
         });
     });
 }
@@ -198,6 +202,7 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
             Bench::Find(query) => find(window, query, cx).await,
             Bench::FindInFiles(query) => find_in_files(window, query, cx).await,
             Bench::GoToFile(query) => go_to_file(window, query, cx).await,
+            Bench::Completion(latency) => completion(window, latency, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -917,5 +922,112 @@ async fn cursor(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
     env::marker(&format!(
         "cursor {}",
         json!({ "window_active": active, "places": results, "views": views })
+    ));
+}
+
+/// Completion items of the bench service, and the popups measured.
+pub const COMPLETION_ITEMS: usize = 200;
+const COMPLETION_RUNS: usize = 30;
+
+/// The completion popup: `.` typed after a name at the end of the open
+/// file opens it (the service's trigger char); from the key to the first
+/// frame that draws the popup, and from the service's answer (`latency`
+/// ms after the request) to that frame, the client's part, which the
+/// budget limits to 100 ms (docs/performance.md).
+async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut AsyncApp) {
+    if !settle(window, cx, Duration::from_secs(120)).await {
+        env::marker("completion {\"error\": \"the file did not open\"}");
+        return;
+    }
+    let Some(editor) = active_editor(window, cx) else {
+        return;
+    };
+    // A line of its own at the end of the file, the caret after a name.
+    let _ = editor.update(cx, |e, cx| {
+        let end = e.buffer().len_chars();
+        e.set_selections(text::SelectionSet::caret(end), cx);
+        e.insert("\nbench_object", cx);
+    });
+    sleep(cx, Duration::from_secs(2)).await;
+    let display = display_frames(window, cx).await;
+    let key = |name: &str| Keystroke::parse(name).ok();
+    let (Some(dot), Some(escape), Some(backspace)) = (key("."), key("escape"), key("backspace"))
+    else {
+        return;
+    };
+    let mut key_to_popup = Vec::new();
+    let mut answer_to_popup = Vec::new();
+    let mut missed = 0;
+    for _ in 0..COMPLETION_RUNS {
+        if !display {
+            force_frame(window, cx);
+        }
+        let sent = Instant::now();
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            window.dispatch_keystroke(dot.clone(), cx);
+        });
+        let handled = Instant::now();
+        if !display {
+            force_frame(window, cx);
+        }
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut shown = None;
+        while Instant::now() < until {
+            sleep(cx, Duration::from_millis(1)).await;
+            let answered = code_intel_ui::bench::last_answer().filter(|a| *a >= sent);
+            if !display && answered.is_some() {
+                force_frame(window, cx);
+            }
+            if let Some(f) = frames()
+                .into_iter()
+                .find(|f| f.start >= handled && f.completion)
+            {
+                shown = Some((f, answered));
+                break;
+            }
+        }
+        match shown {
+            Some((f, answered)) => {
+                key_to_popup.push(ms(f.end - sent));
+                let answered = answered.or(code_intel_ui::bench::last_answer());
+                if let Some(a) = answered.filter(|a| *a <= f.end) {
+                    answer_to_popup.push(ms(f.end - a));
+                }
+            }
+            None => missed += 1,
+        }
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            window.dispatch_keystroke(escape.clone(), cx);
+            window.dispatch_keystroke(backspace.clone(), cx);
+        });
+        sleep(cx, Duration::from_millis(300)).await;
+    }
+    // With `PYOXIDE_SHOT`: a picture of the popup.
+    if let Some(path) = env::shot_path() {
+        let _ = cx.update_window(window.into(), |_, window, cx| {
+            window.dispatch_keystroke(dot.clone(), cx);
+        });
+        sleep(cx, Duration::from_millis(latency + 500)).await;
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            crate::shot::request_display(window)
+        });
+        sleep(cx, Duration::from_millis(300)).await;
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            match crate::shot::save(window, &path) {
+                Ok((w, h)) => env::marker(&format!("shot {} {w}x{h}", path.display())),
+                Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
+            }
+        });
+    }
+    env::marker(&format!(
+        "completion {}",
+        json!({
+            "frames": frame_source(display),
+            "latency_ms": latency,
+            "items": COMPLETION_ITEMS,
+            "popups_missing": missed,
+            "key_to_popup_ms": stats(key_to_popup),
+            "answer_to_popup_ms": stats(answer_to_popup),
+        })
     ));
 }
