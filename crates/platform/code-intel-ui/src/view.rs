@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use code_intel::{
-    AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, FileChange, FileChangeKind,
-    IntelError, IntelEvent, ServerId,
+    AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, Feature, FileChange,
+    FileChangeKind, IntelError, IntelEvent, ServerId,
 };
-use editor::{Editor, EditorEvent};
+use editor::{Analysis, Editor, EditorEvent};
 use gpui::{
     AnyElement, App, AppContext as _, Context, DismissEvent, Entity, EntityId, EventEmitter,
     Focusable as _, InteractiveElement, SharedString, Subscription, Task, Window,
@@ -242,6 +242,7 @@ impl CodeIntelView {
         let doc = Document::new(id, language, editor.clone(), text, vec![events, blur]);
         services.did_open(&doc.id, language, doc.version(), doc.versions.text());
         self.documents.insert(path.to_owned(), doc);
+        self.update_analysis(path, cx);
         cx.notify();
     }
 
@@ -307,7 +308,9 @@ impl CodeIntelView {
                 if let Some(services) = &self.services {
                     services.did_change(&doc.id, version, applied, doc.versions.text());
                 }
+                doc.reports = 0;
                 let editor = doc.editor.entity_id();
+                self.update_analysis(path, cx);
                 if self.popups.hide(HINT_CONTEXT) {
                     cx.notify();
                 }
@@ -329,7 +332,9 @@ impl CodeIntelView {
                 if let Some(services) = &self.services {
                     services.did_reload(&doc.id, version, &text);
                 }
+                doc.reports = 0;
                 let editor = doc.editor.entity_id();
+                self.update_analysis(path, cx);
                 if self.completion.as_ref().is_some_and(|s| s.path == path) {
                     self.close_completion(cx);
                 }
@@ -363,7 +368,7 @@ impl CodeIntelView {
                 version,
                 items,
             } => {
-                let Some(document) = self.documents.get(doc.path()) else {
+                let Some(document) = self.documents.get_mut(doc.path()) else {
                     return;
                 };
                 // A report for a text that is not known any more: a newer
@@ -371,16 +376,56 @@ impl CodeIntelView {
                 let Some(marks) = marks::marks(&document.versions, version, &items) else {
                     return;
                 };
+                if version == document.version() {
+                    document.reports += 1;
+                }
                 document
                     .editor
                     .update(cx, |e, cx| e.set_diagnostics(marks, cx));
+                self.update_analysis(doc.path(), cx);
             }
             IntelEvent::Status(_) => {
+                // Servers starting, stopping or taking documents change
+                // whose analysis is due.
+                let paths: Vec<PathBuf> = self.documents.keys().cloned().collect();
+                for path in paths {
+                    self.update_analysis(&path, cx);
+                }
                 self.refresh_services_popup(cx);
                 cx.notify();
             }
             _ => {}
         }
+    }
+
+    // ---- analysis ---------------------------------------------------------------
+
+    /// How far the analysis of a document is, for the editor's inspection
+    /// widget: running while a server that reports diagnostics on it (one
+    /// that runs or starts) has not reported on its current text, done
+    /// when all have; off when none does (nothing analyses the file, as
+    /// for files of other types).
+    fn update_analysis(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let (Some(doc), Some(services)) = (self.documents.get(path), &self.services) else {
+            return;
+        };
+        let reporting = services
+            .status()
+            .iter()
+            .filter(|s| {
+                s.serves(&doc.id)
+                    && s.features.contains(Feature::Diagnostics)
+                    && s.state.is_running()
+            })
+            .count();
+        let analysis = if reporting == 0 {
+            Analysis::Off
+        } else if doc.reports >= reporting {
+            Analysis::Done
+        } else {
+            Analysis::Running
+        };
+        doc.editor.update(cx, |e, cx| e.set_analysis(analysis, cx));
     }
 
     // ---- completion -----------------------------------------------------------
@@ -487,13 +532,9 @@ impl CodeIntelView {
     ) {
         self.close_completion(cx);
         self.sessions += 1;
-        self.completion = Some(Session::new(
-            self.sessions,
-            path,
-            editor.clone(),
-            start,
-            explicit,
-        ));
+        let mut session = Session::new(self.sessions, path, editor.clone(), start, explicit);
+        session.member = start > 0 && editor.read(cx).buffer().char_at(start - 1) == Some('.');
+        self.completion = Some(session);
     }
 
     /// Asks the services for the items at the caret of the session's

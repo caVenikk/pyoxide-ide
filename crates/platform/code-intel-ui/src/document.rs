@@ -21,6 +21,9 @@ pub struct Document {
     pub language: String,
     pub editor: Entity<Editor>,
     pub versions: Versions,
+    /// Diagnostics reports for the current version so far (one comes from
+    /// each server that reports on it).
+    pub reports: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -37,6 +40,7 @@ impl Document {
             language: language.to_owned(),
             editor,
             versions: Versions::new(text),
+            reports: 0,
             _subscriptions: subscriptions,
         }
     }
