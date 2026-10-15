@@ -31,6 +31,6 @@ pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use file_types::{FileType, HighlighterFactory};
 pub use project::AutoExclusions;
 pub use project_panel::{NewItem, NewItemKind, NewTemplate};
-pub use run::{RunHook, RunProvider, RunRequest, RunSpec};
+pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};
 pub use settings::{SaveSettings, SyncSettings};
 pub use workbench::{Workbench, WorkbenchEvent};

@@ -583,7 +583,16 @@ here with: source URL, commit, file(s), license, and what was changed.
   dialog's tree, toolbar and labels of platform/execution-impl/src/com/
   intellij/execution/impl/RunConfigurable.kt and the Python form's fields
   and options of python/src/com/jetbrains/python/run/
-  PythonConfigurationFragmentedEditor.kt, with the labels of
+  PythonConfigurationFragmentedEditor.kt, the form's layout (head
+  fragments, labelled rows, tags, "Modify options" with its shortcut, the
+  Run button with the executors) of platform/execution-impl/src/com/
+  intellij/execution/ui/RunConfigurationFragmentedEditor.java,
+  FragmentedSettingsEditor.java and SettingsEditorFragment.java, the
+  dialog window of platform/platform-api/src/com/intellij/openapi/ui/
+  DialogWrapper.java (crates/platform/ui/src/dialog_window.rs), the tree's
+  initial expansion of RunConfigurable.kt (selectConfigurableOnShow) and
+  the expanded paths of its fields (PathMacroManager), with the
+  labels of
   ExecutionBundle.properties, ActionsBundle.properties, PyBundle.properties
   and ShBundle.properties. Changes: reimplemented in Rust; the natural
   order works on characters, the name trimming counts characters instead

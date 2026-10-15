@@ -59,17 +59,23 @@
 - Step 5: Save Configuration makes it permanent (it stays personal); Pin
   puts it under "Pinned"; Delete asks "Are you sure you want to delete
   …?" ("Don't ask again"), Yes deletes it, a shared one's file too.
-- Step 6: the dialog "Run/Debug Configurations" shows the tree type →
-  folder → configuration in list order, the toolbar Add New Configuration
-  (a list of types), Remove Configuration, Copy Configuration, Save
-  Configuration, Create New Folder, Sort Configurations, the name with
-  "Store as project file", the type's fields and Modify options (groups
-  Operating System, Python, Debug, Before Launch, Allow multiple
-  instances; options at their default are hidden from the form), an error
-  line ("Please specify a script name"), Cancel, Apply, OK. "Store as
-  project file" with personal values asks whether the values stay
-  personal; the shared file lists those variables by name only. Cancel
-  drops every change since the last Apply.
+- Step 6: the dialog "Run/Debug Configurations" opens as a window of its
+  own (system title bar, movable, resizable, modal: the main window takes
+  no input until it closes) and shows the tree type → folder →
+  configuration in list order (types and folders collapse with Left and
+  expand with Right), the toolbar Add New Configuration (a list of
+  types), Remove Configuration, Copy Configuration, Save Configuration
+  (for a temporary one), Create New Folder, Sort Configurations, the name
+  with "Store as project file", the Run header with Modify options ⌥M
+  (groups Operating System, Python, Debug, Before Launch, Allow multiple
+  instances), the module, the interpreter with its version and path (not
+  editable yet), script or module with the path field, the parameters,
+  "Press ⌥ for field hints", the labelled rows, the options that are on
+  as tags with a remove button, an error line ("Please specify a script
+  name"), the Run button, Cancel, Apply, OK. "Store as project file" with
+  personal values asks in the dialog whether the values stay personal;
+  the shared file lists those variables by name only. Cancel drops every
+  change since the last Apply; Run applies, closes and runs.
 - Step 7: the pytest configuration is listed under "Python tests", read-
   only in the dialog with its decoded options; Run is disabled and says
   the type is not supported yet. The configuration with the missing
@@ -87,10 +93,12 @@
 `run.configurations.import-reference`, `run.configurations.dialog.*`
 (`select`, `next`, `previous`, `add`, `remove`, `copy`,
 `save-temporary`, `new-folder`, `sort`, `set {"field", "value"}`,
-`toggle-option {"option"}`, `modify-options`, `apply`, `ok`, `cancel`),
-`dialog.choose`, `run.run`, `run.state` (`configurations`, `widget`,
-`menu`, `edit_dialog`), `workbench.state` (`notice`, `message`,
-`dialog`).
+`toggle-option {"option"}`, `modify-options`, `apply`, `ok`, `cancel`,
+`run`, `expand`, `collapse`, `browse {"field"}`), `dialog.choose`,
+`run.run`, `run.state` (`configurations`, `widget`, `menu`,
+`edit_dialog` with its `prompt`), `workbench.state` (`notice`,
+`message`, `dialog`). While the dialog is open, commands sent to the
+main window run in the dialog.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/run-debug-configuration.html;

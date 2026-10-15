@@ -28,11 +28,14 @@ struct H<'a> {
 }
 
 impl H<'_> {
+    /// Draws every window (the main one and an open dialog).
     fn draw(&mut self) {
         self.cx.run_until_parked();
-        self.cx
-            .update_window(self.window.into(), |_, window, cx| window.draw(cx).clear())
-            .unwrap();
+        for window in self.cx.update(|cx| cx.windows()) {
+            let _ = self
+                .cx
+                .update_window(window, |_, window, cx| window.draw(cx).clear());
+        }
     }
 
     fn invoke(&mut self, id: &str, args: Value) -> Value {
@@ -564,19 +567,19 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     let mut h = setup(cx, &root);
     h.loaded();
     h.invoke("run.configurations.edit", json!({"name": "alpha"}));
+    // The dialog is a window of its own, modal to the main one.
+    let main: gpui::AnyWindowHandle = h.window.into();
+    assert!(
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .is_some()
+    );
+    assert_eq!(h.cx.update(|cx| cx.windows().len()), 2);
     let d = dialog(&mut h);
     assert_eq!(d["title"], json!("Run/Debug Configurations"));
+    // Collapsed but for the way to the selected configuration.
     assert_eq!(
         tree(&mut h),
-        [
-            "Script",
-            "  Group",
-            "    beta",
-            "  alpha",
-            "  shared",
-            "FutureType",
-            "  later"
-        ]
+        ["Script", "  Group", "  alpha", "  shared", "FutureType"]
     );
     assert_eq!(
         d["selected"],
@@ -611,9 +614,14 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
         "run.configurations.dialog.set",
         json!({"field": "store-as-project-file", "value": "true"}),
     );
-    let state = h.invoke("workbench.state", json!(null));
-    assert_eq!(state["dialog"]["title"], json!("Store as Project File"));
+    // The question is asked in the dialog's window.
+    assert_eq!(
+        dialog(&mut h)["prompt"]["title"],
+        json!("Store as Project File")
+    );
+    assert!(h.invoke("workbench.state", json!(null))["dialog"].is_null());
     h.invoke("dialog.choose", json!({"button": "Keep Values Personal"}));
+    assert!(dialog(&mut h)["prompt"].is_null());
     assert_eq!(dialog(&mut h)["store_as_project_file"], json!(true));
     assert_eq!(field(&mut h, "shared-env")["value"], json!(""));
     // A rename, then Add, Copy, Create New Folder, Remove, Sort.
@@ -641,6 +649,32 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     h.invoke("run.configurations.dialog.remove", json!(null));
     assert!(!tree(&mut h).iter().any(|n| n.trim() == "Unnamed (1)"));
     h.invoke("run.configurations.dialog.sort", json!(null));
+    // Path fields show their paths expanded (as the reference loads them);
+    // they are stored relative to the project.
+    h.invoke(
+        "run.configurations.dialog.add",
+        json!({"type": "shell-script"}),
+    );
+    let dir = field(&mut h, "working-directory")["value"].clone();
+    assert!(
+        Path::new(dir.as_str().unwrap()).is_absolute(),
+        "{dir}: the project folder"
+    );
+    let script = Path::new(dir.as_str().unwrap())
+        .join("tools")
+        .join("build.sh");
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "script", "value": script.display().to_string()}),
+    );
+    let shown = field(&mut h, "script")["value"].clone();
+    assert_eq!(Path::new(shown.as_str().unwrap()), script.as_path());
+    h.invoke("run.configurations.dialog.apply", json!(null));
+    h.wait("the stored script path", |_| {
+        std::fs::read_to_string(root.join(".oxide/workspace.toml"))
+            .is_ok_and(|t| t.contains("script = \"tools/build.sh\""))
+    });
+    h.invoke("run.configurations.dialog.remove", json!(null));
     // Modify options: a common option.
     h.invoke(
         "run.configurations.dialog.select",
@@ -666,6 +700,11 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     assert_eq!(dialog(&mut h)["read_only"], json!(true));
     h.invoke("run.configurations.dialog.ok", json!(null));
     assert!(h.run()["edit_dialog"].is_null());
+    assert!(
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .is_none()
+    );
+    assert_eq!(h.cx.update(|cx| cx.windows().len()), 1);
     let s = h.wait("the shared file", |_| {
         root.join(".oxide/run/renamed.toml").is_file()
     });
@@ -681,6 +720,15 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     h.invoke("run.configurations.dialog.cancel", json!(null));
     let _ = invoke_and_draw(&mut h, "workbench.state", json!(null));
     assert!(names(&h.run()).contains(&"beta".to_owned()));
+    // Run applies, closes the dialog and runs the configuration.
+    h.invoke("run.configurations.edit", json!({"name": "beta"}));
+    h.invoke("run.configurations.dialog.run", json!(null));
+    assert!(h.run()["edit_dialog"].is_null());
+    h.wait("the run of beta", |s| {
+        s["tabs"]
+            .as_array()
+            .is_some_and(|t| t.iter().any(|t| t["title"] == json!("beta")))
+    });
 }
 
 /// A configuration's file open in an editor: the application's writes of

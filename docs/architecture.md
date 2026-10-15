@@ -94,8 +94,10 @@ Platform (`crates/platform/`, language-agnostic):
   schemes and UI themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
   metrics, bundled fonts, colour icons rasterized at device scale, common
-  components, context menus and list popups, the UI command index
-  (`ui_commands!`, `command::invoke`).
+  components, context menus and list popups, dialog windows (a separate
+  OS window modal to its parent: `dialog_window`, used by the Run/Debug
+  Configurations dialog), the UI command index (`ui_commands!`,
+  `command::invoke`, which runs commands in an open dialog).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar, a movable and resizable popup frame, the Find in Files
   and Replace in Files popup with its preview, Search Everywhere and Go to

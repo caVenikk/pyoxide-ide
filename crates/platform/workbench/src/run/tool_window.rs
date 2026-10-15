@@ -160,11 +160,11 @@ pub struct RunToolWindow {
     launching: Vec<LaunchKey>,
     /// The project's run configurations.
     configs: Entity<RunConfigs>,
-    /// The Run/Debug Configurations dialog while it is open, where the
-    /// focus returns when it closes, and the workbench's subscription.
+    /// The Run/Debug Configurations dialog while it is open, its window
+    /// and the workbench's subscription.
     edit_dialog: Option<(
         Entity<super::edit_dialog::EditDialog>,
-        Option<FocusHandle>,
+        gpui::AnyWindowHandle,
         Subscription,
     )>,
     next_id: u64,
@@ -211,20 +211,25 @@ impl RunToolWindow {
         self.edit_dialog.as_ref().map(|(d, _, _)| d)
     }
 
-    /// Keeps the open dialog (`None` closes it); returns where the focus
-    /// goes back to when it closes.
+    /// The window of the open dialog.
+    pub fn edit_dialog_window(&self) -> Option<gpui::AnyWindowHandle> {
+        self.edit_dialog.as_ref().map(|(_, w, _)| *w)
+    }
+
+    /// Keeps the open dialog (`None` forgets it); returns the window of the
+    /// one it had.
     pub fn set_edit_dialog(
         &mut self,
         dialog: Option<(
             Entity<super::edit_dialog::EditDialog>,
-            Option<FocusHandle>,
+            gpui::AnyWindowHandle,
             Subscription,
         )>,
         cx: &mut Context<Self>,
-    ) -> Option<FocusHandle> {
+    ) -> Option<gpui::AnyWindowHandle> {
         let old = std::mem::replace(&mut self.edit_dialog, dialog);
         cx.notify();
-        old.and_then(|(_, focus, _)| focus)
+        old.map(|(_, window, _)| window)
     }
 
     /// A project was opened: its run configurations load.

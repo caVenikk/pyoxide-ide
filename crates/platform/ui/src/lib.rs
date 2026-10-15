@@ -8,6 +8,7 @@
 
 pub mod command;
 pub mod components;
+pub mod dialog_window;
 pub mod fonts;
 pub mod icons;
 pub mod keys;

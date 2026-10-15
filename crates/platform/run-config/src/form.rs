@@ -40,6 +40,10 @@ pub struct Field {
     /// A note under the field (a path variable Pyoxide does not expand on
     /// another machine).
     pub note: Option<String>,
+    /// In the head of the form, without a label: the reference's fragments
+    /// above the labelled rows (interpreter, script, parameters), whose
+    /// label is a hint shown while Alt is held.
+    pub head: bool,
 }
 
 impl Field {
@@ -51,7 +55,14 @@ impl Field {
             value: value.into(),
             placeholder: None,
             note: None,
+            head: false,
         }
+    }
+
+    /// In the head of the form (see [`Field::head`]).
+    pub fn head(mut self) -> Self {
+        self.head = true;
+        self
     }
 
     pub fn placeholder(mut self, text: &str) -> Self {
@@ -76,6 +87,9 @@ pub struct OptionItem {
     pub id: String,
     pub label: String,
     pub checked: bool,
+    /// A flag shown under the form as a tag with a remove button while it
+    /// is on (the reference's tag fragments).
+    pub tag: bool,
 }
 
 impl OptionItem {
@@ -85,7 +99,14 @@ impl OptionItem {
             id: id.to_owned(),
             label: label.to_owned(),
             checked,
+            tag: false,
         }
+    }
+
+    /// Shown as a tag while it is on (see [`OptionItem::tag`]).
+    pub fn tag(mut self) -> Self {
+        self.tag = true;
+        self
     }
 }
 
@@ -140,25 +161,29 @@ pub fn common_options(config: &RunConfiguration, allow_parallel_default: bool) -
             common::ACTIVATE_TOOL_WINDOW,
             "Open run/debug tool window when started",
             config.activate_tool_window,
-        ),
+        )
+        .tag(),
         OptionItem::new(
             "Before Launch",
             common::FOCUS_TOOL_WINDOW,
             "Focus run/debug tool window when started",
             config.focus_tool_window,
-        ),
+        )
+        .tag(),
         OptionItem::new(
             "Before Launch",
             common::EDIT_BEFORE_RUN,
             "Show the run/debug configuration settings before start",
             config.edit_before_run,
-        ),
+        )
+        .tag(),
         OptionItem::new(
             "",
             common::ALLOW_PARALLEL,
             "Allow multiple instances",
             config.allow_parallel.unwrap_or(allow_parallel_default),
-        ),
+        )
+        .tag(),
     ]
 }
 

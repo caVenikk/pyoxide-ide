@@ -440,16 +440,33 @@ fn run_commands_and_shot(
         cx.background_executor()
             .timer(Duration::from_millis(300))
             .await;
-        let _ = cx.update_window(window.into(), |_, window, _| {
-            match crate::shot::save(window, &path) {
+        let save =
+            |window: &gpui::Window, path: &std::path::Path| match crate::shot::save(window, path) {
                 Ok((w, h)) => env::marker(&format!(
                     "shot {} {w}x{h} scale {}",
                     path.display(),
                     window.scale_factor()
                 )),
                 Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
-            }
-        });
+            };
+        let _ = cx.update_window(window.into(), |_, window, _| save(window, &path));
+        // An open dialog window is saved next to it (`<name>-dialog.png`).
+        let dialog = cx
+            .update(|cx| ui::dialog_window::modal_of(window.into(), cx))
+            .ok()
+            .flatten();
+        if let Some(dialog) = dialog {
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let dialog_path = path.with_file_name(format!("{stem}-dialog.png"));
+            let _ = cx.update_window(dialog, |_, window, _| crate::shot::request_display(window));
+            cx.background_executor()
+                .timer(Duration::from_millis(300))
+                .await;
+            let _ = cx.update_window(dialog, |_, window, _| save(window, &dialog_path));
+        }
         let _ = cx.update(|cx| cx.quit());
     })
     .detach();

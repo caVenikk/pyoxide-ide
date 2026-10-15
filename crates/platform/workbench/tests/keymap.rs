@@ -102,11 +102,22 @@ struct H<'a> {
 }
 
 impl H<'_> {
+    /// Draws every window (the main one and an open dialog).
     fn draw(&mut self) {
         self.cx.run_until_parked();
+        for window in self.cx.update(|cx| cx.windows()) {
+            let _ = self
+                .cx
+                .update_window(window, |_, window, cx| window.draw(cx).clear());
+        }
+    }
+
+    /// The window that takes input: an open dialog, else the main one.
+    fn target(&mut self) -> gpui::AnyWindowHandle {
+        let main: gpui::AnyWindowHandle = self.window.into();
         self.cx
-            .update_window(self.window.into(), |_, window, cx| window.draw(cx).clear())
-            .unwrap();
+            .update(|cx| ui::dialog_window::modal_of(main, cx))
+            .unwrap_or(main)
     }
 
     fn invoke(&mut self, id: &str, args: Value) -> Value {
@@ -149,7 +160,8 @@ impl H<'_> {
 
     fn press(&mut self, keys: &str) {
         self.dispatched.borrow_mut().clear();
-        self.cx.simulate_keystrokes(self.window.into(), keys);
+        let target = self.target();
+        self.cx.simulate_keystrokes(target, keys);
         self.draw();
     }
 
@@ -163,8 +175,9 @@ impl H<'_> {
     }
 
     fn focus(&mut self, handle: gpui::FocusHandle) {
+        let target = self.target();
         self.cx
-            .update_window(self.window.into(), |_, window, _| window.focus(&handle))
+            .update_window(target, |_, window, _| window.focus(&handle))
             .unwrap();
         self.draw();
     }
@@ -1630,6 +1643,30 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.focus_run_dialog(None);
             h.press(keys);
             assert_eq!(h.run_dialog_selected(), to, "{what}");
+        }
+        "run.configurations.dialog.expand" | "run.configurations.dialog.collapse" => {
+            h.open_run_dialog();
+            // The type of the new configuration: collapse hides it, expand
+            // shows it again.
+            h.invoke(
+                "run.configurations.dialog.select",
+                json!({"type": "script"}),
+            );
+            let expand = b.command.ends_with("expand");
+            if expand {
+                h.invoke("run.configurations.dialog.collapse", json!(null));
+            }
+            h.focus_run_dialog(None);
+            h.press(keys);
+            let tree = h.run_dialog()["tree"].clone();
+            let node = tree
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|n| n["kind"] == json!("type") && n["type"] == json!("script"))
+                .cloned()
+                .unwrap();
+            assert_eq!(node["expanded"], json!(expand), "{what}");
         }
         "run.configurations.dialog.add" => {
             h.open_run_dialog();

@@ -561,7 +561,8 @@ impl TypeEditor for PythonEditor {
                 FieldKind::Text,
                 interpreter,
             )
-            .placeholder("Project interpreter"),
+            .placeholder("Project interpreter")
+            .head(),
             Field::new(
                 field::TARGET,
                 "Run:",
@@ -570,7 +571,8 @@ impl TypeEditor for PythonEditor {
                     ("module".into(), "module".into()),
                 ]),
                 if o.module_mode { "module" } else { "script" },
-            ),
+            )
+            .head(),
         ];
         let mut script = if o.module_mode {
             Field::new(
@@ -580,6 +582,7 @@ impl TypeEditor for PythonEditor {
                 o.script.clone(),
             )
             .placeholder("Module name")
+            .head()
         } else {
             Field::new(
                 field::SCRIPT,
@@ -588,6 +591,7 @@ impl TypeEditor for PythonEditor {
                 o.script.clone(),
             )
             .placeholder("Script path")
+            .head()
         };
         if !o.module_mode
             && let Some(var) = paths::flagged_variable(&o.script)
@@ -595,19 +599,27 @@ impl TypeEditor for PythonEditor {
             script.note = Some(format!("{var} is kept as written"));
         }
         fields.push(script);
-        fields.push(Field::new(
-            field::PARAMETERS,
-            "Parameters:",
-            FieldKind::Text,
-            o.parameters.clone(),
-        ));
-        if !o.interpreter_options.is_empty() || shown.contains(field::INTERPRETER_OPTIONS) {
-            fields.push(Field::new(
-                field::INTERPRETER_OPTIONS,
-                "Interpreter options:",
+        fields.push(
+            Field::new(
+                field::PARAMETERS,
+                "Parameters:",
                 FieldKind::Text,
-                o.interpreter_options.clone(),
-            ));
+                o.parameters.clone(),
+            )
+            .placeholder("Script parameters")
+            .head(),
+        );
+        if !o.interpreter_options.is_empty() || shown.contains(field::INTERPRETER_OPTIONS) {
+            fields.push(
+                Field::new(
+                    field::INTERPRETER_OPTIONS,
+                    "Interpreter options:",
+                    FieldKind::Text,
+                    o.interpreter_options.clone(),
+                )
+                .placeholder("Interpreter options")
+                .head(),
+            );
         }
         fields.push(Field::new(
             field::WORKING_DIRECTORY,
@@ -625,7 +637,7 @@ impl TypeEditor for PythonEditor {
             fields.push(Field::new(
                 field::ENV_FILES,
                 "Paths to \".env\" files:",
-                FieldKind::Text,
+                FieldKind::Path,
                 o.env_files.join(";"),
             ));
         }
@@ -668,37 +680,43 @@ impl TypeEditor for PythonEditor {
                 field::ADD_CONTENT_ROOTS,
                 "Add content roots to PYTHONPATH",
                 o.add_content_roots,
-            ),
+            )
+            .tag(),
             OptionItem::new(
                 py,
                 field::ADD_SOURCE_ROOTS,
                 "Add source roots to PYTHONPATH",
                 o.add_source_roots,
-            ),
+            )
+            .tag(),
             OptionItem::new(
                 py,
                 field::RUN_WITH_PYTHON_CONSOLE,
                 "Run with Python Console",
                 o.run_with_python_console,
-            ),
+            )
+            .tag(),
             OptionItem::new(
                 py,
                 field::EMULATE_TERMINAL,
                 "Emulate terminal in output console",
                 o.emulate_terminal,
-            ),
+            )
+            .tag(),
             OptionItem::new(
                 py,
                 field::RUN_WITH_UV,
                 "Run with `uv run`",
                 o.run_with_uv.unwrap_or(true),
-            ),
+            )
+            .tag(),
             OptionItem::new(
                 "Debug",
                 field::DEBUG_JUST_MY_CODE,
                 "Debug just my code",
                 o.debug_just_my_code,
-            ),
+            )
+            .tag(),
         ];
         options.extend(form::common_options(config, false));
         options
