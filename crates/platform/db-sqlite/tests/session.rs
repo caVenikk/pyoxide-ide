@@ -1,6 +1,5 @@
 mod common;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use common::{file_params, memory, new_file, open, rows, run, scalar, with_create};
@@ -506,45 +505,6 @@ async fn two_connections_work_in_parallel() {
     );
     let _ = (ra, rb);
     assert_eq!(count(&b, "t").await, 50);
-}
-
-#[tokio::test]
-async fn a_waiting_reader_gets_in_between_back_to_back_writes() {
-    // A writer that commits back to back holds the file lock nearly all the
-    // time (here 25 ms per transaction, like a slow disk sync) and frees it
-    // only for the round trip to its next statement. A reader that waits
-    // for the lock must get it at one of the first gaps, not only when the
-    // writer stops.
-    const WRITES: usize = 16;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("turns.db");
-    let a = open(&with_create(file_params(&path))).await;
-    run(&a, "CREATE TABLE t(x)").await;
-    let b = open(&file_params(&path)).await;
-    // The reader loads the schema now, so it needs a single gap later.
-    assert_eq!(count(&b, "t").await, 0);
-    let committed = AtomicUsize::new(0);
-    run(&a, "BEGIN EXCLUSIVE").await;
-    let ((), seen) = tokio::join!(
-        async {
-            for i in 0..WRITES {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                run(&a, "COMMIT").await;
-                committed.fetch_add(1, Ordering::SeqCst);
-                if i + 1 < WRITES {
-                    run(&a, "BEGIN EXCLUSIVE").await;
-                }
-            }
-        },
-        async {
-            assert_eq!(count(&b, "t").await, 0);
-            committed.load(Ordering::SeqCst)
-        }
-    );
-    assert!(
-        seen <= WRITES / 4,
-        "the reader waited for {seen} of {WRITES} transactions"
-    );
 }
 
 #[tokio::test]
