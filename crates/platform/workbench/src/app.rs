@@ -121,6 +121,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::find_in_files::init(cx, &product.find_file_masks);
     crate::search_everywhere::init(cx);
     crate::recent_files::init(cx);
+    crate::navigation::init(cx);
     crate::run::init(cx);
     code_intel_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);

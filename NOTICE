@@ -499,6 +499,21 @@ here with: source URL, commit, file(s), license, and what was changed.
   pycharm/2026.2.3: platform/icons/src/expui/actions/checked.svg and
   checked_dark.svg. Unchanged copies.
 
+- crates/platform/workbench/src/navigation.rs, src/workbench/history.rs
+  The navigation history (Back and Forward) follows the IntelliJ Platform
+  Community (Apache-2.0), https://github.com/JetBrains/intellij-community @
+  pycharm/2026.2.3 (404a109fe630a2b9013f10b71081f87c9dbb32e2): the back and
+  forward places of platform/platform-impl/src/com/intellij/openapi/
+  fileEditor/impl/IdeDocumentHistoryImpl.kt (a place replaces the last one
+  when it is the same place, Forward skips the current place, places in
+  removed files are dropped), the same-place distance of .../fileEditor/
+  impl/text/TextEditorState.java (4 lines), the limit of
+  platform/util/resources/misc/registry.properties
+  (editor.navigation.history.stack.size, 150), the tab selection as a
+  navigation of .../fileEditor/impl/EditorTabbedContainer.kt, and the
+  keystrokes of Back and Forward in the keymap files. Only behaviour and
+  numbers are used; reimplemented in Rust, no code is copied.
+
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,
   and JetBrains Mono 2.304 (c) 2020 The JetBrains Mono Project Authors,

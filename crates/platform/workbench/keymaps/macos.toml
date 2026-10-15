@@ -24,6 +24,11 @@
 "cmd-shift-a" = "search-everywhere.go-to-action"
 "cmd-alt-shift-e" = "search-everywhere.go-to-text"
 "cmd-e" = "recent-files.open"
+# Navigation history: Back and Forward.
+"cmd-[" = "workbench.back"
+"cmd-alt-left" = "workbench.back"
+"cmd-]" = "workbench.forward"
+"cmd-alt-right" = "workbench.forward"
 # Run: the current file (Current File is the only configuration yet);
 # Run Context Configuration runs it as well; Stop stops the run, a second
 # Stop kills it.
