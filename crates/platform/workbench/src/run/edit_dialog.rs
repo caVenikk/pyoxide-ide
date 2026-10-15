@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 use themes::{Metric, UiRole};
 use ui::components::{checkbox, input_frame};
 use ui::icons::{Icon, IconName};
-use ui::menu::{ContextMenu, MenuItem, PopupOptions};
+use ui::menu::{ChosenEvent, ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
 use super::FieldText;
@@ -97,6 +97,9 @@ ui::ui_commands! {
     /// Collapse the selected node.
     DialogCollapse => "run.configurations.dialog.collapse", "Collapse",
         "Collapses the selected type or folder of the dialog's tree, or selects its parent.";
+    /// Remove the focused option tag.
+    DialogRemoveTag => "run.configurations.dialog.remove-tag", "Remove Option",
+        "Turns off the option of the focused tag under the form.";
     /// Choose a file for a path field.
     DialogBrowse { field: String } => "run.configurations.dialog.browse", "Browse",
         "Chooses a file or folder for a path field of the selected configuration.",
@@ -106,6 +109,8 @@ ui::ui_commands! {
 /// Key contexts of the dialog and its tree.
 pub const KEY_CONTEXT: &str = "RunConfigurationsDialog";
 pub const TREE_CONTEXT: &str = "RunConfigurationsTree";
+/// Key context of an option tag under the form.
+pub const TAG_CONTEXT: &str = "RunConfigurationsTag";
 
 /// Ids of the fields every configuration has.
 const NAME: &str = "name";
@@ -137,6 +142,8 @@ const LABEL_WIDTH: f32 = 153.0;
 const FIELD: f32 = 28.0;
 const FIELD_GAP: f32 = 12.0;
 const CHOICE_WIDTH: f32 = 87.0;
+/// The largest a popup of the dialog opens before it fits its rows.
+const POPUP_MAX: (f32, f32) = (640.0, 900.0);
 /// The buttons under the form.
 const BUTTON: f32 = 71.0;
 const BUTTON_HEIGHT: f32 = 27.0;
@@ -168,8 +175,9 @@ struct FieldView {
 /// An open popup of the dialog (types, a choice, Modify options).
 struct OpenMenu {
     menu: Entity<ContextMenu>,
-    position: Point<Pixels>,
-    _subscription: Subscription,
+    /// The popup's window (`ui::dialog_window::open_popup`).
+    window: gpui::AnyWindowHandle,
+    _subscriptions: Vec<Subscription>,
 }
 
 /// The Run/Debug Configurations dialog.
@@ -207,6 +215,8 @@ pub struct EditDialog {
     collapsed: HashSet<Node>,
     /// Alt is held: the head fields show their labels.
     hints: bool,
+    /// The focus of each option's tag, by option id.
+    tag_focus: HashMap<String, FocusHandle>,
     /// The project folder: path fields show their paths expanded from it.
     root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -271,6 +281,7 @@ impl EditDialog {
             describing: None,
             collapsed: HashSet::new(),
             hints: false,
+            tag_focus: HashMap::new(),
             root,
             _subscriptions: Vec::new(),
         };
@@ -591,7 +602,23 @@ impl EditDialog {
             };
             self.fields.push(FieldView { field, editor });
         }
+        // Every option that can be a tag can take the focus.
+        if let Some(config) = self.selected_config().cloned()
+            && let Some(editor) = self.editor_of(&config.type_id)
+        {
+            let shown = self.shown.get(&config.key()).cloned().unwrap_or_default();
+            for option in editor.options(&config, &shown) {
+                if option.tag && !self.tag_focus.contains_key(&option.id) {
+                    self.tag_focus.insert(option.id.clone(), cx.focus_handle());
+                }
+            }
+        }
         self.describe(cx);
+    }
+
+    /// The focus of an option's tag (tests and agents focus a tag with it).
+    pub fn tag_focus(&self, option: &str) -> Option<FocusHandle> {
+        self.tag_focus.get(option).cloned()
     }
 
     /// Expands the types and folders above the selected node.
@@ -1176,14 +1203,17 @@ impl EditDialog {
                 DialogToggleOption {
                     option: option.id.clone(),
                 },
-            );
+            )
+            .enabled(option.enabled);
             items.push(if option.checked {
                 item.icon(IconName::CHECKED)
             } else {
                 item
             });
         }
-        let at = self.options_anchor.get().bottom_left();
+        // Under the link, its left edge at the link's (`showPopup` below
+        // the component).
+        let at = self.options_anchor.get().bottom_left() + gpui::point(px(-8.0), px(6.0));
         self.open_menu(items, Some("Add Run Options".into()), at, window, cx);
     }
 
@@ -1225,26 +1255,55 @@ impl EditDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let menu = ContextMenu::popup(
-            items,
-            PopupOptions {
-                title,
-                speed_search: true,
-                ..PopupOptions::default()
-            },
+        self.close_menu(cx);
+        // The shortcuts of the rows where their actions run: here.
+        let mut items = items;
+        ui::menu::fill_shortcuts(&mut items, &self.focus, window);
+        let options = PopupOptions {
+            title,
+            speed_search: true,
+            own_window: true,
+            ..PopupOptions::default()
+        };
+        let mut built = None;
+        let popup = ui::dialog_window::open_popup(
             window,
+            position,
+            gpui::size(px(POPUP_MAX.0), px(POPUP_MAX.1)),
+            !crate::env::background(),
             cx,
+            |window, cx| {
+                let menu = ContextMenu::popup(items, options, window, cx);
+                built = Some(menu.clone());
+                menu.into()
+            },
         );
-        let subscription = cx.subscribe(&menu, |this, _, _: &gpui::DismissEvent, cx| {
-            this.menu = None;
-            cx.notify();
-        });
+        let (Some(popup), Some(menu)) = (popup, built) else {
+            return;
+        };
+        let subscriptions = vec![
+            // The chosen row's action runs in the dialog.
+            cx.subscribe_in(&menu, window, |_, _, chosen: &ChosenEvent, window, cx| {
+                window.dispatch_action(chosen.0.boxed_clone(), cx);
+            }),
+            cx.subscribe(&menu, |this, _, _: &gpui::DismissEvent, cx| {
+                this.close_menu(cx);
+            }),
+        ];
         self.menu = Some(OpenMenu {
             menu,
-            position,
-            _subscription: subscription,
+            window: popup.into(),
+            _subscriptions: subscriptions,
         });
         cx.notify();
+    }
+
+    /// Closes the open popup's window.
+    fn close_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(open) = self.menu.take() {
+            ui::dialog_window::close(open.window, cx);
+            cx.notify();
+        }
     }
 
     /// Hands the edited configurations back.
@@ -1435,6 +1494,7 @@ struct Colors {
     link: gpui::Hsla,
     hover: gpui::Hsla,
     danger: gpui::Hsla,
+    focus: gpui::Hsla,
     radius: Pixels,
     field_radius: Pixels,
 }
@@ -1458,6 +1518,7 @@ impl Colors {
             link: theme.color(UiRole::TextLink),
             hover: theme.color(UiRole::Hover),
             danger: theme.color(UiRole::Danger),
+            focus: theme.color(UiRole::Focus),
             radius,
             field_radius: radius * 1.5,
         }
@@ -1616,6 +1677,14 @@ impl EditDialog {
 
         let nodes = self.visible_nodes();
         let tree_focused = self.tree_focus.is_focused(window);
+        // Indent guides (`ui::tree_guides`): the chevrons sit at the row's
+        // start, one indent per level.
+        let guides = ui::tree_guides::TreeGuides {
+            first: px(0.0),
+            indent: px(INDENT),
+            control: px(16.0),
+        };
+        let guide_color = cx.theme().color(UiRole::TreeIndentGuide);
         let rows: Vec<AnyElement> =
             nodes
                 .iter()
@@ -1668,6 +1737,7 @@ impl EditDialog {
                         .rounded(c.radius)
                         .when(selected, |d| d.bg(c.selection))
                         .when(selected && !tree_focused, |d| d.opacity(0.9))
+                        .children(guides.row(*depth, parent && expanded, px(ROW), guide_color))
                         .child(
                             div()
                                 .id(("run-dialog-chevron", i))
@@ -2125,7 +2195,15 @@ impl EditDialog {
                         .items_center()
                         .gap(px(4.0))
                         .text_color(c.link)
-                        .child("Modify options")
+                        // A link: the hand and the underline under the
+                        // pointer (`DropDownLink`).
+                        .cursor_pointer()
+                        .group("run-dialog-modify-options")
+                        .child(
+                            div()
+                                .group_hover("run-dialog-modify-options", |s| s.underline())
+                                .child("Modify options"),
+                        )
                         .child(Icon::new(IconName::CHEVRON_DOWN))
                         .child(anchor(self.options_anchor.clone()))
                         .on_click(|_, window, cx| {
@@ -2286,9 +2364,30 @@ impl EditDialog {
                 .map(|(i, o)| {
                     let selector = format!("run-dialog-tag:{}", o.label);
                     let option = o.id.clone();
+                    let remove = option.clone();
+                    let focus = self.tag_focus.get(&o.id).cloned();
+                    let focused = focus.as_ref().is_some_and(|f| f.is_focused(window));
+                    // "Remove option" with the key that removes a focused
+                    // tag (`TagButton`).
+                    let keys = focus.as_ref().and_then(|f| {
+                        ui::keys::shortcut_in(&DialogRemoveTag, f, window).map(SharedString::from)
+                    });
+                    let dialog_focus = self.focus.clone();
+                    let click_focus = focus.clone();
                     div()
                         .id(("run-dialog-tag", i))
                         .debug_selector(move || selector.clone())
+                        .key_context(TAG_CONTEXT)
+                        .when_some(focus.as_ref(), |d, f| d.track_focus(f))
+                        .on_action(move |_: &DialogRemoveTag, window, cx| {
+                            window.focus(&dialog_focus);
+                            window.dispatch_action(
+                                Box::new(DialogToggleOption {
+                                    option: remove.clone(),
+                                }),
+                                cx,
+                            )
+                        })
                         .flex()
                         .flex_none()
                         .flex_row()
@@ -2297,16 +2396,20 @@ impl EditDialog {
                         .h(px(FIELD))
                         .pl(px(11.0))
                         .pr(px(8.0))
-                        .rounded(px(6.0))
+                        .rounded_full()
                         .bg(c.raised)
+                        .border_1()
+                        .border_color(if focused { c.focus } else { c.raised })
                         .child(div().whitespace_nowrap().child(o.label.clone()))
                         .child(
                             div()
                                 .id(("run-dialog-tag-remove", i))
                                 .flex_none()
+                                .cursor_pointer()
                                 .child(Icon::new(IconName::CLOSE_SMALL))
-                                .tooltip(ui::components::Tooltip::text("Remove", None))
+                                .tooltip(ui::components::Tooltip::text("Remove option", keys))
                                 .on_click(move |_, window, cx| {
+                                    cx.stop_propagation();
                                     window.dispatch_action(
                                         Box::new(DialogToggleOption {
                                             option: option.clone(),
@@ -2315,6 +2418,11 @@ impl EditDialog {
                                     )
                                 }),
                         )
+                        .on_click(move |_, window, _| {
+                            if let Some(f) = &click_focus {
+                                window.focus(f);
+                            }
+                        })
                         .into_any_element()
                 })
                 .collect();
@@ -2537,10 +2645,6 @@ impl Render for EditDialog {
         let left = self.render_tree(c, window, cx);
         let form = self.render_form(c, window, cx);
         let footer = self.render_footer(c, cx);
-        let menu = self
-            .menu
-            .as_ref()
-            .map(|m| ui::menu::overlay(&m.menu, m.position, window));
         let prompt = self.prompt.as_ref().map(|(d, _)| d.clone());
         div()
             .id("run-dialog")
@@ -2580,6 +2684,9 @@ impl Render for EditDialog {
             .text_color(c.text)
             .font_family(family)
             .text_size(size)
+            // The title bar in the theme's colours (macOS; elsewhere the
+            // system's).
+            .children(ui::dialog_window::title_bar(TITLE, true, cx))
             .child(
                 div()
                     .flex()
@@ -2597,7 +2704,6 @@ impl Render for EditDialog {
                     ),
             )
             .child(footer)
-            .children(menu)
             .children(prompt)
     }
 }

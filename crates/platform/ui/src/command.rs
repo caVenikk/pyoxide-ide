@@ -115,9 +115,11 @@ pub fn invoke(
         .build_action(id, Some(args))
         .map_err(|e| CommandError::invalid_args(format!("{id}: {e}")))?;
     // A window with a dialog open takes no input: the command goes to the
-    // dialog (queries above still read the window's own state).
-    if let Some(dialog) = crate::dialog_window::modal_of(window.window_handle(), cx) {
-        return dialog
+    // dialog, or to a popup open over it (queries above still read the
+    // window's own state).
+    let target = crate::dialog_window::innermost(window.window_handle(), cx);
+    if target != window.window_handle() {
+        return target
             .update(cx, |_, window, cx| {
                 if !window.is_action_available(action.as_ref(), cx)
                     && !cx.is_action_available(action.as_ref())

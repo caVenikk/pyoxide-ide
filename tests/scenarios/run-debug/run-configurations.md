@@ -71,8 +71,13 @@
   instances), the module, the interpreter with its version and path (not
   editable yet), script or module with the path field, the parameters,
   "Press ⌥ for field hints", the labelled rows, the options that are on
-  as tags with a remove button, an error line ("Please specify a script
-  name"), the Run button, Cancel, Apply, OK. "Store as project file" with
+  as tags with a remove button ("Remove option ⌫"; Backspace on a focused
+  tag), an error line ("Please specify a script name"), the Run button,
+  Cancel, Apply, OK. The title bar has the theme's colours. "Add Run
+  Options" opens under the link in a window of its own that may reach
+  beyond the dialog: Operating System (Allow multiple instances ⌃⌥U,
+  Redirect input, Environment variables ⌃⌥E, Paths to ".env" files ⌃⌥P),
+  Python, Debug, Logs (not supported yet), Before Launch. "Store as project file" with
   personal values asks in the dialog whether the values stay personal;
   the shared file lists those variables by name only. Cancel drops every
   change since the last Apply; Run applies, closes and runs.
@@ -94,7 +99,8 @@
 (`select`, `next`, `previous`, `add`, `remove`, `copy`,
 `save-temporary`, `new-folder`, `sort`, `set {"field", "value"}`,
 `toggle-option {"option"}`, `modify-options`, `apply`, `ok`, `cancel`,
-`run`, `expand`, `collapse`, `browse {"field"}`), `dialog.choose`,
+`run`, `expand`, `collapse`, `browse {"field"}`, `remove-tag`),
+`dialog.choose`,
 `run.run`, `run.state` (`configurations`, `widget`, `menu`,
 `edit_dialog` with its `prompt`), `workbench.state` (`notice`,
 `message`, `dialog`). While the dialog is open, commands sent to the

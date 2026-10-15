@@ -545,8 +545,10 @@ impl MenuItem {
 }
 
 /// Fills the shortcuts of `items` (and their submenus) from the bindings
-/// that win where `focus` is.
-fn fill_shortcuts(items: &mut [MenuItem], focus: &FocusHandle, window: &Window) {
+/// that win where `focus` is; a menu does it itself where it opens, a
+/// popup in a window of its own gets them from the window its actions run
+/// in.
+pub fn fill_shortcuts(items: &mut [MenuItem], focus: &FocusHandle, window: &Window) {
     for item in items {
         match item {
             MenuItem::Action {
@@ -580,7 +582,17 @@ pub struct PopupOptions {
     /// 310 to 500).
     pub min_width: Option<f32>,
     pub max_width: Option<f32>,
+    /// The popup is the content of a window of its own
+    /// ([`crate::dialog_window::open_popup`]): the window draws the shadow,
+    /// and a chosen action is handed over as a [`ChosenEvent`] for the
+    /// window it belongs to, instead of being dispatched in the popup's
+    /// window.
+    pub own_window: bool,
 }
+
+/// The action chosen in a popup that has a window of its own
+/// ([`PopupOptions::own_window`]); the menu closes.
+pub struct ChosenEvent(pub Box<dyn Action>);
 
 /// An open context menu or list popup.
 pub struct ContextMenu {
@@ -601,6 +613,7 @@ pub struct ContextMenu {
     matcher: Option<Matcher>,
     min_width: Option<f32>,
     max_width: Option<f32>,
+    own_window: bool,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
     submenu_on_hover: bool,
@@ -617,6 +630,7 @@ pub struct ContextMenu {
 }
 
 impl EventEmitter<DismissEvent> for ContextMenu {}
+impl EventEmitter<ChosenEvent> for ContextMenu {}
 
 impl Focusable for ContextMenu {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -679,6 +693,7 @@ impl ContextMenu {
                 matcher: None,
                 min_width: options.min_width,
                 max_width: options.max_width,
+                own_window: options.own_window,
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
                 aim_history: [None; AIM_HISTORY],
@@ -1047,9 +1062,7 @@ impl ContextMenu {
         };
         if let Some(action) = item.run_action() {
             let action = action.boxed_clone();
-            self.dismiss(window, cx);
-            // The focus is back where it was; the action goes there.
-            window.dispatch_action(action, cx);
+            self.choose(action, window, cx);
             return;
         }
         match item {
@@ -1082,7 +1095,19 @@ impl ContextMenu {
         else {
             return;
         };
+        self.choose(action, window, cx);
+    }
+
+    /// Closes the menu and runs `action` where the focus was, or hands it
+    /// over when the menu has a window of its own.
+    fn choose(&mut self, action: Box<dyn Action>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.own_window {
+            cx.emit(ChosenEvent(action));
+            self.dismiss(window, cx);
+            return;
+        }
         self.dismiss(window, cx);
+        // The focus is back where it was; the action goes there.
         window.dispatch_action(action, cx);
     }
 
@@ -1422,7 +1447,9 @@ impl ContextMenu {
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow(crate::components::popup_shadow())
+            .when(!self.own_window, |d| {
+                d.shadow(crate::components::popup_shadow())
+            })
             .children(title.map(|title| {
                 div()
                     .debug_selector(|| "menu-title".into())

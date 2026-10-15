@@ -596,7 +596,11 @@ here with: source URL, commit, file(s), license, and what was changed.
   dialog window of platform/platform-api/src/com/intellij/openapi/ui/
   DialogWrapper.java (crates/platform/ui/src/dialog_window.rs), the tree's
   initial expansion of RunConfigurable.kt (selectConfigurableOnShow) and
-  the expanded paths of its fields (PathMacroManager), with the
+  the expanded paths of its fields (PathMacroManager), the "Add Run
+  Options" rows, groups and mnemonics of platform/execution-impl/src/com/
+  intellij/execution/ui/CommonTags.java, CommonParameterFragments.java,
+  BeforeRunFragment.java and diagnostic/logging/LogsGroupFragment.java,
+  the option tags of TagButton and the link of DropDownLink, with the
   labels of
   ExecutionBundle.properties, ActionsBundle.properties, PyBundle.properties
   and ShBundle.properties. Changes: reimplemented in Rust; the natural

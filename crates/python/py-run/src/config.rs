@@ -512,6 +512,15 @@ pub fn same_context(existing: &RunConfiguration, context: &RunConfiguration) -> 
 /// The Python type's form (`PythonConfigurationFragmentedEditor`).
 pub struct PythonEditor;
 
+/// In the dialog session's options: the parameters field, shown by
+/// default, was hidden.
+const PARAMETERS_HIDDEN: &str = "parameters-hidden";
+
+/// The parameters field shows unless it was hidden while empty.
+fn parameters_shown(o: &PythonOptions, shown: &BTreeSet<String>) -> bool {
+    !o.parameters.is_empty() || !shown.contains(PARAMETERS_HIDDEN)
+}
+
 /// Ids of the Python form's fields and options.
 pub mod field {
     pub const INTERPRETER: &str = "interpreter";
@@ -599,16 +608,18 @@ impl TypeEditor for PythonEditor {
             script.note = Some(format!("{var} is kept as written"));
         }
         fields.push(script);
-        fields.push(
-            Field::new(
-                field::PARAMETERS,
-                "Parameters:",
-                FieldKind::Text,
-                o.parameters.clone(),
-            )
-            .placeholder("Script parameters")
-            .head(),
-        );
+        if parameters_shown(&o, shown) {
+            fields.push(
+                Field::new(
+                    field::PARAMETERS,
+                    "Parameters:",
+                    FieldKind::Text,
+                    o.parameters.clone(),
+                )
+                .placeholder("Script parameters")
+                .head(),
+            );
+        }
         if !o.interpreter_options.is_empty() || shown.contains(field::INTERPRETER_OPTIONS) {
             fields.push(
                 Field::new(
@@ -627,12 +638,14 @@ impl TypeEditor for PythonEditor {
             FieldKind::Path,
             o.working_directory.clone(),
         ));
-        fields.push(Field::new(
-            form::common::ENV,
-            "Environment variables:",
-            FieldKind::Env,
-            form::env_text(&config.env),
-        ));
+        if !config.env.is_empty() || shown.contains(form::common::ENV) {
+            fields.push(Field::new(
+                form::common::ENV,
+                "Environment variables:",
+                FieldKind::Env,
+                form::env_text(&config.env),
+            ));
+        }
         if !o.env_files.is_empty() || shown.contains(field::ENV_FILES) {
             fields.push(Field::new(
                 field::ENV_FILES,
@@ -652,22 +665,32 @@ impl TypeEditor for PythonEditor {
         fields
     }
 
+    /// The rows of "Modify options" in the reference's order
+    /// (`PythonConfigurationFragmentedEditor`): Operating System, Python,
+    /// Debug, then the common Logs and Before Launch.
     fn options(&self, config: &RunConfiguration, shown: &BTreeSet<String>) -> Vec<OptionItem> {
         let o = PythonOptions::read(config);
-        let os = "Operating System";
+        let os = form::group::OPERATING_SYSTEM;
         let py = "Python";
-        let mut options = vec![
-            OptionItem::new(
-                os,
-                field::ENV_FILES,
-                "Paths to \".env\" files",
-                !o.env_files.is_empty() || shown.contains(field::ENV_FILES),
-            ),
+        let mut options = form::common_head_options(config, false);
+        options.extend([
             OptionItem::new(
                 os,
                 field::REDIRECT_INPUT,
                 "Redirect input",
                 o.redirect_input,
+            ),
+            OptionItem::new(
+                os,
+                form::common::ENV,
+                "Environment variables",
+                !config.env.is_empty() || shown.contains(form::common::ENV),
+            ),
+            OptionItem::new(
+                os,
+                field::ENV_FILES,
+                "Paths to \".env\" files",
+                !o.env_files.is_empty() || shown.contains(field::ENV_FILES),
             ),
             OptionItem::new(
                 py,
@@ -691,6 +714,19 @@ impl TypeEditor for PythonEditor {
             .tag(),
             OptionItem::new(
                 py,
+                field::RUN_WITH_UV,
+                "Run with `uv run`",
+                o.run_with_uv.unwrap_or(true),
+            )
+            .tag(),
+            OptionItem::new(
+                py,
+                field::PARAMETERS,
+                "Parameters",
+                parameters_shown(&o, shown),
+            ),
+            OptionItem::new(
+                py,
                 field::RUN_WITH_PYTHON_CONSOLE,
                 "Run with Python Console",
                 o.run_with_python_console,
@@ -704,21 +740,14 @@ impl TypeEditor for PythonEditor {
             )
             .tag(),
             OptionItem::new(
-                py,
-                field::RUN_WITH_UV,
-                "Run with `uv run`",
-                o.run_with_uv.unwrap_or(true),
-            )
-            .tag(),
-            OptionItem::new(
                 "Debug",
                 field::DEBUG_JUST_MY_CODE,
                 "Debug just my code",
                 o.debug_just_my_code,
             )
             .tag(),
-        ];
-        options.extend(form::common_options(config, false));
+        ]);
+        options.extend(form::common_tail_options(config));
         options
     }
 
@@ -773,6 +802,23 @@ impl TypeEditor for PythonEditor {
             }
         };
         match option {
+            form::common::ENV => {
+                let on = !config.env.is_empty() || shown.contains(option);
+                flip(on, shown);
+                if on {
+                    config.env.clear();
+                }
+                return;
+            }
+            field::PARAMETERS => {
+                // Shown by default: the session keeps that it was hidden.
+                if parameters_shown(&o, shown) {
+                    shown.insert(PARAMETERS_HIDDEN.to_owned());
+                    o.parameters.clear();
+                } else {
+                    shown.remove(PARAMETERS_HIDDEN);
+                }
+            }
             field::ENV_FILES => {
                 let on = !o.env_files.is_empty() || shown.contains(option);
                 flip(on, shown);

@@ -444,10 +444,15 @@ name = "Dialog"
 "escape" = "dialog.cancel"
 
 # The Run/Debug Configurations dialog: Enter is OK, Escape Cancel, Option+M
-# opens Modify options; also in its fields, which are editors.
+# opens Modify options, Control+Option with an option's mnemonic turns it
+# on or off (Allow m&ultiple instances, &Environment variables, &Paths to
+# ".env" files); also in its fields, which are editors.
 [[context]]
 name = "RunConfigurationsDialog"
 [context.bindings]
+"ctrl-alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"ctrl-alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"ctrl-alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
 "enter" = "run.configurations.dialog.ok"
 "escape" = "run.configurations.dialog.cancel"
 "alt-m" = "run.configurations.dialog.modify-options"
@@ -455,6 +460,9 @@ name = "RunConfigurationsDialog"
 [[context]]
 name = "RunConfigurationsDialog > Editor"
 [context.bindings]
+"ctrl-alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"ctrl-alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"ctrl-alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
 "enter" = "run.configurations.dialog.ok"
 "escape" = "run.configurations.dialog.cancel"
 "alt-m" = "run.configurations.dialog.modify-options"
@@ -473,6 +481,12 @@ name = "RunConfigurationsTree"
 "cmd-d" = "run.configurations.dialog.copy"
 "left" = "run.configurations.dialog.collapse"
 "right" = "run.configurations.dialog.expand"
+
+# An option tag under its form: Backspace removes the option (`TagButton`).
+[[context]]
+name = "RunConfigurationsTag"
+[context.bindings]
+"backspace" = "run.configurations.dialog.remove-tag"
 
 # The name field of New File, New Directory and Rename (#37).
 [[context]]
