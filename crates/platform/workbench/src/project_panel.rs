@@ -12,6 +12,7 @@
 mod file_ops;
 pub mod name_popup;
 mod new_items;
+mod row_expansion;
 mod transfer;
 pub mod transfer_dialog;
 
@@ -28,9 +29,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, Bounds, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
-    ScrollStrategy, SharedString, Styled, Subscription, UniformListScrollHandle, Window, canvas,
-    div, point, prelude::*, px, uniform_list,
+    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
+    ScrollStrategy, Styled, Subscription, UniformListScrollHandle, Window, canvas, div, point,
+    prelude::*, px, uniform_list,
 };
 use project::{FileTree, Filter, Node, NodeId, Project, list_dir};
 use serde_json::json;
@@ -79,6 +80,8 @@ const ICON_X: f32 = 21.0;
 const TEXT_X: f32 = 20.0;
 /// Space above the first row.
 const TREE_TOP: f32 = 4.0;
+/// Size of the chevron that expands or collapses a folder.
+const CHEVRON: f32 = 16.0;
 
 #[derive(Debug, Clone)]
 pub enum PanelEvent {
@@ -124,6 +127,13 @@ pub struct ProjectPanel {
     rows_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// New, Rename and Delete: their popup or dialog while open.
     ops: file_ops::FileOps,
+    /// A row cut by the tree's edge shows its rest on hover.
+    expansion: row_expansion::RowExpansion,
+    /// The vertical lines below open folders ("Show indent guides"). On by
+    /// default; the reference IDE has them off until they are turned on.
+    indent_guides: bool,
+    /// The tree had the focus when it was last drawn (for the state).
+    focus_seen: Cell<bool>,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -154,7 +164,16 @@ impl ProjectPanel {
             settings_error: None,
             rows_bounds: Rc::default(),
             ops: file_ops::FileOps::default(),
+            expansion: row_expansion::RowExpansion::default(),
+            indent_guides: true,
+            focus_seen: Cell::new(false),
         }
+    }
+
+    /// Shows or hides the indent guides (on by default).
+    pub fn set_indent_guides(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.indent_guides = on;
+        cx.notify();
     }
 
     /// The open context menu, if any.
@@ -198,6 +217,7 @@ impl ProjectPanel {
         self.context_menu = None;
         self.settings_error = None;
         self.ops.close();
+        self.expansion.clear();
         self.tree = Some(FileTree::new(&root));
         self.project = Some(project);
         self.selected = Some(FileTree::ROOT);
@@ -280,6 +300,7 @@ impl ProjectPanel {
 
     fn select(&mut self, id: NodeId, cx: &mut Context<Self>) {
         self.selected = Some(id);
+        self.expansion.selected(id);
         if let Some(row) = self.tree.as_ref().and_then(|t| t.row_of(id)) {
             self.scroll_to_row(row, cx);
         }
@@ -389,6 +410,7 @@ impl ProjectPanel {
         };
         let scroll_top = self.scroll_top();
         let first_visible = (scroll_top / cx.theme().metric(Metric::RowHeight)).floor() as usize;
+        let guides = self.guides(cx);
         json!({
             "rows": tree.rows().iter().map(|&id| {
                 let n = tree.node(id);
@@ -400,6 +422,13 @@ impl ProjectPanel {
                     "excluded": n.entry.excluded,
                     "icon": self.icon(n).0,
                     "background": n.entry.excluded.then(|| UiRole::NonProjectFile.name()),
+                    "overflows": self.overflow_json(id),
+                    "guides": guides.map(|g| {
+                        g.row_lines(n.depth, n.expanded)
+                            .into_iter()
+                            .map(f32::from)
+                            .collect::<Vec<_>>()
+                    }),
                 })
             }).collect::<Vec<_>>(),
             "selected": self.selected.map(rel),
@@ -414,6 +443,7 @@ impl ProjectPanel {
             "transfer": self.transfer_dialog().map(|d| d.read(cx).state_json(cx)),
             "clipboard": self.clipboard_json(),
             "drop_target": self.drop_target_json(cx),
+            "expanded_row": self.expansion_json(self.focus_seen.get(), cx),
         })
     }
 
@@ -737,11 +767,35 @@ impl ProjectPanel {
 
     // ---- drawing ----------------------------------------------------------
 
+    /// Where the tree's expand controls are, for its indent guides; `None`
+    /// when they are off.
+    fn guides(&self, cx: &App) -> Option<ui::tree_guides::TreeGuides> {
+        self.indent_guides.then(|| ui::tree_guides::TreeGuides {
+            first: px(TREE_LEFT),
+            indent: cx.theme().metric(Metric::TreeIndent),
+            control: px(CHEVRON),
+        })
+    }
+
+    /// The colour of a row's name.
+    fn row_text_color(&self, node: &Node, selected: bool, focused: bool, cx: &App) -> Hsla {
+        let theme = cx.theme();
+        // Cut rows are greyed until Paste moves them.
+        if selected && focused {
+            theme.color(UiRole::SelectionText)
+        } else if self.is_cut(&node.entry.path) {
+            theme.color(UiRole::TextMuted)
+        } else {
+            theme.color(UiRole::Text)
+        }
+    }
+
     fn row(
         &self,
         id: NodeId,
         ix: usize,
         focused: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let tree = self.tree.as_ref().expect("rows exist only with a tree");
@@ -760,14 +814,19 @@ impl ProjectPanel {
         let hover = theme.color(UiRole::Hover);
         // Excluded rows keep the normal text colour and get the background
         // of non-project files across the whole row.
-        // Cut rows are greyed until Paste moves them.
-        let text_color = if selected && focused {
-            theme.color(UiRole::SelectionText)
-        } else if self.is_cut(&entry.path) {
-            theme.color(UiRole::TextMuted)
-        } else {
-            theme.color(UiRole::Text)
-        };
+        let text_color = self.row_text_color(node, selected, focused, cx);
+        // A row whose text runs past the selection's right end: its
+        // selection and hover reach the tree's edge.
+        let wide = self.is_wide(self.measure_label(id, node, window, cx));
+        let radius = theme.metric(Metric::CornerRadius);
+        let guides = self.guides(cx).and_then(|g| {
+            g.row(
+                node.depth,
+                node.expanded,
+                row_height,
+                theme.color(UiRole::TreeIndentGuide),
+            )
+        });
         let non_project = entry.excluded.then(|| theme.color(UiRole::NonProjectFile));
         let icon = self.icon(node);
         let chevron = entry.is_dir().then(|| {
@@ -780,7 +839,7 @@ impl ProjectPanel {
                 .id(("chevron", ix))
                 .absolute()
                 .left(left)
-                .top((row_height - px(16.0)) / 2.0)
+                .top((row_height - px(CHEVRON)) / 2.0)
                 .child(Icon::new(name))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
@@ -788,24 +847,7 @@ impl ProjectPanel {
                     this.toggle(id, cx);
                 }))
         });
-        let mut label = div()
-            .flex()
-            .flex_row()
-            .gap(px(6.0))
-            .whitespace_nowrap()
-            .text_color(text_color)
-            .child(SharedString::from(entry.name.clone()));
-        if node.depth == 0 {
-            label = label.font_weight(FontWeight::SEMIBOLD);
-            if let Some(project) = &self.project {
-                label = label.child(
-                    div()
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(theme.color(UiRole::TextMuted))
-                        .child(project.display_root()),
-                );
-            }
-        }
+        let label = self.row_label(node, text_color, cx);
         let row = div()
             .id(("row", ix))
             // Tests find a row by its path (no cost in release builds).
@@ -824,11 +866,18 @@ impl ProjectPanel {
                     .top_0()
                     .bottom_0()
                     .left(px(TREE_LEFT))
-                    .right(px(TREE_LEFT))
-                    .rounded(theme.metric(Metric::CornerRadius))
-                    .when(selected, |d| d.bg(selection))
+                    .when(!wide, |d| d.right(px(TREE_LEFT)).rounded(radius))
+                    .when(wide, |d| {
+                        d.right(px(row_expansion::WIDE_MARGIN))
+                            .rounded_tl(radius)
+                            .rounded_bl(radius)
+                    })
+                    .when(selected, |d| {
+                        d.bg(selection).debug_selector(|| "tree-selection".into())
+                    })
                     .when(!selected, |d| d.hover(move |s| s.bg(hover))),
             )
+            .children(guides)
             .children(chevron)
             .child(
                 div()
@@ -929,6 +978,7 @@ panel_actions! {
 impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focused = self.focus.contains_focused(window, cx);
+        self.focus_seen.set(focused);
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
         let count = self.tree.as_ref().map_or(0, |t| t.rows().len());
@@ -953,7 +1003,7 @@ impl Render for ProjectPanel {
         let mut rows = uniform_list(
             "project-rows",
             count,
-            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+            cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                 let rows: Vec<NodeId> = this
                     .tree
                     .as_ref()
@@ -961,7 +1011,7 @@ impl Render for ProjectPanel {
                     .unwrap_or_default();
                 rows.into_iter()
                     .zip(range)
-                    .map(|(id, ix)| this.row(id, ix, focused, cx))
+                    .map(|(id, ix)| this.row(id, ix, focused, window, cx))
                     .collect::<Vec<_>>()
             }),
         )
@@ -975,12 +1025,24 @@ impl Render for ProjectPanel {
         // A sideways swipe does not scroll the rows up or down.
         rows.style().restrict_scroll_to_axis = Some(true);
         let bounds = self.rows_bounds.clone();
+        let panel = cx.entity_id();
         let menu = self
             .context_menu
             .as_ref()
             .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
+        let expansion = self.expansion_overlay(focused, window, cx);
         el.child(
             div()
+                .id("project-rows-area")
+                // The pointer's row shows its rest when it is cut.
+                .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                    this.pointer_over_rows(e.position, cx);
+                }))
+                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    if !hovered {
+                        this.pointer_left_rows(cx);
+                    }
+                }))
                 .relative()
                 .flex()
                 .flex_col()
@@ -988,12 +1050,22 @@ impl Render for ProjectPanel {
                 .min_h(px(0.0))
                 .child(rows)
                 .child(
-                    canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
-                        .absolute()
-                        .size_full(),
+                    canvas(
+                        move |b, _, cx| {
+                            // The rows measure their text against the
+                            // width: draw them again when it changes.
+                            if bounds.replace(b).size.width != b.size.width {
+                                cx.notify(panel);
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
                 ),
         )
         .children(menu)
+        .children(expansion)
         .into_any_element()
     }
 }

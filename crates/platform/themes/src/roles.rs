@@ -132,6 +132,7 @@ roles! {
         RunWidgetStop => ("run-widget-stop", "Chrome", "Background of the run widget's Stop button"),
         DragAndDropBorder => ("drag-and-drop-border", "Chrome", "Border of the row that takes dragged files or folders"),
         DragAndDropRow => ("drag-and-drop-row", "Chrome", "Background of the row that takes dragged files or folders"),
+        TreeIndentGuide => ("tree-indent-guide", "Chrome", "Indent guides of trees: the vertical lines below an open folder"),
         ListButtonHover => ("list-button-hover", "Chrome", "Background of a hovered button at the end of a popup row, such as Run in the run widget's dropdown"),
         ListButtonSeparator => ("list-button-separator", "Chrome", "Line before the buttons at the end of a popup row"),
 
@@ -377,6 +378,7 @@ impl UiRole {
             RunWidgetStop => Some(Danger),
             DragAndDropBorder => Some(Accent),
             DragAndDropRow => Some(Selection),
+            TreeIndentGuide => Some(Divider),
             ListButtonHover => Some(Hover),
             ListButtonSeparator => Some(Pressed),
             DiagnosticErrorStripe => Some(DiagnosticError),
