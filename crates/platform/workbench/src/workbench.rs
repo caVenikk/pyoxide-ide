@@ -1031,7 +1031,7 @@ impl Workbench {
         self.save_tab(index, cx);
         self.tab_closing(cx);
         let tab = self.tabs.remove(index);
-        self.sync_tab_closed(&tab.path);
+        self.sync_tab_closed(&tab.path, cx);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }

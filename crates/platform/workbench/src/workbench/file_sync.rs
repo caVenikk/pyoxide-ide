@@ -27,13 +27,15 @@
 //! listed again), the file index and the language services (watched
 //! files), also for the application's own writes of files without an
 //! editor (Replace in Files). When events were lost, or no watcher runs,
-//! the tree and the index are built again instead.
+//! the tree and the index are built again instead. Open files outside the
+//! project folder, or without a project, are watched by their folders.
 
 mod dialogs;
 mod disk;
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use code_intel_ui::code_intel::{FileChange, FileChangeKind};
@@ -78,16 +80,20 @@ struct DiskState {
     _events: Option<Subscription>,
 }
 
-/// The project's file watcher.
+/// The file watcher: the project folder with everything below it, and
+/// the folders of open files outside it (or of every open file without a
+/// project), which the reference has no need for: it always has a
+/// project, while Pyoxide opens single files too.
 #[derive(Default)]
 enum Watch {
-    /// Not asked for, or no project.
+    /// Not asked for, or nothing to watch yet.
     #[default]
     Off,
     /// Being set up off the UI thread.
     Starting,
-    /// Watching while it is kept here.
-    Running { _watcher: FileWatcher },
+    /// Watching while it is kept here (shared with the background work
+    /// that adds and removes folders).
+    Running { watcher: Arc<Mutex<FileWatcher>> },
     /// Could not start: the window's activation looks at the project
     /// instead.
     Failed,
@@ -98,6 +104,10 @@ enum Watch {
 pub(super) struct FileSync {
     settings: SyncSettings,
     watch: Watch,
+    /// The project folder, watched with everything below it.
+    root: Option<PathBuf>,
+    /// Folders watched for open files outside the project folder.
+    folders: BTreeSet<PathBuf>,
     /// Receives the watcher's batches.
     events: Option<Task<()>>,
     files: HashMap<PathBuf, DiskState>,
@@ -113,12 +123,17 @@ pub(super) struct FileSync {
 }
 
 /// Paths the watcher leaves out: what is never shown (a version control
-/// folder, byte code) and the application's own temporary save files.
-fn ignored(root: &Path, path: &Path) -> bool {
+/// folder, byte code; below the project folder by any of its names,
+/// elsewhere by the file's name) and the application's own temporary save
+/// files.
+fn ignored(root: Option<&Path>, path: &Path) -> bool {
     let hidden = Filter::default();
-    let rel = path.strip_prefix(root).unwrap_or(path);
-    rel.components()
-        .any(|c| hidden.is_hidden(&c.as_os_str().to_string_lossy()))
+    let name_hidden = |name: &std::ffi::OsStr| hidden.is_hidden(&name.to_string_lossy());
+    let hidden_path = match root.and_then(|r| path.strip_prefix(r).ok()) {
+        Some(rel) => rel.components().any(|c| name_hidden(c.as_os_str())),
+        None => path.file_name().is_some_and(name_hidden),
+    };
+    hidden_path
         || path
             .file_name()
             .is_some_and(|n| project::is_save_temp(&n.to_string_lossy()))
@@ -172,21 +187,32 @@ impl Workbench {
     ) {
         let sync = &mut self.file_sync;
         sync.window = Some(window.window_handle());
-        sync.generation += 1;
         sync.files.clear();
         sync.dialogs.clear();
+        sync.root = Some(root.to_owned());
+        self.start_watcher(cx);
+    }
+
+    /// Starts the watcher afresh (off the UI thread): the project folder,
+    /// then the folders of open files outside it.
+    fn start_watcher(&mut self, cx: &mut Context<Self>) {
+        let sync = &mut self.file_sync;
+        sync.generation += 1;
         sync.watch = Watch::Off;
         sync.events = None;
+        sync.folders.clear();
         if !sync.settings.watch {
             return;
         }
         sync.watch = Watch::Starting;
         let generation = sync.generation;
-        let root = root.to_owned();
+        let root = sync.root.clone();
         let start = cx.background_spawn(async move {
             let ignore_root = root.clone();
-            let mut watcher = FileWatcher::new(move |p: &Path| ignored(&ignore_root, p))?;
-            watcher.watch(&root, true)?;
+            let mut watcher = FileWatcher::new(move |p: &Path| ignored(ignore_root.as_deref(), p))?;
+            if let Some(root) = &root {
+                watcher.watch(root, true)?;
+            }
             Ok::<_, file_watcher::WatchError>(watcher)
         });
         cx.spawn(async move |this, cx| {
@@ -213,7 +239,10 @@ impl Workbench {
 
     fn watcher_started(&mut self, watcher: FileWatcher, cx: &mut Context<Self>) {
         let events = watcher.events();
-        self.file_sync.watch = Watch::Running { _watcher: watcher };
+        self.file_sync.watch = Watch::Running {
+            watcher: Arc::new(Mutex::new(watcher)),
+        };
+        self.watch_folders_of_open_files(cx);
         self.file_sync.events = Some(cx.spawn(async move |this, cx| {
             while let Ok(batch) = events.recv_async().await {
                 if this
@@ -227,6 +256,43 @@ impl Workbench {
         // Files may have changed while the watcher was set up.
         self.check_open_files(None, cx);
         cx.notify();
+    }
+
+    /// Watches the folders of the open files outside the project folder
+    /// (without their subfolders) and stops watching folders no open file
+    /// is in any more. The watcher starts when the first such file opens.
+    fn watch_folders_of_open_files(&mut self, cx: &mut Context<Self>) {
+        let sync = &mut self.file_sync;
+        let root = sync.root.as_deref();
+        let wanted: BTreeSet<PathBuf> = sync
+            .files
+            .keys()
+            .filter(|p| root.is_none_or(|r| !p.starts_with(r)))
+            .filter_map(|p| p.parent().map(Path::to_path_buf))
+            .collect();
+        let watcher = match &sync.watch {
+            Watch::Running { watcher } => watcher.clone(),
+            Watch::Off if !wanted.is_empty() && sync.settings.watch => {
+                return self.start_watcher(cx);
+            }
+            _ => return,
+        };
+        let added: Vec<PathBuf> = wanted.difference(&sync.folders).cloned().collect();
+        let removed: Vec<PathBuf> = sync.folders.difference(&wanted).cloned().collect();
+        if added.is_empty() && removed.is_empty() {
+            return;
+        }
+        sync.folders = wanted;
+        cx.background_spawn(async move {
+            let mut watcher = watcher.lock().unwrap_or_else(|e| e.into_inner());
+            for folder in removed {
+                let _ = watcher.unwatch(&folder);
+            }
+            for folder in added {
+                let _ = watcher.watch(&folder, false);
+            }
+        })
+        .detach();
     }
 
     /// An editor tab was opened for a file.
@@ -270,12 +336,14 @@ impl Workbench {
                 ..DiskState::default()
             },
         );
+        self.watch_folders_of_open_files(cx);
     }
 
     /// The tab of a file was closed.
-    pub(super) fn sync_tab_closed(&mut self, path: &Path) {
+    pub(super) fn sync_tab_closed(&mut self, path: &Path, cx: &mut Context<Self>) {
         if !self.tabs.iter().any(|t| t.path == path) {
             self.file_sync.files.remove(path);
+            self.watch_folders_of_open_files(cx);
         }
     }
 
@@ -459,11 +527,20 @@ impl Workbench {
         }
         let filter = self.panel.read(cx).filter().cloned().unwrap_or_default();
         let generation = self.file_sync.generation;
+        // Folders outside the project are watched for their open files
+        // only: the tree, the index and the services follow the project.
+        let Some(root) = self.file_sync.root.clone() else {
+            return;
+        };
         let paths: Vec<(PathBuf, bool)> = batch
             .paths
             .into_iter()
+            .filter(|e| e.path.starts_with(&root))
             .map(|e| (e.path, e.kind != Kind::Changed))
             .collect();
+        if paths.is_empty() {
+            return;
+        }
         self.pending += 1;
         let look = cx.background_spawn(async move { project::disk_changes(paths, &filter) });
         cx.spawn(async move |this, cx| {

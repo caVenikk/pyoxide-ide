@@ -23,7 +23,9 @@
 12. Type into a file and quit at once.
 
 ## Expected
-- Step 1: with the file watcher, the editor shows the new text at once;
+- Step 1: with the file watcher (also for a file opened without a
+  project, or outside the project folder), the editor shows the new text
+  at once;
   otherwise when the window gets the focus (step 2, "Synchronize files on
   frame activation", on by default). The caret stays on its line (now
   two lines lower) and column; the view does not scroll; the tab is not

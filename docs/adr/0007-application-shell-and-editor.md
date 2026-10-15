@@ -177,9 +177,13 @@ Created and removed paths list the project tree's folders again, update
 the file index and reach the language services as watched-file changes,
 also for the application's own writes of files without an editor
 (Replace in Files). When events were lost, or without a watcher, the tree
-and the index are built again instead. Files outside the project folder
-are not watched (the reference watches only project and library roots);
-the window's activation and Reload All from Disk look at them.
+and the index are built again instead. The folder of an open file
+outside the project folder, or of any open file without a project, is
+watched too (without its subfolders), and the watcher starts with the
+first such file: the reference watches only project and library roots,
+but it always has a project, while Pyoxide opens single files, and a
+window that never gets the focus would otherwise never see their
+changes.
 
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a

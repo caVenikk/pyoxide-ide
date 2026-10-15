@@ -70,6 +70,50 @@ fn open(cx: &mut TestAppContext, sync: SyncSettings) -> (H<'_>, tempfile::TempDi
     (h, dir)
 }
 
+/// As the application runs with `PYOXIDE_BACKGROUND`: the window never
+/// gets the focus, and a file opens by its absolute path (with the folder
+/// opened as the project first when `project`).
+fn open_in_background(
+    cx: &mut TestAppContext,
+    sync: SyncSettings,
+    project: bool,
+) -> (H<'_>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.py"), "def hello():\n    return 1\n").unwrap();
+    let fake = FakeCodeIntel::new();
+    let product = Product {
+        name: "Test IDE",
+        file_types: vec![FileType {
+            language_id: Some("python"),
+            ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
+        }],
+        code_intel: Some(CodeIntelHook::new(Provider(fake.clone()))),
+        ..Product::default()
+    };
+    let window = cx.update(|cx| {
+        workbench::init(cx, &product);
+        workbench::open_main_window(cx, Rc::new(product))
+    });
+    cx.run_until_parked();
+    window
+        .update(cx, |w, _, _| w.set_sync_settings(sync))
+        .unwrap();
+    let mut h = H {
+        cx,
+        window,
+        root,
+        fake,
+    };
+    if project {
+        let root = h.root.display().to_string();
+        h.invoke("project.open-folder", json!({ "path": root }));
+    }
+    let a = h.root.join("a.py").display().to_string();
+    h.invoke("project.open-file", json!({ "path": a }));
+    (h, dir)
+}
+
 struct H<'a> {
     cx: &'a mut TestAppContext,
     window: WindowHandle<Workbench>,
@@ -443,6 +487,71 @@ fn a_rename_outside_is_a_deletion_and_a_creation(cx: &mut TestAppContext) {
     let rows = h.rows();
     assert!(rows.contains(&"renamed.py".to_owned()), "{rows:?}");
     assert!(!rows.contains(&"a.py".to_owned()), "{rows:?}");
+}
+
+/// The sequence of a release run in the background: a file opened by the
+/// command, changed outside, typed into, saved by the idle save, changed
+/// outside again, then the application quits. The file written outside is
+/// never written over.
+fn changes_outside_while_typing(h: &mut H, watched: bool) {
+    let a = h.root.join("a.py");
+    h.write("a.py", "def hello():\n    return 2  # outside\n");
+    if watched {
+        h.wait("the change outside to be reloaded", |h| {
+            h.text() == "def hello():\n    return 2  # outside\n"
+        });
+    } else {
+        // No watcher, no focus: nothing looks at the file yet.
+        h.advance(Duration::from_secs(3));
+    }
+    h.set_caret(0, 0);
+    h.invoke("editor.type", json!({"text": "# mine\n"}));
+    h.write("a.py", "def hello():\n    return 3  # outside again\n");
+    // The idle save comes 2 s after the typing.
+    if watched {
+        h.wait("the conflict", |h| !h.state()["dialog"].is_null());
+    } else {
+        h.advance(Duration::from_secs(3));
+    }
+    let disk = std::fs::read_to_string(&a).unwrap();
+    assert_eq!(disk, "def hello():\n    return 3  # outside again\n");
+    assert_eq!(h.state()["dialog"]["title"], json!("File Cache Conflict"));
+    assert_eq!(h.state()["tabs"][0]["modified"], json!(true));
+    // Quitting does not write over it either.
+    h.cx.update(|cx| cx.shutdown());
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), disk);
+}
+
+#[gpui::test]
+fn a_background_window_without_a_project_never_writes_over_a_newer_file(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open_in_background(cx, SyncSettings::default(), false);
+    changes_outside_while_typing(&mut h, false);
+}
+
+fn background_with_the_watcher(cx: &mut TestAppContext, project: bool) {
+    support::allow_processes(cx);
+    let sync = SyncSettings {
+        watch: true,
+        ..SyncSettings::default()
+    };
+    let (mut h, _dir) = open_in_background(cx, sync, project);
+    let window = h.window;
+    h.wait("the watcher to start", |h| {
+        window.read_with(h.cx, |w, _| w.is_watching()).unwrap()
+    });
+    changes_outside_while_typing(&mut h, true);
+}
+
+#[gpui::test]
+fn a_background_window_reloads_and_asks_with_the_watcher(cx: &mut TestAppContext) {
+    background_with_the_watcher(cx, true);
+}
+
+/// A file opened without a project (or outside its folder) is watched by
+/// its folder.
+#[gpui::test]
+fn a_file_without_a_project_is_watched_too(cx: &mut TestAppContext) {
+    background_with_the_watcher(cx, false);
 }
 
 #[gpui::test]
