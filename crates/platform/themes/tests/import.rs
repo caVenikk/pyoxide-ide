@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use themes::import::{
     ImportError, Imported, KeySource, Level, Library, SourceKind, WarningKind, import_path,
 };
-use themes::{Registry, Rgba, TextRole, ThemeKind, UiRole, UnderlineStyle};
+use themes::{Registry, Rgba, TextRole, TextStyle, ThemeKind, UiRole, UnderlineStyle};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -115,6 +115,83 @@ fn effects_become_underlines_strikeouts_and_links() {
     let link = &t.text[TextRole::Link];
     assert_eq!(link.fg, Some(rgba("#5aa0ff")));
     assert_eq!(link.underline, Some(UnderlineStyle::Single));
+}
+
+#[test]
+fn an_effect_type_without_an_effect_colour_draws_nothing() {
+    // Every effect type without a colour: the reference paints no effect
+    // then, so the styles keep only their colours.
+    let xml = r#"<scheme name="Effectless Fixture" version="142">
+        <attributes>
+          <option name="TEXT"><value>
+            <option name="FOREGROUND" value="23282d" />
+            <option name="BACKGROUND" value="fbfaf5" />
+          </value></option>
+          <option name="FOLDED_TEXT_ATTRIBUTES"><value>
+            <option name="FOREGROUND" value="4a5a4a" />
+            <option name="EFFECT_TYPE" value="0" />
+          </value></option>
+          <option name="WARNING_ATTRIBUTES"><value>
+            <option name="BACKGROUND" value="faf0cc" />
+            <option name="EFFECT_TYPE" value="1" />
+          </value></option>
+          <option name="IDENTIFIER_UNDER_CARET_ATTRIBUTES"><value>
+            <option name="BACKGROUND" value="e0e8f0" />
+            <option name="EFFECT_TYPE" value="2" />
+          </value></option>
+          <option name="DEPRECATED_ATTRIBUTES"><value>
+            <option name="FOREGROUND" value="606060" />
+            <option name="EFFECT_TYPE" value="3" />
+          </value></option>
+          <option name="WRITE_IDENTIFIER_UNDER_CARET_ATTRIBUTES"><value>
+            <option name="BACKGROUND" value="f0e0e8" />
+            <option name="EFFECT_TYPE" value="4" />
+          </value></option>
+          <option name="HYPERLINK_ATTRIBUTES"><value>
+            <option name="FOREGROUND" value="2050c0" />
+            <option name="EFFECT_TYPE" value="5" />
+          </value></option>
+          <option name="ERRORS_ATTRIBUTES"><value>
+            <option name="EFFECT_COLOR" value="d03030" />
+            <option name="EFFECT_TYPE" value="2" />
+          </value></option>
+        </attributes></scheme>"#;
+    let mut library = Library::new();
+    library
+        .add_scheme_xml(xml, "inline", "inline.icls", true)
+        .unwrap();
+    let item = library.import_all().remove(0);
+    let text = &item.theme.text;
+    let only = |fg: Option<&str>, bg: Option<&str>| TextStyle {
+        fg: fg.map(rgba),
+        bg: bg.map(rgba),
+        ..TextStyle::default()
+    };
+    assert_eq!(text[TextRole::FoldedText], only(Some("#4a5a4a"), None));
+    assert_eq!(
+        text[TextRole::DiagnosticWarning],
+        only(None, Some("#faf0cc"))
+    );
+    assert_eq!(text[TextRole::IdentifierRead], only(None, Some("#e0e8f0")));
+    assert_eq!(
+        text[TextRole::DiagnosticDeprecated],
+        only(Some("#606060"), None)
+    );
+    assert_eq!(text[TextRole::IdentifierWrite], only(None, Some("#f0e0e8")));
+    assert_eq!(text[TextRole::Link], only(Some("#2050c0"), None));
+    // With a colour the effect is drawn.
+    let error = &text[TextRole::DiagnosticError];
+    assert_eq!(error.underline, Some(UnderlineStyle::Wavy));
+    assert_eq!(error.underline_color, Some(rgba("#d03030")));
+    // Drawing nothing is what the reference does: no approximation.
+    assert!(
+        item.report
+            .approximations
+            .iter()
+            .all(|a| !a.note.contains("strikeout")),
+        "{:?}",
+        item.report.approximations
+    );
 }
 
 #[test]

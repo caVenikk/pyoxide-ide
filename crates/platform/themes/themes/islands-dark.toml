@@ -173,7 +173,6 @@ italic = true
 
 [syntax.docstring-tag]
 fg = "#67a37c"
-underline = "single"
 
 [syntax.todo]
 fg = "#8bb33d"
@@ -259,7 +258,6 @@ fg = "#bababa"
 
 [syntax.property-key]
 fg = "#cf8e6d"
-underline = "single"
 
 [syntax.link]
 fg = "#548af7"
@@ -304,11 +302,9 @@ fg = "#f75464"
 
 [syntax.identifier-read]
 bg = "#373b39"
-underline = "single"
 
 [syntax.identifier-write]
 bg = "#402f33"
-underline = "single"
 
 [syntax.folded-text]
 fg = "#868991"
