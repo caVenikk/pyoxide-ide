@@ -102,6 +102,7 @@ run-widget-running = "$leaf"
 run-widget-stop = "$red"
 drag-and-drop-border = "#2675bf"
 drag-and-drop-row = "#2675bf26"
+tree-indent-guide = "#e6e6e6"
 list-button-hover = "#b3cdef"
 list-button-separator = "#ffffffb3"
 

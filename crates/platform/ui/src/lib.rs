@@ -16,6 +16,7 @@ pub mod markdown;
 pub mod menu;
 pub mod pointer;
 pub mod theme;
+pub mod tree_guides;
 
 pub use icons::{Icon, IconName};
 pub use theme::{Theme, ThemeExt};
