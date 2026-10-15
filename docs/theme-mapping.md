@@ -426,6 +426,7 @@ Editor decorations have no fallback except where listed.
 | `EFFECT_TYPE` 3 (strikeout) | `strikethrough`, drawn in the text colour |
 | `EFFECT_TYPE` 4 (bold line) | `underline = "thick"` in `EFFECT_COLOR` |
 | `EFFECT_TYPE` 5 (bold dotted) | `underline = "dotted"` in `EFFECT_COLOR` |
+| `EFFECT_TYPE` without `EFFECT_COLOR` | no effect, as in the reference, which paints an effect only with both |
 | any other `EFFECT_TYPE`, or `EFFECT_COLOR` alone | ignored, listed as an approximation |
 | `ERROR_STRIPE_COLOR` | only used as a source of the diagnostic colours above |
 

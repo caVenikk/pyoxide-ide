@@ -378,6 +378,11 @@ impl<'a> Converter<'a> {
                     );
                 }
             }
+            // The reference paints an effect only when both its type and its
+            // colour are set (`AttributesFlyweight.getAllEffects`), so a type
+            // without a colour draws nothing rather than a line in the text
+            // colour.
+            Some(Ok(_)) if effect_color.is_none() => {}
             Some(Ok(kind)) => {
                 let underline = |style: &mut TextStyle, kind: UnderlineStyle| {
                     style.underline = Some(kind);
@@ -389,7 +394,7 @@ impl<'a> Converter<'a> {
                     2 => underline(&mut style, UnderlineStyle::Wavy),
                     3 => {
                         style.strikethrough = Some(true);
-                        if effect_color.is_some() && effect_color != style.fg {
+                        if effect_color != style.fg {
                             note(
                                 self,
                                 "the strikeout colour follows the text colour".to_owned(),
