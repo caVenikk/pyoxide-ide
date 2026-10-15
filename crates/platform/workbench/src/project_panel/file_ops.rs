@@ -422,7 +422,7 @@ impl ProjectPanel {
             PopupOptions {
                 title: Some("New".into()),
                 speed_search: true,
-                selected: None,
+                ..PopupOptions::default()
             },
             window,
             cx,
