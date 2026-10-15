@@ -25,6 +25,8 @@ pub struct IconName(pub &'static str);
 
 impl IconName {
     pub const ADD: Self = Self("general/add");
+    pub const CUT: Self = Self("general/cut");
+    pub const PASTE: Self = Self("general/paste");
     pub const CHEVRON_DOWN: Self = Self("general/chevronDown");
     pub const CHEVRON_LEFT: Self = Self("general/chevronLeft");
     pub const CHEVRON_RIGHT: Self = Self("general/chevronRight");
@@ -173,10 +175,10 @@ platform_icons! {
         "fileTypes/unknown", "fileTypes/xml", "fileTypes/yaml",
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
-        "general/collapseAll", "general/copy", "general/delete", "general/down", "general/expandAll", "general/filter",
+        "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down", "general/expandAll", "general/filter",
         "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
-        "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
+        "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
         "general/previewHorizontally", "general/print", "general/questionDialog", "general/remove",
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",

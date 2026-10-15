@@ -153,6 +153,28 @@ impl NavigationHistory {
         self.forward.retain(&mut keep);
     }
 
+    /// `from` was renamed or moved to `to`: the places in it (and in the
+    /// files inside a folder) follow, as the reference's places follow the
+    /// file.
+    pub fn rename(&mut self, from: &Path, to: &Path) {
+        for place in self.back.iter_mut().chain(self.forward.iter_mut()) {
+            if let Ok(rest) = place.path.strip_prefix(from) {
+                place.path = if rest.as_os_str().is_empty() {
+                    to.to_owned()
+                } else {
+                    to.join(rest)
+                };
+            }
+        }
+    }
+
+    /// `path` was deleted: the places in it (and in the files inside a
+    /// folder) are dropped.
+    pub fn remove(&mut self, path: &Path) {
+        self.back.retain(|p| !p.path.starts_with(path));
+        self.forward.retain(|p| !p.path.starts_with(path));
+    }
+
     /// Forgets every place (another project opened).
     pub fn clear(&mut self) {
         self.back.clear();
@@ -368,6 +390,24 @@ mod tests {
 
         h.retain_existing(|_| false);
         assert!(!h.can_go_back());
+        assert!(!h.can_go_forward());
+    }
+
+    #[test]
+    fn places_follow_renamed_and_deleted_files() {
+        let mut h = NavigationHistory::new();
+        h.record(at("src/a.py", 0));
+        h.record(at("src/pkg/b.py", 10));
+        h.record(at("srcx.py", 0));
+        h.record(at("c.py", 0));
+        h.back(Some(at("src/pkg/b.py", 30)));
+        h.rename(Path::new("src/pkg"), Path::new("lib"));
+        h.rename(Path::new("src/a.py"), Path::new("main.py"));
+        let moved = Path::new("lib").join("b.py").display().to_string();
+        assert_eq!(back(&h), [p("main.py", 0), p(&moved, 10), p("srcx.py", 0)]);
+        assert_eq!(forward(&h), [p(&moved, 30)]);
+        h.remove(Path::new("lib"));
+        assert_eq!(back(&h), [p("main.py", 0), p("srcx.py", 0)]);
         assert!(!h.can_go_forward());
     }
 

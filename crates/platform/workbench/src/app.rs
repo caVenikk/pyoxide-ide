@@ -98,6 +98,9 @@ pub struct Product {
     /// tabs of file types with a language id get code intelligence; without
     /// it they get none.
     pub code_intel: Option<CodeIntelHook>,
+    /// The product's rows of *New* in the project tool window, after
+    /// *Directory* (Python File, Python Package).
+    pub new_items: Vec<project_panel::NewItem>,
 }
 
 /// Default size of the main window's content.
@@ -116,6 +119,10 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
+    ui::command::register(cx, project_panel::FILE_COMMANDS);
+    ui::command::register(cx, project_panel::NEW_ITEM_COMMANDS);
+    ui::command::register(cx, project_panel::TRANSFER_COMMANDS);
+    ui::command::register(cx, project_panel::name_popup::COMMANDS);
     ui::command::register(cx, ui::menu::COMMANDS);
     editor::init(cx);
     crate::find_in_files::init(cx, &product.find_file_masks);

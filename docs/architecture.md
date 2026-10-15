@@ -44,8 +44,11 @@ Platform (`crates/platform/`, language-agnostic):
   and the one-time import of the reference IDE's exclusions (ADR 0008),
   the personal project state (ADR 0009), reading and writing documents
   with the stamps (size, modification time) that tell external changes
-  from the application's own writes, and what paths reported by the file
-  watcher are now on disk.
+  from the application's own writes, what paths reported by the file
+  watcher are now on disk, and the file operations of the project tool
+  window (`fs_ops`: the reference's checks of new names, create from
+  templates and packages, rename, copy and move with their conflicts,
+  delete to the system trash; never outside the project).
 - `file-watcher`: the operating system's change notifications (`notify`:
   FSEvents, inotify, ReadDirectoryChangesW) for the project folder,
   gathered into batches of changed paths with a hint each and a rescan
@@ -96,13 +99,16 @@ Platform (`crates/platform/`, language-agnostic):
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
   area, status bar, a movable and resizable popup frame, the Find in Files
   and Replace in Files popup with its preview, Search Everywhere and Go to
-  File, Recent Files), the navigation history (Back and Forward),
-  keymaps (with double taps of a modifier and the mouse's back and
-  forward buttons), application start-up, environment switches and
-  in-app measurements; files changed outside the application (the file
-  watcher, a look at the open files when the window gets the focus,
-  Reload All from Disk, the File Cache Conflict dialog, saves that never
-  write over a newer file).
+  File, Recent Files), the project tool window's file operations (New
+  with the product's kinds, Rename, Delete, Cut, Copy, Paste, Move, Copy
+  Path and drag and drop, with their popups and dialogs; tabs, the file
+  index, the navigation history and the language services follow), the
+  navigation history (Back and Forward), keymaps (with double taps of a
+  modifier and the mouse's back and forward buttons), application
+  start-up, environment switches and in-app measurements; files changed
+  outside the application (the file watcher, a look at the open files
+  when the window gets the focus, Reload All from Disk, the File Cache
+  Conflict dialog, saves that never write over a newer file).
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model

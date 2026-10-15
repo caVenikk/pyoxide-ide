@@ -4,6 +4,7 @@
 //! engine widget).
 
 pub mod interpreter;
+mod new_items;
 pub mod run;
 pub mod services;
 pub mod type_engine;
@@ -166,6 +167,7 @@ pub fn product() -> Product {
         code_intel: Some(workbench::CodeIntelHook::new(
             services::PythonCodeIntel::new(),
         )),
+        new_items: new_items::new_items(),
     }
 }
 

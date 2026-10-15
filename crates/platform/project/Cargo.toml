@@ -12,6 +12,7 @@ text.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 toml_edit = "0.25"
+trash.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

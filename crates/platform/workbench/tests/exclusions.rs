@@ -12,6 +12,25 @@ use gpui::{
 use serde_json::{Value, json};
 use workbench::{AutoExclusions, FileType, Product, Workbench};
 
+/// The context menu of a row with nothing to mark: inside an excluded
+/// folder, a folder a product excludes, the project root.
+const NOTHING_TO_MARK: [&str; 14] = [
+    "New",
+    "-",
+    "Cut",
+    "Copy",
+    "Copy Path/Reference…",
+    "Paste",
+    "-",
+    "Find in Files…",
+    "Replace in Files…",
+    "-",
+    "Rename…",
+    "Refactor",
+    "-",
+    "Delete…",
+];
+
 fn open(cx: &mut TestAppContext, root: &Path) -> WindowHandle<Workbench> {
     let product = Product {
         name: "Test IDE",
@@ -184,8 +203,20 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     assert_eq!(
         menu(&t),
         [[
+            "New",
+            "-",
+            "Cut",
+            "Copy",
+            "Copy Path/Reference…",
+            "Paste",
+            "-",
             "Find in Files…",
             "Replace in Files…",
+            "-",
+            "Rename…",
+            "Refactor",
+            "-",
+            "Delete…",
             "-",
             "Mark Directory As"
         ]]
@@ -236,10 +267,7 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     );
     // Rows inside an excluded folder have nothing to mark.
     right_click(cx, window, "tree-row:docs/api");
-    assert_eq!(
-        menu(&tree(cx, window)),
-        [vec!["Find in Files…", "Replace in Files…"]]
-    );
+    assert_eq!(menu(&tree(cx, window)), [NOTHING_TO_MARK]);
     press(cx, window, "escape");
     invoke(cx, window, "project.tree.collapse-all", json!(null));
 
@@ -250,7 +278,7 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     press(cx, window, "up");
     assert_eq!(
         tree(cx, window)["context_menu"]["levels"][0]["selected"],
-        json!(3)
+        json!(15)
     );
     press(cx, window, "right");
     let t = tree(cx, window);
@@ -277,7 +305,24 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     right_click(cx, window, "tree-row:notes.txt");
     assert_eq!(
         menu(&tree(cx, window)),
-        [["Find in Files…", "Replace in Files…", "-", "Mark File As"]]
+        [[
+            "New",
+            "-",
+            "Cut",
+            "Copy",
+            "Copy Path/Reference…",
+            "Paste",
+            "-",
+            "Find in Files…",
+            "Replace in Files…",
+            "-",
+            "Rename…",
+            "Refactor",
+            "-",
+            "Delete…",
+            "-",
+            "Mark File As"
+        ]]
     );
     click(cx, window, "tree-row:src");
     let t = tree(cx, window);
@@ -287,16 +332,10 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     // A folder a product rule excludes offers no Cancel Exclusion, and the
     // project root has nothing to mark.
     right_click(cx, window, "tree-row:.venv");
-    assert_eq!(
-        menu(&tree(cx, window)),
-        [vec!["Find in Files…", "Replace in Files…"]]
-    );
+    assert_eq!(menu(&tree(cx, window)), [NOTHING_TO_MARK]);
     press(cx, window, "escape");
     right_click(cx, window, "tree-row:");
-    assert_eq!(
-        menu(&tree(cx, window)),
-        [vec!["Find in Files…", "Replace in Files…"]]
-    );
+    assert_eq!(menu(&tree(cx, window)), [NOTHING_TO_MARK]);
     press(cx, window, "escape");
 }
 
@@ -405,8 +444,20 @@ fn context_menu_from_the_keyboard(cx: &mut TestAppContext) {
     assert_eq!(
         menu(&t),
         [[
+            "New",
+            "-",
+            "Cut",
+            "Copy",
+            "Copy Path/Reference…",
+            "Paste",
+            "-",
             "Find in Files…",
             "Replace in Files…",
+            "-",
+            "Rename…",
+            "Refactor",
+            "-",
+            "Delete…",
             "-",
             "Mark Directory As"
         ]]

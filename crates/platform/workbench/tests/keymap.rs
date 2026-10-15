@@ -271,10 +271,19 @@ impl H<'_> {
     }
 
     fn focus_dialog(&mut self) {
-        let dialog = self.workbench(|w, cx| w.dialog_focus(cx));
+        let dialog = self.workbench(|w, cx| {
+            w.dialog_focus(cx)
+                .or_else(|| w.panel().read(cx).dialog().map(|d| d.focus_handle(cx)))
+        });
         if let Some(handle) = dialog {
             self.focus(handle);
         }
+    }
+
+    /// The tree's New File, New Directory or Rename popup (`null` without
+    /// one).
+    fn name_popup(&mut self) -> Value {
+        self.state()["tree"]["name_popup"].clone()
     }
 
     fn run_focused(&mut self) -> bool {
@@ -523,6 +532,27 @@ impl H<'_> {
         if self.run()["configurations"]["selected"] != Value::Null {
             self.invoke("run.select-current-file", json!(null));
         }
+        // No name popup, no Copy or Move dialog.
+        if !self.state()["tree"]["transfer"].is_null() {
+            let dialog = self.workbench(|w, cx| {
+                w.panel()
+                    .read(cx)
+                    .transfer_dialog()
+                    .map(|d| d.focus_handle(cx))
+            });
+            if let Some(handle) = dialog {
+                self.focus(handle);
+            }
+            self.invoke("name-input.cancel", json!(null));
+        }
+        if !self.name_popup().is_null() {
+            let popup =
+                self.workbench(|w, cx| w.panel().read(cx).name_popup().map(|p| p.focus_handle(cx)));
+            if let Some(handle) = popup {
+                self.focus(handle);
+            }
+            self.invoke("name-input.cancel", json!(null));
+        }
         if !self.state()["dialog"].is_null() {
             self.focus_dialog();
             self.invoke("dialog.cancel", json!(null));
@@ -602,6 +632,22 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
         file_types: vec![python()],
         run: Some(support::run_hook()),
         code_intel: Some(CodeIntelHook::new(Intel(FakeCodeIntel::new()))),
+        new_items: vec![workbench::NewItem {
+            label: "Python File",
+            icon: IconName::FILE_TEXT,
+            title: "New Python File",
+            kinds: ["Python file", "Python unit test"]
+                .into_iter()
+                .map(|label| workbench::NewItemKind {
+                    label,
+                    icon: IconName::FILE_TEXT,
+                    template: workbench::NewTemplate::File {
+                        extension: "py",
+                        text: "",
+                    },
+                })
+                .collect(),
+        }],
         ..Product::default()
     };
     let keymap = Keymap::parse(keymap_text).unwrap();
@@ -633,6 +679,9 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
         "project.open-folder",
         json!({ "path": root.display().to_string() }),
     );
+    // Deleting never fills the system trash.
+    let panel = h.workbench(|w, _| w.panel().clone());
+    h.cx.update(|cx| panel.update(cx, |p, _| p.set_delete_to_trash(false)));
     h.reset();
     (h, dir)
 }
@@ -1743,22 +1792,141 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.select_in_tree("src");
             h.press(keys);
             let levels = h.menu_levels();
+            assert_eq!(levels[0]["items"][0]["label"], json!("New"), "{what}");
             assert_eq!(
-                levels[0]["items"][0]["label"],
+                levels[0]["items"][7]["label"],
                 json!("Find in Files…"),
                 "{what}"
             );
             assert_eq!(
-                levels[0]["items"][3]["label"],
+                levels[0]["items"][15]["label"],
                 json!("Mark Directory As"),
                 "{what}"
             );
+        }
+        "project.tree.new" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            let menu = h.state()["tree"]["context_menu"].clone();
+            assert_eq!(menu["title"], json!("New"), "{what}");
+            let items = &menu["levels"][0]["items"];
+            assert_eq!(items[0]["label"], json!("File"), "{what}");
+            assert_eq!(items[1]["label"], json!("Directory"), "{what}");
+        }
+        "project.tree.rename" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            assert_eq!(
+                h.name_popup()["label"],
+                json!("Rename file 'm.py' to:"),
+                "{what}"
+            );
+        }
+        "project.tree.delete" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            assert_eq!(
+                h.state()["dialog"]["message"],
+                json!("Delete file \"m.py\"?"),
+                "{what}"
+            );
+            assert!(h.root.join("src/m.py").exists(), "{what}: only asked");
+        }
+        "name-input.confirm" => {
+            h.select_in_tree("src");
+            h.invoke("project.tree.new-directory", json!(null));
+            h.invoke("editor.type", json!({ "text": "made" }));
+            h.press(keys);
+            assert!(h.name_popup().is_null(), "{what}");
+            assert!(h.root.join("src/made").is_dir(), "{what}");
+            h.invoke("project.tree.delete", json!({ "paths": ["src/made"] }));
+            h.invoke("dialog.confirm", json!(null));
+            assert!(!h.root.join("src/made").exists(), "{what}");
+        }
+        "name-input.next-kind" | "name-input.previous-kind" => {
+            // Two kinds: either way the second one, going round.
+            h.select_in_tree("src");
+            h.invoke("project.tree.new-item", json!({ "item": "Python File" }));
+            h.press(keys);
+            assert_eq!(
+                h.name_popup()["selected_kind"],
+                json!("Python unit test"),
+                "{what}"
+            );
+        }
+        "name-input.next-field" | "name-input.previous-field" => {
+            // The Copy dialog of one file: New name, then To directory.
+            h.select_in_tree("src/m.py");
+            h.invoke("project.tree.copy-element", json!(null));
+            let dialog = h.workbench(|w, cx| w.panel().read(cx).transfer_dialog().cloned());
+            let dialog = dialog.expect("the Copy dialog");
+            h.press(keys);
+            let directory =
+                h.cx.update(|cx| dialog.read(cx).directory_field().focus_handle(cx));
+            let focused =
+                h.cx.update_window(h.window.into(), |_, window, _| directory.is_focused(window))
+                    .unwrap();
+            assert!(focused, "{what}: the directory field has the focus");
+        }
+        "project.tree.cut" | "project.tree.copy" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            assert_eq!(
+                h.state()["tree"]["clipboard"],
+                json!({ "paths": ["src/m.py"], "cut": b.command.ends_with("cut") }),
+                "{what}"
+            );
+        }
+        "project.tree.paste" => {
+            h.select_in_tree("src/m.py");
+            h.invoke("project.tree.copy", json!(null));
+            h.select_in_tree("src/pkg");
+            h.press(keys);
+            assert_eq!(
+                h.state()["tree"]["transfer"]["title"],
+                json!("Copy"),
+                "{what}"
+            );
+        }
+        "project.tree.move" | "project.tree.copy-element" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            let title = if b.command.ends_with("move") {
+                "Move"
+            } else {
+                "Copy"
+            };
+            assert_eq!(
+                h.state()["tree"]["transfer"]["title"],
+                json!(title),
+                "{what}"
+            );
+        }
+        "project.tree.copy-paths" => {
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            let text =
+                h.cx.update(|cx| cx.read_from_clipboard())
+                    .and_then(|c| c.text());
+            assert_eq!(
+                text,
+                Some(h.root.join("src").join("m.py").display().to_string()),
+                "{what}"
+            );
+        }
+        "name-input.cancel" => {
+            h.select_in_tree("src");
+            h.invoke("project.tree.new-file", json!(null));
+            assert!(!h.name_popup().is_null(), "{what}");
+            h.press(keys);
+            assert!(h.name_popup().is_null(), "{what}");
+            assert!(h.tree_focused(), "{what}: the tree has the focus back");
         }
         "menu.down" | "menu.up" => {
             h.open_menu("src");
             h.press(keys);
             // Down from no row selects the first one, Up the last one.
-            let expected = if b.command == "menu.down" { 0 } else { 3 };
+            let expected = if b.command == "menu.down" { 0 } else { 15 };
             assert_eq!(h.menu_levels()[0]["selected"], json!(expected), "{what}");
         }
         "menu.open-submenu" => {

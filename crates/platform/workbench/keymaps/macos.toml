@@ -54,6 +54,22 @@ name = "ProjectTree"
 "cmd-=" = "project.tree.expand-all"
 "escape" = "workbench.focus-editor"
 "shift-escape" = "workbench.hide-tool-window"
+# File operations (#37): New (NewElement), Rename (RenameElement), Delete
+# ($Delete).
+"cmd-n" = "project.tree.new"
+"ctrl-enter" = "project.tree.new"
+"shift-f6" = "project.tree.rename"
+"delete" = "project.tree.delete"
+"backspace" = "project.tree.delete"
+"cmd-backspace" = "project.tree.delete"
+# Cut, Copy, Paste ($Cut, $Copy, $Paste), Move (F6), Copy (CopyElement,
+# F5), Copy Paths.
+"cmd-x" = "project.tree.cut"
+"cmd-c" = "project.tree.copy"
+"cmd-v" = "project.tree.paste"
+"f6" = "project.tree.move"
+"f5" = "project.tree.copy-element"
+"cmd-shift-c" = "project.tree.copy-paths"
 
 [[context]]
 name = "Editor"
@@ -454,3 +470,14 @@ name = "RunConfigurationsTree"
 "delete" = "run.configurations.dialog.remove"
 "cmd-backspace" = "run.configurations.dialog.remove"
 "cmd-d" = "run.configurations.dialog.copy"
+
+# The name field of New File, New Directory and Rename (#37).
+[[context]]
+name = "NameInput > Editor"
+[context.bindings]
+"enter" = "name-input.confirm"
+"escape" = "name-input.cancel"
+"down" = "name-input.next-kind"
+"up" = "name-input.previous-kind"
+"tab" = "name-input.next-field"
+"shift-tab" = "name-input.previous-field"
