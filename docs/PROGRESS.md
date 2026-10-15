@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 50%** `██████████░░░░░░░░░░`
+**Overall parity: 52%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -11,12 +11,12 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 50% `█████░░░░░` | 2 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 21% `██░░░░░░░░` | 1 | 0 | 4 |
+| run-debug | 32% `███░░░░░░░` | 1 | 1 | 3 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 50% `█████░░░░░` | 0 | 9 | 0 |
+| python-env | 55% `██████░░░░` | 1 | 8 | 0 |
 
 ✅ done · 🟡 partial · ⬜ not started. Features marked (own) are additions beyond the reference and are not part of the parity score.
 
@@ -126,7 +126,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ✅ | Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun) | must | #45; uv run for uv environments; soft wraps, print and console find later |
-| ⬜ | Run configurations | must | #74 |
+| 🟡 | Run configurations | must | Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75 |
 | ⬜ | Debugger (breakpoints / stepping / variables) | must | DAP / debugpy |
 | ⬜ | Test runner (pytest) | should |  |
 | ⬜ | Integrated terminal | must |  |
@@ -169,6 +169,6 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Package manager panel (list / install / upgrade / remove) | must | engine and CLI (env packages/add/remove, outdated); panel UI todo |
 | 🟡 | Package search and version picker | should | PyPI lookup (env search); picker UI todo |
 | 🟡 | Dependency groups and extras in pyproject.toml | should | read and edit via uv add --group/--optional; no UI yet |
-| 🟡 | uv run as run configuration | should | the current file runs through uv run in a uv environment (#45); configurations: #74 |
+| ✅ | uv run as run configuration | should | the current file and Python configurations run through uv run in a uv environment, standalone uv run configurations imported as Python ones (#45, #74) |
 | 🟡 | PEP 723 inline script dependencies | could | parsed by the project model |
 | 🟡 | Other managers (poetry / conda / pipenv / pip) | should | discovery of Poetry/conda/Pipenv, pip fallback for packages |

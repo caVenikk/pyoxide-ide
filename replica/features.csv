@@ -76,7 +76,7 @@ Go to Class / Go to Symbol and File Structure,python-intel,should,yes,no,Communi
 Inlay hints,python-intel,could,yes,no,Community
 Semantic highlighting,python-intel,could,yes,no,Community
 "Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun)",run-debug,must,yes,yes,"#45; uv run for uv environments; soft wraps, print and console find later"
-Run configurations,run-debug,must,yes,no,#74
+Run configurations,run-debug,must,yes,partial,"Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75"
 Debugger (breakpoints / stepping / variables),run-debug,must,yes,no,DAP / debugpy
 Test runner (pytest),run-debug,should,yes,no,
 Integrated terminal,run-debug,must,yes,no,
@@ -94,6 +94,6 @@ uv: install and manage Python versions,python-env,should,yes,partial,engine and 
 Package manager panel (list / install / upgrade / remove),python-env,must,yes,partial,"engine and CLI (env packages/add/remove, outdated); panel UI todo"
 Package search and version picker,python-env,should,yes,partial,PyPI lookup (env search); picker UI todo
 Dependency groups and extras in pyproject.toml,python-env,should,yes,partial,read and edit via uv add --group/--optional; no UI yet
-uv run as run configuration,python-env,should,yes,partial,"the current file runs through uv run in a uv environment (#45); configurations: #74"
+uv run as run configuration,python-env,should,yes,yes,"the current file and Python configurations run through uv run in a uv environment, standalone uv run configurations imported as Python ones (#45, #74)"
 PEP 723 inline script dependencies,python-env,could,yes,partial,parsed by the project model
 Other managers (poetry / conda / pipenv / pip),python-env,should,yes,partial,"discovery of Poetry/conda/Pipenv, pip fallback for packages"
