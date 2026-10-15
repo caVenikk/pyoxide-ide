@@ -1,6 +1,6 @@
 [package]
 name = "py-run"
-description = "Running Python files in Pyoxide IDE: the reference's command line, environment and PYTHONPATH for a script (uv run included) and the Python traceback link filter of the console"
+description = "Running Python in Pyoxide IDE: the Python run configuration type and its import from the reference IDE, the reference's command line, environment and PYTHONPATH for a script or module (uv run included), and the Python traceback link filter of the console"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,8 @@ console.workspace = true
 process.workspace = true
 py-env.workspace = true
 regex.workspace = true
+run-config.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

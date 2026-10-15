@@ -19,8 +19,9 @@ use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
 use super::commands::*;
+use super::configurations::{RunConfigs, RunConfigsEvent};
 use super::console_view::{ConsoleEvent, ConsoleView};
-use super::{RunHook, RunRequest, RunSpec};
+use super::{LaunchKey, RunHook, RunRequest, RunSpec};
 use crate::chrome;
 
 /// Size of the buttons of the run and console toolbars and of their icons.
@@ -39,6 +40,8 @@ pub enum RunToolWindowEvent {
     OpenLink(LinkTarget),
     /// A message for the status bar.
     Message(String),
+    /// A notification (the import of run configurations).
+    Notice(String),
     /// Closing a tab whose process runs: the workbench asks first.
     ConfirmClose(usize),
     /// The tab context menu was asked for at a window position.
@@ -67,6 +70,18 @@ fn stop_process(process: ProcessHandle, cx: &mut Context<RunToolWindow>) {
     cx.spawn(async move |this, cx| {
         stop.await;
         let _ = this.update(cx, |_, cx| cx.notify());
+    })
+    .detach();
+}
+
+/// Writes a file to a process's standard input and closes it, off the UI
+/// thread.
+fn feed_input(process: ProcessHandle, file: std::path::PathBuf, cx: &mut Context<RunToolWindow>) {
+    cx.background_spawn(async move {
+        if let Ok(bytes) = std::fs::read(&file) {
+            let _ = process.write_stdin(&bytes);
+        }
+        process.close_stdin();
     })
     .detach();
 }
@@ -139,26 +154,49 @@ pub struct RunToolWindow {
     provider: Option<RunHook>,
     tabs: Vec<RunTab>,
     selected: Option<usize>,
-    /// Launches whose command lines are being prepared, by file.
-    launching: Vec<std::path::PathBuf>,
+    /// Launches whose command lines are being prepared.
+    launching: Vec<LaunchKey>,
+    /// The project's run configurations.
+    configs: Entity<RunConfigs>,
     next_id: u64,
     /// The main window (a rerun after the process ended starts there).
     window_handle: gpui::AnyWindowHandle,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<RunToolWindowEvent> for RunToolWindow {}
 
 impl RunToolWindow {
     pub fn new(provider: Option<RunHook>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let configs = cx.new(|_| RunConfigs::new(provider.as_ref()));
+        let subscriptions = vec![
+            cx.observe(&configs, |_, _, cx| cx.notify()),
+            cx.subscribe(&configs, |_, _, event: &RunConfigsEvent, cx| match event {
+                RunConfigsEvent::Notice(text) => cx.emit(RunToolWindowEvent::Notice(text.clone())),
+            }),
+        ];
         Self {
             focus: cx.focus_handle(),
             provider,
             tabs: Vec::new(),
             selected: None,
             launching: Vec::new(),
+            configs,
             next_id: 0,
             window_handle: window.window_handle(),
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// The project's run configurations.
+    pub fn configs(&self) -> &Entity<RunConfigs> {
+        &self.configs
+    }
+
+    /// A project was opened: its run configurations load.
+    pub fn project_opened(&mut self, root: &std::path::Path, cx: &mut Context<Self>) {
+        let root = root.to_owned();
+        self.configs.update(cx, |c, cx| c.open(root, cx));
     }
 
     pub fn provider(&self) -> Option<&RunHook> {
@@ -189,16 +227,26 @@ impl RunToolWindow {
             .collect()
     }
 
-    /// The tab whose process runs `file`.
+    /// The tab whose process runs `file` (a Current File run).
     pub fn running_file(&self, file: &std::path::Path) -> Option<usize> {
+        self.running(&LaunchKey::File(file.to_owned()))
+    }
+
+    /// The tab whose process runs what `key` names.
+    pub fn running(&self, key: &LaunchKey) -> Option<usize> {
         self.tabs
             .iter()
-            .position(|t| t.is_alive() && t.request.file == file)
+            .position(|t| t.is_alive() && t.request.launch_key() == *key)
     }
 
     /// A launch of `file` is being prepared.
     pub fn is_launching(&self, file: &std::path::Path) -> bool {
-        self.launching.iter().any(|f| f == file)
+        self.is_launching_key(&LaunchKey::File(file.to_owned()))
+    }
+
+    /// A launch of what `key` names is being prepared.
+    pub fn is_launching_key(&self, key: &LaunchKey) -> bool {
+        self.launching.iter().any(|k| k == key)
     }
 
     /// Where the focus goes in the tool window: the selected console.
@@ -230,8 +278,15 @@ impl RunToolWindow {
         if let Some(i) = tab {
             self.tabs[i].status = TabStatus::Starting;
         }
-        self.launching.push(request.file.clone());
-        let prepare = provider.0.prepare(request.clone(), cx);
+        let key = request.launch_key();
+        self.launching.push(key.clone());
+        let prepare = match &request.configuration {
+            Some(c) if c.type_id == run_config::shell::TYPE_ID => {
+                super::prepare_shell_script(request.clone(), cx)
+            }
+            Some(_) => provider.0.prepare_configuration(request.clone(), cx),
+            None => provider.0.prepare(request.clone(), cx),
+        };
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let spec = prepare.await;
@@ -240,7 +295,7 @@ impl RunToolWindow {
                 write.await;
             }
             let _ = this.update_in(cx, |this, window, cx| {
-                if let Some(i) = this.launching.iter().position(|f| *f == request.file) {
+                if let Some(i) = this.launching.iter().position(|k| *k == key) {
                     this.launching.remove(i);
                 }
                 match spec {
@@ -255,11 +310,7 @@ impl RunToolWindow {
                         if let Some(i) = tab_id.and_then(|id| this.index_of(id)) {
                             this.tabs[i].status = TabStatus::Ended(None);
                         }
-                        let name = request
-                            .file
-                            .file_stem()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default();
+                        let name = request.name();
                         cx.emit(RunToolWindowEvent::Message(format!(
                             "Error running '{name}': {message}"
                         )));
@@ -341,6 +392,9 @@ impl RunToolWindow {
             c.reset(spec.link_filters.clone(), cx);
             c.print_system(&format!("{}\n", spec.display), cx);
         });
+        if let Some(warning) = &spec.warning {
+            cx.emit(RunToolWindowEvent::Message(warning.clone()));
+        }
         let (handle, events) = match process::spawn(&spec.command) {
             Ok(started) => started,
             Err(e) => {
@@ -365,7 +419,21 @@ impl RunToolWindow {
                 return;
             }
         };
-        console.update(cx, |c, _| c.set_input(Some(handle.clone())));
+        match &spec.input_file {
+            // "Redirect input from": the file is the process's input
+            // (`PythonScriptCommandLineState`, "Input is being redirected
+            // from …"); the console takes none.
+            Some(file) => {
+                console.update(cx, |c, cx| {
+                    c.print_system(
+                        &format!("Input is being redirected from {}\n", file.display()),
+                        cx,
+                    )
+                });
+                feed_input(handle.clone(), file.clone(), cx);
+            }
+            None => console.update(cx, |c, _| c.set_input(Some(handle.clone()))),
+        }
         // The model is fed off the UI thread (link filters may look at the
         // file system); the view takes the changes once per frame.
         let (model, dirty) = {
@@ -611,7 +679,10 @@ impl RunToolWindow {
     pub fn state_json(&self, cx: &App) -> serde_json::Value {
         serde_json::json!({
             "selected": self.selected,
-            "launching": self.launching.iter().map(|f| f.display().to_string()).collect::<Vec<_>>(),
+            "launching": self.launching.iter().map(|k| match k {
+                LaunchKey::File(f) => f.display().to_string(),
+                LaunchKey::Configuration(c) => c.name.clone(),
+            }).collect::<Vec<_>>(),
             "tabs": self.tabs.iter().enumerate().map(|(i, t)| {
                 let (status, exit) = match t.status {
                     TabStatus::Starting => ("starting", None),

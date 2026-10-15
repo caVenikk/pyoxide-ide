@@ -17,15 +17,34 @@ use ui::theme::ThemeExt;
 use super::commands::*;
 use crate::chrome::toolbar_widget;
 
+/// Opacity of a temporary configuration's icon
+/// (`ProgramRunnerUtil.getTemporaryIcon`).
+pub const TEMPORARY_ICON_ALPHA: f32 = 0.45;
+
+/// The selected run configuration as the widget shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedConfig {
+    pub name: String,
+    /// The type's icon; `None` for a type Pyoxide does not know.
+    pub icon: Option<IconName>,
+    /// Drawn at [`TEMPORARY_ICON_ALPHA`].
+    pub temporary: bool,
+    /// Its type is supported: it can run.
+    pub supported: bool,
+}
+
 /// What the run widget shows.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WidgetState {
+    /// The selected run configuration; `None` is Current File.
+    pub configuration: Option<SelectedConfig>,
     /// The file in the editor (its name with the extension) and whether it
     /// can run; `None` without an editor.
     pub file: Option<(String, bool)>,
-    /// The current file's process runs: Run shows Rerun on green.
+    /// What Run runs (the selected configuration, or the current file) is
+    /// running: Run shows Rerun on green.
     pub file_running: bool,
-    /// A launch of the current file is being prepared: a spinner.
+    /// A launch of what Run runs is being prepared: a spinner.
     pub launching: bool,
     /// Titles of the running processes (the Stop button).
     pub running: Vec<String>,
@@ -38,6 +57,18 @@ impl WidgetState {
     /// Run's tooltip: what it runs, or why it cannot
     /// (`ExecutorAction.getRunCurrentFileActionStatus`).
     pub fn run_tooltip(&self) -> String {
+        if let Some(config) = &self.configuration {
+            return if !config.supported {
+                format!(
+                    "'{}' cannot run: its type is not supported yet",
+                    config.name
+                )
+            } else if self.file_running {
+                format!("Rerun '{}'", config.name)
+            } else {
+                format!("Run '{}'", config.name)
+            };
+        }
         match &self.file {
             Some((name, true)) => format!("Run '{name}'"),
             Some((_, false)) => "The file in the editor is not runnable".to_owned(),
@@ -46,7 +77,31 @@ impl WidgetState {
     }
 
     pub fn can_run(&self) -> bool {
-        matches!(self.file, Some((_, true))) && !self.launching
+        let runnable = match &self.configuration {
+            Some(config) => config.supported,
+            None => matches!(self.file, Some((_, true))),
+        };
+        runnable && !self.launching
+    }
+
+    /// The selector's text: the configuration's name cut in the middle,
+    /// or "Current File".
+    pub fn selector_text(&self) -> String {
+        match &self.configuration {
+            Some(config) => super::dropdown::trim_name(&config.name),
+            None => "Current File".to_owned(),
+        }
+    }
+
+    /// The selector's tooltip ("Run / Debug Configuration: {name}" when the
+    /// name is cut).
+    pub fn selector_tooltip(&self) -> String {
+        match &self.configuration {
+            Some(config) if super::dropdown::trim_name(&config.name) != config.name => {
+                format!("Run / Debug Configuration: {}", config.name)
+            }
+            _ => "Run / Debug Configurations".to_owned(),
+        }
     }
 
     /// Stop's tooltip: the one process, or "Stop..." for several.
@@ -60,7 +115,10 @@ impl WidgetState {
 
     pub fn state_json(&self) -> serde_json::Value {
         serde_json::json!({
-            "configuration": "Current File",
+            "configuration": self.selector_text(),
+            "configuration_icon": self.configuration.as_ref().and_then(|c| c.icon).map(|i| i.0),
+            "configuration_temporary": self.configuration.as_ref().is_some_and(|c| c.temporary),
+            "selector_tooltip": self.selector_tooltip(),
             "run_enabled": self.can_run(),
             "run_tooltip": self.run_tooltip(),
             "run_icon": if self.file_running { "rerun" } else { "run" },
@@ -137,14 +195,23 @@ fn button(
 pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     let icon = |name: IconName| Icon::new(name).size(px(16.0)).into_any_element();
+    // A configuration shows its type's icon (temporary ones at 45 %);
+    // Current File shows none.
+    let config_icon = state.configuration.as_ref().map(|c| {
+        div()
+            .flex_none()
+            .when(c.temporary, |d| d.opacity(TEMPORARY_ICON_ALPHA))
+            .child(Icon::new(c.icon.unwrap_or(IconName::FILE_UNKNOWN)).size(px(16.0)))
+    });
     let selector = toolbar_widget("run-configuration", cx)
         .debug_selector(|| "run-configuration".into())
         .relative()
         .gap(px(4.0))
-        .child(div().whitespace_nowrap().child("Current File"))
+        .children(config_icon)
+        .child(div().whitespace_nowrap().child(state.selector_text()))
         .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
         .child(anchor(anchors.selector.clone()))
-        .tooltip(Tooltip::text("Run / Debug Configurations", None))
+        .tooltip(Tooltip::text(state.selector_tooltip(), None))
         .on_click(|_, window, cx| window.dispatch_action(Box::new(ChooseConfiguration), cx));
     let run_icon = if state.launching {
         spinner("run-launching", cx).into_any_element()

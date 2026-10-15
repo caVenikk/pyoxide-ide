@@ -133,6 +133,86 @@ pub fn save_values(
     Ok(true)
 }
 
+/// The table under the top-level key `table` with its values as they are
+/// stored (a product or a platform feature keeping a structured state,
+/// such as run configurations); `None` when the file or the table is
+/// missing.
+pub fn load_table(root: &Path, table: &str) -> Result<Option<toml::Table>, StoreError> {
+    let path = workspace_file(root);
+    let Some(doc) = read_document(&path)? else {
+        return Ok(None);
+    };
+    let Some(found) = find_table(&doc, table, &path)? else {
+        return Ok(None);
+    };
+    let mut copy = DocumentMut::new();
+    for (key, item) in found.iter() {
+        copy.insert(key, item.clone());
+    }
+    toml::from_str(&copy.to_string())
+        .map(Some)
+        .map_err(|e| StoreError::Invalid {
+            path,
+            message: e.to_string(),
+        })
+}
+
+/// Replaces the table under the top-level key `table` with `value`, or
+/// removes it with `None`, keeping everything else in the file, under the
+/// rules of [`save_value`]: the file (and `.oxide/.gitignore`) is created
+/// only when there is something to store, and a file of a newer version is
+/// not rewritten. Returns whether the file was written.
+pub fn save_table(
+    root: &Path,
+    table: &str,
+    value: Option<toml_edit::Table>,
+) -> Result<bool, StoreError> {
+    let _lock = lock_root(root);
+    let path = workspace_file(root);
+    let existing = read_document(&path)?;
+    let created = existing.is_none();
+    if created && value.as_ref().is_none_or(|t| t.is_empty()) {
+        return Ok(false);
+    }
+    let mut doc = match existing {
+        Some(doc) => doc,
+        None => format!("{HEADER}version = {WORKSPACE_VERSION}\n")
+            .parse::<DocumentMut>()
+            .expect("the header is valid TOML"),
+    };
+    let stored = version_of(&doc, WORKSPACE_VERSION);
+    if stored > WORKSPACE_VERSION {
+        return Err(StoreError::Newer {
+            path,
+            version: stored,
+        });
+    }
+    if doc.get("version").and_then(Item::as_integer) != Some(WORKSPACE_VERSION) {
+        doc["version"] = toml_edit::value(WORKSPACE_VERSION);
+    }
+    let before = doc.to_string();
+    match value {
+        Some(value) => {
+            doc.insert(table, Item::Table(value));
+        }
+        None => {
+            doc.remove(table);
+        }
+    }
+    let text = doc.to_string();
+    if !created && text == before {
+        return Ok(false);
+    }
+    write_atomic(&path, &text).map_err(|source| StoreError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    if created {
+        write_gitignore(root)?;
+    }
+    Ok(true)
+}
+
 /// Writes `.oxide/.gitignore` unless it exists (any file there, even an
 /// empty one, is the person's and stays as it is).
 fn write_gitignore(root: &Path) -> Result<(), StoreError> {
@@ -313,6 +393,42 @@ mod tests {
         assert_eq!(load_value(root, "python.tools.ruff", "path").unwrap(), None);
         // Removing from a table that is not there writes nothing.
         assert!(!save_value(root, "python.tools.ty", "path", None).unwrap());
+    }
+
+    #[test]
+    fn whole_tables_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(!save_table(root, "run", None).unwrap());
+        assert!(!save_table(root, "run", Some(toml_edit::Table::new())).unwrap());
+        assert!(!root.join(STORE_DIR).exists());
+        save_value(root, "python", "interpreter", Some("a")).unwrap();
+        let mut table = toml_edit::Table::new();
+        table.insert("selected", toml_edit::value("x"));
+        let mut item = toml_edit::Table::new();
+        item.insert("name", toml_edit::value("api"));
+        let mut list = toml_edit::ArrayOfTables::new();
+        list.push(item);
+        table.insert("configurations", Item::ArrayOfTables(list));
+        assert!(save_table(root, "run", Some(table.clone())).unwrap());
+        // The same again writes nothing.
+        assert!(!save_table(root, "run", Some(table)).unwrap());
+        let loaded = load_table(root, "run").unwrap().unwrap();
+        assert_eq!(loaded["selected"].as_str(), Some("x"));
+        assert_eq!(
+            loaded["configurations"].as_array().unwrap()[0]["name"].as_str(),
+            Some("api")
+        );
+        // Other tables stay.
+        assert_eq!(
+            load_value(root, "python", "interpreter")
+                .unwrap()
+                .as_deref(),
+            Some("a")
+        );
+        assert!(save_table(root, "run", None).unwrap());
+        assert_eq!(load_table(root, "run").unwrap(), None);
+        assert_eq!(load_table(root, "missing").unwrap(), None);
     }
 
     #[test]

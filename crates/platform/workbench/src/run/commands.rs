@@ -33,6 +33,26 @@ ui::ui_commands! {
 }
 
 ui::ui_commands! {
+    CONFIGURATION_COMMANDS, scope = "Workbench";
+    /// Select a run configuration.
+    SelectConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.select", "Select Run Configuration",
+        "Makes a run configuration the selected one, by name (and type id when two types have the name); without a name, Current File.",
+        r#"{"name": "server"}"#;
+    /// Run a run configuration.
+    LaunchConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.run", "Run Configuration",
+        "Runs a run configuration by name (and type id when two types have the name), or the selected one.",
+        r#"{"name": "server"}"#;
+    /// Show or hide every configuration in the dropdown.
+    ToggleAllConfigurations => "run.configurations.toggle-all", "All Configurations",
+        "Shows or hides every run configuration below the recent ones in the run widget's dropdown, and opens the dropdown again.";
+    /// Import the reference IDE's run configurations again.
+    ImportReference => "run.configurations.import-reference", "Import Run Configurations from the Reference IDE",
+        "Reads the reference IDE's run configurations of the project (.idea and *.run.xml) again and adds the ones that do not exist yet; .idea is never written.";
+}
+
+ui::ui_commands! {
     TOOL_WINDOW_COMMANDS, scope = "RunToolWindow";
     /// Run the selected tab's process again.
     Rerun => "run.rerun", "Rerun",

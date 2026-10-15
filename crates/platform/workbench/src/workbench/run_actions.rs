@@ -1,9 +1,11 @@
-//! Running files from the main window: the run commands, the run widget's
-//! state and popups, the Run tool window's events and the dialogs that
-//! confirm stopping a process (the reference's `ExecutorAction`,
-//! `StopAction`, `RunContentManagerImpl` and `ExecutionManagerImpl`).
+//! Running files and run configurations from the main window: the run
+//! commands, the run widget's state and popups (the configuration
+//! dropdown), the Run tool window's events and the dialogs that confirm
+//! stopping a process (the reference's `ExecutorAction`, `StopAction`,
+//! `RunToolbarPopup`, `RunContentManagerImpl` and `ExecutionManagerImpl`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use console::LinkTarget;
 use gpui::{
@@ -12,13 +14,14 @@ use gpui::{
 };
 use serde_json::json;
 use ui::icons::IconName;
-use ui::menu::{ContextMenu, MenuItem};
+use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 
 use super::{ToolWindow, Workbench};
 use crate::dialog::{Dialog, DialogButton, DialogEvent};
 use crate::run::commands::*;
-use crate::run::widget::WidgetState;
-use crate::run::{RunRequest, RunToolWindowEvent};
+use crate::run::dropdown::{self, Row};
+use crate::run::widget::{SelectedConfig, WidgetState};
+use crate::run::{LaunchKey, RunConfigs, RunRequest, RunToolWindowEvent};
 
 /// What closing an open dialog leads to.
 pub(super) enum PendingDialog {
@@ -86,12 +89,37 @@ impl Workbench {
         Some((file, runnable))
     }
 
+    /// The project's run configurations.
+    fn run_configs(&self, cx: &App) -> Entity<RunConfigs> {
+        self.run_window.read(cx).configs().clone()
+    }
+
+    /// A project was opened: its run configurations load (and the
+    /// reference's are imported once), off the UI thread.
+    pub(super) fn run_project_opened(&mut self, root: &Path, cx: &mut Context<Self>) {
+        self.run_window
+            .update(cx, |w, cx| w.project_opened(root, cx));
+    }
+
     /// What the run widget shows.
     pub fn run_widget_state(&self, window: &Window, cx: &App) -> WidgetState {
         let run = self.run_window.read(cx);
+        let configs = run.configs().read(cx);
         let file = self.current_run_file(cx);
         let path = file.as_ref().map(|(f, _)| f.clone());
+        let selected = configs.list().selected_config();
+        // What Run runs: the selected configuration, or the current file.
+        let key = match selected {
+            Some(c) => Some(LaunchKey::Configuration(c.key())),
+            None => path.clone().map(LaunchKey::File),
+        };
         WidgetState {
+            configuration: selected.map(|c| SelectedConfig {
+                name: c.name.clone(),
+                icon: configs.types().icon_of(c).map(IconName),
+                temporary: c.temporary,
+                supported: !c.is_unsupported(),
+            }),
             file: file.map(|(f, runnable)| {
                 let name = f
                     .file_name()
@@ -99,8 +127,8 @@ impl Workbench {
                     .unwrap_or_default();
                 (name, runnable)
             }),
-            file_running: path.as_ref().is_some_and(|p| run.running_file(p).is_some()),
-            launching: path.as_ref().is_some_and(|p| run.is_launching(p)),
+            file_running: key.as_ref().is_some_and(|k| run.running(k).is_some()),
+            launching: key.as_ref().is_some_and(|k| run.is_launching_key(k)),
             running: run
                 .alive_tabs()
                 .into_iter()
@@ -119,6 +147,7 @@ impl Workbench {
         state["registered"] = json!(self.run_registered);
         state["alive"] = json!(self.run_window.read(cx).any_alive());
         state["widget"] = self.run_widget_state(window, cx).state_json();
+        state["configurations"] = self.run_configs(cx).read(cx).state_json();
         state["menu"] = self
             .run_menu
             .as_ref()
@@ -129,23 +158,83 @@ impl Workbench {
     fn run_request(&self, file: PathBuf, cx: &App) -> RunRequest {
         RunRequest {
             file,
+            configuration: None,
             project_root: self.project_root(cx),
             source_roots: self.project_files.read(cx).source_roots(),
         }
     }
 
-    /// Run and Run Context Configuration: the current file. A file that
-    /// runs already is stopped and run again after asking ("Process 'x' Is
-    /// Running", `userApprovesStopForSameTypeConfigurations`).
+    /// Run: the selected configuration, or the current file.
+    fn run_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self
+            .run_configs(cx)
+            .read(cx)
+            .list()
+            .selected_config()
+            .map(|c| c.key());
+        match selected {
+            Some(key) => self.run_configuration(&key, window, cx),
+            None => self.run_current(window, cx),
+        }
+    }
+
+    /// Runs a configuration of a supported type.
+    fn run_configuration(
+        &mut self,
+        key: &run_config::ConfigKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let configs = self.run_configs(cx);
+        let Some(config) = configs.read(cx).list().get(key).cloned() else {
+            return;
+        };
+        if config.is_unsupported() {
+            self.message = Some(
+                format!(
+                    "'{}' cannot run: its type is not supported yet",
+                    config.name
+                )
+                .into(),
+            );
+            cx.notify();
+            return;
+        }
+        let parallel = configs.read(cx).types().allows_parallel(&config);
+        let request = RunRequest {
+            file: PathBuf::new(),
+            configuration: Some(Arc::new(config)),
+            project_root: self.project_root(cx),
+            source_roots: self.project_files.read(cx).source_roots(),
+        };
+        self.launch_request(request, parallel, window, cx);
+    }
+
+    /// Run Context Configuration: the current file.
     fn run_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((file, true)) = self.current_run_file(cx) else {
             return;
         };
+        let request = self.run_request(file, cx);
+        self.launch_request(request, false, window, cx);
+    }
+
+    /// Starts a run. What runs already and may not run in parallel is
+    /// stopped and run again after asking ("Process 'x' Is Running",
+    /// `userApprovesStopForSameTypeConfigurations`).
+    fn launch_request(
+        &mut self,
+        request: RunRequest,
+        parallel: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = request.launch_key();
         let run = self.run_window.read(cx);
-        if run.is_launching(&file) {
+        if run.is_launching_key(&key) {
             return;
         }
-        if let Some(tab) = run.running_file(&file) {
+        if let Some(tab) = run.running(&key).filter(|_| !parallel) {
             if self.run_settings.confirm_rerun {
                 let name = run.tabs()[tab].title().to_owned();
                 let dialog = cx.new(|cx| {
@@ -175,8 +264,10 @@ impl Workbench {
             }
             return;
         }
+        if let LaunchKey::Configuration(key) = &key {
+            self.run_configs(cx).update(cx, |c, cx| c.started(key, cx));
+        }
         let saved = self.save_all_tasks(cx);
-        let request = self.run_request(file, cx);
         self.show_run_for_launch(window, cx);
         self.run_window
             .update(cx, |w, cx| w.launch(request, None, saved, window, cx));
@@ -204,7 +295,7 @@ impl Workbench {
     }
 
     pub(super) fn run_run(&mut self, _: &Run, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_current(window, cx);
+        self.run_selected(window, cx);
     }
 
     /// The reference creates a temporary configuration for the context;
@@ -394,21 +485,97 @@ impl Workbench {
         self.run_window.update(cx, |w, cx| w.type_text(&text, cx));
     }
 
-    /// The run configuration dropdown (`RunToolbarPopup`): Current File,
-    /// then Edit Configurations… (run configurations come later).
+    /// The run configuration dropdown (`RunToolbarPopup`): pinned and
+    /// recent configurations, every configuration by type with folders as
+    /// submenus, Current File, Edit Configurations…; the selected row is
+    /// preselected and typing filters the rows.
     pub(super) fn run_choose_configuration(
         &mut self,
         _: &ChooseConfiguration,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let items = vec![
-            MenuItem::action("Current File", SelectCurrentFile),
-            MenuItem::separator(),
-            MenuItem::action("Edit Configurations\u{2026}", SelectCurrentFile).enabled(false),
-        ];
+        let configs = self.run_configs(cx);
+        let configs = configs.read(cx);
+        let list = configs.list();
+        let types = configs.types();
+        let item = |key: &run_config::ConfigKey| -> Option<MenuItem> {
+            let c = list.get(key)?;
+            let icon = types
+                .icon_of(c)
+                .map(IconName)
+                .unwrap_or(IconName::FILE_UNKNOWN);
+            let mut description = types.name_of(c).to_owned();
+            if c.is_unsupported() {
+                description.push_str(", not supported yet");
+            }
+            Some(
+                MenuItem::action(
+                    c.name.clone(),
+                    SelectConfiguration {
+                        name: Some(c.name.clone()),
+                        r#type: Some(c.type_id.clone()),
+                    },
+                )
+                .icon(icon)
+                .description(description),
+            )
+        };
+        let mut items: Vec<MenuItem> = Vec::new();
+        let mut preselect = None;
+        for row in dropdown::rows(list, types, configs.show_all) {
+            match row {
+                Row::Header(text) => items.push(MenuItem::unavailable(text)),
+                Row::Configuration { key, .. } => {
+                    if list.selected.as_ref() == Some(&key) && preselect.is_none() {
+                        preselect = Some(items.len());
+                    }
+                    items.extend(item(&key));
+                }
+                Row::Folder { name, keys } => {
+                    let sub: Vec<MenuItem> = keys.iter().filter_map(&item).collect();
+                    items.push(MenuItem::submenu(name, sub).icon(IconName::FOLDER));
+                }
+                Row::Toggle { count, expanded } => {
+                    let toggle =
+                        MenuItem::action(dropdown::toggle_text(count), ToggleAllConfigurations);
+                    items.push(if expanded {
+                        toggle.icon(IconName::CHECKED)
+                    } else {
+                        toggle
+                    });
+                }
+                Row::Separator => {
+                    if items
+                        .last()
+                        .is_some_and(|i| !matches!(i, MenuItem::Separator))
+                    {
+                        items.push(MenuItem::separator());
+                    }
+                }
+                Row::CurrentFile => {
+                    if list.selected.is_none() {
+                        preselect = Some(items.len());
+                    }
+                    items.push(MenuItem::action("Current File", SelectCurrentFile));
+                }
+                Row::EditConfigurations => {
+                    items.push(MenuItem::unavailable("Edit Configurations\u{2026}"))
+                }
+            }
+        }
         let anchor = self.run_anchors.selector.get();
-        self.open_run_menu(items, anchor.bottom_left(), window, cx);
+        let menu = ContextMenu::popup(
+            items,
+            PopupOptions {
+                title: None,
+                speed_search: true,
+                selected: preselect,
+            },
+            window,
+            cx,
+        );
+        self.open_run_menu_entity(menu, anchor.bottom_left(), cx);
     }
 
     pub(super) fn run_select_current_file(
@@ -417,7 +584,77 @@ impl Workbench {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.run_configs(cx).update(cx, |c, cx| c.select(None, cx));
         cx.notify();
+    }
+
+    /// The configuration a command names: by name (and type), or the
+    /// selected one.
+    fn named_configuration(
+        &self,
+        name: Option<&str>,
+        type_id: Option<&str>,
+        cx: &App,
+    ) -> Result<Option<run_config::ConfigKey>, String> {
+        let configs = self.run_configs(cx);
+        let configs = configs.read(cx);
+        match name {
+            Some(name) => configs.find(name, type_id).map(Some),
+            None => Ok(configs.list().selected.clone()),
+        }
+    }
+
+    pub(super) fn run_select_configuration(
+        &mut self,
+        action: &SelectConfiguration,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.named_configuration(action.name.as_deref(), action.r#type.as_deref(), cx) {
+            Ok(key) => {
+                self.run_configs(cx).update(cx, |c, cx| c.select(key, cx));
+            }
+            Err(message) => self.message = Some(message.into()),
+        }
+        cx.notify();
+    }
+
+    pub(super) fn run_launch_configuration(
+        &mut self,
+        action: &LaunchConfiguration,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.named_configuration(action.name.as_deref(), action.r#type.as_deref(), cx) {
+            Ok(Some(key)) => self.run_configuration(&key, window, cx),
+            Ok(None) => self.run_current(window, cx),
+            Err(message) => {
+                self.message = Some(message.into());
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn run_toggle_all_configurations(
+        &mut self,
+        _: &ToggleAllConfigurations,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_configs(cx).update(cx, |c, cx| {
+            c.show_all = !c.show_all;
+            cx.notify();
+        });
+        self.run_choose_configuration(&ChooseConfiguration, window, cx);
+    }
+
+    pub(super) fn run_import_reference(
+        &mut self,
+        _: &ImportReference,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_configs(cx).update(cx, |c, cx| c.import_again(cx));
     }
 
     /// More Actions of the run widget in Current File mode: Run with
@@ -442,6 +679,15 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         let menu = ContextMenu::build(items, window, cx);
+        self.open_run_menu_entity(menu, position, cx);
+    }
+
+    fn open_run_menu_entity(
+        &mut self,
+        menu: Entity<ContextMenu>,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.run_menu = None;
             cx.notify();
@@ -505,6 +751,7 @@ impl Workbench {
             RunToolWindowEvent::Message(message) => {
                 self.message = (!message.is_empty()).then(|| message.clone().into());
             }
+            RunToolWindowEvent::Notice(text) => self.show_notice(text.clone().into(), cx),
             RunToolWindowEvent::ConfirmClose(tab) => self.confirm_close_running(*tab, window, cx),
             RunToolWindowEvent::TabMenu(tab, position) => {
                 self.open_tab_menu(*tab, *position, window, cx)

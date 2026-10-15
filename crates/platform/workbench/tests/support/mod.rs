@@ -1,6 +1,8 @@
 //! A run provider for tests: runs `.py` files as shell scripts (the
 //! script comes from [`set_script`], not from the file), with a link filter
-//! for `at <path>:<line>` and the URL filter.
+//! for `at <path>:<line>` and the URL filter. Its run configuration type,
+//! "Script" (the reference's `ScriptType` in test `.idea` folders), runs
+//! the configuration's `COMMAND` the same way.
 
 #![allow(dead_code)]
 
@@ -12,6 +14,7 @@ use std::time::Duration;
 use console::{Link, LinkFilter, LinkTarget};
 use gpui::{App, Task, TestAppContext};
 use process::CommandLine;
+use run_config::{IdeaConfiguration, Importer, RunConfiguration, TypeInfo};
 use ui::icons::IconName;
 use workbench::{RunHook, RunProvider, RunRequest, RunSpec};
 
@@ -92,13 +95,88 @@ impl RunProvider for ShellRunner {
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        Task::ready(Ok(RunSpec {
+        let display = format!("{} ", command.display());
+        Task::ready(Ok(RunSpec::new(
             title,
-            icon: IconName::RUN,
-            display: format!("{} ", command.display()),
+            IconName::RUN,
             command,
-            link_filters: vec![Arc::new(AtFilter), Arc::new(console::UrlFilter)],
-        }))
+            display,
+            vec![Arc::new(AtFilter), Arc::new(console::UrlFilter)],
+        )))
+    }
+
+    fn configuration_types(&self) -> Vec<TypeInfo> {
+        vec![SCRIPT_TYPE]
+    }
+
+    fn importers(&self) -> Vec<Arc<dyn Importer>> {
+        vec![Arc::new(ScriptImporter)]
+    }
+
+    fn prepare_configuration(
+        &self,
+        request: RunRequest,
+        _: &mut App,
+    ) -> Task<Result<RunSpec, String>> {
+        let config = request.configuration.clone().expect("a configuration");
+        let script = config.str_option("command").to_owned();
+        let command = if cfg!(windows) {
+            CommandLine::new("cmd").args(["/V:ON", "/C", &script])
+        } else {
+            CommandLine::new("/bin/sh").args(["-c", &script])
+        };
+        let mut command = command;
+        command.cwd = request.project_root.clone();
+        for (name, value) in config.env_values() {
+            command = command.with_env(name, value);
+        }
+        let display = format!("{} ", command.display());
+        Task::ready(Ok(RunSpec::new(
+            config.name.clone(),
+            IconName::RUN,
+            command,
+            display,
+            vec![Arc::new(console::UrlFilter)],
+        )))
+    }
+}
+
+/// The test product's run configuration type.
+pub const SCRIPT_TYPE: TypeInfo = TypeInfo {
+    id: "script",
+    name: "Script",
+    icon: "run/run",
+    reference_id: "ScriptType",
+    allow_parallel: false,
+};
+
+/// Imports the reference's `ScriptType` configurations: `COMMAND` and the
+/// variables.
+struct ScriptImporter;
+
+impl Importer for ScriptImporter {
+    fn type_name(&self, reference_type: &str) -> Option<&'static str> {
+        (reference_type == "ScriptType").then_some("Script")
+    }
+
+    fn convert(
+        &self,
+        idea: &IdeaConfiguration<'_>,
+        _: &Path,
+        config: &mut RunConfiguration,
+    ) -> bool {
+        if idea.type_id() != "ScriptType" {
+            return false;
+        }
+        config.type_id = "script".into();
+        config.set_str("command", idea.field("COMMAND").unwrap_or(""));
+        let shared = config.is_shared();
+        config.env = idea
+            .envs()
+            .into_iter()
+            .map(|(n, v)| run_config::EnvVar::new(n, v, shared))
+            .collect();
+        true
     }
 }
 

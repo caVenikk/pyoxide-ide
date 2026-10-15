@@ -666,6 +666,7 @@ impl Workbench {
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.project_opened(&path, cx));
         }
+        self.run_project_opened(&path, cx);
         cx.emit(WorkbenchEvent::ProjectOpened(path));
         cx.notify();
     }
@@ -2575,6 +2576,10 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::run_choose_configuration))
             .on_action(cx.listener(Self::run_select_current_file))
             .on_action(cx.listener(Self::run_more_actions))
+            .on_action(cx.listener(Self::run_select_configuration))
+            .on_action(cx.listener(Self::run_launch_configuration))
+            .on_action(cx.listener(Self::run_toggle_all_configurations))
+            .on_action(cx.listener(Self::run_import_reference))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {
