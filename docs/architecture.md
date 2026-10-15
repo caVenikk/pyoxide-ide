@@ -57,7 +57,8 @@ Platform (`crates/platform/`, language-agnostic):
   history; storage in `.oxide/run/` (shared) and the personal project
   state; the one-time import of the reference IDE's configurations
   (`.idea/workspace.xml`, `.idea/runConfigurations`, `*.run.xml`) with
-  importers per type; the Shell Script type.
+  importers per type; the forms the Run/Debug Configurations dialog
+  draws (`TypeEditor`); the Shell Script type.
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching
