@@ -60,9 +60,19 @@ fn busy_handler(attempt: i32) -> bool {
     if BUSY_DEADLINE.get().is_some_and(|d| Instant::now() >= d) {
         return false;
     }
-    let step = u64::try_from(attempt.clamp(0, 19)).unwrap_or(0) + 1;
-    LOCK_RELEASES.wait(Duration::from_millis(step));
+    LOCK_RELEASES.wait(poll_step(attempt));
     true
+}
+
+/// How long a lock wait lasts before the lock is tried again, unless a
+/// release wakes it first: 1 ms, growing to 20 ms. Locks held by other
+/// processes are only found by these polls.
+fn poll_step(attempt: i32) -> Duration {
+    #[cfg(test)]
+    if let Some(step) = lock_wait_tests::poll_step() {
+        return step;
+    }
+    Duration::from_millis(u64::try_from(attempt.clamp(0, 19)).unwrap_or(0) + 1)
 }
 
 /// Wakes the lock waits of this process when one of its connections lets go
@@ -119,7 +129,10 @@ impl LockReleases {
 
     /// Wait for `max`, or less if a connection announces a release. A release
     /// announced between the failed lock attempt and this call is missed;
-    /// the wait then ends by time.
+    /// the wait then ends by time. On Windows that attempt is long when it
+    /// asks for a read lock: SQLite's Windows VFS tries the lock three times
+    /// with `Sleep(1)` in between, and a sleep lasts up to a clock tick
+    /// (15.6 ms by default).
     fn wait(&self, max: Duration) {
         let mut state = self.state();
         let seen = state.count;
@@ -470,6 +483,9 @@ fn first_keyword(sql: &str) -> String {
         .collect::<String>()
         .to_ascii_uppercase()
 }
+
+#[cfg(test)]
+mod lock_wait_tests;
 
 #[cfg(test)]
 mod tests {
