@@ -192,6 +192,10 @@ pub enum EditorEvent {
     /// is where it was and `view_y` how far that line was from the top of
     /// the view. The navigation history records the place.
     Jumped { from: Point, view_y: Option<Pixels> },
+    /// Undo (or redo) would revert (or apply again) a reload from disk and
+    /// the owner asks first ([`Editor::set_confirm_reload_undo`]); nothing
+    /// changed. [`Editor::undo_confirmed`] does it.
+    ConfirmUndo { redo: bool },
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -281,6 +285,8 @@ pub struct Editor {
     pub(crate) forward_input: bool,
     /// Scroll to the end of the text on the next frame.
     pub(crate) scroll_to_end: bool,
+    /// Undoing or redoing a reload from disk asks the owner first.
+    pub(crate) confirm_reload_undo: bool,
     /// The link under the last mouse press (line, char range, position):
     /// it is followed when the mouse is released at the same point.
     pub(crate) pressed_link: Option<(usize, Range<usize>, gpui::Point<Pixels>)>,
@@ -373,6 +379,7 @@ impl Editor {
             console: false,
             forward_input: false,
             scroll_to_end: false,
+            confirm_reload_undo: false,
             pressed_link: None,
             diagnostics: Marks::default(),
             link_highlight: None,
@@ -401,6 +408,42 @@ impl Editor {
     /// them to a process).
     pub fn set_forward_input(&mut self, forward: bool) {
         self.forward_input = forward;
+    }
+
+    /// Undo and Redo of a reload from disk emit
+    /// [`EditorEvent::ConfirmUndo`] instead of changing the text, as the
+    /// reference asks "Undo Reload from Disk?" first.
+    pub fn set_confirm_reload_undo(&mut self, confirm: bool) {
+        self.confirm_reload_undo = confirm;
+    }
+
+    /// Undoes (or redoes) the last change without asking (after the
+    /// owner's confirmation).
+    pub fn undo_confirmed(&mut self, redo: bool, cx: &mut Context<Self>) {
+        let done = if redo {
+            self.buffer.redo()
+        } else {
+            self.buffer.undo()
+        };
+        if let Some((applied, selections)) = done {
+            self.selections = selections;
+            self.selections.clamp(self.buffer.len_chars());
+            self.changed(applied, cx);
+        }
+    }
+
+    /// Asks the owner first when the step is a reload from disk.
+    fn undo_or_ask(&mut self, redo: bool, cx: &mut Context<Self>) {
+        let kind = if redo {
+            self.buffer.redo_kind()
+        } else {
+            self.buffer.undo_kind()
+        };
+        if self.confirm_reload_undo && kind == Some(text::EditKind::Reload) {
+            cx.emit(EditorEvent::ConfirmUndo { redo });
+        } else {
+            self.undo_confirmed(redo, cx);
+        }
     }
 
     /// Replaces text outside the undo history, also when the buffer is
@@ -2344,19 +2387,11 @@ impl Editor {
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some((applied, selections)) = self.buffer.undo() {
-            self.selections = selections;
-            self.selections.clamp(self.buffer.len_chars());
-            self.changed(applied, cx);
-        }
+        self.undo_or_ask(false, cx);
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some((applied, selections)) = self.buffer.redo() {
-            self.selections = selections;
-            self.selections.clamp(self.buffer.len_chars());
-            self.changed(applied, cx);
-        }
+        self.undo_or_ask(true, cx);
     }
 
     // ---- clipboard ------------------------------------------------------------

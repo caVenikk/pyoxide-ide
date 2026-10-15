@@ -22,11 +22,14 @@ pub enum EditKind {
     DeleteForward,
     /// Anything else (paste, cut, line operations): its own undo step.
     Other,
+    /// The file's text from disk (Reload from Disk): its own undo step,
+    /// which the reference asks about before undoing or redoing it.
+    Reload,
 }
 
 impl EditKind {
     fn merges(self) -> bool {
-        self != EditKind::Other
+        !matches!(self, EditKind::Other | EditKind::Reload)
     }
 }
 
@@ -144,6 +147,21 @@ impl History {
 
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
+    }
+
+    /// What the next undo and redo would revert or apply again.
+    pub fn undo_kind(&self) -> Option<EditKind> {
+        self.undo.last().map(|t| t.kind)
+    }
+
+    pub fn redo_kind(&self) -> Option<EditKind> {
+        self.redo.last().map(|t| t.kind)
+    }
+
+    /// The saved state can no longer be reached: the text differs from
+    /// the file until the next save.
+    pub fn mark_unsaved(&mut self) {
+        self.saved = None;
     }
 
     pub fn can_redo(&self) -> bool {

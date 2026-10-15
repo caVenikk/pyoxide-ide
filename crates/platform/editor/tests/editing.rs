@@ -334,6 +334,20 @@ fn a_reload_from_disk_keeps_the_caret_line_and_the_view(cx: &mut TestAppContext)
     act(cx, Undo);
     assert_eq!(text(&editor, cx), old);
     assert!(editor.read_with(cx, |e, _| e.is_modified()));
+    // An owner that asks first gets an event instead, then confirms.
+    editor.update(cx, |e, _| e.set_confirm_reload_undo(true));
+    act(cx, Redo);
+    assert_eq!(text(&editor, cx), old);
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|e| e == "ConfirmUndo { redo: true }"),
+        "{events:?}"
+    );
+    editor.update(cx, |e, cx| e.undo_confirmed(true, cx));
+    assert_eq!(text(&editor, cx), new);
+    editor.update(cx, |e, cx| e.undo_confirmed(false, cx));
 
     // A plan made for an older text changes nothing.
     let plan = editor.read_with(cx, |e, _| {

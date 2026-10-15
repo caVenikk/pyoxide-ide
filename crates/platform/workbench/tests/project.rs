@@ -125,7 +125,7 @@ fn open_edit_undo_save_close(cx: &mut TestAppContext) {
     let s = state(cx, window);
     assert_eq!(
         s["tabs"],
-        json!([{"path": "src/app.py", "modified": false}])
+        json!([{"path": "src/app.py", "modified": false, "deleted": false}])
     );
     assert_eq!(s["editor"]["line_ending"], json!("CRLF"));
 
@@ -188,7 +188,7 @@ fn open_edit_undo_save_close(cx: &mut TestAppContext) {
     let s = state(cx, window);
     assert_eq!(
         s["tabs"],
-        json!([{"path": "src/app.py", "modified": false}])
+        json!([{"path": "src/app.py", "modified": false, "deleted": false}])
     );
     assert_eq!(s["active_tab"], json!(0));
     assert_eq!(

@@ -122,7 +122,8 @@ thread only lexes the lines it paints.
 ### Saving
 There is no unsaved state to lose: a modified file is written when its tab
 closes, when another tab is selected, when the window loses the focus to
-another application, and after 2 seconds without keyboard or mouse input
+another application, when the application quits, and after 2 seconds
+without keyboard or mouse input
 or edits (`workbench::SaveSettings`, defaults in code until there is a
 settings window). The reference IDE saves on frame deactivation by default
 and has an idle save that is off by default (15 s, 1 to 300 s); Pyoxide
@@ -149,9 +150,36 @@ overlaps one is dropped. An unmodified editor takes the new text as one
 undo step of the part that differs (`text::ReloadPlan`, worked out off the
 UI thread); carets inside it keep their column on the line a line diff
 leads to, as the reference translates caret lines through a diff; the view
-does not scroll. Created and removed paths list the project tree's folders
-again and update the file index; when events were lost, or without a
-watcher, both are built again instead.
+does not scroll. Undoing or redoing that step asks first ("Undo Reload
+from Disk?"), as the reference does for this command.
+
+An editor with changes of its own gets the reference's File Cache
+Conflict dialog (Load File System Changes, the default; Keep Memory
+Changes, also Escape; no Show Difference until there is a diff viewer).
+No save writes over a newer file: every write first compares the file
+with what the application last read or wrote (stamp, then content) and
+leaves a file that changed meanwhile to the dialog, as the reference
+refreshes a file before saving it and vetoes the save while a conflict
+waits.
+
+A file deleted outside the application closes its tab, as in the
+reference; a rename outside is a deletion and a creation. A missing file
+is looked at again after 300 ms first, since tools such as `git` remove a
+file and write it again. One deviation: an editor with changes stays
+open, its tab title in the error colour, and is not saved automatically,
+because Pyoxide has no Local History yet to get the changes back from;
+Save writes the file again, and closing the tab asks with the reference's
+prompt for editors that are not saved automatically (its LightEdit
+"Close Document": Save, Discard, Cancel). Open files are also written
+when the application quits, as the reference saves all documents on exit.
+
+Created and removed paths list the project tree's folders again, update
+the file index and reach the language services as watched-file changes,
+also for the application's own writes of files without an editor
+(Replace in Files). When events were lost, or without a watcher, the tree
+and the index are built again instead. Files outside the project folder
+are not watched (the reference watches only project and library roots);
+the window's activation and Reload All from Disk look at them.
 
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a

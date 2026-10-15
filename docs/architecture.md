@@ -92,7 +92,8 @@ Platform (`crates/platform/`, language-agnostic):
   forward buttons), application start-up, environment switches and
   in-app measurements; files changed outside the application (the file
   watcher, a look at the open files when the window gets the focus,
-  Reload All from Disk).
+  Reload All from Disk, the File Cache Conflict dialog, saves that never
+  write over a newer file).
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model

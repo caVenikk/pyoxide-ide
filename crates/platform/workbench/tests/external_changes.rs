@@ -165,6 +165,12 @@ impl H<'_> {
             .count()
     }
 
+    /// Lets the executor's clock move on.
+    fn advance(&mut self, by: Duration) {
+        self.cx.executor().advance_clock(by);
+        self.cx.run_until_parked();
+    }
+
     /// Waits for real events (the file watcher) until `f` holds.
     fn wait(&mut self, what: &str, f: impl Fn(&mut Self) -> bool) {
         let start = Instant::now();
@@ -202,12 +208,26 @@ fn an_unmodified_file_is_reloaded_when_the_window_gets_the_focus(cx: &mut TestAp
         h.files_changed()
             .contains(&FileChange::new(&a, FileChangeKind::Changed))
     );
-    // The reload is one undo step; undone, the editor differs from the
-    // file.
+    // The reload is one undo step, undone after a question; undone, the
+    // editor differs from the file.
     h.invoke("editor.undo", json!(null));
+    assert_eq!(h.text(), new, "nothing is undone before the answer");
+    let dialog = h.state()["dialog"].clone();
+    assert_eq!(dialog["title"], json!("Undo"));
+    assert_eq!(dialog["message"], json!("Undo Reload from Disk?"));
+    assert_eq!(dialog["buttons"], json!(["Cancel", "OK"]));
+    h.invoke("dialog.cancel", json!(null));
+    assert_eq!(h.text(), new);
+    h.invoke("editor.undo", json!(null));
+    h.invoke("dialog.confirm", json!(null));
     assert_eq!(h.text(), A);
     assert_eq!(h.state()["tabs"][0]["modified"], json!(true));
     h.invoke("editor.redo", json!(null));
+    assert_eq!(
+        h.state()["dialog"]["message"],
+        json!("Redo Reload from Disk?")
+    );
+    h.invoke("dialog.confirm", json!(null));
     assert_eq!(h.text(), new);
 
     // Coming back again without a change reads nothing new.
@@ -238,24 +258,191 @@ fn the_applications_own_saves_are_not_changes(cx: &mut TestAppContext) {
     assert_eq!(h.text(), A);
 }
 
-#[gpui::test]
-fn a_modified_file_keeps_its_text(cx: &mut TestAppContext) {
-    let (mut h, _dir) = open(cx, SyncSettings::default());
+/// Saves only on request, so that the test decides when a save happens.
+fn manual_saves(h: &mut H) {
     h.window
         .update(h.cx, |w, _, _| {
             w.set_save_settings(SaveSettings {
                 save_on_deactivation: false,
                 save_on_idle: false,
+                save_on_tab_switch: false,
                 ..SaveSettings::default()
             })
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn a_file_changed_on_disk_and_in_its_editor_asks_which_to_keep(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    manual_saves(&mut h);
+    let a = h.root.join("a.py");
     h.invoke("editor.type", json!({"text": "y = 0\n"}));
+    let mine = format!("y = 0\n{A}");
     h.write("a.py", "changed = True\n");
     h.switch_away_and_back();
-    assert_eq!(h.text(), format!("y = 0\n{A}"));
+    let dialog = h.state()["dialog"].clone();
+    assert_eq!(dialog["title"], json!("File Cache Conflict"));
+    assert_eq!(
+        dialog["message"],
+        json!(format!(
+            "Changes have been made to '{}' in memory and on disk.",
+            a.display()
+        ))
+    );
+    assert_eq!(
+        dialog["buttons"],
+        json!(["Keep Memory Changes", "Load File System Changes"])
+    );
+    assert_eq!(dialog["default"], json!("Load File System Changes"));
+    assert_eq!(h.text(), mine, "nothing changes before the answer");
+
+    // While the question is open, no save writes the file.
+    h.invoke("dialog.cancel", json!(null));
+    // Escape keeps the editor's text, which the next save writes.
+    assert_eq!(h.text(), mine);
     assert_eq!(h.state()["tabs"][0]["modified"], json!(true));
-    assert_eq!(h.reloads(&h.root.join("a.py")), 0);
+    h.invoke("workbench.save-all", json!(null));
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), mine);
+
+    // Load File System Changes: the editor takes the file, one undo step.
+    h.set_caret(0, 0);
+    h.invoke("editor.type", json!({"text": "z = 0\n"}));
+    h.write("a.py", "outside = 2\n");
+    h.switch_away_and_back();
+    h.invoke(
+        "dialog.choose",
+        json!({"button": "Load File System Changes"}),
+    );
+    assert_eq!(h.text(), "outside = 2\n");
+    assert_eq!(h.state()["tabs"][0]["modified"], json!(false));
+    assert!(h.state()["dialog"].is_null());
+    h.invoke("editor.undo", json!(null));
+    h.invoke("dialog.confirm", json!(null));
+    assert!(h.text().starts_with("z = 0\n"), "{}", h.text());
+    assert_eq!(h.state()["tabs"][0]["modified"], json!(true));
+}
+
+#[gpui::test]
+fn no_save_writes_over_a_file_changed_on_disk(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    manual_saves(&mut h);
+    let a = h.root.join("a.py");
+    // Looked at once, so its stamp is known.
+    h.switch_away_and_back();
+    h.invoke("editor.type", json!({"text": "mine = 1\n"}));
+    // Changed outside; no check has seen it yet.
+    h.write("a.py", "theirs = 1\n");
+    h.invoke("workbench.save-all", json!(null));
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "theirs = 1\n");
+    assert_eq!(h.state()["dialog"]["title"], json!("File Cache Conflict"));
+    assert_eq!(h.state()["tabs"][0]["modified"], json!(true));
+    // Saves wait for the answer, explicit ones too.
+    h.invoke("dialog.cancel", json!(null));
+    h.invoke("workbench.save-all", json!(null));
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        format!("mine = 1\n{A}")
+    );
+
+    // The same without a stamp known yet (no check before the change).
+    h.invoke("project.open-file", json!({"path": "src/m.py"}));
+    h.invoke("editor.type", json!({"text": "mine = 2\n"}));
+    h.write("src/m.py", "theirs = 2\n");
+    h.invoke("editor.save", json!(null));
+    assert_eq!(
+        std::fs::read_to_string(h.root.join("src/m.py")).unwrap(),
+        "theirs = 2\n"
+    );
+    assert_eq!(h.state()["dialog"]["title"], json!("File Cache Conflict"));
+}
+
+#[gpui::test]
+fn a_deleted_files_tab_closes_unless_its_editor_has_changes(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    h.invoke("project.open-file", json!({"path": "src/m.py"}));
+    h.invoke("editor.type", json!({"text": "kept = 1\n"}));
+    std::fs::remove_file(h.root.join("a.py")).unwrap();
+    std::fs::remove_file(h.root.join("src/m.py")).unwrap();
+    // The save when the window loses the focus finds m.py gone and
+    // leaves it so.
+    h.switch_away_and_back();
+    assert!(!h.root.join("src/m.py").exists());
+    // Looked at again a moment later (a tool may write it again).
+    assert_eq!(h.state()["tabs"].as_array().unwrap().len(), 2);
+    h.advance(Duration::from_millis(400));
+    let tabs = h.state()["tabs"].clone();
+    assert_eq!(
+        tabs,
+        json!([{"path": "src/m.py", "modified": true, "deleted": true}])
+    );
+    // Not saved by itself, so the file is not made again.
+    h.switch_away_and_back();
+    assert!(!h.root.join("src/m.py").exists());
+
+    // Closing it asks; Cancel keeps the tab.
+    h.invoke("tabs.close", json!(null));
+    let dialog = h.state()["dialog"].clone();
+    assert_eq!(dialog["title"], json!("Close Document"));
+    assert_eq!(
+        dialog["message"],
+        json!("The document has been modified.\nDo you want to save the changes?")
+    );
+    assert_eq!(dialog["buttons"], json!(["Cancel", "Discard", "Save"]));
+    h.invoke("dialog.cancel", json!(null));
+    assert_eq!(h.state()["tabs"].as_array().unwrap().len(), 1);
+    // Save writes the file again and closes the tab.
+    h.invoke("tabs.close", json!(null));
+    h.invoke("dialog.choose", json!({"button": "Save"}));
+    assert!(h.state()["tabs"].as_array().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(h.root.join("src/m.py")).unwrap(),
+        "kept = 1\nm = 1\n"
+    );
+
+    // Discard drops the changes.
+    h.invoke("project.open-file", json!({"path": "src/m.py"}));
+    h.invoke("editor.type", json!({"text": "dropped = 1\n"}));
+    std::fs::remove_file(h.root.join("src/m.py")).unwrap();
+    h.switch_away_and_back();
+    h.advance(Duration::from_millis(400));
+    assert_eq!(h.state()["tabs"][0]["deleted"], json!(true));
+    // An explicit save makes the file again.
+    h.invoke("workbench.save-all", json!(null));
+    assert!(h.root.join("src/m.py").exists());
+    assert_eq!(h.state()["tabs"][0]["deleted"], json!(false));
+    h.invoke("editor.type", json!({"text": "dropped = 2\n"}));
+    std::fs::remove_file(h.root.join("src/m.py")).unwrap();
+    h.switch_away_and_back();
+    h.advance(Duration::from_millis(400));
+    h.invoke("tabs.close", json!(null));
+    h.invoke("dialog.choose", json!({"button": "Discard"}));
+    assert!(h.state()["tabs"].as_array().unwrap().is_empty());
+    assert!(!h.root.join("src/m.py").exists());
+}
+
+#[gpui::test]
+fn a_file_removed_and_written_again_keeps_its_tab(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    std::fs::remove_file(h.root.join("a.py")).unwrap();
+    h.switch_away_and_back();
+    // Written again before the second look (as `git checkout` does).
+    h.write("a.py", "again = 1\n");
+    h.advance(Duration::from_millis(400));
+    assert_eq!(h.state()["tabs"].as_array().unwrap().len(), 1);
+    assert_eq!(h.text(), "again = 1\n");
+}
+
+#[gpui::test]
+fn a_rename_outside_is_a_deletion_and_a_creation(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    std::fs::rename(h.root.join("a.py"), h.root.join("renamed.py")).unwrap();
+    h.switch_away_and_back();
+    h.advance(Duration::from_millis(400));
+    assert!(h.state()["tabs"].as_array().unwrap().is_empty());
+    let rows = h.rows();
+    assert!(rows.contains(&"renamed.py".to_owned()), "{rows:?}");
+    assert!(!rows.contains(&"a.py".to_owned()), "{rows:?}");
 }
 
 #[gpui::test]
@@ -367,4 +554,40 @@ fn the_watcher_reports_changes_made_outside(cx: &mut TestAppContext) {
         h.files_changed()
             .contains(&FileChange::new(&new, FileChangeKind::Deleted))
     });
+
+    // The application's own write of a file without an editor (Replace in
+    // Files writes this way) reaches the services too, as a change of a
+    // file they know; its temporary file does not.
+    let m = h.root.join("src/m.py");
+    project::write_document(&m, b"m = 2\n").unwrap();
+    h.wait("the services to hear about m.py", |h| {
+        h.files_changed()
+            .contains(&FileChange::new(&m, FileChangeKind::Changed))
+    });
+    assert!(
+        h.files_changed()
+            .iter()
+            .all(|c| !c.path.to_string_lossy().contains(".pyoxide-save-")),
+        "{:?}",
+        h.files_changed()
+    );
+
+    // An open file deleted outside: its tab closes.
+    std::fs::remove_file(&a).unwrap();
+    h.wait("a.py's tab to close", |h| {
+        h.state()["tabs"].as_array().is_some_and(|t| t.is_empty())
+    });
+}
+
+#[gpui::test]
+fn the_open_files_are_saved_when_the_application_quits(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, SyncSettings::default());
+    manual_saves(&mut h);
+    h.invoke("editor.type", json!({"text": "# last words\n"}));
+    let a = h.root.join("a.py");
+    h.cx.update(|cx| cx.shutdown());
+    assert_eq!(
+        std::fs::read_to_string(a).unwrap(),
+        format!("# last words\n{A}")
+    );
 }

@@ -492,6 +492,22 @@ impl Buffer {
         self.history.mark_saved();
     }
 
+    /// The file on disk differs from every state of the text (it changed
+    /// outside and the text was kept): modified until the next save.
+    pub fn mark_unsaved(&mut self) {
+        self.history.mark_unsaved();
+    }
+
+    /// The kind of edit the next undo reverts.
+    pub fn undo_kind(&self) -> Option<EditKind> {
+        self.history.undo_kind()
+    }
+
+    /// The kind of edit the next redo applies again.
+    pub fn redo_kind(&self) -> Option<EditKind> {
+        self.history.redo_kind()
+    }
+
     /// Starts writing the current text: ends the undo group and returns the
     /// point to pass to [`Buffer::mark_saved_at`] once the write succeeded.
     /// Edits made while the write runs keep the buffer modified.

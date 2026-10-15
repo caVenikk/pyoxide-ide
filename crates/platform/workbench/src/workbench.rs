@@ -623,6 +623,7 @@ impl Workbench {
             "tabs": self.tabs.iter().map(|t| json!({
                 "path": rel(&t.path),
                 "modified": t.editor.read(cx).is_modified(),
+                "deleted": self.is_deleted_on_disk(&t.path),
             })).collect::<Vec<_>>(),
             "active_tab": self.active,
             "navigation": self.navigation.history.state_json(rel),
@@ -656,7 +657,7 @@ impl Workbench {
         self.clear_navigation();
         self.project_visible = true;
         self.project_files.update(cx, |files, cx| files.clear(cx));
-        self.sync_project_opened(&path, cx);
+        self.sync_project_opened(&path, window, cx);
         self.panel.update(cx, |panel, cx| {
             panel.set_project(Project::new(path.clone()), cx)
         });
@@ -869,7 +870,7 @@ impl Workbench {
                 v.editor_opened(&path, language, &editor, window, cx)
             });
         }
-        self.sync_tab_opened(&path);
+        self.sync_tab_opened(&path, &editor, window, cx);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -958,23 +959,27 @@ impl Workbench {
         if !editor.read(cx).is_modified() {
             return None;
         }
+        // Not while the file changed or went away on disk; the write
+        // leaves a file changed meanwhile alone.
+        let guard = self.sync_save_started(&path, &editor, cx)?;
         let (bytes, point) = editor.update(cx, |e, _| {
             let point = e.buffer_mut().begin_save();
             (e.buffer().encoded(), point)
         });
         self.pending += 1;
-        self.sync_save_started(&path);
         let write = cx.background_spawn({
             let path = path.clone();
-            async move { file_sync::write(&path, &bytes) }
+            async move { guard.write(&path, &bytes) }
         });
         Some(cx.spawn(async move |this, cx| {
             let result = write.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending -= 1;
-                this.sync_save_finished(&path, result.as_ref().ok().copied().flatten());
+                let Some(result) = this.sync_save_finished(&path, result, cx) else {
+                    return cx.notify();
+                };
                 match result {
-                    Ok(_) => {
+                    Ok(()) => {
                         editor.update(cx, |e, cx| {
                             e.buffer_mut().mark_saved_at(point);
                             cx.notify();
@@ -1018,7 +1023,7 @@ impl Workbench {
 
     /// Closes a tab; a modified file is saved first (no prompt).
     pub fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index >= self.tabs.len() {
+        if index >= self.tabs.len() || self.sync_close_asks(index, cx) {
             return;
         }
         self.save_tab(index, cx);
@@ -1635,11 +1640,13 @@ impl Workbench {
 
     fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(i) = self.active {
+            self.sync_explicit_save();
             self.save_tab(i, cx);
         }
     }
 
     fn save_all_action(&mut self, _: &SaveAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.sync_explicit_save();
         self.save_all(cx);
     }
 
@@ -2110,7 +2117,10 @@ impl Workbench {
         let hover = theme.color(UiRole::TabHover);
         let active_bg = theme.color(UiRole::TabActive);
         let outline = theme.color(UiRole::TabUnderline);
-        let text: Hsla = if selected {
+        // A file gone from disk whose editor keeps its changes.
+        let text: Hsla = if self.is_deleted_on_disk(&tab.path) {
+            theme.color(UiRole::Danger)
+        } else if selected {
             theme.color(UiRole::TabActiveText)
         } else {
             theme

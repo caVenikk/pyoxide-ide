@@ -379,7 +379,7 @@ impl Buffer {
         mapped.push(primary);
         *selections = SelectionSet::from_vec(mapped);
         selections.clamp(self.len_chars());
-        self.record_step(step, EditKind::Other, &before, selections, Instant::now());
+        self.record_step(step, EditKind::Reload, &before, selections, Instant::now());
         self.mark_saved();
         Ok(applied.into_iter().next())
     }
@@ -480,11 +480,20 @@ mod tests {
         assert!(!b.is_modified());
         // Undo brings the text from before the reload back, which then
         // differs from the file; the typing before stays its own step.
+        assert_eq!(b.undo_kind(), Some(EditKind::Reload));
         b.undo().unwrap();
         assert_eq!(b.text(), "xone\n");
         assert!(b.is_modified());
+        assert_eq!(b.redo_kind(), Some(EditKind::Reload));
+        assert_eq!(b.undo_kind(), Some(EditKind::Typing));
         b.undo().unwrap();
         assert_eq!(b.text(), "one\n");
+        // A text kept against a newer file stays modified.
+        let mut kept = Buffer::new("a\n");
+        kept.mark_unsaved();
+        assert!(kept.is_modified());
+        kept.mark_saved();
+        assert!(!kept.is_modified());
     }
 
     #[test]

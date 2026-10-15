@@ -6,44 +6,76 @@
 //! (`SynchronizeAction`: save everything, then look at everything).
 //!
 //! An open file that changed on disk (its size or modification time differ
-//! from when the application last read or wrote it, and so does its text)
-//! is reloaded when its editor is unmodified, as the reference's
+//! from when the application last read or wrote it, and so does its
+//! content) is reloaded when its editor is unmodified, as the reference's
 //! `FileDocumentManagerImpl.contentsChanged` does: one undo step, carets
-//! and the view kept ([`editor::Editor::reload`]). Files the application
-//! writes itself are not changes: a check that overlaps a write of its
-//! file is dropped, and the write leaves the file's new stamp behind.
+//! and the view kept ([`editor::Editor::reload`]); undoing it asks first.
+//! When the editor has changes of its own, the File Cache Conflict dialog
+//! asks which to keep, and nothing writes the file until then: every save
+//! looks at the file first and leaves one that changed meanwhile alone
+//! (`dialogs`). The application's own writes are not changes: a check
+//! that overlaps a write of its file is dropped, and the write leaves the
+//! file's new stamp and content behind.
+//!
+//! A deleted file's tab closes, as in the reference (a rename outside the
+//! application is a deletion and a creation). An editor with changes
+//! stays open instead, its tab marked, and is not saved automatically:
+//! Pyoxide has no Local History yet to get them back from. Save writes
+//! the file again; closing the tab asks (Close Document).
 //!
 //! Created, changed and removed paths reach the project tree (folders
 //! listed again), the file index and the language services (watched
-//! files). When events were lost, or no watcher runs, the tree and the
-//! index are built again instead.
+//! files), also for the application's own writes of files without an
+//! editor (Replace in Files). When events were lost, or no watcher runs,
+//! the tree and the index are built again instead.
 
-use std::collections::{BTreeSet, HashMap};
+mod dialogs;
+mod disk;
+
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use code_intel_ui::code_intel::{FileChange, FileChangeKind};
-use editor::Editor;
+use editor::{Editor, EditorEvent};
 use file_index::Change;
 use file_watcher::{Batch, FileWatcher, Kind};
-use gpui::{AppContext as _, Context, Entity, Task, Window};
+use gpui::{AnyWindowHandle, AppContext as _, Context, Entity, Subscription, Task, Window};
 use project::{DiskChange, Filter, Stamp};
-use text::ReloadPlan;
+
+pub(super) use dialogs::SyncDialog;
+use disk::{Check, Checked, Conflict, Known, SaveGuard, Saved};
 
 use super::Workbench;
 use crate::commands::Synchronize;
 use crate::settings::SyncSettings;
 
+/// A file reported missing is looked at again after this long before its
+/// tab closes: tools such as `git` remove a file and write it again.
+const DELETE_GRACE: Duration = Duration::from_millis(300);
+
 /// What the application knows of an open file on disk.
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct DiskState {
     /// Size and modification time when the application last read or
     /// wrote the file; `None` until it has been looked at.
     stamp: Option<Stamp>,
-    /// Writes of the file in flight.
+    /// The content the application last read or wrote; `None` until
+    /// known (an editor opened with changes).
+    known: Option<Known>,
+    /// Writes of the file in flight, and the text of the last one.
     saving: usize,
+    writing: Option<Known>,
     /// Changes with every write that starts or ends, so that a check that
     /// read the file around a write is dropped.
     epoch: u64,
+    /// Changed on disk while the editor had changes: nothing writes the
+    /// file until the person chose.
+    conflict: Option<Conflict>,
+    /// Gone from disk while the editor had changes.
+    deleted: bool,
+    /// The editor's requests to confirm undoing a reload.
+    _events: Option<Subscription>,
 }
 
 /// The project's file watcher.
@@ -72,71 +104,12 @@ pub(super) struct FileSync {
     /// Changes with every project, so late results of the previous one
     /// are dropped.
     generation: u64,
-}
-
-/// One open file to look at, off the UI thread.
-struct Check {
-    path: PathBuf,
-    epoch: u64,
-    /// Skip reading when the file still has this stamp.
-    stamp: Option<Stamp>,
-    text: text::Rope,
-    version: u64,
-    line_ending: text::LineEnding,
-    encoding: text::Encoding,
-    read_only: bool,
-}
-
-/// What a check found.
-enum Checked {
-    /// The file is as the editor has it; its stamp now.
-    Same(Stamp),
-    /// The file differs from the editor.
-    Changed {
-        plan: ReloadPlan,
-        read_only: bool,
-        stamp: Stamp,
-    },
-    /// Gone, or not readable as text: left alone for now.
-    Unavailable,
-}
-
-impl Check {
-    fn run(self) -> (PathBuf, u64, Checked) {
-        let result = match Stamp::of(&self.path) {
-            None => Checked::Unavailable,
-            Some(stamp) if Some(stamp) == self.stamp => Checked::Same(stamp),
-            Some(_) => match project::read_document(&self.path) {
-                Err(_) => Checked::Unavailable,
-                Ok(loaded) => {
-                    let read_only = loaded.read_only || loaded.decoded.lossy;
-                    let plan = ReloadPlan::new(&self.text, self.version, &loaded.decoded);
-                    let same = !plan.changes_text()
-                        && loaded.decoded.line_ending == self.line_ending
-                        && loaded.decoded.encoding == self.encoding
-                        && read_only == self.read_only;
-                    if same {
-                        Checked::Same(loaded.stamp)
-                    } else {
-                        Checked::Changed {
-                            plan,
-                            read_only,
-                            stamp: loaded.stamp,
-                        }
-                    }
-                }
-            },
-        };
-        (self.path, self.epoch, result)
-    }
-}
-
-/// Writes a document (blocking) and returns the file's stamp after the
-/// write, which tells the application's own writes from changes made
-/// outside it.
-pub(super) fn write(path: &Path, bytes: &[u8]) -> std::io::Result<Option<Stamp>> {
-    project::write_document(path, bytes)?;
-    Ok(Stamp::of(path))
+    /// The window, for dialogs and tabs closed after background work.
+    window: Option<AnyWindowHandle>,
+    /// Dialogs waiting for the open one.
+    dialogs: VecDeque<SyncDialog>,
+    /// Writes the open files when the application quits.
+    _quit: Option<Subscription>,
 }
 
 /// Paths the watcher leaves out: what is never shown (a version control
@@ -166,12 +139,42 @@ impl Workbench {
         matches!(self.file_sync.watch, Watch::Running { .. })
     }
 
+    /// The file of an open tab is gone from disk and its editor has
+    /// changes (the tab stays, marked).
+    pub fn is_deleted_on_disk(&self, path: &Path) -> bool {
+        self.file_sync.files.get(path).is_some_and(|s| s.deleted)
+    }
+
+    /// Runs `f` with the window, after the current update.
+    fn in_window(
+        &self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let Some(handle) = self.file_sync.window else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = this.update(cx, |this, cx| f(this, window, cx));
+            });
+        })
+        .detach();
+    }
+
     /// A project was opened: the files of the previous one are forgotten
     /// and the new folder is watched (set up off the UI thread).
-    pub(super) fn sync_project_opened(&mut self, root: &Path, cx: &mut Context<Self>) {
+    pub(super) fn sync_project_opened(
+        &mut self,
+        root: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let sync = &mut self.file_sync;
+        sync.window = Some(window.window_handle());
         sync.generation += 1;
         sync.files.clear();
+        sync.dialogs.clear();
         sync.watch = Watch::Off;
         sync.events = None;
         if !sync.settings.watch {
@@ -227,10 +230,46 @@ impl Workbench {
     }
 
     /// An editor tab was opened for a file.
-    pub(super) fn sync_tab_opened(&mut self, path: &Path) {
-        if path.is_absolute() {
-            self.file_sync.files.entry(path.to_owned()).or_default();
+    pub(super) fn sync_tab_opened(
+        &mut self,
+        path: &Path,
+        editor: &Entity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_sync.window = Some(window.window_handle());
+        if self.file_sync._quit.is_none() {
+            self.file_sync._quit = Some(cx.on_app_quit(|this, cx| {
+                this.save_on_quit(cx);
+                async {}
+            }));
         }
+        if !path.is_absolute() {
+            return;
+        }
+        let buffer = editor.read(cx).buffer();
+        // An editor opened with changes (from the Find in Files preview)
+        // does not tell what the file is.
+        let known = (!buffer.is_modified()).then(|| Known::of(buffer));
+        editor.update(cx, |e, _| e.set_confirm_reload_undo(true));
+        let key = path.to_owned();
+        let events = cx.subscribe(editor, move |this, _, event: &EditorEvent, cx| {
+            if let EditorEvent::ConfirmUndo { redo } = event {
+                let dialog = SyncDialog::UndoReload {
+                    path: key.clone(),
+                    redo: *redo,
+                };
+                this.queue_sync_dialog(dialog, cx);
+            }
+        });
+        self.file_sync.files.insert(
+            path.to_owned(),
+            DiskState {
+                known,
+                _events: Some(events),
+                ..DiskState::default()
+            },
+        );
     }
 
     /// The tab of a file was closed.
@@ -240,22 +279,127 @@ impl Workbench {
         }
     }
 
-    /// The application starts writing a file.
-    pub(super) fn sync_save_started(&mut self, path: &Path) {
-        if let Some(state) = self.file_sync.files.get_mut(path) {
-            state.saving += 1;
-            state.epoch += 1;
+    /// Before a tab closes: a modified editor that is not saved
+    /// automatically (its file is gone, or changed on disk) asks first.
+    /// True when the tab stays for now.
+    pub(super) fn sync_close_asks(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        let Some(tab) = self.tabs.get(index) else {
+            return false;
+        };
+        let held = self
+            .file_sync
+            .files
+            .get(&tab.path)
+            .is_some_and(|s| s.deleted || s.conflict.is_some());
+        if !held || !tab.editor.read(cx).is_modified() {
+            return false;
+        }
+        let dialog = SyncDialog::CloseModified(tab.path.clone());
+        self.queue_sync_dialog(dialog, cx);
+        true
+    }
+
+    /// An explicit save (Save, Save All): a file gone from disk is written
+    /// again.
+    pub(super) fn sync_explicit_save(&mut self) {
+        for state in self.file_sync.files.values_mut() {
+            if state.deleted {
+                state.deleted = false;
+                state.known = None;
+                state.stamp = None;
+            }
         }
     }
 
-    /// The application's write of a file ended; `stamp` is the file's
-    /// stamp after a successful write.
-    pub(super) fn sync_save_finished(&mut self, path: &Path, stamp: Option<Stamp>) {
-        if let Some(state) = self.file_sync.files.get_mut(path) {
+    /// The application is about to write a file: the guard that makes the
+    /// write leave a file that changed meanwhile alone, or `None` when the
+    /// file must not be written now (a conflict waits for the person's
+    /// choice, or the file is gone).
+    pub(super) fn sync_save_started(
+        &mut self,
+        path: &Path,
+        editor: &Entity<Editor>,
+        cx: &mut Context<Self>,
+    ) -> Option<SaveGuard> {
+        let text = Known::of(editor.read(cx).buffer());
+        let Some(state) = self.file_sync.files.get_mut(path) else {
+            return Some(SaveGuard::new(None, Vec::new(), text));
+        };
+        if state.conflict.is_some() || state.deleted {
+            return None;
+        }
+        let expected: Vec<Known> = match &state.known {
+            Some(known) => [Some(known.clone()), state.writing.clone()]
+                .into_iter()
+                .flatten()
+                .collect(),
+            None => Vec::new(),
+        };
+        // While another write runs, the stamp says nothing.
+        let stamp = state.stamp.filter(|_| state.saving == 0);
+        state.saving += 1;
+        state.epoch += 1;
+        state.writing = Some(text.clone());
+        Some(SaveGuard::new(stamp, expected, text))
+    }
+
+    /// A write of a file ended. Returns how it went for the caller, or
+    /// `None` when it was not written because the file changed or went
+    /// away (handled here).
+    pub(super) fn sync_save_finished(
+        &mut self,
+        path: &Path,
+        result: std::io::Result<Saved>,
+        cx: &mut Context<Self>,
+    ) -> Option<std::io::Result<()>> {
+        let mut state = self.file_sync.files.get_mut(path);
+        if let Some(state) = state.as_mut() {
             state.saving = state.saving.saturating_sub(1);
             state.epoch += 1;
-            if stamp.is_some() {
-                state.stamp = stamp;
+            if state.saving == 0 {
+                state.writing = None;
+            }
+        }
+        match result {
+            Err(e) => Some(Err(e)),
+            Ok(Saved::Written { stamp, text }) => {
+                if let Some(state) = state {
+                    state.stamp = stamp;
+                    state.known = Some(text);
+                }
+                Some(Ok(()))
+            }
+            Ok(Saved::Conflict(conflict)) => {
+                if let Some(state) = state {
+                    state.conflict = Some(conflict);
+                }
+                self.queue_sync_dialog(SyncDialog::Conflict(path.to_owned()), cx);
+                None
+            }
+            Ok(Saved::Missing) => {
+                self.file_missing(path.to_owned(), cx);
+                None
+            }
+        }
+    }
+
+    /// Writes every modified file that may be written when the
+    /// application quits (the reference saves all documents on exit). The
+    /// writes run here: the application does not wait for background work
+    /// when it quits.
+    fn save_on_quit(&mut self, cx: &mut Context<Self>) {
+        for i in 0..self.tabs.len() {
+            let (path, editor) = (self.tabs[i].path.clone(), self.tabs[i].editor.clone());
+            if !editor.read(cx).is_modified() {
+                continue;
+            }
+            let Some(guard) = self.sync_save_started(&path, &editor, cx) else {
+                continue;
+            };
+            let bytes = editor.read(cx).buffer().encoded();
+            let result = guard.write(&path, &bytes);
+            if let Some(Ok(())) = self.sync_save_finished(&path, result, cx) {
+                editor.update(cx, |e, _| e.buffer_mut().mark_saved());
             }
         }
     }
@@ -302,11 +446,13 @@ impl Workbench {
         if batch.paths.is_empty() {
             return;
         }
-        let open: Vec<PathBuf> = batch
-            .paths
-            .iter()
-            .filter(|e| self.file_sync.files.contains_key(&e.path))
-            .map(|e| e.path.clone())
+        // Open files reported, and those in a folder reported (removed).
+        let open: Vec<PathBuf> = self
+            .file_sync
+            .files
+            .keys()
+            .filter(|f| batch.paths.iter().any(|e| f.starts_with(&e.path)))
+            .cloned()
             .collect();
         if !open.is_empty() {
             self.check_open_files(Some(open), cx);
@@ -341,8 +487,9 @@ impl Workbench {
         if changes.is_empty() {
             return;
         }
+        let index = self.project_files.read(cx).index();
         let mut dirs = BTreeSet::new();
-        let mut index = Vec::new();
+        let mut index_changes = Vec::new();
         let mut watched = Vec::new();
         for change in changes {
             let path = change.path();
@@ -352,18 +499,11 @@ impl Workbench {
             if change.is_dir() {
                 dirs.insert(path.to_owned());
             }
-            let open = self.file_sync.files.contains_key(path);
-            match change {
-                DiskChange::Created { path, is_dir } | DiskChange::Changed { path, is_dir } => {
-                    index.push(Change::Created {
-                        path: path.clone(),
-                        is_dir: *is_dir,
-                    });
-                }
-                DiskChange::Removed(path) => index.push(Change::Removed(path.clone())),
-            }
+            // A file written over (an atomic save) was there before.
+            let indexed = index.as_ref().is_some_and(|i| i.find(path).is_some());
             let kind = match change {
-                _ if open => None,
+                _ if self.file_sync.files.contains_key(path) => None,
+                DiskChange::Created { .. } if indexed => Some(FileChangeKind::Changed),
                 DiskChange::Created { .. } => Some(FileChangeKind::Created),
                 DiskChange::Changed { is_dir: false, .. } => Some(FileChangeKind::Changed),
                 DiskChange::Changed { .. } => None,
@@ -372,12 +512,21 @@ impl Workbench {
             if let Some(kind) = kind {
                 watched.push(FileChange::new(path, kind));
             }
+            index_changes.push(match change {
+                DiskChange::Created { path, is_dir } | DiskChange::Changed { path, is_dir } => {
+                    Change::Created {
+                        path: path.clone(),
+                        is_dir: *is_dir,
+                    }
+                }
+                DiskChange::Removed(path) => Change::Removed(path.clone()),
+            });
         }
         let dirs: Vec<PathBuf> = dirs.into_iter().collect();
         self.panel
             .update(cx, |panel, cx| panel.refresh_dirs(&dirs, cx));
         self.project_files
-            .update(cx, |files, cx| files.apply(&index, cx));
+            .update(cx, |files, cx| files.apply(&index_changes, cx));
         if let Some(view) = &self.code_intel
             && !watched.is_empty()
         {
@@ -385,8 +534,7 @@ impl Workbench {
         }
     }
 
-    /// Looks at open files (`None`: all) off the UI thread and reloads the
-    /// ones that changed on disk and are unmodified in their editors.
+    /// Looks at open files (`None`: all) off the UI thread.
     fn check_open_files(&mut self, paths: Option<Vec<PathBuf>>, cx: &mut Context<Self>) {
         let checks: Vec<Check> = self
             .tabs
@@ -394,16 +542,15 @@ impl Workbench {
             .filter(|t| paths.as_ref().is_none_or(|p| p.contains(&t.path)))
             .filter_map(|t| {
                 let state = self.file_sync.files.get(&t.path)?;
-                let editor = t.editor.read(cx);
-                // A modified editor keeps its text (a conflict, later).
-                if state.saving > 0 || editor.is_modified() {
+                if state.saving > 0 {
                     return None;
                 }
-                let buffer = editor.buffer();
+                let buffer = t.editor.read(cx).buffer();
                 Some(Check {
                     path: t.path.clone(),
                     epoch: state.epoch,
                     stamp: state.stamp,
+                    known: state.known.clone(),
                     text: buffer.rope().clone(),
                     version: buffer.version(),
                     line_ending: buffer.line_ending(),
@@ -426,8 +573,8 @@ impl Workbench {
             let _ = this.update(cx, |this, cx| {
                 this.pending -= 1;
                 if this.file_sync.generation == generation {
-                    for (path, epoch, checked) in results {
-                        this.checked(&path, epoch, checked, cx);
+                    for (path, epoch, version, checked) in results {
+                        this.checked(path, epoch, version, checked, cx);
                     }
                 }
                 cx.notify();
@@ -436,53 +583,120 @@ impl Workbench {
         .detach();
     }
 
-    fn checked(&mut self, path: &Path, epoch: u64, checked: Checked, cx: &mut Context<Self>) {
+    fn checked(
+        &mut self,
+        path: PathBuf,
+        epoch: u64,
+        version: u64,
+        checked: Checked,
+        cx: &mut Context<Self>,
+    ) {
         // The application wrote the file meanwhile: what was read may be
         // its own text or the one before.
         let current = self
             .file_sync
             .files
-            .get(path)
+            .get(&path)
             .is_some_and(|s| s.epoch == epoch && s.saving == 0);
-        if !current {
+        let Some(editor) = self.editor_for(&path).filter(|_| current) else {
             return;
-        }
-        let stamp = match checked {
-            Checked::Same(stamp) => stamp,
-            Checked::Unavailable => return,
+        };
+        let (modified, now) = {
+            let e = editor.read(cx);
+            (e.is_modified(), e.buffer().version())
+        };
+        match checked {
+            Checked::Unavailable => {}
+            Checked::Missing => self.file_missing(path, cx),
+            Checked::Unchanged { stamp, disk } => {
+                let state = self.file_sync.files.get_mut(&path).expect("checked");
+                state.stamp = Some(stamp);
+                state.deleted = false;
+                if let Some(disk) = disk {
+                    state.known = Some(disk);
+                    // The editor's changes are what the file has now.
+                    if modified && now == version {
+                        editor.update(cx, |e, _| e.buffer_mut().mark_saved());
+                    }
+                }
+            }
             Checked::Changed {
-                plan,
+                disk,
                 read_only,
                 stamp,
+                plan,
             } => {
-                let Some(editor) = self.editor_for(path) else {
+                let state = self.file_sync.files.get_mut(&path).expect("checked");
+                state.deleted = false;
+                if !modified {
+                    if !editor.update(cx, |e, cx| e.reload(plan, read_only, cx)) {
+                        // Edited meanwhile: the next check looks again.
+                        return;
+                    }
+                    state.known = Some(disk);
+                    state.stamp = Some(stamp);
+                } else if state.known.is_none() {
+                    // What the editor was opened from is not known.
+                    state.known = Some(disk);
+                    state.stamp = Some(stamp);
                     return;
-                };
-                if !reload(&editor, plan, read_only, cx) {
-                    return;
+                } else if state.conflict.is_none() {
+                    state.conflict = Some(Conflict { disk, stamp });
+                    self.queue_sync_dialog(SyncDialog::Conflict(path.clone()), cx);
                 }
                 if let Some(view) = &self.code_intel {
-                    let change = FileChange::new(path, FileChangeKind::Changed);
+                    let change = FileChange::new(&path, FileChangeKind::Changed);
                     view.update(cx, |v, cx| v.files_changed(&[change], cx));
                 }
-                stamp
             }
-        };
-        if let Some(state) = self.file_sync.files.get_mut(path) {
-            state.stamp = Some(stamp);
         }
+        cx.notify();
     }
-}
 
-/// Reloads an editor that is still unmodified and still has the text the
-/// plan was made from.
-fn reload(
-    editor: &Entity<Editor>,
-    plan: ReloadPlan,
-    read_only: bool,
-    cx: &mut Context<Workbench>,
-) -> bool {
-    editor.update(cx, |e, cx| {
-        !e.is_modified() && e.reload(plan, read_only, cx)
-    })
+    /// An open file was found missing: after a moment, if it is still
+    /// gone, its tab closes (as in the reference), or, when its editor
+    /// has changes, stays marked.
+    fn file_missing(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let generation = self.file_sync.generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(DELETE_GRACE).await;
+            let probe = path.clone();
+            let gone = cx
+                .background_spawn(async move { matches!(probe.try_exists(), Ok(false)) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.file_sync.generation != generation {
+                    return;
+                }
+                if gone {
+                    this.file_deleted(&path, cx);
+                } else {
+                    this.check_open_files(Some(vec![path]), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn file_deleted(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor_for(path) else {
+            return;
+        };
+        let Some(state) = self.file_sync.files.get_mut(path) else {
+            return;
+        };
+        if editor.read(cx).is_modified() {
+            state.deleted = true;
+            state.conflict = None;
+            state.stamp = None;
+            cx.notify();
+            return;
+        }
+        let path = path.to_owned();
+        self.in_window(cx, move |this, window, cx| {
+            if let Some(index) = this.tabs.iter().position(|t| t.path == path) {
+                this.close_tab(index, window, cx);
+            }
+        });
+    }
 }
