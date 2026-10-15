@@ -110,6 +110,10 @@
   where the file is already does nothing.
 - Step 15: the navigation history follows: Back opens `src/lib/n.py`; the
   places in the deleted file are gone.
+- With the file watcher on, the tree's own renames, moves, copies and
+  deletes are not external changes: no tab closes, nothing reloads, no
+  File Cache Conflict asks, and a renamed or moved open file is watched
+  under its new path (a change made outside reloads it).
 - File system errors open a dialog with the reference's title: *Cannot
   Create File* (a file), *Error* (a folder, a delete, a copy or move),
   *Rename*, *Create Package Error*. Name errors stay in the popup.

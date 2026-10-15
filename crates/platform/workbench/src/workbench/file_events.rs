@@ -131,6 +131,8 @@ impl Workbench {
                 v.editor_opened(&path, language, &editor, window, cx);
             });
         }
+        // Not an external change for the file watcher.
+        self.sync_tab_moved(&old, &path, &editor, cx);
     }
 
     /// `path` was deleted: the tabs of it (and of the files inside a
@@ -152,6 +154,7 @@ impl Workbench {
             .focus_handle(cx)
             .contains_focused(window, cx);
         let tab = self.tabs.remove(index);
+        self.sync_tab_closed(&tab.path, cx);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }

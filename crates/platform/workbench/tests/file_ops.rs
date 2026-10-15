@@ -14,8 +14,10 @@ use gpui::{App, AppContext as _, TestAppContext, WindowHandle};
 use serde_json::{Value, json};
 use workbench::{
     CodeIntelHook, CodeIntelProvider, FileType, NewItem, NewItemKind, NewTemplate, Product,
-    Workbench,
+    SyncSettings, Workbench,
 };
+
+mod support;
 
 struct Provider(Arc<FakeCodeIntel>);
 
@@ -77,6 +79,11 @@ fn test_items() -> Vec<NewItem> {
 }
 
 fn setup(cx: &mut TestAppContext) -> H<'_> {
+    setup_with(cx, SyncSettings::default())
+}
+
+/// The project opened with these settings of the file watcher.
+fn setup_with(cx: &mut TestAppContext, sync: SyncSettings) -> H<'_> {
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
     for (path, text) in [
@@ -106,6 +113,9 @@ fn setup(cx: &mut TestAppContext) -> H<'_> {
         workbench::open_main_window(cx, Rc::new(product))
     });
     cx.run_until_parked();
+    window
+        .update(cx, |w, _, _| w.set_sync_settings(sync))
+        .unwrap();
     cx.update_window(window.into(), |_, window, _| window.activate_window())
         .unwrap();
     let mut h = H {
@@ -273,6 +283,30 @@ impl H<'_> {
         vcx.simulate_mouse_move(mid, gpui::MouseButton::Left, modifiers);
         vcx.simulate_mouse_move(end, gpui::MouseButton::Left, modifiers);
         vcx.simulate_mouse_up(end, gpui::MouseButton::Left, modifiers);
+        self.draw();
+    }
+
+    /// Waits for real events (the file watcher) until `f` holds.
+    fn wait(&mut self, what: &str, f: impl Fn(&mut Self) -> bool) {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(30) {
+            support::tick(self.cx);
+            if f(self) {
+                return;
+            }
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    /// The watcher has reported what happened before `name` was written
+    /// outside the application (its row shows), and the time a missing
+    /// file is given has passed.
+    fn settle(&mut self, name: &str) {
+        std::fs::write(self.root.join(name), "").unwrap();
+        self.wait(name, |h| h.rows().contains(&name.to_owned()));
+        for _ in 0..40 {
+            support::tick(self.cx);
+        }
         self.draw();
     }
 
@@ -960,4 +994,73 @@ fn dragging_rows_onto_a_folder_moves_them(cx: &mut TestAppContext) {
     // Onto its own folder: nothing.
     h.drag("app.py", "", gpui::Modifiers::none());
     assert_eq!(h.transfer(), Value::Null);
+}
+
+#[gpui::test]
+fn the_file_watcher_does_not_take_tree_operations_for_external_changes(cx: &mut TestAppContext) {
+    support::allow_processes(cx);
+    let mut h = setup_with(
+        cx,
+        SyncSettings {
+            watch: true,
+            ..SyncSettings::default()
+        },
+    );
+    let window = h.window;
+    h.wait("the watcher to start", |h| {
+        window.read_with(h.cx, |w, _| w.is_watching()).unwrap()
+    });
+    // A renamed file with unsaved changes keeps its tab and its changes:
+    // no tab closes, nothing reloads, no dialog asks.
+    h.invoke("project.open-file", json!({ "path": "app.py" }));
+    h.invoke("editor.type", json!({ "text": "x" }));
+    h.invoke(
+        "project.tree.rename",
+        json!({ "path": "app.py", "name": "main.py" }),
+    );
+    h.settle("marker1.txt");
+    let s = h.state();
+    assert_eq!(s["dialog"], Value::Null, "{s:#}");
+    assert_eq!(s["tabs"][0]["path"], json!("main.py"));
+    assert_eq!(s["tabs"][0]["modified"], json!(true));
+    assert_eq!(s["tabs"][0]["deleted"], json!(false));
+    let text = |h: &mut H| {
+        let editor = h
+            .window
+            .read_with(h.cx, |w, _| w.active_editor().cloned())
+            .unwrap()
+            .unwrap();
+        h.cx.update(|cx| editor.read(cx).text())
+    };
+    assert_eq!(text(&mut h), "xa = 1\n");
+    // Moved: the same.
+    h.invoke(
+        "project.tree.move",
+        json!({ "paths": ["main.py"], "to": "src" }),
+    );
+    h.settle("marker2.txt");
+    let s = h.state();
+    assert_eq!(s["dialog"], Value::Null, "{s:#}");
+    assert_eq!(h.tabs(), [("src/main.py".to_owned(), true)]);
+    assert_eq!(text(&mut h), "xa = 1\n");
+    // Saved under the new path, and the watcher stays quiet about it.
+    h.invoke("workbench.save-all", json!(null));
+    h.settle("marker3.txt");
+    assert_eq!(
+        std::fs::read_to_string(h.root.join("src/main.py")).unwrap(),
+        "xa = 1\n"
+    );
+    assert_eq!(h.state()["dialog"], Value::Null);
+    assert_eq!(h.tabs(), [("src/main.py".to_owned(), false)]);
+    // The renamed file is still watched under its new path: a change made
+    // outside reloads it.
+    std::fs::write(h.root.join("src/main.py"), "y = 2\n").unwrap();
+    h.wait("the renamed file to reload", |h| text(h) == "y = 2\n");
+    // A deleted folder with an open file: its tab closes, no dialog.
+    h.invoke("project.open-file", json!({ "path": "docs/index.md" }));
+    h.invoke("project.tree.delete", json!({ "paths": ["docs"] }));
+    h.invoke("dialog.confirm", json!(null));
+    h.settle("marker4.txt");
+    assert_eq!(h.state()["dialog"], Value::Null);
+    assert_eq!(h.tabs(), [("src/main.py".to_owned(), false)]);
 }

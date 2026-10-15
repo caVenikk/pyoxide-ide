@@ -322,16 +322,7 @@ impl Workbench {
         // does not tell what the file is.
         let known = (!buffer.is_modified()).then(|| Known::of(buffer));
         editor.update(cx, |e, _| e.set_confirm_reload_undo(true));
-        let key = path.to_owned();
-        let events = cx.subscribe(editor, move |this, _, event: &EditorEvent, cx| {
-            if let EditorEvent::ConfirmUndo { redo } = event {
-                let dialog = SyncDialog::UndoReload {
-                    path: key.clone(),
-                    redo: *redo,
-                };
-                this.queue_sync_dialog(dialog, cx);
-            }
-        });
+        let events = Self::undo_reload_events(path, editor, cx);
         self.file_sync.files.insert(
             path.to_owned(),
             DiskState {
@@ -343,12 +334,49 @@ impl Workbench {
         self.watch_folders_of_open_files(cx);
     }
 
+    /// The editor's requests to confirm undoing a reload of `path`.
+    fn undo_reload_events(
+        path: &Path,
+        editor: &Entity<Editor>,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        let key = path.to_owned();
+        cx.subscribe(editor, move |this, _, event: &EditorEvent, cx| {
+            if let EditorEvent::ConfirmUndo { redo } = event {
+                let dialog = SyncDialog::UndoReload {
+                    path: key.clone(),
+                    redo: *redo,
+                };
+                this.queue_sync_dialog(dialog, cx);
+            }
+        })
+    }
+
     /// The tab of a file was closed.
     pub(super) fn sync_tab_closed(&mut self, path: &Path, cx: &mut Context<Self>) {
         if !self.tabs.iter().any(|t| t.path == path) {
             self.file_sync.files.remove(path);
             self.watch_folders_of_open_files(cx);
         }
+    }
+
+    /// The application renamed or moved an open file (the project tool
+    /// window, #37): what is known of it on disk goes with it, so the
+    /// watcher's report of the old path gone and the new one created is
+    /// not an external change (no tab closes, nothing reloads).
+    pub(super) fn sync_tab_moved(
+        &mut self,
+        from: &Path,
+        to: &Path,
+        editor: &Entity<Editor>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut state) = self.file_sync.files.remove(from) else {
+            return;
+        };
+        state._events = Some(Self::undo_reload_events(to, editor, cx));
+        self.file_sync.files.insert(to.to_owned(), state);
+        self.watch_folders_of_open_files(cx);
     }
 
     /// Before a tab closes: a modified editor that is not saved
