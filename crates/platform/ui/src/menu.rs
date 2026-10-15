@@ -30,7 +30,11 @@
 //! While the pointer moves from a row towards its open submenu, the rows it
 //! crosses on the way do not take the hover (`MouseMovementTracker`,
 //! `ListPopupImpl.isMovingToSubmenu`); a row the pointer rests on takes it
-//! after a short delay.
+//! after a short delay. A submenu opened from a row's "More Actions" button
+//! is pinned instead: the pointer moves the highlight over the other rows
+//! but the submenu stays until the button is clicked again or the menu
+//! closes (`ListPopupImpl` without `showSubmenuOnHover` keeps its child
+//! open; `PopupInlineActionsSupportImpl.performAction`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -626,6 +630,11 @@ pub struct ContextMenu {
     /// was, and the timer that gives it the hover if the pointer rests.
     aim_pending: Option<(usize, usize, Point<Pixels>)>,
     _aim_timer: Option<Task<()>>,
+    /// The level whose submenu was opened by a row's More Actions button,
+    /// and the row of that level the pointer is over meanwhile (it shows
+    /// the highlight and the buttons; the submenu stays with its row).
+    pinned: Option<usize>,
+    pinned_hover: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -700,6 +709,8 @@ impl ContextMenu {
                 aim_at: 0,
                 aim_pending: None,
                 _aim_timer: None,
+                pinned: None,
+                pinned_hover: None,
                 _subscriptions: subscriptions,
             };
             if list {
@@ -884,6 +895,7 @@ impl ContextMenu {
         if submenu {
             self.selected.push(None);
         }
+        self.unpin_closed();
         cx.notify();
     }
 
@@ -939,6 +951,14 @@ impl ContextMenu {
     /// of that level; then it does after [`AIM_DELAY`] if the pointer
     /// rests there.
     fn hover(&mut self, level: usize, ix: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+        // A pinned submenu stays; the pointer only moves the highlight.
+        if self.pinned == Some(level) {
+            if self.pinned_hover != Some(ix) {
+                self.pinned_hover = Some(ix);
+                cx.notify();
+            }
+            return;
+        }
         let towards = self.moving_towards_submenu(level, position);
         let hovered =
             self.selected.get(level).copied().flatten() == Some(ix) && self.selected.len() > level;
@@ -999,13 +1019,35 @@ impl ContextMenu {
 
     /// The "More Actions" button of row `ix`: opens its submenu with the
     /// first row selected (`PopupInlineActionsSupportImpl.performAction`).
+    /// The button again closes the submenu; another row's button moves it
+    /// there. The submenu is pinned (see [`ContextMenu::hover`]).
     fn open_more(&mut self, level: usize, ix: usize, cx: &mut Context<Self>) {
         if level >= self.selected.len() {
             return;
         }
+        let open_here = self.selected.len() > level + 1 && self.selected[level] == Some(ix);
         self.selected.truncate(level + 1);
         self.selected[level] = Some(ix);
-        self.open_selected_submenu(cx);
+        self.pinned_hover = None;
+        if open_here {
+            self.pinned = None;
+            cx.notify();
+            return;
+        }
+        if self.open_selected_submenu(cx) {
+            self.pinned = Some(level);
+        }
+    }
+
+    /// Forgets a pin whose submenu is closed.
+    fn unpin_closed(&mut self) {
+        if self
+            .pinned
+            .is_some_and(|level| self.selected.len() <= level + 1)
+        {
+            self.pinned = None;
+            self.pinned_hover = None;
+        }
     }
 
     fn open_submenu(&mut self, _: &OpenSubmenu, _: &mut Window, cx: &mut Context<Self>) {
@@ -1022,6 +1064,7 @@ impl ContextMenu {
     fn close_submenu(&mut self, _: &CloseSubmenu, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected.len() > 1 {
             self.selected.pop();
+            self.unpin_closed();
             cx.notify();
         }
     }
@@ -1029,6 +1072,7 @@ impl ContextMenu {
     fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected.len() > 1 {
             self.selected.pop();
+            self.unpin_closed();
             cx.notify();
         } else if !self.filter.is_empty() {
             self.set_filter(String::new(), cx);
@@ -1186,6 +1230,7 @@ impl ContextMenu {
             "title": self.title.as_ref().map(|t| t.as_ref()),
             "filter": self.filter,
             "levels": levels,
+            "pinned": self.pinned,
         })
     }
 
@@ -1270,7 +1315,14 @@ impl ContextMenu {
                         .into_any_element();
                 }
                 let enabled = item.selectable();
-                let is_selected = selected == Some(ix);
+                // The row whose submenu is open, and the highlighted row:
+                // the same but under a pinned submenu, where the pointer
+                // moves the highlight alone.
+                let owner = selected == Some(ix);
+                let is_selected = match (self.pinned == Some(level), self.pinned_hover) {
+                    (true, Some(hovered)) => hovered == ix,
+                    _ => owner,
+                };
                 let label = item.label().cloned().unwrap_or_default();
                 let selector = format!("menu-item:{label}");
                 let inner_selector = format!("menu-row:{label}");
@@ -1326,7 +1378,7 @@ impl ContextMenu {
                 } else {
                     m.content_x
                 };
-                let submenu = (open && is_selected).then(|| Beside {
+                let submenu = (open && owner).then(|| Beside {
                     child: self.render_level(level + 1, cx),
                     above: px(1.0 + m.pad_top),
                     level: level + 1,
@@ -2377,5 +2429,42 @@ mod tests {
         // Inside, or without a previous position.
         assert!(movement_towards(Some(p(50.0, 10.0)), p(120.0, 10.0), b));
         assert!(movement_towards(None, p(0.0, 0.0), b));
+    }
+
+    /// A submenu opened from a row's More Actions button stays while the
+    /// pointer moves over the other rows; the button again closes it
+    /// (#135, `ListPopupImpl` without `showSubmenuOnHover`).
+    #[gpui::test]
+    fn a_submenu_from_its_button_is_pinned(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = rich(cx);
+        place(&origin, point(px(10.0), px(10.0)), cx);
+        let alpha = cx.debug_bounds("menu-item:alpha").unwrap();
+        let beta = cx.debug_bounds("menu-item:beta").unwrap();
+        let more = cx.debug_bounds("menu-inline:More Actions").unwrap();
+        cx.simulate_click(more.center(), gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(1), Some(0)]);
+        // Over beta, and back: the submenu stays with alpha.
+        move_to(cx, beta.center());
+        assert_eq!(selected(&menu, cx), [Some(1), Some(0)]);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert_eq!(state["pinned"], json!(0));
+        move_to(cx, point(beta.center().x, beta.center().y + px(2.0)));
+        assert_eq!(selected(&menu, cx), [Some(1), Some(0)]);
+        move_to(cx, alpha.center());
+        // The button again closes it.
+        let more = cx.debug_bounds("menu-inline:More Actions").unwrap();
+        cx.simulate_click(more.center(), gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(1)]);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert_eq!(state["pinned"], Json::Null);
+        // Open again; a click on another row runs it.
+        cx.simulate_click(more.center(), gpui::Modifiers::none());
+        redraw(cx);
+        move_to(cx, beta.center());
+        cx.simulate_click(beta.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
     }
 }

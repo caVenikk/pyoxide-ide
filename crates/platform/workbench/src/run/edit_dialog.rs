@@ -217,6 +217,11 @@ pub struct EditDialog {
     hints: bool,
     /// The focus of each option's tag, by option id.
     tag_focus: HashMap<String, FocusHandle>,
+    /// The pointer is over the Modify options link: its text is
+    /// underlined. GPUI lays text out before it knows what is hovered, so a
+    /// hover style cannot underline text; the state keeps it for the next
+    /// frame.
+    link_hovered: bool,
     /// The project folder: path fields show their paths expanded from it.
     root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -282,6 +287,7 @@ impl EditDialog {
             collapsed: HashSet::new(),
             hints: false,
             tag_focus: HashMap::new(),
+            link_hovered: false,
             root,
             _subscriptions: Vec::new(),
         };
@@ -1473,6 +1479,7 @@ impl EditDialog {
             "modified": self.modified,
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
             "prompt": self.prompt.as_ref().map(|(d, _)| d.read(cx).state_json()),
+            "modify_options_underlined": self.link_hovered,
         })
     }
 }
@@ -2198,10 +2205,15 @@ impl EditDialog {
                         // A link: the hand and the underline under the
                         // pointer (`DropDownLink`).
                         .cursor_pointer()
-                        .group("run-dialog-modify-options")
+                        .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                            if this.link_hovered != *hovered {
+                                this.link_hovered = *hovered;
+                                cx.notify();
+                            }
+                        }))
                         .child(
                             div()
-                                .group_hover("run-dialog-modify-options", |s| s.underline())
+                                .when(self.link_hovered, |d| d.underline())
                                 .child("Modify options"),
                         )
                         .child(Icon::new(IconName::CHEVRON_DOWN))
