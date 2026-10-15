@@ -42,6 +42,8 @@ pub enum RunToolWindowEvent {
     Message(String),
     /// A notification (the import of run configurations).
     Notice(String),
+    /// The run configurations' files were written or removed.
+    FilesWritten(Vec<std::path::PathBuf>),
     /// Closing a tab whose process runs: the workbench asks first.
     ConfirmClose(usize),
     /// The tab context menu was asked for at a window position.
@@ -180,6 +182,9 @@ impl RunToolWindow {
             cx.observe(&configs, |_, _, cx| cx.notify()),
             cx.subscribe(&configs, |_, _, event: &RunConfigsEvent, cx| match event {
                 RunConfigsEvent::Notice(text) => cx.emit(RunToolWindowEvent::Notice(text.clone())),
+                RunConfigsEvent::FilesWritten(paths) => {
+                    cx.emit(RunToolWindowEvent::FilesWritten(paths.clone()))
+                }
             }),
         ];
         Self {

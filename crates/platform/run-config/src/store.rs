@@ -227,9 +227,10 @@ pub fn load(root: &Path) -> Result<Stored, StoreError> {
 
 /// Writes the configurations of a project: each shared configuration's
 /// file (only when it changed; a new one gets a file name), and the
-/// personal table (with the personal import marker). Returns the files of
-/// shared configurations that were written.
-pub fn save(root: &Path, list: &mut RunConfigurations) -> Result<Vec<String>, StoreError> {
+/// personal table (with the personal import marker). Returns the files
+/// that were written (an editor that has one open takes it as the
+/// application's own write).
+pub fn save(root: &Path, list: &mut RunConfigurations) -> Result<Vec<PathBuf>, StoreError> {
     let dir = shared_dir(root);
     let mut written = Vec::new();
     let mut taken: Vec<String> = list.all().iter().filter_map(|c| c.file.clone()).collect();
@@ -269,11 +270,13 @@ pub fn save(root: &Path, list: &mut RunConfigurations) -> Result<Vec<String>, St
             path: path.clone(),
             source,
         })?;
-        written.push(file);
+        written.push(path);
     }
     let table = personal_table(list);
     let value = (!table.is_empty()).then_some(table);
-    project::workspace::save_table(root, PERSONAL_TABLE, value)?;
+    if project::workspace::save_table(root, PERSONAL_TABLE, value)? {
+        written.push(project::workspace::workspace_file(root));
+    }
     Ok(written)
 }
 
@@ -789,7 +792,13 @@ mod tests {
         list.executors = vec![(shared.clone(), "Run".into())];
         list.personal_imported = true;
         let written = save(root, &mut list).unwrap();
-        assert_eq!(written, ["server.toml"]);
+        assert_eq!(
+            written,
+            [
+                shared_dir(root).join("server.toml"),
+                project::workspace::workspace_file(root)
+            ]
+        );
         let text = std::fs::read_to_string(shared_dir(root).join("server.toml")).unwrap();
         assert!(text.starts_with(HEADER), "{text}");
         assert!(text.contains("{ name = \"API_TOKEN\" }"), "{text}");

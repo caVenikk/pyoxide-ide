@@ -909,6 +909,7 @@ impl Workbench {
                 self.message = (!message.is_empty()).then(|| message.clone().into());
             }
             RunToolWindowEvent::Notice(text) => self.show_notice(text.clone().into(), cx),
+            RunToolWindowEvent::FilesWritten(paths) => self.sync_files_written(paths, cx),
             RunToolWindowEvent::ConfirmClose(tab) => self.confirm_close_running(*tab, window, cx),
             RunToolWindowEvent::TabMenu(tab, position) => {
                 self.open_tab_menu(*tab, *position, window, cx)

@@ -19,6 +19,9 @@ use super::RunHook;
 pub enum RunConfigsEvent {
     /// A notification ("Imported 3 run configurations").
     Notice(String),
+    /// Files of the project folder were written or removed: an editor
+    /// that has one open takes the change as the application's own.
+    FilesWritten(Vec<PathBuf>),
 }
 
 /// The run configurations of the open project.
@@ -286,6 +289,7 @@ impl RunConfigs {
         let generation = self.generation;
         let mut list = self.list.clone();
         let importers = self.importers.clone();
+        let files_root = root.clone();
         let task = cx.background_spawn(async move {
             let refs: Vec<&dyn Importer> = importers.iter().map(|i| i.as_ref()).collect();
             run_config::import::import_again(&root, &mut list, &refs).map(|r| (r, list))
@@ -298,6 +302,16 @@ impl RunConfigs {
                 }
                 let message = match result {
                     Ok((report, list)) => {
+                        // The files the import may have written.
+                        let mut written: Vec<PathBuf> = list
+                            .all()
+                            .iter()
+                            .filter(|c| c.is_shared())
+                            .filter_map(|c| c.file.as_ref())
+                            .map(|f| run_config::store::shared_dir(&files_root).join(f))
+                            .collect();
+                        written.push(project::workspace::workspace_file(&files_root));
+                        cx.emit(RunConfigsEvent::FilesWritten(written));
                         this.list = list;
                         if report.imported == 0 {
                             "No new run configurations to import".to_owned()
@@ -366,22 +380,29 @@ impl RunConfigs {
         let removed = std::mem::take(&mut self.removed_files);
         let task = cx.background_spawn(async move {
             // A file that a shared configuration took again is kept.
+            let mut touched = Vec::new();
             for file in removed {
                 let taken = list
                     .all()
                     .iter()
                     .any(|c| c.is_shared() && c.file.as_deref() == Some(file.as_str()));
-                if !taken {
-                    let _ = run_config::store::delete_shared(&root, &file);
+                if !taken && run_config::store::delete_shared(&root, &file).is_ok() {
+                    touched.push(run_config::store::shared_dir(&root).join(&file));
                 }
             }
             let result = run_config::store::save(&root, &mut list);
-            (result, list)
+            if let Ok(written) = &result {
+                touched.extend(written.iter().cloned());
+            }
+            (result, list, touched)
         });
         cx.spawn(async move |this, cx| {
-            let (result, saved) = task.await;
+            let (result, saved, touched) = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
+                if !touched.is_empty() {
+                    cx.emit(RunConfigsEvent::FilesWritten(touched));
+                }
                 if this.generation != generation {
                     return;
                 }

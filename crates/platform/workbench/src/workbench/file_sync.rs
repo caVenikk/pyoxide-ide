@@ -76,6 +76,10 @@ struct DiskState {
     conflict: Option<Conflict>,
     /// Gone from disk while the editor had changes.
     deleted: bool,
+    /// The application wrote the file outside its editor (run
+    /// configurations): the next check takes the change as known, with no
+    /// conflict.
+    own_write: bool,
     /// The editor's requests to confirm undoing a reload.
     _events: Option<Subscription>,
 }
@@ -611,6 +615,29 @@ impl Workbench {
         }
     }
 
+    /// Files the application wrote or removed outside their editors (run
+    /// configurations in the project folder, which the watcher leaves out):
+    /// an open one is looked at now, and a change found is the
+    /// application's own: an unmodified editor shows the new text, an
+    /// editor with changes keeps them and asks nothing (its next save
+    /// writes them).
+    pub(super) fn sync_files_written(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let open: Vec<PathBuf> = paths
+            .iter()
+            .filter(|p| self.file_sync.files.contains_key(*p))
+            .cloned()
+            .collect();
+        if open.is_empty() {
+            return;
+        }
+        for path in &open {
+            if let Some(state) = self.file_sync.files.get_mut(path) {
+                state.own_write = true;
+            }
+        }
+        self.check_open_files(Some(open), cx);
+    }
+
     /// Looks at open files (`None`: all) off the UI thread.
     fn check_open_files(&mut self, paths: Option<Vec<PathBuf>>, cx: &mut Context<Self>) {
         let checks: Vec<Check> = self
@@ -689,6 +716,7 @@ impl Workbench {
                 let state = self.file_sync.files.get_mut(&path).expect("checked");
                 state.stamp = Some(stamp);
                 state.deleted = false;
+                state.own_write = false;
                 if let Some(disk) = disk {
                     state.known = Some(disk);
                     // The editor's changes are what the file has now.
@@ -705,6 +733,15 @@ impl Workbench {
             } => {
                 let state = self.file_sync.files.get_mut(&path).expect("checked");
                 state.deleted = false;
+                let own = std::mem::take(&mut state.own_write);
+                if modified && own {
+                    // The application's own write under the person's
+                    // changes: no conflict; their save writes them.
+                    state.known = Some(disk);
+                    state.stamp = Some(stamp);
+                    cx.notify();
+                    return;
+                }
                 if !modified {
                     if !editor.update(cx, |e, cx| e.reload(plan, read_only, cx)) {
                         // Edited meanwhile: the next check looks again.

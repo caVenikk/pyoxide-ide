@@ -682,3 +682,55 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     let _ = invoke_and_draw(&mut h, "workbench.state", json!(null));
     assert!(names(&h.run()).contains(&"beta".to_owned()));
 }
+
+/// A configuration's file open in an editor: the application's writes of
+/// it are its own: an unmodified editor shows the new text, an editor
+/// with changes keeps them, and no File Cache Conflict comes up.
+#[gpui::test]
+fn writes_of_an_open_configuration_file_are_the_applications_own(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    let file = root.join(".oxide/run/shared.toml");
+    h.invoke(
+        "project.open-file",
+        json!({"path": file.display().to_string()}),
+    );
+    let text = |h: &mut H<'_>| {
+        h.invoke("editor.text", json!(null))
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(text(&mut h).contains("echo shared"));
+    // Unmodified: the editor follows the write.
+    h.invoke("run.configurations.edit", json!({"name": "shared"}));
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": "echo first"}),
+    );
+    h.invoke("run.configurations.dialog.ok", json!(null));
+    h.wait("the editor follows", |_| {
+        std::fs::read_to_string(&file).is_ok_and(|t| t.contains("echo first"))
+    });
+    let state = h.invoke("workbench.state", json!(null));
+    assert!(state["dialog"].is_null(), "{:#}", state["dialog"]);
+    assert!(text(&mut h).contains("echo first"), "{}", text(&mut h));
+    // With changes of the person's: kept, no conflict.
+    h.invoke("editor.type", json!({"text": "# mine\n"}));
+    h.invoke("run.configurations.edit", json!({"name": "shared"}));
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": "echo second"}),
+    );
+    h.invoke("run.configurations.dialog.ok", json!(null));
+    h.wait("the second write", |_| {
+        std::fs::read_to_string(&file).is_ok_and(|t| t.contains("echo second"))
+    });
+    for _ in 0..5 {
+        tick(h.cx);
+    }
+    let state = h.invoke("workbench.state", json!(null));
+    assert!(state["dialog"].is_null(), "{:#}", state["dialog"]);
+    assert!(text(&mut h).contains("# mine"));
+}
