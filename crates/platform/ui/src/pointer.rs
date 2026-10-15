@@ -30,6 +30,11 @@ pub fn enable_native() {
     NATIVE.with(|n| n.set(true));
 }
 
+/// Windows are native ones (not the test platform's).
+pub fn native() -> bool {
+    NATIVE.with(Cell::get)
+}
+
 /// Forgets the requests of the previous frame; called when the main
 /// window starts to draw a frame.
 pub fn begin_frame() {

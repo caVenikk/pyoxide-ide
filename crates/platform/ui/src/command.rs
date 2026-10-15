@@ -114,6 +114,24 @@ pub fn invoke(
     let action = cx
         .build_action(id, Some(args))
         .map_err(|e| CommandError::invalid_args(format!("{id}: {e}")))?;
+    // A window with a dialog open takes no input: the command goes to the
+    // dialog (queries above still read the window's own state).
+    if let Some(dialog) = crate::dialog_window::modal_of(window.window_handle(), cx) {
+        return dialog
+            .update(cx, |_, window, cx| {
+                if !window.is_action_available(action.as_ref(), cx)
+                    && !cx.is_action_available(action.as_ref())
+                {
+                    return Err(CommandError::new(
+                        "not_available",
+                        format!("{id} is not available in the open dialog"),
+                    ));
+                }
+                window.dispatch_action(action, cx);
+                Ok(Json::Null)
+            })
+            .map_err(|e| CommandError::new("not_available", format!("{id}: {e}")))?;
+    }
     // Window handlers on the focus path, then application-wide handlers
     // (`App::on_action`, such as quit).
     if !window.is_action_available(action.as_ref(), cx) && !cx.is_action_available(action.as_ref())

@@ -138,6 +138,13 @@ impl IconName {
     pub const SAVE: Self = Self("general/save");
     pub const NEW_FOLDER: Self = Self("actions/newFolder");
     pub const SORT: Self = Self("objectBrowser/sortAlphabetically");
+    // Its form: field buttons (Insert Macros, Browse, Expand), the gear of
+    // "Store as project file" and the help button.
+    pub const MACROS: Self = Self("inline/variables");
+    pub const BROWSE: Self = Self("inline/browse");
+    pub const EXPAND: Self = Self("inline/expand");
+    pub const INLINE_SETTINGS: Self = Self("inline/inlineSettings");
+    pub const HELP: Self = Self("general/help");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -177,7 +184,7 @@ platform_icons! {
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down", "general/expandAll", "general/filter",
-        "general/hide",
+        "general/help", "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
         "general/previewHorizontally", "general/print", "general/questionDialog", "general/refresh", "general/remove",
@@ -185,8 +192,9 @@ platform_icons! {
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/softWrap",
         "general/showAsTree", "general/up",
-        "inline/exactWords", "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
-        "inline/searchHistory",
+        "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
+        "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
+        "inline/searchHistory", "inline/variables",
         "json/object",
         "nodes/class", "nodes/constant", "nodes/enum", "nodes/errorMark", "nodes/excludeRoot",
         "nodes/field",

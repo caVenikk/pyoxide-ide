@@ -125,6 +125,21 @@ impl RunConfigs {
             .unwrap_or_default()
     }
 
+    /// How the dialog shows a field only the product can tell (see
+    /// [`RunProvider::describe_field`](super::RunProvider::describe_field)).
+    pub fn describe_field(
+        &self,
+        config: &RunConfiguration,
+        field: &str,
+        cx: &mut gpui::App,
+    ) -> Option<gpui::Task<Option<super::FieldText>>> {
+        let root = self.root.clone()?;
+        self.provider
+            .as_ref()?
+            .0
+            .describe_field(config, field, &root, cx)
+    }
+
     pub fn root(&self) -> Option<&Path> {
         self.root.as_deref()
     }

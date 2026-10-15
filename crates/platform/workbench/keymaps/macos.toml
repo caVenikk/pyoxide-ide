@@ -459,8 +459,9 @@ name = "RunConfigurationsDialog > Editor"
 "escape" = "run.configurations.dialog.cancel"
 "alt-m" = "run.configurations.dialog.modify-options"
 
-# Its tree: Up and Down move; Cmd+N adds, Delete removes and Cmd+D copies
-# a configuration (`CommonShortcuts.getInsert`, `getDelete`, `getDuplicate`).
+# Its tree: Up and Down move, Left and Right collapse and expand; Cmd+N
+# adds, Delete removes and Cmd+D copies a configuration
+# (`CommonShortcuts.getInsert`, `getDelete`, `getDuplicate`).
 [[context]]
 name = "RunConfigurationsTree"
 [context.bindings]
@@ -470,6 +471,8 @@ name = "RunConfigurationsTree"
 "delete" = "run.configurations.dialog.remove"
 "cmd-backspace" = "run.configurations.dialog.remove"
 "cmd-d" = "run.configurations.dialog.copy"
+"left" = "run.configurations.dialog.collapse"
+"right" = "run.configurations.dialog.expand"
 
 # The name field of New File, New Directory and Rename (#37).
 [[context]]

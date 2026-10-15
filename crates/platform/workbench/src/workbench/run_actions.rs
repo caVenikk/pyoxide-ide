@@ -20,7 +20,7 @@ use super::{ToolWindow, Workbench};
 use crate::dialog::{Dialog, DialogButton, DialogEvent};
 use crate::run::commands::*;
 use crate::run::dropdown;
-use crate::run::edit_dialog::{EditDialog, EditDialogEvent};
+use crate::run::edit_dialog::{self, EditDialog, EditDialogEvent};
 use crate::run::widget::{SelectedConfig, WidgetState};
 use crate::run::{LaunchKey, RunConfigs, RunRequest, RunToolWindowEvent};
 
@@ -34,9 +34,6 @@ pub(super) enum PendingDialog {
     FileSync(super::file_sync::SyncDialog),
     /// "Are you sure you want to delete …?": Yes deletes it.
     DeleteConfiguration(run_config::ConfigKey),
-    /// "Store as project file" with personal values: keep them personal
-    /// or store them too.
-    StoreValues,
 }
 
 /// What closing a tab with a running process does
@@ -738,71 +735,62 @@ impl Workbench {
                     return;
                 }
             };
-        if self.run_window.read(cx).edit_dialog().is_some() {
+        // An open dialog comes to the front.
+        if let Some(open) = self.run_window.read(cx).edit_dialog_window() {
+            if !crate::env::background() {
+                let _ = open.update(cx, |_, window, _| window.activate_window());
+            }
             return;
         }
         let configs = self.run_configs(cx);
-        let return_focus = window.focused(cx);
-        let dialog = cx.new(|cx| EditDialog::new(configs, select, window, cx));
+        let options = ui::dialog_window::DialogOptions {
+            title: edit_dialog::TITLE.into(),
+            size: gpui::size(px(edit_dialog::WIDTH), px(edit_dialog::HEIGHT)),
+            min_size: Some(gpui::size(
+                px(edit_dialog::MIN_WIDTH),
+                px(edit_dialog::MIN_HEIGHT),
+            )),
+            activate: !crate::env::background(),
+        };
+        let mut built = None;
+        let handle = ui::dialog_window::open(window, options, cx, |window, cx| {
+            let dialog = cx.new(|cx| EditDialog::new(configs, select, window, cx));
+            built = Some(dialog.clone());
+            dialog
+        });
+        let (Some(handle), Some(dialog)) = (handle, built) else {
+            self.message = Some("The Run/Debug Configurations window could not open".into());
+            cx.notify();
+            return;
+        };
         let subscription =
             cx.subscribe_in(&dialog, window, |this, _, event, window, cx| match event {
-                EditDialogEvent::Closed => this.close_edit_dialog(window, cx),
-                EditDialogEvent::AskStoreValues(names) => this.ask_store_values(names, window, cx),
+                EditDialogEvent::Closed => this.close_edit_dialog(cx),
+                EditDialogEvent::Run(key) => {
+                    let action = LaunchConfiguration {
+                        name: Some(key.name.clone()),
+                        r#type: Some(key.type_id.clone()),
+                    };
+                    this.close_edit_dialog(cx);
+                    window.dispatch_action(Box::new(action), cx);
+                }
             });
         self.run_window.update(cx, |w, cx| {
-            w.set_edit_dialog(Some((dialog, return_focus, subscription)), cx)
+            w.set_edit_dialog(Some((dialog, handle.into(), subscription)), cx)
         });
         cx.notify();
     }
 
-    fn close_edit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self
+    /// Closes the dialog's window; the element that had the focus gets it
+    /// back.
+    fn close_edit_dialog(&mut self, cx: &mut Context<Self>) {
+        let window = self
             .run_window
             .update(cx, |w, cx| w.set_edit_dialog(None, cx));
-        match focus {
-            Some(focus) => window.focus(&focus),
-            None => window.focus(&self.focus),
+        if let Some(window) = window {
+            ui::dialog_window::close(window, cx);
         }
         cx.notify();
-    }
-
-    /// "Store as project file" for a configuration with personal values:
-    /// the values stay personal unless the person chooses otherwise.
-    fn ask_store_values(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
-        let list = names.join(", ");
-        let dialog = cx.new(|cx| {
-            Dialog::new(
-                "Store as Project File",
-                format!(
-                    "These variables have personal values: {list}.\nThe project file lists their names; their values stay on this machine unless they are stored too."
-                ),
-                vec![
-                    DialogButton {
-                        id: "cancel",
-                        label: "Cancel".into(),
-                    },
-                    DialogButton {
-                        id: "store-values",
-                        label: "Store Values Too".into(),
-                    },
-                    DialogButton {
-                        id: "keep-personal",
-                        label: "Keep Values Personal".into(),
-                    },
-                ],
-                cx,
-            )
-            .with_icon(IconName::QUESTION_DIALOG)
-        });
-        self.open_dialog(dialog, PendingDialog::StoreValues, window, cx);
-    }
-
-    /// The open Run/Debug Configurations dialog, drawn over the window.
-    pub(super) fn render_run_dialog(&self, cx: &App) -> Option<AnyElement> {
-        self.run_window
-            .read(cx)
-            .edit_dialog()
-            .map(|d| gpui::IntoElement::into_any_element(d.clone()))
     }
 
     pub(super) fn run_import_reference(
@@ -1040,12 +1028,6 @@ impl Workbench {
                     self.run_settings.confirm_delete = false;
                 }
                 self.run_configs(cx).update(cx, |c, cx| c.delete(&key, cx));
-            }
-            (PendingDialog::StoreValues, Some(choice @ ("store-values" | "keep-personal"))) => {
-                if let Some(dialog) = self.run_window.read(cx).edit_dialog().cloned() {
-                    let share = choice == "store-values";
-                    dialog.update(cx, |d, cx| d.store_as_project_file(share, window, cx));
-                }
             }
             (PendingDialog::CloseRunning(tab), Some(choice @ ("terminate" | "disconnect"))) => {
                 let terminate = choice == "terminate";

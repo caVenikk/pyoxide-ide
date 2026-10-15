@@ -26,8 +26,14 @@ pub use highlight::{Highlighter, InlineStyle, Job, JobResult, Span, SyntaxHighli
 /// Height of a one-line field in the UI font ([`Editor::set_ui_font`]),
 /// for laying out its container.
 pub fn field_line_height(window: &gpui::Window, cx: &gpui::App) -> gpui::Pixels {
+    field_line_height_for(true, window, cx)
+}
+
+/// The line height of a single-line field in the UI font, or in the
+/// editor font (`set_ui_font(false)`).
+pub fn field_line_height_for(ui_font: bool, window: &gpui::Window, cx: &gpui::App) -> gpui::Pixels {
     use ui::theme::ThemeExt as _;
-    element::metrics(cx.theme(), window, true).line_height
+    element::metrics(cx.theme(), window, ui_font).line_height
 }
 
 /// Registers the editor and find bar commands with the command index.

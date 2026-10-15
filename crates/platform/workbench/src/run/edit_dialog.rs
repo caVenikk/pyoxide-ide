@@ -1,33 +1,38 @@
 //! The Run/Debug Configurations dialog (`EditConfigurationsDialog`,
-//! `RunConfigurable`): the configurations as a tree (type, folder,
-//! configuration) in the list order, a toolbar (Add New Configuration,
-//! Remove Configuration, Copy Configuration, Save Configuration, Create
-//! New Folder, Sort Configurations), the selected configuration's name,
-//! "Store as project file", its type's form with "Modify options", and
-//! Cancel, Apply and OK. It edits a copy of the configurations; Apply and
-//! OK hand the copy back. A configuration of a type Pyoxide does not
-//! support is shown read-only.
+//! `RunConfigurable`), a window of its own (`ui::dialog_window`): the
+//! configurations as a tree (type, folder, configuration) in the list
+//! order, a toolbar (Add New Configuration, Remove Configuration, Copy
+//! Configuration, Save Configuration, Create New Folder, Sort
+//! Configurations), the selected configuration's name, "Store as project
+//! file", its type's form with "Modify options" as the reference's
+//! fragmented editor draws it (the head fields without labels, the
+//! labelled rows, the options that are on as tags), and Run, Cancel, Apply
+//! and OK. It edits a copy of the configurations; Apply and OK hand the
+//! copy back. A configuration of a type Pyoxide does not support is shown
+//! read-only.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use editor::Editor;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, IntoElement, Pixels, Point, Render, SharedString,
-    Subscription, Window, canvas, div, prelude::*, px,
+    FocusHandle, Focusable, FontWeight, IntoElement, ModifiersChangedEvent, Pixels, Point, Render,
+    SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use run_config::form::{self, Field, FieldKind};
 use run_config::{ConfigKey, RunConfiguration, RunConfigurations, Storage, TypeEditor, Types};
 use serde_json::{Value, json};
 use themes::{Metric, UiRole};
-use ui::components::{checkbox, input_frame, popup_shadow};
+use ui::components::{checkbox, input_frame};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
+use super::FieldText;
 use super::configurations::RunConfigs;
 use super::widget::TEMPORARY_ICON_ALPHA;
+use crate::dialog::{Dialog, DialogButton, DialogEvent};
 
 ui::ui_commands! {
     DIALOG_COMMANDS, scope = "RunConfigurationsDialog";
@@ -81,6 +86,19 @@ ui::ui_commands! {
     /// Close without saving.
     DialogCancel => "run.configurations.dialog.cancel", "Cancel",
         "Closes the dialog without saving its changes.";
+    /// Apply, close and run.
+    DialogRun => "run.configurations.dialog.run", "Run",
+        "Saves the dialog's changes, closes it and runs the selected configuration.";
+    /// Expand the selected node.
+    DialogExpand => "run.configurations.dialog.expand", "Expand",
+        "Expands the selected type or folder of the dialog's tree, or selects its first child.";
+    /// Collapse the selected node.
+    DialogCollapse => "run.configurations.dialog.collapse", "Collapse",
+        "Collapses the selected type or folder of the dialog's tree, or selects its parent.";
+    /// Choose a file for a path field.
+    DialogBrowse { field: String } => "run.configurations.dialog.browse", "Browse",
+        "Chooses a file or folder for a path field of the selected configuration.",
+        r#"{"field": "script"}"#;
 }
 
 /// Key contexts of the dialog and its tree.
@@ -93,16 +111,36 @@ const STORE: &str = "store-as-project-file";
 const SHARED_ENV: &str = "shared-env";
 const FOLDER_NAME: &str = "folder-name";
 
-/// Size of the dialog and of its parts.
-const WIDTH: f32 = 880.0;
-const HEIGHT: f32 = 580.0;
-const TREE_WIDTH: f32 = 260.0;
-const LABEL_WIDTH: f32 = 170.0;
+/// The window's title, its content size and the smallest size it can be
+/// resized to.
+pub const TITLE: &str = "Run/Debug Configurations";
+pub const WIDTH: f32 = 800.0;
+pub const HEIGHT: f32 = 652.0;
+pub const MIN_WIDTH: f32 = 640.0;
+pub const MIN_HEIGHT: f32 = 420.0;
+/// The tree: its width, rows, the margin of the selection and the indent
+/// of a level (`Tree.leftChildIndent` + `Tree.rightChildIndent`).
+const TREE_WIDTH: f32 = 214.0;
 const ROW: f32 = 24.0;
-const INDENT: f32 = 18.0;
+const TREE_MARGIN: f32 = 12.0;
+const INDENT: f32 = 19.0;
+/// The form: its insets, the label column of its rows, field height and
+/// the space between fields.
+const FORM_LEFT: f32 = 17.0;
+const FORM_RIGHT: f32 = 18.0;
+const FORM_TOP: f32 = 18.0;
+const NAME_LABEL: f32 = 59.0;
+const NAME_FIELD: f32 = 280.0;
+const LABEL_WIDTH: f32 = 153.0;
+const FIELD: f32 = 28.0;
+const FIELD_GAP: f32 = 12.0;
+const CHOICE_WIDTH: f32 = 87.0;
+/// The buttons under the form.
+const BUTTON: f32 = 71.0;
+const BUTTON_HEIGHT: f32 = 27.0;
 
 /// A node of the tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Node {
     Type(String),
     Folder(String, String),
@@ -112,12 +150,11 @@ pub enum Node {
 /// What the dialog asks of the workbench.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditDialogEvent {
-    /// The dialog closed.
+    /// The dialog is done (OK, Cancel, its window's close button).
     Closed,
-    /// "Store as project file" was turned on for a configuration with
-    /// personal values: these variables keep their values personal unless
-    /// the person chooses otherwise (`store_as_project_file`).
-    AskStoreValues(Vec<String>),
+    /// Run was chosen: the changes are applied; the dialog closes and the
+    /// configuration runs.
+    Run(ConfigKey),
 }
 
 /// A field of the form and its text field.
@@ -151,10 +188,23 @@ pub struct EditDialog {
     error: Option<String>,
     modified: bool,
     menu: Option<OpenMenu>,
-    /// Where the Add and Modify options popups open.
+    /// Where the Add, Modify options and Run popups open.
     add_anchor: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     options_anchor: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    run_anchor: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     choice_anchor: std::rc::Rc<std::cell::RefCell<HashMap<String, Bounds<Pixels>>>>,
+    /// A question of the dialog ("Store as project file" with personal
+    /// values) and its subscription.
+    prompt: Option<(Entity<Dialog>, Subscription)>,
+    /// What the product tells about fields of the selected configuration
+    /// (its interpreter), by field id, and the lookup.
+    described: HashMap<String, FieldText>,
+    describable: HashSet<String>,
+    describing: Option<Task<()>>,
+    /// Types and folders whose children are hidden.
+    collapsed: HashSet<Node>,
+    /// Alt is held: the head fields show their labels.
+    hints: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -204,9 +254,24 @@ impl EditDialog {
             menu: None,
             add_anchor: Default::default(),
             options_anchor: Default::default(),
+            run_anchor: Default::default(),
             choice_anchor: Default::default(),
+            prompt: None,
+            described: HashMap::new(),
+            describable: HashSet::new(),
+            describing: None,
+            collapsed: HashSet::new(),
+            hints: false,
             _subscriptions: Vec::new(),
         };
+        // The window's close button cancels; the workbench then closes it.
+        let this = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |_, cx| cx.emit(EditDialogEvent::Closed));
+            }
+            false
+        });
         let first = select
             .or_else(|| dialog.list.selected.clone())
             .filter(|k| dialog.list.contains(k))
@@ -245,6 +310,76 @@ impl EditDialog {
     }
 
     // ---- the tree ------------------------------------------------------------
+
+    /// The nodes shown: [`EditDialog::nodes`] without the children of
+    /// collapsed types and folders.
+    fn visible_nodes(&self) -> Vec<(Node, usize)> {
+        let mut hidden_below: Option<usize> = None;
+        self.nodes()
+            .into_iter()
+            .filter(|(node, depth)| {
+                if let Some(d) = hidden_below {
+                    if *depth > d {
+                        return false;
+                    }
+                    hidden_below = None;
+                }
+                if self.collapsed.contains(node) {
+                    hidden_below = Some(*depth);
+                }
+                true
+            })
+            .collect()
+    }
+
+    /// A type or folder node (it has children).
+    fn is_parent(node: &Node) -> bool {
+        matches!(node, Node::Type(_) | Node::Folder(..))
+    }
+
+    /// Expands a collapsed node, or selects the first child of an expanded
+    /// one (`TreeUtil.expandOrSelectFirstChild`, Right).
+    fn expand(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.selected.clone() else {
+            return;
+        };
+        if !Self::is_parent(&node) {
+            return;
+        }
+        if self.collapsed.remove(&node) {
+            cx.notify();
+        } else {
+            self.step(1, window, cx);
+        }
+    }
+
+    /// Collapses an expanded node, or selects the parent (Left).
+    fn collapse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(node) = self.selected.clone() else {
+            return;
+        };
+        if Self::is_parent(&node) && !self.collapsed.contains(&node) {
+            self.collapsed.insert(node);
+            cx.notify();
+            return;
+        }
+        let nodes = self.visible_nodes();
+        let Some(at) = nodes.iter().position(|(n, _)| *n == node) else {
+            return;
+        };
+        let depth = nodes[at].1;
+        if let Some((parent, _)) = nodes[..at].iter().rev().find(|(_, d)| *d < depth) {
+            self.select_node(Some(parent.clone()), window, cx);
+        }
+    }
+
+    /// The chevron of a type or folder: expands or collapses it.
+    fn toggle_node(&mut self, node: Node, cx: &mut Context<Self>) {
+        if !self.collapsed.remove(&node) {
+            self.collapsed.insert(node);
+        }
+        cx.notify();
+    }
 
     /// The nodes in order with their depth: types in list order, their
     /// folders (in the order they first appear) with their configurations,
@@ -326,7 +461,7 @@ impl EditDialog {
     }
 
     fn step(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
-        let nodes = self.nodes();
+        let nodes = self.visible_nodes();
         if nodes.is_empty() {
             return;
         }
@@ -346,6 +481,7 @@ impl EditDialog {
     fn text_field(
         text: &str,
         placeholder: Option<&str>,
+        ui_font: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<Editor> {
@@ -353,7 +489,7 @@ impl EditDialog {
         cx.new(|cx| {
             let mut e = Editor::new(text::Buffer::new(text), window, cx);
             e.set_single_line(true);
-            e.set_ui_font(true);
+            e.set_ui_font(ui_font);
             e.set_transparent(true);
             e.set_placeholder(placeholder);
             e.set_config(editor::EditorConfig {
@@ -395,7 +531,7 @@ impl EditDialog {
                             .collect();
                         fields.push(Field::new(
                             SHARED_ENV,
-                            "Variables with shared values:",
+                            "Shared variables:",
                             FieldKind::Text,
                             names.join(";"),
                         ));
@@ -418,6 +554,7 @@ impl EditDialog {
                 FieldKind::Text | FieldKind::Path | FieldKind::Env => Some(Self::text_field(
                     &field.value,
                     field.placeholder.as_deref(),
+                    Self::ui_font(&field),
                     window,
                     cx,
                 )),
@@ -425,6 +562,52 @@ impl EditDialog {
             };
             self.fields.push(FieldView { field, editor });
         }
+        self.describe(cx);
+    }
+
+    /// Text fields in the editor's font: parameters and options typed as a
+    /// command line, environment variables (`RawCommandLineEditor`,
+    /// `EnvironmentVariablesTextFieldWithBrowseButton`).
+    fn ui_font(field: &Field) -> bool {
+        !(field.kind == FieldKind::Env || field.head && field.kind == FieldKind::Text)
+    }
+
+    /// Asks the product about the selected configuration's fields it can
+    /// tell more of (its interpreter).
+    fn describe(&mut self, cx: &mut Context<Self>) {
+        self.described.clear();
+        self.describable.clear();
+        self.describing = None;
+        let Some(config) = self.selected_config().cloned() else {
+            return;
+        };
+        let ids: Vec<String> = self.fields.iter().map(|f| f.field.id.clone()).collect();
+        let configs = self.configs.clone();
+        let tasks: Vec<(String, Task<Option<FieldText>>)> = ids
+            .into_iter()
+            .filter_map(|id| {
+                let task = configs.update(cx, |c, cx| c.describe_field(&config, &id, cx))?;
+                Some((id, task))
+            })
+            .collect();
+        if tasks.is_empty() {
+            return;
+        }
+        self.describable = tasks.iter().map(|(id, _)| id.clone()).collect();
+        let key = config.key();
+        self.describing = Some(cx.spawn(async move |this, cx| {
+            for (id, task) in tasks {
+                let Some(text) = task.await else {
+                    continue;
+                };
+                let _ = this.update(cx, |this, cx| {
+                    if this.selected == Some(Node::Config(key.clone())) {
+                        this.described.insert(id, text);
+                        cx.notify();
+                    }
+                });
+            }
+        }));
     }
 
     /// Keeps what was typed into the fields in the configurations.
@@ -533,7 +716,7 @@ impl EditDialog {
 
     /// "Store as project file" on or off. Turning it on for a
     /// configuration with personal values asks first.
-    fn set_store(&mut self, on: bool, cx: &mut Context<Self>) {
+    fn set_store(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(config) = self.selected_config() else {
             return;
         };
@@ -548,14 +731,56 @@ impl EditDialog {
                 .map(|v| v.name.clone())
                 .collect();
             if !personal.is_empty() {
-                cx.emit(EditDialogEvent::AskStoreValues(personal));
+                self.ask_store_values(&personal, window, cx);
                 return;
             }
         }
         self.move_storage(on, false, cx);
     }
 
-    /// The answer to [`EditDialogEvent::AskStoreValues`]: the
+    /// "Store as project file" for a configuration with personal values:
+    /// the values stay personal unless the person chooses otherwise.
+    fn ask_store_values(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        let list = names.join(", ");
+        let dialog = cx.new(|cx| {
+            Dialog::new(
+                "Store as Project File",
+                format!(
+                    "These variables have personal values: {list}.\nThe project file lists their names; their values stay on this machine unless they are stored too."
+                ),
+                vec![
+                    DialogButton {
+                        id: "cancel",
+                        label: "Cancel".into(),
+                    },
+                    DialogButton {
+                        id: "store-values",
+                        label: "Store Values Too".into(),
+                    },
+                    DialogButton {
+                        id: "keep-personal",
+                        label: "Keep Values Personal".into(),
+                    },
+                ],
+                cx,
+            )
+            .with_icon(IconName::QUESTION_DIALOG)
+        });
+        let subscription = cx.subscribe_in(&dialog, window, |this, _, event, window, cx| {
+            let DialogEvent::Closed { button, .. } = event;
+            this.prompt = None;
+            window.focus(&this.tree_focus);
+            if let Some(choice @ ("store-values" | "keep-personal")) = button {
+                this.store_as_project_file(*choice == "store-values", window, cx);
+            }
+            cx.notify();
+        });
+        window.focus(&dialog.focus_handle(cx));
+        self.prompt = Some((dialog, subscription));
+        cx.notify();
+    }
+
+    /// The answer to the question of [`EditDialog::ask_store_values`]: the
     /// configuration becomes shared; `share_values` stores the personal
     /// values in the project file too.
     pub fn store_as_project_file(
@@ -794,7 +1019,7 @@ impl EditDialog {
     fn on_set(&mut self, action: &DialogSet, window: &mut Window, cx: &mut Context<Self>) {
         self.commit(cx);
         if action.field == STORE {
-            self.set_store(action.value == "true", cx);
+            self.set_store(action.value == "true", window, cx);
         } else {
             self.set_value(&action.field, &action.value, cx);
         }
@@ -842,7 +1067,16 @@ impl EditDialog {
         let shown = self.shown.get(&config.key()).cloned().unwrap_or_default();
         let mut items: Vec<MenuItem> = Vec::new();
         let mut group = None;
-        for option in editor.options(&config, &shown) {
+        // A group's rows together, in the order the groups first come.
+        let mut options = editor.options(&config, &shown);
+        let mut groups: Vec<String> = Vec::new();
+        for o in &options {
+            if !groups.contains(&o.group) {
+                groups.push(o.group.clone());
+            }
+        }
+        options.sort_by_key(|o| groups.iter().position(|g| *g == o.group));
+        for option in options {
             if group.as_ref() != Some(&option.group) {
                 if option.group.is_empty() {
                     items.push(MenuItem::separator());
@@ -954,6 +1188,71 @@ impl EditDialog {
         cx.emit(EditDialogEvent::Closed);
     }
 
+    fn on_run(&mut self, _: &DialogRun, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self
+            .selected_config()
+            .filter(|c| !c.is_unsupported())
+            .map(RunConfiguration::key)
+        else {
+            return;
+        };
+        self.apply(cx);
+        cx.emit(EditDialogEvent::Run(key));
+    }
+
+    fn on_expand(&mut self, _: &DialogExpand, window: &mut Window, cx: &mut Context<Self>) {
+        self.expand(window, cx);
+    }
+
+    fn on_collapse(&mut self, _: &DialogCollapse, window: &mut Window, cx: &mut Context<Self>) {
+        self.collapse(window, cx);
+    }
+
+    /// The Browse button of a path field: a file (a folder for a working
+    /// directory) chosen in the system's dialog.
+    fn on_browse(&mut self, action: &DialogBrowse, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit(cx);
+        let id = action.field.clone();
+        let directories = id.contains("directory");
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: !directories,
+            directories,
+            multiple: false,
+            prompt: None,
+        });
+        let root = self.configs.read(cx).root().map(|r| r.to_owned());
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            // Inside the project the path is kept relative to it.
+            let value = root
+                .as_deref()
+                .and_then(|r| path.strip_prefix(r).ok())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.set_value(&id, &value, cx);
+                this.rebuild(window, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The Run split button's arrow: the executors.
+    fn open_executors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let items = vec![
+            MenuItem::action("Run", DialogRun).icon(IconName::RUN),
+            MenuItem::unavailable("Debug").icon(IconName::DEBUG),
+        ];
+        let at = self.run_anchor.get().bottom_left();
+        self.open_menu(items, None, at, window, cx);
+    }
+
     /// The dialog for `run.state`.
     pub fn state_json(&self, cx: &App) -> Value {
         let node_json = |n: &Node| match n {
@@ -962,11 +1261,14 @@ impl EditDialog {
             Node::Config(k) => json!({"kind": "configuration", "type": k.type_id, "name": k.name}),
         };
         let tree: Vec<Value> = self
-            .nodes()
+            .visible_nodes()
             .iter()
             .map(|(n, depth)| {
                 let mut v = node_json(n);
                 v["depth"] = json!(depth);
+                if Self::is_parent(n) {
+                    v["expanded"] = json!(!self.collapsed.contains(n));
+                }
                 v["text"] = json!(match n {
                     Node::Type(t) => self.type_name(t),
                     Node::Folder(_, f) => f.clone(),
@@ -987,6 +1289,8 @@ impl EditDialog {
                 json!({
                     "id": f.field.id,
                     "label": f.field.label,
+                    "head": f.field.head,
+                    "described": self.described.get(&f.field.id).map(|d| json!({"text": d.text, "detail": d.detail})),
                     "kind": match &f.field.kind {
                         FieldKind::Text => "text",
                         FieldKind::Path => "path",
@@ -1007,13 +1311,13 @@ impl EditDialog {
                     editor
                         .options(c, &shown)
                         .into_iter()
-                        .map(|o| json!({"group": o.group, "id": o.id, "label": o.label, "checked": o.checked}))
+                        .map(|o| json!({"group": o.group, "id": o.id, "label": o.label, "checked": o.checked, "tag": o.tag}))
                         .collect(),
                 )
             })
             .unwrap_or_default();
         json!({
-            "title": "Run/Debug Configurations",
+            "title": TITLE,
             "tree": tree,
             "selected": self.selected.as_ref().map(node_json),
             "store_as_project_file": config.map(|c| c.is_shared()),
@@ -1023,27 +1327,116 @@ impl EditDialog {
             "error": self.error,
             "modified": self.modified,
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
+            "prompt": self.prompt.as_ref().map(|(d, _)| d.read(cx).state_json()),
         })
     }
 }
 
-impl Render for EditDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let viewport = window.viewport_size();
-        let width = px(WIDTH).min(viewport.width - px(40.0));
-        let height = px(HEIGHT).min(viewport.height - px(40.0));
-        let text = theme.color(UiRole::Text);
-        let secondary = theme.color(UiRole::TextDisabled);
-        let line = theme.color(UiRole::PopupBorder);
-        let selection = theme.color(UiRole::Selection);
-        let accent = theme.color(UiRole::Accent);
-        let on_accent = theme.color(UiRole::OnAccent);
-        let border = theme.color(UiRole::BorderInput);
-        let hover = theme.color(UiRole::Hover);
-        let radius = theme.metric(Metric::CornerRadius);
+/// Colours of the dialog, read once per frame.
+#[derive(Clone, Copy)]
+struct Colors {
+    surface: gpui::Hsla,
+    raised: gpui::Hsla,
+    text: gpui::Hsla,
+    muted: gpui::Hsla,
+    disabled: gpui::Hsla,
+    border: gpui::Hsla,
+    input: gpui::Hsla,
+    divider: gpui::Hsla,
+    selection: gpui::Hsla,
+    accent: gpui::Hsla,
+    on_accent: gpui::Hsla,
+    link: gpui::Hsla,
+    hover: gpui::Hsla,
+    danger: gpui::Hsla,
+    radius: Pixels,
+    field_radius: Pixels,
+}
 
-        // The toolbar over the tree.
+impl Colors {
+    fn of(cx: &App) -> Self {
+        let theme = cx.theme();
+        let radius = theme.metric(Metric::CornerRadius);
+        Self {
+            surface: theme.color(UiRole::Surface),
+            raised: theme.color(UiRole::SurfaceRaised),
+            text: theme.color(UiRole::Text),
+            muted: theme.color(UiRole::TextMuted),
+            disabled: theme.color(UiRole::TextDisabled),
+            border: theme.color(UiRole::Border),
+            input: theme.color(UiRole::BorderInput),
+            divider: theme.color(UiRole::Divider),
+            selection: theme.color(UiRole::Selection),
+            accent: theme.color(UiRole::Accent),
+            on_accent: theme.color(UiRole::OnAccent),
+            link: theme.color(UiRole::TextLink),
+            hover: theme.color(UiRole::Hover),
+            danger: theme.color(UiRole::Danger),
+            radius,
+            field_radius: radius * 1.5,
+        }
+    }
+}
+
+/// A small button inside a field (Insert Macros, Browse, Expand); without
+/// an action it is drawn disabled.
+fn field_button(
+    id: SharedString,
+    icon: IconName,
+    tooltip: &'static str,
+    action: Option<Box<dyn gpui::Action>>,
+) -> AnyElement {
+    let enabled = action.is_some();
+    div()
+        .id(id)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(16.0))
+        .when(!enabled, |d| d.opacity(ui::components::DISABLED_ALPHA))
+        .child(Icon::new(icon))
+        .tooltip(ui::components::Tooltip::text(tooltip, None))
+        .when_some(action, |d, action| {
+            d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+        })
+        .into_any_element()
+}
+
+/// A combo box: filled, with the arrow at its end (`ComboBox` in the New
+/// UI's dialogs).
+fn combo(id: SharedString, c: Colors, content: Vec<AnyElement>) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .relative()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .h(px(FIELD))
+        .px(px(8.0))
+        .rounded(c.field_radius)
+        .border_1()
+        .border_color(c.input)
+        .bg(c.raised)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .children(content),
+        )
+        .child(div().flex_none().child(Icon::new(IconName::CHEVRON_DOWN)))
+}
+
+impl EditDialog {
+    /// The left side: the toolbar, the tree and the templates link.
+    fn render_tree(&self, c: Colors, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tool = |id: &'static str,
                     icon: IconName,
                     tooltip: &'static str,
@@ -1056,9 +1449,9 @@ impl Render for EditDialog {
                 .flex_none()
                 .items_center()
                 .justify_center()
-                .size(px(ROW))
-                .rounded(radius)
-                .when(enabled, |d| d.hover(move |s| s.bg(hover)))
+                .size(px(22.0))
+                .rounded(c.radius)
+                .when(enabled, |d| d.hover(move |s| s.bg(c.hover)))
                 .when(!enabled, |d| d.opacity(ui::components::DISABLED_ALPHA))
                 .child(Icon::new(icon))
                 .tooltip(ui::components::Tooltip::text(tooltip, None))
@@ -1068,15 +1461,21 @@ impl Render for EditDialog {
                     })
                 })
         };
-        let config = self.selected_config().cloned();
+        let config = self.selected_config();
         let is_config = config.is_some();
+        let temporary = config.is_some_and(|c| c.temporary);
+        // The toolbar (`RunConfigurable.createLeftPanel`); Save shows for a
+        // temporary configuration.
         let toolbar = div()
             .flex()
+            .flex_none()
             .flex_row()
             .items_center()
-            .gap(px(2.0))
-            .px(px(6.0))
-            .h(px(ROW + 8.0))
+            .gap(px(4.0))
+            .px(px(2.0))
+            .h(px(ROW))
+            .border_b_1()
+            .border_color(c.border)
             .child(
                 div()
                     .relative()
@@ -1105,13 +1504,15 @@ impl Render for EditDialog {
                 is_config,
                 Box::new(DialogCopy),
             ))
-            .child(tool(
-                "run-dialog-save",
-                IconName::SAVE,
-                "Save Configuration",
-                config.as_ref().is_some_and(|c| c.temporary),
-                Box::new(DialogSaveTemporary),
-            ))
+            .when(temporary, |d| {
+                d.child(tool(
+                    "run-dialog-save",
+                    IconName::SAVE,
+                    "Save Configuration",
+                    true,
+                    Box::new(DialogSaveTemporary),
+                ))
+            })
             .child(tool(
                 "run-dialog-folder",
                 IconName::NEW_FOLDER,
@@ -1127,74 +1528,106 @@ impl Render for EditDialog {
                 Box::new(DialogSort),
             ));
 
-        // The tree.
-        let nodes = self.nodes();
+        let nodes = self.visible_nodes();
         let tree_focused = self.tree_focus.is_focused(window);
-        let rows: Vec<AnyElement> = nodes
-            .iter()
-            .enumerate()
-            .map(|(i, (node, depth))| {
-                let selected = self.selected.as_ref() == Some(node);
-                let (icon, label, alpha, note) = match node {
-                    Node::Type(t) => {
-                        let icon = self
-                            .types
-                            .get(t)
-                            .map(|i| IconName(i.icon))
-                            .unwrap_or(IconName::FILE_UNKNOWN);
-                        (icon, self.type_name(t), 1.0, None)
-                    }
-                    Node::Folder(_, f) => (IconName::FOLDER, f.clone(), 1.0, None),
-                    Node::Config(k) => {
-                        let c = self.list.get(k);
-                        let icon = c
-                            .and_then(|c| self.types.icon_of(c))
-                            .map(IconName)
-                            .unwrap_or(IconName::FILE_UNKNOWN);
-                        let alpha = if c.is_some_and(|c| c.temporary) {
-                            TEMPORARY_ICON_ALPHA
-                        } else {
-                            1.0
-                        };
-                        let note = c
-                            .filter(|c| c.is_unsupported())
-                            .map(|_| super::dropdown::NOT_SUPPORTED);
-                        (icon, k.name.clone(), alpha, note)
-                    }
-                };
-                let node = node.clone();
-                let selector = format!("run-dialog-node:{label}");
-                div()
-                    .id(("run-dialog-node", i))
-                    .debug_selector(move || selector.clone())
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(4.0))
-                    .h(px(ROW))
-                    .pl(px(8.0 + INDENT * *depth as f32))
-                    .pr(px(8.0))
-                    .mx(px(4.0))
-                    .rounded(radius)
-                    .when(selected, |d| d.bg(selection))
-                    .when(selected && !tree_focused, |d| d.opacity(0.9))
-                    .child(
-                        div()
-                            .flex_none()
-                            .when(alpha < 1.0, |d| d.opacity(alpha))
-                            .child(Icon::new(icon)),
-                    )
-                    .child(div().whitespace_nowrap().text_color(text).child(label))
-                    .children(
-                        note.map(|n| div().whitespace_nowrap().text_color(secondary).child(n)),
-                    )
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        window.focus(&this.tree_focus);
-                        this.select_node(Some(node.clone()), window, cx);
-                    }))
-                    .into_any_element()
-            })
-            .collect();
+        let rows: Vec<AnyElement> =
+            nodes
+                .iter()
+                .enumerate()
+                .map(|(i, (node, depth))| {
+                    let selected = self.selected.as_ref() == Some(node);
+                    let (icon, label, alpha, note) = match node {
+                        Node::Type(t) => {
+                            let icon = self
+                                .types
+                                .get(t)
+                                .map(|i| IconName(i.icon))
+                                .unwrap_or(IconName::FILE_UNKNOWN);
+                            (icon, self.type_name(t), 1.0, None)
+                        }
+                        Node::Folder(_, f) => (IconName::FOLDER, f.clone(), 1.0, None),
+                        Node::Config(k) => {
+                            let c = self.list.get(k);
+                            let icon = c
+                                .and_then(|c| self.types.icon_of(c))
+                                .map(IconName)
+                                .unwrap_or(IconName::FILE_UNKNOWN);
+                            let alpha = if c.is_some_and(|c| c.temporary) {
+                                TEMPORARY_ICON_ALPHA
+                            } else {
+                                1.0
+                            };
+                            let note = c
+                                .filter(|c| c.is_unsupported())
+                                .map(|_| super::dropdown::NOT_SUPPORTED);
+                            (icon, k.name.clone(), alpha, note)
+                        }
+                    };
+                    let parent = Self::is_parent(node);
+                    let expanded = !self.collapsed.contains(node);
+                    let bold = matches!(node, Node::Type(_));
+                    let toggle = node.clone();
+                    let node = node.clone();
+                    let selector = format!("run-dialog-node:{label}");
+                    div()
+                        .id(("run-dialog-node", i))
+                        .debug_selector(move || selector.clone())
+                        .flex()
+                        .flex_none()
+                        .flex_row()
+                        .items_center()
+                        .h(px(ROW))
+                        .mx(px(TREE_MARGIN))
+                        .pl(px(INDENT * *depth as f32))
+                        .rounded(c.radius)
+                        .when(selected, |d| d.bg(c.selection))
+                        .when(selected && !tree_focused, |d| d.opacity(0.9))
+                        .child(
+                            div()
+                                .id(("run-dialog-chevron", i))
+                                .flex_none()
+                                .w(px(16.0))
+                                .when(parent, |d| {
+                                    d.child(Icon::new(if expanded {
+                                        IconName::CHEVRON_DOWN
+                                    } else {
+                                        IconName::CHEVRON_RIGHT
+                                    }))
+                                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                        cx.stop_propagation();
+                                        this.toggle_node(toggle.clone(), cx);
+                                    }))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .ml(px(5.0))
+                                .when(alpha < 1.0, |d| d.opacity(alpha))
+                                .child(Icon::new(icon)),
+                        )
+                        .child(
+                            div()
+                                .ml(px(3.0))
+                                .whitespace_nowrap()
+                                .text_color(c.text)
+                                .when(bold, |d| d.font_weight(FontWeight::SEMIBOLD))
+                                .child(label),
+                        )
+                        .children(note.map(|n| {
+                            div()
+                                .ml(px(6.0))
+                                .whitespace_nowrap()
+                                .text_color(c.muted)
+                                .child(n)
+                        }))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            window.focus(&this.tree_focus);
+                            this.select_node(Some(node.clone()), window, cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect();
         let tree = div()
             .id("run-dialog-tree")
             .debug_selector(|| "run-dialog-tree".into())
@@ -1203,8 +1636,9 @@ impl Render for EditDialog {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scroll()
-            .py(px(4.0))
+            .pt(px(5.0))
             .children(rows)
             .when(nodes.is_empty(), |d| {
                 d.child(
@@ -1213,12 +1647,12 @@ impl Render for EditDialog {
                         .flex_col()
                         .items_center()
                         .pt(px(40.0))
-                        .text_color(secondary)
+                        .text_color(c.muted)
                         .child("No run configurations added.")
                         .child(
                             div()
                                 .id("run-dialog-add-new")
-                                .text_color(accent)
+                                .text_color(c.link)
                                 .child("Add new\u{2026}")
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(DialogAdd { r#type: None }), cx)
@@ -1226,211 +1660,497 @@ impl Render for EditDialog {
                         ),
                 )
             });
-        let left = div()
+        // Templates are not editable yet.
+        let templates = div()
+            .flex_none()
+            .pl(px(11.0))
+            .pt(px(8.0))
+            .pb(px(12.0))
+            .text_color(c.link)
+            .opacity(ui::components::DISABLED_ALPHA)
+            .whitespace_nowrap()
+            .child("Edit configuration templates\u{2026}");
+        div()
             .flex()
             .flex_col()
             .flex_none()
             .w(px(TREE_WIDTH))
             .h_full()
             .border_r_1()
-            .border_color(line)
+            .border_color(c.border)
             .child(toolbar)
-            .child(tree);
+            .child(tree)
+            .child(templates)
+            .into_any_element()
+    }
 
-        // The form.
-        let field_row = |label: Option<String>, input: AnyElement, note: Option<String>| {
+    /// A text field of the form with its buttons.
+    fn render_text_field(
+        &self,
+        f: &FieldView,
+        editor: &Entity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = f.field.id.clone();
+        let focused = editor.focus_handle(cx).is_focused(window);
+        let selector = format!("run-dialog-field:{id}");
+        let button_id = |name: &str| SharedString::from(format!("run-dialog-{name}-{id}"));
+        let buttons: Vec<AnyElement> = match f.field.kind {
+            FieldKind::Path => vec![
+                field_button(button_id("macros"), IconName::MACROS, "Insert Macros", None),
+                field_button(
+                    button_id("browse"),
+                    IconName::BROWSE,
+                    "Browse",
+                    Some(Box::new(DialogBrowse { field: id.clone() })),
+                ),
+            ],
+            FieldKind::Env => vec![field_button(
+                button_id("env"),
+                IconName::MACROS,
+                "Edit Environment Variables",
+                None,
+            )],
+            _ if f.field.head => vec![
+                field_button(button_id("macros"), IconName::MACROS, "Insert Macros", None),
+                field_button(button_id("expand"), IconName::EXPAND, "Expand", None),
+            ],
+            _ => Vec::new(),
+        };
+        input_frame(focused, false, cx)
+            .id(SharedString::from(format!("run-dialog-field-{id}")))
+            .debug_selector(move || selector.clone())
+            .key_context(KEY_CONTEXT)
+            .h(px(FIELD))
+            .pl(px(8.0))
+            .pr(px(7.0))
+            .gap(px(9.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h(editor::field_line_height_for(
+                        Self::ui_font(&f.field),
+                        window,
+                        cx,
+                    ))
+                    .overflow_hidden()
+                    .child(editor.clone()),
+            )
+            .children(buttons)
+            .into_any_element()
+    }
+
+    /// A choice field: a combo box that opens its values.
+    fn render_choice(&self, f: &FieldView, c: Colors, cx: &mut Context<Self>) -> AnyElement {
+        let FieldKind::Choice(choices) = &f.field.kind else {
+            return div().into_any_element();
+        };
+        let id = f.field.id.clone();
+        let label = choices
+            .iter()
+            .find(|(v, _)| *v == f.field.value)
+            .map(|(_, l)| l.clone())
+            .unwrap_or_else(|| f.field.value.clone());
+        let anchors = self.choice_anchor.clone();
+        let anchor_id = id.clone();
+        let open_id = id.clone();
+        let selector = format!("run-dialog-choice:{id}");
+        combo(
+            SharedString::from(format!("run-dialog-choice-{id}")),
+            c,
+            vec![label.into_any_element()],
+        )
+        .debug_selector(move || selector.clone())
+        .child(
+            canvas(
+                move |bounds, _, _| {
+                    anchors.borrow_mut().insert(anchor_id.clone(), bounds);
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.open_choice(&open_id, window, cx)
+        }))
+        .into_any_element()
+    }
+
+    /// A field the product describes (the interpreter): a combo box with
+    /// the icon, the name and grey details.
+    fn render_described(&self, f: &FieldView, c: Colors) -> AnyElement {
+        let id = f.field.id.clone();
+        let selector = format!("run-dialog-field:{id}");
+        let content: Vec<AnyElement> = match self.described.get(&id) {
+            Some(d) => {
+                let mut out = Vec::new();
+                if let Some(icon) = d.icon {
+                    out.push(Icon::new(icon).into_any_element());
+                }
+                out.push(
+                    div()
+                        .text_color(c.text)
+                        .child(d.text.clone())
+                        .into_any_element(),
+                );
+                out.push(
+                    div()
+                        .text_color(c.muted)
+                        .child(d.detail.clone())
+                        .into_any_element(),
+                );
+                out
+            }
+            None => vec![
+                div()
+                    .text_color(c.muted)
+                    .child(if f.field.value.is_empty() {
+                        f.field.placeholder.clone().unwrap_or_default()
+                    } else {
+                        f.field.value.clone()
+                    })
+                    .into_any_element(),
+            ],
+        };
+        // TODO(#75): choosing the interpreter here; until interpreters are
+        // configured in the IDE the combo only shows the one that runs.
+        combo(
+            SharedString::from(format!("run-dialog-combo-{id}")),
+            c,
+            content,
+        )
+        .debug_selector(move || selector.clone())
+        .tooltip(ui::components::Tooltip::text(
+            "The interpreter is chosen in the interpreter widget",
+            None,
+        ))
+        .into_any_element()
+    }
+
+    /// The form of the selected configuration (`RunConfigurationFragmentedEditor`):
+    /// Name and "Store as project file", the Run header with Modify
+    /// options, the head fields, the labelled rows and the tags.
+    fn render_form(&self, c: Colors, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let config = self.selected_config().cloned();
+        let field_input =
+            |this: &Self, f: &FieldView, window: &mut Window, cx: &mut Context<Self>| {
+                if this.describable.contains(&f.field.id) {
+                    return this.render_described(f, c);
+                }
+                match (&f.field.kind, &f.editor) {
+                    (FieldKind::Choice(_), _) => this.render_choice(f, c, cx),
+                    (FieldKind::Flag, _) => {
+                        let on = f.field.value == "true";
+                        let field = f.field.id.clone();
+                        let id = f.field.id.clone();
+                        div()
+                            .id(SharedString::from(format!("run-dialog-flag-{id}")))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(checkbox(
+                                SharedString::from(format!("run-dialog-check-{id}")),
+                                on,
+                                cx,
+                            ))
+                            .child(f.field.label.clone())
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(DialogSet {
+                                        field: field.clone(),
+                                        value: (!on).to_string(),
+                                    }),
+                                    cx,
+                                )
+                            })
+                            .into_any_element()
+                    }
+                    (_, Some(editor)) => this.render_text_field(f, editor, window, cx),
+                    _ => div().into_any_element(),
+                }
+            };
+
+        let Some(Node::Config(_)) = &self.selected else {
+            // A folder: its name; a type or nothing: a hint.
+            return match &self.selected {
+                Some(Node::Folder(..)) => {
+                    let rows: Vec<AnyElement> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(LABEL_WIDTH))
+                                        .whitespace_nowrap()
+                                        .child(f.field.label.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .child(field_input(self, f, window, cx)),
+                                )
+                                .into_any_element()
+                        })
+                        .collect();
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(FIELD_GAP))
+                        .pt(px(FORM_TOP))
+                        .pl(px(FORM_LEFT))
+                        .pr(px(FORM_RIGHT))
+                        .children(rows)
+                        .child(
+                            div()
+                                .text_color(c.muted)
+                                .child("Note: empty folders won't be saved"),
+                        )
+                        .into_any_element()
+                }
+                _ => div()
+                    .pt(px(FORM_TOP))
+                    .pl(px(FORM_LEFT))
+                    .text_color(c.muted)
+                    .child(if self.list.is_empty() {
+                        "Add a configuration with the + button"
+                    } else {
+                        "Select a configuration"
+                    })
+                    .into_any_element(),
+            };
+        };
+        let Some(config) = config else {
+            return div().into_any_element();
+        };
+
+        // Name and "Store as project file".
+        let name = self.fields.iter().find(|f| f.field.id == NAME);
+        let shared = config.is_shared();
+        let store = div()
+            .id("run-dialog-store")
+            .debug_selector(|| "run-dialog-store".into())
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .gap(px(8.0))
+            .child(checkbox("run-dialog-store-check", shared, cx))
+            .child(div().whitespace_nowrap().child("Store as project file"))
+            .on_click(move |_, window, cx| {
+                window.dispatch_action(
+                    Box::new(DialogSet {
+                        field: STORE.to_owned(),
+                        value: (!shared).to_string(),
+                    }),
+                    cx,
+                )
+            });
+        let name_row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .h(px(FIELD))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(NAME_LABEL))
+                    .whitespace_nowrap()
+                    .child("Name:"),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(NAME_FIELD))
+                    .children(name.map(|f| field_input(self, f, window, cx))),
+            )
+            .child(div().flex_1())
+            .when(!config.is_unsupported(), |d| {
+                d.child(store).child(
+                    div()
+                        .flex_none()
+                        .ml(px(6.0))
+                        .opacity(ui::components::DISABLED_ALPHA)
+                        .child(Icon::new(IconName::INLINE_SETTINGS)),
+                )
+            });
+
+        let body: AnyElement = if config.is_unsupported() {
+            let type_name = self.types.name_of(&config).to_owned();
+            let details = self.configs.read(cx).unsupported_details(&config);
             div()
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
+                .gap(px(6.0))
+                .mt(px(20.0))
+                .child(format!("{type_name}: not supported yet"))
                 .child(
+                    div()
+                        .text_color(c.muted)
+                        .child("Kept as the reference IDE wrote it; it cannot run in Pyoxide yet."),
+                )
+                .children(details.into_iter().map(|(k, v)| {
                     div()
                         .flex()
                         .flex_row()
-                        .items_center()
-                        .gap(px(8.0))
                         .child(
                             div()
                                 .flex_none()
                                 .w(px(LABEL_WIDTH))
-                                .text_color(text)
-                                .whitespace_nowrap()
-                                .children(label),
+                                .text_color(c.muted)
+                                .child(k),
                         )
-                        .child(div().flex_1().min_w(px(0.0)).child(input)),
-                )
-                .children(note.map(|n| {
-                    div()
-                        .pl(px(LABEL_WIDTH + 8.0))
-                        .text_color(secondary)
-                        .child(n)
+                        .child(v)
                 }))
-        };
-        let mut form_rows: Vec<AnyElement> = Vec::new();
-        let mut name_row: Option<AnyElement> = None;
-        for f in &self.fields {
-            let id = f.field.id.clone();
-            let input: AnyElement = match (&f.field.kind, &f.editor) {
-                (FieldKind::Text | FieldKind::Path | FieldKind::Env, Some(editor)) => {
-                    let focused = editor.focus_handle(cx).is_focused(window);
-                    let selector = format!("run-dialog-field:{id}");
-                    input_frame(focused, false, cx)
-                        .id(SharedString::from(format!("run-dialog-field-{id}")))
-                        .debug_selector(move || selector.clone())
-                        .key_context(KEY_CONTEXT)
-                        .h(px(ROW + 4.0))
-                        .pl(px(6.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .h(editor::field_line_height(window, cx))
-                                .overflow_hidden()
-                                .child(editor.clone()),
-                        )
-                        .into_any_element()
-                }
-                (FieldKind::Choice(choices), _) => {
-                    let label = choices
-                        .iter()
-                        .find(|(v, _)| *v == f.field.value)
-                        .map(|(_, l)| l.clone())
-                        .unwrap_or_else(|| f.field.value.clone());
-                    let anchors = self.choice_anchor.clone();
-                    let anchor_id = id.clone();
-                    let open_id = id.clone();
-                    let selector = format!("run-dialog-choice:{id}");
+                .into_any_element()
+        } else {
+            // The Run header (`RunConfigurationFragmentedEditor`'s group
+            // with "Modify options" and its shortcut).
+            let header = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .h(px(24.0))
+                .mt(px(9.0))
+                .child(
                     div()
-                        .id(SharedString::from(format!("run-dialog-choice-{id}")))
-                        .debug_selector(move || selector.clone())
+                        .flex_1()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Run"),
+                )
+                .child(
+                    div()
+                        .id("run-dialog-modify-options")
+                        .debug_selector(|| "run-dialog-modify-options".into())
                         .relative()
                         .flex()
                         .flex_row()
                         .items_center()
                         .gap(px(4.0))
-                        .h(px(ROW + 4.0))
-                        .px(px(8.0))
-                        .w(px(140.0))
-                        .rounded(radius)
-                        .border_1()
-                        .border_color(border)
-                        .hover(move |s| s.bg(hover))
-                        .child(div().flex_1().whitespace_nowrap().child(label))
+                        .text_color(c.link)
+                        .child("Modify options")
                         .child(Icon::new(IconName::CHEVRON_DOWN))
-                        .child(
-                            canvas(
-                                move |bounds, _, _| {
-                                    anchors.borrow_mut().insert(anchor_id.clone(), bounds);
-                                },
-                                |_, _, _, _| {},
-                            )
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full(),
-                        )
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.open_choice(&open_id, window, cx)
-                        }))
-                        .into_any_element()
-                }
-                (FieldKind::Flag, _) => {
-                    let on = f.field.value == "true";
-                    let field = id.clone();
+                        .child(anchor(self.options_anchor.clone()))
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(DialogModifyOptions), cx)
+                        }),
+                )
+                .child(div().flex_none().ml(px(12.0)).text_color(c.muted).children(
+                    ui::keys::shortcut_in(&DialogModifyOptions, &self.focus, window),
+                ));
+            // The head: the module, then the head fields (a choice and the
+            // field after it share a line).
+            let head: Vec<&FieldView> = self
+                .fields
+                .iter()
+                .filter(|f| f.field.head && f.field.id != NAME)
+                .collect();
+            let small = cx.theme().ui_size() - px(2.0);
+            let hint = |label: &str| {
+                let label = label.trim_end_matches(':').to_owned();
+                div()
+                    .text_size(small)
+                    .text_color(c.muted)
+                    .whitespace_nowrap()
+                    .child(label)
+            };
+            let mut head_rows: Vec<AnyElement> = Vec::new();
+            if !head.is_empty() {
+                let module = self
+                    .configs
+                    .read(cx)
+                    .root()
+                    .and_then(|r| r.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                head_rows.push(
+                    combo(
+                        "run-dialog-module".into(),
+                        c,
+                        vec![
+                            Icon::new(IconName::MODULE).into_any_element(),
+                            div().child(module).into_any_element(),
+                        ],
+                    )
+                    .debug_selector(|| "run-dialog-module".into())
+                    .into_any_element(),
+                );
+            }
+            let mut i = 0;
+            while i < head.len() {
+                let f = head[i];
+                let paired = matches!(f.field.kind, FieldKind::Choice(_)) && i + 1 < head.len();
+                let row = if paired {
+                    let next = head[i + 1];
+                    i += 2;
                     div()
-                        .id(SharedString::from(format!("run-dialog-flag-{id}")))
                         .flex()
                         .flex_row()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(checkbox(
-                            SharedString::from(format!("run-dialog-check-{id}")),
-                            on,
-                            cx,
-                        ))
-                        .child(f.field.label.clone())
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(DialogSet {
-                                    field: field.clone(),
-                                    value: (!on).to_string(),
-                                }),
-                                cx,
-                            )
-                        })
-                        .into_any_element()
-                }
-                _ => div().into_any_element(),
-            };
-            let label = match f.field.kind {
-                FieldKind::Flag => None,
-                _ => Some(f.field.label.clone()),
-            };
-            let note = f.field.note.clone().or_else(|| {
-                (f.field.kind == FieldKind::Env)
-                    .then(|| "Separate variables with semicolon: VAR=value; VAR1=value1".to_owned())
-            });
-            let row = field_row(label, input, note).into_any_element();
-            if id == NAME {
-                name_row = Some(row);
-            } else {
-                form_rows.push(row);
-            }
-        }
-        let right: AnyElement = match (&self.selected, &config) {
-            (Some(Node::Config(_)), Some(c)) => {
-                let shared = c.is_shared();
-                let store = div()
-                    .id("run-dialog-store")
-                    .debug_selector(|| "run-dialog-store".into())
-                    .flex()
-                    .flex_row()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(checkbox("run-dialog-store-check", shared, cx))
-                    .child("Store as project file")
-                    .on_click(move |_, window, cx| {
-                        window.dispatch_action(
-                            Box::new(DialogSet {
-                                field: STORE.to_owned(),
-                                value: (!shared).to_string(),
-                            }),
-                            cx,
-                        )
-                    });
-                let header = div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(div().flex_1().children(name_row))
-                    .when(!c.is_unsupported(), |d| d.child(store));
-                let body: AnyElement = if c.is_unsupported() {
-                    let type_name = self.types.name_of(c).to_owned();
-                    let details = self.configs.read(cx).unsupported_details(c);
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.0))
-                        .child(format!("{type_name}: not supported yet"))
-                        .child(div().text_color(secondary).child(
-                            "Kept as the reference IDE wrote it; it cannot run in Pyoxide yet.",
-                        ))
-                        .children(details.into_iter().map(|(k, v)| {
+                        .items_end()
+                        .gap(px(7.0))
+                        .child(
                             div()
                                 .flex()
-                                .flex_row()
-                                .gap(px(8.0))
-                                .child(div().w(px(LABEL_WIDTH)).text_color(secondary).child(k))
-                                .child(v)
-                        }))
+                                .flex_col()
+                                .gap(px(2.0))
+                                .flex_none()
+                                .w(px(CHOICE_WIDTH))
+                                .when(self.hints, |d| d.child(hint(&f.field.label)))
+                                .child(field_input(self, f, window, cx)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .when(self.hints, |d| d.child(hint(&next.field.label)))
+                                .child(field_input(self, next, window, cx)),
+                        )
                         .into_any_element()
                 } else {
+                    i += 1;
                     div()
                         .flex()
                         .flex_col()
-                        .gap(px(8.0))
+                        .gap(px(2.0))
+                        .when(self.hints, |d| d.child(hint(&f.field.label)))
+                        .child(field_input(self, f, window, cx))
+                        .into_any_element()
+                };
+                head_rows.push(row);
+            }
+            // The labelled rows.
+            let rows: Vec<AnyElement> = self
+                .fields
+                .iter()
+                .filter(|f| !f.field.head && f.field.id != NAME)
+                .map(|f| {
+                    let note = f.field.note.clone().or_else(|| {
+                        (f.field.kind == FieldKind::Env).then(|| {
+                            "Separate variables with semicolon: VAR=value; VAR1=value1".to_owned()
+                        })
+                    });
+                    let label = match f.field.kind {
+                        FieldKind::Flag => None,
+                        _ => Some(f.field.label.clone()),
+                    };
+                    let choice = matches!(f.field.kind, FieldKind::Choice(_));
+                    div()
+                        .flex()
+                        .flex_col()
                         .child(
                             div()
                                 .flex()
@@ -1438,64 +2158,146 @@ impl Render for EditDialog {
                                 .items_center()
                                 .child(
                                     div()
-                                        .flex_1()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Run"),
+                                        .flex_none()
+                                        .w(px(LABEL_WIDTH))
+                                        .whitespace_nowrap()
+                                        .children(label),
                                 )
                                 .child(
                                     div()
-                                        .id("run-dialog-modify-options")
-                                        .debug_selector(|| "run-dialog-modify-options".into())
-                                        .relative()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .text_color(accent)
-                                        .child("Modify options")
-                                        .child(Icon::new(IconName::CHEVRON_DOWN))
-                                        .child(anchor(self.options_anchor.clone()))
-                                        .on_click(|_, window, cx| {
-                                            window
-                                                .dispatch_action(Box::new(DialogModifyOptions), cx)
-                                        }),
+                                        .when(choice, |d| d.flex_none().w(px(2.0 * CHOICE_WIDTH)))
+                                        .when(!choice, |d| d.flex_1())
+                                        .min_w(px(0.0))
+                                        .child(field_input(self, f, window, cx)),
                                 ),
                         )
-                        .children(form_rows)
+                        .children(note.map(|n| {
+                            div()
+                                .pl(px(LABEL_WIDTH))
+                                .pt(px(10.0))
+                                .text_color(c.muted)
+                                .child(n)
+                        }))
                         .into_any_element()
-                };
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(header)
-                    .child(body)
-                    .into_any_element()
-            }
-            (Some(Node::Folder(..)), _) => div()
+                })
+                .collect();
+            // The options that are on, as tags with a remove button; the
+            // Before Launch ones come first, as the reference's fragments.
+            let mut on: Vec<form::OptionItem> = self
+                .editor_of(&config.type_id)
+                .map(|editor| {
+                    let shown = self.shown.get(&config.key()).cloned().unwrap_or_default();
+                    editor.options(&config, &shown)
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|o| o.tag && o.checked)
+                .collect();
+            on.sort_by_key(|o| o.group != "Before Launch");
+            let tags: Vec<AnyElement> = on
+                .into_iter()
+                .enumerate()
+                .map(|(i, o)| {
+                    let selector = format!("run-dialog-tag:{}", o.label);
+                    let option = o.id.clone();
+                    div()
+                        .id(("run-dialog-tag", i))
+                        .debug_selector(move || selector.clone())
+                        .flex()
+                        .flex_none()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .h(px(FIELD))
+                        .pl(px(11.0))
+                        .pr(px(8.0))
+                        .rounded(px(6.0))
+                        .bg(c.raised)
+                        .child(div().whitespace_nowrap().child(o.label.clone()))
+                        .child(
+                            div()
+                                .id(("run-dialog-tag-remove", i))
+                                .flex_none()
+                                .child(Icon::new(IconName::CLOSE_SMALL))
+                                .tooltip(ui::components::Tooltip::text("Remove", None))
+                                .on_click(move |_, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(DialogToggleOption {
+                                            option: option.clone(),
+                                        }),
+                                        cx,
+                                    )
+                                }),
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            let has_head = !head_rows.is_empty();
+            div()
                 .flex()
                 .flex_col()
-                .gap(px(8.0))
-                .children(form_rows)
-                .children(name_row)
+                .child(div().mt(px(20.0)).h(px(1.0)).bg(c.divider))
+                .child(header)
+                .when(has_head, |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(FIELD_GAP))
+                            .mt(px(11.0))
+                            .children(head_rows),
+                    )
+                    .child(
+                        div()
+                            .mt(px(9.0))
+                            .text_color(c.muted)
+                            .child("Press \u{2325} for field hints"),
+                    )
+                })
                 .child(
                     div()
-                        .text_color(secondary)
-                        .child("Note: empty folders won't be saved"),
+                        .flex()
+                        .flex_col()
+                        .gap(px(FIELD_GAP))
+                        .mt(px(if has_head { 14.0 } else { 11.0 }))
+                        .children(rows),
                 )
-                .into_any_element(),
-            _ => div()
-                .text_color(secondary)
-                .child(if self.list.is_empty() {
-                    "Add a configuration with the + button"
-                } else {
-                    "Select a configuration"
+                .when(!tags.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap_x(px(8.0))
+                            .gap_y(px(FIELD_GAP))
+                            .mt(px(32.0))
+                            .children(tags),
+                    )
                 })
-                .into_any_element(),
+                .into_any_element()
         };
+        div()
+            .flex()
+            .flex_col()
+            .pt(px(FORM_TOP))
+            .pl(px(FORM_LEFT))
+            .pr(px(FORM_RIGHT))
+            .pb(px(16.0))
+            .child(name_row)
+            .child(body)
+            .into_any_element()
+    }
+
+    /// The buttons: help, the error, Run with its executors, Cancel,
+    /// Apply and OK.
+    fn render_footer(&self, c: Colors, cx: &mut Context<Self>) -> AnyElement {
+        let can_run = self
+            .selected_config()
+            .is_some_and(|config| !config.is_unsupported());
         let button = |id: &'static str,
                       label: &'static str,
                       default: bool,
+                      enabled: bool,
                       action: Box<dyn gpui::Action>| {
             div()
                 .id(id)
@@ -1504,52 +2306,157 @@ impl Render for EditDialog {
                 .flex_none()
                 .items_center()
                 .justify_center()
-                .h(px(28.0))
-                .min_w(px(72.0))
+                .h(px(BUTTON_HEIGHT))
+                .min_w(px(BUTTON))
                 .px(px(14.0))
-                .rounded(radius)
+                .rounded(c.field_radius)
                 .map(|d| {
                     if default {
-                        d.bg(accent).text_color(on_accent)
+                        d.bg(c.accent).text_color(c.on_accent)
                     } else {
                         d.border_1()
-                            .border_color(border)
-                            .hover(move |s| s.bg(hover))
+                            .border_color(c.input)
+                            .when(enabled, |d| d.hover(move |s| s.bg(c.hover)))
                     }
                 })
+                .when(!enabled, |d| d.text_color(c.disabled))
                 .child(label)
-                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+                .when(enabled, |d| {
+                    d.on_click(move |_, window, cx| {
+                        window.dispatch_action(action.boxed_clone(), cx)
+                    })
+                })
         };
-        let footer = div()
+        // The Run split button (`DialogWrapper` with the executors).
+        let run = div()
+            .id("run-dialog-run")
+            .debug_selector(|| "run-dialog-run".into())
+            .relative()
             .flex()
+            .flex_none()
             .flex_row()
             .items_center()
-            .gap(px(8.0))
-            .px(px(16.0))
-            .py(px(12.0))
+            .h(px(BUTTON_HEIGHT))
+            .rounded(c.field_radius)
+            .border_1()
+            .border_color(c.input)
+            .when(!can_run, |d| d.opacity(ui::components::DISABLED_ALPHA))
+            .child(
+                div()
+                    .id("run-dialog-run-main")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.0))
+                    .h_full()
+                    .px(px(14.0))
+                    .child(Icon::new(IconName::RUN))
+                    .child("Run")
+                    .when(can_run, |d| {
+                        d.on_click(|_, window, cx| window.dispatch_action(Box::new(DialogRun), cx))
+                    }),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h(px(BUTTON_HEIGHT - 10.0))
+                    .bg(c.input),
+            )
+            .child(
+                div()
+                    .id("run-dialog-run-more")
+                    .flex()
+                    .items_center()
+                    .h_full()
+                    .px(px(7.0))
+                    .child(Icon::new(IconName::CHEVRON_DOWN))
+                    .when(can_run, |d| {
+                        d.on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.open_executors(window, cx)
+                        }))
+                    }),
+            )
+            .child(anchor(self.run_anchor.clone()));
+        div()
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .h(px(BUTTON_HEIGHT + 25.0))
+            .pl(px(15.0))
+            .pr(px(15.0))
             .border_t_1()
-            .border_color(line)
+            .border_color(c.border)
+            .child(
+                div()
+                    .id("run-dialog-help")
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .size(px(22.0))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(c.input)
+                    .opacity(ui::components::DISABLED_ALPHA)
+                    .child(Icon::new(IconName::HELP))
+                    .tooltip(ui::components::Tooltip::text("Help", None)),
+            )
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
+                    .px(px(12.0))
                     .debug_selector(|| "run-dialog-error".into())
-                    .text_color(theme.color(UiRole::Danger))
+                    .text_color(c.danger)
+                    .whitespace_nowrap()
+                    .overflow_hidden()
                     .children(self.error.clone().map(|e| format!("Error: {e}"))),
             )
+            .child(run)
+            .child(div().w(px(19.0)))
             .child(button(
                 "run-dialog-cancel",
                 "Cancel",
                 false,
+                true,
                 Box::new(DialogCancel),
             ))
+            .child(div().w(px(13.0)))
             .child(button(
                 "run-dialog-apply",
                 "Apply",
                 false,
+                self.modified,
                 Box::new(DialogApply),
             ))
-            .child(button("run-dialog-ok", "OK", true, Box::new(DialogOk)));
-        let dialog = div()
+            .child(div().w(px(13.0)))
+            .child(button(
+                "run-dialog-ok",
+                "OK",
+                true,
+                true,
+                Box::new(DialogOk),
+            ))
+            .into_any_element()
+    }
+}
+
+impl Render for EditDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = Colors::of(cx);
+        let family = cx.theme().ui_family();
+        let size = cx.theme().ui_size();
+        let left = self.render_tree(c, window, cx);
+        let form = self.render_form(c, window, cx);
+        let footer = self.render_footer(c, cx);
+        let menu = self
+            .menu
+            .as_ref()
+            .map(|m| ui::menu::overlay(&m.menu, m.position, window));
+        let prompt = self.prompt.as_ref().map(|(d, _)| d.clone());
+        div()
             .id("run-dialog")
             .debug_selector(|| "run-dialog".into())
             .key_context(KEY_CONTEXT)
@@ -1569,26 +2476,24 @@ impl Render for EditDialog {
             .on_action(cx.listener(Self::on_apply))
             .on_action(cx.listener(Self::on_ok))
             .on_action(cx.listener(Self::on_cancel))
+            .on_action(cx.listener(Self::on_run))
+            .on_action(cx.listener(Self::on_expand))
+            .on_action(cx.listener(Self::on_collapse))
+            .on_action(cx.listener(Self::on_browse))
+            .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, _, cx| {
+                let alt = e.modifiers.alt;
+                if alt != this.hints {
+                    this.hints = alt;
+                    cx.notify();
+                }
+            }))
+            .size_full()
             .flex()
             .flex_col()
-            .w(width)
-            .h(height)
-            .rounded(px(10.0))
-            .border_1()
-            .border_color(line)
-            .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow(popup_shadow())
-            .text_color(text)
-            .child(
-                div()
-                    .flex()
-                    .justify_center()
-                    .py(px(10.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .border_b_1()
-                    .border_color(line)
-                    .child("Run/Debug Configurations"),
-            )
+            .bg(c.surface)
+            .text_color(c.text)
+            .font_family(family)
+            .text_size(size)
             .child(
                 div()
                     .flex()
@@ -1602,26 +2507,11 @@ impl Render for EditDialog {
                             .flex_1()
                             .min_w(px(0.0))
                             .overflow_y_scroll()
-                            .p(px(16.0))
-                            .child(right),
+                            .child(form),
                     ),
             )
-            .child(footer);
-        let menu = self
-            .menu
-            .as_ref()
-            .map(|m| ui::menu::overlay(&m.menu, m.position, window));
-        div()
-            .id("run-dialog-backdrop")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .occlude()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(dialog)
+            .child(footer)
             .children(menu)
+            .children(prompt)
     }
 }

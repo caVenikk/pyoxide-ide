@@ -44,6 +44,10 @@ pub struct SelectedInterpreter {
     /// The uv project the environment belongs to (`[project] name` of a
     /// project managed by uv), when it is one.
     pub uv_project: Option<String>,
+    /// The name, as the reference names the interpreter (`uv (demo)`).
+    pub name: String,
+    /// The flavour icon.
+    pub icon: ui::icons::IconName,
 }
 
 /// The interpreter of the project at `root`: the one chosen in the
@@ -351,6 +355,8 @@ impl FoundInterpreter {
             version: self.version.clone().unwrap_or_default(),
             label: self.short_name(),
             uv_project,
+            name: self.name.clone(),
+            icon: self.icon(),
         }
     }
 

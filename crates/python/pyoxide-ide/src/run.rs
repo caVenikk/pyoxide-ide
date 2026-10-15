@@ -12,7 +12,7 @@ use py_run::config::{LaunchContext, PythonEditor, PythonImporter, PythonOptions}
 use py_run::{PythonRun, UvRun};
 use run_config::{Importer, RunConfiguration, TypeEditor, TypeInfo, paths};
 use ui::icons::IconName;
-use workbench::{RunProvider, RunRequest, RunSpec};
+use workbench::{FieldText, RunProvider, RunRequest, RunSpec};
 
 use crate::interpreter::{self, ConfiguredInterpreter};
 
@@ -102,6 +102,37 @@ impl RunProvider for PythonRunProvider {
 
     fn unsupported_details(&self, config: &RunConfiguration) -> Vec<(String, String)> {
         py_run::config::unsupported_details(config)
+    }
+
+    /// The interpreter a Python configuration runs with, as the reference's
+    /// interpreter combo shows it: name, version, path.
+    fn describe_field(
+        &self,
+        config: &RunConfiguration,
+        field: &str,
+        root: &Path,
+        cx: &mut App,
+    ) -> Option<Task<Option<FieldText>>> {
+        if config.type_id != py_run::config::TYPE_ID || field != py_run::config::field::INTERPRETER
+        {
+            return None;
+        }
+        let options = PythonOptions::read(config);
+        let configured = (!options.use_project_interpreter).then(|| ConfiguredInterpreter {
+            name: options.interpreter_name.clone(),
+            path: paths::resolve(&options.interpreter, root),
+        });
+        let interpreter = interpreter::for_run(root, configured, cx);
+        Some(cx.background_spawn(async move {
+            let (selected, _) = interpreter.await;
+            selected.map(|s| FieldText {
+                icon: Some(s.icon),
+                text: s.name,
+                detail: format!("{} {}", s.version, s.python.display())
+                    .trim()
+                    .to_owned(),
+            })
+        }))
     }
 
     /// A Python configuration: its interpreter (the project's, or the one

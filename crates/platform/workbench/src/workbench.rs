@@ -2695,7 +2695,7 @@ impl Render for Workbench {
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
-            .children(self.render_run_dialog(cx))
+            .children(ui::dialog_window::blocker(window, cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))
             .children(self.panel.read(cx).overlays(window))
             .when(self.find_in_files.read(cx).is_open(), |d| {

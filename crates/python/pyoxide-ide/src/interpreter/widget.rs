@@ -143,7 +143,7 @@ impl FoundInterpreter {
     /// The flavour icon (`PythonSdkFlavor.getIcon`): uv's for uv
     /// (`UvSdkFlavor`), the virtualenv icon for other virtual environments
     /// (`VirtualEnvSdkFlavor`), the Python file icon for the others.
-    fn icon(&self) -> IconName {
+    pub(crate) fn icon(&self) -> IconName {
         match self.kind {
             _ if self.uv => UV_ICON,
             py_env::InterpreterKind::Venv => VENV_ICON,

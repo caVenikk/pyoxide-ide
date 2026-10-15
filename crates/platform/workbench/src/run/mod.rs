@@ -217,6 +217,20 @@ pub trait RunProvider: 'static {
         Vec::new()
     }
 
+    /// How the dialog shows a field whose value only the product can tell
+    /// (a configuration's interpreter: its name, version and path), looked
+    /// up off the UI thread; `None` for the other fields.
+    fn describe_field(
+        &self,
+        config: &RunConfiguration,
+        field: &str,
+        root: &Path,
+        cx: &mut App,
+    ) -> Option<Task<Option<FieldText>>> {
+        let _ = (config, field, root, cx);
+        None
+    }
+
     /// Prepares the run of a configuration of one of the product's types
     /// (`request.configuration`), off the UI thread.
     fn prepare_configuration(
@@ -227,6 +241,15 @@ pub trait RunProvider: 'static {
         let _ = (request, cx);
         Task::ready(Err("This run configuration cannot run".to_owned()))
     }
+}
+
+/// A field's value as the Run/Debug Configurations dialog shows it in a
+/// combo box: an icon, the text and grey details after it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldText {
+    pub icon: Option<IconName>,
+    pub text: String,
+    pub detail: String,
 }
 
 /// The product's [`RunProvider`] in a [`Product`](crate::Product).
