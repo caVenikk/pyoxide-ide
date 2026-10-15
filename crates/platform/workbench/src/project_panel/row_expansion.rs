@@ -10,18 +10,21 @@
 //!   `TreeExpandableItemsHandler` and `AbstractExpandableItemsHandler`
 //!   (IntelliJ Community, Apache-2.0) do: the part beyond the edge on the
 //!   row's background, with a 1 px border at the top, the bottom and the
-//!   rounded right end. It goes when the pointer leaves the rows, and shows
+//!   rounded right end. It follows the pointer and the selection 10 ms
+//!   later, stays while the pointer is on it (clicks on it are clicks on
+//!   the row), goes when the pointer leaves both the rows and it, and shows
 //!   only for a row the tree shows whole.
 //!
 //! A row that fits is drawn as before.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Point, SharedString, Styled as _, TextRun, Window, anchored,
-    deferred, div, point, px,
+    AnyElement, App, Bounds, Context, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, Point, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Task, TextRun, Window, anchored, deferred, div, point, px, size,
 };
 use project::{Node, NodeId};
 use themes::{Metric, UiRole};
@@ -35,6 +38,9 @@ pub(super) const WIDE_MARGIN: f32 = 1.0;
 const EXPANSION_PAD: f32 = 4.0;
 /// Gap between the root's name and its location.
 const LOCATION_GAP: f32 = 6.0;
+/// The rest of a row follows the pointer and the selection this much later
+/// (`AbstractExpandableItemsHandler`'s update alarm).
+pub(super) const EXPANSION_DELAY: Duration = Duration::from_millis(10);
 
 /// Which row shows its rest, and where the drawn rows' text ends.
 #[derive(Default)]
@@ -46,6 +52,10 @@ pub(super) struct RowExpansion {
     by_selection: bool,
     /// Where each drawn row's text ends, from the row's left edge.
     label_ends: RefCell<HashMap<NodeId, Pixels>>,
+    /// Where the rest of a row was drawn last (window coordinates).
+    hint: Cell<Option<Bounds<Pixels>>>,
+    /// The change of `key` waiting for [`EXPANSION_DELAY`].
+    pending: Option<Task<()>>,
 }
 
 impl RowExpansion {
@@ -53,16 +63,40 @@ impl RowExpansion {
         self.key = None;
         self.by_selection = false;
         self.label_ends.borrow_mut().clear();
+        self.hint.set(None);
+        self.pending = None;
     }
 
-    /// The selection moved to `id`.
-    pub(super) fn selected(&mut self, id: NodeId) {
-        self.key = Some(id);
-        self.by_selection = true;
+    fn hint_contains(&self, position: Point<Pixels>) -> bool {
+        self.hint.get().is_some_and(|b| b.contains(&position))
     }
 }
 
 impl ProjectPanel {
+    /// Shows the rest of `key` (or of nothing) after [`EXPANSION_DELAY`];
+    /// a change back to the current row cancels a waiting one.
+    fn expand_later(&mut self, key: Option<NodeId>, by_selection: bool, cx: &mut Context<Self>) {
+        if (key, by_selection) == (self.expansion.key, self.expansion.by_selection) {
+            self.expansion.pending = None;
+            return;
+        }
+        let timer = cx.background_executor().timer(EXPANSION_DELAY);
+        self.expansion.pending = Some(cx.spawn(async move |this, cx| {
+            timer.await;
+            let _ = this.update(cx, |this, cx| {
+                this.expansion.key = key;
+                this.expansion.by_selection = by_selection;
+                this.expansion.pending = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    /// The selection moved to `id`.
+    pub(super) fn selection_moved(&mut self, id: NodeId, cx: &mut Context<Self>) {
+        self.expand_later(Some(id), true, cx);
+    }
+
     /// Where the text of `node` ends, from the row's left edge, and
     /// remembers it for the row's expansion.
     pub(super) fn measure_label(
@@ -131,15 +165,17 @@ impl ProjectPanel {
     /// The pointer moved over the rows (window coordinates).
     pub(super) fn pointer_over_rows(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let id = self.row_at(position, cx);
-        if id != self.expansion.key || self.expansion.by_selection {
-            self.expansion.key = id;
-            self.expansion.by_selection = false;
-            cx.notify();
-        }
+        self.expand_later(id, false, cx);
     }
 
-    /// The pointer left the rows: the rest of a row goes.
-    pub(super) fn pointer_left_rows(&mut self, cx: &mut Context<Self>) {
+    /// The pointer left the rows or the rest of a row: the rest goes
+    /// unless the pointer is on the other one.
+    pub(super) fn pointer_left(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let position = window.mouse_position();
+        if self.rows_bounds.get().contains(&position) || self.expansion.hint_contains(position) {
+            return;
+        }
+        self.expansion.pending = None;
         if !self.expansion.by_selection && self.expansion.key.take().is_some() {
             cx.notify();
         }
@@ -186,9 +222,22 @@ impl ProjectPanel {
         &self,
         focused: bool,
         window: &Window,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        self.expansion.hint.set(None);
         let id = self.expanded_row(focused, cx)?;
+        let hint = div()
+            .id("tree-row-expansion")
+            .debug_selector(|| "tree-row-expansion".into())
+            // The editor below gets no pointer while the pointer is on it.
+            .occlude()
+            .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
+                if !hovered {
+                    this.pointer_left(window, cx);
+                }
+            }));
+        // Clicks on it are clicks on the row.
+        let hint = Self::row_clicks(hint, id, cx);
         let tree = self.tree.as_ref()?;
         let node = tree.node(id);
         let end = *self.expansion.label_ends.borrow().get(&id)?;
@@ -204,6 +253,9 @@ impl ProjectPanel {
         if width <= px(0.0) {
             return None;
         }
+        self.expansion
+            .hint
+            .set(Some(Bounds::new(origin, size(width, row_height))));
         let selected = self.selected == Some(id);
         // The row's background as the tree draws it.
         let background = match (selected, focused) {
@@ -217,9 +269,7 @@ impl ProjectPanel {
         Some(
             deferred(
                 anchored().position(origin).child(
-                    div()
-                        .debug_selector(|| "tree-row-expansion".into())
-                        .relative()
+                    hint.relative()
                         .w(width)
                         .h(row_height)
                         .overflow_hidden()

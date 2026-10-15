@@ -300,7 +300,7 @@ impl ProjectPanel {
 
     fn select(&mut self, id: NodeId, cx: &mut Context<Self>) {
         self.selected = Some(id);
-        self.expansion.selected(id);
+        self.selection_moved(id, cx);
         if let Some(row) = self.tree.as_ref().and_then(|t| t.row_of(id)) {
             self.scroll_to_row(row, cx);
         }
@@ -895,21 +895,28 @@ impl ProjectPanel {
                     .flex()
                     .items_center()
                     .child(label),
-            )
-            .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
-                window.focus(&this.focus);
-                this.selected = Some(id);
-                if e.click_count() >= 2 {
-                    this.activate(id, cx);
-                }
-                cx.notify();
-            }));
-        let row = self.drag_and_drop(row, id, icon, cx);
+            );
+        let row = Self::row_clicks(row, id, cx);
+        self.drag_and_drop(row, id, icon, cx).into_any_element()
+    }
+
+    /// A click selects the row (a double click opens it) and a right click
+    /// opens its context menu: on the row, and on its rest shown over the
+    /// tree's edge.
+    fn row_clicks<E: StatefulInteractiveElement>(el: E, id: NodeId, cx: &mut Context<Self>) -> E {
+        let el = el.on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+            window.focus(&this.focus);
+            this.selected = Some(id);
+            if e.click_count() >= 2 {
+                this.activate(id, cx);
+            }
+            cx.notify();
+        }));
         // The context menu opens on the right button: when it goes down on
         // macOS and Linux, when it comes up on Windows (the platforms'
         // popup triggers).
         #[cfg(not(windows))]
-        let row = row.on_mouse_down(
+        let el = el.on_mouse_down(
             MouseButton::Right,
             cx.listener(move |this, e: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();
@@ -917,14 +924,14 @@ impl ProjectPanel {
             }),
         );
         #[cfg(windows)]
-        let row = row.on_mouse_up(
+        let el = el.on_mouse_up(
             MouseButton::Right,
             cx.listener(move |this, e: &gpui::MouseUpEvent, window, cx| {
                 cx.stop_propagation();
                 this.context_click(id, e.position, window, cx);
             }),
         );
-        row.into_any_element()
+        el
     }
 }
 
@@ -1038,9 +1045,9 @@ impl Render for ProjectPanel {
                 .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
                     this.pointer_over_rows(e.position, cx);
                 }))
-                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
                     if !hovered {
-                        this.pointer_left_rows(cx);
+                        this.pointer_left(window, cx);
                     }
                 }))
                 .relative()

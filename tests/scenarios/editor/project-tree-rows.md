@@ -6,8 +6,9 @@
 2. Open a folder whose name and location together are wider than the
    project tool window (or narrow the tool window until the root row is
    cut). Select the root row, then a short row.
-3. Point at the root row; point at a short row; move the pointer out of
-   the tree.
+3. Point at the root row and move the pointer onto its rest over the
+   editor; click it, double-click it, right-click it. Point at a short
+   row; move the pointer out of the tree.
 4. Click a short row, press Up until the root row is selected, then click
    in the editor.
 
@@ -22,12 +23,15 @@
   right corners; the text is cut at the edge. A short row's selection
   keeps its inset and rounded corners on both sides. A root row that fits
   looks like any other row.
-- Step 3: right away, the rest of the root row shows over the tree's
+- Step 3: 10 ms later the rest of the root row shows over the tree's
   edge, over the editor: on the row's background (the selection colour
   when it is selected), a 1 px border at the top, the bottom and the
-  rounded right end, the text continuing where the tree cuts it. It shows
-  only for a row that is cut and fully in view, goes when the pointer is
-  on a short row, and goes when the pointer leaves the tree.
+  rounded right end, the text continuing where the tree cuts it. It stays
+  while the pointer is on it; a click there selects the root row, a
+  double click collapses or expands it, a right click opens its context
+  menu. It shows only for a row that is cut and fully in view, goes when
+  the pointer is on a short row, and goes when the pointer leaves both
+  the tree and the rest.
 - Step 4: selecting the cut root row with the keyboard shows its rest
   while the tree has the focus; it goes when the focus moves to the
   editor or the selection moves on.

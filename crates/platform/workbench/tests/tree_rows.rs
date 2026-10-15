@@ -1,14 +1,16 @@
 //! How the project tree draws its rows (tests/scenarios/editor/project-tree-rows.md):
 //! indent guides below open folders, and a row whose text is cut by the
 //! tool window's edge (its selection reaching the edge, the rest of it
-//! shown over the edge while the pointer is at it or the tree selects it).
+//! shown over the edge while the pointer is at it or the tree selects it,
+//! 10 ms later, taking the row's clicks while the pointer is on it).
 
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
-    AppContext as _, Bounds, Modifiers, Pixels, Point, TestAppContext, VisualTestContext,
-    WindowHandle, point, px,
+    AppContext as _, Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
+    TestAppContext, VisualTestContext, WindowHandle, point, px,
 };
 use serde_json::{Value, json};
 use workbench::{FileType, Product, Workbench};
@@ -59,7 +61,16 @@ fn invoke(
     out
 }
 
+/// The rest of a row follows the pointer and the selection this much later.
+const DELAY: Duration = Duration::from_millis(10);
+
 fn draw(cx: &mut TestAppContext, window: WindowHandle<Workbench>) {
+    cx.executor().advance_clock(DELAY);
+    draw_now(cx, window);
+}
+
+/// Draws without letting time pass.
+fn draw_now(cx: &mut TestAppContext, window: WindowHandle<Workbench>) {
     cx.run_until_parked();
     // Twice: rows measure their text against the width drawn the frame
     // before (a new width asks for another frame).
@@ -67,6 +78,16 @@ fn draw(cx: &mut TestAppContext, window: WindowHandle<Workbench>) {
         cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
             .unwrap();
     }
+}
+
+/// The tree's state now, without letting time pass.
+fn tree_now(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Value {
+    cx.update_window(window.into(), |_, window, cx| {
+        ui::command::invoke("workbench.state", json!(null), window, cx)
+    })
+    .unwrap()
+    .unwrap()["tree"]
+        .clone()
 }
 
 fn tree(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Value {
@@ -115,6 +136,34 @@ fn click(cx: &mut TestAppContext, window: WindowHandle<Workbench>, selector: &st
     let vcx = &mut VisualTestContext::from_window(window.into(), cx);
     vcx.simulate_mouse_move(at, None, Modifiers::none());
     vcx.simulate_click(at, Modifiers::none());
+    draw(cx, window);
+}
+
+/// Left button clicks at `at`: one, or two for a double click.
+fn click_at(cx: &mut TestAppContext, window: WindowHandle<Workbench>, at: Point<Pixels>, n: usize) {
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    for click_count in 1..=n {
+        vcx.simulate_event(MouseDownEvent {
+            button: MouseButton::Left,
+            position: at,
+            modifiers: Modifiers::none(),
+            click_count,
+            first_mouse: false,
+        });
+        vcx.simulate_event(MouseUpEvent {
+            button: MouseButton::Left,
+            position: at,
+            modifiers: Modifiers::none(),
+            click_count,
+        });
+    }
+    draw(cx, window);
+}
+
+fn right_click_at(cx: &mut TestAppContext, window: WindowHandle<Workbench>, at: Point<Pixels>) {
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
+    vcx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
     draw(cx, window);
 }
 
@@ -250,4 +299,70 @@ fn selecting_a_cut_row_with_the_keyboard_shows_its_rest(cx: &mut TestAppContext)
     // Down again: the short row shows nothing.
     press(cx, window, "down");
     assert_eq!(tree(cx, window)["expanded_row"], json!(null));
+}
+
+#[gpui::test]
+fn the_rest_of_a_row_shows_10_ms_after_the_pointer_comes(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    layout(&root);
+    let window = open(cx, &root);
+    let at = drawn(cx, window, "tree-row:").center();
+    VisualTestContext::from_window(window.into(), cx).simulate_mouse_move(
+        at,
+        None,
+        Modifiers::none(),
+    );
+    draw_now(cx, window);
+    assert_eq!(tree_now(cx, window)["expanded_row"], json!(null));
+    cx.executor().advance_clock(DELAY);
+    draw_now(cx, window);
+    assert_eq!(tree_now(cx, window)["expanded_row"], json!(""));
+}
+
+#[gpui::test]
+fn the_rest_of_a_row_stays_under_the_pointer_and_takes_the_rows_clicks(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    layout(&root);
+    let window = open(cx, &root);
+    click(cx, window, "tree-row:src");
+    let root_row = drawn(cx, window, "tree-row:");
+    mouse_to(cx, window, root_row.center());
+    let rest = drawn(cx, window, "tree-row-expansion");
+
+    // The pointer moves from the row onto its rest: it stays.
+    mouse_to(cx, window, rest.center());
+    let t = tree(cx, window);
+    assert_eq!(t["expanded_row"], json!(""));
+    assert_eq!(t["selected"], json!("src"));
+
+    // A click on it selects the row; a double click opens (here: closes)
+    // the folder, another one opens it again.
+    click_at(cx, window, rest.center(), 1);
+    let t = tree(cx, window);
+    assert_eq!(t["selected"], json!(""));
+    assert_eq!(t["expanded_row"], json!(""));
+    click_at(cx, window, rest.center(), 2);
+    assert_eq!(row(&tree(cx, window), "")["expanded"], json!(false));
+    click_at(cx, window, rest.center(), 2);
+    assert_eq!(row(&tree(cx, window), "")["expanded"], json!(true));
+
+    // Away from both the row and its rest: it goes.
+    mouse_to(
+        cx,
+        window,
+        point(rest.right() + px(40.0), rest.bottom() + px(200.0)),
+    );
+    assert_eq!(tree(cx, window)["expanded_row"], json!(null));
+
+    // Back to the row and onto its rest: a right click opens the row's
+    // context menu.
+    click(cx, window, "tree-row:src");
+    mouse_to(cx, window, root_row.center());
+    mouse_to(cx, window, rest.center());
+    right_click_at(cx, window, rest.center());
+    let t = tree(cx, window);
+    assert_eq!(t["selected"], json!(""));
+    assert!(t["context_menu"].is_object(), "no context menu: {t}");
 }
