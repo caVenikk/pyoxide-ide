@@ -782,3 +782,36 @@ fn writes_of_an_open_configuration_file_are_the_applications_own(cx: &mut TestAp
     assert!(state["dialog"].is_null(), "{:#}", state["dialog"]);
     assert!(text(&mut h).contains("# mine"));
 }
+
+/// The Modify options link underlines its text while the pointer is over
+/// it (#136); a hover style cannot do it (GPUI lays text out before it
+/// knows what is hovered), the dialog keeps the state.
+#[gpui::test]
+fn the_modify_options_link_underlines_under_the_pointer(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    h.invoke("run.configurations.edit", json!({"name": "alpha"}));
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let win =
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .expect("the dialog window");
+    let link = gpui::VisualTestContext::from_window(win, h.cx)
+        .debug_bounds("run-dialog-modify-options")
+        .expect("the link");
+    assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(false));
+    gpui::VisualTestContext::from_window(win, h.cx).simulate_mouse_move(
+        link.center(),
+        None,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(true));
+    gpui::VisualTestContext::from_window(win, h.cx).simulate_mouse_move(
+        gpui::point(gpui::px(5.0), gpui::px(300.0)),
+        None,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(false));
+}
