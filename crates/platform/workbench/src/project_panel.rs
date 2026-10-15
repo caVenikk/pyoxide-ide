@@ -818,6 +818,9 @@ impl ProjectPanel {
         // A row whose text runs past the selection's right end: its
         // selection and hover reach the tree's edge.
         let wide = self.is_wide(self.measure_label(id, node, window, cx));
+        // While its rest shows over the edge the row stays hovered, also
+        // with the pointer on the rest.
+        let hovered = !selected && self.expanded_row(focused, cx) == Some(id);
         let radius = theme.metric(Metric::CornerRadius);
         let guides = self.guides(cx).and_then(|g| {
             g.row(
@@ -874,6 +877,9 @@ impl ProjectPanel {
                     })
                     .when(selected, |d| {
                         d.bg(selection).debug_selector(|| "tree-selection".into())
+                    })
+                    .when(hovered, |d| {
+                        d.bg(hover).debug_selector(|| "tree-hovered".into())
                     })
                     .when(!selected, |d| d.hover(move |s| s.bg(hover))),
             )

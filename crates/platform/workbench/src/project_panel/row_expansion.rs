@@ -8,9 +8,12 @@
 //! - Pointing at the row, or selecting it while the tree has the focus,
 //!   shows the rest of the row over the tree's edge, as the reference's
 //!   `TreeExpandableItemsHandler` and `AbstractExpandableItemsHandler`
-//!   (IntelliJ Community, Apache-2.0) do: the part beyond the edge on the
-//!   row's background, with a 1 px border at the top, the bottom and the
-//!   rounded right end. It follows the pointer and the selection 10 ms
+//!   (IntelliJ Community, Apache-2.0) do: the part beyond the edge,
+//!   continuing the row without a seam (it starts where the row's
+//!   selection ends, on the same background, with the text at the same
+//!   place), framed by a 1 px border outside the row above, below and at
+//!   the rounded right end, none where it joins the row. While it shows,
+//!   the row keeps its hover background. It follows the pointer and the selection 10 ms
 //!   later, stays while the pointer is on it (clicks on it are clicks on
 //!   the row), goes when the pointer leaves both the rows and it, and shows
 //!   only for a row the tree shows whole.
@@ -36,6 +39,8 @@ use super::{ICON_X, ProjectPanel, TEXT_X, TREE_LEFT};
 pub(super) const WIDE_MARGIN: f32 = 1.0;
 /// Space after the text in the shown rest of a row.
 const EXPANSION_PAD: f32 = 4.0;
+/// Width of the border of the shown rest of a row.
+const HINT_BORDER: f32 = 1.0;
 /// Gap between the root's name and its location.
 const LOCATION_GAP: f32 = 6.0;
 /// The rest of a row follows the pointer and the selection this much later
@@ -242,67 +247,80 @@ impl ProjectPanel {
         let node = tree.node(id);
         let end = *self.expansion.label_ends.borrow().get(&id)?;
         let theme = cx.theme();
-        let bounds = self.rows_bounds.get();
+        let rows = self.rows_bounds.get();
         let row_height = theme.metric(Metric::RowHeight);
+        let border = px(HINT_BORDER);
+        // It starts where the row's selection ends, so the two meet, and
+        // its border runs outside the row's height: top, bottom and right,
+        // none on the side that joins the row.
+        let start = rows.size.width - px(WIDE_MARGIN);
         let origin = point(
-            bounds.right(),
-            bounds.top() + self.row_top(tree.row_of(id)?, cx),
+            rows.left() + start,
+            rows.top() + self.row_top(tree.row_of(id)?, cx) - border,
         );
-        let width = (end - bounds.size.width + px(EXPANSION_PAD))
-            .min(window.viewport_size().width - bounds.right());
-        if width <= px(0.0) {
+        let width =
+            (end - start + px(EXPANSION_PAD) + border).min(window.viewport_size().width - origin.x);
+        if width <= border {
             return None;
         }
-        self.expansion
-            .hint
-            .set(Some(Bounds::new(origin, size(width, row_height))));
+        self.expansion.hint.set(Some(Bounds::new(
+            origin,
+            size(width, row_height + border * 2.0),
+        )));
         let selected = self.selected == Some(id);
-        // The row's background as the tree draws it.
+        // The row's background as the tree draws it: the tool window's,
+        // the excluded rows' over it, then the selection or the hover.
+        let excluded = node
+            .entry
+            .excluded
+            .then(|| theme.color(UiRole::NonProjectFile));
         let background = match (selected, focused) {
             (true, true) => theme.color(UiRole::Selection),
             (true, false) => theme.color(UiRole::SelectionInactive),
-            _ if node.entry.excluded => theme.color(UiRole::NonProjectFile),
             _ => theme.color(UiRole::Hover),
         };
         let radius = theme.metric(Metric::CornerRadius);
+        let layer = || div().absolute().top_0().left_0().size_full();
         let label = self.row_label(node, self.row_text_color(node, selected, focused, cx), cx);
         Some(
             deferred(
                 anchored().position(origin).child(
                     hint.relative()
                         .w(width)
-                        .h(row_height)
-                        .overflow_hidden()
+                        .h(row_height + border * 2.0)
                         .font_family(theme.ui_family())
                         .text_size(theme.ui_size())
-                        .bg(theme.color(UiRole::ToolWindow))
-                        .rounded_tr(radius)
-                        .rounded_br(radius)
+                        .bg(theme.color(UiRole::Border))
+                        .rounded_tr(radius + border)
+                        .rounded_br(radius + border)
                         .child(
+                            // The row's part beyond the edge, exactly as
+                            // high as the row and level with it.
                             div()
+                                .debug_selector(|| "tree-row-expansion-row".into())
                                 .absolute()
-                                .top_0()
+                                .top(border)
                                 .left_0()
-                                .size_full()
-                                .bg(background)
+                                .w(width - border)
+                                .h(row_height)
+                                .overflow_hidden()
                                 .rounded_tr(radius)
                                 .rounded_br(radius)
-                                .border_t_1()
-                                .border_b_1()
-                                .border_r_1()
-                                .border_color(theme.color(UiRole::Border)),
-                        )
-                        .child(
-                            // The row's text, continuing where the tree
-                            // cuts it.
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left(label_x(node, cx) - bounds.size.width)
-                                .h(row_height)
-                                .flex()
-                                .items_center()
-                                .child(label),
+                                .bg(theme.color(UiRole::ToolWindow))
+                                .children(excluded.map(|bg| layer().bg(bg)))
+                                .child(layer().bg(background))
+                                .child(
+                                    // The row's text, continuing where the
+                                    // tree cuts it.
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left(label_x(node, cx) - start)
+                                        .h(row_height)
+                                        .flex()
+                                        .items_center()
+                                        .child(label),
+                                ),
                         ),
                 ),
             )
