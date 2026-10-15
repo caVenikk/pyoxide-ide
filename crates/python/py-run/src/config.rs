@@ -637,7 +637,7 @@ impl TypeEditor for PythonEditor {
             fields.push(Field::new(
                 field::ENV_FILES,
                 "Paths to \".env\" files:",
-                FieldKind::Text,
+                FieldKind::Path,
                 o.env_files.join(";"),
             ));
         }

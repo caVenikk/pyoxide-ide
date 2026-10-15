@@ -21,7 +21,9 @@ use gpui::{
     SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use run_config::form::{self, Field, FieldKind};
-use run_config::{ConfigKey, RunConfiguration, RunConfigurations, Storage, TypeEditor, Types};
+use run_config::{
+    ConfigKey, RunConfiguration, RunConfigurations, Storage, TypeEditor, Types, paths,
+};
 use serde_json::{Value, json};
 use themes::{Metric, UiRole};
 use ui::components::{checkbox, input_frame};
@@ -205,6 +207,8 @@ pub struct EditDialog {
     collapsed: HashSet<Node>,
     /// Alt is held: the head fields show their labels.
     hints: bool,
+    /// The project folder: path fields show their paths expanded from it.
+    root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -234,9 +238,14 @@ impl EditDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (list, types, editors) = {
+        let (list, types, editors, root) = {
             let c = configs.read(cx);
-            (c.list().clone(), c.types().clone(), c.editors().to_vec())
+            (
+                c.list().clone(),
+                c.types().clone(),
+                c.editors().to_vec(),
+                c.root().map(|r| r.to_owned()),
+            )
         };
         let mut dialog = Self {
             focus: cx.focus_handle(),
@@ -262,6 +271,7 @@ impl EditDialog {
             describing: None,
             collapsed: HashSet::new(),
             hints: false,
+            root,
             _subscriptions: Vec::new(),
         };
         // The window's close button cancels; the workbench then closes it.
@@ -282,6 +292,15 @@ impl EditDialog {
                     .into_iter()
                     .find_map(|(n, _)| matches!(n, Node::Config(_)).then_some(n))
             });
+        // The tree opens collapsed but for the way to the selected
+        // configuration (`RunConfigurable.selectConfigurableOnShow`:
+        // `TreeUtil.selectInTree` makes the node visible).
+        dialog.collapsed = dialog
+            .nodes()
+            .into_iter()
+            .map(|(n, _)| n)
+            .filter(Self::is_parent)
+            .collect();
         dialog.selected = first;
         dialog.rebuild(window, cx);
         window.focus(&dialog.tree_focus);
@@ -549,6 +568,16 @@ impl EditDialog {
             }
             _ => {}
         }
+        for field in fields.iter_mut() {
+            if field.kind == FieldKind::Path {
+                field.value = self.shown_paths(&field.value);
+                // A variable that is expanded needs no note.
+                if !field.value.starts_with('$') {
+                    field.note = None;
+                }
+            }
+        }
+        self.reveal();
         for field in fields {
             let editor = match field.kind {
                 FieldKind::Text | FieldKind::Path | FieldKind::Env => Some(Self::text_field(
@@ -563,6 +592,53 @@ impl EditDialog {
             self.fields.push(FieldView { field, editor });
         }
         self.describe(cx);
+    }
+
+    /// Expands the types and folders above the selected node.
+    fn reveal(&mut self) {
+        match &self.selected {
+            Some(Node::Config(key)) => {
+                self.collapsed.remove(&Node::Type(key.type_id.clone()));
+                if let Some(folder) = self.list.get(key).and_then(|c| c.folder.clone()) {
+                    self.collapsed
+                        .remove(&Node::Folder(key.type_id.clone(), folder));
+                }
+            }
+            Some(Node::Folder(type_id, _)) => {
+                self.collapsed.remove(&Node::Type(type_id.clone()));
+            }
+            _ => {}
+        }
+    }
+
+    /// Paths as a path field shows them: expanded, as the reference loads
+    /// them (`PathMacroManager` expands `$PROJECT_DIR$`, `$MODULE_DIR$`
+    /// and `$USER_HOME$`); other variables stay as written. A list is
+    /// separated by `;`.
+    fn shown_paths(&self, stored: &str) -> String {
+        let Some(root) = self.root.as_deref() else {
+            return stored.to_owned();
+        };
+        stored
+            .split(';')
+            .filter_map(|p| paths::resolve(p, root))
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// Paths typed into a path field in their stored form: relative to the
+    /// project inside it (ADR 0012), else as typed.
+    fn stored_paths(&self, shown: &str) -> String {
+        let Some(root) = self.root.as_deref() else {
+            return shown.to_owned();
+        };
+        shown
+            .split(';')
+            .map(|p| paths::from_reference(p, root))
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(";")
     }
 
     /// Text fields in the editor's font: parameters and options typed as a
@@ -637,6 +713,16 @@ impl EditDialog {
     /// Sets a field of the selected node without rebuilding the form.
     fn set_value(&mut self, id: &str, value: &str, cx: &mut Context<Self>) -> bool {
         self.modified = true;
+        let is_path = self
+            .fields
+            .iter()
+            .any(|f| f.field.id == id && f.field.kind == FieldKind::Path);
+        let stored = if is_path {
+            self.stored_paths(value)
+        } else {
+            value.to_owned()
+        };
+        let value = stored.as_str();
         match self.selected.clone() {
             Some(Node::Config(key)) => {
                 if id == NAME {
@@ -902,7 +988,7 @@ impl EditDialog {
     }
 
     fn on_remove(&mut self, _: &DialogRemove, window: &mut Window, cx: &mut Context<Self>) {
-        let nodes = self.nodes();
+        let nodes = self.visible_nodes();
         let at = self
             .selected
             .as_ref()
@@ -932,7 +1018,7 @@ impl EditDialog {
         }
         self.modified = true;
         // The node that took its place is selected.
-        let nodes = self.nodes();
+        let nodes = self.visible_nodes();
         self.selected = at
             .map(|i| i.min(nodes.len().saturating_sub(1)))
             .and_then(|i| nodes.get(i).map(|(n, _)| n.clone()));

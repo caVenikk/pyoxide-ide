@@ -576,17 +576,10 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     assert_eq!(h.cx.update(|cx| cx.windows().len()), 2);
     let d = dialog(&mut h);
     assert_eq!(d["title"], json!("Run/Debug Configurations"));
+    // Collapsed but for the way to the selected configuration.
     assert_eq!(
         tree(&mut h),
-        [
-            "Script",
-            "  Group",
-            "    beta",
-            "  alpha",
-            "  shared",
-            "FutureType",
-            "  later"
-        ]
+        ["Script", "  Group", "  alpha", "  shared", "FutureType"]
     );
     assert_eq!(
         d["selected"],
@@ -656,6 +649,34 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     h.invoke("run.configurations.dialog.remove", json!(null));
     assert!(!tree(&mut h).iter().any(|n| n.trim() == "Unnamed (1)"));
     h.invoke("run.configurations.dialog.sort", json!(null));
+    // Path fields show their paths expanded (as the reference loads them);
+    // they are stored relative to the project.
+    h.invoke(
+        "run.configurations.dialog.add",
+        json!({"type": "shell-script"}),
+    );
+    let dir = field(&mut h, "working-directory")["value"].clone();
+    assert!(
+        Path::new(dir.as_str().unwrap()).is_absolute(),
+        "{dir}: the project folder"
+    );
+    let script = Path::new(dir.as_str().unwrap())
+        .join("tools")
+        .join("build.sh");
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "script", "value": script.display().to_string()}),
+    );
+    assert_eq!(
+        field(&mut h, "script")["value"],
+        json!(script.display().to_string())
+    );
+    h.invoke("run.configurations.dialog.apply", json!(null));
+    h.wait("the stored script path", |_| {
+        std::fs::read_to_string(root.join(".oxide/workspace.toml"))
+            .is_ok_and(|t| t.contains("script = \"tools/build.sh\""))
+    });
+    h.invoke("run.configurations.dialog.remove", json!(null));
     // Modify options: a common option.
     h.invoke(
         "run.configurations.dialog.select",

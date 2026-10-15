@@ -589,7 +589,9 @@ here with: source URL, commit, file(s), license, and what was changed.
   intellij/execution/ui/RunConfigurationFragmentedEditor.java,
   FragmentedSettingsEditor.java and SettingsEditorFragment.java, the
   dialog window of platform/platform-api/src/com/intellij/openapi/ui/
-  DialogWrapper.java (crates/platform/ui/src/dialog_window.rs), with the
+  DialogWrapper.java (crates/platform/ui/src/dialog_window.rs), the tree's
+  initial expansion of RunConfigurable.kt (selectConfigurableOnShow) and
+  the expanded paths of its fields (PathMacroManager), with the
   labels of
   ExecutionBundle.properties, ActionsBundle.properties, PyBundle.properties
   and ShBundle.properties. Changes: reimplemented in Rust; the natural
