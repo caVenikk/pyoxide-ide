@@ -252,7 +252,12 @@ here with: source URL, commit, file(s), license, and what was changed.
   platform-impl/src/com/intellij/ui/popup/list/ListPopupImpl.java,
   ListPopupModel.java, PopupListElementRenderer.java,
   PopupInlineActionsSupportImpl.kt and InlineActionsUtil.kt (row buttons,
-  More Actions), ui/popup/WizardPopup.java (submenu placement), ui/popup/
+  More Actions), ui/popup/WizardPopup.java (submenu placement), the
+  submenu aim of platform/util/ui/src/com/intellij/ui/
+  MouseMovementTracker.java and ScreenUtil.java (isMovementTowards), the
+  run widget's spacing and stroke icons of platform/execution-impl/src/com/
+  intellij/execution/ui/RedesignedRunWidget.kt and platform/platform-impl/
+  src/com/intellij/openapi/wm/impl/headertoolbar/MainToolbar.kt, ui/popup/
   AbstractPopup.java and ActionPopupStep.java, platform/platform-api/src/
   com/intellij/ui/speedSearch/SpeedSearch.java and ui/
   GroupHeaderSeparator.java, platform/platform-api/src/com/intellij/

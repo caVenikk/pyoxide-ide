@@ -56,6 +56,10 @@ impl IconName {
     pub const RUN_STROKE: Self = Self("run/run_stroke");
     pub const RERUN_STROKE: Self = Self("run/rerun_stroke");
     pub const STOP_STROKE: Self = Self("run/stop_stroke");
+    /// Outlines for disabled run widget buttons, tinted grey (the
+    /// reference paints its run widget icons as strokes, `toStrokeIcon`,
+    /// and dims them when disabled).
+    pub const DEBUG_STROKE: Self = Self("run/debug_stroke");
     pub const DELETE: Self = Self("general/delete");
     pub const PRINT: Self = Self("general/print");
     pub const SOFT_WRAP: Self = Self("general/softWrap");
@@ -213,7 +217,8 @@ platform_icons! {
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [
-        "fileTypes/gitignore", "run/rerun_stroke", "run/run_stroke", "run/stop_stroke",
+        "fileTypes/gitignore", "run/debug_stroke", "run/rerun_stroke", "run/run_stroke",
+        "run/stop_stroke",
         "general/inspections/inspectionsError", "general/inspections/inspectionsWarning",
     ]
 }

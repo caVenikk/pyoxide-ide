@@ -364,16 +364,14 @@ pub fn menu(state: &MenuState<'_>) -> (Vec<MenuItem>, Option<usize>) {
 }
 
 /// Current File (`createCurrentFileWithInlineActions`): selects it; runs
-/// the file in the editor.
+/// the file in the editor. Without a file it only selects (no buttons, no
+/// submenu), as the toolbar's buttons are disabled then.
 fn current_file_item(state: &MenuState<'_>) -> MenuItem {
-    let (file, runnable, running) = match &state.current_file {
-        Some((name, runnable, running)) => (Some(name.as_str()), *runnable, *running),
-        None => (None, false, None),
+    let Some((name, runnable, running)) = &state.current_file else {
+        return MenuItem::action("Current File", SelectCurrentFile);
     };
-    let run_text = match file {
-        Some(name) => format!("Run '{name}'"),
-        None => "Run".to_owned(),
-    };
+    let (runnable, running) = (*runnable, *running);
+    let run_text = format!("Run '{name}'");
     let sub = vec![
         MenuItem::action(run_text.clone(), RunFile)
             .icon(IconName::RUN)
@@ -654,6 +652,28 @@ mod tests {
             Some(NOT_SUPPORTED)
         );
         assert!(extra.inline.is_empty());
+    }
+
+    /// Without a file in the editor Current File only selects: no buttons,
+    /// no submenu (#135).
+    #[test]
+    fn current_file_without_a_file_has_no_buttons() {
+        let list = list(&[("python", "api", None)]);
+        let types = types();
+        let running = |_: &ConfigKey| None;
+        let state = MenuState {
+            list: &list,
+            types: &types,
+            expanded: false,
+            running: &running,
+            current_file: None,
+        };
+        let (items, _) = menu(&state);
+        let item = items
+            .iter()
+            .find(|i| i.label().is_some_and(|l| l.as_ref() == "Current File"))
+            .unwrap();
+        assert!(matches!(item, MenuItem::Action { extra, .. } if extra.inline.is_empty()));
     }
 
     #[test]

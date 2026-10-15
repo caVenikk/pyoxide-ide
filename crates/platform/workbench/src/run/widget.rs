@@ -10,7 +10,7 @@ use gpui::{
     AnyElement, App, Bounds, IntoElement, Pixels, SharedString, canvas, div, prelude::*, px,
 };
 use themes::{Metric, UiRole};
-use ui::components::{DISABLED_ALPHA, Tooltip, spinner};
+use ui::components::{Tooltip, spinner};
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
@@ -148,8 +148,8 @@ fn anchor(cell: Rc<Cell<Bounds<Pixels>>>) -> impl IntoElement {
         .size_full()
 }
 
-/// A button of the widget: an icon on an optional coloured background,
-/// dimmed when disabled.
+/// A button of the widget: an icon on an optional coloured background;
+/// a disabled one shows its inactive icon (see [`inactive`]).
 fn button(
     id: &'static str,
     icon: AnyElement,
@@ -178,17 +178,23 @@ fn button(
             None if enabled => d.hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)),
             None => d,
         })
-        .child(
-            div()
-                .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
-                .child(icon),
-        )
+        .child(icon)
         .when_some(tooltip, |d, (title, keys)| {
             d.tooltip(Tooltip::text(title, keys))
         })
         .when(enabled, |d| {
             d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         })
+}
+
+/// The outline of a disabled button in the disabled colour (the
+/// reference's run widget paints stroke icons and greys them out when the
+/// action is disabled), not the coloured icon dimmed.
+fn inactive(name: IconName, cx: &App) -> AnyElement {
+    Icon::new(name)
+        .size(px(16.0))
+        .tint(cx.theme().color(UiRole::TextDisabled))
+        .into_any_element()
 }
 
 /// The widget for `state`.
@@ -217,8 +223,10 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
         spinner("run-launching", cx).into_any_element()
     } else if state.file_running {
         icon(IconName::RERUN_STROKE)
-    } else {
+    } else if state.can_run() {
         icon(IconName::RUN)
+    } else {
+        inactive(IconName::RUN_STROKE, cx)
     };
     let run = button(
         "run",
@@ -234,18 +242,23 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
     // Debugging arrives with the debugger.
     let debug = button(
         "debug",
-        icon(IconName::DEBUG),
+        inactive(IconName::DEBUG_STROKE, cx),
         None,
         false,
         Some(("Debug".to_owned(), None)),
         Box::new(Run),
         cx,
     );
-    // Hidden while nothing runs; an empty slot keeps its place
-    // (`InactiveStopActionPlaceholder`).
+    // Hidden while nothing runs; an empty slot after More keeps the
+    // widget's width (`InactiveStopActionPlaceholder`, the last of
+    // `RunToolbarMainActionGroup`).
     let size = theme.metric(Metric::ToolbarButtonSize);
+    let placeholder = state
+        .running
+        .is_empty()
+        .then(|| div().flex_none().size(size).into_any_element());
     let stop = if state.running.is_empty() {
-        div().flex_none().size(size).into_any_element()
+        None
     } else {
         let count = state.running.len();
         let stop_icon = div()
@@ -271,7 +284,7 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
                 )
             })
             .into_any_element();
-        button(
+        let stop = button(
             "run-stop",
             stop_icon,
             Some(theme.color(UiRole::RunWidgetStop)),
@@ -281,7 +294,8 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
             cx,
         )
         .child(anchor(anchors.stop.clone()))
-        .into_any_element()
+        .into_any_element();
+        Some(stop)
     };
     let more = button(
         "run-more",
@@ -299,10 +313,13 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(2.0))
+        // Buttons of 30 with 2 on both sides (`RunWidget.actionButtonWidth`,
+        // `toolbarBorderDirectionalGap`).
+        .gap(px(4.0))
         .child(selector)
         .child(run)
         .child(debug)
-        .child(stop)
+        .children(stop)
         .child(more)
+        .children(placeholder)
 }
