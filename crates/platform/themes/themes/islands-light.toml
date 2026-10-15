@@ -256,7 +256,6 @@ underline-color = "#ff0000"
 
 [syntax.diagnostic-warning]
 bg = "#fcf4d4"
-underline = "single"
 
 [syntax.diagnostic-info]
 underline = "wavy"
@@ -294,7 +293,6 @@ bg = "#fce8f4"
 [syntax.folded-text]
 fg = "#414d41"
 bg = "#e9f5e6"
-underline = "single"
 
 [syntax.inlay-hint]
 fg = "#7a7a7a"

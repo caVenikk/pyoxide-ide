@@ -84,6 +84,28 @@ fn every_syntax_token_sets_a_style_or_is_plain_on_purpose() {
 }
 
 #[test]
+fn generated_themes_underline_only_with_an_effect_colour() {
+    // The reference paints an effect only when the scheme gives it a colour;
+    // the islands themes come from its schemes, so every underline in them
+    // names its colour rather than falling back to the text colour.
+    for kind in [ThemeKind::Dark, ThemeKind::Light] {
+        let theme = builtin::default_theme(kind);
+        for (role, style) in theme.text.iter() {
+            assert!(
+                style.underline.is_none() || style.underline_color.is_some(),
+                "{} underlines {role} in the text colour",
+                theme.id
+            );
+        }
+    }
+    // The light scheme's warning sets an effect type but no effect colour:
+    // only its background is drawn.
+    let warning = &builtin::default_theme(ThemeKind::Light).text[TextRole::DiagnosticWarning];
+    assert!(warning.bg.is_some());
+    assert_eq!(warning.underline, None);
+}
+
+#[test]
 #[ignore = "prints the tightest pairs of both themes"]
 fn print_tightest_pairs() {
     for theme in [builtin::dark(), builtin::light()] {
