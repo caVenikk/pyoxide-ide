@@ -49,6 +49,9 @@ ui::ui_commands! {
     Rename { path: Option<String>, name: Option<String> } => "project.tree.rename", "Rename…",
         "Renames the selected file or folder (or `path`, relative to the project): asks for the new name in the Rename dialog, or takes `name`. Open tabs follow.",
         r#"{"path": "app.py", "name": "main.py"}"#;
+    ReloadFromDisk { paths: Option<Vec<String>> } => "project.tree.reload-from-disk", "Reload from Disk",
+        "Looks at the selected files and folders (or `paths`, relative to the project) on disk again: open files changed outside are reloaded, the folders listed again.",
+        r#"{"paths": ["src"]}"#;
     Delete { paths: Option<Vec<String>> } => "project.tree.delete", "Delete",
         "Asks, then deletes the selected file or folder (or `paths`, relative to the project), to the system trash where it can. Tabs of deleted files close.",
         r#"{"paths": ["app.py"]}"#;
@@ -125,6 +128,8 @@ pub(super) struct FileOps {
     pub(super) transfer: Option<super::transfer::OpenTransfer>,
     /// A copy or move asking about its conflicts.
     pub(super) run: Option<super::transfer::TransferRun>,
+    /// The row dragged rows are over (drawn as the drop target).
+    pub(super) drop_target: Option<NodeId>,
 }
 
 impl Default for FileOps {
@@ -138,6 +143,7 @@ impl Default for FileOps {
             clipboard: None,
             transfer: None,
             run: None,
+            drop_target: None,
         }
     }
 }
@@ -150,6 +156,7 @@ impl FileOps {
         self.clipboard = None;
         self.transfer = None;
         self.run = None;
+        self.drop_target = None;
     }
 }
 
@@ -334,6 +341,9 @@ impl ProjectPanel {
             return Vec::new();
         };
         let entry = &tree.node(id).entry;
+        let reload = |paths: Option<Vec<String>>| {
+            MenuItem::action("Reload from Disk", ReloadFromDisk { paths }).icon(IconName::REFRESH)
+        };
         let Some(rel) = filter.relative(&entry.path) else {
             return vec![
                 MenuItem::separator(),
@@ -341,6 +351,9 @@ impl ProjectPanel {
                 MenuItem::submenu("Refactor", Vec::new()).enabled(false),
                 MenuItem::separator(),
                 MenuItem::unavailable("Delete…"),
+                MenuItem::separator(),
+                // The project root: everything.
+                reload(Some(vec![String::new()])),
             ];
         };
         let rename = || {
@@ -379,9 +392,11 @@ impl ProjectPanel {
             MenuItem::action(
                 "Delete…",
                 Delete {
-                    paths: Some(vec![rel]),
+                    paths: Some(vec![rel.clone()]),
                 },
             ),
+            MenuItem::separator(),
+            reload(Some(vec![rel])),
         ]
     }
 
@@ -573,6 +588,51 @@ impl ProjectPanel {
             .with_icon(IconName::QUESTION_DIALOG)
         });
         self.open_dialog(dialog, DialogPurpose::Delete(paths), window, cx);
+    }
+
+    /// Reload from Disk (`SynchronizeCurrentFileAction`): the workbench
+    /// looks at the open files under the paths again; the tree lists their
+    /// folders again.
+    pub(super) fn reload_from_disk(
+        &mut self,
+        a: &ReloadFromDisk,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(root), Some(tree)) = (self.root(), &self.tree) else {
+            return;
+        };
+        let paths: Vec<PathBuf> = match &a.paths {
+            Some(paths) => paths.iter().filter_map(|p| self.resolve(p)).collect(),
+            None => self
+                .selected
+                .map(|id| vec![tree.node(id).entry.path.clone()])
+                .unwrap_or_else(|| vec![root.clone()]),
+        };
+        if paths.is_empty() {
+            return;
+        }
+        self.refresh_paths(&paths, cx);
+        cx.emit(PanelEvent::ReloadFromDisk(paths));
+    }
+
+    /// Lists again the listed folders that are `paths` or inside them, and
+    /// the folders that hold the paths.
+    pub fn refresh_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let Some(tree) = &self.tree else { return };
+        let dirs: Vec<NodeId> = tree
+            .listed_dirs()
+            .into_iter()
+            .filter(|&id| {
+                let dir = &tree.node(id).entry.path;
+                paths
+                    .iter()
+                    .any(|p| dir.starts_with(p) || p.parent() == Some(dir.as_path()))
+            })
+            .collect();
+        for id in dirs {
+            self.list(id, cx);
+        }
     }
 
     // ---- popups and dialogs -------------------------------------------------

@@ -101,6 +101,8 @@ notification = "$bg-raised"
 non-project-file = "#2a221d"
 run-widget-running = "$leaf"
 run-widget-stop = "$red"
+drag-and-drop-border = "#2f65ca"
+drag-and-drop-row = "#2f65ca33"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"

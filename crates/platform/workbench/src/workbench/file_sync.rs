@@ -529,6 +529,25 @@ impl Workbench {
         .detach();
     }
 
+    /// Reload from Disk on files and folders of the project tool window
+    /// (`SynchronizeCurrentFileAction`): unlike Reload All from Disk nothing
+    /// is written first; the open files under them are looked at (and
+    /// reloaded when they changed outside), the index is built again (the
+    /// tree lists their folders itself), and the status bar says so.
+    pub(super) fn synchronize_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let open: Vec<PathBuf> = self
+            .tabs
+            .iter()
+            .map(|t| t.path.clone())
+            .filter(|t| paths.iter().any(|p| t.starts_with(p)))
+            .collect();
+        if !open.is_empty() {
+            self.check_open_files(Some(open), cx);
+        }
+        self.project_files.update(cx, |files, cx| files.refresh(cx));
+        self.show_notice("File synchronization completed successfully.".into(), cx);
+    }
+
     /// The tree's folders and the file index are made again from the disk.
     fn rescan_project(&mut self, cx: &mut Context<Self>) {
         self.panel.update(cx, |panel, cx| panel.refresh_all(cx));

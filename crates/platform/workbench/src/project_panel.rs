@@ -16,7 +16,7 @@ mod transfer;
 pub mod transfer_dialog;
 
 pub use file_ops::COMMANDS as FILE_COMMANDS;
-pub use file_ops::{Delete, NewDirectory, NewElement, NewFile, Rename};
+pub use file_ops::{Delete, NewDirectory, NewElement, NewFile, ReloadFromDisk, Rename};
 pub use new_items::COMMANDS as NEW_ITEM_COMMANDS;
 pub use new_items::{NewFromTemplate, NewItem, NewItemKind, NewTemplate};
 pub use transfer::COMMANDS as TRANSFER_COMMANDS;
@@ -89,6 +89,8 @@ pub enum PanelEvent {
     RulesChanged,
     /// Files or folders were created, renamed or deleted from the tree.
     FilesChanged(Vec<project::fs_ops::FsChange>),
+    /// Reload from Disk on these files and folders.
+    ReloadFromDisk(Vec<PathBuf>),
 }
 
 pub struct ProjectPanel {
@@ -411,6 +413,7 @@ impl ProjectPanel {
             "dialog": self.dialog().map(|d| d.read(cx).state_json()),
             "transfer": self.transfer_dialog().map(|d| d.read(cx).state_json(cx)),
             "clipboard": self.clipboard_json(),
+            "drop_target": self.drop_target_json(cx),
         })
     }
 
@@ -912,6 +915,7 @@ panel_actions! {
     NewDirectory => new_directory,
     Rename => rename_action,
     Delete => delete_action,
+    ReloadFromDisk => reload_from_disk,
     NewFromTemplate => new_from_template,
     Cut => cut,
     Copy => copy,

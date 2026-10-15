@@ -14,7 +14,7 @@ use workbench::{AutoExclusions, FileType, Product, Workbench};
 
 /// The context menu of a row with nothing to mark: inside an excluded
 /// folder, a folder a product excludes, the project root.
-const NOTHING_TO_MARK: [&str; 14] = [
+const NOTHING_TO_MARK: [&str; 16] = [
     "New",
     "-",
     "Cut",
@@ -29,6 +29,8 @@ const NOTHING_TO_MARK: [&str; 14] = [
     "Refactor",
     "-",
     "Delete…",
+    "-",
+    "Reload from Disk",
 ];
 
 fn open(cx: &mut TestAppContext, root: &Path) -> WindowHandle<Workbench> {
@@ -218,6 +220,8 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
             "-",
             "Delete…",
             "-",
+            "Reload from Disk",
+            "-",
             "Mark Directory As"
         ]]
     );
@@ -278,7 +282,7 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
     press(cx, window, "up");
     assert_eq!(
         tree(cx, window)["context_menu"]["levels"][0]["selected"],
-        json!(15)
+        json!(17)
     );
     press(cx, window, "right");
     let t = tree(cx, window);
@@ -320,6 +324,8 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
             "Refactor",
             "-",
             "Delete…",
+            "-",
+            "Reload from Disk",
             "-",
             "Mark File As"
         ]]
@@ -458,6 +464,8 @@ fn context_menu_from_the_keyboard(cx: &mut TestAppContext) {
             "Refactor",
             "-",
             "Delete…",
+            "-",
+            "Reload from Disk",
             "-",
             "Mark Directory As"
         ]]

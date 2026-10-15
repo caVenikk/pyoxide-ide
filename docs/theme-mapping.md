@@ -205,6 +205,8 @@ report says which parent was missing.
 | `ui.non-project-file` | `FileColor.Yellow` | Row background of files outside the project content, such as excluded folders (the reference's "Non-Project Files" file colour) |
 | `ui.run-widget-running` | `RunWidget.runningBackground` | Background of the run widget's Run button while its process runs |
 | `ui.run-widget-stop` | `RunWidget.stopBackground` | Background of the run widget's Stop button |
+| `ui.drag-and-drop-border` | `DragAndDrop.borderColor` | Border of the row that takes dragged files or folders (the reference's drop target rectangle) |
+| `ui.drag-and-drop-row` | `DragAndDrop.rowBackground` | Background of the row that takes dragged files or folders |
 
 ### Editor
 
@@ -322,6 +324,8 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.non-project-file` | `ui.surface-alt` |
 | `ui.run-widget-running` | `ui.success` |
 | `ui.run-widget-stop` | `ui.danger` |
+| `ui.drag-and-drop-border` | `ui.accent` |
+| `ui.drag-and-drop-row` | `ui.selection` |
 
 ## Text roles
 

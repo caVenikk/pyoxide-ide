@@ -327,6 +327,7 @@ impl Workbench {
                 |this, panel, event, window, cx| match event {
                     PanelEvent::OpenFile(path) => this.open_file(path.clone(), window, cx),
                     PanelEvent::FilesChanged(changes) => this.files_changed(changes, window, cx),
+                    PanelEvent::ReloadFromDisk(paths) => this.synchronize_paths(paths, cx),
                     PanelEvent::RulesChanged => {
                         if let Some(filter) = panel.read(cx).filter().cloned() {
                             this.project_files

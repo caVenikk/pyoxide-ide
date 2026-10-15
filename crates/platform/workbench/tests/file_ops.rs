@@ -264,6 +264,30 @@ impl H<'_> {
             .and_then(|c| c.text())
     }
 
+    /// Presses on the row of `from` and moves the pointer over the row of
+    /// `to` without letting go.
+    fn drag_over(&mut self, from: &str, to: &str) -> gpui::Point<gpui::Pixels> {
+        let centre = |h: &mut H, path: &str| {
+            h.draw();
+            let name: &'static str = Box::leak(format!("tree-row:{path}").into_boxed_str());
+            gpui::VisualTestContext::from_window(h.window.into(), h.cx)
+                .debug_bounds(name)
+                .unwrap_or_else(|| panic!("{path} is not drawn"))
+                .center()
+        };
+        let start = centre(self, from);
+        let end = centre(self, to);
+        let none = gpui::Modifiers::none();
+        let vcx = &mut gpui::VisualTestContext::from_window(self.window.into(), self.cx);
+        vcx.simulate_mouse_move(start, None, none);
+        vcx.simulate_mouse_down(start, gpui::MouseButton::Left, none);
+        let mid = gpui::point(start.x, (start.y + end.y) / 2.0);
+        vcx.simulate_mouse_move(mid, gpui::MouseButton::Left, none);
+        vcx.simulate_mouse_move(end, gpui::MouseButton::Left, none);
+        self.draw();
+        end
+    }
+
     /// Drags the row of `from` onto the row of `to` with the mouse.
     fn drag(&mut self, from: &str, to: &str, modifiers: gpui::Modifiers) {
         let centre = |h: &mut H, path: &str| {
@@ -640,6 +664,8 @@ fn the_context_menu_has_the_file_operations(cx: &mut TestAppContext) {
             "Refactor",
             "-",
             "Delete…",
+            "-",
+            "Reload from Disk",
             "-",
             "Mark File As"
         ]
@@ -1063,4 +1089,107 @@ fn the_file_watcher_does_not_take_tree_operations_for_external_changes(cx: &mut 
     h.settle("marker4.txt");
     assert_eq!(h.state()["dialog"], Value::Null);
     assert_eq!(h.tabs(), [("src/main.py".to_owned(), false)]);
+}
+
+#[gpui::test]
+fn reload_from_disk_looks_at_the_selection_again(cx: &mut TestAppContext) {
+    let mut h = setup(cx);
+    h.invoke("project.open-file", json!({ "path": "src/m.py" }));
+    h.select("src");
+    h.invoke("project.tree.expand", json!(null));
+    // Changed and created outside, with nothing watching.
+    std::fs::write(h.root.join("src/m.py"), "m = 4\n").unwrap();
+    std::fs::write(h.root.join("src/outside.py"), "").unwrap();
+    assert!(!h.rows().contains(&"src/outside.py".to_owned()));
+    // In the context menu after Delete…, before Mark Directory As.
+    h.invoke("project.tree.context-menu", json!(null));
+    let labels: Vec<String> = h.tree()["context_menu"]["levels"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["label"].as_str().unwrap_or("-").to_owned())
+        .collect();
+    let at = labels.iter().position(|l| l == "Reload from Disk").unwrap();
+    assert_eq!(labels[at - 2], "Delete…");
+    assert_eq!(labels[at + 2], "Mark Directory As");
+    h.invoke("menu.cancel", json!(null));
+    h.invoke("project.tree.reload-from-disk", json!(null));
+    let s = h.state();
+    assert!(
+        s["tree"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["path"] == json!("src/outside.py")),
+        "the folder is listed again"
+    );
+    assert_eq!(
+        s["notice"],
+        json!("File synchronization completed successfully.")
+    );
+    let editor = h
+        .window
+        .read_with(h.cx, |w, _| w.active_editor().cloned())
+        .unwrap()
+        .unwrap();
+    assert_eq!(h.cx.update(|cx| editor.read(cx).text()), "m = 4\n");
+    // A file elsewhere is not looked at.
+    std::fs::write(h.root.join("app.py"), "a = 2\n").unwrap();
+    h.invoke("project.open-file", json!({ "path": "app.py" }));
+    std::fs::write(h.root.join("app.py"), "a = 3\n").unwrap();
+    h.invoke("project.tree.reload-from-disk", json!({ "paths": ["src"] }));
+    let editor = h
+        .window
+        .read_with(h.cx, |w, _| w.active_editor().cloned())
+        .unwrap()
+        .unwrap();
+    assert_eq!(h.cx.update(|cx| editor.read(cx).text()), "a = 2\n");
+    h.invoke(
+        "project.tree.reload-from-disk",
+        json!({ "paths": ["app.py"] }),
+    );
+    assert_eq!(h.cx.update(|cx| editor.read(cx).text()), "a = 3\n");
+}
+
+#[gpui::test]
+fn the_drop_target_is_the_row_under_the_pointer(cx: &mut TestAppContext) {
+    let mut h = setup(cx);
+    h.select("src");
+    h.invoke("project.tree.expand", json!(null));
+    let end = h.drag_over("notes.txt", "src/pkg");
+    assert_eq!(h.tree()["drop_target"], json!("src/pkg"));
+    // The dragged row's image follows the pointer.
+    h.draw();
+    assert!(
+        gpui::VisualTestContext::from_window(h.window.into(), h.cx)
+            .debug_bounds("tree-drag-image")
+            .is_some()
+    );
+    // Onto a file: that row (its folder takes the files).
+    let over_file = {
+        let name = "tree-row:src/m.py";
+        h.draw();
+        gpui::VisualTestContext::from_window(h.window.into(), h.cx)
+            .debug_bounds(name)
+            .unwrap()
+            .center()
+    };
+    gpui::VisualTestContext::from_window(h.window.into(), h.cx).simulate_mouse_move(
+        over_file,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(h.tree()["drop_target"], json!("src/m.py"));
+    gpui::VisualTestContext::from_window(h.window.into(), h.cx).simulate_mouse_up(
+        end,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(h.tree()["drop_target"], Value::Null, "no drag: no target");
+    h.press("escape");
+    // A folder over itself or inside itself: no target.
+    h.drag_over("src", "src/pkg");
+    assert_eq!(h.tree()["drop_target"], Value::Null);
 }
