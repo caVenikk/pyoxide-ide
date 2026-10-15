@@ -34,7 +34,7 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 50%** `██████████░░░░░░░░░░`
+**Overall parity: 52%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -43,12 +43,12 @@ the same engine.
 | editor | 50% `█████░░░░░` | 2 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 21% `██░░░░░░░░` | 1 | 0 | 4 |
+| run-debug | 32% `███░░░░░░░` | 1 | 1 | 3 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 50% `█████░░░░░` | 0 | 9 | 0 |
+| python-env | 55% `██████░░░░` | 1 | 8 | 0 |
 
 Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
 <!-- progress:end -->

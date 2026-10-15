@@ -343,6 +343,7 @@ impl TypeEngineWidget {
             title: Some(POPUP_TITLE.into()),
             speed_search: false,
             selected,
+            ..PopupOptions::default()
         };
         let menu = ContextMenu::popup(items, options, window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {

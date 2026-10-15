@@ -50,6 +50,15 @@ Platform (`crates/platform/`, language-agnostic):
   FSEvents, inotify, ReadDirectoryChangesW) for the project folder,
   gathered into batches of changed paths with a hint each and a rescan
   flag when events were lost.
+- `run-config`: run configurations without a toolkit (ADR 0012): the
+  language-neutral model (common settings, environment variables with
+  shared or personal values, options per type), the list with the
+  selection, the reference's order, temporary ones, pinned ones and the
+  history; storage in `.oxide/run/` (shared) and the personal project
+  state; the one-time import of the reference IDE's configurations
+  (`.idea/workspace.xml`, `.idea/runConfigurations`, `*.run.xml`) with
+  importers per type; the forms the Run/Debug Configurations dialog
+  draws (`TypeEditor`); the Shell Script type.
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching

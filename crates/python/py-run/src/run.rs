@@ -32,8 +32,17 @@ impl UvRun {
     }
 }
 
-/// A Python script run: the inputs of the reference's Python run
-/// configuration that "Current File" uses.
+/// What a run starts: a script file or a module (`-m`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A script, an absolute path.
+    Script(PathBuf),
+    /// A module by its qualified name (`MODULE_MODE`).
+    Module(String),
+}
+
+/// A Python run: the inputs of the reference's Python run configuration
+/// (`PythonRunConfiguration`, `PythonScriptCommandLineState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PythonRun {
     /// The interpreter (for a virtual environment its `bin/python` or
@@ -41,8 +50,8 @@ pub struct PythonRun {
     pub python: PathBuf,
     /// Run through `uv run`; `None` runs the interpreter directly.
     pub uv: Option<UvRun>,
-    /// The script, an absolute path.
-    pub script: PathBuf,
+    /// The script or module.
+    pub target: Target,
     /// Arguments after the script ("Script parameters"; empty for Current
     /// File).
     pub script_args: Vec<OsString>,
@@ -80,7 +89,7 @@ impl PythonRun {
         PythonRun {
             python: python.into(),
             uv: None,
-            script,
+            target: Target::Script(script),
             script_args: Vec::new(),
             interpreter_options: Vec::new(),
             working_dir,
@@ -127,7 +136,13 @@ impl PythonRun {
             None => self.python.clone(),
         };
         args.extend(self.interpreter_options.iter().cloned());
-        args.push(self.script.clone().into_os_string());
+        match &self.target {
+            Target::Script(script) => args.push(script.clone().into_os_string()),
+            Target::Module(module) => {
+                args.push("-m".into());
+                args.push(module.into());
+            }
+        }
         args.extend(self.script_args.iter().cloned());
 
         let mut env = Env::default();

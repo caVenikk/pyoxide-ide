@@ -1,6 +1,8 @@
 //! A run provider for tests: runs `.py` files as shell scripts (the
 //! script comes from [`set_script`], not from the file), with a link filter
-//! for `at <path>:<line>` and the URL filter.
+//! for `at <path>:<line>` and the URL filter. Its run configuration type,
+//! "Script" (the reference's `ScriptType` in test `.idea` folders), runs
+//! the configuration's `COMMAND` the same way.
 
 #![allow(dead_code)]
 
@@ -12,6 +14,8 @@ use std::time::Duration;
 use console::{Link, LinkFilter, LinkTarget};
 use gpui::{App, Task, TestAppContext};
 use process::CommandLine;
+use run_config::form::{self, Field, FieldKind, OptionItem, TypeEditor};
+use run_config::{IdeaConfiguration, Importer, RunConfiguration, Storage, TypeInfo};
 use ui::icons::IconName;
 use workbench::{RunHook, RunProvider, RunRequest, RunSpec};
 
@@ -92,13 +96,181 @@ impl RunProvider for ShellRunner {
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        Task::ready(Ok(RunSpec {
+        let display = format!("{} ", command.display());
+        Task::ready(Ok(RunSpec::new(
             title,
-            icon: IconName::RUN,
-            display: format!("{} ", command.display()),
+            IconName::RUN,
             command,
-            link_filters: vec![Arc::new(AtFilter), Arc::new(console::UrlFilter)],
-        }))
+            display,
+            vec![Arc::new(AtFilter), Arc::new(console::UrlFilter)],
+        )))
+    }
+
+    fn configuration_types(&self) -> Vec<TypeInfo> {
+        vec![SCRIPT_TYPE]
+    }
+
+    fn importers(&self) -> Vec<Arc<dyn Importer>> {
+        vec![Arc::new(ScriptImporter)]
+    }
+
+    fn editors(&self) -> Vec<Arc<dyn TypeEditor>> {
+        vec![Arc::new(ScriptEditor)]
+    }
+
+    /// A `.py` file runs from its context as a "Script" configuration named
+    /// after the file, without a command: it runs the script set when it
+    /// runs, as the file would.
+    fn context_configuration(&self, file: &Path, root: &Path) -> Option<RunConfiguration> {
+        if file.extension().is_none_or(|e| e != "py") {
+            return None;
+        }
+        let relative = file.strip_prefix(root).ok()?;
+        let mut config =
+            ScriptEditor.create(&file.file_stem()?.to_string_lossy(), Storage::Personal);
+        config.name_is_generated = true;
+        config.set_str("file", &relative.to_string_lossy().replace('\\', "/"));
+        Some(config)
+    }
+
+    fn same_context(&self, existing: &RunConfiguration, context: &RunConfiguration) -> bool {
+        existing.type_id == context.type_id
+            && existing.str_option("file") == context.str_option("file")
+    }
+
+    fn prepare_configuration(
+        &self,
+        request: RunRequest,
+        _: &mut App,
+    ) -> Task<Result<RunSpec, String>> {
+        let config = request.configuration.clone().expect("a configuration");
+        let script = match config.str_option("command") {
+            "" => SCRIPT.with(|s| s.borrow().clone()),
+            command => command.to_owned(),
+        };
+        let command = if cfg!(windows) {
+            CommandLine::new("cmd").args(["/V:ON", "/C", &script])
+        } else {
+            CommandLine::new("/bin/sh").args(["-c", &script])
+        };
+        let mut command = command;
+        command.cwd = request.project_root.clone();
+        for (name, value) in config.env_values() {
+            command = command.with_env(name, value);
+        }
+        let display = format!("{} ", command.display());
+        Task::ready(Ok(RunSpec::new(
+            config.name.clone(),
+            IconName::RUN,
+            command,
+            display,
+            vec![Arc::new(console::UrlFilter)],
+        )))
+    }
+}
+
+/// The test product's run configuration type.
+pub const SCRIPT_TYPE: TypeInfo = TypeInfo {
+    id: "script",
+    name: "Script",
+    icon: "run/run",
+    reference_id: "ScriptType",
+    allow_parallel: false,
+};
+
+/// The form of the "Script" type: its command and its variables.
+pub struct ScriptEditor;
+
+impl TypeEditor for ScriptEditor {
+    fn type_id(&self) -> &'static str {
+        "script"
+    }
+
+    fn create(&self, name: &str, storage: Storage) -> RunConfiguration {
+        RunConfiguration::new("script", name, storage)
+    }
+
+    fn fields(
+        &self,
+        config: &RunConfiguration,
+        _: &std::collections::BTreeSet<String>,
+    ) -> Vec<Field> {
+        vec![
+            Field::new(
+                "command",
+                "Command:",
+                FieldKind::Text,
+                config.str_option("command"),
+            ),
+            Field::new(
+                form::common::ENV,
+                "Environment variables:",
+                FieldKind::Env,
+                form::env_text(&config.env),
+            ),
+        ]
+    }
+
+    fn options(
+        &self,
+        config: &RunConfiguration,
+        _: &std::collections::BTreeSet<String>,
+    ) -> Vec<OptionItem> {
+        form::common_options(config, false)
+    }
+
+    fn set(&self, config: &mut RunConfiguration, field: &str, value: &str) -> bool {
+        if field != "command" {
+            return false;
+        }
+        config.set_str("command", value);
+        true
+    }
+
+    fn toggle(
+        &self,
+        config: &mut RunConfiguration,
+        option: &str,
+        _: &mut std::collections::BTreeSet<String>,
+    ) {
+        form::toggle_common(config, option, false);
+    }
+
+    fn validate(&self, config: &RunConfiguration) -> Option<String> {
+        config
+            .str_option("command")
+            .is_empty()
+            .then(|| "Please specify a command".to_owned())
+    }
+}
+
+/// Imports the reference's `ScriptType` configurations: `COMMAND` and the
+/// variables.
+struct ScriptImporter;
+
+impl Importer for ScriptImporter {
+    fn type_name(&self, reference_type: &str) -> Option<&'static str> {
+        (reference_type == "ScriptType").then_some("Script")
+    }
+
+    fn convert(
+        &self,
+        idea: &IdeaConfiguration<'_>,
+        _: &Path,
+        config: &mut RunConfiguration,
+    ) -> bool {
+        if idea.type_id() != "ScriptType" {
+            return false;
+        }
+        config.type_id = "script".into();
+        config.set_str("command", idea.field("COMMAND").unwrap_or(""));
+        let shared = config.is_shared();
+        config.env = idea
+            .envs()
+            .into_iter()
+            .map(|(n, v)| run_config::EnvVar::new(n, v, shared))
+            .collect();
+        true
     }
 }
 

@@ -59,6 +59,99 @@ pub fn for_project(root: &Path, cx: &App) -> Task<Option<SelectedInterpreter>> {
     })
 }
 
+/// How a run configuration names its interpreter: by its name in the
+/// reference IDE (`SDK_NAME`) and by path (`SDK_HOME`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfiguredInterpreter {
+    pub name: String,
+    pub path: Option<PathBuf>,
+}
+
+/// The interpreter a run configuration runs with, looked up off the UI
+/// thread: the project's (`None`), or the configured one as the reference
+/// resolves it (`AbstractPythonRunConfiguration.getSdk`): by name among
+/// the project's interpreters and then in the reference's SDK table, else
+/// by path. A configured interpreter that is not found falls back to the
+/// project's; the second value then names the one that was not found (its
+/// SDK name, else its path).
+pub fn for_run(
+    root: &Path,
+    configured: Option<ConfiguredInterpreter>,
+    cx: &App,
+) -> Task<(Option<SelectedInterpreter>, Option<String>)> {
+    let root = root.to_owned();
+    let chosen = chosen(&root, cx);
+    cx.background_spawn(async move {
+        let found = scan(&root, chosen.as_deref());
+        let project = || found.selected.as_ref().map(|s| s.to_selected(&root));
+        let Some(configured) = configured else {
+            return (project(), None);
+        };
+        if let Some(selected) = find_configured(&root, &found, &configured, &pycharm_config_dirs())
+        {
+            return (Some(selected), None);
+        }
+        let what = if configured.name.is_empty() {
+            configured
+                .path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        } else {
+            configured.name.clone()
+        };
+        (project(), Some(what))
+    })
+}
+
+/// A configured interpreter among the project's (by name), in the
+/// reference's SDK table of the configuration directories (by name), or
+/// by path.
+fn find_configured(
+    root: &Path,
+    found: &ProjectInterpreters,
+    configured: &ConfiguredInterpreter,
+    config_dirs: &[PathBuf],
+) -> Option<SelectedInterpreter> {
+    let by_path = |python: &Path| -> SelectedInterpreter {
+        let item = match py_env::venv::inspect_python(python) {
+            Some(env) => found
+                .found
+                .iter()
+                .find(|f| same_dir(&f.dir, &env.dir))
+                .cloned()
+                .unwrap_or_else(|| FoundInterpreter::from_env(&env)),
+            None => found
+                .found
+                .iter()
+                .find(|f| same_dir(&f.python, python))
+                .cloned()
+                .unwrap_or_else(|| FoundInterpreter::bare(python)),
+        };
+        item.to_selected(root)
+    };
+    if !configured.name.is_empty() {
+        if let Some(item) = found.found.iter().find(|f| f.name == configured.name) {
+            return Some(item.to_selected(root));
+        }
+        let home = config_dirs.iter().find_map(|dir| {
+            project::idea::read_sdk_table(&dir.join("options").join("jdk.table.xml"))
+                .into_iter()
+                .find(|e| e.name == configured.name && e.type_id == PYTHON_SDK)
+                .and_then(|e| e.home)
+                .filter(|h| h.is_file())
+        });
+        if let Some(home) = home {
+            return Some(by_path(&home));
+        }
+    }
+    configured
+        .path
+        .as_deref()
+        .filter(|p| p.is_file())
+        .map(by_path)
+}
+
 /// Registers the interpreter widget's icons and commands (the product's
 /// `init`).
 pub fn init(cx: &mut App) {
@@ -1001,5 +1094,52 @@ mod tests {
             env_dir_of(Path::new("/p/.venv/bin/python3.13")),
             Path::new("/p/.venv")
         );
+    }
+
+    /// A run configuration's interpreter: by the reference's name among
+    /// the project's interpreters, then in the reference's SDK table, then
+    /// by path; nothing when none resolves.
+    #[test]
+    fn a_configured_interpreter_is_found_by_name_or_path() {
+        let (dir, root) = project("demo");
+        std::fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let uv = venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.14\n");
+        let plain = venv(&root.join("venv"), "version = 3.12.13\n");
+        let found = scan(&root, None);
+        let config = dir.path().join("PyCharm2026.2");
+        sdk_table(&config, &[("uv (demo)", &uv)]);
+        let configs = [config];
+        let by = |name: &str, path: Option<&Path>| {
+            find_configured(
+                &root,
+                &found,
+                &ConfiguredInterpreter {
+                    name: name.into(),
+                    path: path.map(Path::to_path_buf),
+                },
+                &configs,
+            )
+        };
+        // A name of the project's interpreters (path-derived here).
+        let name = found
+            .found
+            .iter()
+            .find(|f| f.python == plain)
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(by(&name, None).unwrap().python, plain);
+        // The reference's SDK table: a uv environment of the uv project.
+        let s = by("uv (demo)", None).unwrap();
+        assert_eq!(s.python, uv);
+        assert_eq!(s.uv_project.as_deref(), Some("demo"));
+        // By path, when the name does not resolve.
+        assert_eq!(by("gone", Some(&plain)).unwrap().python, plain);
+        assert_eq!(by("gone", Some(&root.join("missing/python"))), None);
+        assert_eq!(by("", None), None);
     }
 }

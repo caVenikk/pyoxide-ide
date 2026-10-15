@@ -23,9 +23,10 @@
   running one?", a "Do not show this dialog in the future" check box and
   [Cancel] [Stop and Rerun] (the default); Stop and Rerun stops the
   process and runs the file again in the same tab.
-- Step 5: the dropdown lists "Current File", a separator and "Edit
-  Configurations…" (disabled until run configurations exist); More
-  Actions offers "Run with Parameters…" (disabled likewise).
+- Step 5: in a project without run configurations the dropdown lists
+  "Current File" (with Run while the file can run), a separator and "Edit
+  Configurations…" (with configurations see run-configurations.md); More
+  Actions offers "Run with Parameters…" (disabled for now).
 
 ## Commands
 `run.run`, `run.stop {"tab": n}`, `run.stop-all`, `run.configurations`,

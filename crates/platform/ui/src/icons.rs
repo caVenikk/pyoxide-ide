@@ -129,6 +129,12 @@ impl IconName {
     pub const SETTINGS_SMALL: Self = Self("general/settings");
     pub const ERROR: Self = Self("status/error");
     pub const ERROR_MARK: Self = Self("nodes/errorMark");
+    // The toolbar of the Run/Debug Configurations dialog.
+    pub const REMOVE: Self = Self("general/remove");
+    pub const COPY: Self = Self("general/copy");
+    pub const SAVE: Self = Self("general/save");
+    pub const NEW_FOLDER: Self = Self("actions/newFolder");
+    pub const SORT: Self = Self("objectBrowser/sortAlphabetically");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -158,7 +164,7 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
-        "actions/checked", "actions/inSelection", "actions/stopAndRestart",
+        "actions/checked", "actions/inSelection", "actions/newFolder", "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/config", "fileTypes/css",
         "fileTypes/csv", "fileTypes/docker", "fileTypes/html", "fileTypes/image",
@@ -167,11 +173,12 @@ platform_icons! {
         "fileTypes/unknown", "fileTypes/xml", "fileTypes/yaml",
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
-        "general/collapseAll", "general/delete", "general/down", "general/expandAll", "general/filter",
+        "general/collapseAll", "general/copy", "general/delete", "general/down", "general/expandAll", "general/filter",
         "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/pin",
-        "general/previewHorizontally", "general/print", "general/questionDialog", "general/scrollDown",
+        "general/previewHorizontally", "general/print", "general/questionDialog", "general/remove",
+        "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/softWrap",
         "general/showAsTree", "general/up",
@@ -183,6 +190,7 @@ platform_icons! {
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
         "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/type", "nodes/variable", "nodes/word",
+        "objectBrowser/sortAlphabetically",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
         "status/error",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",

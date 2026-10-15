@@ -21,6 +21,7 @@ process.workspace = true
 project.workspace = true
 project-search.workspace = true
 regex.workspace = true
+run-config.workspace = true
 search.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -134,9 +134,78 @@ const SEARCH_MARGIN_X: f32 = 12.0;
 const SEARCH_TOP: f32 = 4.0;
 const SEARCH_LEFT: f32 = 8.0;
 const SEARCH_BOTTOM: f32 = 8.0;
+/// A row's buttons (`ActionButton` in a list row) and the gap before a
+/// secondary text (`emptyLeft(6)`).
+const INLINE_BUTTON: f32 = 20.0;
+const SECONDARY_GAP: f32 = 6.0;
 /// Characters besides letters and digits that speed search takes
 /// (`SpeedSearch.PUNCTUATION_MARKS`); a space only after the first char.
 const PUNCTUATION_MARKS: &str = "*_-+\"'/.#$>: ,;?!@%^&";
+
+/// What a row can have besides its label (the reference's list popup
+/// rows): a secondary text after the label, a faded icon, buttons at its
+/// end shown while it is selected, and whether it shows only while the
+/// speed search filters.
+#[derive(Default)]
+pub struct RowExtra {
+    /// Grey text right after the label (`secondaryLabel`,
+    /// `MenuItem.acceleratorForeground`).
+    pub secondary: Option<SharedString>,
+    /// Opacity of the icon (a temporary run configuration's is 0.45).
+    pub icon_alpha: Option<f32>,
+    /// Buttons at the end of the row (`ActionUtil.INLINE_ACTIONS`).
+    pub inline: Vec<InlineButton>,
+    /// Shown only while the speed search filters (a row hidden behind a
+    /// toggle, or a duplicate found by search).
+    pub hidden: bool,
+}
+
+impl Clone for RowExtra {
+    fn clone(&self) -> Self {
+        Self {
+            secondary: self.secondary.clone(),
+            icon_alpha: self.icon_alpha,
+            inline: self.inline.clone(),
+            hidden: self.hidden,
+        }
+    }
+}
+
+/// A button at the end of a row: runs its action (where the focus was)
+/// and closes the menu. Without an action it is drawn disabled.
+pub struct InlineButton {
+    pub icon: IconName,
+    pub action: Option<Box<dyn Action>>,
+    pub tooltip: SharedString,
+}
+
+impl InlineButton {
+    pub fn new(icon: IconName, tooltip: impl Into<SharedString>, action: impl Action) -> Self {
+        Self {
+            icon,
+            action: Some(Box::new(action)),
+            tooltip: tooltip.into(),
+        }
+    }
+
+    pub fn disabled(icon: IconName, tooltip: impl Into<SharedString>) -> Self {
+        Self {
+            icon,
+            action: None,
+            tooltip: tooltip.into(),
+        }
+    }
+}
+
+impl Clone for InlineButton {
+    fn clone(&self) -> Self {
+        Self {
+            icon: self.icon,
+            action: self.action.as_ref().map(|a| a.boxed_clone()),
+            tooltip: self.tooltip.clone(),
+        }
+    }
+}
 
 /// One row of a menu.
 pub enum MenuItem {
@@ -150,14 +219,23 @@ pub enum MenuItem {
         /// What the item does, for agents and tests (the reference keeps it
         /// in the action's presentation).
         description: Option<SharedString>,
+        extra: RowExtra,
     },
-    /// Opens `items` next to it.
+    /// Opens `items` next to it while it is selected; with an `action`
+    /// (the reference's "perform group") a click or Enter runs the action
+    /// instead of opening the submenu.
     Submenu {
         label: SharedString,
         icon: Option<IconName>,
         items: Vec<MenuItem>,
         enabled: bool,
+        action: Option<Box<dyn Action>>,
+        description: Option<SharedString>,
+        extra: RowExtra,
     },
+    /// A separator with a title (`Separator.create(text)`): "Pinned",
+    /// "Recent Configurations".
+    Header(SharedString),
     Separator,
 }
 
@@ -170,24 +248,33 @@ impl Clone for MenuItem {
                 action,
                 enabled,
                 description,
+                extra,
             } => Self::Action {
                 label: label.clone(),
                 icon: *icon,
                 action: action.as_ref().map(|a| a.boxed_clone()),
                 enabled: *enabled,
                 description: description.clone(),
+                extra: extra.clone(),
             },
             Self::Submenu {
                 label,
                 icon,
                 items,
                 enabled,
+                action,
+                description,
+                extra,
             } => Self::Submenu {
                 label: label.clone(),
                 icon: *icon,
                 items: items.clone(),
                 enabled: *enabled,
+                action: action.as_ref().map(|a| a.boxed_clone()),
+                description: description.clone(),
+                extra: extra.clone(),
             },
+            Self::Header(label) => Self::Header(label.clone()),
             Self::Separator => Self::Separator,
         }
     }
@@ -201,6 +288,7 @@ impl std::fmt::Debug for MenuItem {
                 None => write!(f, "Action({label:?})"),
             },
             Self::Submenu { label, items, .. } => write!(f, "Submenu({label:?}, {items:?})"),
+            Self::Header(label) => write!(f, "Header({label:?})"),
             Self::Separator => f.write_str("Separator"),
         }
     }
@@ -214,6 +302,7 @@ impl MenuItem {
             action: Some(Box::new(action)),
             enabled: true,
             description: None,
+            extra: RowExtra::default(),
         }
     }
 
@@ -226,6 +315,7 @@ impl MenuItem {
             action: None,
             enabled: false,
             description: None,
+            extra: RowExtra::default(),
         }
     }
 
@@ -235,6 +325,9 @@ impl MenuItem {
             icon: None,
             items,
             enabled: true,
+            action: None,
+            description: None,
+            extra: RowExtra::default(),
         }
     }
 
@@ -242,10 +335,15 @@ impl MenuItem {
         Self::Separator
     }
 
+    /// A separator with a title.
+    pub fn header(label: impl Into<SharedString>) -> Self {
+        Self::Header(label.into())
+    }
+
     pub fn icon(mut self, name: IconName) -> Self {
         match &mut self {
             Self::Action { icon, .. } | Self::Submenu { icon, .. } => *icon = Some(name),
-            Self::Separator => {}
+            Self::Header(_) | Self::Separator => {}
         }
         self
     }
@@ -253,15 +351,59 @@ impl MenuItem {
     pub fn enabled(mut self, on: bool) -> Self {
         match &mut self {
             Self::Action { enabled, .. } | Self::Submenu { enabled, .. } => *enabled = on,
-            Self::Separator => {}
+            Self::Header(_) | Self::Separator => {}
         }
         self
     }
 
     /// What the item does (see [`MenuItem::Action`]).
     pub fn description(mut self, text: impl Into<SharedString>) -> Self {
-        if let Self::Action { description, .. } = &mut self {
-            *description = Some(text.into());
+        match &mut self {
+            Self::Action { description, .. } | Self::Submenu { description, .. } => {
+                *description = Some(text.into())
+            }
+            Self::Header(_) | Self::Separator => {}
+        }
+        self
+    }
+
+    /// A submenu row that runs `action` when it is clicked or chosen with
+    /// Enter (its submenu opens while it is selected).
+    pub fn perform(mut self, run: impl Action) -> Self {
+        if let Self::Submenu { action, .. } = &mut self {
+            *action = Some(Box::new(run));
+        }
+        self
+    }
+
+    /// Grey text after the label.
+    pub fn secondary(mut self, text: impl Into<SharedString>) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.secondary = Some(text.into());
+        }
+        self
+    }
+
+    /// The icon's opacity.
+    pub fn icon_alpha(mut self, alpha: f32) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.icon_alpha = Some(alpha);
+        }
+        self
+    }
+
+    /// A button at the end of the row.
+    pub fn inline(mut self, button: InlineButton) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.inline.push(button);
+        }
+        self
+    }
+
+    /// Shown only while the speed search filters.
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.hidden = hidden;
         }
         self
     }
@@ -269,14 +411,55 @@ impl MenuItem {
     pub fn label(&self) -> Option<&SharedString> {
         match self {
             Self::Action { label, .. } | Self::Submenu { label, .. } => Some(label),
-            Self::Separator => None,
+            Self::Header(_) | Self::Separator => None,
         }
+    }
+
+    fn extra(&self) -> Option<&RowExtra> {
+        match self {
+            Self::Action { extra, .. } | Self::Submenu { extra, .. } => Some(extra),
+            Self::Header(_) | Self::Separator => None,
+        }
+    }
+
+    fn extra_mut(&mut self) -> Option<&mut RowExtra> {
+        match self {
+            Self::Action { extra, .. } | Self::Submenu { extra, .. } => Some(extra),
+            Self::Header(_) | Self::Separator => None,
+        }
+    }
+
+    fn is_hidden(&self) -> bool {
+        self.extra().is_some_and(|e| e.hidden)
     }
 
     fn icon_name(&self) -> Option<IconName> {
         match self {
             Self::Action { icon, .. } | Self::Submenu { icon, .. } => *icon,
-            Self::Separator => None,
+            Self::Header(_) | Self::Separator => None,
+        }
+    }
+
+    /// Has a submenu to open.
+    fn has_submenu(&self) -> bool {
+        matches!(self, Self::Submenu { items, .. } if !items.is_empty())
+    }
+
+    /// The action a click or Enter runs (a submenu row's only with
+    /// `perform`).
+    fn run_action(&self) -> Option<&dyn Action> {
+        match self {
+            Self::Action {
+                action: Some(action),
+                enabled: true,
+                ..
+            }
+            | Self::Submenu {
+                action: Some(action),
+                enabled: true,
+                ..
+            } => Some(action.as_ref()),
+            _ => None,
         }
     }
 
@@ -286,8 +469,13 @@ impl MenuItem {
             Self::Action {
                 enabled, action, ..
             } => *enabled && action.is_some(),
-            Self::Submenu { items, enabled, .. } => *enabled && !items.is_empty(),
-            Self::Separator => false,
+            Self::Submenu {
+                items,
+                enabled,
+                action,
+                ..
+            } => *enabled && (!items.is_empty() || action.is_some()),
+            Self::Header(_) | Self::Separator => false,
         }
     }
 
@@ -310,6 +498,10 @@ pub struct PopupOptions {
     /// condition); without one, or when it cannot be selected, the first
     /// row that can.
     pub selected: Option<usize>,
+    /// Narrowest and widest the popup is drawn (the run widget's dropdown:
+    /// 310 to 500).
+    pub min_width: Option<f32>,
+    pub max_width: Option<f32>,
 }
 
 /// An open context menu or list popup.
@@ -329,6 +521,8 @@ pub struct ContextMenu {
     /// ignored, as the reference builds it).
     filter: String,
     matcher: Option<Matcher>,
+    min_width: Option<f32>,
+    max_width: Option<f32>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -389,6 +583,8 @@ impl ContextMenu {
                 speed_search: options.speed_search,
                 filter: String::new(),
                 matcher: None,
+                min_width: options.min_width,
+                max_width: options.max_width,
                 _subscriptions: subscriptions,
             };
             if list {
@@ -428,7 +624,7 @@ impl ContextMenu {
         let mut items = self.items.as_slice();
         for selected in &self.selected[..level] {
             match selected.and_then(|i| items.get(i)) {
-                Some(MenuItem::Submenu { items: sub, .. }) => items = sub,
+                Some(MenuItem::Submenu { items: sub, .. }) if !sub.is_empty() => items = sub,
                 _ => return &[],
             }
         }
@@ -456,13 +652,16 @@ impl ContextMenu {
     fn shown(&self, level: usize) -> Vec<bool> {
         let items = self.level_items(level);
         if level > 0 || self.matcher.is_none() {
-            return vec![true; items.len()];
+            return items.iter().map(|i| !i.is_hidden()).collect();
         }
         let mut shown = vec![false; items.len()];
         let mut pending = None;
         let mut any = false;
         for (ix, item) in items.iter().enumerate() {
-            if let MenuItem::Separator = item {
+            if let MenuItem::Header(_) = item {
+                // Titles go while filtering; a line stays between groups.
+                pending = pending.or(Some(ix));
+            } else if let MenuItem::Separator = item {
                 pending = Some(ix);
             } else if self.matches(item) {
                 if let Some(sep) = pending.take()
@@ -499,10 +698,9 @@ impl ContextMenu {
         let upper = self.filter.to_uppercase();
         let shown = self.shown(0);
         let candidates = || {
-            self.items
-                .iter()
-                .enumerate()
-                .filter(|(ix, item)| shown[*ix] && !matches!(item, MenuItem::Separator))
+            self.items.iter().enumerate().filter(|(ix, item)| {
+                shown[*ix] && !matches!(item, MenuItem::Separator | MenuItem::Header(_))
+            })
         };
         let label = |item: &MenuItem| item.label().map(|l| l.to_uppercase()).unwrap_or_default();
         let best = if upper.is_empty() {
@@ -565,7 +763,7 @@ impl ContextMenu {
         if !item.selectable() {
             return;
         }
-        let submenu = matches!(item, MenuItem::Submenu { .. });
+        let submenu = item.has_submenu();
         self.selected.truncate(level + 1);
         self.selected[level] = Some(ix);
         if submenu {
@@ -609,10 +807,11 @@ impl ContextMenu {
         let Some(ix) = self.selected[level] else {
             return false;
         };
-        if !matches!(
-            self.level_items(level).get(ix),
-            Some(MenuItem::Submenu { .. })
-        ) {
+        if !self
+            .level_items(level)
+            .get(ix)
+            .is_some_and(MenuItem::has_submenu)
+        {
             return false;
         }
         self.select(level, ix, cx);
@@ -656,10 +855,8 @@ impl ContextMenu {
             None if level > 0 => self.step(1, cx),
             None => {}
             Some(ix) => {
-                if matches!(
-                    self.level_items(level).get(ix),
-                    Some(MenuItem::Submenu { .. })
-                ) {
+                let item = self.level_items(level).get(ix);
+                if item.is_some_and(|i| i.has_submenu() && i.run_action().is_none()) {
                     self.open_selected_submenu(cx);
                 } else {
                     self.activate(level, ix, window, cx);
@@ -674,17 +871,14 @@ impl ContextMenu {
         let Some(item) = self.level_items(level).get(ix) else {
             return;
         };
+        if let Some(action) = item.run_action() {
+            let action = action.boxed_clone();
+            self.dismiss(window, cx);
+            // The focus is back where it was; the action goes there.
+            window.dispatch_action(action, cx);
+            return;
+        }
         match item {
-            MenuItem::Action {
-                action: Some(action),
-                enabled: true,
-                ..
-            } => {
-                let action = action.boxed_clone();
-                self.dismiss(window, cx);
-                // The focus is back where it was; the action goes there.
-                window.dispatch_action(action, cx);
-            }
             MenuItem::Submenu { .. }
                 if self.selected.get(level + 1).is_none() || self.selected[level] != Some(ix) =>
             {
@@ -692,6 +886,30 @@ impl ContextMenu {
             }
             _ => {}
         }
+    }
+
+    /// Runs a row's button: closes the menu and dispatches its action where
+    /// the focus was.
+    fn run_inline(
+        &mut self,
+        level: usize,
+        ix: usize,
+        button: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(action) = self
+            .level_items(level)
+            .get(ix)
+            .and_then(|i| i.extra())
+            .and_then(|e| e.inline.get(button))
+            .and_then(|b| b.action.as_ref())
+            .map(|a| a.boxed_clone())
+        else {
+            return;
+        };
+        self.dismiss(window, cx);
+        window.dispatch_action(action, cx);
     }
 
     /// The open levels with their rows, for tests and agents.
@@ -706,6 +924,7 @@ impl ContextMenu {
                     .map(|(ix, item)| {
                         let mut row = match item {
                             MenuItem::Separator => json!({ "separator": true }),
+                            MenuItem::Header(label) => json!({ "header": label.as_ref() }),
                             MenuItem::Action {
                                 label,
                                 action,
@@ -717,12 +936,41 @@ impl ContextMenu {
                                 "command": action.as_ref().map(|a| a.name()),
                                 "description": description.as_ref().map(|d| d.as_ref()),
                             }),
-                            MenuItem::Submenu { label, .. } => json!({
+                            MenuItem::Submenu {
+                                label,
+                                action,
+                                description,
+                                ..
+                            } => json!({
                                 "label": label.as_ref(),
                                 "enabled": item.selectable(),
                                 "submenu": true,
+                                "command": action.as_ref().map(|a| a.name()),
+                                "description": description.as_ref().map(|d| d.as_ref()),
                             }),
                         };
+                        if let Some(extra) = item.extra() {
+                            if let Some(text) = &extra.secondary {
+                                row["secondary"] = json!(text.as_ref());
+                            }
+                            if let Some(alpha) = extra.icon_alpha {
+                                row["icon_alpha"] = json!(alpha);
+                            }
+                            if !extra.inline.is_empty() {
+                                row["inline"] = extra
+                                    .inline
+                                    .iter()
+                                    .map(|b| {
+                                        json!({
+                                            "tooltip": b.tooltip.as_ref(),
+                                            "icon": b.icon.0,
+                                            "enabled": b.action.is_some(),
+                                            "command": b.action.as_ref().map(|a| a.name()),
+                                        })
+                                    })
+                                    .collect();
+                            }
+                        }
                         if !shown[ix] {
                             row["hidden"] = json!(true);
                         }
@@ -760,6 +1008,32 @@ impl ContextMenu {
             .filter(|(ix, _)| shown[*ix])
             .map(|(ix, item)| {
                 let id = SharedString::from(format!("menu-{level}-{ix}"));
+                if let MenuItem::Header(title) = item {
+                    let selector = format!("menu-header:{title}");
+                    let first = !items[..ix].iter().enumerate().any(|(i, _)| shown[i]);
+                    return div()
+                        .id(id)
+                        .debug_selector(move || selector.clone())
+                        .flex()
+                        .flex_col()
+                        .justify_end()
+                        .h(px(item_height))
+                        .px(px(m.separator_x))
+                        .when(!first, |d| {
+                            d.child(div().flex_none().h(px(1.0)).w_full().bg(line))
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .flex()
+                                .items_center()
+                                .px(px(m.content_x))
+                                .text_color(disabled)
+                                .whitespace_nowrap()
+                                .child(title.clone()),
+                        )
+                        .into_any_element();
+                }
                 if let MenuItem::Separator = item {
                     let selector = format!("menu-separator-{level}-{ix}");
                     // A column, so that the line stretches across.
@@ -783,7 +1057,44 @@ impl ContextMenu {
                 let is_selected = selected == Some(ix);
                 let label = item.label().cloned().unwrap_or_default();
                 let selector = format!("menu-item:{label}");
-                let submenu = matches!(item, MenuItem::Submenu { .. });
+                let submenu = item.has_submenu();
+                let extra = item.extra();
+                let secondary = extra.and_then(|e| e.secondary.clone());
+                let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
+                let inline: Vec<AnyElement> = if is_selected {
+                    extra
+                        .map(|e| e.inline.as_slice())
+                        .unwrap_or(&[])
+                        .iter()
+                        .enumerate()
+                        .map(|(b, button)| {
+                            let enabled = button.action.is_some();
+                            let tooltip = button.tooltip.clone();
+                            let selector = format!("menu-inline:{tooltip}");
+                            div()
+                                .id(SharedString::from(format!("menu-inline-{level}-{ix}-{b}")))
+                                .debug_selector(move || selector.clone())
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .size(px(INLINE_BUTTON))
+                                .rounded(px(SELECTION_RADIUS))
+                                .when(!enabled, |d| d.opacity(crate::components::DISABLED_ALPHA))
+                                .child(Icon::new(button.icon))
+                                .tooltip(crate::components::Tooltip::text(tooltip, None))
+                                .when(enabled, |d| {
+                                    d.on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.run_inline(level, ix, b, window, cx);
+                                    }))
+                                })
+                                .into_any_element()
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 let fragments = match (&self.matcher, level) {
                     (Some(matcher), 0) => matcher.find(&label).unwrap_or_default(),
                     _ => Vec::new(),
@@ -811,10 +1122,29 @@ impl ContextMenu {
                                     div()
                                         .flex_none()
                                         .w(px(ICON + ICON_GAP))
+                                        .when(icon_alpha < 1.0, |d| d.opacity(icon_alpha))
                                         .children(item.icon_name().map(Icon::new)),
                                 )
                             })
-                            .child(div().flex_1().whitespace_nowrap().child(label))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .overflow_hidden()
+                                    .child(div().flex_none().whitespace_nowrap().child(label))
+                                    .children(secondary.map(|text| {
+                                        div()
+                                            .flex_none()
+                                            .pl(px(SECONDARY_GAP))
+                                            .whitespace_nowrap()
+                                            .text_color(disabled)
+                                            .child(text)
+                                    })),
+                            )
+                            .children(inline)
                             .child(
                                 div()
                                     .flex_none()
@@ -842,6 +1172,11 @@ impl ContextMenu {
             })
             .collect();
         let header = level == 0 && self.title.is_some();
+        let (min_width, max_width) = if level == 0 {
+            (self.min_width, self.max_width)
+        } else {
+            (None, None)
+        };
         let title = (level == 0).then(|| self.title.clone()).flatten();
         let search = (level == 0 && !self.filter.is_empty()).then(|| {
             div()
@@ -872,6 +1207,8 @@ impl ContextMenu {
             .occlude()
             .flex()
             .flex_col()
+            .when_some(min_width, |d, w| d.min_w(px(w)))
+            .when_some(max_width, |d, w| d.max_w(px(w)))
             .rounded(px(RADIUS))
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
@@ -1180,6 +1517,7 @@ mod tests {
                 title: Some("Python Interpreter".into()),
                 speed_search: true,
                 selected,
+                ..PopupOptions::default()
             };
             ContextMenu::popup(popup_items(), options, window, cx)
         })
@@ -1281,5 +1619,80 @@ mod tests {
         cx.simulate_input("s");
         assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "");
         assert_eq!(selected(&menu, cx), [None]);
+    }
+
+    fn rich_items() -> Vec<MenuItem> {
+        vec![
+            MenuItem::header("Pinned"),
+            MenuItem::submenu("alpha", vec![MenuItem::action("Third", Third)])
+                .perform(First)
+                .secondary("not supported yet")
+                .icon(IconName::RUN)
+                .icon_alpha(0.45)
+                .inline(InlineButton::new(IconName::RUN, "Run 'alpha'", Second))
+                .inline(InlineButton::disabled(IconName::DEBUG, "Debug 'alpha'")),
+            MenuItem::separator(),
+            MenuItem::action("beta", Second),
+            MenuItem::action("gamma", Third).hidden(true),
+        ]
+    }
+
+    fn rich(
+        cx: &mut TestAppContext,
+    ) -> (Entity<Origin>, Entity<ContextMenu>, &mut VisualTestContext) {
+        open_with(cx, |window, cx| {
+            let options = PopupOptions {
+                speed_search: true,
+                min_width: Some(310.0),
+                max_width: Some(500.0),
+                ..PopupOptions::default()
+            };
+            ContextMenu::popup(rich_items(), options, window, cx)
+        })
+    }
+
+    /// Titled separators, secondary texts, faded icons, row buttons, rows
+    /// that run an action and open a submenu, rows shown only while
+    /// filtering.
+    #[gpui::test]
+    fn rows_of_a_list_popup_with_extras(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = rich(cx);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        let items = &state["levels"][0]["items"];
+        assert_eq!(items[0]["header"], json!("Pinned"));
+        assert_eq!(items[1]["secondary"], json!("not supported yet"));
+        let alpha = items[1]["icon_alpha"].as_f64().unwrap();
+        assert!((alpha - 0.45).abs() < 1e-6, "{alpha}");
+        assert_eq!(items[1]["command"], json!("menu_test::First"));
+        assert_eq!(items[1]["inline"][0]["tooltip"], json!("Run 'alpha'"));
+        assert_eq!(items[1]["inline"][1]["enabled"], json!(false));
+        assert_eq!(items[4]["hidden"], json!(true));
+        assert_eq!(shown_labels(&menu, cx), ["---", "alpha", "---", "beta"]);
+        // The first row that can be chosen is selected; its buttons show.
+        assert_eq!(selected(&menu, cx), [Some(1)]);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear());
+        assert!(cx.debug_bounds("menu-inline:Run 'alpha'").is_some());
+        assert!(cx.debug_bounds("menu-header:Pinned").is_some());
+        // Right opens its submenu; Enter on the row runs its own action.
+        cx.dispatch_action(OpenSubmenu);
+        assert_eq!(selected(&menu, cx), [Some(1), Some(0)]);
+        cx.dispatch_action(CloseSubmenu);
+        // A hidden row shows while filtering.
+        cx.simulate_input("gam");
+        assert_eq!(shown_labels(&menu, cx), ["gamma"]);
+        cx.dispatch_action(Cancel);
+        cx.dispatch_action(Confirm);
+        cx.run_until_parked();
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["first"]);
+    }
+
+    #[gpui::test]
+    fn a_row_button_runs_its_action(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = rich(cx);
+        cx.update(|window, cx| menu.update(cx, |m, cx| m.run_inline(0, 1, 0, window, cx)));
+        cx.run_until_parked();
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
+        assert!(menu.read_with(cx, |m, _| m.is_dismissed()));
     }
 }

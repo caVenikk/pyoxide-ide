@@ -5250,6 +5250,8 @@ dependencies = [
  "process",
  "py-env",
  "regex",
+ "run-config",
+ "serde_json",
  "tempfile",
 ]
 
@@ -5294,6 +5296,7 @@ dependencies = [
  "py-lsp",
  "py-run",
  "py-syntax",
+ "run-config",
  "serde_json",
  "tempfile",
  "text",
@@ -5792,6 +5795,21 @@ checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "run-config"
+version = "0.0.1"
+dependencies = [
+ "process",
+ "project",
+ "quick-xml 0.42.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]
@@ -8693,6 +8711,7 @@ dependencies = [
  "project-search",
  "raw-window-handle",
  "regex",
+ "run-config",
  "search",
  "serde",
  "serde_json",

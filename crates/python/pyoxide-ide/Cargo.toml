@@ -29,6 +29,7 @@ py-env.workspace = true
 py-lsp.workspace = true
 py-run.workspace = true
 py-syntax.workspace = true
+run-config.workspace = true
 serde_json.workspace = true
 themes.workspace = true
 ui.workspace = true

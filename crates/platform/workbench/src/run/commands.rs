@@ -10,7 +10,7 @@ ui::ui_commands! {
         "Runs the selected run configuration; with Current File selected, the file in the editor.";
     /// Run the file in the editor.
     RunCurrentFile => "run.current-file", "Run Context Configuration",
-        "Runs the file in the editor (the reference's context configuration).";
+        "Runs the file in the editor with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.";
     /// Stop a run.
     Stop { tab: Option<usize> } => "run.stop", "Stop",
         "Stops the process of a Run tab (zero-based), or of the only running one; a second Stop kills it. With several running and no tab, offers them in a popup.",
@@ -30,6 +30,49 @@ ui::ui_commands! {
     /// Describe the runs.
     RunState => "run.state", "Run State",
         "Returns the Run tool window's tabs, their processes, consoles and the run widget as JSON.";
+}
+
+ui::ui_commands! {
+    CONFIGURATION_COMMANDS, scope = "Workbench";
+    /// Select a run configuration.
+    SelectConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.select", "Select Run Configuration",
+        "Makes a run configuration the selected one, by name (and type id when two types have the name); without a name, Current File.",
+        r#"{"name": "server"}"#;
+    /// Run a run configuration.
+    LaunchConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.run", "Run Configuration",
+        "Runs a run configuration by name (and type id when two types have the name), or the selected one.",
+        r#"{"name": "server"}"#;
+    /// Open the Run/Debug Configurations dialog.
+    EditConfigurations { name: Option<String>, r#type: Option<String> }
+        => "run.configurations.edit", "Edit Configurations\u{2026}",
+        "Opens the Run/Debug Configurations dialog, on a configuration by name (and type id), else on the selected one.",
+        r#"{"name": "server"}"#;
+    /// Make a temporary configuration permanent.
+    SaveTemporary { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.save-temporary", "Save Configuration",
+        "Makes a temporary run configuration (by name, or the selected one) permanent; it stays personal.",
+        r#"{"name": "main"}"#;
+    /// Delete a configuration.
+    DeleteConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.delete", "Delete",
+        "Deletes a run configuration (by name, or the selected one) after asking; a shared one's file goes too.",
+        r#"{"name": "main"}"#;
+    /// Pin or unpin a configuration.
+    PinConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.pin", "Pin",
+        "Pins a run configuration (by name, or the selected one) at the top of the run widget's dropdown, or unpins it.",
+        r#"{"name": "server"}"#;
+    /// Run the file in the editor.
+    RunFile => "run.file", "Run Current File",
+        "Runs the file in the editor without making a run configuration (the dropdown's Current File).";
+    /// Show or hide every configuration in the dropdown.
+    ToggleAllConfigurations => "run.configurations.toggle-all", "All Configurations",
+        "Shows or hides every run configuration below the recent ones in the run widget's dropdown, and opens the dropdown again.";
+    /// Import the reference IDE's run configurations again.
+    ImportReference => "run.configurations.import-reference", "Import Run Configurations from the Reference IDE",
+        "Reads the reference IDE's run configurations of the project (.idea and *.run.xml) again and adds the ones that do not exist yet; .idea is never written.";
 }
 
 ui::ui_commands! {

@@ -241,6 +241,35 @@ impl H<'_> {
         self.focus(handle);
     }
 
+    /// The Run/Debug Configurations dialog's state.
+    fn run_dialog(&mut self) -> Value {
+        self.run()["edit_dialog"].clone()
+    }
+
+    /// Opens the Run/Debug Configurations dialog with a new "Script"
+    /// configuration selected and the tree focused.
+    fn open_run_dialog(&mut self) {
+        self.invoke("run.configurations.edit", json!(null));
+        self.invoke("run.configurations.dialog.add", json!({"type": "script"}));
+        self.focus_run_dialog(None);
+    }
+
+    /// Focuses the dialog's tree, or a field of its form.
+    fn focus_run_dialog(&mut self, field: Option<&str>) {
+        let dialog = self
+            .workbench(|w, cx| w.run_window().read(cx).edit_dialog().cloned())
+            .expect("the dialog is open");
+        let handle = self.cx.update(|cx| match field {
+            Some(id) => dialog.read(cx).field_focus(id, cx).expect("the field"),
+            None => dialog.read(cx).tree_focus(),
+        });
+        self.focus(handle);
+    }
+
+    fn run_dialog_selected(&mut self) -> Value {
+        self.run_dialog()["selected"]["name"].clone()
+    }
+
     fn focus_dialog(&mut self) {
         let dialog = self.workbench(|w, cx| w.dialog_focus(cx));
         if let Some(handle) = dialog {
@@ -484,6 +513,16 @@ impl H<'_> {
             self.invoke("menu.cancel", json!(null));
         }
         // No dialog, no run menu, no runs.
+        if !self.run_dialog().is_null() {
+            if !self.run_dialog()["menu"].is_null() {
+                self.invoke("menu.cancel", json!(null));
+            }
+            self.focus_run_dialog(None);
+            self.invoke("run.configurations.dialog.cancel", json!(null));
+        }
+        if self.run()["configurations"]["selected"] != Value::Null {
+            self.invoke("run.select-current-file", json!(null));
+        }
         if !self.state()["dialog"].is_null() {
             self.focus_dialog();
             self.invoke("dialog.cancel", json!(null));
@@ -1496,6 +1535,83 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.wait_run("the end of the input", |s| {
                 s["tabs"][0]["status"] == json!("terminated")
             });
+        }
+        "run.configurations.dialog.ok"
+        | "run.configurations.dialog.cancel"
+        | "run.configurations.dialog.modify-options" => {
+            let before = h.run()["configurations"]["configurations"]
+                .as_array()
+                .unwrap()
+                .len();
+            h.open_run_dialog();
+            if b.context.as_deref().is_some_and(|c| c.ends_with("Editor")) {
+                h.focus_run_dialog(Some("command"));
+            }
+            h.press(keys);
+            match b.command.as_str() {
+                "run.configurations.dialog.modify-options" => {
+                    assert!(!h.run_dialog()["menu"].is_null(), "{what}");
+                }
+                command => {
+                    assert!(h.run_dialog().is_null(), "{what}");
+                    let count = h.run()["configurations"]["configurations"]
+                        .as_array()
+                        .unwrap()
+                        .len();
+                    let expected = if command.ends_with(".ok") {
+                        before + 1
+                    } else {
+                        before
+                    };
+                    assert_eq!(count, expected, "{what}");
+                }
+            }
+        }
+        "run.configurations.dialog.next" | "run.configurations.dialog.previous" => {
+            h.open_run_dialog();
+            let first = h.run_dialog_selected();
+            h.invoke("run.configurations.dialog.add", json!({"type": "script"}));
+            let second = h.run_dialog_selected();
+            let (from, to) = if b.command.ends_with("next") {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            h.invoke("run.configurations.dialog.select", json!({"name": from}));
+            h.focus_run_dialog(None);
+            h.press(keys);
+            assert_eq!(h.run_dialog_selected(), to, "{what}");
+        }
+        "run.configurations.dialog.add" => {
+            h.open_run_dialog();
+            h.press(keys);
+            assert_eq!(
+                h.run_dialog()["menu"]["title"],
+                json!("Add New Configuration"),
+                "{what}"
+            );
+        }
+        "run.configurations.dialog.remove" => {
+            h.open_run_dialog();
+            let name = h.run_dialog_selected();
+            h.press(keys);
+            let tree = h.run_dialog()["tree"].clone();
+            assert!(
+                !tree.as_array().unwrap().iter().any(|n| n["text"] == name),
+                "{what}"
+            );
+        }
+        "run.configurations.dialog.copy" => {
+            h.open_run_dialog();
+            let name = h.run_dialog_selected();
+            let count = h.run_dialog()["tree"].as_array().unwrap().len();
+            h.press(keys);
+            assert_ne!(h.run_dialog_selected(), name, "{what}");
+            assert_eq!(
+                h.run_dialog()["tree"].as_array().unwrap().len(),
+                count + 1,
+                "{what}"
+            );
         }
         "dialog.confirm" | "dialog.cancel" => {
             let first = h.start_run(&support::long_running(), "started");
