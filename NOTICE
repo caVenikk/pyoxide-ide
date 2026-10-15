@@ -526,6 +526,29 @@ here with: source URL, commit, file(s), license, and what was changed.
   and Forward in the keymap files. Only behaviour and numbers are used;
   reimplemented in Rust, no code is copied.
 
+- crates/platform/text/src/reload.rs
+  Closely adapted from IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2). Files:
+  platform/core-impl/src/com/intellij/openapi/editor/impl/event/DocumentEventImpl.java
+  (translateLineViaDiff), platform/core-impl/src/com/intellij/openapi/editor/impl/DocumentImpl.java
+  (replaceString: the common start and end of a whole-text replacement are
+  kept), platform/platform-impl/src/com/intellij/openapi/editor/impl/CaretImpl.java
+  (a caret inside the replaced part keeps its column on the translated
+  line, else stays within the new part). Changes: reimplemented in Rust on
+  a rope with char offsets; the line diff is Pyoxide's own (Myers' algorithm
+  with a cost limit).
+
+- crates/platform/workbench/src/workbench/file_sync/dialogs.rs
+  Dialog texts of IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2): file.cache.conflict.* of
+  platform/platform-api/resources/messages/UIBundle.properties, undo.command,
+  redo.command, undo.dialog.title and redo.dialog.title of IdeBundle.properties
+  (same folder), light.edit.close.* of
+  platform/ide-core/resources/messages/ApplicationBundle.properties.
+  Unchanged texts; mnemonics kept as `&`.
+
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,
   and JetBrains Mono 2.304 (c) 2020 The JetBrains Mono Project Authors,

@@ -37,6 +37,9 @@ ui::ui_commands! {
     Save => "editor.save", "Save", "Writes the active file to disk.";
     /// Save every modified file.
     SaveAll => "workbench.save-all", "Save All", "Writes every modified file to disk.";
+    /// Save, then look at every file again.
+    Synchronize => "workbench.synchronize", "Reload All from Disk",
+        "Writes every modified file, then reloads the open files changed on disk and lists the project tree and the file index again.";
     /// Close a tab.
     CloseTab { index: Option<usize> } => "tabs.close", "Close Tab",
         "Closes the active editor tab, or the tab at a zero-based index; a modified file is saved first.",

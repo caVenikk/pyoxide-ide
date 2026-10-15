@@ -335,6 +335,14 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
             ui::pointer::enable_native();
         }
         let window = open_main_window(cx, product.clone());
+        // The project folder is watched for changes made outside.
+        let _ = window.update(cx, |workbench, _, _| {
+            let sync = crate::SyncSettings {
+                watch: true,
+                ..workbench.sync_settings()
+            };
+            workbench.set_sync_settings(sync);
+        });
         // A folder opens as the project, files open in tabs.
         for path in paths {
             let _ = window.update(cx, |workbench, window, cx| {

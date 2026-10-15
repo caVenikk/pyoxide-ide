@@ -4,7 +4,7 @@
 //! excluded), extended with the content of excluded folders when
 //! non-project items are first asked for, and kept current with
 //! [`ProjectFiles::apply`] (files created, deleted or renamed by the
-//! application, and later the changes a file watcher reports).
+//! application, and the changes the file watcher reports).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -73,6 +73,11 @@ impl ProjectFiles {
     /// The project's rules were read or changed: the index is built again.
     pub fn set_rules(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = Some(filter);
+        self.rebuild(cx);
+    }
+
+    /// Builds the index again (changes on disk may have been missed).
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.rebuild(cx);
     }
 

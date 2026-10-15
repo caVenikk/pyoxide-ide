@@ -1520,6 +1520,21 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(disk, "x = 9", "{what}");
             std::fs::write(h.root.join("a.py"), "a = 1\n").unwrap();
         }
+        "workbench.synchronize" => {
+            // Saves a.py, then reloads b.py, changed outside.
+            h.set_editor("|");
+            h.invoke("editor.type", json!({ "text": "s = 1" }));
+            std::fs::write(h.root.join("b.py"), "b = 3\n").unwrap();
+            h.focus_editor();
+            h.press(keys);
+            let disk = std::fs::read_to_string(h.root.join("a.py")).unwrap();
+            assert_eq!(disk, "s = 1", "{what}");
+            h.invoke("tabs.select", json!({ "index": 1 }));
+            let text = h.invoke("editor.text", json!(null));
+            assert_eq!(text, json!("b = 3\n"), "{what}");
+            std::fs::write(h.root.join("a.py"), "a = 1\n").unwrap();
+            std::fs::write(h.root.join("b.py"), "b = 2\n").unwrap();
+        }
         "tabs.close" => {
             h.press(keys);
             let s = h.state();

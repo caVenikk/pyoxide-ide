@@ -35,6 +35,7 @@ use crate::run::RunToolWindow;
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
+mod file_sync;
 mod history;
 /// Default width of the project tool window.
 mod run_actions;
@@ -234,6 +235,8 @@ pub struct Workbench {
     code_intel: Option<Entity<CodeIntelView>>,
     /// Back and Forward (`history.rs`).
     navigation: history::Navigation,
+    /// Changes of files on disk made outside the application.
+    file_sync: file_sync::FileSync,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -332,6 +335,11 @@ impl Workbench {
                 if !window.is_window_active() && this.save_settings.save_on_deactivation {
                     this.save_all(cx);
                 }
+                // And files changed meanwhile are looked at when it comes
+                // back.
+                if window.is_window_active() {
+                    this.window_activated(cx);
+                }
             }),
         ];
         // Code intelligence popups and key contexts are drawn by the root.
@@ -382,6 +390,7 @@ impl Workbench {
             run_anchors: crate::run::widget::Anchors::default(),
             code_intel,
             navigation: Default::default(),
+            file_sync: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -614,6 +623,7 @@ impl Workbench {
             "tabs": self.tabs.iter().map(|t| json!({
                 "path": rel(&t.path),
                 "modified": t.editor.read(cx).is_modified(),
+                "deleted": self.is_deleted_on_disk(&t.path),
             })).collect::<Vec<_>>(),
             "active_tab": self.active,
             "navigation": self.navigation.history.state_json(rel),
@@ -647,6 +657,7 @@ impl Workbench {
         self.clear_navigation();
         self.project_visible = true;
         self.project_files.update(cx, |files, cx| files.clear(cx));
+        self.sync_project_opened(&path, window, cx);
         self.panel.update(cx, |panel, cx| {
             panel.set_project(Project::new(path.clone()), cx)
         });
@@ -859,6 +870,7 @@ impl Workbench {
                 v.editor_opened(&path, language, &editor, window, cx)
             });
         }
+        self.sync_tab_opened(&path, &editor, window, cx);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -947,6 +959,9 @@ impl Workbench {
         if !editor.read(cx).is_modified() {
             return None;
         }
+        // Not while the file changed or went away on disk; the write
+        // leaves a file changed meanwhile alone.
+        let guard = self.sync_save_started(&path, &editor, cx)?;
         let (bytes, point) = editor.update(cx, |e, _| {
             let point = e.buffer_mut().begin_save();
             (e.buffer().encoded(), point)
@@ -954,12 +969,15 @@ impl Workbench {
         self.pending += 1;
         let write = cx.background_spawn({
             let path = path.clone();
-            async move { project::write_document(&path, &bytes) }
+            async move { guard.write(&path, &bytes) }
         });
         Some(cx.spawn(async move |this, cx| {
             let result = write.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending -= 1;
+                let Some(result) = this.sync_save_finished(&path, result, cx) else {
+                    return cx.notify();
+                };
                 match result {
                     Ok(()) => {
                         editor.update(cx, |e, cx| {
@@ -1003,14 +1021,17 @@ impl Workbench {
         self.find_in_files.update(cx, |p, cx| p.save_preview(cx));
     }
 
-    /// Closes a tab; a modified file is saved first (no prompt).
+    /// Closes a tab; a modified file is saved first (no prompt). A modified
+    /// editor that is not saved automatically (its file is gone, or changed
+    /// on disk) asks first (Close Document) and stays until the answer.
     pub fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index >= self.tabs.len() {
+        if index >= self.tabs.len() || self.sync_close_asks(index, cx) {
             return;
         }
         self.save_tab(index, cx);
         self.tab_closing(cx);
         let tab = self.tabs.remove(index);
+        self.sync_tab_closed(&tab.path, cx);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }
@@ -1621,11 +1642,13 @@ impl Workbench {
 
     fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(i) = self.active {
+            self.sync_explicit_save();
             self.save_tab(i, cx);
         }
     }
 
     fn save_all_action(&mut self, _: &SaveAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.sync_explicit_save();
         self.save_all(cx);
     }
 
@@ -2096,7 +2119,10 @@ impl Workbench {
         let hover = theme.color(UiRole::TabHover);
         let active_bg = theme.color(UiRole::TabActive);
         let outline = theme.color(UiRole::TabUnderline);
-        let text: Hsla = if selected {
+        // A file gone from disk whose editor keeps its changes.
+        let text: Hsla = if self.is_deleted_on_disk(&tab.path) {
+            theme.color(UiRole::Danger)
+        } else if selected {
             theme.color(UiRole::TabActiveText)
         } else {
             theme
@@ -2513,6 +2539,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_file_action))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_all_action))
+            .on_action(cx.listener(Self::synchronize))
             .on_action(cx.listener(Self::close_tab_action))
             .on_action(cx.listener(Self::select_tab))
             .on_action(cx.listener(Self::next_tab))

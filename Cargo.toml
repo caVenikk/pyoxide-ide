@@ -20,6 +20,7 @@ members = [
     "crates/platform/db-cli",
     "crates/platform/editor",
     "crates/platform/file-index",
+    "crates/platform/file-watcher",
     "crates/platform/lsp-client",
     "crates/platform/secrets",
     "crates/platform/settings-import",
@@ -62,6 +63,9 @@ flume = "0.11"
 futures = "0.3"
 lsp-types = "=0.95.1"
 pulldown-cmark = { version = "0.13", default-features = false }
+# Changes on disk made outside the application (CC0-1.0): FSEvents on
+# macOS, inotify on Linux, ReadDirectoryChangesW on Windows.
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
 # UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
@@ -76,6 +80,7 @@ lsp-client = { path = "crates/platform/lsp-client" }
 name-match = { path = "crates/platform/name-match" }
 process = { path = "crates/platform/process" }
 file-index = { path = "crates/platform/file-index" }
+file-watcher = { path = "crates/platform/file-watcher" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
 db-oracle-odpi = { path = "crates/platform/db-oracle-odpi" }
 db-postgres = { path = "crates/platform/db-postgres" }

@@ -143,9 +143,39 @@ impl FileTree {
         self.rows.iter().position(|&r| r == id)
     }
 
-    /// The node for a path that has been listed.
+    /// The node for a path that has been listed (and is still in its
+    /// folder's listing).
     pub fn find(&self, path: &Path) -> Option<NodeId> {
-        self.nodes.iter().position(|n| n.entry.path == path)
+        (0..self.nodes.len()).find(|&id| self.nodes[id].entry.path == path && self.is_attached(id))
+    }
+
+    /// The node is in the tree: every folder above it lists it. Entries
+    /// that disappeared from a new listing are kept, detached.
+    pub fn is_attached(&self, mut id: NodeId) -> bool {
+        while let Some(parent) = self.nodes[id].parent {
+            let listed = self.nodes[parent]
+                .children
+                .as_ref()
+                .is_some_and(|c| c.contains(&id));
+            if !listed {
+                return false;
+            }
+            id = parent;
+        }
+        true
+    }
+
+    /// The folders in the tree that have been listed, parents first.
+    pub fn listed_dirs(&self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut stack = vec![Self::ROOT];
+        while let Some(id) = stack.pop() {
+            if let Some(children) = &self.nodes[id].children {
+                out.push(id);
+                stack.extend(children.iter().rev());
+            }
+        }
+        out
     }
 
     /// The directory must be listed before its children can be shown.
@@ -367,5 +397,34 @@ mod tests {
         assert!(!tree.node(FileTree::ROOT).entry.excluded);
         tree.refresh_excluded(&filter);
         assert!(!excluded(&tree, "src") && !excluded(&tree, "src/pkg/mod.py"));
+    }
+
+    #[test]
+    fn entries_gone_from_a_new_listing_are_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        layout(dir.path());
+        let filter = Filter::new(dir.path(), Exclusions::default(), PY);
+        let mut tree = FileTree::new(dir.path());
+        tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
+        let src = tree.find(&dir.path().join("src")).unwrap();
+        tree.expand(src);
+        tree.set_children(src, list_dir(&dir.path().join("src"), &filter).unwrap());
+        assert_eq!(tree.listed_dirs(), vec![FileTree::ROOT, src]);
+        let pkg = dir.path().join("src/pkg");
+        assert!(tree.find(&pkg).is_some());
+
+        // Gone, and everything that was listed below it.
+        std::fs::remove_dir_all(dir.path().join("src")).unwrap();
+        tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
+        assert_eq!(tree.find(&dir.path().join("src")), None);
+        assert_eq!(tree.find(&pkg), None);
+        assert_eq!(tree.listed_dirs(), vec![FileTree::ROOT]);
+
+        // Back again: a new node, not listed yet.
+        std::fs::create_dir_all(&pkg).unwrap();
+        tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
+        let again = tree.find(&dir.path().join("src")).unwrap();
+        assert_ne!(again, src);
+        assert!(tree.needs_listing(again));
     }
 }

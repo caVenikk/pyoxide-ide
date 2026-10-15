@@ -12,6 +12,7 @@
 "cmd-1" = "workbench.toggle-project"
 "cmd-4" = "workbench.toggle-run"
 "cmd-s" = "workbench.save-all"
+"cmd-alt-y" = "workbench.synchronize"
 "cmd-w" = "tabs.close"
 "cmd-}" = "tabs.next"
 "ctrl-right" = "tabs.next"

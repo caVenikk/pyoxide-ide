@@ -10,7 +10,9 @@ use std::time::Duration;
 /// deactivated (on by default) and saving after the IDE has been idle for
 /// N seconds (off by default, N = 15, 1 to 300), idle meaning no keyboard
 /// or mouse input. Pyoxide turns the idle save on with N = 2 and also saves
-/// a file when its tab is left; a tab that is closed is always saved.
+/// a file when its tab is left; a tab that is closed is always saved, and
+/// so are the open files when the application quits. A file that changed
+/// or went away on disk is not written over (see `SyncSettings`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SaveSettings {
     /// Save every modified file when the window loses the focus to another
@@ -44,6 +46,31 @@ impl Default for SaveSettings {
             save_on_idle: true,
             idle_seconds: 2,
             save_on_tab_switch: true,
+        }
+    }
+}
+
+/// How changes made to files outside the application are found.
+///
+/// The reference IDE watches the project with a native file watcher and
+/// looks at the files again when its window gets the focus ("Synchronize
+/// files on frame activation", on by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncSettings {
+    /// Watch the project folder for changes. Off by default so that a
+    /// window made by a test sees only the changes it is told about;
+    /// [`crate::run`] turns it on.
+    pub watch: bool,
+    /// Look at the open files (and, without a watcher, the project tree)
+    /// when the window gets the focus.
+    pub sync_on_activation: bool,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            watch: false,
+            sync_on_activation: true,
         }
     }
 }

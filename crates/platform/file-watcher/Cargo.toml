@@ -1,0 +1,15 @@
+[package]
+name = "file-watcher"
+description = "File watcher of Pyoxide IDE: changes on disk under watched folders, reported by the operating system and gathered into batches of changed paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flume.workspace = true
+notify.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

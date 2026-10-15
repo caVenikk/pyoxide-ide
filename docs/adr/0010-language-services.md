@@ -85,8 +85,10 @@ its own diagnostic marks. Checked by `scripts/check-layers.py`.
 - `didSave` only to servers that ask for it; `didClose` when the tab
   closes. Changes the application makes on disk (save, create, delete,
   rename) are sent as `workspace/didChangeWatchedFiles` to servers that
-  registered matching watchers. Changes made outside the application need
-  a file watcher (later issue).
+  registered matching watchers. Changes made outside the application come
+  the same way from the project's file watcher (`file-watcher`); an open
+  file's change is sent once its check shows it is not the application's
+  own write, and a reloaded editor sends its new text.
 
 ### Diagnostics
 - Pull (`textDocument/diagnostic`, also when registered dynamically)

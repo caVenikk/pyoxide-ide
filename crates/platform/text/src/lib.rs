@@ -10,6 +10,7 @@ mod buffer;
 mod encoding;
 mod history;
 pub mod movement;
+mod reload;
 mod selection;
 
 pub use buffer::{AppliedEdit, Buffer, CaretPlacement, Edit, Point, SavePoint};
@@ -17,5 +18,6 @@ pub use encoding::{
     DecodeError, Decoded, Encoding, LineEnding, decode, encode, normalize_line_endings,
 };
 pub use history::{EditKind, GROUP_INTERVAL};
+pub use reload::{LineChange, MAX_DIFF_COST, ReloadPlan, StalePlan, diff_lines};
 pub use ropey::{Rope, RopeSlice};
 pub use selection::{Selection, SelectionSet};

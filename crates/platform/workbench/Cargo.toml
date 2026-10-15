@@ -13,6 +13,7 @@ console.workspace = true
 dirs = "7"
 editor.workspace = true
 file-index.workspace = true
+file-watcher.workspace = true
 futures = "0.3"
 gpui.workspace = true
 name-match.workspace = true

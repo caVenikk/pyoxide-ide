@@ -26,6 +26,8 @@ pub(super) enum PendingDialog {
     Rerun(usize),
     /// Closing a tab whose process runs: Terminate or Disconnect.
     CloseRunning(usize),
+    /// A dialog about a file changed on disk (`file_sync`).
+    FileSync(super::file_sync::SyncDialog),
 }
 
 /// What closing a tab with a running process does
@@ -585,7 +587,7 @@ impl Workbench {
         self.open_dialog(dialog, PendingDialog::CloseRunning(tab), window, cx);
     }
 
-    fn open_dialog(
+    pub(super) fn open_dialog(
         &mut self,
         dialog: Entity<Dialog>,
         pending: PendingDialog,
@@ -640,8 +642,13 @@ impl Workbench {
                 self.run_window
                     .update(cx, |w, cx| w.close(tab, terminate, cx));
             }
+            (PendingDialog::FileSync(pending), button) => {
+                self.sync_dialog_closed(pending, button, window, cx)
+            }
             _ => {}
         }
+        // A file dialog that waited for this one.
+        self.show_sync_dialog(window, cx);
         cx.notify();
     }
 
