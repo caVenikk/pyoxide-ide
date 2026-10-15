@@ -1,15 +1,22 @@
 //! The navigation history of the main window (Back and Forward, see
 //! [`crate::navigation`]): the places that tab switches and jumps leave,
-//! and going back and forward to them. As in the reference IDE, where
-//! every change of the selected editor tab is a navigation
-//! (`EditorTabbedContainer`), another file becoming the active editor's
-//! records the place in the file left: opening a file, selecting a tab,
-//! closing the active tab. A jump within the active editor records the
-//! place it left when the caret left its line.
+//! and going back and forward to them.
+//!
+//! As in the reference IDE, every change of the editor tabs' selection is
+//! a navigation (`EditorTabbedContainer`): another file becoming the
+//! active editor's records the place in the file left (opening a file,
+//! selecting a tab). Closing a tab while others stay selects a tab through
+//! the same path, so it records the active editor's place: the closed
+//! file's when it was the active one (Back opens it again), else the
+//! current one; closing the last tab selects nothing and records nothing
+//! (`EditorWindow.closeFile`, `JBTabsImpl.removeTab`). A jump within the
+//! active editor ([`editor::EditorEvent::Jumped`], Go to Line, a location
+//! opened in the active file) records the place it left when the caret
+//! left its line.
 
 use std::path::PathBuf;
 
-use gpui::{App, Context, Window};
+use gpui::{App, Context, Pixels, Window, px};
 
 use super::Workbench;
 use crate::navigation::{Back, Forward, NavigationHistory, Place};
@@ -20,20 +27,23 @@ pub(super) struct Navigation {
     pub history: NavigationHistory,
     /// Back or Forward is going to a place: tab switches record nothing.
     moving: bool,
-    /// The file Back or Forward is opening: selecting its tab when it is
-    /// read records nothing.
-    opening: Option<PathBuf>,
+    /// The place Back or Forward is opening a file for: selecting its tab
+    /// when it is read records nothing and puts the caret there.
+    opening: Option<Place>,
 }
 
 impl Workbench {
-    /// The place of the active editor: its file and caret.
+    /// The place of the active editor: its file and caret, and where the
+    /// caret's line is in the view.
     pub fn current_place(&self, cx: &App) -> Option<Place> {
         self.active.map(|i| self.tab_place(i, cx))
     }
 
     fn tab_place(&self, index: usize, cx: &App) -> Place {
         let tab = &self.tabs[index];
-        Place::new(tab.path.clone(), tab.editor.read(cx).caret_point())
+        let editor = tab.editor.read(cx);
+        Place::new(tab.path.clone(), editor.caret_point())
+            .with_view_y(editor.caret_view_y().map(f32::from))
     }
 
     /// The window's navigation history.
@@ -44,8 +54,9 @@ impl Workbench {
     /// Records `left`, the place a navigation left, for Back: a component
     /// that moves the active editor's caret as a navigation (a jump, not
     /// typing or caret keys) takes [`Self::current_place`] before the move
-    /// and passes it here after it. It is recorded when the caret is now
-    /// in another file or on another line. Opening files through
+    /// and passes it here after it, or has the editor report the jump
+    /// ([`editor::Editor::jumped_from`]). It is recorded when the caret is
+    /// now in another file or on another line. Opening files through
     /// [`Self::open_file`] or [`Self::open_file_at`] and switching tabs
     /// record by themselves.
     pub fn record_place(&mut self, left: Place, cx: &App) {
@@ -60,26 +71,53 @@ impl Workbench {
         }
     }
 
+    /// The editor of the tab of `path` reported a jump of its caret.
+    pub(super) fn editor_jumped(
+        &mut self,
+        path: PathBuf,
+        from: text::Point,
+        view_y: Option<Pixels>,
+        cx: &App,
+    ) {
+        let left = Place::new(path, from).with_view_y(view_y.map(f32::from));
+        self.record_place(left, cx);
+    }
+
     /// The tab at `index` became active, `previous` was: the place in the
     /// previous one is recorded, unless Back or Forward is going there.
-    pub(super) fn tab_activated(&mut self, previous: Option<usize>, index: usize, cx: &App) {
+    pub(super) fn tab_activated(
+        &mut self,
+        previous: Option<usize>,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
         // Any activation ends Back's or Forward's opening of a file.
-        let opening = self.navigation.opening.take();
-        let quiet =
-            self.navigation.moving || opening.is_some_and(|path| path == self.tabs[index].path);
+        let opening = self
+            .navigation
+            .opening
+            .take()
+            .filter(|place| place.path == self.tabs[index].path);
+        if let Some(place) = &opening {
+            self.tabs[index].editor.update(cx, |e, cx| {
+                e.go_to_place(place.caret, place.view_y.map(px), cx)
+            });
+        }
         if let Some(previous) = previous.filter(|p| *p != index)
-            && !quiet
+            && !self.navigation.moving
+            && opening.is_none()
         {
             self.navigation.history.record(self.tab_place(previous, cx));
         }
     }
 
-    /// The tab at `index` is about to close: when it is the active one and
-    /// another tab takes its place, its place is recorded (Back opens the
-    /// file again).
-    pub(super) fn tab_closing(&mut self, index: usize, cx: &App) {
-        if self.active == Some(index) && self.tabs.len() > 1 && !self.navigation.moving {
-            self.navigation.history.record(self.tab_place(index, cx));
+    /// A tab is about to close: while another tab stays, the active
+    /// editor's place is recorded.
+    pub(super) fn tab_closing(&mut self, cx: &App) {
+        if let Some(active) = self.active
+            && self.tabs.len() > 1
+            && !self.navigation.moving
+        {
+            self.navigation.history.record(self.tab_place(active, cx));
         }
     }
 
@@ -113,22 +151,21 @@ impl Workbench {
         }
     }
 
-    /// Opens a place's file (or selects its tab) with the caret at the
-    /// place, recording nothing.
+    /// Opens a place's file (or selects its tab) with the caret and its
+    /// line in the view where they were, recording nothing.
     fn go_to_place(&mut self, place: Place, window: &mut Window, cx: &mut Context<Self>) {
-        let Place { path, caret } = place;
-        match self.tabs.iter().position(|t| t.path == path) {
+        match self.tabs.iter().position(|t| t.path == place.path) {
             Some(i) => {
                 self.navigation.moving = true;
                 self.activate(i, window, cx);
                 self.navigation.moving = false;
                 self.tabs[i].editor.update(cx, |e, cx| {
-                    e.go_to(caret.line + 1, Some(caret.column + 1), cx)
+                    e.go_to_place(place.caret, place.view_y.map(px), cx)
                 });
             }
             None => {
-                self.navigation.opening = Some(path.clone());
-                self.pending_go_to = Some((path.clone(), caret));
+                let path = place.path.clone();
+                self.navigation.opening = Some(place);
                 self.open_file(path, window, cx);
             }
         }

@@ -424,8 +424,11 @@ impl CodeIntelView {
         {
             let offset = point_to_offset(document.versions.text(), location.range.start);
             editor.update(cx, |e, cx| {
+                let from = e.selections().primary().head;
                 e.set_selections(SelectionSet::caret(offset), cx);
                 e.reveal(offset, cx);
+                // A navigation (the reference's `navigateRequest`).
+                e.jumped_from(from, cx);
             });
             return;
         }

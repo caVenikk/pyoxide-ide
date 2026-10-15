@@ -21,9 +21,12 @@
 "ctrl-shift-a" = "search-everywhere.go-to-action"
 "ctrl-alt-shift-e" = "search-everywhere.go-to-text"
 "ctrl-e" = "recent-files.open"
-# Navigation history: Back and Forward.
+# Navigation history: Back and Forward, also the mouse's back and
+# forward buttons.
 "ctrl-alt-left" = "workbench.back"
+"button4" = "workbench.back"
 "ctrl-alt-right" = "workbench.forward"
+"button5" = "workbench.forward"
 # Run: the current file (Current File is the only configuration yet);
 # Run Context Configuration runs it as well; Stop stops the run, a second
 # Stop kills it.

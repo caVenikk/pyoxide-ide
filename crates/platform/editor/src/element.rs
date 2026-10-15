@@ -891,6 +891,7 @@ impl Element for EditorElement {
                     e.scroll.y = y - (bounds.size.height - lh) / 2.0;
                 }
             }
+            e.apply_caret_view_y(lh);
             if e.autoscroll {
                 e.autoscroll = false;
                 let head = e.selections.primary().head;

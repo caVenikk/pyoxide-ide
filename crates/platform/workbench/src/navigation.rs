@@ -42,12 +42,18 @@ pub const LIMIT: usize = 150;
 /// places, `TextEditorState.MIN_CHANGE_DISTANCE`).
 pub const SAME_PLACE_LINES: usize = 4;
 
-/// A place to come back to: a file and the caret in it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A place to come back to: a file, the caret in it and where the caret's
+/// line was in the view.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Place {
     pub path: PathBuf,
     /// Zero-based line and column of the caret.
     pub caret: text::Point,
+    /// How far the caret's line was from the top of the view, in pixels
+    /// (the reference's relative caret position); going back puts it
+    /// there again. `None` when the editor had not been drawn: the line
+    /// goes to the middle of the view.
+    pub view_y: Option<f32>,
 }
 
 impl Place {
@@ -55,7 +61,14 @@ impl Place {
         Self {
             path: path.into(),
             caret,
+            view_y: None,
         }
+    }
+
+    /// The place with the caret's line `view_y` from the top of the view.
+    pub fn with_view_y(mut self, view_y: Option<f32>) -> Self {
+        self.view_y = view_y;
+        self
     }
 
     /// The same file with the caret less than [`SAME_PLACE_LINES`] lines
@@ -174,6 +187,7 @@ impl NavigationHistory {
                         "path": path(&p.path),
                         "line": p.caret.line,
                         "column": p.caret.column,
+                        "view_y": p.view_y,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -291,6 +305,10 @@ mod tests {
         // Only the last place is compared.
         h.record(at("a", 11));
         assert_eq!(back(&h), [p("a", 10), p("a", 14), p("b", 14), p("a", 11)]);
+        // The view does not count; the newer place's view stays.
+        h.record(at("a", 12).with_view_y(Some(40.0)));
+        assert_eq!(h.back_places().last().unwrap().view_y, Some(40.0));
+        assert_eq!(h.back_places().len(), 4);
     }
 
     #[test]
@@ -375,7 +393,7 @@ mod tests {
             state,
             json!({
                 "back": [],
-                "forward": [{ "path": "/p/b.py", "line": 7, "column": 0 }],
+                "forward": [{ "path": "/p/b.py", "line": 7, "column": 0, "view_y": null }],
             })
         );
     }

@@ -834,6 +834,9 @@ impl Workbench {
                 this.note_input(cx);
                 remember_file(&mut this.recently_changed, &edited_path);
             }
+            if let EditorEvent::Jumped { from, view_y } = event {
+                this.editor_jumped(edited_path.clone(), *from, *view_y, cx);
+            }
             cx.notify()
         });
         let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
@@ -1006,7 +1009,7 @@ impl Workbench {
             return;
         }
         self.save_tab(index, cx);
-        self.tab_closing(index, cx);
+        self.tab_closing(cx);
         let tab = self.tabs.remove(index);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
@@ -2553,6 +2556,12 @@ impl Render for Workbench {
                     bar.update(cx, |bar, cx| bar.clear_hint(cx));
                 }
             }))
+            // Mouse buttons of the keymap (Back and Forward).
+            .capture_any_mouse_down(|e, window, cx| {
+                if crate::keymap::mouse_down(e.button, window, cx) {
+                    cx.stop_propagation();
+                }
+            })
             // Double taps of a modifier (Shift Shift).
             .on_modifiers_changed(|e: &gpui::ModifiersChangedEvent, window, cx| {
                 crate::keymap::modifiers_changed(e.modifiers, window, cx)

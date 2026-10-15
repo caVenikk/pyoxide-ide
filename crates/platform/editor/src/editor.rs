@@ -188,6 +188,10 @@ pub enum EditorEvent {
     /// The whole text was replaced (reloaded from disk, or set by the
     /// editor's owner): positions from before are meaningless.
     Reloaded,
+    /// The caret jumped as a navigation ([`Editor::jumped_from`]): `from`
+    /// is where it was and `view_y` how far that line was from the top of
+    /// the view. The navigation history records the place.
+    Jumped { from: Point, view_y: Option<Pixels> },
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -247,6 +251,9 @@ pub struct Editor {
     extend_last: Option<SelectionSet>,
     /// Center the caret line on the next frame (Go to Line).
     pub(crate) center_caret: bool,
+    /// Put the caret line this far from the top of the view on the next
+    /// frame ([`Editor::go_to_place`]).
+    pub(crate) caret_view_y: Option<Pixels>,
     /// A text field: no gutter, no scrollbar, no caret line (one line, or
     /// a few in search fields).
     pub(crate) single_line: bool,
@@ -354,6 +361,7 @@ impl Editor {
             extend_stack: Vec::new(),
             extend_last: None,
             center_caret: false,
+            caret_view_y: None,
             single_line: false,
             placeholder: None,
             placeholder_unfocused: false,
@@ -629,6 +637,7 @@ impl Editor {
         match problem_to_go(self.diagnostics(), Some(caret), forward) {
             Some(i) => {
                 self.show_problem(i, cx);
+                self.jumped_from(caret, cx);
                 true
             }
             None => false,
@@ -1298,11 +1307,15 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let from = self.selections.primary().head;
         self.set_selections(SelectionSet::caret(0), cx);
+        self.jumped_from(from, cx);
     }
 
     fn move_document_end(&mut self, _: &MoveDocumentEnd, _: &mut Window, cx: &mut Context<Self>) {
+        let from = self.selections.primary().head;
         self.set_selections(SelectionSet::caret(self.buffer.len_chars()), cx);
+        self.jumped_from(from, cx);
     }
 
     fn page_up(&mut self, _: &PageUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -2459,6 +2472,10 @@ impl Editor {
                     Selection::caret(pos)
                 };
                 self.set_selections(SelectionSet::single(sel), cx);
+                // A click elsewhere without a selection is a navigation.
+                if !shift && s.is_empty() && s.head != pos {
+                    self.jumped_from(s.head, cx);
+                }
             }
         }
     }
@@ -2538,6 +2555,55 @@ impl Editor {
     pub(crate) fn set_scroll_y(&mut self, y: Pixels, cx: &mut Context<Self>) {
         self.scroll.y = y.clamp(px(0.0), self.max_scroll_y());
         cx.notify();
+    }
+}
+
+// ---- navigation history -------------------------------------------------
+
+impl Editor {
+    /// How far line `line` is from the top of the view, as of the last
+    /// frame (`None` before the first).
+    pub fn line_view_y(&self, line: usize) -> Option<Pixels> {
+        let line_height = self.layout.as_ref()?.line_height;
+        Some(line_height * line as f32 - self.scroll.y)
+    }
+
+    /// How far the primary caret's line is from the top of the view (the
+    /// reference's relative caret position).
+    pub fn caret_view_y(&self) -> Option<Pixels> {
+        self.line_view_y(self.caret_point().line)
+    }
+
+    /// Reports that the caret jumped from char offset `from` as a
+    /// navigation ([`EditorEvent::Jumped`]): a component that moves the
+    /// caret as a navigation calls it after the move.
+    pub fn jumped_from(&mut self, from: usize, cx: &mut Context<Self>) {
+        let from = self
+            .buffer
+            .offset_to_point(from.min(self.buffer.len_chars()));
+        let view_y = self.line_view_y(from.line);
+        cx.emit(EditorEvent::Jumped { from, view_y });
+    }
+
+    /// Puts the caret at a zero-based point (clamped) with its line
+    /// `view_y` from the top of the view, or in the middle of the view
+    /// without it; the caret stays visible (going back to a place, as the
+    /// reference restores a text editor's state).
+    pub fn go_to_place(&mut self, point: Point, view_y: Option<Pixels>, cx: &mut Context<Self>) {
+        self.go_to(point.line + 1, Some(point.column + 1), cx);
+        if view_y.is_some() {
+            self.center_caret = false;
+            self.caret_view_y = view_y;
+        }
+    }
+
+    /// Scrolls the caret line to the place's position in the view (before
+    /// the caret is kept visible; `line_height` of this frame).
+    pub(crate) fn apply_caret_view_y(&mut self, line_height: Pixels) {
+        if let Some(y) = self.caret_view_y.take() {
+            let line = self.buffer.char_to_line(self.selections.primary().head);
+            self.scroll.y = line_height * line as f32 - y;
+        }
     }
 }
 
