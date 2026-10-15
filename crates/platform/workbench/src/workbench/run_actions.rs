@@ -556,6 +556,7 @@ impl Workbench {
                 selected: preselect,
                 min_width: Some(dropdown::MIN_WIDTH),
                 max_width: Some(dropdown::MAX_WIDTH),
+                ..PopupOptions::default()
             },
             window,
             cx,
@@ -745,12 +746,17 @@ impl Workbench {
         let configs = self.run_configs(cx);
         let options = ui::dialog_window::DialogOptions {
             title: edit_dialog::TITLE.into(),
-            size: gpui::size(px(edit_dialog::WIDTH), px(edit_dialog::HEIGHT)),
+            // The content's size; a title bar of its own comes on top.
+            size: gpui::size(
+                px(edit_dialog::WIDTH),
+                px(edit_dialog::HEIGHT + ui::dialog_window::title_height(true)),
+            ),
             min_size: Some(gpui::size(
                 px(edit_dialog::MIN_WIDTH),
                 px(edit_dialog::MIN_HEIGHT),
             )),
             activate: !crate::env::background(),
+            themed_title: true,
         };
         let mut built = None;
         let handle = ui::dialog_window::open(window, options, cx, |window, cx| {

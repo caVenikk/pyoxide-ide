@@ -450,22 +450,38 @@ fn run_commands_and_shot(
                 Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
             };
         let _ = cx.update_window(window.into(), |_, window, _| save(window, &path));
-        // An open dialog window is saved next to it (`<name>-dialog.png`).
-        let dialog = cx
-            .update(|cx| ui::dialog_window::modal_of(window.into(), cx))
-            .ok()
-            .flatten();
-        if let Some(dialog) = dialog {
-            let stem = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let dialog_path = path.with_file_name(format!("{stem}-dialog.png"));
-            let _ = cx.update_window(dialog, |_, window, _| crate::shot::request_display(window));
+        // An open dialog window is saved next to it (`<name>-dialog.png`),
+        // a popup open over the dialog too (`<name>-popup.png`).
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut parent: gpui::AnyWindowHandle = window.into();
+        for suffix in ["dialog", "popup"] {
+            let child = cx
+                .update(|cx| ui::dialog_window::modal_of(parent, cx))
+                .ok()
+                .flatten();
+            let Some(child) = child else {
+                break;
+            };
+            let child_path = path.with_file_name(format!("{stem}-{suffix}.png"));
+            let _ = cx.update_window(child, |_, window, _| crate::shot::request_display(window));
             cx.background_executor()
                 .timer(Duration::from_millis(300))
                 .await;
-            let _ = cx.update_window(dialog, |_, window, _| save(window, &dialog_path));
+            let _ = cx.update_window(child, |_, window, _| {
+                save(window, &child_path);
+                let b = window.bounds();
+                env::marker(&format!(
+                    "window {suffix} at {} {} size {} {}",
+                    f32::from(b.origin.x),
+                    f32::from(b.origin.y),
+                    f32::from(b.size.width),
+                    f32::from(b.size.height)
+                ));
+            });
+            parent = child;
         }
         let _ = cx.update(|cx| cx.quit());
     })

@@ -90,6 +90,8 @@ pub struct OptionItem {
     /// A flag shown under the form as a tag with a remove button while it
     /// is on (the reference's tag fragments).
     pub tag: bool,
+    /// Pyoxide cannot do it yet: shown, not chosen.
+    pub enabled: bool,
 }
 
 impl OptionItem {
@@ -100,6 +102,15 @@ impl OptionItem {
             label: label.to_owned(),
             checked,
             tag: false,
+            enabled: true,
+        }
+    }
+
+    /// A row of the reference Pyoxide does not support yet.
+    pub fn unavailable(group: &str, id: &str, label: &str) -> Self {
+        Self {
+            enabled: false,
+            ..Self::new(group, id, label, false)
         }
     }
 
@@ -146,15 +157,62 @@ pub mod common {
     pub const INCLUDE_SYSTEM_ENV: &str = "include-system-env";
 }
 
-/// The "Modify options" rows every type has: Before Launch and Allow
-/// multiple instances.
+/// Group titles of "Modify options" (`ExecutionBundle`).
+pub mod group {
+    pub const OPERATING_SYSTEM: &str = "Operating System";
+    pub const LOGS: &str = "Logs";
+    pub const BEFORE_LAUNCH: &str = "Before Launch";
+}
+
+/// The "Modify options" rows every type has (`CommonTags.parallelRun`,
+/// `LogsGroupFragment`, `BeforeRunFragment`): Allow multiple instances
+/// first, the Logs and Before Launch groups last; a type puts its own rows
+/// between.
 pub fn common_options(config: &RunConfiguration, allow_parallel_default: bool) -> Vec<OptionItem> {
+    let mut options = common_head_options(config, allow_parallel_default);
+    options.extend(common_tail_options(config));
+    options
+}
+
+/// Allow multiple instances, the first row of Operating System.
+pub fn common_head_options(
+    config: &RunConfiguration,
+    allow_parallel_default: bool,
+) -> Vec<OptionItem> {
     vec![
         OptionItem::new(
-            "Operating System",
-            common::INCLUDE_SYSTEM_ENV,
-            "Include system environment variables",
-            config.include_system_env,
+            group::OPERATING_SYSTEM,
+            common::ALLOW_PARALLEL,
+            "Allow multiple instances",
+            config.allow_parallel.unwrap_or(allow_parallel_default),
+        )
+        .tag(),
+    ]
+}
+
+/// The Logs group (not supported yet) and Before Launch.
+pub fn common_tail_options(config: &RunConfiguration) -> Vec<OptionItem> {
+    vec![
+        OptionItem::unavailable(
+            group::LOGS,
+            "logs",
+            "Specify logs to be shown in the console",
+        ),
+        OptionItem::unavailable(group::LOGS, "save-output", "Save console output to file"),
+        OptionItem::unavailable(
+            group::LOGS,
+            "show-on-stdout",
+            "Show console when a message is printed to stdout",
+        ),
+        OptionItem::unavailable(
+            group::LOGS,
+            "show-on-stderr",
+            "Show console when a message is printed to stderr",
+        ),
+        OptionItem::unavailable(
+            group::BEFORE_LAUNCH,
+            "before-launch-task",
+            "Add before launch task",
         ),
         OptionItem::new(
             "Before Launch",
@@ -175,13 +233,6 @@ pub fn common_options(config: &RunConfiguration, allow_parallel_default: bool) -
             common::EDIT_BEFORE_RUN,
             "Show the run/debug configuration settings before start",
             config.edit_before_run,
-        )
-        .tag(),
-        OptionItem::new(
-            "",
-            common::ALLOW_PARALLEL,
-            "Allow multiple instances",
-            config.allow_parallel.unwrap_or(allow_parallel_default),
         )
         .tag(),
     ]

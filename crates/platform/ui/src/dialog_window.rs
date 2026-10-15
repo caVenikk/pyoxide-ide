@@ -12,16 +12,36 @@
 //! it back.
 //!
 //! The dialog's view is the root of its window: nothing of the parent
-//! window draws into it. Dialog windows work on the test platform too.
+//! window draws into it. On macOS a dialog can draw its own title bar in
+//! the theme's colours under the system's window buttons ([`title_bar`]),
+//! as the reference does.
+//!
+//! A popup of a dialog that may reach beyond it (the reference's popups
+//! are windows of their own) opens with [`open_popup`]: a borderless window
+//! fitted to its content, a child of the dialog in the same way.
+//!
+//! Dialog and popup windows work on the test platform too.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{
-    AnyElement, AnyWindowHandle, App, Bounds, Entity, FocusHandle, Global, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString, Size, Styled,
-    Subscription, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
-    anchored, deferred, div, point, px,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity,
+    FocusHandle, FontWeight, Global, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Pixels, Point, Render, SharedString, Size, StatefulInteractiveElement as _, Styled,
+    Subscription, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle,
+    WindowKind, WindowOptions, anchored, canvas, deferred, div, point, px,
 };
+use themes::UiRole;
+
+use crate::theme::ThemeExt;
+
+/// Height of a dialog's own title bar (the system's, under its buttons).
+pub const TITLE_BAR: f32 = 28.0;
+/// Where the title starts: after the window buttons
+/// (`DialogWrapperPeerImpl` on macOS with a custom title bar).
+const TITLE_LEFT: f32 = 84.0;
 
 /// How a dialog window opens.
 #[derive(Debug, Clone)]
@@ -35,6 +55,20 @@ pub struct DialogOptions {
     /// Activate the application and give the dialog the focus (off for
     /// windows opened in the background).
     pub activate: bool,
+    /// The dialog draws its title bar itself ([`title_bar`]); macOS only,
+    /// other platforms keep the system's.
+    pub themed_title: bool,
+}
+
+/// The dialog draws its own title bar: on macOS when asked.
+fn own_title(themed: bool) -> bool {
+    themed && cfg!(target_os = "macos")
+}
+
+/// The height a dialog's own title bar takes from its content: add it to
+/// the content's size where the dialog draws it.
+pub fn title_height(themed: bool) -> f32 {
+    if own_title(themed) { TITLE_BAR } else { 0.0 }
 }
 
 /// An open dialog window.
@@ -94,7 +128,7 @@ pub fn open<V: 'static + Render>(
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
             title: Some(options.title.clone()),
-            appears_transparent: false,
+            appears_transparent: own_title(options.themed_title),
             traffic_light_position: None,
         }),
         focus: options.activate,
@@ -133,6 +167,160 @@ pub fn modal_of(parent: AnyWindowHandle, cx: &App) -> Option<AnyWindowHandle> {
     cx.windows().contains(&modal.dialog).then_some(modal.dialog)
 }
 
+/// The window that takes the input of `window`: the innermost dialog or
+/// popup open over it, else itself.
+pub fn innermost(window: AnyWindowHandle, cx: &App) -> AnyWindowHandle {
+    let mut current = window;
+    while let Some(child) = modal_of(current, cx) {
+        current = child;
+    }
+    current
+}
+
+/// A dialog's title bar in the theme's colours, under the system's window
+/// buttons; it moves the window like the system's (macOS drags it) and
+/// zooms it on a double click. `None` where the system draws it.
+pub fn title_bar(title: impl Into<SharedString>, themed: bool, cx: &App) -> Option<AnyElement> {
+    if !own_title(themed) {
+        return None;
+    }
+    let theme = cx.theme();
+    Some(
+        div()
+            .id("dialog-title-bar")
+            .debug_selector(|| "dialog-title-bar".into())
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .h(px(TITLE_BAR))
+            .pl(px(TITLE_LEFT))
+            .pr(px(12.0))
+            .bg(theme.color(UiRole::Surface))
+            .text_color(theme.color(UiRole::Text))
+            .font_weight(FontWeight::SEMIBOLD)
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .child(title.into())
+            .on_click(|event, window, _| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
+            .into_any_element(),
+    )
+}
+
+/// The content of a popup window: drawn at its top left corner and
+/// measured, so that the window fits it.
+pub struct PopupHost {
+    content: AnyView,
+    fitted: Rc<Cell<Option<Size<Pixels>>>>,
+}
+
+impl Render for PopupHost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let fitted = self.fitted.clone();
+        div().size_full().child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .child(self.content.clone())
+                .child(
+                    canvas(
+                        move |bounds, window, cx| {
+                            let size = bounds.size;
+                            if fitted.get() != Some(size) && size.width > px(0.0) {
+                                fitted.set(Some(size));
+                                window.defer(cx, move |window, _| native::fit(window, size));
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                ),
+        )
+    }
+}
+
+/// Opens `build`'s view as a popup window of `parent`: borderless, with
+/// its top left corner at `at` (in `parent`'s coordinates), as large as
+/// `max` at first and then fitted to the view. It takes `parent`'s input
+/// while it is open, like a dialog, and closes with [`close`].
+pub fn open_popup(
+    parent: &mut Window,
+    at: Point<Pixels>,
+    max: Size<Pixels>,
+    activate: bool,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> AnyView,
+) -> Option<WindowHandle<PopupHost>> {
+    ensure_init(cx);
+    let parent_handle = parent.window_handle();
+    let return_focus = parent.focused(cx);
+    // The parent's content in screen coordinates (below a system title
+    // bar, if it has one).
+    let frame = parent.bounds();
+    let viewport = parent.viewport_size();
+    let content = point(
+        frame.left() + (frame.size.width - viewport.width) / 2.0,
+        frame.bottom() - viewport.height,
+    );
+    let mut origin = content + at;
+    let mut size = max;
+    if let Some(display) = parent.display(cx).map(|d| d.bounds()) {
+        size.height = size.height.min(display.bottom() - origin.y - px(8.0));
+        if origin.x + size.width > display.right() {
+            origin.x = (display.right() - size.width).max(display.left());
+        }
+    }
+    let window_options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+            point(origin.x.floor(), origin.y.floor()),
+            size,
+        ))),
+        titlebar: None,
+        focus: activate,
+        show: true,
+        kind: WindowKind::PopUp,
+        is_movable: false,
+        is_resizable: false,
+        is_minimizable: false,
+        display_id: parent.display(cx).map(|d| d.id()),
+        window_background: WindowBackgroundAppearance::Transparent,
+        ..WindowOptions::default()
+    };
+    let handle = cx
+        .open_window(window_options, |window, cx| {
+            let content = build(window, cx);
+            cx.new(|_| PopupHost {
+                content,
+                fitted: Rc::default(),
+            })
+        })
+        .ok()?;
+    let popup: AnyWindowHandle = handle.into();
+    cx.global_mut::<Modals>().by_parent.insert(
+        parent_handle,
+        Modal {
+            dialog: popup,
+            return_focus,
+            activate,
+        },
+    );
+    let _ = popup.update(cx, |_, window, _| {
+        native::attach(parent, window);
+        if activate {
+            window.activate_window();
+        }
+    });
+    Some(handle)
+}
+
 /// The window a dialog was opened over.
 pub fn parent_of(dialog: AnyWindowHandle, cx: &App) -> Option<AnyWindowHandle> {
     cx.try_global::<Modals>()?
@@ -145,6 +333,10 @@ pub fn parent_of(dialog: AnyWindowHandle, cx: &App) -> Option<AnyWindowHandle> {
 /// Closes a dialog window; its parent takes input again and the element
 /// that had the focus gets it back. Nothing for a dialog already closed.
 pub fn close(dialog: AnyWindowHandle, cx: &mut App) {
+    // A popup open over it goes first.
+    if let Some(child) = modal_of(dialog, cx) {
+        close(child, cx);
+    }
     let modal = parent_of(dialog, cx).and_then(|parent| {
         cx.global_mut::<Modals>()
             .by_parent
@@ -245,6 +437,80 @@ mod native {
         (!window.is_null()).then_some(window)
     }
 
+    /// Sizes a popup window to `size`, its top left corner where it is.
+    #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+    pub fn fit(window: &mut Window, size: gpui::Size<gpui::Pixels>) {
+        use cocoa_types::{NSPoint, NSRect, NSSize};
+        if !crate::pointer::native() {
+            window.resize(size);
+            return;
+        }
+        let Some(ns) = ns_window(window) else {
+            return;
+        };
+        // SAFETY: a live NSWindow, on the main thread.
+        unsafe {
+            let frame: NSRect = msg_send![ns, frame];
+            let top_left = NSPoint {
+                x: frame.origin.x,
+                y: frame.origin.y + frame.size.height,
+            };
+            let content = NSSize {
+                width: f64::from(f32::from(size.width)),
+                height: f64::from(f32::from(size.height)),
+            };
+            let _: () = msg_send![ns, setContentSize: content];
+            let _: () = msg_send![ns, setFrameTopLeftPoint: top_left];
+            let _: () = msg_send![ns, invalidateShadow];
+        }
+    }
+
+    /// Plain Cocoa geometry for `msg_send!` (`NSPoint`, `NSSize`,
+    /// `NSRect`), laid out as AppKit's.
+    mod cocoa_types {
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        pub struct NSPoint {
+            pub x: f64,
+            pub y: f64,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        pub struct NSSize {
+            pub width: f64,
+            pub height: f64,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        pub struct NSRect {
+            pub origin: NSPoint,
+            pub size: NSSize,
+        }
+
+        unsafe impl objc::Encode for NSPoint {
+            fn encode() -> objc::Encoding {
+                // SAFETY: the type encoding of CGPoint on 64-bit.
+                unsafe { objc::Encoding::from_str("{CGPoint=dd}") }
+            }
+        }
+
+        unsafe impl objc::Encode for NSSize {
+            fn encode() -> objc::Encoding {
+                // SAFETY: the type encoding of CGSize on 64-bit.
+                unsafe { objc::Encoding::from_str("{CGSize=dd}") }
+            }
+        }
+
+        unsafe impl objc::Encode for NSRect {
+            fn encode() -> objc::Encoding {
+                // SAFETY: the type encoding of CGRect on 64-bit.
+                unsafe { objc::Encoding::from_str("{CGRect={CGPoint=dd}{CGSize=dd}}") }
+            }
+        }
+    }
+
     /// Makes `dialog` a child window of `parent`: it stays above it.
     #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
     pub fn attach(parent: &Window, dialog: &Window) {
@@ -265,14 +531,18 @@ mod native {
 #[cfg(not(target_os = "macos"))]
 mod native {
     pub fn attach(_: &gpui::Window, _: &gpui::Window) {}
+
+    /// Sizes a popup window to `size`; the window keeps its top left
+    /// corner.
+    pub fn fit(window: &mut gpui::Window, size: gpui::Size<gpui::Pixels>) {
+        window.resize(size);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{
-        AppContext as _, Context, FocusHandle, Focusable, TestAppContext, VisualTestContext, size,
-    };
+    use gpui::{Context, FocusHandle, Focusable, TestAppContext, VisualTestContext, size};
 
     gpui::actions!(dialog_window_test, [Ping]);
 
@@ -339,6 +609,7 @@ mod tests {
                     size: size(px(400.0), px(300.0)),
                     min_size: None,
                     activate: true,
+                    themed_title: false,
                 };
                 open(window, options, cx, |window, cx| {
                     cx.new(|cx| {
@@ -384,5 +655,58 @@ mod tests {
             parent.read_with(cx, |r, _| r.got.clone()).unwrap(),
             ["ping"]
         );
+    }
+
+    /// A popup window of a window: input goes to it while it is open, it
+    /// fits its content, and closing it gives the focus back.
+    #[gpui::test]
+    fn a_popup_window_fits_its_content(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::theme::init(cx, themes::ThemeKind::Dark));
+        let parent = cx.add_window(|_, cx| recorder(cx));
+        let parent_any: AnyWindowHandle = parent.into();
+        let parent_focus = parent
+            .update(cx, |r, window, _| {
+                window.focus(&r.focus);
+                r.focus.clone()
+            })
+            .unwrap();
+        draw(parent_any, cx);
+        let popup = parent
+            .update(cx, |_, window, cx| {
+                open_popup(
+                    window,
+                    point(px(20.0), px(30.0)),
+                    size(px(400.0), px(300.0)),
+                    true,
+                    cx,
+                    |_, cx| cx.new(|_| KnownSize).into(),
+                )
+                .unwrap()
+            })
+            .unwrap();
+        let popup_any: AnyWindowHandle = popup.into();
+        draw(popup_any, cx);
+        draw(popup_any, cx);
+        assert!(cx.update(|cx| innermost(parent_any, cx)) == popup_any);
+        let fitted = popup
+            .update(cx, |_, window, _| window.viewport_size())
+            .unwrap();
+        assert_eq!(fitted, size(px(120.0), px(40.0)), "fitted to the content");
+        cx.update(|cx| close(popup_any, cx));
+        draw(parent_any, cx);
+        assert!(cx.update(|cx| innermost(parent_any, cx)) == parent_any);
+        let focused = parent
+            .update(cx, |_, window, _| parent_focus.is_focused(window))
+            .unwrap();
+        assert!(focused, "the focus went back");
+    }
+
+    /// Content of a known size.
+    struct KnownSize;
+
+    impl Render for KnownSize {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(120.0)).h(px(40.0))
+        }
     }
 }
