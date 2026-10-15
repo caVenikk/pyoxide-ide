@@ -989,7 +989,9 @@ fn find_in_files_from_the_tree_context_menu(cx: &mut TestAppContext) {
         // On a folder: Find in Files… searches that folder.
         h.invoke("project.tree.reveal", json!({ "path": "pkg" }));
         h.invoke("project.tree.context-menu", json!(null));
-        h.press("down enter");
+        // New, Cut, Copy, Copy Path/Reference… (Paste is off), then Find
+        // in Files….
+        h.press("down down down down down enter");
         let s = h.state();
         assert_eq!(s["open"], json!(true));
         assert_eq!(s["replace_mode"], json!(false));
@@ -999,7 +1001,7 @@ fn find_in_files_from_the_tree_context_menu(cx: &mut TestAppContext) {
         // On a file: Replace in Files… in the file's folder.
         h.invoke("project.tree.reveal", json!({ "path": "pkg/util.py" }));
         h.invoke("project.tree.context-menu", json!(null));
-        h.press("down down enter");
+        h.press("down down down down down down enter");
         let s = h.state();
         assert_eq!(s["replace_mode"], json!(true));
         assert_eq!(s["scope"], json!("directory"));

@@ -146,6 +146,9 @@ impl FileTree {
     /// The node for a path that has been listed (and is still in its
     /// folder's listing).
     pub fn find(&self, path: &Path) -> Option<NodeId> {
+        if path.as_os_str().is_empty() {
+            return None;
+        }
         (0..self.nodes.len()).find(|&id| self.nodes[id].entry.path == path && self.is_attached(id))
     }
 
@@ -241,6 +244,107 @@ impl FileTree {
     pub fn refresh_excluded(&mut self, filter: &Filter) {
         for n in self.nodes.iter_mut().skip(1) {
             n.entry.excluded = filter.is_excluded(&n.entry.path, n.entry.is_dir());
+        }
+    }
+
+    /// Adds an entry that appeared on disk under the listed folder
+    /// `parent`, in its sorted place; a folder not listed yet lists it
+    /// when it is expanded. Returns the entry's node (an existing one for
+    /// a path the tree has).
+    pub fn insert(&mut self, parent: NodeId, entry: Entry) -> Option<NodeId> {
+        if let Some(id) = self.find(&entry.path) {
+            return Some(id);
+        }
+        let depth = self.nodes[parent].depth + 1;
+        self.nodes[parent].children.as_ref()?;
+        self.nodes.push(Node {
+            entry,
+            depth,
+            parent: Some(parent),
+            children: None,
+            expanded: false,
+            error: None,
+        });
+        let id = self.nodes.len() - 1;
+        self.attach(parent, id);
+        Some(id)
+    }
+
+    /// Puts `id` among the children of `parent` in sorted order.
+    fn attach(&mut self, parent: NodeId, id: NodeId) {
+        let mut children = self.nodes[parent].children.take().unwrap_or_default();
+        children.retain(|&c| c != id);
+        let at = children
+            .iter()
+            .position(|&c| order(&self.nodes[id].entry, &self.nodes[c].entry) == Ordering::Less)
+            .unwrap_or(children.len());
+        children.insert(at, id);
+        self.nodes[parent].children = Some(children);
+        self.nodes[id].parent = Some(parent);
+        self.rebuild();
+    }
+
+    /// Takes `id` and everything below it out of the tree (deleted on
+    /// disk). Its nodes are kept but never found again.
+    pub fn remove(&mut self, id: NodeId) {
+        if id == Self::ROOT {
+            return;
+        }
+        if let Some(parent) = self.nodes[id].parent
+            && let Some(children) = &mut self.nodes[parent].children
+        {
+            children.retain(|&c| c != id);
+        }
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let node = &mut self.nodes[n];
+            node.entry.path = PathBuf::new();
+            node.parent = None;
+            if let Some(children) = node.children.take() {
+                stack.extend(children);
+            }
+        }
+        self.rebuild();
+    }
+
+    /// Renames or moves `id` to `to`, below `new_parent` (a listed
+    /// folder): the paths below a folder follow, and it keeps its
+    /// expansion and listing.
+    pub fn rename(&mut self, id: NodeId, to: &Path, new_parent: NodeId) {
+        if id == Self::ROOT {
+            return;
+        }
+        let from = self.nodes[id].entry.path.clone();
+        if let Some(parent) = self.nodes[id].parent
+            && let Some(children) = &mut self.nodes[parent].children
+        {
+            children.retain(|&c| c != id);
+        }
+        let depth_shift = self.nodes[new_parent].depth as isize + 1 - self.nodes[id].depth as isize;
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let node = &mut self.nodes[n];
+            if let Ok(rest) = node.entry.path.strip_prefix(&from) {
+                node.entry.path = if rest.as_os_str().is_empty() {
+                    to.to_owned()
+                } else {
+                    to.join(rest)
+                };
+            }
+            node.depth = (node.depth as isize + depth_shift) as usize;
+            if let Some(children) = &node.children {
+                stack.extend(children.iter().copied());
+            }
+        }
+        self.nodes[id].entry.name = to
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if self.nodes[new_parent].children.is_some() {
+            self.attach(new_parent, id);
+        } else {
+            // The new folder lists its content when it is expanded.
+            self.remove(id);
         }
     }
 
@@ -426,5 +530,96 @@ mod tests {
         let again = tree.find(&dir.path().join("src")).unwrap();
         assert_ne!(again, src);
         assert!(tree.needs_listing(again));
+    }
+
+    fn entry(path: &Path, kind: EntryKind) -> Entry {
+        Entry {
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            path: path.to_owned(),
+            kind,
+            symlink: false,
+            excluded: false,
+        }
+    }
+
+    #[test]
+    fn inserts_removes_and_renames_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        layout(root);
+        let filter = Filter::new(root, Exclusions::default(), PY);
+        let mut tree = FileTree::new(root);
+        tree.set_children(FileTree::ROOT, list_dir(root, &filter).unwrap());
+        let src = tree.find(&root.join("src")).unwrap();
+        let names = |tree: &FileTree| -> Vec<String> {
+            tree.rows()
+                .iter()
+                .map(|&id| {
+                    let p = &tree.node(id).entry.path;
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect()
+        };
+        // A new folder goes before the files, sorted; a folder not listed
+        // yet takes nothing.
+        let new = tree
+            .insert(FileTree::ROOT, entry(&root.join("lib"), EntryKind::Dir))
+            .unwrap();
+        assert_eq!(tree.node(new).depth, 1);
+        assert_eq!(
+            names(&tree)[..6],
+            ["", ".idea", ".venv", "lib", "src", "tests"]
+        );
+        assert_eq!(
+            tree.insert(src, entry(&root.join("src/x.py"), EntryKind::File)),
+            None
+        );
+        // Renaming an expanded folder keeps it expanded; paths below
+        // follow.
+        tree.expand(src);
+        tree.set_children(src, list_dir(&root.join("src"), &filter).unwrap());
+        let pkg = tree.find(&root.join("src/pkg")).unwrap();
+        tree.expand(pkg);
+        tree.set_children(pkg, list_dir(&root.join("src/pkg"), &filter).unwrap());
+        tree.rename(src, &root.join("a_src"), FileTree::ROOT);
+        assert_eq!(tree.find(&root.join("src")), None);
+        assert!(tree.find(&root.join("a_src/pkg/mod.py")).is_some());
+        assert!(tree.node(src).expanded);
+        assert_eq!(
+            names(&tree)[..7],
+            [
+                "",
+                ".idea",
+                ".venv",
+                "a_src",
+                "a_src/pkg",
+                "a_src/pkg/mod.py",
+                "lib"
+            ]
+        );
+        // Moved into another folder: depths follow.
+        tree.set_children(new, Vec::new());
+        tree.rename(pkg, &root.join("lib/pkg"), new);
+        assert_eq!(tree.node(pkg).depth, 2);
+        let module = tree.find(&root.join("lib/pkg/mod.py")).unwrap();
+        assert_eq!(tree.node(module).depth, 3);
+        assert_eq!(tree.node(pkg).parent, Some(new));
+        // Into a folder that is not listed: it leaves the tree until that
+        // folder is listed.
+        let tests_dir = tree.find(&root.join("tests")).unwrap();
+        tree.rename(pkg, &root.join("tests/pkg"), tests_dir);
+        assert_eq!(tree.find(&root.join("tests/pkg")), None);
+        assert_eq!(tree.find(&root.join("lib/pkg")), None);
+        // Removed with everything below it.
+        let tests = tree.find(&root.join("tests")).unwrap();
+        tree.remove(tests);
+        assert_eq!(tree.find(&root.join("tests")), None);
+        assert!(!names(&tree).contains(&"tests".to_owned()));
+        tree.remove(src);
+        assert_eq!(tree.find(&root.join("a_src")), None);
+        assert_eq!(tree.find(Path::new("")), None);
     }
 }

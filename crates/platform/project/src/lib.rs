@@ -1,9 +1,9 @@
 //! The project model of Pyoxide IDE (ADR 0007, 0008): a folder opened as a
 //! project, its file tree loaded one directory at a time, the rules that
 //! hide or exclude entries, Pyoxide's own project folder with the shared
-//! project settings and the personal project state, and reading and
-//! writing documents, and what reported paths are now on disk (for a file
-//! watcher).
+//! project settings and the personal project state, reading and writing
+//! documents, what reported paths are now on disk (for a file watcher),
+//! and the file operations of the project tool window.
 //!
 //! Everything here is blocking and toolkit-free: callers run it on a
 //! background thread (the workbench uses GPUI's background executor).
@@ -11,6 +11,7 @@
 mod changes;
 mod document;
 mod filter;
+pub mod fs_ops;
 pub mod idea;
 pub mod store;
 mod tree;

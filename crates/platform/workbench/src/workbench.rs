@@ -35,6 +35,7 @@ use crate::run::RunToolWindow;
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
+mod file_events;
 mod file_sync;
 mod history;
 /// Default width of the project tool window.
@@ -247,7 +248,11 @@ impl Workbench {
         let focus = cx.focus_handle();
         window.focus(&focus);
         let file_types = Rc::new(FileTypes::new(&product.file_types));
-        let panel = cx.new(|cx| ProjectPanel::new(file_types.clone(), cx));
+        let panel = cx.new(|cx| {
+            let mut panel = ProjectPanel::new(file_types.clone(), cx);
+            panel.set_new_items(product.new_items.clone());
+            panel
+        });
         let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
         let host = cx.entity().downgrade();
         find_in_files.update(cx, |p, _| p.set_host(host));
@@ -321,6 +326,7 @@ impl Workbench {
                 window,
                 |this, panel, event, window, cx| match event {
                     PanelEvent::OpenFile(path) => this.open_file(path.clone(), window, cx),
+                    PanelEvent::FilesChanged(changes) => this.files_changed(changes, window, cx),
                     PanelEvent::RulesChanged => {
                         if let Some(filter) = panel.read(cx).filter().cloned() {
                             this.project_files
@@ -632,7 +638,8 @@ impl Workbench {
             "find_in_files": self.find_in_files.read(cx).is_open(),
             "search_everywhere": self.search_everywhere.read(cx).is_open(),
             "recent_files": self.recent_files.read(cx).is_open(),
-            "dialog": self.dialog.as_ref().map(|d| d.dialog.read(cx).state_json()),
+            "dialog": self.dialog.as_ref().map(|d| d.dialog.read(cx).state_json())
+                .or_else(|| self.panel.read(cx).dialog().map(|d| d.read(cx).state_json())),
             "file_index": self.project_files.read(cx).index().map(|i| i.len()),
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
@@ -838,16 +845,20 @@ impl Workbench {
             }
             editor
         });
-        let edited_path = path.clone();
-        let subscription = cx.subscribe(&editor, move |this, _, event: &EditorEvent, cx| {
+        let subscription = cx.subscribe(&editor, move |this, editor, event: &EditorEvent, cx| {
             if matches!(event, EditorEvent::Edited(_)) {
                 // Edits count as input for the idle save (they may also come
                 // from commands rather than keys).
                 this.note_input(cx);
-                remember_file(&mut this.recently_changed, &edited_path);
+                // The editor's path follows renames.
+                if let Some(path) = editor.read(cx).path().cloned() {
+                    remember_file(&mut this.recently_changed, &path);
+                }
             }
-            if let EditorEvent::Jumped { from, view_y } = event {
-                this.editor_jumped(edited_path.clone(), *from, *view_y, cx);
+            if let EditorEvent::Jumped { from, view_y } = event
+                && let Some(path) = editor.read(cx).path().cloned()
+            {
+                this.editor_jumped(path, *from, *view_y, cx);
             }
             cx.notify()
         });
@@ -2685,6 +2696,7 @@ impl Render for Workbench {
             .children(self.render_run_menu(window))
             .children(self.render_run_dialog(cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))
+            .children(self.panel.read(cx).overlays(window))
             .when(self.find_in_files.read(cx).is_open(), |d| {
                 d.child(self.find_in_files.clone())
             })

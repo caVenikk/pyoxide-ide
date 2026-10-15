@@ -4,9 +4,23 @@
 //! reference IDE's exclusions once, ADR 0008); directories are listed when
 //! the rules are there.
 //!
-//! The context menu of a row has *Mark Directory As* (*Mark File As* for a
-//! file) with *Excluded* and *Cancel Exclusion*; the project settings are
-//! written in the background after every change.
+//! The context menu of a row has *New*, *Rename…* and *Delete…*
+//! ([`file_ops`]) and *Mark Directory As* (*Mark File As* for a file) with
+//! *Excluded* and *Cancel Exclusion*; the project settings are written in
+//! the background after every change.
+
+mod file_ops;
+pub mod name_popup;
+mod new_items;
+mod transfer;
+pub mod transfer_dialog;
+
+pub use file_ops::COMMANDS as FILE_COMMANDS;
+pub use file_ops::{Delete, NewDirectory, NewElement, NewFile, Rename};
+pub use new_items::COMMANDS as NEW_ITEM_COMMANDS;
+pub use new_items::{NewFromTemplate, NewItem, NewItemKind, NewTemplate};
+pub use transfer::COMMANDS as TRANSFER_COMMANDS;
+pub use transfer::{Copy, CopyElement, CopyPath, CopyPaths, Cut, DraggedFiles, Move, Paste};
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -73,6 +87,8 @@ pub enum PanelEvent {
     /// The project's hide and exclude rules were read or changed
     /// ([`ProjectPanel::filter`]).
     RulesChanged,
+    /// Files or folders were created, renamed or deleted from the tree.
+    FilesChanged(Vec<project::fs_ops::FsChange>),
 }
 
 pub struct ProjectPanel {
@@ -104,6 +120,8 @@ pub struct ProjectPanel {
     /// Where the rows were drawn (window coordinates), to place a context
     /// menu opened from the keyboard.
     rows_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// New, Rename and Delete: their popup or dialog while open.
+    ops: file_ops::FileOps,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -133,6 +151,7 @@ impl ProjectPanel {
             resave: false,
             settings_error: None,
             rows_bounds: Rc::default(),
+            ops: file_ops::FileOps::default(),
         }
     }
 
@@ -176,6 +195,7 @@ impl ProjectPanel {
         self.waiting.clear();
         self.context_menu = None;
         self.settings_error = None;
+        self.ops.close();
         self.tree = Some(FileTree::new(&root));
         self.project = Some(project);
         self.selected = Some(FileTree::ROOT);
@@ -387,6 +407,10 @@ impl ProjectPanel {
             "context_menu": self.context_menu().map(|m| m.read(cx).state_json()),
             "exclusions": self.filter.as_ref().map(|f| &f.exclusions().paths),
             "settings_error": self.settings_error,
+            "name_popup": self.name_popup().map(|p| p.read(cx).state_json(cx)),
+            "dialog": self.dialog().map(|d| d.read(cx).state_json()),
+            "transfer": self.transfer_dialog().map(|d| d.read(cx).state_json(cx)),
+            "clipboard": self.clipboard_json(),
         })
     }
 
@@ -597,8 +621,9 @@ impl ProjectPanel {
     }
 
     /// The rows of the context menu of `id`, in the reference IDE's order:
-    /// *Find in Files…* and *Replace in Files…* (the row's folder, or the
-    /// folder of a file, becomes the Directory scope), then *Mark Directory
+    /// *New*, *Find in Files…* and *Replace in Files…* (the row's folder,
+    /// or the folder of a file, becomes the Directory scope), *Rename…*,
+    /// *Delete…*, then *Mark Directory
     /// As* (or *Mark File As*) with *Excluded* for project content or
     /// *Cancel Exclusion* for a stored exclusion. The project root, rows
     /// inside an excluded folder and folders a product excludes have
@@ -607,10 +632,12 @@ impl ProjectPanel {
         let (Some(tree), Some(filter)) = (&self.tree, &self.filter) else {
             return Vec::new();
         };
-        let mut items = vec![
+        let mut items = self.new_menu_items(id);
+        items.extend([
             MenuItem::action("Find in Files…", crate::find_in_files::Open),
             MenuItem::action("Replace in Files…", crate::find_in_files::OpenReplace),
-        ];
+        ]);
+        items.extend(self.edit_menu_items(id));
         let entry = &tree.node(id).entry;
         let Some(rel) = filter.relative(&entry.path) else {
             return items;
@@ -730,8 +757,11 @@ impl ProjectPanel {
         let hover = theme.color(UiRole::Hover);
         // Excluded rows keep the normal text colour and get the background
         // of non-project files across the whole row.
+        // Cut rows are greyed until Paste moves them.
         let text_color = if selected && focused {
             theme.color(UiRole::SelectionText)
+        } else if self.is_cut(&entry.path) {
+            theme.color(UiRole::TextMuted)
         } else {
             theme.color(UiRole::Text)
         };
@@ -822,6 +852,7 @@ impl ProjectPanel {
                 }
                 cx.notify();
             }));
+        let row = self.drag_and_drop(row, id, icon, cx);
         // The context menu opens on the right button: when it goes down on
         // macOS and Linux, when it comes up on Windows (the platforms'
         // popup triggers).
@@ -876,6 +907,19 @@ panel_actions! {
     ShowContextMenu => show_context_menu,
     MarkExcluded => mark_excluded,
     CancelExclusion => cancel_exclusion,
+    NewElement => new_element,
+    NewFile => new_file,
+    NewDirectory => new_directory,
+    Rename => rename_action,
+    Delete => delete_action,
+    NewFromTemplate => new_from_template,
+    Cut => cut,
+    Copy => copy,
+    Paste => paste,
+    CopyElement => copy_element,
+    Move => move_action,
+    CopyPaths => copy_paths,
+    CopyPath => copy_path,
 }
 
 impl Render for ProjectPanel {
