@@ -1021,7 +1021,9 @@ impl Workbench {
         self.find_in_files.update(cx, |p, cx| p.save_preview(cx));
     }
 
-    /// Closes a tab; a modified file is saved first (no prompt).
+    /// Closes a tab; a modified file is saved first (no prompt). A modified
+    /// editor that is not saved automatically (its file is gone, or changed
+    /// on disk) asks first (Close Document) and stays until the answer.
     pub fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if index >= self.tabs.len() || self.sync_close_asks(index, cx) {
             return;
