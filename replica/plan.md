@@ -61,7 +61,7 @@ reference them with `Refs #N`, pull requests with `Closes #N`.
 | #71 SQLite lock waits starved by back-to-back commits | sub-agent sqlite | `db-sqlite` | - | done (PR #72) |
 | #44 Go to File and Search Everywhere | sub-agent find | `ui` (popup, list, fuzzy), `project` (file name index), `workbench` | #43 | done (PR #73) |
 | #45 Run the current Python file | sub-agents run (A1 non-UI, A2 UI, B interpreter) | new `crates/platform/{process,console}`, `crates/python/py-run`; `workbench` (bottom tool window area, Run tool window, run widget, dialogs, product hooks), `editor` (console mode), `project` (personal state, ADR 0009), `ui` (list popups), `pyoxide-ide` (Python run provider, interpreter widget) | #18 | done (PR #76) |
-| #74 Run configurations with a one-time import from `.idea` | - | run-debug | #45 | todo |
+| #74 Run configurations with a one-time import from `.idea` | sub-agent run-config | new `crates/platform/run-config`, `workbench/src/run/**`, `ui` (menu), `py-run`, `pyoxide-ide`, ADR 0012 | #45 | done (PR #117) |
 | #75 Configured interpreters, Add New Interpreter, interpreter settings | - | python-env | #45 | todo |
 
 ## M3: Python intelligence (recon done)
@@ -98,6 +98,26 @@ git (#91, #28), settings window (#92, #40), rebrand (#93), release builds
 and README / CONTRIBUTING (#94). Terminal, debugger, git and settings get a
 recon (`/replica-recon`) after M3's first version. Windows release: per-user
 installer without administrator rights, per-machine installer, portable zip.
+Also in the MVP: editor soft wraps (#119), the Search Everywhere preview
+(#118, one configurable preview component shared with Find in Files),
+Python packages and source roots in the project tree (#120), file type
+icons by name pattern (#121), navigation history (#103).
+
+Wave 1 (parallel sub-agents in worktrees, merged in this order):
+
+| issue | owner | crates / files | status |
+|---|---|---|---|
+| #96 Theme import: effect type without a colour | sub-agent small | `themes` | done (PR #111) |
+| #101 Flaky db-sqlite lock-wait test on Windows | sub-agent small | `db-sqlite` | done (PR #112) |
+| #103 Navigation history (Back / Forward) | sub-agent nav | `workbench` (`navigation.rs`, history hooks), `editor` (jump event), `code-intel-ui` | done (PR #113) |
+| #36 Reload files changed on disk | sub-agent sync | new `crates/platform/file-watcher`, `project` (stamps, changes), `text` (reload), `workbench` (file sync, conflict dialog) | done (PR #115) |
+| #74 Run configurations | sub-agent run-config | see M2 table | done (PR #117) |
+| #37 Project tree file operations | sub-agent tree | `project` (`fs_ops`, trash), `workbench` (project panel), `pyoxide-ide` (Python new items) | PR #116 |
+
+Wave 2 (on command): recon (`/replica-recon`) for terminal (#89),
+debugger (#90), git (#91, #28), settings window (#92, #40) and configured
+interpreters (#75); small items without a recon: #119, #118, #120, #121.
+Wave 3: rebrand (#93), release (#94), announcement.
 
 Queue: MVP (M3 first version first), then #13 control channel, then #50 (find filters for comments and string
 literals, which need the Python syntax layer). Follow-ups of #18 are #24-#42;
