@@ -26,13 +26,22 @@
 //! row's arrow, its "More Actions" button or Right (`ListPopupImpl`
 //! without `showSubmenuOnHover`). A submenu opens to the right of the
 //! menu, or to its left when there is no room; the menu never moves.
+//!
+//! While the pointer moves from a row towards its open submenu, the rows it
+//! crosses on the way do not take the hover (`MouseMovementTracker`,
+//! `ListPopupImpl.isMovingToSubmenu`); a row the pointer rests on takes it
+//! after a short delay.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
-    Action, AnyElement, App, AppContext as _, Context, Corner, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, ParentElement, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, anchored, deferred, div,
-    point, prelude::*, px,
+    Action, AnyElement, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, Render,
+    SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task, Window,
+    anchored, deferred, div, point, prelude::*, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
@@ -167,6 +176,13 @@ const HEADER_LABEL: f32 = 16.0;
 const HEADER_INSET_Y: f32 = 3.0;
 /// Distance a submenu keeps from the window's edges.
 const WINDOW_MARGIN: f32 = 4.0;
+/// Pointer positions kept to tell where it moves, and the distance that
+/// counts as a move (`MouseMovementTracker`: 4 positions, 2 px).
+const AIM_HISTORY: usize = 4;
+const AIM_MARGIN: f32 = 2.0;
+/// A row the pointer rests on while moving towards a submenu takes the
+/// hover after this long (`ListPopupImpl`'s submenu timer, 250 ms).
+const AIM_DELAY: Duration = Duration::from_millis(250);
 /// Characters besides letters and digits that speed search takes
 /// (`SpeedSearch.PUNCTUATION_MARKS`); a space only after the first char.
 const PUNCTUATION_MARKS: &str = "*_-+\"'/.#$>: ,;?!@%^&";
@@ -588,6 +604,15 @@ pub struct ContextMenu {
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
     submenu_on_hover: bool,
+    /// Where each open submenu is drawn (window coordinates), by level.
+    submenu_bounds: Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>,
+    /// The pointer's last positions over the menu, newest at `aim_at`.
+    aim_history: [Option<Point<Pixels>>; AIM_HISTORY],
+    aim_at: usize,
+    /// A row the pointer reached while moving towards a submenu, where it
+    /// was, and the timer that gives it the hover if the pointer rests.
+    aim_pending: Option<(usize, usize, Point<Pixels>)>,
+    _aim_timer: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -655,6 +680,11 @@ impl ContextMenu {
                 min_width: options.min_width,
                 max_width: options.max_width,
                 submenu_on_hover: !list,
+                submenu_bounds: Rc::default(),
+                aim_history: [None; AIM_HISTORY],
+                aim_at: 0,
+                aim_pending: None,
+                _aim_timer: None,
                 _subscriptions: subscriptions,
             };
             if list {
@@ -887,6 +917,69 @@ impl ContextMenu {
         self.select(level, ix, true, cx);
         self.step(1, cx);
         true
+    }
+
+    /// The pointer moved to `position` over row `ix` of `level`: the row
+    /// takes the hover unless the pointer moves towards the open submenu
+    /// of that level; then it does after [`AIM_DELAY`] if the pointer
+    /// rests there.
+    fn hover(&mut self, level: usize, ix: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let towards = self.moving_towards_submenu(level, position);
+        let hovered =
+            self.selected.get(level).copied().flatten() == Some(ix) && self.selected.len() > level;
+        if hovered {
+            self.aim_pending = None;
+            return;
+        }
+        if towards {
+            self.aim_pending = Some((level, ix, position));
+            self._aim_timer = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(AIM_DELAY).await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some((level, ix, at)) = this.aim_pending.take()
+                        && this.aim_history[this.aim_at] == Some(at)
+                    {
+                        let open = this.submenu_on_hover;
+                        this.select(level, ix, open, cx);
+                    }
+                });
+            }));
+            return;
+        }
+        self.aim_pending = None;
+        let open = self.submenu_on_hover;
+        self.select(level, ix, open, cx);
+    }
+
+    /// Keeps `position` in the history and tells whether the pointer moves
+    /// towards the submenu open from `level` (`MouseMovementTracker.
+    /// isMovingTowards`, `ScreenUtil.isMovementTowards`).
+    fn moving_towards_submenu(&mut self, level: usize, position: Point<Pixels>) -> bool {
+        let far_enough = |a: Point<Pixels>, b: Point<Pixels>| {
+            let dx = f32::from(a.x - b.x);
+            let dy = f32::from(a.y - b.y);
+            (dx * dx + dy * dy).sqrt() >= AIM_MARGIN
+        };
+        let previous = (0..AIM_HISTORY)
+            .filter_map(|i| self.aim_history[(self.aim_at + AIM_HISTORY - i) % AIM_HISTORY])
+            .find(|p| far_enough(*p, position));
+        if self.aim_history[self.aim_at].is_none_or(|p| far_enough(p, position)) {
+            self.aim_at = (self.aim_at + 1) % AIM_HISTORY;
+            self.aim_history[self.aim_at] = Some(position);
+        }
+        if self.selected.len() <= level + 1 {
+            return false;
+        }
+        let bounds = self
+            .submenu_bounds
+            .borrow()
+            .get(level + 1)
+            .copied()
+            .flatten();
+        let Some(bounds) = bounds else {
+            return false;
+        };
+        movement_towards(previous, position, bounds)
     }
 
     /// The "More Actions" button of row `ix`: opens its submenu with the
@@ -1211,6 +1304,8 @@ impl ContextMenu {
                 let submenu = (open && is_selected).then(|| Beside {
                     child: self.render_level(level + 1, cx),
                     above: px(1.0 + m.pad_top),
+                    level: level + 1,
+                    drawn: self.submenu_bounds.clone(),
                 });
                 let fragments = match (&self.matcher, level) {
                     (Some(matcher), 0) => matcher.find(&label).unwrap_or_default(),
@@ -1272,13 +1367,8 @@ impl ContextMenu {
                     )
                     .children(submenu)
                     .when(enabled, |d| {
-                        d.on_mouse_move(cx.listener(move |this, _, _, cx| {
-                            if this.selected.get(level).copied().flatten() != Some(ix)
-                                || this.selected.len() <= level
-                            {
-                                let open = this.submenu_on_hover;
-                                this.select(level, ix, open, cx);
-                            }
+                        d.on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                            this.hover(level, ix, event.position, cx);
                         }))
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
@@ -1477,6 +1567,10 @@ struct Beside {
     /// From the top of the submenu to its first row: the border and the
     /// space above the rows.
     above: Pixels,
+    /// The submenu's level, and where the menu keeps the bounds it is
+    /// drawn at (for the pointer's aim).
+    level: usize,
+    drawn: Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>,
 }
 
 impl IntoElement for Beside {
@@ -1548,6 +1642,13 @@ impl gpui::Element for Beside {
         let y = (row.top() - self.above)
             .min(viewport.height - margin - size.height)
             .max(margin);
+        {
+            let mut drawn = self.drawn.borrow_mut();
+            if drawn.len() <= self.level {
+                drawn.resize(self.level + 1, None);
+            }
+            drawn[self.level] = Some(Bounds::new(point(x, y), size));
+        }
         self.child.prepaint_at(point(x, y), window, cx);
     }
 
@@ -1563,6 +1664,57 @@ impl gpui::Element for Beside {
     ) {
         self.child.paint(window, cx);
     }
+}
+
+/// The pointer moves from `previous` to `location` towards `bounds`: the
+/// line through both points crosses the rectangle ahead of the pointer
+/// (`ScreenUtil.isMovementTowards`). Without a previous position, or
+/// inside the rectangle, it does.
+fn movement_towards(
+    previous: Option<Point<Pixels>>,
+    location: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    if previous == location || bounds.contains(&location) {
+        return true;
+    }
+    let (px_, py) = (f32::from(previous.x), f32::from(previous.y));
+    let (lx, ly) = (f32::from(location.x), f32::from(location.y));
+    let (bx, by) = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
+    let (bw, bh) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+    let dx = px_ - lx;
+    let dy = py - ly;
+    // Moving away from the rectangle.
+    if dx > 0.0 && bx >= px_ {
+        return false;
+    }
+    if dx < 0.0 && bx + bw <= px_ {
+        return false;
+    }
+    if dy < 0.0 && by + bh <= py {
+        return false;
+    }
+    if dy > 0.0 && by >= py {
+        return false;
+    }
+    if dx == 0.0 {
+        return lx >= bx && lx < bx + bw && ((dy > 0.0) ^ (by > ly));
+    }
+    if dy == 0.0 {
+        return ly >= by && ly < by + bh && ((dx > 0.0) ^ (bx > lx));
+    }
+    // The line `y = a x + b` through both points crosses a side.
+    let a = dy / dx;
+    let b = ly - a * lx;
+    let within_y = |y: f32| y >= by && y < by + bh;
+    let within_x = |x: f32| x >= bx && x < bx + bw;
+    within_y(a * bx + b)
+        || within_y(a * (bx + bw) + b)
+        || within_x((by - b) / a)
+        || within_x((by + bh - b) / a)
 }
 
 /// Char ranges of `text` as byte ranges with a background.
@@ -2120,5 +2272,83 @@ mod tests {
         let level = cx.debug_bounds("menu-level-0").unwrap();
         let sub = cx.debug_bounds("menu-level-1").unwrap();
         assert_eq!(sub.left(), level.right());
+    }
+
+    fn aim_items() -> Vec<MenuItem> {
+        vec![
+            MenuItem::action("Second", Second),
+            MenuItem::submenu(
+                "More",
+                vec![
+                    MenuItem::action("One", First),
+                    MenuItem::action("Two", First),
+                    MenuItem::action("Three", First),
+                    MenuItem::action("Four", First),
+                    MenuItem::action("Five", First),
+                ],
+            ),
+            MenuItem::action("Third", Third),
+            MenuItem::action("Fourth", Third),
+        ]
+    }
+
+    fn move_to(cx: &mut VisualTestContext, at: Point<Pixels>) {
+        cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+        redraw(cx);
+    }
+
+    /// The safety triangle (#135): while the pointer moves from a row
+    /// towards its submenu, the rows it crosses do not take the hover; a
+    /// row it rests on does after a moment; a move away from the submenu
+    /// changes the hover at once.
+    #[gpui::test]
+    fn rows_on_the_way_to_a_submenu_keep_it_open(cx: &mut TestAppContext) {
+        let (origin, menu, cx) =
+            open_with(cx, |window, cx| ContextMenu::build(aim_items(), window, cx));
+        place(&origin, point(px(10.0), px(10.0)), cx);
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        let more = cx.debug_bounds("menu-item:More").unwrap();
+        let third = cx.debug_bounds("menu-item:Third").unwrap();
+        // Hovering More opens its submenu to the right.
+        let start = point(level.right() - px(30.0), more.center().y);
+        move_to(cx, start);
+        assert_eq!(selected(&menu, cx), [Some(1), None]);
+        let sub = cx.debug_bounds("menu-level-1").unwrap();
+        assert!(
+            sub.bottom() > third.bottom(),
+            "the submenu reaches below Third"
+        );
+        // Down and right, towards the submenu, over Third: More keeps it.
+        let on_third = point(level.right() - px(10.0), third.center().y);
+        move_to(cx, on_third);
+        assert_eq!(selected(&menu, cx), [Some(1), None]);
+        // Resting there gives Third the hover.
+        cx.executor()
+            .advance_clock(AIM_DELAY + Duration::from_millis(50));
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(2)]);
+        // Straight down, away from the submenu: the row takes the hover.
+        move_to(cx, start);
+        assert_eq!(selected(&menu, cx), [Some(1), None]);
+        let fourth = cx.debug_bounds("menu-item:Fourth").unwrap();
+        move_to(cx, point(start.x, fourth.center().y));
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+    }
+
+    #[test]
+    fn movement_towards_a_rectangle() {
+        let b = Bounds::new(point(px(100.0), px(0.0)), gpui::size(px(50.0), px(100.0)));
+        let p = |x: f32, y: f32| point(px(x), px(y));
+        // Right and a little down: crosses the left side.
+        assert!(movement_towards(Some(p(50.0, 10.0)), p(60.0, 15.0), b));
+        // Steeply down: passes below.
+        assert!(!movement_towards(Some(p(50.0, 10.0)), p(55.0, 40.0), b));
+        // Left, away from it.
+        assert!(!movement_towards(Some(p(60.0, 10.0)), p(50.0, 10.0), b));
+        // Straight down beside it.
+        assert!(!movement_towards(Some(p(50.0, 10.0)), p(50.0, 20.0), b));
+        // Inside, or without a previous position.
+        assert!(movement_towards(Some(p(50.0, 10.0)), p(120.0, 10.0), b));
+        assert!(movement_towards(None, p(0.0, 0.0), b));
     }
 }

@@ -70,6 +70,9 @@ const MIN_EDITOR_WIDTH: f32 = 200.0;
 /// Room kept on each side of the file path in the middle of the toolbar
 /// for the widgets at the toolbar's ends; a longer path is cut short.
 const TOOLBAR_SIDE_ROOM: f32 = 320.0;
+/// Between the run widget and the toolbar's buttons right of it: 31 (see
+/// `render_toolbar`) less the toolbar's gaps of 4 on both sides.
+const TOOLBAR_RUN_GAP: f32 = 31.0 - 2.0 * 4.0;
 /// Width of the Go to Line popup and its distance below the toolbar.
 const GO_TO_LINE_WIDTH: f32 = 320.0;
 const GO_TO_LINE_TOP: f32 = 80.0;
@@ -1735,7 +1738,7 @@ impl Workbench {
             .items_center()
             .h(height)
             .pl(left)
-            .pr(px(8.0))
+            .pr(px(5.0))
             .gap(px(4.0))
             .bg(theme.color(UiRole::Toolbar))
             .on_click(|event, window, _| {
@@ -1750,14 +1753,25 @@ impl Workbench {
             )
             .child(div().flex_1())
             .child(crate::run::widget::render(run, &self.run_anchors, cx))
-            .child(div().w(px(8.0)))
+            // The run widget's toolbar ends 16 after its buttons, the main
+            // toolbar's groups are 10 apart, its buttons have 5 on both
+            // sides (`RedesignedRunWidget` insets, `MainToolbar` layout gap,
+            // `MainToolbar.Icon.insets`): 31 in all, less the gaps here.
+            .child(div().flex_none().w(px(TOOLBAR_RUN_GAP)))
             .child(
-                icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
-                    .tooltip(Tooltip::text("Search Everywhere", None)),
-            )
-            .child(
-                icon_button("settings", IconName::SETTINGS, button, px(20.0), false, cx)
-                    .tooltip(Tooltip::text("Settings", None)),
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
+                            .tooltip(Tooltip::text("Search Everywhere", None)),
+                    )
+                    .child(
+                        icon_button("settings", IconName::SETTINGS, button, px(20.0), false, cx)
+                            .tooltip(Tooltip::text("Settings", None)),
+                    ),
             )
             .children(path_widget)
     }
