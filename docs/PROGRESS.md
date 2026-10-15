@@ -8,7 +8,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 44% `████░░░░░░` | 1 | 6 | 3 |
+| editor | 50% `█████░░░░░` | 2 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 21% `██░░░░░░░░` | 1 | 0 | 4 |
@@ -80,6 +80,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | File tree and project model | must | open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; no file operations or drag and drop |
 | 🟡 | Search in file and project | must | find and replace in file (#31) and in files (#43: scopes, masks, editable preview, Replace in Files); missing: Find tool window (#65), multi-row selection (#66), undo across files (#67), comment/string filters (#50) |
 | 🟡 | Navigation popups (Search Everywhere, Go to File / Action, Recent Files) | must | All / Files / Actions / Text tabs, ported name matcher, file:line, recent files; Classes and Symbols with M3; preview and Find window (#65); the reference's ML ranking replaced by a fixed rule |
+| ✅ | Navigation history (Back / Forward) | must | places and keys as in the reference, mouse buttons 4 / 5, view position restored (#103); only the primary caret is kept; Recent Locations and Last Edit Location later |
 | ⬜ | Multi-cursor and column selection | should |  |
 | ⬜ | Code folding | should |  |
 | ⬜ | Live templates | should |  |
@@ -109,7 +110,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Code completion (basic, auto-popup, auto-import) | must | Community (#85, #87); completion characters, documentation in the lookup and postfix templates later |
 | ✅ | Quick documentation (F1 / hover) | must | Community (#86) |
 | ✅ | Parameter info | must | Community (#86) |
-| 🟡 | Go to declaration (Cmd+B / Cmd+click) and type declaration | must | Community; Cmd+B, Cmd+click, chooser, usages on the declaration (#86); Go to Type Declaration and Back (#103) missing |
+| 🟡 | Go to declaration (Cmd+B / Cmd+click) and type declaration | must | Community; Cmd+B, Cmd+click, chooser, usages on the declaration (#86), Back / Forward (#103); Go to Type Declaration missing |
 | 🟡 | Find usages and Show Usages popup | must | Community; Show Usages popup (#86); Find Usages tool window later |
 | ⬜ | Highlight usages of the symbol at the caret | should | Community |
 | ✅ | Quick fixes and intention actions (Alt+Enter) | must | Community; ruff fixes with Disable for file / line / project (#86, #87); intention preview later |
