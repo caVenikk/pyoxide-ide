@@ -180,6 +180,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         RunWidgetStop => &[Ui("RunWidget.stopBackground")],
         DragAndDropBorder => &[Ui("DragAndDrop.borderColor")],
         DragAndDropRow => &[Ui("DragAndDrop.rowBackground")],
+        ListButtonHover => &[Ui("List.Button.hoverBackground")],
+        ListButtonSeparator => &[Ui("List.Button.separatorColor")],
         PopupBorder => &[Ui("Popup.borderColor"), Ui("Menu.borderColor")],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],

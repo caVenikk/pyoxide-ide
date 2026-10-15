@@ -207,6 +207,8 @@ report says which parent was missing.
 | `ui.run-widget-stop` | `RunWidget.stopBackground` | Background of the run widget's Stop button |
 | `ui.drag-and-drop-border` | `DragAndDrop.borderColor` | Border of the row that takes dragged files or folders (the reference's drop target rectangle) |
 | `ui.drag-and-drop-row` | `DragAndDrop.rowBackground` | Background of the row that takes dragged files or folders |
+| `ui.list-button-hover` | `List.Button.hoverBackground` | Background of a hovered button at the end of a popup row, such as Run in the run widget's dropdown |
+| `ui.list-button-separator` | `List.Button.separatorColor` | Line before the buttons at the end of a popup row |
 
 ### Editor
 
@@ -326,6 +328,8 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.run-widget-stop` | `ui.danger` |
 | `ui.drag-and-drop-border` | `ui.accent` |
 | `ui.drag-and-drop-row` | `ui.selection` |
+| `ui.list-button-hover` | `ui.hover` |
+| `ui.list-button-separator` | `ui.pressed` |
 
 ## Text roles
 

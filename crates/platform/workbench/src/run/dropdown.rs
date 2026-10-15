@@ -237,8 +237,8 @@ fn config_submenu(c: &RunConfiguration, pinned: bool) -> Vec<MenuItem> {
     items
 }
 
-/// A configuration's row: selects it, opens its submenu while selected,
-/// with Run, Stop and Debug buttons.
+/// A configuration's row: selects it; Run, Stop and Debug buttons, and
+/// More Actions (added by the popup) or Right open its submenu.
 fn config_item(
     state: &MenuState<'_>,
     c: &RunConfiguration,
