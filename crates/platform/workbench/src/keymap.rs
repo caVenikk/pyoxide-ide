@@ -13,7 +13,9 @@
 //!
 //! Keystrokes use GPUI's syntax (`cmd-shift-z`, `alt-left`, `ctrl-f4`).
 //! A modifier written twice (`"shift shift"`) is a double tap of that key
-//! ([`gesture`]), bound everywhere.
+//! ([`gesture`]), bound everywhere; `button4` and `button5` are the mouse's
+//! back and forward buttons (the reference keymaps' names), bound
+//! everywhere in the window.
 
 mod gesture;
 
@@ -22,7 +24,7 @@ use std::rc::Rc;
 
 use gpui::{
     Action, App, DummyKeyboardMapper, Global, KeyBinding, KeyBindingContextPredicate, Keystroke,
-    Modifiers, Window,
+    Modifiers, MouseButton, NavigationDirection, Window,
 };
 use serde::Deserialize;
 use serde_json::Value as Json;
@@ -122,6 +124,7 @@ pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
     let mut errors = Vec::new();
     let mut out = Vec::new();
     let mut taps = Vec::new();
+    let mut buttons = Vec::new();
     for b in &keymap.bindings {
         let action = match cx.build_action(&b.command, b.args.clone()) {
             Ok(action) => action,
@@ -132,6 +135,10 @@ pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
         };
         if let Some(key) = parse_double_tap(&b.keys) {
             taps.push((key, b.command.clone(), action));
+            continue;
+        }
+        if let Some(button) = parse_mouse_button(&b.keys) {
+            buttons.push((button, action));
             continue;
         }
         let predicate = match &b.context {
@@ -160,16 +167,28 @@ pub fn bind(cx: &mut App, keymap: &Keymap) -> Vec<String> {
     cx.set_global(Gestures {
         taps,
         state: DoubleTap::default(),
+        buttons,
     });
     errors
 }
 
-/// The double-tap bindings of the installed keymap and the tap in
-/// progress.
+/// The mouse button a keymap entry names: `button4` (back) or `button5`
+/// (forward).
+pub fn parse_mouse_button(keys: &str) -> Option<MouseButton> {
+    match keys {
+        "button4" => Some(MouseButton::Navigate(NavigationDirection::Back)),
+        "button5" => Some(MouseButton::Navigate(NavigationDirection::Forward)),
+        _ => None,
+    }
+}
+
+/// The double-tap and mouse button bindings of the installed keymap and
+/// the tap in progress.
 #[derive(Default)]
 struct Gestures {
     taps: Vec<(ModifierKey, String, Box<dyn Action>)>,
     state: DoubleTap,
+    buttons: Vec<(MouseButton, Box<dyn Action>)>,
 }
 
 impl Global for Gestures {}
@@ -197,6 +216,24 @@ pub fn modifiers_changed(modifiers: Modifiers, window: &mut Window, cx: &mut App
     });
     if let Some(action) = action {
         window.dispatch_action(action, cx);
+    }
+}
+
+/// A mouse button went down in a window: a bound button runs its command
+/// there. Returns whether one did.
+pub fn mouse_down(button: MouseButton, window: &mut Window, cx: &mut App) -> bool {
+    let action = cx.try_global::<Gestures>().and_then(|g| {
+        g.buttons
+            .iter()
+            .find(|(b, _)| *b == button)
+            .map(|(_, action)| action.boxed_clone())
+    });
+    match action {
+        Some(action) => {
+            window.dispatch_action(action, cx);
+            true
+        }
+        None => false,
     }
 }
 
@@ -256,6 +293,15 @@ name = "Editor"
         assert_eq!(select.context.as_deref(), Some("Editor"));
         assert_eq!(keymap.keys_for("editor.undo"), Some("cmd-z"));
         assert!(Keymap::parse("[[context]]\nnope = 1\n").is_err());
+    }
+
+    #[test]
+    fn mouse_buttons() {
+        let back = MouseButton::Navigate(NavigationDirection::Back);
+        let forward = MouseButton::Navigate(NavigationDirection::Forward);
+        assert_eq!(parse_mouse_button("button4"), Some(back));
+        assert_eq!(parse_mouse_button("button5"), Some(forward));
+        assert_eq!(parse_mouse_button("cmd-4"), None);
     }
 
     #[test]

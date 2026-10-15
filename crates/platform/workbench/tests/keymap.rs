@@ -138,6 +138,15 @@ impl H<'_> {
         assert_eq!(self.completion()["shown"], json!(true), "the popup shows");
     }
 
+    /// Presses and releases a mouse button over the editor.
+    fn click_button(&mut self, button: gpui::MouseButton) {
+        let at = gpui::point(gpui::px(700.0), gpui::px(400.0));
+        let mut cx = gpui::VisualTestContext::from_window(self.window.into(), self.cx);
+        cx.simulate_mouse_down(at, button, gpui::Modifiers::none());
+        cx.simulate_mouse_up(at, button, gpui::Modifiers::none());
+        self.draw();
+    }
+
     fn press(&mut self, keys: &str) {
         self.dispatched.borrow_mut().clear();
         self.cx.simulate_keystrokes(self.window.into(), keys);
@@ -1524,6 +1533,26 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.state()["active_tab"], json!(2), "{what}");
         }
+        // The reset opens a.py, b.py and c.txt and selects a.py again:
+        // Back returns to c.txt, Forward to a.py.
+        "workbench.back" | "workbench.forward" => {
+            let active =
+                |s: &Value| s["tabs"][s["active_tab"].as_u64().unwrap() as usize]["path"].clone();
+            if b.command == "workbench.forward" {
+                h.invoke("workbench.back", json!(null));
+                h.focus_editor();
+            }
+            match keymap::parse_mouse_button(keys) {
+                Some(button) => h.click_button(button),
+                None => h.press(keys),
+            }
+            let expected = if b.command == "workbench.back" {
+                "c.txt"
+            } else {
+                "a.py"
+            };
+            assert_eq!(active(&h.state()), json!(expected), "{what}");
+        }
         "project.tree.up" | "project.tree.down" => {
             h.select_in_tree("src/m.py");
             let rows = h.tree_rows();
@@ -1698,8 +1727,11 @@ fn check_keymap(cx: &mut TestAppContext, text: &str) {
             missing.push(format!("`{}` -> {}", b.keys, b.command));
             continue;
         }
-        // A double tap runs its command without a keystroke.
-        if keymap::parse_double_tap(&b.keys).is_some() {
+        // A double tap or a mouse button runs its command without a
+        // keystroke.
+        if keymap::parse_double_tap(&b.keys).is_some()
+            || keymap::parse_mouse_button(&b.keys).is_some()
+        {
             continue;
         }
         let dispatched = h.dispatched.borrow().clone();

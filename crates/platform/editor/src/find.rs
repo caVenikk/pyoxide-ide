@@ -283,6 +283,9 @@ pub struct FindBar {
     /// The selection the bar gave the editor last (moving away from it
     /// ends a pending wrap and the hint).
     own_selection: Option<Range<usize>>,
+    /// Find Next or Previous pressed in the editor (not in the bar): where
+    /// the caret was; selecting a match then is a navigation.
+    jump_from: Option<usize>,
     history: Option<HistoryPopup>,
     _subscriptions: Vec<Subscription>,
 }
@@ -343,7 +346,8 @@ impl FindBar {
                 | EditorEvent::LinkClicked { .. }
                 | EditorEvent::Hovered { .. }
                 | EditorEvent::ModifiedClick { .. }
-                | EditorEvent::Reloaded => {}
+                | EditorEvent::Reloaded
+                | EditorEvent::Jumped { .. } => {}
             }),
             cx.on_blur(&history_focus, window, |this, _, cx| {
                 if this.history.take().is_some() {
@@ -374,6 +378,7 @@ impl FindBar {
             hint_above: false,
             initial: None,
             own_selection: None,
+            jump_from: None,
             history: None,
             _subscriptions: subscriptions,
         }
@@ -989,6 +994,7 @@ impl FindBar {
                 }
             }
         });
+        self.report_jump(cx);
     }
 
     /// Find Next or Previous with the bar closed, on the matches of the
@@ -1032,6 +1038,7 @@ impl FindBar {
                 self.own_selection = Some(range.clone());
                 self.editor
                     .update(cx, |e, cx| e.select_and_reveal(range, cx));
+                self.report_jump(cx);
             }
             None => self.not_found(direction, !matches.is_empty(), window, cx),
         }
@@ -1047,6 +1054,7 @@ impl FindBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.jump_from = None;
         let text = if self.open {
             self.query.read(cx).text()
         } else {
@@ -1438,11 +1446,41 @@ impl FindBar {
     }
 
     fn next_action(&mut self, _: &Next, window: &mut Window, cx: &mut Context<Self>) {
-        self.find(Direction::Forward, window, cx);
+        self.find_from_editor(Direction::Forward, window, cx);
     }
 
     fn previous_action(&mut self, _: &Previous, window: &mut Window, cx: &mut Context<Self>) {
-        self.find(Direction::Backward, window, cx);
+        self.find_from_editor(Direction::Backward, window, cx);
+    }
+
+    /// Find Next or Previous; pressed in the editor rather than in the
+    /// bar, the move to a match is a navigation (the reference's
+    /// `SearchAgainAction` and `FindUtil.doSearch`, not the bar's own
+    /// keys), reported when the match is selected.
+    fn find_from_editor(
+        &mut self,
+        direction: Direction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = self.editor.read(cx);
+        self.jump_from = editor
+            .focus_handle_ref()
+            .is_focused(window)
+            .then(|| editor.selections().primary().head);
+        self.find(direction, window, cx);
+        // Moved (and reported) or found nothing, unless a search runs.
+        if self.search_task.is_none() {
+            self.jump_from = None;
+        }
+    }
+
+    /// A match was selected: a navigation when Find Next or Previous was
+    /// pressed in the editor.
+    fn report_jump(&mut self, cx: &mut Context<Self>) {
+        if let Some(from) = self.jump_from.take() {
+            self.editor.update(cx, |e, cx| e.jumped_from(from, cx));
+        }
     }
 
     fn search_action(&mut self, a: &Search, window: &mut Window, cx: &mut Context<Self>) {

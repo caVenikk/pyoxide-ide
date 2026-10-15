@@ -35,6 +35,7 @@ use crate::run::RunToolWindow;
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
+mod history;
 /// Default width of the project tool window.
 mod run_actions;
 
@@ -231,6 +232,8 @@ pub struct Workbench {
     /// Code intelligence of the editor tabs, when the product has language
     /// services.
     code_intel: Option<Entity<CodeIntelView>>,
+    /// Back and Forward (`history.rs`).
+    navigation: history::Navigation,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -378,6 +381,7 @@ impl Workbench {
             dialog: None,
             run_anchors: crate::run::widget::Anchors::default(),
             code_intel,
+            navigation: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -612,6 +616,7 @@ impl Workbench {
                 "modified": t.editor.read(cx).is_modified(),
             })).collect::<Vec<_>>(),
             "active_tab": self.active,
+            "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
             "find_in_files": self.find_in_files.read(cx).is_open(),
@@ -639,6 +644,7 @@ impl Workbench {
         self.save_all(cx);
         self.tabs.clear();
         self.active = None;
+        self.clear_navigation();
         self.project_visible = true;
         self.project_files.update(cx, |files, cx| files.clear(cx));
         self.panel.update(cx, |panel, cx| {
@@ -702,10 +708,14 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+            let left = self.current_place(cx);
             self.activate(i, window, cx);
             self.tabs[i].editor.update(cx, |e, cx| {
                 e.go_to(point.line + 1, Some(point.column + 1), cx)
             });
+            if let Some(left) = left {
+                self.record_place(left, cx);
+            }
             return;
         }
         self.pending_go_to = Some((path.clone(), point));
@@ -824,6 +834,9 @@ impl Workbench {
                 this.note_input(cx);
                 remember_file(&mut this.recently_changed, &edited_path);
             }
+            if let EditorEvent::Jumped { from, view_y } = event {
+                this.editor_jumped(edited_path.clone(), *from, *view_y, cx);
+            }
             cx.notify()
         });
         let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
@@ -867,6 +880,7 @@ impl Workbench {
         {
             self.save_tab(previous, cx);
         }
+        self.tab_activated(self.active, index, cx);
         self.active = Some(index);
         let path = self.tabs[index].path.clone();
         remember_file(&mut self.recently_viewed, &path);
@@ -995,6 +1009,7 @@ impl Workbench {
             return;
         }
         self.save_tab(index, cx);
+        self.tab_closing(cx);
         let tab = self.tabs.remove(index);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
@@ -1164,8 +1179,12 @@ impl Workbench {
             return;
         };
         self.go_to_line = None;
+        let left = self.current_place(cx);
         if let Some(editor) = self.active_editor().cloned() {
             editor.update(cx, |e, cx| e.go_to(line, column, cx));
+        }
+        if let Some(left) = left {
+            self.record_place(left, cx);
         }
         self.focus_editor(&FocusEditor, window, cx);
         cx.notify();
@@ -2499,6 +2518,8 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .on_action(cx.listener(Self::show_go_to_line))
+            .on_action(cx.listener(Self::back))
+            .on_action(cx.listener(Self::forward))
             .on_action(cx.listener(Self::open_find_in_files))
             .on_action(cx.listener(Self::open_replace_in_files))
             .on_action(cx.listener(Self::search_in_files))
@@ -2535,6 +2556,12 @@ impl Render for Workbench {
                     bar.update(cx, |bar, cx| bar.clear_hint(cx));
                 }
             }))
+            // Mouse buttons of the keymap (Back and Forward).
+            .capture_any_mouse_down(|e, window, cx| {
+                if crate::keymap::mouse_down(e.button, window, cx) {
+                    cx.stop_propagation();
+                }
+            })
             // Double taps of a modifier (Shift Shift).
             .on_modifiers_changed(|e: &gpui::ModifiersChangedEvent, window, cx| {
                 crate::keymap::modifiers_changed(e.modifiers, window, cx)
