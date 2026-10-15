@@ -113,10 +113,17 @@ Wave 1 (parallel sub-agents in worktrees, merged in this order):
 | #36 Reload files changed on disk | sub-agent sync | new `crates/platform/file-watcher`, `project` (stamps, changes), `text` (reload), `workbench` (file sync, conflict dialog) | done (PR #115) |
 | #74 Run configurations | sub-agent run-config | see M2 table | done (PR #117) |
 | #37 Project tree file operations | sub-agent tree | `project` (`fs_ops`, trash), `workbench` (project panel), `pyoxide-ide` (Python new items) | done (PR #116) |
+| #129 Tree: Reload from Disk in the menu, drag and drop look | sub-agent tree | `workbench` (project panel), `themes` | done (PR #130) |
+| #128, #69 Menus: full-row highlight, shortcuts; run dropdown rows (#127) | sub-agent run-config | `ui` (menu) | done (PR #131) |
+| #127 Run/Debug Configurations in a window of its own | sub-agent run-config | `ui` (`dialog_window`), `workbench/src/run` | done (PR #132) |
+| #134 Tree: full-width root row with hover expansion, indent guides | sub-agent tree | `ui` (`tree_guides`), `workbench` (project panel) | done (PR #137, #141) |
+| #135 Run widget inactive icons, toolbar spacing, submenu aim | sub-agent run-config | `ui` (menu), `workbench` (toolbar, run) | done (PR #138, #140) |
+| #136 Dialog title bar, option tags, Modify options popup window | sub-agent run-config | `ui` (`dialog_window` popups), `workbench/src/run` | done (PR #139, #140) |
 
 Wave 2 (on command): recon (`/replica-recon`) for terminal (#89),
 debugger (#90), git (#91, #28), settings window (#92, #40) and configured
 interpreters (#75); small items without a recon: #119, #118, #120, #121.
+The settings window reuses `ui::dialog_window` (#127).
 Wave 3: rebrand (#93), release (#94), announcement.
 
 Queue: MVP (M3 first version first), then #13 control channel, then #50 (find filters for comments and string
