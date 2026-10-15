@@ -250,7 +250,9 @@ here with: source URL, commit, file(s), license, and what was changed.
   JpsProjectConfigurationLoading.java, library/JpsSdkTableSerializer.java
   and module/JpsModuleRootModelSerializer.java; list popups of platform/
   platform-impl/src/com/intellij/ui/popup/list/ListPopupImpl.java,
-  ListPopupModel.java and PopupListElementRenderer.java, ui/popup/
+  ListPopupModel.java, PopupListElementRenderer.java,
+  PopupInlineActionsSupportImpl.kt and InlineActionsUtil.kt (row buttons,
+  More Actions), ui/popup/WizardPopup.java (submenu placement), ui/popup/
   AbstractPopup.java and ActionPopupStep.java, platform/platform-api/src/
   com/intellij/ui/speedSearch/SpeedSearch.java and ui/
   GroupHeaderSeparator.java, platform/platform-api/src/com/intellij/

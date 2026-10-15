@@ -102,6 +102,8 @@ run-widget-running = "$leaf"
 run-widget-stop = "$red"
 drag-and-drop-border = "#2675bf"
 drag-and-drop-row = "#2675bf26"
+list-button-hover = "#b3cdef"
+list-button-separator = "#ffffffb3"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"

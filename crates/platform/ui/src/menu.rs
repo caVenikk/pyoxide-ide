@@ -19,6 +19,13 @@
 //! the menu closes it; so does deactivating the window. With speed search,
 //! typing filters the rows of the popup (Backspace deletes, Escape clears
 //! the filter before it closes the popup).
+//!
+//! Rows span the menu, with the shortcut of their action (from the active
+//! keymap, where the focus was) at their end. In a context menu a submenu
+//! opens while its row is selected; in a list popup it opens from the
+//! row's arrow, its "More Actions" button or Right (`ListPopupImpl`
+//! without `showSubmenuOnHover`). A submenu opens to the right of the
+//! menu, or to its left when there is no room; the menu never moves.
 
 use gpui::{
     Action, AnyElement, App, AppContext as _, Context, Corner, DismissEvent, Entity, EventEmitter,
@@ -134,10 +141,32 @@ const SEARCH_MARGIN_X: f32 = 12.0;
 const SEARCH_TOP: f32 = 4.0;
 const SEARCH_LEFT: f32 = 8.0;
 const SEARCH_BOTTOM: f32 = 8.0;
-/// A row's buttons (`ActionButton` in a list row) and the gap before a
-/// secondary text (`emptyLeft(6)`).
-const INLINE_BUTTON: f32 = 20.0;
+/// A row's buttons (`createExtraButton`): a 16 px icon with
+/// `List.Button.leftRightInset` 8 on both sides, after a line of 1 with a
+/// gap of 1 on both sides and `List.Button.separatorInset` 4 above and
+/// below (`createButtonsSeparator`). The buttons, or a submenu's arrow, end
+/// 5 inside the selection (`PopupListElementRenderer.customizeComponent`:
+/// twice `Popup.Selection.leftRightInset` less the line); the arrow comes
+/// 20 after the label (`myNextStepLabel`).
+const BUTTON: f32 = 16.0 + 2.0 * 8.0;
+const BUTTON_LINE: f32 = 3.0;
+const BUTTON_LINE_INSET: f32 = 4.0;
+const BUTTONS_RIGHT: f32 = 5.0;
+const NEXT_STEP_GAP: f32 = 20.0;
+/// Tooltip of the button that opens a row's submenu in a list popup
+/// (`inline.actions.more.actions.text`).
+pub const MORE_ACTIONS: &str = "More Actions";
+/// The gap before a secondary text (`emptyLeft(6)`) and before a shortcut.
 const SECONDARY_GAP: f32 = 6.0;
+const SHORTCUT_GAP: f32 = 18.0;
+/// A titled separator (`GroupHeaderSeparator`): its line with
+/// `Popup.separatorInsets` (4, 8), left out above the first row, then the
+/// title in a smaller bold font (`JBFont.smallOrNewUiMedium`) with
+/// `Popup.separatorLabelInsets` 3 above and below.
+const HEADER_LABEL: f32 = 16.0;
+const HEADER_INSET_Y: f32 = 3.0;
+/// Distance a submenu keeps from the window's edges.
+const WINDOW_MARGIN: f32 = 4.0;
 /// Characters besides letters and digits that speed search takes
 /// (`SpeedSearch.PUNCTUATION_MARKS`); a space only after the first char.
 const PUNCTUATION_MARKS: &str = "*_-+\"'/.#$>: ,;?!@%^&";
@@ -158,6 +187,9 @@ pub struct RowExtra {
     /// Shown only while the speed search filters (a row hidden behind a
     /// toggle, or a duplicate found by search).
     pub hidden: bool,
+    /// The shortcut at the end of the row; filled from the keymap when the
+    /// menu opens (`KeymapUtil.getShortcutText`).
+    pub shortcut: Option<SharedString>,
 }
 
 impl Clone for RowExtra {
@@ -167,6 +199,7 @@ impl Clone for RowExtra {
             icon_alpha: self.icon_alpha,
             inline: self.inline.clone(),
             hidden: self.hidden,
+            shortcut: self.shortcut.clone(),
         }
     }
 }
@@ -408,6 +441,15 @@ impl MenuItem {
         self
     }
 
+    /// The shortcut shown at the end of the row, instead of the one the
+    /// keymap gives the row's action.
+    pub fn shortcut(mut self, text: impl Into<SharedString>) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.shortcut = Some(text.into());
+        }
+        self
+    }
+
     pub fn label(&self) -> Option<&SharedString> {
         match self {
             Self::Action { label, .. } | Self::Submenu { label, .. } => Some(label),
@@ -445,6 +487,12 @@ impl MenuItem {
         matches!(self, Self::Submenu { items, .. } if !items.is_empty())
     }
 
+    /// Runs its own action and has a submenu (a "perform group", final in
+    /// the reference's popup step).
+    fn is_final_group(&self) -> bool {
+        self.has_submenu() && self.run_action().is_some()
+    }
+
     /// The action a click or Enter runs (a submenu row's only with
     /// `perform`).
     fn run_action(&self) -> Option<&dyn Action> {
@@ -478,11 +526,25 @@ impl MenuItem {
             Self::Header(_) | Self::Separator => false,
         }
     }
+}
 
-    fn height(&self, item_height: f32) -> f32 {
-        match self {
-            Self::Separator => SEPARATOR_HEIGHT,
-            _ => item_height,
+/// Fills the shortcuts of `items` (and their submenus) from the bindings
+/// that win where `focus` is.
+fn fill_shortcuts(items: &mut [MenuItem], focus: &FocusHandle, window: &Window) {
+    for item in items {
+        match item {
+            MenuItem::Action {
+                action: Some(action),
+                extra,
+                ..
+            } => {
+                if extra.shortcut.is_none() {
+                    extra.shortcut =
+                        crate::keys::shortcut_in(action.as_ref(), focus, window).map(Into::into);
+                }
+            }
+            MenuItem::Submenu { items, .. } => fill_shortcuts(items, focus, window),
+            _ => {}
         }
     }
 }
@@ -523,6 +585,9 @@ pub struct ContextMenu {
     matcher: Option<Matcher>,
     min_width: Option<f32>,
     max_width: Option<f32>,
+    /// A submenu opens while its row is selected (context menus), else
+    /// from its arrow, its button or Right (list popups).
+    submenu_on_hover: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -562,6 +627,10 @@ impl ContextMenu {
     ) -> Entity<Self> {
         let origin = window.focused(cx);
         let list = metrics == LIST;
+        let mut items = items;
+        if let Some(origin) = &origin {
+            fill_shortcuts(&mut items, origin, window);
+        }
         let menu = cx.new(|cx: &mut Context<Self>| {
             let focus = cx.focus_handle();
             let subscriptions = vec![
@@ -585,6 +654,7 @@ impl ContextMenu {
                 matcher: None,
                 min_width: options.min_width,
                 max_width: options.max_width,
+                submenu_on_hover: !list,
                 _subscriptions: subscriptions,
             };
             if list {
@@ -754,16 +824,16 @@ impl ContextMenu {
 
     // ---- selection and keys -------------------------------------------------
 
-    /// Selects row `ix` of `level`, closing deeper levels; a submenu row
-    /// opens its submenu (with nothing selected yet).
-    fn select(&mut self, level: usize, ix: usize, cx: &mut Context<Self>) {
+    /// Selects row `ix` of `level`, closing deeper levels; with `open` a
+    /// submenu row opens its submenu (with nothing selected yet).
+    fn select(&mut self, level: usize, ix: usize, open: bool, cx: &mut Context<Self>) {
         let Some(item) = self.level_items(level).get(ix) else {
             return;
         };
         if !item.selectable() {
             return;
         }
-        let submenu = item.has_submenu();
+        let submenu = open && item.has_submenu();
         self.selected.truncate(level + 1);
         self.selected[level] = Some(ix);
         if submenu {
@@ -814,9 +884,20 @@ impl ContextMenu {
         {
             return false;
         }
-        self.select(level, ix, cx);
+        self.select(level, ix, true, cx);
         self.step(1, cx);
         true
+    }
+
+    /// The "More Actions" button of row `ix`: opens its submenu with the
+    /// first row selected (`PopupInlineActionsSupportImpl.performAction`).
+    fn open_more(&mut self, level: usize, ix: usize, cx: &mut Context<Self>) {
+        if level >= self.selected.len() {
+            return;
+        }
+        self.selected.truncate(level + 1);
+        self.selected[level] = Some(ix);
+        self.open_selected_submenu(cx);
     }
 
     fn open_submenu(&mut self, _: &OpenSubmenu, _: &mut Window, cx: &mut Context<Self>) {
@@ -882,7 +963,7 @@ impl ContextMenu {
             MenuItem::Submenu { .. }
                 if self.selected.get(level + 1).is_none() || self.selected[level] != Some(ix) =>
             {
-                self.select(level, ix, cx);
+                self.select(level, ix, true, cx);
             }
             _ => {}
         }
@@ -956,6 +1037,9 @@ impl ContextMenu {
                             if let Some(alpha) = extra.icon_alpha {
                                 row["icon_alpha"] = json!(alpha);
                             }
+                            if let Some(shortcut) = &extra.shortcut {
+                                row["shortcut"] = json!(shortcut.as_ref());
+                            }
                             if !extra.inline.is_empty() {
                                 row["inline"] = extra
                                     .inline
@@ -992,16 +1076,22 @@ impl ContextMenu {
     fn render_level(&self, level: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let m = self.metrics;
+        let list = m == LIST;
         let items = self.level_items(level);
         let shown = self.shown(level);
         let with_icons = items.iter().any(|i| i.icon_name().is_some());
         let selected = self.selected[level];
+        let open = self.selected.len() > level + 1;
         let selection = theme.color(UiRole::Selection);
         let text = theme.color(UiRole::Text);
+        let muted = theme.color(UiRole::TextMuted);
         let disabled = theme.color(UiRole::TextDisabled);
         let line = theme.color(UiRole::PopupBorder);
         let match_bg = theme.color(UiRole::SearchMatch);
+        let small = theme.ui_size() - px(1.0);
         let item_height = self.item_height(cx);
+        let inner_height = item_height - 2.0 * m.selection_y;
+        let first_shown = shown.iter().position(|s| *s);
         let rows: Vec<AnyElement> = items
             .iter()
             .enumerate()
@@ -1010,25 +1100,34 @@ impl ContextMenu {
                 let id = SharedString::from(format!("menu-{level}-{ix}"));
                 if let MenuItem::Header(title) = item {
                     let selector = format!("menu-header:{title}");
-                    let first = !items[..ix].iter().enumerate().any(|(i, _)| shown[i]);
+                    let first = first_shown == Some(ix);
+                    // Columns, so that the line stretches across.
                     return div()
                         .id(id)
                         .debug_selector(move || selector.clone())
                         .flex()
                         .flex_col()
-                        .justify_end()
-                        .h(px(item_height))
                         .px(px(m.separator_x))
                         .when(!first, |d| {
-                            d.child(div().flex_none().h(px(1.0)).w_full().bg(line))
+                            d.child(
+                                div()
+                                    .flex_none()
+                                    .h(px(1.0))
+                                    .my(px(SEPARATOR_INDENT))
+                                    .bg(line),
+                            )
                         })
                         .child(
                             div()
-                                .flex_1()
+                                .flex_none()
                                 .flex()
                                 .items_center()
+                                .h(px(HEADER_LABEL))
+                                .my(px(HEADER_INSET_Y))
                                 .px(px(m.content_x))
-                                .text_color(disabled)
+                                .text_size(small)
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(muted)
                                 .whitespace_nowrap()
                                 .child(title.clone()),
                         )
@@ -1036,7 +1135,6 @@ impl ContextMenu {
                 }
                 if let MenuItem::Separator = item {
                     let selector = format!("menu-separator-{level}-{ix}");
-                    // A column, so that the line stretches across.
                     return div()
                         .id(id)
                         .flex()
@@ -1057,44 +1155,63 @@ impl ContextMenu {
                 let is_selected = selected == Some(ix);
                 let label = item.label().cloned().unwrap_or_default();
                 let selector = format!("menu-item:{label}");
-                let submenu = item.has_submenu();
+                let inner_selector = format!("menu-row:{label}");
                 let extra = item.extra();
                 let secondary = extra.and_then(|e| e.secondary.clone());
+                let shortcut = extra.and_then(|e| e.shortcut.clone());
                 let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
-                let inline: Vec<AnyElement> = if is_selected {
-                    extra
-                        .map(|e| e.inline.as_slice())
-                        .unwrap_or(&[])
-                        .iter()
-                        .enumerate()
-                        .map(|(b, button)| {
-                            let enabled = button.action.is_some();
-                            let tooltip = button.tooltip.clone();
-                            let selector = format!("menu-inline:{tooltip}");
-                            div()
-                                .id(SharedString::from(format!("menu-inline-{level}-{ix}-{b}")))
-                                .debug_selector(move || selector.clone())
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .size(px(INLINE_BUTTON))
-                                .rounded(px(SELECTION_RADIUS))
-                                .when(!enabled, |d| d.opacity(crate::components::DISABLED_ALPHA))
-                                .child(Icon::new(button.icon))
-                                .tooltip(crate::components::Tooltip::text(tooltip, None))
-                                .when(enabled, |d| {
-                                    d.on_click(cx.listener(move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.run_inline(level, ix, b, window, cx);
-                                    }))
-                                })
-                                .into_any_element()
-                        })
-                        .collect()
+                let more = !self.submenu_on_hover && item.is_final_group();
+                let buttons = extra.map_or(0, |e| e.inline.len()) + usize::from(more);
+                let arrow = item.has_submenu() && !more;
+                let shortcut_color = if enabled { muted } else { disabled };
+                let shortcut = shortcut.map(|s| {
+                    div()
+                        .flex_none()
+                        .pl(px(SHORTCUT_GAP))
+                        .whitespace_nowrap()
+                        .text_color(shortcut_color)
+                        .child(s)
+                        .into_any_element()
+                });
+                // The row's end: its buttons (their room while it is not
+                // selected), a submenu's arrow or the shortcut.
+                let end: Option<AnyElement> = if buttons > 0 {
+                    Some(self.render_buttons(level, ix, more, is_selected, inner_height, cx))
+                } else if list && arrow {
+                    Some(
+                        div()
+                            .flex_none()
+                            .pl(px(NEXT_STEP_GAP))
+                            .child(Icon::new(IconName::CHEVRON_RIGHT))
+                            .into_any_element(),
+                    )
+                } else if list {
+                    shortcut
                 } else {
-                    Vec::new()
+                    // A popup menu keeps room for the arrow after every
+                    // label; a shortcut or an arrow ends at the row's end.
+                    Some(
+                        div()
+                            .flex_none()
+                            .min_w(px(TRAILING))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_end()
+                            .children(shortcut)
+                            .when(arrow, |d| d.child(Icon::new(IconName::CHEVRON_RIGHT)))
+                            .into_any_element(),
+                    )
                 };
+                let right = if list && (buttons > 0 || arrow) {
+                    BUTTONS_RIGHT
+                } else {
+                    m.content_x
+                };
+                let submenu = (open && is_selected).then(|| Beside {
+                    child: self.render_level(level + 1, cx),
+                    above: px(1.0 + m.pad_top),
+                });
                 let fragments = match (&self.matcher, level) {
                     (Some(matcher), 0) => matcher.find(&label).unwrap_or_default(),
                     _ => Vec::new(),
@@ -1107,13 +1224,20 @@ impl ContextMenu {
                     .h(px(item_height))
                     .px(px(m.selection_x))
                     .py(px(m.selection_y))
+                    // A row, so that the selection fills it whatever the
+                    // label's width (#128).
+                    .flex()
+                    .flex_row()
                     .child(
                         div()
-                            .size_full()
+                            .debug_selector(move || inner_selector.clone())
+                            .flex_1()
+                            .min_w(px(0.0))
                             .flex()
                             .flex_row()
                             .items_center()
-                            .px(px(m.content_x))
+                            .pl(px(m.content_x))
+                            .pr(px(right))
                             .rounded(px(SELECTION_RADIUS))
                             .when(is_selected, |d| d.bg(selection))
                             .text_color(if enabled { text } else { disabled })
@@ -1140,26 +1264,20 @@ impl ContextMenu {
                                             .flex_none()
                                             .pl(px(SECONDARY_GAP))
                                             .whitespace_nowrap()
-                                            .text_color(disabled)
+                                            .text_color(muted)
                                             .child(text)
                                     })),
                             )
-                            .children(inline)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(px(TRAILING))
-                                    .flex()
-                                    .justify_end()
-                                    .when(submenu, |d| d.child(Icon::new(IconName::CHEVRON_RIGHT))),
-                            ),
+                            .children(end),
                     )
+                    .children(submenu)
                     .when(enabled, |d| {
                         d.on_mouse_move(cx.listener(move |this, _, _, cx| {
                             if this.selected.get(level).copied().flatten() != Some(ix)
                                 || this.selected.len() <= level
                             {
-                                this.select(level, ix, cx);
+                                let open = this.submenu_on_hover;
+                                this.select(level, ix, open, cx);
                             }
                         }))
                         .on_click(cx.listener(
@@ -1201,6 +1319,7 @@ impl ContextMenu {
                         .child(div().whitespace_nowrap().child(self.filter.clone())),
                 )
         });
+        let theme = cx.theme();
         div()
             .id(("menu-level", level))
             .debug_selector(move || format!("menu-level-{level}"))
@@ -1240,21 +1359,209 @@ impl ContextMenu {
             .into_any_element()
     }
 
+    /// The buttons at the end of row `ix` and the line before them
+    /// (`PopupListElementRenderer.updateExtraButtons`), the last one opening
+    /// its submenu when `more`. While the row is not selected only their
+    /// room, so that nothing moves when they show.
+    fn render_buttons(
+        &self,
+        level: usize,
+        ix: usize,
+        more: bool,
+        show: bool,
+        height: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let hover = theme.color(UiRole::ListButtonHover);
+        let line = theme.color(UiRole::ListButtonSeparator);
+        let inline: Vec<InlineButton> = self
+            .level_items(level)
+            .get(ix)
+            .and_then(MenuItem::extra)
+            .map(|e| e.inline.clone())
+            .unwrap_or_default();
+        let count = inline.len() + usize::from(more);
+        if !show {
+            return div()
+                .flex_none()
+                .w(px(BUTTON_LINE + count as f32 * BUTTON))
+                .into_any_element();
+        }
+        let button = |id: SharedString, selector: String, icon: IconName, enabled: bool| {
+            div()
+                .id(id)
+                .debug_selector(move || selector.clone())
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(BUTTON))
+                .h(px(height))
+                .rounded(px(SELECTION_RADIUS))
+                .when(enabled, |d| d.hover(|s| s.bg(hover)))
+                .when(!enabled, |d| d.opacity(crate::components::DISABLED_ALPHA))
+                .child(Icon::new(icon))
+        };
+        let mut buttons: Vec<AnyElement> = inline
+            .into_iter()
+            .enumerate()
+            .map(|(b, inline)| {
+                let enabled = inline.action.is_some();
+                let tooltip = inline.tooltip.clone();
+                button(
+                    SharedString::from(format!("menu-inline-{level}-{ix}-{b}")),
+                    format!("menu-inline:{tooltip}"),
+                    inline.icon,
+                    enabled,
+                )
+                .tooltip(crate::components::Tooltip::text(tooltip, None))
+                .when(enabled, |d| {
+                    d.on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.run_inline(level, ix, b, window, cx);
+                    }))
+                })
+                .into_any_element()
+            })
+            .collect();
+        if more {
+            buttons.push(
+                button(
+                    SharedString::from(format!("menu-more-{level}-{ix}")),
+                    format!("menu-inline:{MORE_ACTIONS}"),
+                    IconName::MORE_VERTICAL,
+                    true,
+                )
+                .tooltip(crate::components::Tooltip::text(MORE_ACTIONS, None))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.open_more(level, ix, cx);
+                }))
+                .into_any_element(),
+            );
+        }
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .justify_center()
+                    .w(px(BUTTON_LINE))
+                    .h(px(height))
+                    .py(px(BUTTON_LINE_INSET))
+                    .child(div().w(px(1.0)).bg(line)),
+            )
+            .children(buttons)
+            .into_any_element()
+    }
+
     /// Height of an item row: a list row of the theme, and in popup menus
     /// the selection's outer insets.
     fn item_height(&self, cx: &App) -> f32 {
         f32::from(cx.theme().metric(Metric::RowHeight)) + 2.0 * self.metrics.selection_y
     }
+}
 
-    /// Distance from the top of `level`'s rows to the top of its row `ix`.
-    fn row_top(&self, level: usize, ix: usize, item_height: f32) -> f32 {
-        let shown = self.shown(level);
-        self.level_items(level)[..ix]
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| shown[*i])
-            .map(|(_, item)| item.height(item_height))
-            .sum()
+/// A submenu beside its row (`WizardPopup.show`): right of the menu, or
+/// left of it when there is no room on the right, moved up to stay inside
+/// the window, with its first row level with its parent row. It is laid
+/// out on its own, so opening it neither widens nor moves the menu.
+struct Beside {
+    child: AnyElement,
+    /// From the top of the submenu to its first row: the border and the
+    /// space above the rows.
+    above: Pixels,
+}
+
+impl IntoElement for Beside {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui::Element for Beside {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, ()) {
+        // Over its row, out of the flow: its bounds are the row's.
+        let style = gpui::Style {
+            position: gpui::Position::Absolute,
+            inset: gpui::Edges::all(px(0.0).into()),
+            ..gpui::Style::default()
+        };
+        (window.request_layout(style, None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        row: gpui::Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let size = self.child.layout_as_root(
+            gpui::size(
+                gpui::AvailableSpace::MaxContent,
+                gpui::AvailableSpace::MaxContent,
+            ),
+            window,
+            cx,
+        );
+        let viewport = window.viewport_size();
+        let margin = px(WINDOW_MARGIN);
+        // The menu's border is 1 outside its rows.
+        let border = px(1.0);
+        let mut x = row.right() + border;
+        if x + size.width > viewport.width - margin {
+            let left = row.left() - border - size.width;
+            x = if left >= margin {
+                left
+            } else {
+                (viewport.width - margin - size.width).max(margin)
+            };
+        }
+        let y = (row.top() - self.above)
+            .min(viewport.height - margin - size.height)
+            .max(margin);
+        self.child.prepaint_at(point(x, y), window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
     }
 }
 
@@ -1284,27 +1591,7 @@ impl Render for ContextMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let family = cx.theme().ui_family();
         let size = cx.theme().ui_size();
-        let item_height = self.item_height(cx);
-        // A submenu lines up with its row: both levels have the same space
-        // above their rows, except below a title (about a row high).
-        let mut tops = vec![0.0];
-        for level in 1..self.selected.len() {
-            let parent = self.selected[level - 1].unwrap_or(0);
-            let header = if level == 1 && self.title.is_some() {
-                TITLE_TOP + item_height + TITLE_BOTTOM - self.metrics.pad_top
-            } else {
-                0.0
-            };
-            tops.push(tops[level - 1] + header + self.row_top(level - 1, parent, item_height));
-        }
-        let levels: Vec<AnyElement> = (0..self.selected.len())
-            .map(|level| {
-                div()
-                    .mt(px(tops[level]))
-                    .child(self.render_level(level, cx))
-                    .into_any_element()
-            })
-            .collect();
+        // The menu; each open submenu is drawn beside its row.
         div()
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
@@ -1320,7 +1607,7 @@ impl Render for ContextMenu {
             .items_start()
             .font_family(family)
             .text_size(size)
-            .children(levels)
+            .child(self.render_level(0, cx))
     }
 }
 
@@ -1385,17 +1672,24 @@ mod tests {
         focus: FocusHandle,
         got: Vec<&'static str>,
         menu: Option<Entity<ContextMenu>>,
+        /// Draws the menu as the application does, with [`overlay`] at
+        /// this point.
+        at: Option<Point<Pixels>>,
     }
 
     impl Render for Origin {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let menu = self.menu.clone().map(|menu| match self.at {
+                Some(at) => overlay(&menu, at, window),
+                None => menu.into_any_element(),
+            });
             div()
                 .track_focus(&self.focus)
                 .on_action(cx.listener(|this, _: &First, _, _| this.got.push("first")))
                 .on_action(cx.listener(|this, _: &Second, _, _| this.got.push("second")))
                 .on_action(cx.listener(|this, _: &Third, _, _| this.got.push("third")))
                 .size_full()
-                .children(self.menu.clone())
+                .children(menu)
         }
     }
 
@@ -1417,6 +1711,7 @@ mod tests {
             focus: cx.focus_handle(),
             got: Vec::new(),
             menu: None,
+            at: None,
         });
         let menu = cx.update(|window, cx| {
             let focus = origin.read(cx).focus.clone();
@@ -1438,6 +1733,20 @@ mod tests {
 
     fn selected(menu: &Entity<ContextMenu>, cx: &mut VisualTestContext) -> Vec<Option<usize>> {
         menu.read_with(cx, |m, _| m.selected.clone())
+    }
+
+    /// Draws the menu with [`overlay`] at `at`, as the application does.
+    fn place(origin: &Entity<Origin>, at: Point<Pixels>, cx: &mut VisualTestContext) {
+        origin.update(cx, |o, cx| {
+            o.at = Some(at);
+            cx.notify();
+        });
+        redraw(cx);
+    }
+
+    fn redraw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear());
     }
 
     #[gpui::test]
@@ -1694,5 +2003,122 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
         assert!(menu.read_with(cx, |m, _| m.is_dismissed()));
+    }
+
+    /// Every row spans the menu's width, whatever its text: the selection
+    /// background goes across the menu (#128).
+    #[gpui::test]
+    fn rows_span_the_menu(cx: &mut TestAppContext) {
+        let (origin, _, cx) = open_with(cx, |window, cx| {
+            ContextMenu::build(
+                vec![
+                    MenuItem::action("A", First),
+                    MenuItem::action("A much longer row of the menu", Second),
+                    MenuItem::submenu("More", vec![MenuItem::action("x", Third)]),
+                ],
+                window,
+                cx,
+            )
+        });
+        place(&origin, point(px(10.0), px(10.0)), cx);
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        for (name, inner) in [
+            ("menu-item:A", "menu-row:A"),
+            (
+                "menu-item:A much longer row of the menu",
+                "menu-row:A much longer row of the menu",
+            ),
+            ("menu-item:More", "menu-row:More"),
+        ] {
+            let row = cx.debug_bounds(name).unwrap();
+            assert_eq!(row.size.width, level.size.width - px(2.0), "{name}");
+            let inner = cx.debug_bounds(inner).unwrap();
+            assert_eq!(
+                inner.size.width,
+                row.size.width - px(2.0 * MENU.selection_x),
+                "{name}"
+            );
+        }
+    }
+
+    /// A row shows the shortcut its action has where the focus was (#69).
+    #[gpui::test]
+    fn rows_show_the_shortcut_of_their_action(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.bind_keys([gpui::KeyBinding::new("cmd-k", Second, None)]));
+        let (_, menu, cx) = open(cx);
+        let expected = crate::keys::binding_text(&gpui::KeyBinding::new("cmd-k", Second, None));
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        let items = &state["levels"][0]["items"];
+        assert_eq!(items[2]["label"], json!("Second"));
+        assert_eq!(items[2]["shortcut"], json!(expected));
+        assert_eq!(items[0].get("shortcut"), None, "no binding, no shortcut");
+    }
+
+    /// In a list popup a row's submenu opens from its "More Actions"
+    /// button (or Right), not on hover; the buttons show on the selected
+    /// row, in room every such row keeps, so nothing moves (#127).
+    #[gpui::test]
+    fn a_list_popup_opens_a_submenu_from_its_button(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = rich(cx);
+        place(&origin, point(px(10.0), px(10.0)), cx);
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        let alpha = cx.debug_bounds("menu-item:alpha").unwrap();
+        let beta = cx.debug_bounds("menu-item:beta").unwrap();
+        cx.simulate_mouse_move(alpha.center(), None, gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(1)], "hovering opens nothing");
+        let row = cx.debug_bounds("menu-row:alpha").unwrap();
+        let more = cx.debug_bounds("menu-inline:More Actions").unwrap();
+        assert_eq!(more.right(), row.right() - px(BUTTONS_RIGHT));
+        assert_eq!(more.size.width, px(BUTTON));
+        cx.simulate_mouse_move(beta.center(), None, gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(3)]);
+        assert_eq!(
+            cx.debug_bounds("menu-level-0"),
+            Some(level),
+            "nothing moves"
+        );
+        cx.simulate_mouse_move(alpha.center(), None, gpui::Modifiers::none());
+        redraw(cx);
+        let more = cx.debug_bounds("menu-inline:More Actions").unwrap();
+        cx.simulate_click(more.center(), gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(1), Some(0)]);
+        assert_eq!(cx.debug_bounds("menu-level-0"), Some(level));
+        let sub = cx.debug_bounds("menu-level-1").unwrap();
+        assert_eq!(sub.left(), level.right());
+        assert!(origin.read_with(cx, |o, _| o.got.is_empty()));
+        assert!(!menu.read_with(cx, |m, _| m.is_dismissed()));
+    }
+
+    /// A submenu opens right of the menu, level with its row, or left of it
+    /// when there is no room on the right; the menu never moves (#127).
+    #[gpui::test]
+    fn a_submenu_without_room_on_the_right_opens_on_the_left(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = open(cx);
+        let viewport = cx.update(|window, _| window.viewport_size());
+        place(&origin, point(viewport.width - px(20.0), px(10.0)), cx);
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        assert!(level.right() <= viewport.width);
+        cx.dispatch_action(SelectNext);
+        cx.dispatch_action(SelectNext);
+        cx.dispatch_action(OpenSubmenu);
+        redraw(cx);
+        assert_eq!(selected(&menu, cx), [Some(3), Some(0)]);
+        assert_eq!(
+            cx.debug_bounds("menu-level-0"),
+            Some(level),
+            "the menu stays"
+        );
+        let sub = cx.debug_bounds("menu-level-1").unwrap();
+        assert_eq!(sub.right(), level.left());
+        let row = cx.debug_bounds("menu-item:More").unwrap();
+        assert_eq!(sub.top(), row.top() - px(1.0 + MENU.pad_top));
+        // With room on the right it opens there.
+        place(&origin, point(px(10.0), px(10.0)), cx);
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        let sub = cx.debug_bounds("menu-level-1").unwrap();
+        assert_eq!(sub.left(), level.right());
     }
 }
