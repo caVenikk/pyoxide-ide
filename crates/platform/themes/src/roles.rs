@@ -130,6 +130,8 @@ roles! {
         NonProjectFile => ("non-project-file", "Chrome", "Row background of files outside the project content, such as excluded folders"),
         RunWidgetRunning => ("run-widget-running", "Chrome", "Background of the run widget's Run button while its process runs"),
         RunWidgetStop => ("run-widget-stop", "Chrome", "Background of the run widget's Stop button"),
+        DragAndDropBorder => ("drag-and-drop-border", "Chrome", "Border of the row that takes dragged files or folders"),
+        DragAndDropRow => ("drag-and-drop-row", "Chrome", "Background of the row that takes dragged files or folders"),
 
         EditorBackground => ("editor-background", "Editor", "Editor background"),
         EditorText => ("editor-text", "Editor", "Default editor text"),
@@ -371,6 +373,8 @@ impl UiRole {
             NonProjectFile => Some(SurfaceAlt),
             RunWidgetRunning => Some(Success),
             RunWidgetStop => Some(Danger),
+            DragAndDropBorder => Some(Accent),
+            DragAndDropRow => Some(Selection),
             DiagnosticErrorStripe => Some(DiagnosticError),
             DiagnosticWarningStripe => Some(DiagnosticWarning),
             DiagnosticWeakWarningStripe => Some(DiagnosticInfo),

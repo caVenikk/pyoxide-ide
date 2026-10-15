@@ -631,8 +631,17 @@ here with: source URL, commit, file(s), license, and what was changed.
   CreatePackageAction.java, with the text of the internal file template
   python/pluginResources/fileTemplates/internal/Python Unit Test.py.ft
   (copied unchanged) and the strings of python/pluginResources/messages/
-  PyBundle.properties; the icons platform/icons/src/expui/general/cut.svg,
-  copy.svg and paste.svg with their dark variants (unchanged copies); and
+  PyBundle.properties; Reload from Disk of platform/lang-impl/src/com/
+  intellij/ide/actions/SynchronizeCurrentFileAction.java; the look of
+  drag and drop of platform/platform-impl/src/com/intellij/ide/dnd/aware/
+  DnDAwareTree.java (the dragged row's image), .../ide/dnd/Highlighters.java
+  and platform/lang-impl/src/com/intellij/ide/projectView/impl/
+  ProjectViewDropTarget.java (the drop target rectangle) with the colours
+  DragAndDrop.borderColor and DragAndDrop.rowBackground of platform/util/
+  ui/src/com/intellij/util/ui/JBUI.java (theme roles drag-and-drop-border
+  and drag-and-drop-row); the icons platform/icons/src/expui/general/
+  cut.svg, copy.svg, paste.svg and refresh.svg with their dark variants
+  (unchanged copies); and
   the UI strings of platform/platform-api/resources/messages/
   IdeBundle.properties, platform/core-api/resources/messages/
   CoreBundle.properties, platform/lang-api/resources/messages/

@@ -19,8 +19,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div, px,
+    AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
+    Styled as _, Subscription, Window, div, px,
 };
 use project::fs_ops::{self, TransferItem, TransferKind};
 use themes::{Metric, UiRole};
@@ -109,38 +110,61 @@ pub struct DraggedFiles {
     pub paths: Vec<PathBuf>,
 }
 
-/// What follows the pointer while rows are dragged: the first row's icon
-/// and name.
+/// What follows the pointer while rows are dragged: the dragged row's icon
+/// and name as the row draws them, on the tree's background at 70 %
+/// (`DnDAwareTree.createDragImage`), where they were in the row relative
+/// to the pointer.
 pub(super) struct DragPreview {
     name: SharedString,
     icon: IconName,
+    /// Where the row's icon starts.
+    left: Pixels,
 }
+
+/// Opacity of the dragged row's image (`DnDAwareTree`: `AlphaComposite`
+/// 0.7).
+const DRAG_IMAGE_ALPHA: f32 = 0.7;
 
 impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let row_height = theme.metric(Metric::RowHeight);
+        let background = theme.color(UiRole::ToolWindow);
+        // The drag image is drawn outside the window's root: the UI font
+        // is set here.
         div()
+            .debug_selector(|| "tree-drag-image".into())
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(6.0))
-            .px(px(8.0))
-            .h(theme.metric(Metric::RowHeight))
-            .rounded(theme.metric(Metric::CornerRadius))
-            .bg(theme.color(UiRole::SurfaceRaised))
-            .border_1()
-            .border_color(theme.color(UiRole::PopupBorder))
-            .opacity(0.9)
-            .child(Icon::new(self.icon))
-            .child(self.name.clone())
+            .h(row_height)
+            .pl(self.left)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(super::TEXT_X - 16.0))
+                    .h(row_height)
+                    .pr(px(2.0))
+                    .bg(background)
+                    .opacity(DRAG_IMAGE_ALPHA)
+                    .whitespace_nowrap()
+                    .child(Icon::new(self.icon))
+                    .child(self.name.clone()),
+            )
     }
 }
 
 impl DragPreview {
-    pub(super) fn new(name: impl Into<SharedString>, icon: IconName) -> Self {
+    pub(super) fn new(name: impl Into<SharedString>, icon: IconName, left: Pixels) -> Self {
         Self {
             name: name.into(),
             icon,
+            left,
         }
     }
 }
@@ -370,7 +394,6 @@ impl ProjectPanel {
         icon: IconName,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
-        use gpui::InteractiveElement as _;
         use gpui::StatefulInteractiveElement as _;
         let Some(tree) = &self.tree else { return row };
         let node = tree.node(id);
@@ -380,11 +403,55 @@ impl ProjectPanel {
         } else {
             entry.path.parent().map(Path::to_owned).unwrap_or_default()
         };
-        let drop_bg = cx.theme().color(UiRole::Hover);
+        let theme = cx.theme();
+        // The row the pointer is over while rows are dragged gets the
+        // reference's drop target rectangle across the tree
+        // (`ProjectViewDropTarget`, `Highlighters.RectangleHighlighter`):
+        // the drag and drop row colour with a 1 px border, over the row.
+        let highlight = (self.ops.drop_target == Some(id) && cx.has_active_drag()).then(|| {
+            div()
+                .debug_selector(|| "tree-drop-target".into())
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .bg(theme.color(UiRole::DragAndDropRow))
+                .border_1()
+                .border_color(theme.color(UiRole::DragAndDropBorder))
+        });
+        let row_path = entry.path.clone();
+        let accepts = {
+            let row_path = row_path.clone();
+            let target = target.clone();
+            move |dragged: &DraggedFiles| {
+                dragged
+                    .paths
+                    .iter()
+                    .all(|p| *p != row_path && !target.starts_with(p))
+            }
+        };
+        let can_drop = accepts.clone();
         let row = row
-            .drag_over::<DraggedFiles>(move |style, _, _, _| style.bg(drop_bg))
+            .children(highlight)
+            .on_drag_move(
+                cx.listener(move |this, e: &gpui::DragMoveEvent<DraggedFiles>, _, cx| {
+                    let over = e.bounds.contains(&e.event.position);
+                    let current = this.ops.drop_target == Some(id);
+                    if over && !current && accepts(e.drag(cx)) {
+                        this.ops.drop_target = Some(id);
+                        cx.notify();
+                    } else if !over && current {
+                        this.ops.drop_target = None;
+                        cx.notify();
+                    }
+                }),
+            )
+            .can_drop(move |value, _, _| {
+                value.downcast_ref::<DraggedFiles>().is_some_and(&can_drop)
+            })
             .on_drop(
                 cx.listener(move |this, dragged: &DraggedFiles, window, cx| {
+                    this.ops.drop_target = None;
                     this.drop_files(dragged, target.clone(), window, cx)
                 }),
             );
@@ -392,11 +459,29 @@ impl ProjectPanel {
             return row;
         }
         let name: SharedString = entry.name.clone().into();
+        let left = px(super::TREE_LEFT + super::ICON_X)
+            + theme.metric(Metric::TreeIndent) * node.depth as f32;
         row.on_drag(
             DraggedFiles {
-                paths: vec![entry.path.clone()],
+                paths: vec![row_path],
             },
-            move |_, _, _, cx| cx.new(|_| DragPreview::new(name.clone(), icon)),
+            move |_, _, _, cx| cx.new(|_| DragPreview::new(name.clone(), icon, left)),
+        )
+    }
+
+    /// The row rows dragged now would be dropped on (for `workbench.state`).
+    pub(super) fn drop_target_json(&self, cx: &gpui::App) -> serde_json::Value {
+        let (Some(id), Some(tree), Some(filter)) = (self.ops.drop_target, &self.tree, &self.filter)
+        else {
+            return serde_json::Value::Null;
+        };
+        if !cx.has_active_drag() {
+            return serde_json::Value::Null;
+        }
+        serde_json::json!(
+            filter
+                .relative(&tree.node(id).entry.path)
+                .unwrap_or_default()
         )
     }
 

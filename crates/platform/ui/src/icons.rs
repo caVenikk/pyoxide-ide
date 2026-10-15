@@ -27,6 +27,7 @@ impl IconName {
     pub const ADD: Self = Self("general/add");
     pub const CUT: Self = Self("general/cut");
     pub const PASTE: Self = Self("general/paste");
+    pub const REFRESH: Self = Self("general/refresh");
     pub const CHEVRON_DOWN: Self = Self("general/chevronDown");
     pub const CHEVRON_LEFT: Self = Self("general/chevronLeft");
     pub const CHEVRON_RIGHT: Self = Self("general/chevronRight");
@@ -179,7 +180,7 @@ platform_icons! {
         "general/hide",
         "general/inspections/inspectionsOK", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
-        "general/previewHorizontally", "general/print", "general/questionDialog", "general/remove",
+        "general/previewHorizontally", "general/print", "general/questionDialog", "general/refresh", "general/remove",
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/softWrap",

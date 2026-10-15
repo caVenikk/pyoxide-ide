@@ -178,6 +178,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         NonProjectFile => &[Ui("FileColor.Yellow")],
         RunWidgetRunning => &[Ui("RunWidget.runningBackground")],
         RunWidgetStop => &[Ui("RunWidget.stopBackground")],
+        DragAndDropBorder => &[Ui("DragAndDrop.borderColor")],
+        DragAndDropRow => &[Ui("DragAndDrop.rowBackground")],
         PopupBorder => &[Ui("Popup.borderColor"), Ui("Menu.borderColor")],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],

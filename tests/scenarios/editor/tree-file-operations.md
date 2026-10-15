@@ -32,6 +32,10 @@
     Option (macOS) or Ctrl held; drag `app.py` onto the project root.
 15. Open `src/pkg/n.py`, then `src/m.py`, then `app.py`; rename `src/pkg`
     to `lib`, delete `src/m.py` and press Back (Cmd+[ / Ctrl+Alt+Left).
+16. With `src` expanded and `src/m.py` open, change `src/m.py` and add a
+    file to `src` outside the IDE (no file watcher); right-click `src` and
+    choose *Reload from Disk*.
+17. Drag a row slowly over a folder row, a file row and onto itself.
 
 ## Expected
 - Step 1: a popup titled *New* below the selected row lists *File* and
@@ -110,6 +114,19 @@
   where the file is already does nothing.
 - Step 15: the navigation history follows: Back opens `src/lib/n.py`; the
   places in the deleted file are gone.
+- Step 16: *Reload from Disk* (with the refresh icon) sits after *Delete…*
+  in its own group, before *Mark Directory As*, for files, folders and the
+  project root. It writes nothing first: the open files under the
+  selection are reloaded when they changed outside, the folders are
+  listed again (the new file shows), and the status bar says "File
+  synchronization completed successfully.". Files elsewhere are left
+  alone.
+- Step 17: the dragged row's icon and name follow the pointer where they
+  were in the row, in the normal text colour on the tree's background at
+  70 % (no box of their own). The row under the pointer gets the drop
+  target rectangle across the tree: the drag and drop row colour with a
+  1 px border in the drag and drop border colour (blue in both themes). A
+  folder over itself or its own content gets none.
 - With the file watcher on, the tree's own renames, moves, copies and
   deletes are not external changes: no tab closes, nothing reloads, no
   File Cache Conflict asks, and a renamed or moved open file is watched
@@ -129,14 +146,16 @@
 {"paths"?}`, `project.tree.cut {"paths"?}`, `project.tree.copy
 {"paths"?}`, `project.tree.paste {"directory"?}`,
 `project.tree.copy-element {"paths"?, "to"?, "name"?}`,
-`project.tree.move {"paths"?, "to"?}`, `project.tree.copy-paths
+`project.tree.move {"paths"?, "to"?}`, `project.tree.reload-from-disk
+{"paths"?}`, `project.tree.copy-paths
 {"paths"?}`, `project.tree.copy-path {"kind", "paths"?}`,
 `name-input.confirm`, `name-input.cancel`, `name-input.next-kind`,
 `name-input.previous-kind`, `name-input.next-field`,
 `name-input.previous-field`, `name-input.toggle-option`,
 `dialog.confirm`, `dialog.cancel`, `dialog.choose {"button": "Delete"}`,
 `workbench.back`, `workbench.state` (`tree.name_popup`,
-`tree.transfer`, `tree.clipboard`, `dialog`, `tree.rows`,
+`tree.transfer`, `tree.clipboard`, `tree.drop_target`, `dialog`,
+`tree.rows`,
 `tree.selected`, `tabs`, `navigation`).
 
 ## Source
