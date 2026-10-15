@@ -33,8 +33,14 @@ pub fn from_reference(value: &str, root: &Path) -> String {
         return value;
     }
     if is_absolute(&value) {
+        // A Windows path may come with or without the verbatim prefix
+        // (`\\?\`, from a canonical project folder): it is compared and
+        // kept without it.
+        let value = simplified(&value);
         let path = lexical(Path::new(&value));
-        let root = lexical(root);
+        let root = lexical(Path::new(&simplified(
+            &root.to_string_lossy().replace('\\', "/"),
+        )));
         if let Ok(rest) = path.strip_prefix(&root) {
             let rest = to_slashes(rest);
             return if rest.is_empty() {
@@ -144,6 +150,35 @@ pub fn flagged_variable(stored: &str) -> Option<&str> {
     (var != PROJECT_DIR && var != MODULE_DIR).then_some(var)
 }
 
+/// A Windows path without its verbatim prefix, as `dunce` simplifies it:
+/// `\\?\C:\x` is `C:\x`, `\\?\UNC\server\share` is `\\server\share` (with
+/// either separator); other paths are unchanged.
+pub fn simplified(path: &str) -> String {
+    for (verbatim, unc) in [("\\\\?\\", "\\\\?\\UNC\\"), ("//?/", "//?/UNC/")] {
+        if let Some(rest) = path.strip_prefix(unc) {
+            return format!("{}{rest}", &verbatim[..2]);
+        }
+        if let Some(rest) = path.strip_prefix(verbatim) {
+            let b = rest.as_bytes();
+            if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+                return rest.to_owned();
+            }
+        }
+    }
+    path.to_owned()
+}
+
+/// A path as a field shows it: without a verbatim prefix and with the
+/// system's separators (`FileUtil.toSystemDependentName`).
+pub fn shown(path: &Path) -> String {
+    let text = simplified(&path.to_string_lossy());
+    if cfg!(windows) {
+        text.replace('/', "\\")
+    } else {
+        text
+    }
+}
+
 /// The home folder.
 fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
@@ -176,6 +211,23 @@ fn lexical(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_verbatim_paths_are_simplified() {
+        assert_eq!(simplified("\\\\?\\C:\\p\\x"), "C:\\p\\x");
+        assert_eq!(simplified("//?/C:/p/x"), "C:/p/x");
+        assert_eq!(simplified("\\\\?\\UNC\\srv\\share\\x"), "\\\\srv\\share\\x");
+        assert_eq!(simplified("/home/p/x"), "/home/p/x");
+        // A path typed without the prefix is inside a canonical project.
+        assert_eq!(
+            from_reference("C:\\p\\tools\\build.sh", Path::new("\\\\?\\C:\\p")),
+            "tools/build.sh"
+        );
+        assert_eq!(
+            from_reference("\\\\?\\C:\\other\\x", Path::new("\\\\?\\C:\\p")),
+            "C:/other/x"
+        );
+    }
 
     #[test]
     fn reference_paths_become_relative() {

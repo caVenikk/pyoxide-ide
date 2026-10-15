@@ -622,7 +622,7 @@ impl EditDialog {
         stored
             .split(';')
             .filter_map(|p| paths::resolve(p, root))
-            .map(|p| p.display().to_string())
+            .map(|p| paths::shown(&p))
             .collect::<Vec<_>>()
             .join(";")
     }

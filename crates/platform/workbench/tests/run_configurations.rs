@@ -667,10 +667,8 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
         "run.configurations.dialog.set",
         json!({"field": "script", "value": script.display().to_string()}),
     );
-    assert_eq!(
-        field(&mut h, "script")["value"],
-        json!(script.display().to_string())
-    );
+    let shown = field(&mut h, "script")["value"].clone();
+    assert_eq!(Path::new(shown.as_str().unwrap()), script.as_path());
     h.invoke("run.configurations.dialog.apply", json!(null));
     h.wait("the stored script path", |_| {
         std::fs::read_to_string(root.join(".oxide/workspace.toml"))
