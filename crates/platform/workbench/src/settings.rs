@@ -48,6 +48,31 @@ impl Default for SaveSettings {
     }
 }
 
+/// How changes made to files outside the application are found.
+///
+/// The reference IDE watches the project with a native file watcher and
+/// looks at the files again when its window gets the focus ("Synchronize
+/// files on frame activation", on by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncSettings {
+    /// Watch the project folder for changes. Off by default so that a
+    /// window made by a test sees only the changes it is told about;
+    /// [`crate::run`] turns it on.
+    pub watch: bool,
+    /// Look at the open files (and, without a watcher, the project tree)
+    /// when the window gets the focus.
+    pub sync_on_activation: bool,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            watch: false,
+            sync_on_activation: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

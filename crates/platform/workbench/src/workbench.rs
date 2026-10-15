@@ -35,6 +35,7 @@ use crate::run::RunToolWindow;
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
+mod file_sync;
 mod history;
 /// Default width of the project tool window.
 mod run_actions;
@@ -234,6 +235,8 @@ pub struct Workbench {
     code_intel: Option<Entity<CodeIntelView>>,
     /// Back and Forward (`history.rs`).
     navigation: history::Navigation,
+    /// Changes of files on disk made outside the application.
+    file_sync: file_sync::FileSync,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -332,6 +335,11 @@ impl Workbench {
                 if !window.is_window_active() && this.save_settings.save_on_deactivation {
                     this.save_all(cx);
                 }
+                // And files changed meanwhile are looked at when it comes
+                // back.
+                if window.is_window_active() {
+                    this.window_activated(cx);
+                }
             }),
         ];
         // Code intelligence popups and key contexts are drawn by the root.
@@ -382,6 +390,7 @@ impl Workbench {
             run_anchors: crate::run::widget::Anchors::default(),
             code_intel,
             navigation: Default::default(),
+            file_sync: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -647,6 +656,7 @@ impl Workbench {
         self.clear_navigation();
         self.project_visible = true;
         self.project_files.update(cx, |files, cx| files.clear(cx));
+        self.sync_project_opened(&path, cx);
         self.panel.update(cx, |panel, cx| {
             panel.set_project(Project::new(path.clone()), cx)
         });
@@ -859,6 +869,7 @@ impl Workbench {
                 v.editor_opened(&path, language, &editor, window, cx)
             });
         }
+        self.sync_tab_opened(&path);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -952,16 +963,18 @@ impl Workbench {
             (e.buffer().encoded(), point)
         });
         self.pending += 1;
+        self.sync_save_started(&path);
         let write = cx.background_spawn({
             let path = path.clone();
-            async move { project::write_document(&path, &bytes) }
+            async move { file_sync::write(&path, &bytes) }
         });
         Some(cx.spawn(async move |this, cx| {
             let result = write.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending -= 1;
+                this.sync_save_finished(&path, result.as_ref().ok().copied().flatten());
                 match result {
-                    Ok(()) => {
+                    Ok(_) => {
                         editor.update(cx, |e, cx| {
                             e.buffer_mut().mark_saved_at(point);
                             cx.notify();
@@ -1011,6 +1024,7 @@ impl Workbench {
         self.save_tab(index, cx);
         self.tab_closing(cx);
         let tab = self.tabs.remove(index);
+        self.sync_tab_closed(&tab.path);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }
@@ -2513,6 +2527,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_file_action))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_all_action))
+            .on_action(cx.listener(Self::synchronize))
             .on_action(cx.listener(Self::close_tab_action))
             .on_action(cx.listener(Self::select_tab))
             .on_action(cx.listener(Self::next_tab))

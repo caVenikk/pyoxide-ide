@@ -292,6 +292,29 @@ impl ProjectPanel {
         }
     }
 
+    /// Lists folders again whose content changed on disk. Only folders
+    /// listed so far are; the others are listed when they are expanded.
+    pub fn refresh_dirs(&mut self, dirs: &[PathBuf], cx: &mut Context<Self>) {
+        let Some(tree) = &self.tree else { return };
+        let ids: Vec<NodeId> = dirs
+            .iter()
+            .filter_map(|dir| tree.find(dir))
+            .filter(|&id| tree.node(id).children.is_some())
+            .collect();
+        for id in ids {
+            self.list(id, cx);
+        }
+    }
+
+    /// Lists every folder listed so far again (changes on disk may have
+    /// been missed).
+    pub fn refresh_all(&mut self, cx: &mut Context<Self>) {
+        let Some(tree) = &self.tree else { return };
+        for id in tree.listed_dirs() {
+            self.list(id, cx);
+        }
+    }
+
     /// Selects `path`, listing the folders above it as needed.
     pub fn reveal(&mut self, path: &Path, cx: &mut Context<Self>) {
         self.reveal = Some(path.to_owned());

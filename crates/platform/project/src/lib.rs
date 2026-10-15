@@ -2,11 +2,13 @@
 //! project, its file tree loaded one directory at a time, the rules that
 //! hide or exclude entries, Pyoxide's own project folder with the shared
 //! project settings and the personal project state, and reading and
-//! writing documents.
+//! writing documents, and what reported paths are now on disk (for a file
+//! watcher).
 //!
 //! Everything here is blocking and toolkit-free: callers run it on a
 //! background thread (the workbench uses GPUI's background executor).
 
+mod changes;
 mod document;
 mod filter;
 pub mod idea;
@@ -14,7 +16,10 @@ pub mod store;
 mod tree;
 pub mod workspace;
 
-pub use document::{LoadError, Loaded, MAX_FILE_SIZE, read_document, write_document};
+pub use changes::{DiskChange, disk_changes, is_hidden_path};
+pub use document::{
+    LoadError, Loaded, MAX_FILE_SIZE, Stamp, is_save_temp, read_document, write_document,
+};
 pub use filter::{
     AutoExclusions, DEFAULT_IGNORED, Filter, NameMasks, auto_exclusions, set_auto_exclusions,
 };

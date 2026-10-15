@@ -2,6 +2,7 @@
 
 use std::io::Write as _;
 use std::path::Path;
+use std::time::SystemTime;
 
 use text::{DecodeError, Decoded, decode};
 
@@ -24,6 +25,44 @@ pub struct Loaded {
     pub decoded: Decoded,
     /// The file cannot be written (permissions).
     pub read_only: bool,
+    /// Size and modification time of the file before it was read.
+    pub stamp: Stamp,
+}
+
+/// What changes when a file is written: its size and modification time.
+/// Two equal stamps mean the file is very likely unchanged (a write of the
+/// same size within the file system's time resolution is not seen); a
+/// different stamp means it was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    pub len: u64,
+    pub modified: Option<SystemTime>,
+}
+
+impl Stamp {
+    pub fn from_metadata(meta: &std::fs::Metadata) -> Self {
+        Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+        }
+    }
+
+    /// The stamp of a file (blocking); `None` when it cannot be read.
+    pub fn of(path: &Path) -> Option<Self> {
+        std::fs::metadata(path)
+            .ok()
+            .map(|meta| Self::from_metadata(&meta))
+    }
+}
+
+/// The marker in the names of the temporary files [`write_document`]
+/// writes before it renames them over the document.
+const SAVE_MARKER: &str = ".pyoxide-save-";
+
+/// A temporary file of [`write_document`] (by its name): a file watcher
+/// leaves these out.
+pub fn is_save_temp(name: &str) -> bool {
+    name.starts_with('.') && name.contains(SAVE_MARKER)
 }
 
 /// Reads and decodes a file.
@@ -39,6 +78,7 @@ pub fn read_document(path: &Path) -> Result<Loaded, LoadError> {
     Ok(Loaded {
         decoded,
         read_only: meta.permissions().readonly(),
+        stamp: Stamp::from_metadata(&meta),
     })
 }
 
@@ -70,7 +110,7 @@ fn tempfile_in(dir: &Path, path: &Path) -> std::io::Result<(std::path::PathBuf, 
         .unwrap_or_default();
     for attempt in 0..100u32 {
         let candidate = dir.join(format!(
-            ".{stem}.pyoxide-save-{}-{attempt}",
+            ".{stem}{SAVE_MARKER}{}-{attempt}",
             std::process::id()
         ));
         match std::fs::OpenOptions::new()
@@ -103,6 +143,12 @@ mod tests {
         assert_eq!(std::fs::read(&file).unwrap(), b"y = 2\r\n");
         let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
         assert_eq!(leftovers.len(), 1, "no temporary files remain");
+        assert_eq!(
+            read_document(&file).unwrap().stamp,
+            Stamp::of(&file).unwrap()
+        );
+        assert_eq!(Stamp::of(&file).unwrap().len, 7);
+        assert_eq!(Stamp::of(&dir.path().join("missing")), None);
 
         let bin = dir.path().join("b.bin");
         std::fs::write(&bin, b"\0\x01\x02").unwrap();
@@ -116,6 +162,17 @@ mod tests {
             read_document(&dir.path().join("missing")),
             Err(LoadError::Io(_))
         ));
+    }
+
+    #[test]
+    fn temporary_save_files_are_known_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.py");
+        let (temp, _) = tempfile_in(dir.path(), &path).unwrap();
+        let name = temp.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(is_save_temp(&name), "{name}");
+        assert!(!is_save_temp("a.py"));
+        assert!(!is_save_temp(".hidden.py"));
     }
 
     #[cfg(unix)]

@@ -11,6 +11,7 @@
 "alt-1" = "workbench.toggle-project"
 "alt-4" = "workbench.toggle-run"
 "ctrl-s" = "workbench.save-all"
+"ctrl-alt-y" = "workbench.synchronize"
 "ctrl-f4" = "tabs.close"
 "alt-right" = "tabs.next"
 "alt-left" = "tabs.previous"

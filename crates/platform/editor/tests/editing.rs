@@ -293,3 +293,55 @@ fn a_large_file_paints_only_visible_lines(cx: &mut TestAppContext) {
     assert_eq!(state["lines"], json!(200_000));
     assert_eq!(state["caret"], json!({"line": 100_000, "column": 1}));
 }
+
+#[gpui::test]
+fn a_reload_from_disk_keeps_the_caret_line_and_the_view(cx: &mut TestAppContext) {
+    let old: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let (editor, cx) = open(cx, &old);
+    select(cx, (150, 3), (150, 3));
+    invoke(cx, "editor.scroll-to", json!({"line": 120}));
+    let top = editor.read_with(cx, |e, _| e.scroll_top());
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&editor, move |_, e: &editor::EditorEvent, _| {
+            seen.borrow_mut().push(format!("{e:?}"))
+        })
+        .detach()
+    });
+    // Two lines inserted at the top, the caret's line changed.
+    let new = format!(
+        "import os\n\n{}",
+        old.replace("line 150\n", "line 150 # changed\n")
+    );
+    let decoded = text::decode(new.as_bytes()).unwrap();
+    let ok = editor.update(cx, |e, cx| {
+        let plan = text::ReloadPlan::new(e.buffer().rope(), e.buffer().version(), &decoded);
+        e.reload(plan, false, cx)
+    });
+    draw(cx);
+    assert!(ok);
+    assert_eq!(text(&editor, cx), new);
+    assert_eq!(caret(&editor, cx), Point::new(152, 3));
+    assert_eq!(editor.read_with(cx, |e, _| e.scroll_top()), top);
+    assert!(!editor.read_with(cx, |e, _| e.is_modified()));
+    assert!(
+        events.borrow().iter().any(|e| e == "Reloaded"),
+        "{events:?}"
+    );
+    // The reload is undone like an edit; the text then differs from the
+    // file.
+    act(cx, Undo);
+    assert_eq!(text(&editor, cx), old);
+    assert!(editor.read_with(cx, |e, _| e.is_modified()));
+
+    // A plan made for an older text changes nothing.
+    let plan = editor.read_with(cx, |e, _| {
+        text::ReloadPlan::new(e.buffer().rope(), e.buffer().version(), &decoded)
+    });
+    cx.simulate_input("x");
+    draw(cx);
+    let ok = editor.update(cx, |e, cx| e.reload(plan, false, cx));
+    assert!(!ok);
+    assert!(text(&editor, cx).contains('x'));
+}

@@ -29,7 +29,9 @@ Platform (`crates/platform/`, language-agnostic):
   settings and the reader of a JetBrains IDE credential store for import.
 - `settings-import`: PyCharm project settings (data sources, JDBC URLs).
 - `text`: the text model (ADR 0007): rope buffer, selections, undoable
-  transactions, caret movement, encoding and line separator of the file.
+  transactions, caret movement, encoding and line separator of the file,
+  reloading from disk as one undo step with carets kept through a line
+  diff.
 - `search`: the text search engine of Find / Replace in the editor and of
   Find in Files: plain and regular expression queries with case and whole
   word options, replacement templates, cancellable searches over text
@@ -40,7 +42,14 @@ Platform (`crates/platform/`, language-agnostic):
   excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
   project settings (exclusions, and values by dotted table for products)
   and the one-time import of the reference IDE's exclusions (ADR 0008),
-  the personal project state (ADR 0009), reading and writing documents.
+  the personal project state (ADR 0009), reading and writing documents
+  with the stamps (size, modification time) that tell external changes
+  from the application's own writes, and what paths reported by the file
+  watcher are now on disk.
+- `file-watcher`: the operating system's change notifications (`notify`:
+  FSEvents, inotify, ReadDirectoryChangesW) for the project folder,
+  gathered into batches of changed paths with a hint each and a rescan
+  flag when events were lost.
 - `project-search`: Find in Files without a toolkit: the files of a scope
   that are project content (the project's hidden and excluded entries left
   out), file masks, a parallel cancellable search that streams the matching
@@ -81,7 +90,9 @@ Platform (`crates/platform/`, language-agnostic):
   File, Recent Files), the navigation history (Back and Forward),
   keymaps (with double taps of a modifier and the mouse's back and
   forward buttons), application start-up, environment switches and
-  in-app measurements.
+  in-app measurements; files changed outside the application (the file
+  watcher, a look at the open files when the window gets the focus,
+  Reload All from Disk).
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model
@@ -115,7 +126,8 @@ hover input) and `py-lsp` (ruff, ty and basedpyright: lookup, settings,
 server configuration, the one-time import of the reference's tool
 settings, ruff rule names and Disable actions, the type engine widget).
 Later: Find Usages tool window, rename, Problems tool window, inlay hints,
-semantic tokens, a file watcher.
+semantic tokens. Files changed outside the application reach the
+services as watched-file changes (`file-watcher`, issue #36).
 - Layering (`scripts/check-layers.py`): `code-intel`, `lsp-client` and
   `py-lsp` know no UI toolkit; only `lsp-client` sees protocol types;
   platform UI crates depend on `code-intel`, never on `lsp-client`; the

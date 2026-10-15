@@ -135,6 +135,24 @@ reference IDE draws the same dot (in its information badge colour) only
 when "Mark modified" is switched on, which is off by default; Pyoxide
 always shows it.
 
+### Reloading
+Files changed outside the application are found as the reference IDE
+finds them: the project folder is watched (`file-watcher` on the `notify`
+crate in place of the reference's native `fsnotifier`), the open files are
+looked at when the window gets the focus ("Synchronize files on frame
+activation", on by default; `workbench::SyncSettings`), and Reload All
+from Disk saves everything, then looks at everything. A file differs when
+its size or modification time differ from the application's last read or
+write and its text (or line separator, encoding, writability) differs
+too; the application's own writes leave their stamp and a check that
+overlaps one is dropped. An unmodified editor takes the new text as one
+undo step of the part that differs (`text::ReloadPlan`, worked out off the
+UI thread); carets inside it keep their column on the line a line diff
+leads to, as the reference translates caret lines through a diff; the view
+does not scroll. Created and removed paths list the project tree's folders
+again and update the file index; when events were lost, or without a
+watcher, both are built again instead.
+
 ### Commands, actions and keymaps
 Option 2. Every user-visible action of the shell is a UI command with a
 stable dotted id (`project.open-folder`, `editor.undo`, `editor.copy`,

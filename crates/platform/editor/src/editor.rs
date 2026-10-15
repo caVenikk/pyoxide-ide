@@ -1125,6 +1125,35 @@ impl Editor {
         self.pressed_stripe = None;
     }
 
+    /// Brings the text to the file's on disk as `plan` (made off the UI
+    /// thread from this editor's text) works it out: one undo step, the
+    /// buffer unmodified and read-only as given, carets as
+    /// [`text::Buffer::apply_reload`] places them, the view not scrolled.
+    /// Returns false, changing nothing, when the text changed since the
+    /// plan was made.
+    pub fn reload(
+        &mut self,
+        plan: text::ReloadPlan,
+        read_only: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut selections = self.selections.clone();
+        let changed = match self.buffer.apply_reload(plan, &mut selections) {
+            Ok(applied) => applied.is_some(),
+            Err(text::StalePlan) => return false,
+        };
+        self.buffer.set_read_only(read_only);
+        if changed {
+            self.selections = selections;
+            self.marked = None;
+            self.buffer_reloaded(cx);
+            let y = self.scroll.y;
+            self.set_scroll_y(y, cx);
+        }
+        cx.notify();
+        true
+    }
+
     /// Notifies observers that the buffer was replaced from disk or saved.
     pub fn buffer_reloaded(&mut self, cx: &mut Context<Self>) {
         self.selections.clamp(self.buffer.len_chars());
