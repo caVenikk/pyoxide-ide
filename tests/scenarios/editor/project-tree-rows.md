@@ -24,9 +24,11 @@
   keeps its inset and rounded corners on both sides. A root row that fits
   looks like any other row.
 - Step 3: 10 ms later the rest of the root row shows over the tree's
-  edge, over the editor: on the row's background (the selection colour
-  when it is selected), a 1 px border at the top, the bottom and the
-  rounded right end, the text continuing where the tree cuts it. It stays
+  edge, over the editor, as one continuous row: no seam where it meets
+  the row's selection or hover, the same background (the row stays
+  hovered while it shows), the text continuing pixel for pixel at the
+  same height, and a 1 px border outside the row above, below and at the
+  rounded right end, none where it joins the row. It stays
   while the pointer is on it; a click there selects the root row, a
   double click collapses or expands it, a right click opens its context
   menu. It shows only for a row that is cut and fully in view, goes when

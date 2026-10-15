@@ -253,17 +253,26 @@ fn a_cut_row_reaches_the_edge_and_shows_its_rest_on_hover(cx: &mut TestAppContex
     assert_eq!(selection.left(), area.left() + px(12.0));
     assert_eq!(selection.right(), area.right() - px(12.0));
 
-    // The pointer at the root: its rest shows over the edge, from the edge
-    // on, as high as the row.
+    // The pointer at the root: its rest shows over the edge, continuing
+    // the row without a seam: it starts where the row's (hover) background
+    // ends, level with the row and as high; its 1 px border runs outside
+    // the row above, below and at the right end.
     let root_row = drawn(cx, window, "tree-row:");
     mouse_to(cx, window, root_row.center());
     let t = tree(cx, window);
     assert_eq!(t["expanded_row"], json!(""));
     let rest = drawn(cx, window, "tree-row-expansion");
-    assert_eq!(rest.left(), area.right());
-    assert_eq!(rest.top(), root_row.top());
-    assert_eq!(rest.size.height, root_row.size.height);
-    assert!(rest.size.width > px(0.0));
+    let part = drawn(cx, window, "tree-row-expansion-row");
+    let hovered = drawn(cx, window, "tree-hovered");
+    assert_eq!(hovered.right(), area.right() - px(1.0));
+    assert_eq!(part.left(), hovered.right());
+    assert_eq!(part.top(), root_row.top());
+    assert_eq!(part.size.height, root_row.size.height);
+    assert_eq!(rest.left(), part.left(), "no border where it joins the row");
+    assert_eq!(rest.top(), part.top() - px(1.0));
+    assert_eq!(rest.bottom(), part.bottom() + px(1.0));
+    assert_eq!(rest.right(), part.right() + px(1.0));
+    assert!(part.size.width > px(0.0));
     let window_width = cx
         .update_window(window.into(), |_, window, _| window.viewport_size().width)
         .unwrap();
