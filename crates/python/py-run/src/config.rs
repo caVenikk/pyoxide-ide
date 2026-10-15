@@ -6,9 +6,11 @@
 //! run they describe (`AbstractPythonRunConfiguration`,
 //! `PythonRunConfiguration`, `PythonCommandLineState`).
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use run_config::form::{self, Field, FieldKind, OptionItem, TypeEditor};
 use run_config::{EnvVar, IdeaConfiguration, Importer, RunConfiguration, Storage, TypeInfo};
 use run_config::{env_file, params, paths};
 
@@ -468,6 +470,349 @@ pub fn launch(config: &RunConfiguration, cx: &LaunchContext<'_>) -> Result<Launc
     Ok(Launch { run, input_file })
 }
 
+/// A configuration for running a file from its context (the gutter, the
+/// project tree, Run Context Configuration), as the reference's
+/// `PythonRunConfigurationProducer` makes one: named after the file without
+/// `.py`, the script, its folder as the working directory, the project's
+/// interpreter. `None` for a file outside the project.
+pub fn context_configuration(file: &Path, root: &Path) -> Option<RunConfiguration> {
+    let relative = file.strip_prefix(root).ok()?;
+    let script = relative
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    let folder = relative
+        .parent()
+        .map(|p| {
+            p.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| paths::PROJECT.to_owned());
+    let name = file.file_stem()?.to_string_lossy().into_owned();
+    let mut config = new_configuration(&name, Storage::Personal);
+    config.name_is_generated = true;
+    let mut o = PythonOptions::read(&config);
+    o.script = script;
+    o.working_directory = folder;
+    o.write(&mut config);
+    Some(config)
+}
+
+/// An existing configuration runs the same as a context one: the same
+/// script (`isConfigurationFromContext`).
+pub fn same_context(existing: &RunConfiguration, context: &RunConfiguration) -> bool {
+    let (a, b) = (PythonOptions::read(existing), PythonOptions::read(context));
+    existing.type_id == TYPE_ID && !a.module_mode && !b.module_mode && a.script == b.script
+}
+
+/// The Python type's form (`PythonConfigurationFragmentedEditor`).
+pub struct PythonEditor;
+
+/// Ids of the Python form's fields and options.
+pub mod field {
+    pub const INTERPRETER: &str = "interpreter";
+    pub const TARGET: &str = "target";
+    pub const SCRIPT: &str = "script";
+    pub const PARAMETERS: &str = "parameters";
+    pub const INTERPRETER_OPTIONS: &str = "interpreter-options";
+    pub const WORKING_DIRECTORY: &str = "working-directory";
+    pub const ENV_FILES: &str = "env-files";
+    pub const REDIRECT_INPUT: &str = "redirect-input";
+    pub const INPUT_FILE: &str = "input-file";
+    pub const ADD_CONTENT_ROOTS: &str = "add-content-roots";
+    pub const ADD_SOURCE_ROOTS: &str = "add-source-roots";
+    pub const RUN_WITH_PYTHON_CONSOLE: &str = "run-with-python-console";
+    pub const EMULATE_TERMINAL: &str = "emulate-terminal";
+    pub const RUN_WITH_UV: &str = "run-with-uv";
+    pub const DEBUG_JUST_MY_CODE: &str = "debug-just-my-code";
+}
+
+/// A value typed as an interpreter is a path when it looks like one.
+fn looks_like_path(value: &str) -> bool {
+    value.contains('/') || value.contains('\\') || value.starts_with('$')
+}
+
+impl TypeEditor for PythonEditor {
+    fn type_id(&self) -> &'static str {
+        TYPE_ID
+    }
+
+    fn create(&self, name: &str, storage: Storage) -> RunConfiguration {
+        new_configuration(name, storage)
+    }
+
+    fn fields(&self, config: &RunConfiguration, shown: &BTreeSet<String>) -> Vec<Field> {
+        let o = PythonOptions::read(config);
+        let interpreter = if o.use_project_interpreter {
+            String::new()
+        } else if !o.interpreter_name.is_empty() {
+            o.interpreter_name.clone()
+        } else {
+            o.interpreter.clone()
+        };
+        let mut fields = vec![
+            Field::new(
+                field::INTERPRETER,
+                "Python interpreter:",
+                FieldKind::Text,
+                interpreter,
+            )
+            .placeholder("Project interpreter"),
+            Field::new(
+                field::TARGET,
+                "Run:",
+                FieldKind::Choice(vec![
+                    ("script".into(), "script".into()),
+                    ("module".into(), "module".into()),
+                ]),
+                if o.module_mode { "module" } else { "script" },
+            ),
+        ];
+        let mut script = if o.module_mode {
+            Field::new(
+                field::SCRIPT,
+                "Module name:",
+                FieldKind::Text,
+                o.script.clone(),
+            )
+            .placeholder("Module name")
+        } else {
+            Field::new(
+                field::SCRIPT,
+                "Script path:",
+                FieldKind::Path,
+                o.script.clone(),
+            )
+            .placeholder("Script path")
+        };
+        if !o.module_mode
+            && let Some(var) = paths::flagged_variable(&o.script)
+        {
+            script.note = Some(format!("{var} is kept as written"));
+        }
+        fields.push(script);
+        fields.push(Field::new(
+            field::PARAMETERS,
+            "Parameters:",
+            FieldKind::Text,
+            o.parameters.clone(),
+        ));
+        if !o.interpreter_options.is_empty() || shown.contains(field::INTERPRETER_OPTIONS) {
+            fields.push(Field::new(
+                field::INTERPRETER_OPTIONS,
+                "Interpreter options:",
+                FieldKind::Text,
+                o.interpreter_options.clone(),
+            ));
+        }
+        fields.push(Field::new(
+            field::WORKING_DIRECTORY,
+            "Working directory:",
+            FieldKind::Path,
+            o.working_directory.clone(),
+        ));
+        fields.push(Field::new(
+            form::common::ENV,
+            "Environment variables:",
+            FieldKind::Env,
+            form::env_text(&config.env),
+        ));
+        if !o.env_files.is_empty() || shown.contains(field::ENV_FILES) {
+            fields.push(Field::new(
+                field::ENV_FILES,
+                "Paths to \".env\" files:",
+                FieldKind::Text,
+                o.env_files.join(";"),
+            ));
+        }
+        if o.redirect_input {
+            fields.push(Field::new(
+                field::INPUT_FILE,
+                "Redirect input from:",
+                FieldKind::Path,
+                o.input_file.clone(),
+            ));
+        }
+        fields
+    }
+
+    fn options(&self, config: &RunConfiguration, shown: &BTreeSet<String>) -> Vec<OptionItem> {
+        let o = PythonOptions::read(config);
+        let os = "Operating System";
+        let py = "Python";
+        let mut options = vec![
+            OptionItem::new(
+                os,
+                field::ENV_FILES,
+                "Paths to \".env\" files",
+                !o.env_files.is_empty() || shown.contains(field::ENV_FILES),
+            ),
+            OptionItem::new(
+                os,
+                field::REDIRECT_INPUT,
+                "Redirect input",
+                o.redirect_input,
+            ),
+            OptionItem::new(
+                py,
+                field::INTERPRETER_OPTIONS,
+                "Interpreter options",
+                !o.interpreter_options.is_empty() || shown.contains(field::INTERPRETER_OPTIONS),
+            ),
+            OptionItem::new(
+                py,
+                field::ADD_CONTENT_ROOTS,
+                "Add content roots to PYTHONPATH",
+                o.add_content_roots,
+            ),
+            OptionItem::new(
+                py,
+                field::ADD_SOURCE_ROOTS,
+                "Add source roots to PYTHONPATH",
+                o.add_source_roots,
+            ),
+            OptionItem::new(
+                py,
+                field::RUN_WITH_PYTHON_CONSOLE,
+                "Run with Python Console",
+                o.run_with_python_console,
+            ),
+            OptionItem::new(
+                py,
+                field::EMULATE_TERMINAL,
+                "Emulate terminal in output console",
+                o.emulate_terminal,
+            ),
+            OptionItem::new(
+                py,
+                field::RUN_WITH_UV,
+                "Run with `uv run`",
+                o.run_with_uv.unwrap_or(true),
+            ),
+            OptionItem::new(
+                "Debug",
+                field::DEBUG_JUST_MY_CODE,
+                "Debug just my code",
+                o.debug_just_my_code,
+            ),
+        ];
+        options.extend(form::common_options(config, false));
+        options
+    }
+
+    fn set(&self, config: &mut RunConfiguration, id: &str, value: &str) -> bool {
+        let mut o = PythonOptions::read(config);
+        match id {
+            field::INTERPRETER => {
+                let value = value.trim();
+                o.interpreter.clear();
+                o.interpreter_name.clear();
+                o.use_project_interpreter = value.is_empty();
+                if looks_like_path(value) {
+                    o.interpreter = form::stored_path(value);
+                } else {
+                    o.interpreter_name = value.to_owned();
+                }
+            }
+            field::TARGET => o.module_mode = value == "module",
+            field::SCRIPT => {
+                o.script = if o.module_mode {
+                    value.trim().to_owned()
+                } else {
+                    form::stored_path(value)
+                }
+            }
+            field::PARAMETERS => o.parameters = value.to_owned(),
+            field::INTERPRETER_OPTIONS => o.interpreter_options = value.to_owned(),
+            field::WORKING_DIRECTORY => o.working_directory = form::stored_path(value),
+            field::ENV_FILES => {
+                o.env_files = value
+                    .split(';')
+                    .map(form::stored_path)
+                    .filter(|p| !p.is_empty())
+                    .collect()
+            }
+            field::INPUT_FILE => o.input_file = form::stored_path(value),
+            _ => return false,
+        }
+        o.write(config);
+        true
+    }
+
+    fn toggle(&self, config: &mut RunConfiguration, option: &str, shown: &mut BTreeSet<String>) {
+        let mut o = PythonOptions::read(config);
+        // A field option shows its field; turned off it is hidden and back
+        // to its default.
+        let flip = |on: bool, shown: &mut BTreeSet<String>| {
+            if on {
+                shown.remove(option);
+            } else {
+                shown.insert(option.to_owned());
+            }
+        };
+        match option {
+            field::ENV_FILES => {
+                let on = !o.env_files.is_empty() || shown.contains(option);
+                flip(on, shown);
+                if on {
+                    o.env_files.clear();
+                }
+            }
+            field::INTERPRETER_OPTIONS => {
+                let on = !o.interpreter_options.is_empty() || shown.contains(option);
+                flip(on, shown);
+                if on {
+                    o.interpreter_options.clear();
+                }
+            }
+            field::REDIRECT_INPUT => {
+                o.redirect_input = !o.redirect_input;
+                if !o.redirect_input {
+                    o.input_file.clear();
+                }
+            }
+            field::ADD_CONTENT_ROOTS => o.add_content_roots = !o.add_content_roots,
+            field::ADD_SOURCE_ROOTS => o.add_source_roots = !o.add_source_roots,
+            field::RUN_WITH_PYTHON_CONSOLE => {
+                o.run_with_python_console = !o.run_with_python_console
+            }
+            field::EMULATE_TERMINAL => o.emulate_terminal = !o.emulate_terminal,
+            field::RUN_WITH_UV => o.run_with_uv = Some(!o.run_with_uv.unwrap_or(true)),
+            field::DEBUG_JUST_MY_CODE => o.debug_just_my_code = !o.debug_just_my_code,
+            other => {
+                form::toggle_common(config, other, false);
+                return;
+            }
+        }
+        o.write(config);
+    }
+
+    fn validate(&self, config: &RunConfiguration) -> Option<String> {
+        let o = PythonOptions::read(config);
+        if o.script.trim().is_empty() {
+            return Some(if o.module_mode {
+                "Please specify a qualified name of the module".to_owned()
+            } else {
+                "Please specify a script name".to_owned()
+            });
+        }
+        None
+    }
+}
+
+/// The options of an unsupported configuration the Python product knows,
+/// for the dialog: the decoded options of a pytest configuration.
+pub fn unsupported_details(config: &RunConfiguration) -> Vec<(String, String)> {
+    match &config.reference {
+        Some(r) if r.type_id == TESTS_REFERENCE_ID => pytest_options(&r.xml),
+        _ => Vec::new(),
+    }
+}
+
 /// Whether a configuration runs through `uv run` with an interpreter of a
 /// uv-managed environment (`RUN_TOOL`: missing is uv's default, on).
 pub fn runs_with_uv(config: &RunConfiguration) -> bool {
@@ -802,5 +1147,81 @@ mod tests {
             super::launch(&empty, &cx).unwrap_err(),
             "Please specify a qualified name of the module"
         );
+    }
+
+    #[test]
+    fn the_python_form() {
+        let e = PythonEditor;
+        let mut c = e.create("server", Storage::Personal);
+        let ids = |c: &RunConfiguration, shown: &BTreeSet<String>| -> Vec<String> {
+            e.fields(c, shown).into_iter().map(|f| f.id).collect()
+        };
+        let mut shown = BTreeSet::new();
+        assert_eq!(
+            ids(&c, &shown),
+            [
+                "interpreter",
+                "target",
+                "script",
+                "parameters",
+                "working-directory",
+                "env"
+            ]
+        );
+        assert_eq!(
+            e.validate(&c).as_deref(),
+            Some("Please specify a script name")
+        );
+        e.set(&mut c, field::SCRIPT, "app\\main.py");
+        assert_eq!(PythonOptions::read(&c).script, "app/main.py");
+        assert_eq!(e.validate(&c), None);
+        // The interpreter: a name, a path, or the project's.
+        e.set(&mut c, field::INTERPRETER, "uv (demo)");
+        let o = PythonOptions::read(&c);
+        assert!(!o.use_project_interpreter);
+        assert_eq!(o.interpreter_name, "uv (demo)");
+        e.set(&mut c, field::INTERPRETER, ".venv/bin/python");
+        let o = PythonOptions::read(&c);
+        assert_eq!(
+            (o.interpreter.as_str(), o.interpreter_name.as_str()),
+            (".venv/bin/python", "")
+        );
+        e.set(&mut c, field::INTERPRETER, "");
+        assert!(PythonOptions::read(&c).use_project_interpreter);
+        // Field options show their fields; flags flip.
+        e.toggle(&mut c, field::INTERPRETER_OPTIONS, &mut shown);
+        assert!(ids(&c, &shown).contains(&"interpreter-options".to_owned()));
+        e.toggle(&mut c, field::INTERPRETER_OPTIONS, &mut shown);
+        assert!(!ids(&c, &shown).contains(&"interpreter-options".to_owned()));
+        e.toggle(&mut c, field::REDIRECT_INPUT, &mut shown);
+        assert!(ids(&c, &shown).contains(&"input-file".to_owned()));
+        e.toggle(&mut c, field::RUN_WITH_UV, &mut shown);
+        assert_eq!(PythonOptions::read(&c).run_with_uv, Some(false));
+        let options = e.options(&c, &shown);
+        assert!(options.iter().any(|o| o.id == "run-with-uv" && !o.checked));
+        assert!(options.iter().any(|o| o.id == "allow-parallel"));
+        e.set(&mut c, field::TARGET, "module");
+        e.set(&mut c, field::SCRIPT, "");
+        assert_eq!(
+            e.validate(&c).as_deref(),
+            Some("Please specify a qualified name of the module")
+        );
+    }
+
+    #[test]
+    fn a_context_configuration_runs_the_file_from_its_folder() {
+        let root = Path::new("/work/demo");
+        let c = context_configuration(&root.join("app/main.py"), root).unwrap();
+        assert_eq!(c.name, "main");
+        assert!(c.name_is_generated);
+        let o = PythonOptions::read(&c);
+        assert_eq!(o.script, "app/main.py");
+        assert_eq!(o.working_directory, "app");
+        assert!(o.use_project_interpreter);
+        let top = context_configuration(&root.join("main.py"), root).unwrap();
+        assert_eq!(PythonOptions::read(&top).working_directory, ".");
+        assert!(same_context(&c, &c));
+        assert!(!same_context(&c, &top));
+        assert!(context_configuration(Path::new("/elsewhere/x.py"), root).is_none());
     }
 }

@@ -12,6 +12,7 @@ pub mod commands;
 pub mod configurations;
 pub mod console_view;
 pub mod dropdown;
+pub mod edit_dialog;
 pub mod tool_window;
 pub mod widget;
 
@@ -31,6 +32,7 @@ pub use tool_window::{RunTab, RunToolWindow, RunToolWindowEvent, TabStatus};
 pub fn init(cx: &mut App) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::CONFIGURATION_COMMANDS);
+    ui::command::register(cx, edit_dialog::DIALOG_COMMANDS);
     ui::command::register(cx, commands::TOOL_WINDOW_COMMANDS);
 }
 
@@ -185,6 +187,33 @@ pub trait RunProvider: 'static {
     /// Importers of the reference IDE's configurations of the product's
     /// types.
     fn importers(&self) -> Vec<Arc<dyn run_config::Importer>> {
+        Vec::new()
+    }
+
+    /// The forms of the product's configuration types (the Run/Debug
+    /// Configurations dialog).
+    fn editors(&self) -> Vec<Arc<dyn run_config::TypeEditor>> {
+        Vec::new()
+    }
+
+    /// A configuration that runs `file` from its context (Run Context
+    /// Configuration, the gutter, the project tree); `None` when the file
+    /// cannot run that way.
+    fn context_configuration(&self, file: &Path, root: &Path) -> Option<RunConfiguration> {
+        let _ = (file, root);
+        None
+    }
+
+    /// An existing configuration runs the same as a context one, which is
+    /// then reused (`RunConfigurationProducer.findExistingConfiguration`).
+    fn same_context(&self, existing: &RunConfiguration, context: &RunConfiguration) -> bool {
+        existing.type_id == context.type_id && existing.options == context.options
+    }
+
+    /// The options of an unsupported configuration the product can read,
+    /// for the dialog (a pytest configuration's target).
+    fn unsupported_details(&self, config: &RunConfiguration) -> Vec<(String, String)> {
+        let _ = config;
         Vec::new()
     }
 

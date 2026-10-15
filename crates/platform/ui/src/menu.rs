@@ -698,12 +698,9 @@ impl ContextMenu {
         let upper = self.filter.to_uppercase();
         let shown = self.shown(0);
         let candidates = || {
-            self.items
-                .iter()
-                .enumerate()
-                .filter(|(ix, item)| {
-                    shown[*ix] && !matches!(item, MenuItem::Separator | MenuItem::Header(_))
-                })
+            self.items.iter().enumerate().filter(|(ix, item)| {
+                shown[*ix] && !matches!(item, MenuItem::Separator | MenuItem::Header(_))
+            })
         };
         let label = |item: &MenuItem| item.label().map(|l| l.to_uppercase()).unwrap_or_default();
         let best = if upper.is_empty() {
@@ -1013,10 +1010,7 @@ impl ContextMenu {
                 let id = SharedString::from(format!("menu-{level}-{ix}"));
                 if let MenuItem::Header(title) = item {
                     let selector = format!("menu-header:{title}");
-                    let first = !items[..ix]
-                        .iter()
-                        .enumerate()
-                        .any(|(i, _)| shown[i]);
+                    let first = !items[..ix].iter().enumerate().any(|(i, _)| shown[i]);
                     return div()
                         .id(id)
                         .debug_selector(move || selector.clone())
@@ -1025,7 +1019,9 @@ impl ContextMenu {
                         .justify_end()
                         .h(px(item_height))
                         .px(px(m.separator_x))
-                        .when(!first, |d| d.child(div().flex_none().h(px(1.0)).w_full().bg(line)))
+                        .when(!first, |d| {
+                            d.child(div().flex_none().h(px(1.0)).w_full().bg(line))
+                        })
                         .child(
                             div()
                                 .flex_1()
@@ -1641,7 +1637,9 @@ mod tests {
         ]
     }
 
-    fn rich(cx: &mut TestAppContext) -> (Entity<Origin>, Entity<ContextMenu>, &mut VisualTestContext) {
+    fn rich(
+        cx: &mut TestAppContext,
+    ) -> (Entity<Origin>, Entity<ContextMenu>, &mut VisualTestContext) {
         open_with(cx, |window, cx| {
             let options = PopupOptions {
                 speed_search: true,
@@ -1663,7 +1661,8 @@ mod tests {
         let items = &state["levels"][0]["items"];
         assert_eq!(items[0]["header"], json!("Pinned"));
         assert_eq!(items[1]["secondary"], json!("not supported yet"));
-        assert_eq!(items[1]["icon_alpha"], json!(0.45));
+        let alpha = items[1]["icon_alpha"].as_f64().unwrap();
+        assert!((alpha - 0.45).abs() < 1e-6, "{alpha}");
         assert_eq!(items[1]["command"], json!("menu_test::First"));
         assert_eq!(items[1]["inline"][0]["tooltip"], json!("Run 'alpha'"));
         assert_eq!(items[1]["inline"][1]["enabled"], json!(false));

@@ -10,7 +10,7 @@ ui::ui_commands! {
         "Runs the selected run configuration; with Current File selected, the file in the editor.";
     /// Run the file in the editor.
     RunCurrentFile => "run.current-file", "Run Context Configuration",
-        "Runs the file in the editor (the reference's context configuration).";
+        "Runs the file in the editor with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.";
     /// Stop a run.
     Stop { tab: Option<usize> } => "run.stop", "Stop",
         "Stops the process of a Run tab (zero-based), or of the only running one; a second Stop kills it. With several running and no tab, offers them in a popup.",
@@ -44,6 +44,29 @@ ui::ui_commands! {
         => "run.configuration.run", "Run Configuration",
         "Runs a run configuration by name (and type id when two types have the name), or the selected one.",
         r#"{"name": "server"}"#;
+    /// Open the Run/Debug Configurations dialog.
+    EditConfigurations { name: Option<String>, r#type: Option<String> }
+        => "run.configurations.edit", "Edit Configurations\u{2026}",
+        "Opens the Run/Debug Configurations dialog, on a configuration by name (and type id), else on the selected one.",
+        r#"{"name": "server"}"#;
+    /// Make a temporary configuration permanent.
+    SaveTemporary { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.save-temporary", "Save Configuration",
+        "Makes a temporary run configuration (by name, or the selected one) permanent; it stays personal.",
+        r#"{"name": "main"}"#;
+    /// Delete a configuration.
+    DeleteConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.delete", "Delete",
+        "Deletes a run configuration (by name, or the selected one) after asking; a shared one's file goes too.",
+        r#"{"name": "main"}"#;
+    /// Pin or unpin a configuration.
+    PinConfiguration { name: Option<String>, r#type: Option<String> }
+        => "run.configuration.pin", "Pin",
+        "Pins a run configuration (by name, or the selected one) at the top of the run widget's dropdown, or unpins it.",
+        r#"{"name": "server"}"#;
+    /// Run the file in the editor.
+    RunFile => "run.file", "Run Current File",
+        "Runs the file in the editor without making a run configuration (the dropdown's Current File).";
     /// Show or hide every configuration in the dropdown.
     ToggleAllConfigurations => "run.configurations.toggle-all", "All Configurations",
         "Shows or hides every run configuration below the recent ones in the run widget's dropdown, and opens the dropdown again.";

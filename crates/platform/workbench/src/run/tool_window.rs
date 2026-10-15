@@ -158,6 +158,13 @@ pub struct RunToolWindow {
     launching: Vec<LaunchKey>,
     /// The project's run configurations.
     configs: Entity<RunConfigs>,
+    /// The Run/Debug Configurations dialog while it is open, where the
+    /// focus returns when it closes, and the workbench's subscription.
+    edit_dialog: Option<(
+        Entity<super::edit_dialog::EditDialog>,
+        Option<FocusHandle>,
+        Subscription,
+    )>,
     next_id: u64,
     /// The main window (a rerun after the process ended starts there).
     window_handle: gpui::AnyWindowHandle,
@@ -182,6 +189,7 @@ impl RunToolWindow {
             selected: None,
             launching: Vec::new(),
             configs,
+            edit_dialog: None,
             next_id: 0,
             window_handle: window.window_handle(),
             _subscriptions: subscriptions,
@@ -191,6 +199,27 @@ impl RunToolWindow {
     /// The project's run configurations.
     pub fn configs(&self) -> &Entity<RunConfigs> {
         &self.configs
+    }
+
+    /// The Run/Debug Configurations dialog while it is open.
+    pub fn edit_dialog(&self) -> Option<&Entity<super::edit_dialog::EditDialog>> {
+        self.edit_dialog.as_ref().map(|(d, _, _)| d)
+    }
+
+    /// Keeps the open dialog (`None` closes it); returns where the focus
+    /// goes back to when it closes.
+    pub fn set_edit_dialog(
+        &mut self,
+        dialog: Option<(
+            Entity<super::edit_dialog::EditDialog>,
+            Option<FocusHandle>,
+            Subscription,
+        )>,
+        cx: &mut Context<Self>,
+    ) -> Option<FocusHandle> {
+        let old = std::mem::replace(&mut self.edit_dialog, dialog);
+        cx.notify();
+        old.and_then(|(_, focus, _)| focus)
     }
 
     /// A project was opened: its run configurations load.

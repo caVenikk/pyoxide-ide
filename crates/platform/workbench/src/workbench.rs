@@ -2580,6 +2580,11 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::run_launch_configuration))
             .on_action(cx.listener(Self::run_toggle_all_configurations))
             .on_action(cx.listener(Self::run_import_reference))
+            .on_action(cx.listener(Self::run_file))
+            .on_action(cx.listener(Self::run_edit_configurations))
+            .on_action(cx.listener(Self::run_save_temporary))
+            .on_action(cx.listener(Self::run_delete_configuration))
+            .on_action(cx.listener(Self::run_pin_configuration))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {
@@ -2678,6 +2683,7 @@ impl Render for Workbench {
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
+            .children(self.render_run_dialog(cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))
             .when(self.find_in_files.read(cx).is_open(), |d| {
                 d.child(self.find_in_files.clone())

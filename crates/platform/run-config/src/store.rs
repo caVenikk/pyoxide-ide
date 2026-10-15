@@ -77,6 +77,7 @@ const KNOWN_PERSONAL: &[&str] = &[
     "recent-temporary",
     "pinned",
     "history",
+    "all-expanded",
     "executors",
     "configurations",
     "shared-env",
@@ -196,6 +197,10 @@ pub fn load(root: &Path) -> Result<Stored, StoreError> {
     list.recent_temporary = keys(&personal, "recent-temporary");
     list.pinned = keys(&personal, "pinned");
     list.history = keys(&personal, "history");
+    list.all_expanded = personal
+        .get("all-expanded")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     list.executors = personal
         .get("executors")
         .and_then(Value::as_array)
@@ -525,6 +530,9 @@ fn personal_table(list: &RunConfigurations) -> toml_edit::Table {
         }
         Item::Value(toml_edit::Value::Array(multiline(a)))
     };
+    if list.all_expanded {
+        t.insert("all-expanded", toml_edit::value(true));
+    }
     if let Some(selected) = &list.selected {
         t.insert("selected", Item::Value(key_value(selected)));
     }

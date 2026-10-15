@@ -29,6 +29,9 @@ pub struct RunConfigurations {
     pub executors: Vec<(ConfigKey, String)>,
     /// How many temporary configurations are kept.
     pub temporary_limit: usize,
+    /// The run widget's dropdown shows every configuration below the
+    /// recent ones ("All Configurations", `allConfigurationsExpanded`).
+    pub all_expanded: bool,
     /// The per-user configurations of the reference were imported on this
     /// machine (the personal import marker).
     pub personal_imported: bool,
@@ -47,6 +50,7 @@ impl Default for RunConfigurations {
             history: Vec::new(),
             executors: Vec::new(),
             temporary_limit: TEMPORARY_LIMIT,
+            all_expanded: false,
             personal_imported: false,
             extra: toml::Table::new(),
         }
@@ -186,6 +190,67 @@ impl RunConfigurations {
         }
         self.executors.retain(|(k, _)| k != key);
         Some(removed)
+    }
+
+    /// Renames a configuration (references to it follow). Fails when its
+    /// type has the name already or the name is empty.
+    pub fn rename(&mut self, key: &ConfigKey, name: &str) -> Result<ConfigKey, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Configuration name shouldn't be empty".to_owned());
+        }
+        if name == key.name {
+            return Ok(key.clone());
+        }
+        let new = ConfigKey::new(&key.type_id, name);
+        if self.contains(&new) {
+            return Err(format!("A configuration named '{name}' already exists"));
+        }
+        let Some(config) = self.get_mut(key) else {
+            return Err(format!("No run configuration '{}'", key.name));
+        };
+        config.name = name.to_owned();
+        config.name_is_generated = false;
+        self.rekey(key, &new);
+        Ok(new)
+    }
+
+    /// Points every reference to `old` at `new`.
+    fn rekey(&mut self, old: &ConfigKey, new: &ConfigKey) {
+        if self.selected.as_ref() == Some(old) {
+            self.selected = Some(new.clone());
+        }
+        for list in [
+            &mut self.order,
+            &mut self.recent_temporary,
+            &mut self.pinned,
+            &mut self.history,
+        ] {
+            for k in list.iter_mut().filter(|k| *k == old) {
+                *k = new.clone();
+            }
+        }
+        for (k, _) in self.executors.iter_mut().filter(|(k, _)| k == old) {
+            *k = new.clone();
+        }
+    }
+
+    /// Replaces a configuration by an edited copy (its name may differ;
+    /// references follow).
+    pub fn replace(&mut self, key: &ConfigKey, config: RunConfiguration) -> bool {
+        let Some(index) = self
+            .configs
+            .iter()
+            .position(|c| c.type_id == key.type_id && c.name == key.name)
+        else {
+            return false;
+        };
+        let new = config.key();
+        self.configs[index] = config;
+        if new != *key {
+            self.rekey(key, &new);
+        }
+        true
     }
 
     /// Makes a temporary configuration permanent (`makeStable`).

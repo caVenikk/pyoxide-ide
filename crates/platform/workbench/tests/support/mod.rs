@@ -14,7 +14,8 @@ use std::time::Duration;
 use console::{Link, LinkFilter, LinkTarget};
 use gpui::{App, Task, TestAppContext};
 use process::CommandLine;
-use run_config::{IdeaConfiguration, Importer, RunConfiguration, TypeInfo};
+use run_config::form::{self, Field, FieldKind, OptionItem, TypeEditor};
+use run_config::{IdeaConfiguration, Importer, RunConfiguration, Storage, TypeInfo};
 use ui::icons::IconName;
 use workbench::{RunHook, RunProvider, RunRequest, RunSpec};
 
@@ -113,13 +114,40 @@ impl RunProvider for ShellRunner {
         vec![Arc::new(ScriptImporter)]
     }
 
+    fn editors(&self) -> Vec<Arc<dyn TypeEditor>> {
+        vec![Arc::new(ScriptEditor)]
+    }
+
+    /// A `.py` file runs from its context as a "Script" configuration named
+    /// after the file, without a command: it runs the script set when it
+    /// runs, as the file would.
+    fn context_configuration(&self, file: &Path, root: &Path) -> Option<RunConfiguration> {
+        if file.extension().is_none_or(|e| e != "py") {
+            return None;
+        }
+        let relative = file.strip_prefix(root).ok()?;
+        let mut config =
+            ScriptEditor.create(&file.file_stem()?.to_string_lossy(), Storage::Personal);
+        config.name_is_generated = true;
+        config.set_str("file", &relative.to_string_lossy().replace('\\', "/"));
+        Some(config)
+    }
+
+    fn same_context(&self, existing: &RunConfiguration, context: &RunConfiguration) -> bool {
+        existing.type_id == context.type_id
+            && existing.str_option("file") == context.str_option("file")
+    }
+
     fn prepare_configuration(
         &self,
         request: RunRequest,
         _: &mut App,
     ) -> Task<Result<RunSpec, String>> {
         let config = request.configuration.clone().expect("a configuration");
-        let script = config.str_option("command").to_owned();
+        let script = match config.str_option("command") {
+            "" => SCRIPT.with(|s| s.borrow().clone()),
+            command => command.to_owned(),
+        };
         let command = if cfg!(windows) {
             CommandLine::new("cmd").args(["/V:ON", "/C", &script])
         } else {
@@ -149,6 +177,72 @@ pub const SCRIPT_TYPE: TypeInfo = TypeInfo {
     reference_id: "ScriptType",
     allow_parallel: false,
 };
+
+/// The form of the "Script" type: its command and its variables.
+pub struct ScriptEditor;
+
+impl TypeEditor for ScriptEditor {
+    fn type_id(&self) -> &'static str {
+        "script"
+    }
+
+    fn create(&self, name: &str, storage: Storage) -> RunConfiguration {
+        RunConfiguration::new("script", name, storage)
+    }
+
+    fn fields(
+        &self,
+        config: &RunConfiguration,
+        _: &std::collections::BTreeSet<String>,
+    ) -> Vec<Field> {
+        vec![
+            Field::new(
+                "command",
+                "Command:",
+                FieldKind::Text,
+                config.str_option("command"),
+            ),
+            Field::new(
+                form::common::ENV,
+                "Environment variables:",
+                FieldKind::Env,
+                form::env_text(&config.env),
+            ),
+        ]
+    }
+
+    fn options(
+        &self,
+        config: &RunConfiguration,
+        _: &std::collections::BTreeSet<String>,
+    ) -> Vec<OptionItem> {
+        form::common_options(config, false)
+    }
+
+    fn set(&self, config: &mut RunConfiguration, field: &str, value: &str) -> bool {
+        if field != "command" {
+            return false;
+        }
+        config.set_str("command", value);
+        true
+    }
+
+    fn toggle(
+        &self,
+        config: &mut RunConfiguration,
+        option: &str,
+        _: &mut std::collections::BTreeSet<String>,
+    ) {
+        form::toggle_common(config, option, false);
+    }
+
+    fn validate(&self, config: &RunConfiguration) -> Option<String> {
+        config
+            .str_option("command")
+            .is_empty()
+            .then(|| "Please specify a command".to_owned())
+    }
+}
 
 /// Imports the reference's `ScriptType` configurations: `COMMAND` and the
 /// variables.

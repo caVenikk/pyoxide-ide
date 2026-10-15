@@ -8,9 +8,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{App, AppContext as _, Task};
-use py_run::config::{LaunchContext, PythonImporter, PythonOptions};
+use py_run::config::{LaunchContext, PythonEditor, PythonImporter, PythonOptions};
 use py_run::{PythonRun, UvRun};
-use run_config::{Importer, TypeInfo, paths};
+use run_config::{Importer, RunConfiguration, TypeEditor, TypeInfo, paths};
 use ui::icons::IconName;
 use workbench::{RunProvider, RunRequest, RunSpec};
 
@@ -29,11 +29,16 @@ pub const NO_INTERPRETER: &str = "Please select a valid Python interpreter";
 /// The icon of Python runs and of the Python configuration type.
 const PYTHON_ICON: IconName = IconName("python/file");
 
+/// A file Run accepts.
+fn runnable(file: &Path) -> bool {
+    file.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| RUNNABLE.contains(&e))
+}
+
 impl RunProvider for PythonRunProvider {
     fn can_run(&self, file: &Path, _: &App) -> bool {
-        file.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| RUNNABLE.contains(&e))
+        runnable(file)
     }
 
     fn prepare(&self, request: RunRequest, cx: &mut App) -> Task<Result<RunSpec, String>> {
@@ -81,6 +86,24 @@ impl RunProvider for PythonRunProvider {
         vec![Arc::new(PythonImporter)]
     }
 
+    fn editors(&self) -> Vec<Arc<dyn TypeEditor>> {
+        vec![Arc::new(PythonEditor)]
+    }
+
+    fn context_configuration(&self, file: &Path, root: &Path) -> Option<RunConfiguration> {
+        runnable(file)
+            .then(|| py_run::config::context_configuration(file, root))
+            .flatten()
+    }
+
+    fn same_context(&self, existing: &RunConfiguration, context: &RunConfiguration) -> bool {
+        py_run::config::same_context(existing, context)
+    }
+
+    fn unsupported_details(&self, config: &RunConfiguration) -> Vec<(String, String)> {
+        py_run::config::unsupported_details(config)
+    }
+
     /// A Python configuration: its interpreter (the project's, or the one
     /// it names, falling back to the project's with a warning), `uv run`
     /// for an environment of a uv project unless the configuration turns
@@ -109,8 +132,19 @@ impl RunProvider for PythonRunProvider {
         });
         let interpreter = interpreter::for_run(&root, configured, cx);
         cx.background_spawn(async move {
-            let (selected, warning) = interpreter.await;
+            let (selected, missing) = interpreter.await;
             let selected = selected.ok_or_else(|| NO_INTERPRETER.to_owned())?;
+            // Until interpreters are configured in the IDE (#75): the one
+            // the configuration names is replaced, and the message says by
+            // which.
+            let warning = missing.map(|what| {
+                format!(
+                    "Python interpreter '{what}' of '{}' was not found; running with the project interpreter {} ({})",
+                    config.name,
+                    selected.label,
+                    selected.python.display()
+                )
+            });
             let uv = if selected.uv_project.is_some() && py_run::config::runs_with_uv(&config) {
                 py_env::paths::venv_root_of(&selected.python).and_then(UvRun::locate)
             } else {

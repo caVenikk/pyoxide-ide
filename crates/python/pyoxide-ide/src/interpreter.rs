@@ -72,7 +72,8 @@ pub struct ConfiguredInterpreter {
 /// resolves it (`AbstractPythonRunConfiguration.getSdk`): by name among
 /// the project's interpreters and then in the reference's SDK table, else
 /// by path. A configured interpreter that is not found falls back to the
-/// project's, with a warning.
+/// project's; the second value then names the one that was not found (its
+/// SDK name, else its path).
 pub fn for_run(
     root: &Path,
     configured: Option<ConfiguredInterpreter>,
@@ -99,9 +100,7 @@ pub fn for_run(
         } else {
             configured.name.clone()
         };
-        let warning =
-            format!("Interpreter '{what}' was not found; the project interpreter is used");
-        (project(), Some(warning))
+        (project(), Some(what))
     })
 }
 

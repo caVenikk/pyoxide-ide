@@ -234,17 +234,19 @@ fn the_reference_configurations_show_in_the_run_widget(cx: &mut TestAppContext) 
     assert_eq!(w["run_enabled"], json!(true));
 
     // The dropdown: the type's folder as a submenu, its configurations,
-    // the unknown type last, Current File and Edit Configurations….
+    // the unknown type last with its marker, Current File and Edit
+    // Configurations…; the configuration in the folder once more for
+    // speed search only.
     h.invoke("run.configurations", json!(null));
     let menu = h.run()["menu"].clone();
-    let labels: Vec<Value> = menu["levels"][0]["items"]
-        .as_array()
-        .unwrap()
+    let items = menu["levels"][0]["items"].as_array().unwrap().clone();
+    let shown: Vec<Value> = items
         .iter()
+        .filter(|i| i.get("hidden").is_none())
         .map(|i| i["label"].clone())
         .collect();
     assert_eq!(
-        labels,
+        shown,
         [
             json!("Group"),
             json!("alpha"),
@@ -257,13 +259,46 @@ fn the_reference_configurations_show_in_the_run_widget(cx: &mut TestAppContext) 
             json!("Edit Configurations\u{2026}"),
         ]
     );
-    assert_eq!(menu["levels"][0]["items"][0]["submenu"], json!(true));
+    assert_eq!(items[0]["submenu"], json!(true));
+    let alpha = &items[1];
+    assert_eq!(alpha["command"], json!("run.configuration.select"));
+    let inline: Vec<Value> = alpha["inline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["tooltip"].clone())
+        .collect();
+    assert_eq!(inline, [json!("Run 'alpha'"), json!("Debug 'alpha'")]);
+    let hidden_beta = items.iter().find(|i| i["label"] == json!("beta")).unwrap();
+    assert_eq!(hidden_beta["hidden"], json!(true));
+    assert_eq!(hidden_beta["secondary"], json!("Group"));
+    let later = items.iter().find(|i| i["label"] == json!("later")).unwrap();
+    assert_eq!(later["secondary"], json!("not supported yet"));
+    assert!(later.get("inline").is_none());
+    // A row's submenu: Run, Debug, "Configuration", Edit Configurations…,
+    // Delete, Pin.
+    h.invoke("menu.down", json!(null));
+    h.invoke("menu.down", json!(null));
+    h.invoke("menu.open-submenu", json!(null));
+    let menu = h.run()["menu"].clone();
+    let sub: Vec<Value> = menu["levels"][1]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i.get("header").cloned().unwrap_or(i["label"].clone()))
+        .collect();
     assert_eq!(
-        menu["levels"][0]["items"][4]["description"],
-        json!("FutureType, not supported yet")
+        sub,
+        [
+            json!("Run"),
+            json!("Debug"),
+            json!("Configuration"),
+            json!("Edit Configurations\u{2026}"),
+            json!("Delete"),
+            json!("Pin")
+        ]
     );
-    // The selected configuration is in the folder: nothing is preselected
-    // at the top level but the first row.
+    h.invoke("menu.cancel", json!(null));
     h.invoke("menu.cancel", json!(null));
 
     // Selecting by command; Current File; an unsupported one cannot run.
@@ -366,4 +401,284 @@ fn a_shell_script_configuration_runs_in_the_run_tool_window(cx: &mut TestAppCont
     assert_eq!(s["tabs"][0]["title"], json!("inline"));
     let text = console_text(&s, 0);
     assert!(text.contains("\nshell-two"), "{text}");
+}
+
+fn invoke_and_draw(h: &mut H<'_>, id: &str, args: Value) -> Value {
+    h.invoke(id, args)
+}
+
+fn dialog(h: &mut H<'_>) -> Value {
+    h.run()["edit_dialog"].clone()
+}
+
+fn tree(h: &mut H<'_>) -> Vec<String> {
+    dialog(h)["tree"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            format!(
+                "{}{}",
+                "  ".repeat(n["depth"].as_u64().unwrap() as usize),
+                n["text"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+fn field(h: &mut H<'_>, id: &str) -> Value {
+    dialog(h)["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["id"] == json!(id))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Run Context Configuration (⌃⇧R / Ctrl+Shift+F10) makes a temporary
+/// configuration of the file and selects it; at most five are kept, the
+/// oldest goes; Save Configuration keeps one; the same file reuses its
+/// configuration.
+#[gpui::test]
+fn context_runs_make_temporary_configurations(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    for i in 0..6 {
+        write(&root, &format!("t{i}.py"), "x = 1\n");
+    }
+    let mut h = setup(cx, &root);
+    h.loaded();
+    support::set_script(&script("echo ok", "echo ok"));
+    let keys = if MAC {
+        "ctrl-shift-r"
+    } else {
+        "ctrl-shift-f10"
+    };
+    for i in 0..6 {
+        h.invoke("project.open-file", json!({"path": format!("t{i}.py")}));
+        h.cx.simulate_keystrokes(h.window.into(), keys);
+        h.draw();
+        h.wait(&format!("the run of t{i}"), |s| {
+            s["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["title"] == json!(format!("t{i}")) && t["status"] == json!("terminated"))
+        });
+    }
+    let s = h.run();
+    // The sixth removed the oldest.
+    assert_eq!(names(&s), ["t1", "t2", "t3", "t4", "t5"]);
+    assert!(
+        s["configurations"]["configurations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["temporary"] == json!(true))
+    );
+    let w = &s["widget"];
+    assert_eq!(w["configuration"], json!("t5"));
+    assert_eq!(w["configuration_temporary"], json!(true));
+    // The same file again: its configuration is reused.
+    h.cx.simulate_keystrokes(h.window.into(), keys);
+    h.draw();
+    assert_eq!(names(&h.run()).len(), 5);
+    // Save Configuration and Pin from the commands.
+    h.invoke("run.configuration.save-temporary", json!({"name": "t1"}));
+    h.invoke("run.configuration.pin", json!({"name": "t2"}));
+    let s = h.run();
+    let t1 = s["configurations"]["configurations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == json!("t1"))
+        .unwrap()
+        .clone();
+    assert_eq!(t1["temporary"], json!(false));
+    assert_eq!(
+        s["configurations"]["pinned"],
+        json!([{"type": "script", "name": "t2"}])
+    );
+    // The dropdown now has Pinned and Recent sections and the toggle.
+    h.invoke("run.configurations", json!(null));
+    let items = h.run()["menu"]["levels"][0]["items"].clone();
+    assert_eq!(items[0]["header"], json!("Pinned"));
+    assert_eq!(items[1]["label"], json!("t2"));
+    assert!(
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["header"] == json!("Recent Configurations"))
+    );
+    assert!(
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["label"] == json!("All Configurations  5"))
+    );
+    h.invoke("menu.cancel", json!(null));
+    h.invoke("run.configurations.toggle-all", json!(null));
+    assert_eq!(h.run()["configurations"]["show_all"], json!(true));
+    h.invoke("menu.cancel", json!(null));
+    // Current File runs the file without a configuration.
+    h.invoke("run.file", json!(null));
+    assert_eq!(names(&h.run()).len(), 5);
+}
+
+/// Delete asks ("Are you sure you want to delete …?"); Yes deletes the
+/// configuration and a shared one's file.
+#[gpui::test]
+fn delete_asks_and_removes_a_shared_file(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    assert!(root.join(".oxide/run/shared.toml").is_file());
+    h.invoke("run.configuration.delete", json!({"name": "shared"}));
+    let state = h.invoke("workbench.state", json!(null));
+    assert_eq!(state["dialog"]["title"], json!("Confirmation"));
+    assert_eq!(
+        state["dialog"]["message"],
+        json!("Are you sure you want to delete shared?")
+    );
+    h.invoke("dialog.choose", json!({"button": "Yes"}));
+    let s = h.wait("the file is gone", |_| {
+        !root.join(".oxide/run/shared.toml").exists()
+    });
+    assert_eq!(names(&s), ["beta", "alpha", "later"]);
+    // "No" keeps it.
+    h.invoke("run.configuration.delete", json!({"name": "alpha"}));
+    h.invoke("dialog.choose", json!({"button": "No"}));
+    assert_eq!(names(&h.run()), ["beta", "alpha", "later"]);
+}
+
+/// The Run/Debug Configurations dialog: the tree by type and folder, the
+/// form of the selected configuration, Apply keeps the changes, Cancel
+/// drops them; Add, Copy, Create New Folder, Remove; "Store as project
+/// file" asks about personal values.
+#[gpui::test]
+fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    h.invoke("run.configurations.edit", json!({"name": "alpha"}));
+    let d = dialog(&mut h);
+    assert_eq!(d["title"], json!("Run/Debug Configurations"));
+    assert_eq!(
+        tree(&mut h),
+        [
+            "Script",
+            "  Group",
+            "    beta",
+            "  alpha",
+            "  shared",
+            "FutureType",
+            "  later"
+        ]
+    );
+    assert_eq!(
+        d["selected"],
+        json!({"kind": "configuration", "type": "script", "name": "alpha"})
+    );
+    assert_eq!(field(&mut h, "name")["value"], json!("alpha"));
+    assert_eq!(field(&mut h, "command")["value"], json!("echo alpha"));
+    assert_eq!(d["store_as_project_file"], json!(false));
+    // Edit the command, Apply.
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": "echo changed"}),
+    );
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "env", "value": "TOKEN=secret-value;MODE=x"}),
+    );
+    h.invoke("run.configurations.dialog.apply", json!(null));
+    assert_eq!(dialog(&mut h)["modified"], json!(false));
+    // Validation: an empty command.
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": ""}),
+    );
+    assert_eq!(dialog(&mut h)["error"], json!("Please specify a command"));
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": "echo changed"}),
+    );
+    // Store as project file with personal values asks first.
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "store-as-project-file", "value": "true"}),
+    );
+    let state = h.invoke("workbench.state", json!(null));
+    assert_eq!(state["dialog"]["title"], json!("Store as Project File"));
+    h.invoke("dialog.choose", json!({"button": "Keep Values Personal"}));
+    assert_eq!(dialog(&mut h)["store_as_project_file"], json!(true));
+    assert_eq!(field(&mut h, "shared-env")["value"], json!(""));
+    // A rename, then Add, Copy, Create New Folder, Remove, Sort.
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "name", "value": "renamed"}),
+    );
+    h.invoke("run.configurations.dialog.add", json!({"type": "script"}));
+    assert_eq!(field(&mut h, "name")["value"], json!("Unnamed"));
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": "command", "value": "echo new"}),
+    );
+    h.invoke("run.configurations.dialog.copy", json!(null));
+    assert_eq!(field(&mut h, "name")["value"], json!("Unnamed (1)"));
+    h.invoke("run.configurations.dialog.new-folder", json!(null));
+    assert_eq!(
+        dialog(&mut h)["selected"],
+        json!({"kind": "folder", "type": "script", "folder": "New Folder"})
+    );
+    h.invoke(
+        "run.configurations.dialog.select",
+        json!({"name": "Unnamed (1)"}),
+    );
+    h.invoke("run.configurations.dialog.remove", json!(null));
+    assert!(!tree(&mut h).iter().any(|n| n.trim() == "Unnamed (1)"));
+    h.invoke("run.configurations.dialog.sort", json!(null));
+    // Modify options: a common option.
+    h.invoke(
+        "run.configurations.dialog.select",
+        json!({"name": "Unnamed"}),
+    );
+    h.invoke("run.configurations.dialog.modify-options", json!(null));
+    assert!(!dialog(&mut h)["menu"].is_null());
+    h.invoke("menu.cancel", json!(null));
+    h.invoke(
+        "run.configurations.dialog.toggle-option",
+        json!({"option": "allow-parallel"}),
+    );
+    let options = dialog(&mut h)["options"].clone();
+    assert!(
+        options
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["id"] == json!("allow-parallel") && o["checked"] == json!(true))
+    );
+    // An unsupported one is read-only.
+    h.invoke("run.configurations.dialog.select", json!({"name": "later"}));
+    assert_eq!(dialog(&mut h)["read_only"], json!(true));
+    h.invoke("run.configurations.dialog.ok", json!(null));
+    assert!(h.run()["edit_dialog"].is_null());
+    let s = h.wait("the shared file", |_| {
+        root.join(".oxide/run/renamed.toml").is_file()
+    });
+    assert_eq!(names(&s), ["beta", "renamed", "shared", "Unnamed", "later"]);
+    let shared = std::fs::read_to_string(root.join(".oxide/run/renamed.toml")).unwrap();
+    assert!(shared.contains("{ name = \"TOKEN\" }"), "{shared}");
+    assert!(!shared.contains("secret-value"), "{shared}");
+    let personal = std::fs::read_to_string(root.join(".oxide/workspace.toml")).unwrap();
+    assert!(personal.contains("secret-value"), "{personal}");
+    // Cancel drops changes.
+    h.invoke("run.configurations.edit", json!({"name": "beta"}));
+    h.invoke("run.configurations.dialog.remove", json!(null));
+    h.invoke("run.configurations.dialog.cancel", json!(null));
+    let _ = invoke_and_draw(&mut h, "workbench.state", json!(null));
+    assert!(names(&h.run()).contains(&"beta".to_owned()));
 }

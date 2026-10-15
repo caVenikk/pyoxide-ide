@@ -161,4 +161,32 @@ fn an_imported_python_configuration_runs_with_the_project_interpreter(cx: &mut T
         std::fs::read(root.join(".idea/workspace.xml")).unwrap(),
         idea
     );
+
+    // An interpreter the configuration names that is not here: the
+    // project's runs, and the status bar says which replaced which.
+    invoke(
+        cx,
+        window,
+        "run.configurations.edit",
+        json!({"name": "server"}),
+    );
+    invoke(
+        cx,
+        window,
+        "run.configurations.dialog.set",
+        json!({"field": "interpreter", "value": "uv (gone)"}),
+    );
+    invoke(cx, window, "run.configurations.dialog.ok", json!(null));
+    invoke(cx, window, "run.run", json!(null));
+    wait(cx, window, "the second run", |s| {
+        s["tabs"][0]["status"] == json!("terminated")
+    });
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(
+        state["message"],
+        json!(format!(
+            "Python interpreter 'uv (gone)' of 'server' was not found; running with the project interpreter .venv [3.12.1] ({})",
+            python.display()
+        ))
+    );
 }

@@ -17,12 +17,15 @@
 //!   `*.run.xml`); `.idea` is only read. Products convert their types with
 //!   an [`Importer`]; configurations of other types are kept read-only.
 //! - [`shell`]: the Shell Script type, which knows no language.
+//! - [`form`]: what the Run/Debug Configurations dialog edits: the fields
+//!   and "Modify options" of a type ([`TypeEditor`]).
 //! - [`params`], [`paths`], [`env_file`]: parameter strings, path
 //!   variables and environment files as the reference reads them.
 //!
 //! Everything here is blocking: callers run it off the UI thread.
 
 pub mod env_file;
+pub mod form;
 pub mod idea;
 pub mod import;
 pub mod list;
@@ -34,6 +37,7 @@ pub mod shell;
 pub mod store;
 pub mod xml;
 
+pub use form::{Field, FieldKind, OptionItem, TypeEditor};
 pub use idea::{IdeaConfiguration, Importer};
 pub use import::{Opened, Report};
 pub use list::{RECENT_COUNT, RunConfigurations, TEMPORARY_LIMIT};

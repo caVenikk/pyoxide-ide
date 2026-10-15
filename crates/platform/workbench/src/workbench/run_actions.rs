@@ -19,7 +19,8 @@ use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use super::{ToolWindow, Workbench};
 use crate::dialog::{Dialog, DialogButton, DialogEvent};
 use crate::run::commands::*;
-use crate::run::dropdown::{self, Row};
+use crate::run::dropdown;
+use crate::run::edit_dialog::{EditDialog, EditDialogEvent};
 use crate::run::widget::{SelectedConfig, WidgetState};
 use crate::run::{LaunchKey, RunConfigs, RunRequest, RunToolWindowEvent};
 
@@ -31,6 +32,11 @@ pub(super) enum PendingDialog {
     CloseRunning(usize),
     /// A dialog about a file changed on disk (`file_sync`).
     FileSync(super::file_sync::SyncDialog),
+    /// "Are you sure you want to delete …?": Yes deletes it.
+    DeleteConfiguration(run_config::ConfigKey),
+    /// "Store as project file" with personal values: keep them personal
+    /// or store them too.
+    StoreValues,
 }
 
 /// What closing a tab with a running process does
@@ -49,6 +55,9 @@ pub(super) struct RunSettings {
     /// (`confirm.rerun.with.termination`).
     pub confirm_rerun: bool,
     pub close_running: CloseRunning,
+    /// Ask before deleting a configuration from a popup
+    /// (`isDeletionFromPopupRequiresConfirmation`).
+    pub confirm_delete: bool,
 }
 
 impl Default for RunSettings {
@@ -56,6 +65,7 @@ impl Default for RunSettings {
         Self {
             confirm_rerun: true,
             close_running: CloseRunning::Ask,
+            confirm_delete: true,
         }
     }
 }
@@ -148,6 +158,11 @@ impl Workbench {
         state["alive"] = json!(self.run_window.read(cx).any_alive());
         state["widget"] = self.run_widget_state(window, cx).state_json();
         state["configurations"] = self.run_configs(cx).read(cx).state_json();
+        state["edit_dialog"] = self
+            .run_window
+            .read(cx)
+            .edit_dialog()
+            .map_or(json!(null), |d| d.read(cx).state_json(cx));
         state["menu"] = self
             .run_menu
             .as_ref()
@@ -298,14 +313,31 @@ impl Workbench {
         self.run_selected(window, cx);
     }
 
-    /// The reference creates a temporary configuration for the context;
-    /// until run configurations exist this runs the current file.
+    /// Run Context Configuration (`RunContextAction`): the file in the
+    /// editor with its context configuration, an existing one that runs it
+    /// or a new temporary one, which becomes the selected one. Without one
+    /// from the product, the file runs as Current File does.
     pub(super) fn run_current_file(
         &mut self,
         _: &RunCurrentFile,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some((file, true)) = self.current_run_file(cx) else {
+            return;
+        };
+        let key = self
+            .run_configs(cx)
+            .update(cx, |c, cx| c.context_configuration(&file, cx));
+        match key {
+            Some(key) => self.run_configuration(&key, window, cx),
+            None => self.run_current(window, cx),
+        }
+    }
+
+    /// The dropdown's Current File: the file in the editor, without a
+    /// configuration.
+    pub(super) fn run_file(&mut self, _: &RunFile, window: &mut Window, cx: &mut Context<Self>) {
         self.run_current(window, cx);
     }
 
@@ -495,75 +527,29 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let configs = self.run_configs(cx);
-        let configs = configs.read(cx);
-        let list = configs.list();
-        let types = configs.types();
-        let item = |key: &run_config::ConfigKey| -> Option<MenuItem> {
-            let c = list.get(key)?;
-            let icon = types
-                .icon_of(c)
-                .map(IconName)
-                .unwrap_or(IconName::FILE_UNKNOWN);
-            let mut description = types.name_of(c).to_owned();
-            if c.is_unsupported() {
-                description.push_str(", not supported yet");
-            }
-            Some(
-                MenuItem::action(
-                    c.name.clone(),
-                    SelectConfiguration {
-                        name: Some(c.name.clone()),
-                        r#type: Some(c.type_id.clone()),
-                    },
-                )
-                .icon(icon)
-                .description(description),
-            )
+        let current = self.current_run_file(cx);
+        let (items, preselect) = {
+            let run = self.run_window.read(cx);
+            let configs = run.configs().read(cx);
+            let list = configs.list();
+            let running =
+                |k: &run_config::ConfigKey| run.running(&LaunchKey::Configuration(k.clone()));
+            let current_file = current.map(|(file, runnable)| {
+                let name = file
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                (name, runnable, run.running_file(&file))
+            });
+            let state = dropdown::MenuState {
+                list,
+                types: configs.types(),
+                expanded: list.all_expanded,
+                running: &running,
+                current_file,
+            };
+            dropdown::menu(&state)
         };
-        let mut items: Vec<MenuItem> = Vec::new();
-        let mut preselect = None;
-        for row in dropdown::rows(list, types, configs.show_all) {
-            match row {
-                Row::Header(text) => items.push(MenuItem::unavailable(text)),
-                Row::Configuration { key, .. } => {
-                    if list.selected.as_ref() == Some(&key) && preselect.is_none() {
-                        preselect = Some(items.len());
-                    }
-                    items.extend(item(&key));
-                }
-                Row::Folder { name, keys } => {
-                    let sub: Vec<MenuItem> = keys.iter().filter_map(&item).collect();
-                    items.push(MenuItem::submenu(name, sub).icon(IconName::FOLDER));
-                }
-                Row::Toggle { count, expanded } => {
-                    let toggle =
-                        MenuItem::action(dropdown::toggle_text(count), ToggleAllConfigurations);
-                    items.push(if expanded {
-                        toggle.icon(IconName::CHECKED)
-                    } else {
-                        toggle
-                    });
-                }
-                Row::Separator => {
-                    if items
-                        .last()
-                        .is_some_and(|i| !matches!(i, MenuItem::Separator))
-                    {
-                        items.push(MenuItem::separator());
-                    }
-                }
-                Row::CurrentFile => {
-                    if list.selected.is_none() {
-                        preselect = Some(items.len());
-                    }
-                    items.push(MenuItem::action("Current File", SelectCurrentFile));
-                }
-                Row::EditConfigurations => {
-                    items.push(MenuItem::unavailable("Edit Configurations\u{2026}"))
-                }
-            }
-        }
         let anchor = self.run_anchors.selector.get();
         let menu = ContextMenu::popup(
             items,
@@ -571,6 +557,8 @@ impl Workbench {
                 title: None,
                 speed_search: true,
                 selected: preselect,
+                min_width: Some(dropdown::MIN_WIDTH),
+                max_width: Some(dropdown::MAX_WIDTH),
             },
             window,
             cx,
@@ -641,11 +629,180 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.run_configs(cx).update(cx, |c, cx| {
-            c.show_all = !c.show_all;
-            cx.notify();
-        });
+        self.run_configs(cx)
+            .update(cx, |c, cx| c.toggle_show_all(cx));
         self.run_choose_configuration(&ChooseConfiguration, window, cx);
+    }
+
+    /// The configuration a command names, or the selected one; a message
+    /// when there is none.
+    fn command_target(
+        &mut self,
+        name: Option<&str>,
+        type_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Option<run_config::ConfigKey> {
+        match self.named_configuration(name, type_id, cx) {
+            Ok(Some(key)) => Some(key),
+            Ok(None) => {
+                self.message = Some("No run configuration is selected".into());
+                cx.notify();
+                None
+            }
+            Err(message) => {
+                self.message = Some(message.into());
+                cx.notify();
+                None
+            }
+        }
+    }
+
+    pub(super) fn run_save_temporary(
+        &mut self,
+        action: &SaveTemporary,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(key) = self.command_target(action.name.as_deref(), action.r#type.as_deref(), cx)
+        {
+            self.run_configs(cx)
+                .update(cx, |c, cx| c.save_temporary(&key, cx));
+        }
+    }
+
+    pub(super) fn run_pin_configuration(
+        &mut self,
+        action: &PinConfiguration,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(key) = self.command_target(action.name.as_deref(), action.r#type.as_deref(), cx)
+        {
+            self.run_configs(cx)
+                .update(cx, |c, cx| c.toggle_pin(&key, cx));
+        }
+    }
+
+    /// Delete asks first, unless "Don't ask again" was chosen
+    /// (`ChooseRunConfigurationManager.deleteConfiguration`).
+    pub(super) fn run_delete_configuration(
+        &mut self,
+        action: &DeleteConfiguration,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.command_target(action.name.as_deref(), action.r#type.as_deref(), cx)
+        else {
+            return;
+        };
+        if !self.run_settings.confirm_delete {
+            self.run_configs(cx).update(cx, |c, cx| c.delete(&key, cx));
+            return;
+        }
+        let name = key.name.clone();
+        let dialog = cx.new(|cx| {
+            Dialog::new(
+                "Confirmation",
+                format!("Are you sure you want to delete {name}?"),
+                vec![
+                    DialogButton {
+                        id: "no",
+                        label: "No".into(),
+                    },
+                    DialogButton {
+                        id: "yes",
+                        label: "Yes".into(),
+                    },
+                ],
+                cx,
+            )
+            .with_icon(IconName::QUESTION_DIALOG)
+            .with_option("Don't ask again")
+        });
+        self.open_dialog(dialog, PendingDialog::DeleteConfiguration(key), window, cx);
+    }
+
+    /// Opens the Run/Debug Configurations dialog.
+    pub(super) fn run_edit_configurations(
+        &mut self,
+        action: &EditConfigurations,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let select =
+            match self.named_configuration(action.name.as_deref(), action.r#type.as_deref(), cx) {
+                Ok(key) => key,
+                Err(message) => {
+                    self.message = Some(message.into());
+                    cx.notify();
+                    return;
+                }
+            };
+        if self.run_window.read(cx).edit_dialog().is_some() {
+            return;
+        }
+        let configs = self.run_configs(cx);
+        let return_focus = window.focused(cx);
+        let dialog = cx.new(|cx| EditDialog::new(configs, select, window, cx));
+        let subscription =
+            cx.subscribe_in(&dialog, window, |this, _, event, window, cx| match event {
+                EditDialogEvent::Closed => this.close_edit_dialog(window, cx),
+                EditDialogEvent::AskStoreValues(names) => this.ask_store_values(names, window, cx),
+            });
+        self.run_window.update(cx, |w, cx| {
+            w.set_edit_dialog(Some((dialog, return_focus, subscription)), cx)
+        });
+        cx.notify();
+    }
+
+    fn close_edit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self
+            .run_window
+            .update(cx, |w, cx| w.set_edit_dialog(None, cx));
+        match focus {
+            Some(focus) => window.focus(&focus),
+            None => window.focus(&self.focus),
+        }
+        cx.notify();
+    }
+
+    /// "Store as project file" for a configuration with personal values:
+    /// the values stay personal unless the person chooses otherwise.
+    fn ask_store_values(&mut self, names: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        let list = names.join(", ");
+        let dialog = cx.new(|cx| {
+            Dialog::new(
+                "Store as Project File",
+                format!(
+                    "These variables have personal values: {list}.\nThe project file lists their names; their values stay on this machine unless they are stored too."
+                ),
+                vec![
+                    DialogButton {
+                        id: "cancel",
+                        label: "Cancel".into(),
+                    },
+                    DialogButton {
+                        id: "store-values",
+                        label: "Store Values Too".into(),
+                    },
+                    DialogButton {
+                        id: "keep-personal",
+                        label: "Keep Values Personal".into(),
+                    },
+                ],
+                cx,
+            )
+            .with_icon(IconName::QUESTION_DIALOG)
+        });
+        self.open_dialog(dialog, PendingDialog::StoreValues, window, cx);
+    }
+
+    /// The open Run/Debug Configurations dialog, drawn over the window.
+    pub(super) fn render_run_dialog(&self, cx: &App) -> Option<AnyElement> {
+        self.run_window
+            .read(cx)
+            .edit_dialog()
+            .map(|d| gpui::IntoElement::into_any_element(d.clone()))
     }
 
     pub(super) fn run_import_reference(
@@ -876,6 +1033,18 @@ impl Workbench {
                     self.run_settings.confirm_rerun = false;
                 }
                 self.rerun_tab(tab, window, cx);
+            }
+            (PendingDialog::DeleteConfiguration(key), Some("yes")) => {
+                if checked {
+                    self.run_settings.confirm_delete = false;
+                }
+                self.run_configs(cx).update(cx, |c, cx| c.delete(&key, cx));
+            }
+            (PendingDialog::StoreValues, Some(choice @ ("store-values" | "keep-personal"))) => {
+                if let Some(dialog) = self.run_window.read(cx).edit_dialog().cloned() {
+                    let share = choice == "store-values";
+                    dialog.update(cx, |d, cx| d.store_as_project_file(share, window, cx));
+                }
             }
             (PendingDialog::CloseRunning(tab), Some(choice @ ("terminate" | "disconnect"))) => {
                 let terminate = choice == "terminate";

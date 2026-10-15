@@ -3,11 +3,13 @@
 //! opens; selection and starts kept in the personal project state, written
 //! in the background one save at a time.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui::{AppContext as _, Context, EventEmitter};
-use run_config::{ConfigKey, Importer, RunConfiguration, RunConfigurations, TypeInfo, Types};
+use run_config::{
+    ConfigKey, Importer, RunConfiguration, RunConfigurations, TypeEditor, TypeInfo, Types,
+};
 use serde_json::{Value, json};
 
 use super::RunHook;
@@ -25,6 +27,12 @@ pub struct RunConfigs {
     list: RunConfigurations,
     types: Types,
     importers: Arc<Vec<Arc<dyn Importer>>>,
+    /// The forms of the types (the Run/Debug Configurations dialog).
+    editors: Vec<Arc<dyn TypeEditor>>,
+    provider: Option<RunHook>,
+    /// Files of shared configurations that were deleted, removed with the
+    /// next save.
+    removed_files: Vec<String>,
     /// The project's configurations are being loaded (and imported).
     loading: bool,
     /// Counts project opens: a late load of a previous project is dropped.
@@ -32,9 +40,6 @@ pub struct RunConfigs {
     /// A write runs, and another one is due after it.
     saving: bool,
     save_again: bool,
-    /// The dropdown shows every configuration below the recent ones
-    /// ("All Configurations").
-    pub show_all: bool,
     /// Files that could not be read.
     errors: Vec<String>,
 }
@@ -48,20 +53,25 @@ impl RunConfigs {
         let mut types = vec![run_config::shell::TYPE];
         let mut importers: Vec<Arc<dyn Importer>> =
             vec![Arc::new(run_config::shell::ShellScriptImporter)];
+        let mut editors: Vec<Arc<dyn TypeEditor>> =
+            vec![Arc::new(run_config::form::ShellScriptEditor)];
         if let Some(provider) = provider {
             types.extend(provider.0.configuration_types());
             importers.extend(provider.0.importers());
+            editors.extend(provider.0.editors());
         }
         Self {
             root: None,
             list: RunConfigurations::default(),
             types: Types::new(types),
             importers: Arc::new(importers),
+            editors,
+            provider: provider.cloned(),
+            removed_files: Vec::new(),
             loading: false,
             generation: 0,
             saving: false,
             save_again: false,
-            show_all: false,
             errors: Vec::new(),
         }
     }
@@ -78,6 +88,146 @@ impl RunConfigs {
         self.types.get(&config.type_id)
     }
 
+    /// The forms of the types.
+    pub fn editors(&self) -> &[Arc<dyn TypeEditor>] {
+        &self.editors
+    }
+
+    /// The form of a type.
+    pub fn editor(&self, type_id: &str) -> Option<Arc<dyn TypeEditor>> {
+        self.editors
+            .iter()
+            .find(|e| e.type_id() == type_id)
+            .cloned()
+    }
+
+    /// The types a new configuration can have, by name.
+    pub fn creatable_types(&self) -> Vec<TypeInfo> {
+        let mut types: Vec<TypeInfo> = self
+            .types
+            .all()
+            .iter()
+            .filter(|t| self.editor(t.id).is_some())
+            .copied()
+            .collect();
+        types.sort_by(|a, b| run_config::natural::compare(a.name, b.name));
+        types
+    }
+
+    /// What the product reads from an unsupported configuration.
+    pub fn unsupported_details(&self, config: &RunConfiguration) -> Vec<(String, String)> {
+        self.provider
+            .as_ref()
+            .map(|p| p.0.unsupported_details(config))
+            .unwrap_or_default()
+    }
+
+    pub fn root(&self) -> Option<&Path> {
+        self.root.as_deref()
+    }
+
+    /// The dropdown shows every configuration ("All Configurations").
+    pub fn show_all(&self) -> bool {
+        self.list.all_expanded
+    }
+
+    pub fn toggle_show_all(&mut self, cx: &mut Context<Self>) {
+        self.list.all_expanded = !self.list.all_expanded;
+        self.save(cx);
+        cx.notify();
+    }
+
+    /// Deletes a configuration (its file too, when it is shared).
+    pub fn delete(&mut self, key: &ConfigKey, cx: &mut Context<Self>) -> bool {
+        let Some(removed) = self.list.remove(key) else {
+            return false;
+        };
+        if removed.is_shared()
+            && let Some(file) = removed.file
+        {
+            self.removed_files.push(file);
+        }
+        self.save(cx);
+        cx.notify();
+        true
+    }
+
+    /// Pins or unpins a configuration in the dropdown.
+    pub fn toggle_pin(&mut self, key: &ConfigKey, cx: &mut Context<Self>) -> bool {
+        if !self.list.contains(key) {
+            return false;
+        }
+        self.list.toggle_pin(key);
+        self.save(cx);
+        cx.notify();
+        true
+    }
+
+    /// Makes a temporary configuration permanent ("Save Configuration").
+    pub fn save_temporary(&mut self, key: &ConfigKey, cx: &mut Context<Self>) -> bool {
+        if !self.list.make_permanent(key) {
+            return false;
+        }
+        self.save(cx);
+        cx.notify();
+        true
+    }
+
+    /// The configuration that runs `file` from its context: an existing
+    /// one that runs the same, else a new temporary one (the oldest
+    /// temporary ones above the limit go). It becomes the selected one
+    /// (`select.run.configuration.from.context`). `None` when the product
+    /// has none for the file.
+    pub fn context_configuration(
+        &mut self,
+        file: &Path,
+        cx: &mut Context<Self>,
+    ) -> Option<ConfigKey> {
+        let root = self.root.clone()?;
+        let provider = self.provider.clone()?;
+        let context = provider.0.context_configuration(file, &root)?;
+        let existing = self
+            .list
+            .all()
+            .iter()
+            .find(|c| provider.0.same_context(c, &context))
+            .map(RunConfiguration::key);
+        let key = match existing {
+            Some(key) => key,
+            None => {
+                let (key, removed) = self.list.add_temporary(context);
+                drop(removed);
+                key
+            }
+        };
+        self.list.select(Some(key.clone()));
+        self.save(cx);
+        cx.notify();
+        Some(key)
+    }
+
+    /// Takes the configurations as the dialog left them: shared files of
+    /// configurations that are gone or no longer shared are removed.
+    pub fn apply_edits(&mut self, list: RunConfigurations, cx: &mut Context<Self>) {
+        let used: Vec<&str> = list
+            .all()
+            .iter()
+            .filter(|c| c.is_shared())
+            .filter_map(|c| c.file.as_deref())
+            .collect();
+        for c in self.list.all() {
+            if c.is_shared()
+                && let Some(file) = &c.file
+                && !used.contains(&file.as_str())
+            {
+                self.removed_files.push(file.clone());
+            }
+        }
+        self.list = list;
+        self.save(cx);
+        cx.notify();
+    }
+
     pub fn is_loading(&self) -> bool {
         self.loading
     }
@@ -90,8 +240,8 @@ impl RunConfigs {
         self.root = Some(root.clone());
         self.list = RunConfigurations::default();
         self.errors.clear();
+        self.removed_files.clear();
         self.loading = true;
-        self.show_all = false;
         let importers = self.importers.clone();
         let types = self.types.clone();
         let task = cx.background_spawn(async move {
@@ -199,7 +349,7 @@ impl RunConfigs {
     }
 
     /// Writes the configurations in the background, one write at a time.
-    fn save(&mut self, cx: &mut Context<Self>) {
+    pub fn save(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             return;
         };
@@ -213,7 +363,18 @@ impl RunConfigs {
         self.saving = true;
         let generation = self.generation;
         let mut list = self.list.clone();
+        let removed = std::mem::take(&mut self.removed_files);
         let task = cx.background_spawn(async move {
+            // A file that a shared configuration took again is kept.
+            for file in removed {
+                let taken = list
+                    .all()
+                    .iter()
+                    .any(|c| c.is_shared() && c.file.as_deref() == Some(file.as_str()));
+                if !taken {
+                    let _ = run_config::store::delete_shared(&root, &file);
+                }
+            }
             let result = run_config::store::save(&root, &mut list);
             (result, list)
         });
@@ -273,7 +434,9 @@ impl RunConfigs {
                 .collect::<Vec<_>>(),
             "order": list.order.iter().map(key_json).collect::<Vec<_>>(),
             "history": list.history.iter().map(key_json).collect::<Vec<_>>(),
-            "show_all": self.show_all,
+            "show_all": list.all_expanded,
+            "pinned": list.pinned.iter().map(key_json).collect::<Vec<_>>(),
+            "recent_temporary": list.recent_temporary.iter().map(key_json).collect::<Vec<_>>(),
             "errors": self.errors,
         })
     }
