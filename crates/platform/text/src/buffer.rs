@@ -347,6 +347,31 @@ impl Buffer {
         applied
     }
 
+    /// Applies a step outside a transaction (the caller records it).
+    pub(crate) fn apply_step(&mut self, step: &[Replacement]) -> Vec<AppliedEdit> {
+        self.apply_forward(step)
+    }
+
+    /// Records an applied step as its own undo step.
+    pub(crate) fn record_step(
+        &mut self,
+        step: Vec<Replacement>,
+        kind: EditKind,
+        before: &SelectionSet,
+        after: &SelectionSet,
+        now: Instant,
+    ) {
+        self.history.seal();
+        self.history.record(step, kind, before, after, now);
+        self.history.seal();
+    }
+
+    /// The file's line separator and encoding (after a reload).
+    pub(crate) fn set_format(&mut self, line_ending: LineEnding, encoding: Encoding) {
+        self.line_ending = line_ending;
+        self.encoding = encoding;
+    }
+
     /// Applies a step (replacements in pre-step coordinates).
     fn apply_forward(&mut self, step: &[Replacement]) -> Vec<AppliedEdit> {
         step.iter()
