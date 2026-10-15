@@ -112,7 +112,7 @@ Wave 1 (parallel sub-agents in worktrees, merged in this order):
 | #103 Navigation history (Back / Forward) | sub-agent nav | `workbench` (`navigation.rs`, history hooks), `editor` (jump event), `code-intel-ui` | done (PR #113) |
 | #36 Reload files changed on disk | sub-agent sync | new `crates/platform/file-watcher`, `project` (stamps, changes), `text` (reload), `workbench` (file sync, conflict dialog) | done (PR #115) |
 | #74 Run configurations | sub-agent run-config | see M2 table | done (PR #117) |
-| #37 Project tree file operations | sub-agent tree | `project` (`fs_ops`, trash), `workbench` (project panel), `pyoxide-ide` (Python new items) | PR #116 |
+| #37 Project tree file operations | sub-agent tree | `project` (`fs_ops`, trash), `workbench` (project panel), `pyoxide-ide` (Python new items) | done (PR #116) |
 
 Wave 2 (on command): recon (`/replica-recon`) for terminal (#89),
 debugger (#90), git (#91, #28), settings window (#92, #40) and configured
