@@ -16,11 +16,20 @@
 //!     "docs/build",
 //! ]
 //! patterns = ["*.egg-info"]
+//!
+//! [roots]
+//! sources = [
+//!     ".",
+//!     "services/api",
+//! ]
+//! tests = ["tests"]
 //! ```
 //!
 //! Paths are relative to the project root with `/` separators on every OS;
 //! patterns are file name masks matched below the root (see
-//! [`NameMasks`](crate::NameMasks)).
+//! [`NameMasks`](crate::NameMasks)). `[roots]` lists the folders marked
+//! as roots by kind, `.` for the project root ([`Roots`], ADR 0013); once
+//! the table is there it is the only source of the project's roots.
 //!
 //! Other settings are values by table and key ([`load_table`],
 //! [`load_value`], [`save_values`]); tables are dotted paths, so a product
@@ -36,6 +45,7 @@ use std::sync::{Condvar, LazyLock, Mutex, PoisonError};
 use toml_edit::{Array, DocumentMut, Item, Table, TableLike, Value};
 
 use crate::idea;
+use crate::roots::{DetectRoots, Roots, detected_roots};
 
 /// Name of Pyoxide's project folder in the project root.
 pub const STORE_DIR: &str = ".oxide";
@@ -105,6 +115,15 @@ pub fn relative_to(root: &Path, path: &Path) -> Option<String> {
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect();
     (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// `path` relative to `root` in the stored form of a root: `.` for the
+/// root itself.
+pub fn relative_or_root(root: &Path, path: &Path) -> Option<String> {
+    if lexical(root) == lexical(path) {
+        return Some(crate::roots::PROJECT_ROOT.to_owned());
+    }
+    relative_to(root, path)
 }
 
 /// `path` with `.` and `..` resolved lexically.
@@ -292,6 +311,117 @@ fn save_locked(root: &Path, exclusions: &Exclusions) -> Result<bool, StoreError>
             patterns.push(p.as_str());
         }
         table.insert("patterns", Item::Value(Value::Array(patterns)));
+    }
+    write_atomic(&path, &doc.to_string()).map_err(|source| StoreError::Io { path, source })?;
+    Ok(true)
+}
+
+// ---- roots ------------------------------------------------------------------
+
+/// The roots of the project settings (`[roots]`); `None` when the file or
+/// the table does not exist (the project has not stored its roots yet).
+pub fn load_roots(root: &Path) -> Result<Option<Roots>, StoreError> {
+    let path = settings_file(root);
+    let Some(doc) = read_document(&path)? else {
+        return Ok(None);
+    };
+    let Some(table) = doc.get("roots") else {
+        return Ok(None);
+    };
+    let table = table
+        .as_table_like()
+        .ok_or_else(|| not_a_table(&path, "roots"))?;
+    let mut out = Roots::default();
+    for (kind, item) in table.iter() {
+        let Some(paths) = item.as_array() else {
+            continue;
+        };
+        for p in paths.iter().filter_map(Value::as_str) {
+            out.mark(p, kind);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// The roots in effect: the project settings once they have `[roots]`;
+/// before that the reference IDE's source folders (`.idea`) and the
+/// roots `detect` finds (blocking).
+pub fn load_or_detect_roots(root: &Path, detect: Option<DetectRoots>) -> Result<Roots, StoreError> {
+    if let Some(stored) = load_roots(root)? {
+        return Ok(stored);
+    }
+    let mut roots = idea::read_source_folders(root).unwrap_or_default();
+    roots.add_missing(&detected_roots(root, detect));
+    Ok(roots)
+}
+
+/// Copies the reference IDE's source folders into the project settings,
+/// once: only while the settings have no `[roots]` and `.idea` names
+/// source folders; the roots `detect` finds are stored with them. Returns
+/// the roots when they were written.
+pub fn import_idea_roots(
+    root: &Path,
+    detect: Option<DetectRoots>,
+) -> Result<Option<Roots>, StoreError> {
+    let _lock = lock_root(root);
+    if load_roots(root)?.is_some() {
+        return Ok(None);
+    }
+    match idea::read_source_folders(root) {
+        Some(mut roots) if !roots.is_empty() => {
+            roots.add_missing(&detected_roots(root, detect));
+            save_roots_locked(root, &roots)?;
+            Ok(Some(roots))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Writes the roots into the project settings (`[roots]`, one array of
+/// paths per kind), keeping everything else in the file. The table is
+/// written also when it is empty: from then on it holds the project's
+/// roots.
+pub fn save_roots(root: &Path, roots: &Roots) -> Result<bool, StoreError> {
+    let _lock = lock_root(root);
+    save_roots_locked(root, roots)
+}
+
+fn save_roots_locked(root: &Path, roots: &Roots) -> Result<bool, StoreError> {
+    let path = settings_file(root);
+    let mut doc = match read_document(&path)? {
+        Some(doc) => doc,
+        None => format!("{HEADER}version = {SETTINGS_VERSION}\n")
+            .parse()
+            .expect("the header is valid TOML"),
+    };
+    let stored = version(&doc);
+    if stored > SETTINGS_VERSION {
+        return Err(StoreError::Newer {
+            path,
+            version: stored,
+        });
+    }
+    if doc.get("version").and_then(Item::as_integer) != Some(SETTINGS_VERSION) {
+        doc["version"] = toml_edit::value(SETTINGS_VERSION);
+    }
+    if doc.get("roots").is_none() {
+        doc["roots"] = Item::Table(Table::new());
+    }
+    let table = doc["roots"]
+        .as_table_like_mut()
+        .ok_or_else(|| not_a_table(&path, "roots"))?;
+    // Kinds without roots go; keys that are no list of paths stay.
+    let gone: Vec<String> = table
+        .iter()
+        .filter(|(kind, item)| item.is_array() && roots.paths(kind).next().is_none())
+        .map(|(kind, _)| kind.to_owned())
+        .collect();
+    for kind in gone {
+        table.remove(&kind);
+    }
+    for kind in roots.kinds() {
+        let paths: Vec<String> = roots.paths(kind).map(str::to_owned).collect();
+        table.insert(kind, Item::Value(Value::Array(lines(&paths))));
     }
     write_atomic(&path, &doc.to_string()).map_err(|source| StoreError::Io { path, source })?;
     Ok(true)
@@ -758,6 +888,99 @@ mod tests {
         let mut want = ex(&["a", "b/c"]);
         want.add_pattern("*.tmp");
         assert_eq!(load(root).unwrap(), Some(want));
+    }
+
+    fn marked(items: &[(&str, &str)]) -> Roots {
+        let mut r = Roots::default();
+        for (kind, path) in items {
+            r.mark(path, kind);
+        }
+        r
+    }
+
+    #[test]
+    fn roots_round_trip_beside_the_exclusions() {
+        use crate::roots::{SOURCES, TESTS};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(load_roots(root).unwrap(), None);
+        save(root, &ex(&["venv"])).unwrap();
+        // A store without `[roots]` has stored none yet.
+        assert_eq!(load_roots(root).unwrap(), None);
+        let roots = marked(&[(SOURCES, "."), (SOURCES, "svc/api"), (TESTS, "tests")]);
+        assert!(save_roots(root, &roots).unwrap());
+        assert_eq!(load_roots(root).unwrap(), Some(roots.clone()));
+        assert_eq!(load(root).unwrap(), Some(ex(&["venv"])));
+        let text = std::fs::read_to_string(settings_file(root)).unwrap();
+        assert!(
+            text.ends_with(
+                "[roots]\nsources = [\n    \".\",\n    \"svc/api\",\n]\ntests = [\n    \"tests\",\n]\n"
+            ),
+            "{text}"
+        );
+        // Unmarking everything keeps an empty table: the project's roots
+        // are none (detected ones no longer apply).
+        assert!(save_roots(root, &Roots::default()).unwrap());
+        assert_eq!(load_roots(root).unwrap(), Some(Roots::default()));
+        let text = std::fs::read_to_string(settings_file(root)).unwrap();
+        assert!(text.ends_with("[roots]\n"), "{text}");
+
+        // Keys that are no list of paths survive; a broken table is an
+        // error.
+        std::fs::write(
+            settings_file(root),
+            "version = 1\n[roots]\nnote = 3\nsources = [\"src\"]\n",
+        )
+        .unwrap();
+        save_roots(root, &marked(&[(TESTS, "t")])).unwrap();
+        let text = std::fs::read_to_string(settings_file(root)).unwrap();
+        assert!(text.contains("note = 3"), "{text}");
+        assert!(!text.contains("sources"), "{text}");
+        std::fs::write(settings_file(root), "roots = 3\n").unwrap();
+        assert!(matches!(load_roots(root), Err(StoreError::Invalid { .. })));
+        assert!(save_roots(root, &Roots::default()).is_err());
+    }
+
+    #[test]
+    fn roots_are_imported_once_with_the_detected_ones() {
+        use crate::roots::{SOURCES, TESTS};
+        fn detect(root: &Path) -> Vec<PathBuf> {
+            vec![root.join("src")]
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Nothing stored, no `.idea`: the detected roots, nothing written.
+        assert_eq!(
+            load_or_detect_roots(root, Some(detect)).unwrap(),
+            marked(&[(SOURCES, "src")])
+        );
+        assert_eq!(import_idea_roots(root, Some(detect)).unwrap(), None);
+        assert!(!root.join(STORE_DIR).exists());
+
+        std::fs::create_dir_all(root.join(".idea")).unwrap();
+        std::fs::write(
+            root.join(".idea/demo.iml"),
+            r#"<module type="PYTHON_MODULE" version="4"><component name="NewModuleRootManager">
+  <content url="file://$MODULE_DIR$">
+    <sourceFolder url="file://$MODULE_DIR$" isTestSource="false" />
+    <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
+    <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="true" />
+  </content>
+</component></module>"#,
+        )
+        .unwrap();
+        // The reference's kind wins for a folder both name.
+        let want = marked(&[(SOURCES, "."), (TESTS, "tests"), (TESTS, "src")]);
+        assert_eq!(load_or_detect_roots(root, Some(detect)).unwrap(), want);
+        assert_eq!(
+            import_idea_roots(root, Some(detect)).unwrap(),
+            Some(want.clone())
+        );
+        assert_eq!(load_roots(root).unwrap(), Some(want.clone()));
+        // Once: later changes in `.idea` are not read.
+        std::fs::remove_file(root.join(".idea/demo.iml")).unwrap();
+        assert_eq!(import_idea_roots(root, Some(detect)).unwrap(), None);
+        assert_eq!(load_or_detect_roots(root, None).unwrap(), want);
     }
 
     /// Writers on other threads (the exclusions import of the project

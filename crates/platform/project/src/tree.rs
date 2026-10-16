@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 use crate::filter::Filter;
+use crate::roots::FolderKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -23,6 +24,9 @@ pub struct Entry {
     pub symlink: bool,
     /// Shown, but marked as excluded and not expanded on its own.
     pub excluded: bool,
+    /// What the product sees in a folder (a package, a module); plain for
+    /// a file.
+    pub folder: FolderKind,
 }
 
 impl Entry {
@@ -61,6 +65,11 @@ pub fn list_dir(dir: &Path, filter: &Filter) -> std::io::Result<Vec<Entry>> {
             file_type.is_dir()
         };
         let excluded = filter.is_excluded(&path, is_dir);
+        let folder = if is_dir {
+            filter.folder_kind(&path)
+        } else {
+            FolderKind::Plain
+        };
         out.push(Entry {
             name,
             path,
@@ -71,6 +80,7 @@ pub fn list_dir(dir: &Path, filter: &Filter) -> std::io::Result<Vec<Entry>> {
             },
             symlink,
             excluded,
+            folder,
         });
     }
     out.sort_by(order);
@@ -114,6 +124,7 @@ impl FileTree {
                     kind: EntryKind::Dir,
                     symlink: false,
                     excluded: false,
+                    folder: FolderKind::Plain,
                 },
                 depth: 0,
                 parent: None,
@@ -244,6 +255,14 @@ impl FileTree {
     pub fn refresh_excluded(&mut self, filter: &Filter) {
         for n in self.nodes.iter_mut().skip(1) {
             n.entry.excluded = filter.is_excluded(&n.entry.path, n.entry.is_dir());
+        }
+    }
+
+    /// What the product sees in folder `id` changed (a marker file was
+    /// created or deleted, or the root's kind was read).
+    pub fn set_folder_kind(&mut self, id: NodeId, kind: FolderKind) {
+        if self.nodes[id].entry.is_dir() {
+            self.nodes[id].entry.folder = kind;
         }
     }
 
@@ -539,7 +558,46 @@ mod tests {
             kind,
             symlink: false,
             excluded: false,
+            folder: FolderKind::Plain,
         }
+    }
+
+    #[test]
+    fn folders_get_the_product_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for d in ["pkg", "svc", "plain"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("pkg/__init__.py"), "").unwrap();
+        std::fs::write(root.join("svc/pyproject.toml"), "").unwrap();
+        std::fs::write(root.join("__init__.py"), "").unwrap();
+        let rules = crate::FolderRules {
+            package_markers: &["__init__.py"],
+            module_markers: &["pyproject.toml"],
+        };
+        let filter = Filter::new(root, Exclusions::default(), PY).with_folder_rules(rules);
+        let entries = list_dir(root, &filter).unwrap();
+        let kinds: Vec<(&str, FolderKind)> = entries
+            .iter()
+            .map(|e| (e.name.as_str(), e.folder))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("pkg", FolderKind::Package),
+                ("plain", FolderKind::Plain),
+                ("svc", FolderKind::Module),
+                ("__init__.py", FolderKind::Plain),
+            ]
+        );
+        // Without the product's rules every folder is plain.
+        let plain = Filter::new(root, Exclusions::default(), PY);
+        let entries = list_dir(root, &plain).unwrap();
+        assert!(entries.iter().all(|e| e.folder == FolderKind::Plain));
+        let mut tree = FileTree::new(root);
+        tree.set_folder_kind(FileTree::ROOT, FolderKind::Package);
+        assert_eq!(tree.node(FileTree::ROOT).entry.folder, FolderKind::Package);
     }
 
     #[test]

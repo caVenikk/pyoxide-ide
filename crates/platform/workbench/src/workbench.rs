@@ -254,18 +254,14 @@ impl Workbench {
         let panel = cx.new(|cx| {
             let mut panel = ProjectPanel::new(file_types.clone(), cx);
             panel.set_new_items(product.new_items.clone());
+            panel.set_product_rules(&product);
             panel
         });
         let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
         let host = cx.entity().downgrade();
         find_in_files.update(cx, |p, _| p.set_host(host));
         let search_everywhere = cx.new(|cx| SearchEverywhere::new(file_types.clone(), window, cx));
-        let find_roots = product.navigation.source_roots;
-        let project_files = cx.new(|_| {
-            let mut files = ProjectFiles::new();
-            files.set_source_roots_finder(find_roots);
-            files
-        });
+        let project_files = cx.new(|_| ProjectFiles::new());
         let recent_place = search_everywhere::settings(cx).recent_files;
         let recent_files =
             cx.new(|cx| RecentFiles::new(file_types.clone(), recent_place, window, cx));

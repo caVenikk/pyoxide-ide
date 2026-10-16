@@ -40,8 +40,10 @@ Platform (`crates/platform/`, language-agnostic):
   theme text roles; grammars and queries come from the products.
 - `project`: an opened folder, its lazily listed file tree with hidden and
   excluded entries, Pyoxide's project folder (`.oxide/`) with the shared
-  project settings (exclusions, and values by dotted table for products)
-  and the one-time import of the reference IDE's exclusions (ADR 0008),
+  project settings (exclusions, source roots, and values by dotted table
+  for products) and the one-time import of the reference IDE's exclusions
+  and source folders (ADR 0008, 0013), the folders a product sees as
+  packages or modules,
   the personal project state (ADR 0009), reading and writing documents
   with the stamps (size, modification time) that tell external changes
   from the application's own writes, what paths reported by the file

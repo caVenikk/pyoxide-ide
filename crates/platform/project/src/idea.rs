@@ -25,6 +25,10 @@
 //! </component>
 //! ```
 //!
+//! Source folders are read the same way for the one-time import of the
+//! project's roots ([`read_source_folders`], ADR 0013):
+//! `<sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />`.
+//!
 //! `$PROJECT_DIR$` is the folder that contains `.idea`; `$MODULE_DIR$` is the
 //! folder of the module file, or the project folder when the module file is
 //! inside `.idea`. Without `modules.xml` the module files directly in `.idea`
@@ -42,7 +46,8 @@ use std::path::{Path, PathBuf};
 
 use quick_xml::events::{BytesStart, Event};
 
-use crate::store::{Exclusions, lexical, relative_to};
+use crate::roots::{Roots, SOURCES, TESTS};
+use crate::store::{Exclusions, lexical, relative_or_root, relative_to};
 
 /// Name of the reference IDE's project folder.
 pub const IDEA_DIR: &str = ".idea";
@@ -77,6 +82,42 @@ pub fn read_exclusions(root: &Path) -> Option<Exclusions> {
                 for pattern in content.exclude_patterns {
                     out.add_pattern(&pattern);
                 }
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The source folders of the reference IDE's project in `root` as roots:
+/// `sourceFolder` entries of the module files inside the project, code
+/// ([`SOURCES`]) or test code ([`TESTS`], `isTestSource="true"`); typed
+/// roots (resources and the like) are left out. `None` when there is no
+/// `.idea` folder (ADR 0013).
+pub fn read_source_folders(root: &Path) -> Option<Roots> {
+    let idea = root.join(IDEA_DIR);
+    if !idea.is_dir() {
+        return None;
+    }
+    let mut out = Roots::default();
+    for module in module_files(root, &idea) {
+        let Ok(text) = std::fs::read_to_string(&module) else {
+            continue;
+        };
+        let module_dir = module_dir(&module);
+        let Ok(module) = parse_module(&text) else {
+            continue;
+        };
+        for folder in module.contents.iter().flat_map(|c| &c.source_folders) {
+            if folder.root_type.is_some() {
+                continue;
+            }
+            let Some(rel) = url_to_path(&folder.url, root, &module_dir)
+                .and_then(|p| relative_or_root(root, &p))
+            else {
+                continue;
+            };
+            if out.kind_of(&rel).is_none() {
+                out.mark(&rel, if folder.test { TESTS } else { SOURCES });
             }
         }
     }
@@ -256,6 +297,18 @@ struct Content {
     url: String,
     exclude_folders: Vec<String>,
     exclude_patterns: Vec<String>,
+    source_folders: Vec<SourceFolder>,
+}
+
+/// A `sourceFolder` of a content root.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SourceFolder {
+    url: String,
+    /// `isTestSource="true"`.
+    test: bool,
+    /// The `type` of a root that is no code or test code root
+    /// (`java-resource`, ...); `None` for those.
+    root_type: Option<String>,
 }
 
 fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
@@ -359,6 +412,15 @@ fn parse_module(text: &str) -> Result<Module, quick_xml::Error> {
             "excludeFolder" if path.names.len() == 3 && path.names[2] == "content" => {
                 if let (Some(content), Some(url)) = (out.contents.last_mut(), attr(e, "url")) {
                     content.exclude_folders.push(url);
+                }
+            }
+            "sourceFolder" if path.names.len() == 3 && path.names[2] == "content" => {
+                if let (Some(content), Some(url)) = (out.contents.last_mut(), attr(e, "url")) {
+                    content.source_folders.push(SourceFolder {
+                        url,
+                        test: attr(e, "isTestSource").as_deref() == Some("true"),
+                        root_type: attr(e, "type").filter(|t| !t.is_empty()),
+                    });
                 }
             }
             "excludePattern" if path.names.len() == 3 && path.names[2] == "content" => {
@@ -474,6 +536,52 @@ mod tests {
         assert_eq!(paths(&e), ["backend/venv", "build", "web/node_modules"]);
         // Patterns of a content root below the project folder are not taken.
         assert!(e.patterns.is_empty());
+    }
+
+    #[test]
+    fn reads_source_folders_as_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(read_source_folders(root), None);
+        write(root, ".idea/modules.xml", MODULES);
+        write(root, ".idea/demo.iml", IML);
+        let roots = read_source_folders(root).unwrap();
+        assert_eq!(roots.iter().collect::<Vec<_>>(), [(SOURCES, "src")]);
+        // The project root, test code, typed roots, folders outside the
+        // project and a second module file outside `.idea`.
+        write(
+            root,
+            ".idea/demo.iml",
+            r#"<module version="4"><component name="NewModuleRootManager">
+  <content url="file://$MODULE_DIR$">
+    <sourceFolder url="file://$MODULE_DIR$" isTestSource="false" />
+    <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
+    <sourceFolder url="file://$MODULE_DIR$/res" type="java-resource" />
+    <sourceFolder url="file://$MODULE_DIR$/../outside" isTestSource="false" />
+    <sourceFolder url="file://$UNKNOWN$/x" isTestSource="false" />
+  </content>
+</component></module>"#,
+        );
+        write(
+            root,
+            ".idea/modules.xml",
+            r#"<project version="4"><component name="ProjectModuleManager"><modules>
+  <module fileurl="file://$PROJECT_DIR$/.idea/demo.iml" filepath="$PROJECT_DIR$/.idea/demo.iml" />
+  <module fileurl="file://$PROJECT_DIR$/svc/svc.iml" filepath="$PROJECT_DIR$/svc/svc.iml" />
+</modules></component></project>"#,
+        );
+        write(
+            root,
+            "svc/svc.iml",
+            r#"<module version="4"><component name="NewModuleRootManager">
+  <content url="file://$MODULE_DIR$"><sourceFolder url="file://$MODULE_DIR$" isTestSource="false" /></content>
+</component></module>"#,
+        );
+        let roots = read_source_folders(root).unwrap();
+        assert_eq!(
+            roots.iter().collect::<Vec<_>>(),
+            [(SOURCES, "."), (SOURCES, "svc"), (TESTS, "tests")]
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! `pyoxide-ide`: the Pyoxide Python IDE. Composes the platform workbench
 //! with what is specific to Python (file type icons, tool windows, the
-//! interpreter widget, running files, the language services and the type
-//! engine widget).
+//! interpreter widget, running files, the language services, the type
+//! engine widget, packages and source roots in the project tree).
 
 pub mod interpreter;
 mod new_items;
@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use editor::{SyntaxHighlighter, WrapCondition, WrapRule};
 use ui::icons::{IconName, IconSvg};
-use workbench::{AutoExclusions, FileType, NavigationHooks, Product, RunHook, StripeItem};
+use workbench::{
+    AutoExclusions, FileType, NavigationHooks, Product, RootKind, RunHook, StripeItem, TreeHooks,
+};
 
 /// Icons of the Python product (IntelliJ Platform Community, Apache-2.0,
 /// see NOTICE).
@@ -38,7 +40,43 @@ const ICONS: &[IconSvg] = &[
             "../assets/icons/pythonConsoleToolWindow@20x20_dark.svg"
         )),
     },
+    IconSvg {
+        name: "python/pyProjectModule",
+        light: include_bytes!("../assets/icons/pyProjectModule.svg"),
+        dark: Some(include_bytes!("../assets/icons/pyProjectModule_dark.svg")),
+    },
 ];
+
+/// Packages, modules and source roots in the project tree (ADR 0013), as
+/// the reference IDE's Python plugin shows them: a folder with
+/// `__init__.py` is a package (`PyDirectoryIconProvider`), a folder with
+/// `pyproject.toml` a module of its own with the Python badge on its
+/// folder (the pyproject.toml project model PyCharm turns on); *Mark
+/// Directory As* offers Sources Root before Excluded and Test Sources Root
+/// after it (`PyCharm.MarkRootGroup`), and only a sources root can be
+/// marked inside a source root (`PythonModuleTypeBase`).
+fn tree() -> TreeHooks {
+    TreeHooks {
+        root_kinds: vec![
+            RootKind {
+                id: project::roots::SOURCES,
+                name: "Sources Root",
+                icon: IconName::SOURCE_ROOT,
+                inner: true,
+                after_excluded: false,
+            },
+            RootKind {
+                id: project::roots::TESTS,
+                name: "Test Sources Root",
+                icon: IconName::TEST_ROOT,
+                inner: false,
+                after_excluded: true,
+            },
+        ],
+        module_markers: &["pyproject.toml"],
+        module_icon: Some(IconName("python/pyProjectModule")),
+    }
+}
 
 /// Python source files.
 fn python() -> FileType {
@@ -185,6 +223,7 @@ pub fn product() -> Product {
             services::PythonCodeIntel::new(),
         )),
         new_items: new_items::new_items(),
+        tree: tree(),
     }
 }
 
@@ -241,6 +280,30 @@ mod tests {
             );
         }
         assert_eq!(product().left_stripe_bottom.len(), 2);
+    }
+
+    /// The reference's kinds of roots for a Python project, in the order
+    /// of Mark Directory As: Sources Root before Excluded (and nested in
+    /// a source root), Test Sources Root after it (not nested).
+    #[test]
+    fn python_roots_and_folder_markers() {
+        let tree = product().tree;
+        let kinds: Vec<_> = tree
+            .root_kinds
+            .iter()
+            .map(|k| (k.id, k.name, k.inner, k.after_excluded))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (project::roots::SOURCES, "Sources Root", true, false),
+                (project::roots::TESTS, "Test Sources Root", false, true),
+            ]
+        );
+        assert_eq!(tree.module_markers, ["pyproject.toml"]);
+        assert_eq!(product().navigation.package_markers, ["__init__.py"]);
+        let module = tree.module_icon.unwrap();
+        assert!(ICONS.iter().any(|i| i.name == module.0));
     }
 
     /// Python files are highlighted off the UI thread, and highlighting

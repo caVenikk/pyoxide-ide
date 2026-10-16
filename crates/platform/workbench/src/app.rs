@@ -30,8 +30,9 @@ pub struct StripeItem {
 /// What the product's language adds to Go to File and Search Everywhere.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NavigationHooks {
-    /// The source roots of a project, found when it opens (run in the
-    /// background): folders below the project folder that hold the code.
+    /// The source roots the product marks on its own in a project that
+    /// has not stored its roots yet (ADR 0013; run in the background):
+    /// folders below the project folder that hold the code.
     pub source_roots: Option<fn(&std::path::Path) -> Vec<std::path::PathBuf>>,
     /// The location shown after a file's name, from the file name and its
     /// folder relative to its source root (or the project folder), with
@@ -101,6 +102,9 @@ pub struct Product {
     /// The product's rows of *New* in the project tool window, after
     /// *Directory* (Python File, Python Package).
     pub new_items: Vec<project_panel::NewItem>,
+    /// Packages, modules and the kinds of roots of *Mark Directory As* in
+    /// the project tool window (ADR 0013).
+    pub tree: project_panel::TreeHooks,
 }
 
 /// Default size of the main window's content.
@@ -121,6 +125,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::command::register(cx, project_panel::COMMANDS);
     ui::command::register(cx, project_panel::FILE_COMMANDS);
     ui::command::register(cx, project_panel::NEW_ITEM_COMMANDS);
+    ui::command::register(cx, project_panel::ROOT_COMMANDS);
     ui::command::register(cx, project_panel::TRANSFER_COMMANDS);
     ui::command::register(cx, project_panel::name_popup::COMMANDS);
     ui::command::register(cx, ui::menu::COMMANDS);
