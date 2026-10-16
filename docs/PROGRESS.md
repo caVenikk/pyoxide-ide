@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 33%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
-| vcs | 0% `░░░░░░░░░░` | 0 | 0 | 25 |
+| vcs | 5% `█░░░░░░░░░` | 1 | 0 | 24 |
 | settings | 19% `██░░░░░░░░` | 2 | 2 | 14 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -187,7 +187,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Git repository detection and git executable lookup | must | Community; the git executable for every operation, ADR 0016 (#91) |
+| ✅ | Git repository detection and git executable lookup | must | Community; the git executable for every operation, ADR 0016 (#91) |
 | ⬜ | File status colours in the project tree, editor tabs and file lists (ignored included) | must | Community (#91) |
 | ⬜ | Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change) | must | Community (#91) |
 | ⬜ | Commit tool window (changes tree with check boxes, message, Commit, legend, errors) | must | Community; Cmd+K / Ctrl+K, non-modal commit (#91) |

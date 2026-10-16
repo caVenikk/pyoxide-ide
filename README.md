@@ -34,7 +34,7 @@ the same engine.
 ## Progress
 
 <!-- progress:start -->
-**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 33%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ the same engine.
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
-| vcs | 0% `░░░░░░░░░░` | 0 | 0 | 25 |
+| vcs | 5% `█░░░░░░░░░` | 1 | 0 | 24 |
 | settings | 19% `██░░░░░░░░` | 2 | 2 | 14 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
