@@ -14,10 +14,15 @@
 //!   branches (`for-each-ref`), base texts (`cat-file --filters`, cached by
 //!   blob).
 //! - [`StatusService`]: statuses kept current from file watcher batches.
+//! - [`branches`]: checkout (Smart and Force too), new branch, rename,
+//!   delete and restore, recent checkouts, `git init`.
 //! - [`idea`]: the reference IDE's `.idea/vcs.xml` mapping.
-//! - [`commands::register`]: `git.status`, `git.branches`, `git.state`.
+//! - [`commands::register`]: `git.status`, `git.branches`, `git.state`,
+//!   `git.checkout`, `git.new-branch`, `git.rename-branch`,
+//!   `git.delete-branch`, `git.init`.
 
 mod backend;
+pub mod branches;
 pub mod commands;
 mod exe;
 pub mod idea;
@@ -31,6 +36,7 @@ use std::path::Path;
 use serde_json::{Value as Json, json};
 
 pub use backend::{GitRepo, MAX_PATHSPECS};
+pub use branches::{CheckedOut, Checkout, CheckoutError, CheckoutMode};
 pub use exe::{GitExe, LookupError, Version};
 pub use repo::{Config, Repository, watched_in_git_dir};
 pub use runner::{Access, Output, Runner, error_text};

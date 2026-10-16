@@ -11,11 +11,14 @@
 //!   they are computed again.
 //! - [`Head`], [`RepoState`], [`RepoInfo`] and [`Branch`]: where the
 //!   repository is and what it has.
+//! - [`branch_name`]: names of new branches checked and cleaned as the
+//!   reference's New Branch dialog does.
 //! - [`Backend`]: what a version control backend (`git`) offers; UI crates
 //!   depend on this trait, never on the backend.
 
 mod backend;
 mod branch;
+pub mod branch_name;
 mod ranges;
 mod status;
 

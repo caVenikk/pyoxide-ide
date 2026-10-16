@@ -71,6 +71,25 @@ impl IconName {
     /// UI's `AllIcons.Actions.Rollback` and `Diff`).
     pub const ROLLBACK: Self = Self("vcs/revert");
     pub const DIFF: Self = Self("vcs/diff");
+    /// The VCS widget and the branches of its popup (the New UI's
+    /// `AllIcons.General.Vcs`, `Vcs.BranchNode`), a tag
+    /// (`DvcsImplIcons.BranchLabel`), the current branch with and without
+    /// the favourite star, a favourite (`AllIcons.Nodes.Favorite`).
+    pub const VCS: Self = Self("general/vcs");
+    pub const BRANCH_LABEL: Self = Self("vcs/branchLabel");
+    pub const CURRENT_BRANCH: Self = Self("vcs/currentBranchLabel");
+    pub const CURRENT_BRANCH_FAVORITE: Self = Self("vcs/currentBranchFavoriteLabel");
+    pub const FAVORITE: Self = Self("nodes/star");
+    /// Incoming and outgoing commits (`DvcsImplIcons.Incoming`,
+    /// `Outgoing`, 12 px).
+    pub const INCOMING: Self = Self("vcs/changesUpdate@12x12");
+    pub const OUTGOING: Self = Self("vcs/changesPush@12x12");
+    /// Fetch, Update Project, Commit and Push (`AllIcons.Vcs.Fetch`,
+    /// `Actions.CheckOut`, `Actions.Commit`, `Vcs.Push`).
+    pub const FETCH: Self = Self("vcs/fetch");
+    pub const VCS_UPDATE: Self = Self("vcs/update");
+    pub const COMMIT: Self = Self("vcs/commit");
+    pub const PUSH: Self = Self("vcs/push");
     pub const BREAKPOINT: Self = Self("breakpoints/breakpoint");
     pub const FOLDER: Self = Self("nodes/folder");
     pub const PACKAGE: Self = Self("nodes/package");
@@ -217,7 +236,7 @@ platform_icons! {
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/softWrap",
-        "general/showAsTree", "general/up",
+        "general/showAsTree", "general/up", "general/vcs",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",
@@ -227,7 +246,7 @@ platform_icons! {
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
         "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
-        "nodes/sourceRoot", "nodes/testRoot",
+        "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
         "status/error", "status/info", "status/warning",
@@ -236,7 +255,9 @@ platform_icons! {
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
         "toolwindows/services@20x20", "toolwindows/structure@20x20",
         "toolwindows/terminal@20x20", "toolwindows/todo@20x20", "toolwindows/vcs@20x20",
-        "vcs/branch", "vcs/diff", "vcs/revert", "vcs/vendors/github",
+        "vcs/branch", "vcs/branchLabel", "vcs/changesPush@12x12", "vcs/changesUpdate@12x12",
+        "vcs/commit", "vcs/currentBranchFavoriteLabel", "vcs/currentBranchLabel", "vcs/diff",
+        "vcs/fetch", "vcs/push", "vcs/revert", "vcs/update", "vcs/vendors/github",
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [

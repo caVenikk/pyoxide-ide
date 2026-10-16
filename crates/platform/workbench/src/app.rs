@@ -171,6 +171,11 @@ pub fn init(cx: &mut App, product: &Product) {
     );
     ui::command::register_query(
         cx,
+        "vcs.state",
+        Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).state(cx)["vcs"].clone())),
+    );
+    ui::command::register_query(
+        cx,
         "editor.state",
         Rc::new(|_, window, cx| Ok(active_editor(window, cx)?.read(cx).state_json())),
     );

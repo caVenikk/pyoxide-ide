@@ -35,9 +35,16 @@
   exists", "HEAD is a reserved keyword".
 
 ## Commands
-`git.branches`, `git.new-branch {"name": ...}`, `git.checkout
-{"ref": ...}`, `git.rename-branch`, `git.delete-branch`, `vcs.state`
-(widget text, popup groups).
+`vcs.branches-popup`, `branches-popup.search {"text": ...}`,
+`git.new-branch {"name": ...}` (without a name the dialog;
+`branch-dialog.set-name`, `branch-dialog.confirm`), `git.checkout
+{"ref": ..., "mode": "smart" | "force"}`, `git.checkout-revision
+{"ref": ...}`, `git.rename-branch {"from": ..., "to": ...}`,
+`git.delete-branch {"name": ...}`, `git.restore-branch`, `dialog.choose
+{"button": "Smart Checkout"}`, `vcs.state` (`widget`: text, icon,
+tooltip, arrows; `branches_popup`: search, rows; `branch_dialog`), and
+the engine's `git.branches`, `git.checkout`, `git.new-branch`,
+`git.rename-branch`, `git.delete-branch`.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/manage-branches.html; IntelliJ

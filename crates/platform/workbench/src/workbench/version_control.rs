@@ -28,13 +28,16 @@ use super::Workbench;
 /// The project's version control.
 #[derive(Default)]
 pub(super) struct VersionControl {
-    service: Option<Arc<StatusService>>,
-    snapshot: Option<Arc<Snapshot>>,
+    pub(super) service: Option<Arc<StatusService>>,
+    pub(super) snapshot: Option<Arc<Snapshot>>,
     /// Why there is no version control for a project with a repository
     /// (no git, an old git), or the last failed status.
-    problem: Option<String>,
+    pub(super) problem: Option<String>,
     /// Git is off for the project by its settings.
-    off: bool,
+    pub(super) off: bool,
+    /// The project was looked at for a repository (the VCS widget shows
+    /// nothing before).
+    pub(super) detected: bool,
     /// Changes with every project, so late results of the previous one
     /// are dropped.
     generation: u64,
@@ -105,6 +108,8 @@ impl Workbench {
     }
 
     fn vcs_found(&mut self, project_root: &Path, found: Found, cx: &mut Context<Self>) {
+        self.version_control.detected = true;
+        cx.notify();
         let (repo, exe) = match found {
             Found::Off => {
                 self.version_control.off = true;
@@ -148,6 +153,7 @@ impl Workbench {
                             this.version_control.snapshot = Some(s);
                             this.version_control.problem = None;
                             this.vcs_statuses_changed(cx);
+                            this.vcs_branch_snapshot(cx);
                         }
                         StatusUpdate::Failed(e) => this.version_control.problem = Some(e.message),
                     }
@@ -302,6 +308,9 @@ impl Workbench {
             "problem": vc.problem,
             "status": vc.snapshot.as_deref().map(git::snapshot_json),
             "open_files": open_files,
+            "widget": self.vcs_widget_state().state_json(),
+            "branches_popup": self.vcs_branches_popup_json(cx),
+            "branch_dialog": self.vcs_branch_dialog_json(cx),
             "marker_popup": self.vcs_popup_json(cx),
         })
     }

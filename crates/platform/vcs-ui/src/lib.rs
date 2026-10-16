@@ -7,12 +7,19 @@
 //! - [`markers`]: an editor's change markers against its base text, the
 //!   error stripe marks, Next / Previous Change and Rollback Lines.
 //! - [`marker_popup`]: the popup of a change marker.
+//! - [`widget`]: what the VCS widget of the main toolbar shows.
+//! - [`branches`]: the branches popup of the widget.
+//! - [`new_branch`]: the New Branch, Rename Branch and Checkout dialogs.
 //! - The `vcs.*` commands of the editor ([`COMMANDS`]) and of the popup
-//!   ([`POPUP_COMMANDS`]); the workbench handles them.
+//!   ([`POPUP_COMMANDS`]), the branch commands ([`BRANCH_COMMANDS`]); the
+//!   workbench handles them.
 
+pub mod branches;
 pub mod marker_popup;
 pub mod markers;
+pub mod new_branch;
 pub mod status_colors;
+pub mod widget;
 
 pub use marker_popup::{MarkerPopup, PopupAction, PopupLine, popup_lines, render_popup};
 pub use markers::{Computed, LineStatus, LineStatusEvent, Part};
@@ -47,8 +54,54 @@ ui::ui_commands! {
         "Closes the popup of a change marker.";
 }
 
+ui::ui_commands! {
+    BRANCH_COMMANDS, scope = "Workbench";
+    /// The branches popup.
+    ShowBranches => "vcs.branches-popup", "Branches\u{2026}",
+        "Opens the popup of the VCS widget: the branches and their actions, or, without a repository, Create Git Repository\u{2026}.";
+    /// New Branch….
+    NewBranch {
+        name: Option<String>,
+        from: Option<String>,
+        checkout: Option<bool>,
+    } => "git.new-branch", "New Branch\u{2026}",
+        "Creates a branch from the current one (or from `from`) and checks it out unless checkout is false; without a name the New Branch dialog asks for it.",
+        r#"{"name": "feat/x", "from": "main"}"#;
+    /// Checkout.
+    Checkout { r#ref: String, mode: Option<String> } => "git.checkout", "Checkout",
+        "Checks out a local branch, a remote branch as a new local branch tracking it, a tag or a commit; local changes in the way ask what to do (Git Checkout Problem) unless mode is force or smart.",
+        r#"{"ref": "main"}"#;
+    /// Checkout Tag or Revision….
+    CheckoutRevision { r#ref: Option<String> } => "git.checkout-revision", "Checkout Tag or Revision\u{2026}",
+        "Checks out a tag, a branch or a commit with HEAD detached; without a reference the Checkout dialog asks for it.",
+        r#"{"ref": "v1.0"}"#;
+    /// Rename….
+    RenameBranch { from: Option<String>, to: Option<String> } => "git.rename-branch", "Rename Branch\u{2026}",
+        "Renames a local branch (the current one by default); without a new name the Rename Branch dialog asks for it.",
+        r#"{"from": "feat/x", "to": "feat/y"}"#;
+    /// Delete.
+    DeleteBranch { name: String } => "git.delete-branch", "Delete Branch",
+        "Deletes a local branch, merged or not; the balloon offers Restore.",
+        r#"{"name": "feat/x"}"#;
+    /// Restore a deleted branch.
+    RestoreBranch { name: String, oid: String } => "git.restore-branch", "Restore Branch",
+        "Creates a deleted branch again at its commit (the Restore link of the Deleted branch balloon).",
+        r#"{"name": "feat/x", "oid": "0123456789abcdef0123456789abcdef01234567"}"#;
+    /// Create Git Repository….
+    Init { path: Option<String> } => "git.init", "Create Git Repository\u{2026}",
+        "Creates a Git repository (git init) in a folder; without a path a folder chooser opens at the project folder.",
+        r#"{"path": "."}"#;
+    /// Describe version control.
+    State => "vcs.state", "Version Control State",
+        "Returns the project's version control as JSON: the repository and its statuses, the VCS widget (text, icon, tooltip, arrows), the open branches popup (search, rows) and dialog.";
+}
+
 /// Registers the commands.
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, COMMANDS);
     ui::command::register(cx, POPUP_COMMANDS);
+    ui::command::register(cx, BRANCH_COMMANDS);
+    ui::command::register(cx, branches::COMMANDS);
+    ui::command::register(cx, branches::INTERNAL_COMMANDS);
+    ui::command::register(cx, new_branch::COMMANDS);
 }

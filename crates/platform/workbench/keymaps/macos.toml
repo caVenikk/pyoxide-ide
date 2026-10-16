@@ -209,6 +209,37 @@ name = "LineStatusPopup > Editor"
 "cmd-d" = "vcs.show-diff-lines"
 "escape" = "marker-popup.close"
 
+# Branches (#28): New Branch (`Git.CreateNewBranch`); the Branches popup
+# has no key on macOS. In the popup Up and Down move, Left and Right
+# collapse and expand (Right opens a branch's actions), Enter chooses,
+# Escape clears the search, then closes; Backspace and Delete delete a
+# character of the search, else the selected branch; F2 and Shift+F6
+# rename it.
+[[context]]
+[context.bindings]
+"cmd-alt-n" = "git.new-branch"
+
+[[context]]
+name = "BranchesPopup"
+[context.bindings]
+"up" = "branches-popup.up"
+"down" = "branches-popup.down"
+"left" = "branches-popup.left"
+"right" = "branches-popup.right"
+"enter" = "branches-popup.confirm"
+"escape" = "branches-popup.close"
+"backspace" = "branches-popup.delete"
+"delete" = "branches-popup.delete"
+"f2" = "branches-popup.rename"
+"shift-f6" = "branches-popup.rename"
+
+# The New Branch, Rename Branch and Checkout dialogs.
+[[context]]
+name = "BranchDialog > Editor"
+[context.bindings]
+"enter" = "branch-dialog.confirm"
+"escape" = "branch-dialog.cancel"
+
 # The completion popup leaves the focus in the editor; while it shows,
 # Enter inserts the selected item, Tab replaces the identifier at the
 # caret with it, Escape closes it, and the keys that move the caret up

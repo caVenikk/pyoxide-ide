@@ -1,6 +1,6 @@
 [package]
 name = "vcs-ui"
-description = "Version control UI of Pyoxide IDE on GPUI: file status colours, the change markers of an editor against its base text, the marker popup, Next / Previous Change and Rollback Lines"
+description = "Version control UI of Pyoxide IDE on GPUI: file status colours, the change markers of an editor against its base text, the marker popup, Next / Previous Change and Rollback Lines, the VCS widget, the branches popup and the branch dialogs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ rust-version.workspace = true
 editor.workspace = true
 gpui.workspace = true
 imara-diff.workspace = true
+name-match.workspace = true
 serde_json.workspace = true
 text.workspace = true
 themes.workspace = true
