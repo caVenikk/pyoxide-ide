@@ -330,6 +330,12 @@ impl Workbench {
             }));
         }
         let tool_windows = tool_window_areas::default_tool_windows(&product, &run_window);
+        // Names are coloured by their version control status (#169).
+        let version_control = version_control::VersionControl::default();
+        let colors = version_control.markers.colors.clone();
+        panel.update(cx, |p, _| p.set_file_colors(colors.clone()));
+        recent_files.update(cx, |p, _| p.set_file_colors(colors.clone()));
+        search_everywhere.update(cx, |p, _| p.set_file_colors(colors));
         Self {
             product,
             file_types,
@@ -368,7 +374,7 @@ impl Workbench {
             navigation: Default::default(),
             file_sync: Default::default(),
             notifications: cx.new(|cx| Notifications::new(window, cx)),
-            version_control: Default::default(),
+            version_control,
             _subscriptions: subscriptions,
         }
     }
@@ -598,11 +604,18 @@ impl Workbench {
             "tool_window_areas": self.tool_windows.areas_json(),
             "title_path": self.title_path(cx),
             "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
-            "tabs": self.tabs.iter().map(|t| json!({
-                "path": rel(&t.path),
-                "modified": t.editor.read(cx).is_modified(),
-                "deleted": self.is_deleted_on_disk(&t.path),
-            })).collect::<Vec<_>>(),
+            "tabs": self.tabs.iter().map(|t| {
+                let mut tab = json!({
+                    "path": rel(&t.path),
+                    "modified": t.editor.read(cx).is_modified(),
+                    "deleted": self.is_deleted_on_disk(&t.path),
+                });
+                // Only a coloured tab has the key.
+                if let Some(role) = self.vcs_file_colors().role(&t.path, false) {
+                    tab["color"] = json!(role.name());
+                }
+                tab
+            }).collect::<Vec<_>>(),
             "active_tab": self.active,
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
@@ -860,6 +873,7 @@ impl Workbench {
             });
         }
         self.sync_tab_opened(&path, &editor, window, cx);
+        self.vcs_tab_opened(&path, &editor, window, cx);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -882,6 +896,9 @@ impl Workbench {
             self.save_tab(previous, cx);
         }
         self.tab_activated(self.active, index, cx);
+        if self.active != Some(index) {
+            self.vcs_close_popup(cx);
+        }
         self.active = Some(index);
         let path = self.tabs[index].path.clone();
         remember_file(&mut self.recently_viewed, &path);
@@ -1021,6 +1038,7 @@ impl Workbench {
         self.tab_closing(cx);
         let tab = self.tabs.remove(index);
         self.sync_tab_closed(&tab.path, cx);
+        self.vcs_tab_closed(&tab.editor, cx);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }
@@ -1813,14 +1831,16 @@ impl Workbench {
         let hover = theme.color(UiRole::TabHover);
         let active_bg = theme.color(UiRole::TabActive);
         let outline = theme.color(UiRole::TabUnderline);
-        // A file gone from disk whose editor keeps its changes.
+        // A file gone from disk whose editor keeps its changes; else the
+        // colour of its version control status.
+        let status = self.vcs_file_colors().color(&tab.path, false, cx);
         let text: Hsla = if self.is_deleted_on_disk(&tab.path) {
             theme.color(UiRole::Danger)
         } else if selected {
-            theme.color(UiRole::TabActiveText)
+            status.unwrap_or(theme.color(UiRole::TabActiveText))
         } else {
-            theme
-                .color(UiRole::TabInactiveText)
+            status
+                .unwrap_or(theme.color(UiRole::TabInactiveText))
                 .opacity(INACTIVE_TAB_ALPHA)
         };
         let modified = tab.editor.read(cx).is_modified();
@@ -1963,10 +1983,11 @@ impl Workbench {
     /// it (its commands, and the key context of a popup over it).
     fn editor_container(&self, editor: &Entity<Editor>, cx: &App) -> Div {
         let container = div().flex_1().min_h(px(0.0)).child(editor.clone());
-        match &self.code_intel {
+        let container = match &self.code_intel {
             Some(view) => code_intel_ui::editor_container(container, view, editor, cx),
             None => container,
-        }
+        };
+        self.vcs_editor_container(container, editor)
     }
 
     fn render_editor_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -2348,6 +2369,8 @@ impl Render for Workbench {
             root = code_intel_ui::forward_actions(root, view.clone());
         }
         root = project_panel::forward_actions(root, self.panel.clone());
+        root = self.vcs_actions(root, cx);
+        let marker_popup = self.vcs_render_popup(window, cx);
         root.flex()
             .flex_col()
             .bg(frame)
@@ -2403,6 +2426,7 @@ impl Render for Workbench {
                 d.child(self.recent_files.clone())
             })
             .children(self.render_find_hint(window.viewport_size().height, cx))
+            .children(marker_popup)
             .children(
                 self.code_intel
                     .as_ref()

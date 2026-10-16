@@ -335,6 +335,8 @@ pub struct SearchEverywhere {
     /// Measurements: when the last search started and how long it took.
     started: Option<std::time::Instant>,
     finished: Option<Duration>,
+    /// Version control statuses of the file names (#169).
+    file_colors: vcs_ui::FileColors,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -419,8 +421,14 @@ impl SearchEverywhere {
             preview,
             started: None,
             finished: None,
+            file_colors: vcs_ui::FileColors::default(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The statuses the file names are coloured with.
+    pub fn set_file_colors(&mut self, colors: vcs_ui::FileColors) {
+        self.file_colors = colors;
     }
 
     // ---- state ------------------------------------------------------------

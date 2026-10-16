@@ -468,13 +468,19 @@ impl SearchEverywhere {
                     d.bg(theme.color(UiRole::NonProjectFile))
                 })
                 .child(Icon::new(icon).size(px(16.0)))
-                .child(div().flex_none().child(
-                    StyledText::new(name.clone()).with_highlights(highlight(
-                        &name,
-                        &name_ranges,
-                        match_bg,
-                    )),
-                ))
+                .child(
+                    div()
+                        .flex_none()
+                        .when_some(
+                            self.file_colors.color(&file.path, file.is_dir, cx),
+                            |d, c| d.text_color(c),
+                        )
+                        .child(StyledText::new(name.clone()).with_highlights(highlight(
+                            &name,
+                            &name_ranges,
+                            match_bg,
+                        ))),
+                )
                 .child(
                     div()
                         .flex_1()

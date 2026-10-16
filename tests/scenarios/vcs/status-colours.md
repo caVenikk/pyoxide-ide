@@ -25,7 +25,8 @@
 - Step 7: the excluded folder keeps the excluded style.
 
 ## Commands
-`git.status`, `workbench.state` (tree rows and tabs with their status).
+`git.status`, `workbench.state` (`tree.rows[].color` and `tabs[].color`:
+the colour role of a name; `vcs.open_files[].status`).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/file-status-highlights.html;

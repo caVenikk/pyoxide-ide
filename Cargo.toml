@@ -36,6 +36,7 @@ members = [
     "crates/platform/themes",
     "crates/platform/ui",
     "crates/platform/vcs",
+    "crates/platform/vcs-ui",
     "crates/platform/git",
     "crates/platform/workbench",
     "crates/python/py-debug",
@@ -123,6 +124,7 @@ text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
 vcs = { path = "crates/platform/vcs" }
+vcs-ui = { path = "crates/platform/vcs-ui" }
 workbench = { path = "crates/platform/workbench" }
 py-debug = { path = "crates/python/py-debug" }
 py-env = { path = "crates/python/py-env" }

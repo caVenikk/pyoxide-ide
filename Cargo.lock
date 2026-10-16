@@ -8031,6 +8031,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vcs-ui"
+version = "0.0.1"
+dependencies = [
+ "editor",
+ "gpui",
+ "imara-diff",
+ "serde_json",
+ "text",
+ "themes",
+ "ui",
+ "vcs",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9007,6 +9021,7 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "ui",
  "vcs",
+ "vcs-ui",
 ]
 
 [[package]]

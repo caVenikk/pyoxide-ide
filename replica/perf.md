@@ -258,6 +258,21 @@ dirty path, the readers and the merge. Line ranges: a 10,000-line file with
 | 2026-10-16 | mac-1 | 10,000 lines: line ranges against the base | 1.8 ms | budget 50 ms after the last keystroke |
 | 2026-10-16 | mac-1 | 10,000 lines: ranges shifted by an edit | 0.9 µs | until the next computation |
 
+### Change markers
+`cargo test -p workbench --release --test version_control perf -- --ignored
+--nocapture` (`crates/platform/workbench/tests/version_control.rs`): a
+committed file of 10,000 lines opened in the workbench, a character typed
+at a different line each time; "keystroke to markers" is the time from the
+simulated key to the markers drawn by the editor's decorations, including
+the range computation of the whole text off the UI thread (the edited
+lines are marked at once). Median of 9.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | 10,000 lines: keystroke to markers | 4.0 ms | budget 50 ms after the last keystroke |
+| 2026-10-17 | mac-1 | 10,000 lines: keystroke to markers | 4.6 ms | same build rebased; load average about 58 from other builds |
+| 2026-10-17 | mac-1 | 10,000 lines: edit to ranges drawn | 3.0 ms | the part after the edit: the whole-text ranges and the redraw (9 ranges) |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

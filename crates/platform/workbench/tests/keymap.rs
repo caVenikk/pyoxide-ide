@@ -340,6 +340,26 @@ impl H<'_> {
         self.focus_editor();
     }
 
+    /// Puts marked text into the active editor with change markers against
+    /// `base` (its committed text).
+    fn set_editor_with_base(&mut self, marked: &str, base: &str) {
+        self.set_editor(marked);
+        let path = self
+            .workbench(|w, cx| w.active_file(cx))
+            .expect("a file is open");
+        self.window
+            .update(self.cx, |w, _, cx| {
+                w.vcs_set_base_text(&path, Some(base), cx)
+            })
+            .unwrap();
+        self.draw();
+    }
+
+    /// The marker popup's state (`null` without one).
+    fn marker_popup(&mut self) -> Value {
+        self.state()["vcs"]["marker_popup"].clone()
+    }
+
     fn editor_marked(&mut self) -> String {
         let editor = self.editor();
         self.cx.update(|cx| {
@@ -638,6 +658,9 @@ impl H<'_> {
         }
         if !self.run()["tabs"].as_array().unwrap().is_empty() {
             self.invoke("run.close-all-tabs", json!(null));
+        }
+        if !self.state()["vcs"]["marker_popup"].is_null() {
+            self.invoke("marker-popup.close", json!(null));
         }
         if self.state()["go_to_line"].is_string() {
             self.invoke("go-to-line.cancel", json!(null));
@@ -2277,6 +2300,51 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "code.show-usages"
         | "code.reformat"
         | "code.optimize-imports" => check_docs(h, &b.command, keys, &what),
+        // Version control: lines 1 and 3 differ from the committed text.
+        "vcs.next-change" => {
+            h.set_editor_with_base("|a\nB\nc\nD\ne\n", "a\nb\nc\nd\ne\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "a\n|B\nc\nD\ne\n", "{what}");
+            assert_eq!(h.marker_popup()["lines"], json!([1, 2]), "{what}");
+            assert!(h.editor_focused(), "{what}: the editor keeps the focus");
+        }
+        "vcs.previous-change" => {
+            h.set_editor_with_base("a\nB\nc\nD\n|e\n", "a\nb\nc\nd\ne\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "a\nB\nc\n|D\ne\n", "{what}");
+            assert_eq!(h.marker_popup()["lines"], json!([3, 4]), "{what}");
+        }
+        "vcs.rollback-lines" => {
+            h.set_editor_with_base("a\nB|\nc\nD\n", "a\nb\nc\nd\n");
+            h.press(keys);
+            assert_eq!(h.editor_marked(), "a\n|b\nc\nD\n", "{what}");
+            // One undoable edit.
+            h.invoke("editor.undo", json!(null));
+            assert_eq!(
+                h.editor().read_with(h.cx, |e, _| e.text()),
+                "a\nB\nc\nD\n",
+                "{what}"
+            );
+        }
+        "vcs.show-diff-lines" | "marker-popup.close" => {
+            h.set_editor_with_base("a\nB|\nc\n", "a\nb\nc\n");
+            h.invoke("vcs.show-current-change", json!(null));
+            assert!(!h.marker_popup().is_null(), "{what}: the popup shows");
+            h.press(keys);
+            if b.command == "marker-popup.close" {
+                assert!(h.marker_popup().is_null(), "{what}");
+            } else {
+                // The popup's key: the line is not duplicated, the popup
+                // stays (the diff viewer comes later).
+                assert!(!h.marker_popup().is_null(), "{what}");
+                assert_eq!(
+                    h.dispatched.borrow().last().map(String::as_str),
+                    Some("vcs.show-diff-lines"),
+                    "{what}"
+                );
+            }
+            assert_eq!(h.editor_marked(), "a\n|B\nc\n", "{what}");
+        }
         _ => return false,
     }
     true

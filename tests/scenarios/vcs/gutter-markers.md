@@ -26,8 +26,11 @@
 - Step 6: the marker uses the whitespace-only colour.
 
 ## Commands
-`vcs.next-change`, `vcs.previous-change`, `vcs.rollback-lines`,
-`git.status`, `workbench.state` (gutter ranges).
+`vcs.next-change`, `vcs.previous-change`, `vcs.show-current-change`,
+`vcs.rollback-lines`, `vcs.copy-change-lines`, `vcs.show-diff-lines`,
+`marker-popup.close`, `git.status`, `workbench.state` (`vcs.open_files[]
+.markers`: the ranges and their pieces; `vcs.marker_popup`),
+`editor.state` (decorations of the group `vcs`).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/editor-gutter.html,

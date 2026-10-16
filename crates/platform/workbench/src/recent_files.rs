@@ -120,6 +120,8 @@ pub struct RecentFiles {
     selected: usize,
     files_scroll: UniformListScrollHandle,
     frame: PopupFrame,
+    /// Version control statuses of the file names (#169).
+    file_colors: vcs_ui::FileColors,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -161,8 +163,14 @@ impl RecentFiles {
             selected: 0,
             files_scroll: UniformListScrollHandle::new(),
             frame,
+            file_colors: vcs_ui::FileColors::default(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The statuses the file names are coloured with.
+    pub fn set_file_colors(&mut self, colors: vcs_ui::FileColors) {
+        self.file_colors = colors;
     }
 
     pub fn is_open(&self) -> bool {
@@ -497,7 +505,14 @@ impl RecentFiles {
             .when(selected, |d| d.bg(theme.color(UiRole::Selection)))
             .child(Icon::new(self.file_types.icon(path)).size(px(16.0)))
             .child(
-                StyledText::new(name.clone()).with_highlights(highlight(&name, &ranges, match_bg)),
+                div()
+                    .when_some(self.file_colors.color(path, false, cx), |d, c| {
+                        d.text_color(c)
+                    })
+                    .child(
+                        StyledText::new(name.clone())
+                            .with_highlights(highlight(&name, &ranges, match_bg)),
+                    ),
             )
             .children(location.map(|l| div().text_color(theme.color(UiRole::TextMuted)).child(l)))
             .on_click(

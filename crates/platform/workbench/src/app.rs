@@ -144,6 +144,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::navigation::init(cx);
     crate::run::init(cx);
     code_intel_ui::init(cx);
+    vcs_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
