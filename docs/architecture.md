@@ -203,8 +203,10 @@ services as watched-file changes (`file-watcher`, issue #36).
 `terminal` exists (#156: sessions, snapshots, input encoding, start rules,
 shell detection, the `ShellCustomizer` hook; the integration scripts and
 the `terminal.*` commands come with their users), and so do
-`stream-framing`, `dap-client` and `debugger` (#162); the other crates are
-planned. Crates without a toolkit are tested without GPUI; UI
+`stream-framing`, `dap-client` and `debugger` (#162) and `py-debug` (#163:
+the helper, launch arguments, stoppable lines, exception breakpoints and
+the provider; the helper is fetched by `scripts/fetch-debugpy.py`); the
+other crates are planned. Crates without a toolkit are tested without GPUI; UI
 crates depend on the model crates, never on the protocol or backend
 crates (`scripts/check-layers.py` gets these rules).
 
@@ -233,8 +235,9 @@ Dependencies: `terminal-ui` -> `terminal`, `console`, `ui`;
 `workbench` -> the UI crates and `git`, and registers their tool windows,
 settings pages and commands. Keymaps stay in `workbench` (ADR 0018).
 `scripts/check-layers.py` checks the debugger's rules (ADR 0015):
-`stream-framing`, `dap-client` and `debugger` know no UI toolkit, and a
-crate that uses the toolkit never depends directly on `dap-client`; it
+`stream-framing`, `dap-client`, `debugger` and `py-debug` know no UI
+toolkit, and a crate that uses the toolkit never depends directly on
+`dap-client`; it
 reaches a session through `debugger`, which re-exports the plain value
 types it shows (threads, frames, scopes, variables).
 

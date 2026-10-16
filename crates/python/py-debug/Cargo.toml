@@ -1,0 +1,20 @@
+[package]
+name = "py-debug"
+description = "Debugging Python in Pyoxide IDE with debugpy over DAP: the helper lookup, the Python version check, the adapter and launch arguments of a Python run, the reference's stoppable lines and exception breakpoints, the product's DebugAdapterProvider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+debugger.workspace = true
+dirs = "7"
+process.workspace = true
+py-env.workspace = true
+py-run.workspace = true
+run-config.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+tempfile = "3"

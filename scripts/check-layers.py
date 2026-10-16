@@ -27,9 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CRATES = ROOT / "crates"
 
-# ADR 0010; stream-framing, dap-client and debugger: ADR 0015.
+# ADR 0010; stream-framing, dap-client, debugger and py-debug: ADR 0015.
 TOOLKIT = "gpui"
-NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal", "stream-framing", "dap-client", "debugger"]
+NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal", "stream-framing", "dap-client", "debugger", "py-debug"]
 CLIENT = "lsp-client"
 PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"
