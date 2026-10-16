@@ -156,6 +156,9 @@ fn bracketed_paste() {
     } else {
         assert!(line.contains("one<CR>two"), "{line}");
     }
+    // The helper stays alive until this byte: ConPTY may drop the output of
+    // a program that exits right after writing it.
+    h.session().write(b"\r".to_vec());
     h.wait_exit();
 }
 

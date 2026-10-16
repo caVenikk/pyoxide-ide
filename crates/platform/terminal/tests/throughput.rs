@@ -1,6 +1,6 @@
 //! Throughput of a session (ADR 0014): a large output through the
 //! pseudo-terminal (ConPTY on Windows) into the emulator, measured from the
-//! spawn to the exit with the last line on the screen, while a view takes
+//! spawn to the last line on the screen, while a view takes
 //! a snapshot per frame; and the emulator alone for comparison. CI runs
 //! both on every OS in its own step and prints the numbers:
 //!
@@ -47,9 +47,11 @@ fn bench_flood_through_the_pty() {
     let mut snapshot = terminal::Snapshot::default();
     let mut snapshot_time = Duration::ZERO;
     let mut last_frame = Instant::now();
-    let status = loop {
+    // The helper stays alive after its last line (ConPTY may drop the output
+    // of a program that exits right after writing it), so the end of the run
+    // is the last line on the screen.
+    loop {
         match rx.recv_deadline(start + LIMIT) {
-            Ok(SessionEvent::Exited(status)) => break status,
             // A view takes a snapshot after a wakeup, at most once per frame.
             Ok(SessionEvent::Wakeup) => {
                 std::thread::sleep(FRAME.saturating_sub(last_frame.elapsed()));
@@ -58,7 +60,25 @@ fn bench_flood_through_the_pty() {
                 session.snapshot_into(&mut snapshot);
                 snapshot_time += t.elapsed();
                 last_frame = Instant::now();
+                if snapshot.text().contains("flood done") {
+                    break;
+                }
             }
+            Ok(SessionEvent::Exited(status)) => {
+                panic!("the helper exited before the last line: {status:?}")
+            }
+            Ok(_) => {}
+            Err(e) => {
+                session.kill();
+                panic!("no last line within {LIMIT:?}: {e:?}");
+            }
+        }
+    }
+    let elapsed = start.elapsed();
+    session.write(b"\r".to_vec());
+    let status = loop {
+        match rx.recv_deadline(start + LIMIT) {
+            Ok(SessionEvent::Exited(status)) => break status,
             Ok(_) => {}
             Err(e) => {
                 session.kill();
@@ -66,14 +86,7 @@ fn bench_flood_through_the_pty() {
             }
         }
     };
-    let elapsed = start.elapsed();
-    session.snapshot_into(&mut snapshot);
     assert!(status.success(), "{status:?}");
-    assert!(
-        snapshot.text().contains("flood done"),
-        "{}",
-        snapshot.text()
-    );
     // ConPTY may repaint the screen instead of scrolling it.
     if cfg!(unix) {
         assert_eq!(snapshot.history_size, terminal::DEFAULT_SCROLLBACK);

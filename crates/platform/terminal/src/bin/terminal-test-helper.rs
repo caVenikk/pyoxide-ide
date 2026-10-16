@@ -8,14 +8,15 @@
 //! - `exit <code>`: exits with the code;
 //! - `paste`: raw input, turns bracketed paste on (`ESC [?2004h`), prints
 //!   `ready`, reads until Ctrl+D (0x04) and prints `pasted: <bytes>` with
-//!   ESC, CR and LF spelled `<ESC>`, `<CR>`, `<LF>`;
+//!   ESC, CR and LF spelled `<ESC>`, `<CR>`, `<LF>`; waits for one more
+//!   byte before it exits;
 //! - `env <name>...`: prints `<name>=<value>` or `<name>=<unset>`;
 //! - `cwd`: prints `cwd <working directory>`;
 //! - `osc`: prints a prompt with OSC 133 marks, an OSC 7 working directory,
 //!   a title (OSC 2) and an OSC 7701 event, then `done`; waits for a line;
 //! - `sleep`: prints `ready` and sleeps;
 //! - `flood <bytes>`: prints numbered lines worth that many bytes, then
-//!   `flood done`.
+//!   `flood done`; waits for a line.
 
 use std::io::{self, BufRead, Read, Write};
 use std::time::Duration;
@@ -71,6 +72,9 @@ fn main() {
                 .replace('\n', "<LF>");
             write!(out, "pasted: {text}\r\n").unwrap();
             out.flush().unwrap();
+            // Stays alive until one more byte arrives: ConPTY may drop the
+            // output of a program that exits right after writing it.
+            let _ = stdin.read(&mut byte);
         }
         "env" => {
             for name in &args[1..] {
@@ -125,6 +129,8 @@ fn main() {
             }
             writeln!(out, "flood done").unwrap();
             out.flush().unwrap();
+            // Alive until a line arrives (see `paste`).
+            wait_line();
         }
         _ => {
             eprintln!("unknown mode {mode:?}");
