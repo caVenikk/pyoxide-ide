@@ -300,7 +300,6 @@ enum Field {
 /// The Find in Files popup.
 pub struct FindInFiles {
     focus: FocusHandle,
-    file_types: Rc<FileTypes>,
     query: Entity<Editor>,
     replace: Entity<Editor>,
     mask: Entity<Editor>,
@@ -455,10 +454,9 @@ impl FindInFiles {
             .as_deref()
             .and_then(NamedScope::from_name)
             .unwrap_or(NamedScope::ProjectFiles);
-        let preview = preview::Preview::new(window, cx);
+        let preview = preview::Preview::new(file_types, window, cx);
         Self {
             focus,
-            file_types,
             query,
             replace,
             mask,
@@ -507,7 +505,12 @@ impl FindInFiles {
 
     /// The main window the popup belongs to (its tabs' editors share
     /// their documents with the preview).
-    pub fn set_host(&mut self, host: gpui::WeakEntity<crate::workbench::Workbench>) {
+    pub fn set_host(
+        &mut self,
+        host: gpui::WeakEntity<crate::workbench::Workbench>,
+        cx: &mut Context<Self>,
+    ) {
+        self.preview.set_host(host.clone(), cx);
         self.host = Some(host);
     }
 
@@ -966,8 +969,8 @@ impl FindInFiles {
             .map(|(p, e)| (p.clone(), e.read(cx).buffer().rope().clone()))
             .collect();
         // A file edited in the preview and not saved yet.
-        if let Some(path) = self.preview.path()
-            && let Some(editor) = self.preview_own_editor(path)
+        if let Some(path) = self.preview.path(cx)
+            && let Some(editor) = self.preview_own_editor(path, cx)
             && editor.read(cx).is_modified()
         {
             overrides.insert(path.clone(), editor.read(cx).buffer().rope().clone());
@@ -1515,7 +1518,7 @@ impl FindInFiles {
     /// else the selected row.
     fn edit_source_action(&mut self, _: &EditSource, window: &mut Window, cx: &mut Context<Self>) {
         if self.in_preview(window, cx)
-            && let Some(path) = self.preview.path().cloned()
+            && let Some(path) = self.preview.path(cx).cloned()
         {
             let point = self.preview.editor().read(cx).caret_point();
             self.open_at(path, point, window, cx);
@@ -1640,7 +1643,7 @@ impl FindInFiles {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.preview.path().is_some() {
+        if self.preview.path(cx).is_some() {
             window.focus(&self.preview.editor().focus_handle(cx));
         }
     }

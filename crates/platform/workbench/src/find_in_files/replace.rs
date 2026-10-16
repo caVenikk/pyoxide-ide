@@ -35,13 +35,13 @@ impl FindInFiles {
     /// The editor holding `path`'s document: its tab's, or the preview's
     /// when the preview edits a file that is not open (the replacement
     /// goes into that document, which the preview saves).
-    fn editor_of(&self, path: &PathBuf) -> Option<Entity<editor::Editor>> {
+    fn editor_of(&self, path: &PathBuf, cx: &gpui::App) -> Option<Entity<editor::Editor>> {
         self.context
             .editors
             .iter()
             .find(|(p, _)| p == path)
             .map(|(_, e)| e.clone())
-            .or_else(|| self.preview_own_editor(path))
+            .or_else(|| self.preview_own_editor(path, cx))
     }
 
     /// Replaces the selected match; its row goes and the next one is
@@ -63,7 +63,7 @@ impl FindInFiles {
         let path = (*row.path).clone();
         // Where the match is now (edits in the preview move it).
         let only = HashSet::from([self.row_point(&row)]);
-        if let Some(editor) = self.editor_of(&path) {
+        if let Some(editor) = self.editor_of(&path, cx) {
             let text = editor.read(cx).text();
             let done = match project_search::replacements(&text, &matcher, &template, Some(&only)) {
                 Ok(reps) if editor.read(cx).buffer().is_read_only() && !reps.is_empty() => {
@@ -176,8 +176,8 @@ impl FindInFiles {
         search.known = Arc::default();
         search.overrides = self.overrides(cx);
         let mut editors = self.context.editors.clone();
-        if let Some(path) = self.preview.path()
-            && let Some(editor) = self.preview_own_editor(path)
+        if let Some(path) = self.preview.path(cx)
+            && let Some(editor) = self.preview_own_editor(path, cx)
         {
             editors.push((path.clone(), editor));
         }
@@ -202,7 +202,7 @@ impl FindInFiles {
             let (files, mut read_only) = find.await;
             let Ok(closed) = this.update(cx, |this, cx| {
                 for path in &files {
-                    if let Some(e) = this.editor_of(path)
+                    if let Some(e) = this.editor_of(path, cx)
                         && e.read(cx).buffer().is_read_only()
                     {
                         read_only.push(path.clone());
@@ -216,7 +216,7 @@ impl FindInFiles {
                 let mut count = 0;
                 let mut closed = Vec::new();
                 for path in files {
-                    match this.editor_of(&path) {
+                    match this.editor_of(&path, cx) {
                         Some(editor) => {
                             let text = editor.read(cx).text();
                             if let Ok(reps) =

@@ -184,13 +184,21 @@ impl SearchEverywhere {
                 cx,
             ));
         }
-        // The preview comes later: shown, not available yet.
         if self.tab != Tab::Actions {
             items.push(
-                small_icon_button("search-everywhere-preview", IconName::PREVIEW, false, cx)
-                    .debug_selector(|| "search-everywhere-preview".into())
-                    .tooltip(Tooltip::text("Preview", None))
-                    .into_any_element(),
+                toggle_button(
+                    "search-everywhere-preview",
+                    IconName::PREVIEW,
+                    settings(cx).preview,
+                    cx,
+                )
+                .debug_selector(|| "search-everywhere-preview".into())
+                .tooltip(Tooltip::text(
+                    "Preview",
+                    self.shortcut(&TogglePreview, window, cx),
+                ))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_preview(cx)))
+                .into_any_element(),
             );
         }
         let filter = match self.tab {
@@ -528,8 +536,12 @@ impl SearchEverywhere {
                 .child(div().pl(px(4.0)).child("\u{2026} more")),
         };
         base.when(selected, |d| d.bg(theme.color(UiRole::Selection)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
                 this.select_row(index, cx);
+                // With the preview a click selects, a double click opens.
+                if this.preview_on(cx) && e.click_count() < 2 {
+                    return;
+                }
                 this.choose(index, window, cx);
             }))
             .into_any_element()
@@ -652,6 +664,11 @@ impl SearchEverywhere {
         .flex_1()
         .py(px(4.0));
         rows.style().restrict_scroll_to_axis = Some(true);
+        let rows = if self.preview_shown(cx) {
+            self.render_split(rows.into_any_element(), cx)
+        } else {
+            rows.into_any_element()
+        };
         div()
             .flex()
             .flex_col()
