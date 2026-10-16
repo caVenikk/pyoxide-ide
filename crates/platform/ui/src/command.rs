@@ -134,12 +134,11 @@ pub fn invoke(
             })
             .map_err(|e| CommandError::new("not_available", format!("{id}: {e}")))?;
     }
-    // Window handlers on the focus path, then application-wide handlers
+    // Window handlers on the focus path, then those of a non-modal dialog
+    // open from the window (the Settings window; it runs there, or in a
+    // dialog open over it), then application-wide handlers
     // (`App::on_action`, such as quit).
-    if !window.is_action_available(action.as_ref(), cx) && !cx.is_action_available(action.as_ref())
-    {
-        // A command of a non-modal dialog open from the window (the
-        // Settings window): it runs there, or in a dialog open over it.
+    if !window.is_action_available(action.as_ref(), cx) {
         for dialog in crate::dialog_window::non_modal_of(window.window_handle(), cx) {
             let target = crate::dialog_window::innermost(dialog, cx);
             let ran = target.update(cx, |_, window, cx| {
@@ -153,10 +152,12 @@ pub fn invoke(
                 return Ok(Json::Null);
             }
         }
-        return Err(CommandError::new(
-            "not_available",
-            format!("{id} is not available here"),
-        ));
+        if !cx.is_action_available(action.as_ref()) {
+            return Err(CommandError::new(
+                "not_available",
+                format!("{id} is not available here"),
+            ));
+        }
     }
     window.dispatch_action(action, cx);
     Ok(Json::Null)

@@ -122,6 +122,49 @@ fn unavailable_commands_report_an_error(cx: &mut TestAppContext) {
     assert_eq!(err.code, "not_available");
 }
 
+/// A command the window does not handle runs in a non-modal dialog open
+/// from it (the Settings window's commands from the control channel).
+#[gpui::test]
+fn commands_reach_a_non_modal_dialog(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        ui::command::register(cx, COMMANDS);
+        cx.open_window(Default::default(), |_, cx| cx.new(|_| Empty))
+            .unwrap()
+    });
+    cx.run_until_parked();
+    let mut counter = None;
+    cx.update_window(window.into(), |_, window, cx| {
+        let options = ui::dialog_window::DialogOptions {
+            title: "Counter".into(),
+            size: gpui::size(gpui::px(200.0), gpui::px(100.0)),
+            modal: false,
+            key: Some("counter".into()),
+            ..Default::default()
+        };
+        ui::dialog_window::open(window, options, cx, |window, cx| {
+            let view = cx.new(|cx| Counter {
+                value: 0,
+                focus: cx.focus_handle(),
+            });
+            window.focus(&view.read(cx).focus.clone());
+            counter = Some(view.clone());
+            view
+        })
+        .unwrap();
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let result = cx
+        .update_window(window.into(), |_, window, cx| {
+            ui::command::invoke("counter.add", json!({"amount": 3}), window, cx)
+        })
+        .unwrap();
+    assert_eq!(result, Ok(json!(null)));
+    cx.run_until_parked();
+    let counter = counter.unwrap();
+    assert_eq!(cx.read(|cx| counter.read(cx).value), 3);
+}
+
 struct Empty;
 
 impl Render for Empty {
