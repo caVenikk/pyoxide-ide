@@ -10,6 +10,7 @@ pub mod command;
 pub mod components;
 pub mod dialog_window;
 pub mod fonts;
+pub mod form;
 pub mod icons;
 pub mod keys;
 pub mod markdown;

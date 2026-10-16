@@ -1,26 +1,33 @@
 //! Dialog windows, as the reference IDE opens its dialogs (`DialogWrapper`
 //! in a window of its own): a separate OS window with the system title
-//! bar, movable and resizable, centred on its parent window and modal to
-//! it.
+//! bar, movable and resizable, centred on its parent window.
 //!
-//! While a dialog is open its parent window takes no input: [`blocker`]
-//! covers it (a click there brings the dialog to the front), keystrokes
-//! sent to it are dropped, and [`crate::command::invoke`] runs commands in
-//! the dialog. On macOS the dialog is a child window of its parent, so it
-//! stays above it. When the dialog closes, by [`close`] or by its title
-//! bar's close button, the element of the parent that had the focus gets
-//! it back.
+//! While a modal dialog ([`DialogOptions::modal`]) is open its parent
+//! window takes no input: [`blocker`] covers it (a click there brings the
+//! dialog to the front), keystrokes sent to it are dropped, and
+//! [`crate::command::invoke`] runs commands in the dialog. A non-modal
+//! dialog (the reference's `SettingsNonModalDialog` in its default float
+//! mode) leaves the parent its input; one is open per
+//! [`DialogOptions::key`], and opening it again brings that one to the
+//! front. A modal dialog can open over a non-modal one and blocks only it.
+//!
+//! On macOS a dialog is a child window of its parent, so it stays above
+//! it. When the dialog closes, by [`close`] or by its title bar's close
+//! button, the element of the parent that had the focus gets it back.
 //!
 //! The dialog's view is the root of its window: nothing of the parent
-//! window draws into it. On macOS a dialog can draw its own title bar in
-//! the theme's colours under the system's window buttons ([`title_bar`]),
-//! as the reference does.
+//! window draws into it; a dialog that can have a modal dialog over it
+//! draws [`blocker`] itself. On macOS a dialog can draw its own title bar
+//! in the theme's colours under the system's window buttons
+//! ([`title_bar`]), as the reference does.
 //!
 //! A popup of a dialog that may reach beyond it (the reference's popups
 //! are windows of their own) opens with [`open_popup`]: a borderless window
 //! fitted to its content, a child of the dialog in the same way.
 //!
-//! Dialog and popup windows work on the test platform too.
+//! Dialog and popup windows work on the test platform too, and open
+//! without taking the focus when [`DialogOptions::activate`] is off
+//! (`PYOXIDE_BACKGROUND`).
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -58,6 +65,26 @@ pub struct DialogOptions {
     /// The dialog draws its title bar itself ([`title_bar`]); macOS only,
     /// other platforms keep the system's.
     pub themed_title: bool,
+    /// The parent takes no input while the dialog is open. Off: the
+    /// parent keeps its input (the reference's non-modal Settings window).
+    pub modal: bool,
+    /// A non-modal dialog opens once per key: [`open`] with the key of an
+    /// open one brings that one to the front instead.
+    pub key: Option<SharedString>,
+}
+
+impl Default for DialogOptions {
+    fn default() -> Self {
+        Self {
+            title: SharedString::default(),
+            size: Size::default(),
+            min_size: None,
+            activate: true,
+            themed_title: false,
+            modal: true,
+            key: None,
+        }
+    }
 }
 
 /// The dialog draws its own title bar: on macOS when asked.
@@ -79,10 +106,22 @@ struct Modal {
     activate: bool,
 }
 
-/// The open dialogs by their parent windows.
+/// An open non-modal dialog window.
+struct NonModal {
+    key: Option<SharedString>,
+    dialog: AnyWindowHandle,
+    parent: AnyWindowHandle,
+    /// Had the focus in the parent window when the dialog opened.
+    return_focus: Option<FocusHandle>,
+    activate: bool,
+}
+
+/// The open dialogs: the modal ones by their parent windows, the
+/// non-modal ones in the order they opened.
 #[derive(Default)]
 struct Modals {
     by_parent: HashMap<AnyWindowHandle, Modal>,
+    non_modal: Vec<NonModal>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -106,11 +145,15 @@ fn ensure_init(cx: &mut App) {
     ];
     cx.set_global(Modals {
         by_parent: HashMap::new(),
+        non_modal: Vec::new(),
         _subscriptions: subscriptions,
     });
 }
 
-/// Opens `build`'s view as a dialog window of `parent`, modal to it.
+/// Opens `build`'s view as a dialog window of `parent`, modal to it
+/// unless [`DialogOptions::modal`] is off. A non-modal dialog with the
+/// [`DialogOptions::key`] of an open one is not built again: the open one
+/// comes to the front (activated when `activate` is on) and is returned.
 pub fn open<V: 'static + Render>(
     parent: &mut Window,
     options: DialogOptions,
@@ -118,6 +161,14 @@ pub fn open<V: 'static + Render>(
     build: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
 ) -> Option<WindowHandle<V>> {
     ensure_init(cx);
+    if !options.modal
+        && let Some(open) = options.key.as_ref().and_then(|key| find(key.as_ref(), cx))
+    {
+        if options.activate {
+            let _ = open.update(cx, |_, window, _| window.activate_window());
+        }
+        return open.downcast::<V>();
+    }
     let parent_handle = parent.window_handle();
     let return_focus = parent.focused(cx);
     let parent_bounds = parent.bounds();
@@ -143,14 +194,25 @@ pub fn open<V: 'static + Render>(
     };
     let handle = cx.open_window(window_options, build).ok()?;
     let dialog: AnyWindowHandle = handle.into();
-    cx.global_mut::<Modals>().by_parent.insert(
-        parent_handle,
-        Modal {
+    let modals = cx.global_mut::<Modals>();
+    if options.modal {
+        modals.by_parent.insert(
+            parent_handle,
+            Modal {
+                dialog,
+                return_focus,
+                activate: options.activate,
+            },
+        );
+    } else {
+        modals.non_modal.push(NonModal {
+            key: options.key.clone(),
             dialog,
+            parent: parent_handle,
             return_focus,
             activate: options.activate,
-        },
-    );
+        });
+    }
     let _ = dialog.update(cx, |_, window, _| {
         native::attach(parent, window);
         if options.activate {
@@ -159,6 +221,36 @@ pub fn open<V: 'static + Render>(
     });
     parent.refresh();
     Some(handle)
+}
+
+/// The open non-modal dialog opened with `key`.
+pub fn find(key: &str, cx: &App) -> Option<AnyWindowHandle> {
+    let open = cx
+        .try_global::<Modals>()?
+        .non_modal
+        .iter()
+        .find(|d| d.key.as_ref().is_some_and(|k| k.as_ref() == key))?;
+    cx.windows().contains(&open.dialog).then_some(open.dialog)
+}
+
+/// The non-modal dialogs open from `parent`, oldest first.
+pub fn non_modal_of(parent: AnyWindowHandle, cx: &App) -> Vec<AnyWindowHandle> {
+    let Some(modals) = cx.try_global::<Modals>() else {
+        return Vec::new();
+    };
+    let open = cx.windows();
+    modals
+        .non_modal
+        .iter()
+        .filter(|d| d.parent == parent && open.contains(&d.dialog))
+        .map(|d| d.dialog)
+        .collect()
+}
+
+/// The window open over `parent`: its modal dialog or popup, else its
+/// newest non-modal dialog.
+pub fn child_of(parent: AnyWindowHandle, cx: &App) -> Option<AnyWindowHandle> {
+    modal_of(parent, cx).or_else(|| non_modal_of(parent, cx).pop())
 }
 
 /// The dialog open over `parent`, if any.
@@ -321,39 +413,61 @@ pub fn open_popup(
     Some(handle)
 }
 
-/// The window a dialog was opened over.
+/// The window a dialog (modal or not) or popup was opened over.
 pub fn parent_of(dialog: AnyWindowHandle, cx: &App) -> Option<AnyWindowHandle> {
-    cx.try_global::<Modals>()?
+    let modals = cx.try_global::<Modals>()?;
+    modals
         .by_parent
         .iter()
         .find(|(_, m)| m.dialog == dialog)
         .map(|(parent, _)| *parent)
+        .or_else(|| {
+            modals
+                .non_modal
+                .iter()
+                .find(|d| d.dialog == dialog)
+                .map(|d| d.parent)
+        })
 }
 
 /// Closes a dialog window; its parent takes input again and the element
 /// that had the focus gets it back. Nothing for a dialog already closed.
 pub fn close(dialog: AnyWindowHandle, cx: &mut App) {
-    // A popup open over it goes first.
+    // What is open over it goes first.
     if let Some(child) = modal_of(dialog, cx) {
         close(child, cx);
     }
-    let modal = parent_of(dialog, cx).and_then(|parent| {
-        cx.global_mut::<Modals>()
+    for child in non_modal_of(dialog, cx) {
+        close(child, cx);
+    }
+    let back = cx.try_global::<Modals>().is_some().then(|| {
+        let modals = cx.global_mut::<Modals>();
+        let parent = modals
             .by_parent
-            .remove(&parent)
-            .map(|m| (parent, m))
+            .iter()
+            .find(|(_, m)| m.dialog == dialog)
+            .map(|(parent, _)| *parent);
+        if let Some(parent) = parent {
+            return modals
+                .by_parent
+                .remove(&parent)
+                .map(|m| GiveBack::modal(parent, m));
+        }
+        let at = modals.non_modal.iter().position(|d| d.dialog == dialog)?;
+        Some(GiveBack::non_modal(modals.non_modal.remove(at)))
     });
     // While the dialog itself is being updated (its title bar's close
     // button) it is not reachable and closes on its own.
     let _ = dialog.update(cx, |_, window, _| window.remove_window());
     // After the current update: the parent may be the window being
     // updated now (a dialog closed from one of its handlers).
-    if let Some((parent, modal)) = modal {
-        cx.defer(move |cx| give_back(parent, modal, cx));
+    if let Some(back) = back.flatten() {
+        cx.defer(move |cx| back.run(cx));
     }
 }
 
-/// Forgets dialogs whose windows are gone.
+/// Forgets dialogs whose windows are gone; a non-modal dialog whose
+/// parent window is gone closes too.
 fn forget_closed(cx: &mut App) {
     let open = cx.windows();
     if !cx.has_global::<Modals>() {
@@ -366,25 +480,73 @@ fn forget_closed(cx: &mut App) {
         .filter(|(_, m)| !open.contains(&m.dialog))
         .map(|(p, _)| *p)
         .collect();
-    let closed: Vec<(AnyWindowHandle, Modal)> = closed
+    let mut back: Vec<GiveBack> = closed
         .into_iter()
-        .filter_map(|p| modals.by_parent.remove(&p).map(|m| (p, m)))
+        .filter_map(|p| modals.by_parent.remove(&p).map(|m| GiveBack::modal(p, m)))
         .collect();
-    for (parent, modal) in closed {
-        give_back(parent, modal, cx);
+    let mut orphans = Vec::new();
+    let mut kept = Vec::new();
+    for d in std::mem::take(&mut modals.non_modal) {
+        if !open.contains(&d.dialog) {
+            back.push(GiveBack::non_modal(d));
+        } else if !open.contains(&d.parent) {
+            orphans.push(d.dialog);
+        } else {
+            kept.push(d);
+        }
+    }
+    modals.non_modal = kept;
+    for back in back {
+        back.run(cx);
+    }
+    for dialog in orphans {
+        let _ = dialog.update(cx, |_, window, _| window.remove_window());
     }
 }
 
-fn give_back(parent: AnyWindowHandle, modal: Modal, cx: &mut App) {
-    let _ = parent.update(cx, |_, window, _| {
-        if let Some(focus) = &modal.return_focus {
-            window.focus(focus);
+/// What a closed dialog gives back to its parent window.
+struct GiveBack {
+    parent: AnyWindowHandle,
+    focus: Option<FocusHandle>,
+    activate: bool,
+    /// The parent took no input while the dialog was open: the focus it
+    /// had goes back. The parent of a non-modal dialog kept its input and
+    /// its own focus; the old one goes back only where nothing has it.
+    modal: bool,
+}
+
+impl GiveBack {
+    fn modal(parent: AnyWindowHandle, m: Modal) -> Self {
+        Self {
+            parent,
+            focus: m.return_focus,
+            activate: m.activate,
+            modal: true,
         }
-        if modal.activate {
-            window.activate_window();
+    }
+
+    fn non_modal(d: NonModal) -> Self {
+        Self {
+            parent: d.parent,
+            focus: d.return_focus,
+            activate: d.activate,
+            modal: false,
         }
-        window.refresh();
-    });
+    }
+
+    fn run(self, cx: &mut App) {
+        let _ = self.parent.update(cx, |_, window, cx| {
+            if let Some(focus) = &self.focus
+                && (self.modal || window.focused(cx).is_none())
+            {
+                window.focus(focus);
+            }
+            if self.activate {
+                window.activate_window();
+            }
+            window.refresh();
+        });
+    }
 }
 
 /// Covers a window that has a dialog open: the mouse reaches nothing in
@@ -607,9 +769,7 @@ mod tests {
                 let options = DialogOptions {
                     title: "Dialog".into(),
                     size: size(px(400.0), px(300.0)),
-                    min_size: None,
-                    activate: true,
-                    themed_title: false,
+                    ..DialogOptions::default()
                 };
                 open(window, options, cx, |window, cx| {
                     cx.new(|cx| {
@@ -655,6 +815,151 @@ mod tests {
             parent.read_with(cx, |r, _| r.got.clone()).unwrap(),
             ["ping"]
         );
+    }
+
+    fn open_recorder(
+        parent: WindowHandle<Recorder>,
+        options: DialogOptions,
+        built: Rc<Cell<usize>>,
+        cx: &mut TestAppContext,
+    ) -> WindowHandle<Recorder> {
+        parent
+            .update(cx, |_, window, cx| {
+                open(window, options, cx, |window, cx| {
+                    built.set(built.get() + 1);
+                    cx.new(|cx| {
+                        let r = recorder(cx);
+                        window.focus(&r.focus);
+                        r
+                    })
+                })
+                .unwrap()
+            })
+            .unwrap()
+    }
+
+    /// A non-modal dialog leaves its parent the input, opens once per key
+    /// (opening it again brings it to the front), can have a modal dialog
+    /// over it that blocks only it, and gives the focus back on close.
+    #[gpui::test]
+    fn a_non_modal_dialog_leaves_its_parent_the_input(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::theme::init(cx, themes::ThemeKind::Dark);
+            cx.bind_keys([gpui::KeyBinding::new("cmd-p", Ping, Some("Recorder"))]);
+        });
+        let parent = cx.add_window(|_, cx| recorder(cx));
+        let parent_any: AnyWindowHandle = parent.into();
+        let parent_focus = parent
+            .update(cx, |r, window, _| {
+                window.focus(&r.focus);
+                r.focus.clone()
+            })
+            .unwrap();
+        draw(parent_any, cx);
+        let options = DialogOptions {
+            title: "Settings".into(),
+            size: size(px(400.0), px(300.0)),
+            modal: false,
+            key: Some("settings".into()),
+            ..DialogOptions::default()
+        };
+        let built = Rc::new(Cell::new(0));
+        let dialog = open_recorder(parent, options.clone(), built.clone(), cx);
+        let dialog_any: AnyWindowHandle = dialog.into();
+        draw(parent_any, cx);
+        draw(dialog_any, cx);
+        assert!(cx.update(|cx| modal_of(parent_any, cx)).is_none());
+        assert!(cx.update(|cx| child_of(parent_any, cx)) == Some(dialog_any));
+        assert!(cx.update(|cx| parent_of(dialog_any, cx)) == Some(parent_any));
+        assert!(cx.update(|cx| find("settings", cx)) == Some(dialog_any));
+        assert!(cx.update(|cx| cx.active_window()) == Some(dialog_any));
+        // The parent takes keys and clicks; commands run in it.
+        cx.simulate_keystrokes(parent_any, "cmd-p");
+        let mut vcx = VisualTestContext::from_window(parent_any, cx);
+        vcx.simulate_click(point(px(20.0), px(20.0)), gpui::Modifiers::none());
+        assert!(cx.update(|cx| innermost(parent_any, cx)) == parent_any);
+        assert_eq!(
+            parent.read_with(cx, |r, _| r.got.clone()).unwrap(),
+            ["ping", "click"]
+        );
+        cx.simulate_keystrokes(dialog_any, "cmd-p");
+        assert_eq!(
+            dialog.read_with(cx, |r, _| r.got.clone()).unwrap(),
+            ["ping"]
+        );
+        // Opened again: the same window comes to the front.
+        parent
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        assert!(cx.update(|cx| cx.active_window()) == Some(parent_any));
+        let again = open_recorder(parent, options, built.clone(), cx);
+        assert!(AnyWindowHandle::from(again) == dialog_any);
+        assert_eq!(built.get(), 1, "not built again");
+        assert!(cx.update(|cx| cx.active_window()) == Some(dialog_any));
+        assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+        // A modal dialog over it blocks it, not the main window.
+        let modal = open_recorder(
+            dialog,
+            DialogOptions {
+                title: "Add Python Interpreter".into(),
+                size: size(px(300.0), px(200.0)),
+                ..DialogOptions::default()
+            },
+            built.clone(),
+            cx,
+        );
+        let modal_any: AnyWindowHandle = modal.into();
+        draw(dialog_any, cx);
+        assert!(cx.update(|cx| modal_of(dialog_any, cx)) == Some(modal_any));
+        assert!(cx.update(|cx| innermost(dialog_any, cx)) == modal_any);
+        cx.simulate_keystrokes(dialog_any, "cmd-p");
+        assert_eq!(dialog.read_with(cx, |r, _| r.got.len()).unwrap(), 1);
+        cx.simulate_keystrokes(parent_any, "cmd-p");
+        assert_eq!(parent.read_with(cx, |r, _| r.got.len()).unwrap(), 3);
+        // Closing the dialog closes the modal one over it; the parent gets
+        // the focus back and is active again.
+        parent.update(cx, |_, window, _| window.blur()).unwrap();
+        cx.update(|cx| close(dialog_any, cx));
+        draw(parent_any, cx);
+        assert!(!cx.update(|cx| cx.windows().contains(&dialog_any)));
+        assert!(!cx.update(|cx| cx.windows().contains(&modal_any)));
+        assert!(cx.update(|cx| find("settings", cx)).is_none());
+        assert!(cx.update(|cx| child_of(parent_any, cx)).is_none());
+        let focused = parent
+            .update(cx, |_, window, _| parent_focus.is_focused(window))
+            .unwrap();
+        assert!(focused, "the focus went back");
+        assert!(cx.update(|cx| cx.active_window()) == Some(parent_any));
+    }
+
+    /// A non-modal dialog closed by its window (the title bar's close
+    /// button) is forgotten, and one whose parent closes goes with it.
+    #[gpui::test]
+    fn a_non_modal_dialog_closed_by_its_window_is_forgotten(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::theme::init(cx, themes::ThemeKind::Dark));
+        let parent = cx.add_window(|_, cx| recorder(cx));
+        let parent_any: AnyWindowHandle = parent.into();
+        let options = DialogOptions {
+            title: "Settings".into(),
+            size: size(px(400.0), px(300.0)),
+            modal: false,
+            key: Some("settings".into()),
+            activate: false,
+            ..DialogOptions::default()
+        };
+        let built = Rc::new(Cell::new(0));
+        let dialog: AnyWindowHandle =
+            open_recorder(parent, options.clone(), built.clone(), cx).into();
+        cx.update_window(dialog, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(cx.update(|cx| find("settings", cx)).is_none());
+        let dialog: AnyWindowHandle = open_recorder(parent, options, built.clone(), cx).into();
+        assert_eq!(built.get(), 2, "a new one");
+        cx.update_window(parent_any, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| cx.windows().contains(&dialog)));
     }
 
     /// A popup window of a window: input goes to it while it is open, it
