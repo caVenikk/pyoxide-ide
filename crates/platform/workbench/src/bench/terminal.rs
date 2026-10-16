@@ -3,10 +3,12 @@
 //!
 //! - `terminal-typing`: keys typed into `cat` (which echoes them through
 //!   the terminal's line discipline, as a shell's prompt does), the time
-//!   from each key to the end of the first frame that shows its echo;
+//!   from each key to the end of the first frame that shows its echo, and
+//!   where it goes (the echo reaching the view, the copy of the screen,
+//!   the frame);
 //! - `terminal-flood:<MiB>`: `cat` of a generated file of that size, the
 //!   time to the frame that shows its last line, and the frames painted
-//!   meanwhile;
+//!   and screen copies shown meanwhile;
 //! - `terminal-scroll`: wheel events over a long scrollback, frame work and
 //!   gaps between frames;
 //! - `typing` with `PYOXIDE_BENCH_FLOOD=1`: the editor typing measurement
@@ -191,7 +193,11 @@ pub(super) async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         .unwrap_or_default();
     let frames = frames();
     let (mut latency, mut handling, mut work, mut missed) = (Vec::new(), Vec::new(), Vec::new(), 0);
-    for k in &keys {
+    // Where the time goes: the echo back from the PTY to the view, the
+    // copy of the screen, the wait for the frame.
+    let (mut echo, mut copy, mut to_frame) = (Vec::new(), Vec::new(), Vec::new());
+    let mut missing = Vec::new();
+    for (i, k) in keys.iter().enumerate() {
         // The first terminal frame after the key whose cursor is past it,
         // then the window frame that painted it.
         let Some(shown) = log
@@ -199,16 +205,26 @@ pub(super) async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
             .find(|r| r.at >= k.handled && r.cursor.map(|c| c.column) == Some(k.column))
         else {
             missed += 1;
+            missing.push(i);
             continue;
         };
         let Some(f) = frames.iter().find(|f| f.end >= shown.at) else {
             missed += 1;
+            missing.push(i);
             continue;
         };
         latency.push(ms(f.end - k.due));
         handling.push(ms(k.handled - k.sent));
         work.push(ms(f.end - f.start));
+        if let (Some(woke), Some(copied)) = (shown.woke, shown.copied)
+            && woke >= k.sent
+        {
+            echo.push(ms(woke - k.sent));
+            copy.push(ms(copied.saturating_duration_since(woke)));
+            to_frame.push(ms(f.end.saturating_duration_since(copied)));
+        }
     }
+    missing.truncate(20);
     env::marker(&format!(
         "terminal-typing {}",
         json!({
@@ -218,6 +234,10 @@ pub(super) async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
             "key_to_frame_ms": stats(latency),
             "key_handling_ms": stats(handling),
             "frame_ms": stats(work),
+            "echo_ms": stats(echo),
+            "wakeup_to_copy_ms": stats(copy),
+            "copy_to_frame_end_ms": stats(to_frame),
+            "missing_keys": missing,
         })
     ));
 }
@@ -273,13 +293,23 @@ pub(super) async fn flood(window: WindowHandle<Workbench>, mib: usize, cx: &mut 
         .unwrap_or_default();
     let shown = log
         .iter()
-        .find(|r| r.at >= t0 && r.last_line == "flood done")
+        // The shell's prompt follows the last line.
+        .find(|r| r.at >= t0 && r.shows_line("flood done"))
         .map(|r| r.at);
     let frames: Vec<_> = frames()
         .into_iter()
         .filter(|f| f.start >= t0 && shown.is_none_or(|s| f.end <= s + Duration::from_millis(50)))
         .collect();
     let seconds = shown.map(|s| (s - t0).as_secs_f64());
+    // Copies of the screen the frames showed (ten a second once flooding).
+    let flood_frames: Vec<_> = log
+        .iter()
+        .filter(|r| r.at >= t0 && shown.is_none_or(|s| r.at <= s))
+        .collect();
+    let copies = match (flood_frames.first(), flood_frames.last()) {
+        (Some(a), Some(b)) => b.snapshots - a.snapshots,
+        _ => 0,
+    };
     let work: Vec<f64> = frames.iter().map(|f| ms(f.end - f.start)).collect();
     let _ = std::fs::remove_file(&path);
     env::marker(&format!(
@@ -290,7 +320,8 @@ pub(super) async fn flood(window: WindowHandle<Workbench>, mib: usize, cx: &mut 
             "seconds": seconds,
             "mib_per_s": seconds.map(|s| (mib as f64 / s * 10.0).round() / 10.0),
             "frame_count": frames.len(),
-            "terminal_frames": log.iter().filter(|r| r.at >= t0).count(),
+            "terminal_frames": flood_frames.len(),
+            "copies": copies,
             "frame_ms": stats(work),
         })
     ));

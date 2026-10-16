@@ -336,6 +336,7 @@ impl Element for TerminalElement {
         let (plan, geometry, colors, marked) = self.view.update(cx, |view, cx| {
             let alternate = view.snapshot.modes.alt_screen;
             let (grid, _) = grid_layout(bounds, metrics.cell, alternate);
+            view.window = window.window_handle();
             view.prepare(grid, &base_colors, cx);
             // The screen may have switched with this snapshot.
             let alternate = view.snapshot.modes.alt_screen;

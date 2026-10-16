@@ -1,12 +1,13 @@
 //! The session view in a headless window with a real pseudo-terminal:
 //! typed and composed text, keys, resizing, mouse selection, mouse
 //! reporting with Shift selecting instead, the wheel on the main and the
-//! alternate screen. `cat` stands in for a shell: it echoes what it gets
+//! alternate screen, and the slower copies of a flood of output. `cat`
+//! stands in for a shell: it echoes what it gets
 //! through the terminal's line discipline (control characters as `^X`),
 //! so what the view sent can be read off the screen.
 #![cfg(unix)]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{
     Entity, EntityInputHandler as _, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
@@ -15,7 +16,7 @@ use gpui::{
 use serde_json::Value;
 use terminal::start::{Os, environment};
 use terminal::{SessionOptions, ShellCommand, TerminalSize};
-use terminal_ui::SessionView;
+use terminal_ui::{FLOOD_AFTER, FLOOD_FRAME, SessionView};
 
 fn options(program: &str, args: &[&str]) -> SessionOptions {
     SessionOptions {
@@ -50,8 +51,15 @@ fn open<'a>(
     (view, cx)
 }
 
-/// Draws frames (each takes the session's snapshot) until `f` accepts the
-/// view's state (at most about 20 s).
+/// Runs the background work (the view's copies of the screen) and draws a
+/// frame.
+fn frame(cx: &mut VisualTestContext) {
+    cx.executor().advance_clock(Duration::from_millis(20));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear());
+}
+
+/// Draws frames until `f` accepts the view's state (at most about 20 s).
 fn wait(
     cx: &mut VisualTestContext,
     view: &Entity<SessionView>,
@@ -60,9 +68,7 @@ fn wait(
 ) -> Value {
     let mut last = Value::Null;
     for _ in 0..2000 {
-        cx.executor().advance_clock(Duration::from_millis(20));
-        cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear());
+        frame(cx);
         last = view.read_with(cx, |v, _| v.state());
         if f(&last) {
             return last;
@@ -70,6 +76,18 @@ fn wait(
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("timed out waiting for {what}: {last:#}");
+}
+
+/// Copies of the screen the view made while frames are drawn for `time`.
+fn copies_in(cx: &mut VisualTestContext, view: &Entity<SessionView>, time: Duration) -> u64 {
+    let (_, before) = view.read_with(cx, |v, _| v.counters());
+    let start = Instant::now();
+    while start.elapsed() < time {
+        frame(cx);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let (_, after) = view.read_with(cx, |v, _| v.counters());
+    after - before
 }
 
 fn has_line(s: &Value, f: impl Fn(&str) -> bool) -> bool {
@@ -280,4 +298,29 @@ fn the_wheel_scrolls_the_history_or_sends_arrows(cx: &mut TestAppContext) {
     wait(cx, &view, "an arrow key", |s| {
         has_line(s, |l| l.contains("^[[A"))
     });
+}
+
+#[gpui::test]
+fn a_flood_of_output_is_copied_ten_times_a_second(cx: &mut TestAppContext) {
+    let (view, cx) = open(cx, "/usr/bin/yes", &["flood"]);
+    wait(cx, &view, "the flood", |s| has_line(s, |l| l == "flood"));
+    // Output that keeps coming slows the copies down (a frame is drawn
+    // about every 2 ms here, so every frame could show a copy).
+    copies_in(cx, &view, FLOOD_AFTER * 2);
+    let second = Duration::from_secs(1);
+    let copies = copies_in(cx, &view, second);
+    let most = (second.as_millis() / FLOOD_FRAME.as_millis()) as u64 + 2;
+    assert!(
+        (2..=most).contains(&copies),
+        "{copies} copies in a second of flood"
+    );
+    // A key is echoed without the flood's wait: the copies speed up
+    // (ten keys a second, each followed by copies at the frame rate).
+    let start = Instant::now();
+    let mut copies = 0;
+    while start.elapsed() < second {
+        view.update(cx, |v, cx| v.type_text("x", cx));
+        copies += copies_in(cx, &view, Duration::from_millis(100));
+    }
+    assert!(copies > most, "{copies} copies in a second of typing");
 }

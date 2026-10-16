@@ -3,6 +3,9 @@
 //! - [`SessionView`]: one session of the `terminal` crate in a focusable
 //!   view: keys, typed and composed text, pastes, mouse selection and
 //!   reporting, wheel and scrollbar, resizes, and the Terminal commands.
+//!   It copies the screen on a background thread, at most once per
+//!   [`FRAME`] and once per [`FLOOD_FRAME`] while output floods, and
+//!   repaints at the start of the next display frame.
 //! - [`TerminalElement`]: the grid element that paints the view's snapshot
 //!   ([`plan`] works out a frame without the toolkit: cell backgrounds,
 //!   text runs at their columns, the cursor).
@@ -25,8 +28,8 @@ pub use element::{
 };
 pub use terminal::StartRequest;
 pub use view::{
-    BLINK_INTERVAL, FRAME, FrameRecord, Geometry, KEY_CONTEXT, ScrollbarGeometry, SessionView,
-    SessionViewEvent, TerminalOptions,
+    BLINK_INTERVAL, FLOOD_AFTER, FLOOD_FRAME, FRAME, FrameRecord, Geometry, KEY_CONTEXT,
+    ScrollbarGeometry, SessionView, SessionViewEvent, TerminalOptions,
 };
 
 /// Registers the Terminal commands.

@@ -7,8 +7,8 @@
 //!   hang-up and kill go through the same thread; [`SessionEvent`]s arrive
 //!   on a channel.
 //! - [`Snapshot`]: what the view paints, copied under the terminal's lock at
-//!   most once per frame: the visible cells, the cursor, the modes, the
-//!   selection and the search matches.
+//!   most once per frame (from any thread through [`Screen`]): the visible
+//!   cells, the cursor, the modes, the selection and the search matches.
 //! - [`input`]: xterm encoding of keys, pastes, mouse and focus events.
 //! - [`start`]: the start rules of the reference (shell, `--login` / `-i`,
 //!   working directory, environment) and [`plan_session`] with the
@@ -43,8 +43,8 @@ pub use input::{Key, Modifiers, MouseAction, MouseButton};
 pub use prescan::{MarkKind, OWN_OSC};
 pub use process::ExitStatus;
 pub use session::{
-    DEFAULT_SCROLLBACK, MatchCount, Palette, Scroll, SearchDirection, SearchError, SearchQuery,
-    SelectionKind, Session, SessionEvent, SessionOptions, ShellMark, Side, SpawnError,
+    DEFAULT_SCROLLBACK, MatchCount, Palette, Screen, Scroll, SearchDirection, SearchError,
+    SearchQuery, SelectionKind, Session, SessionEvent, SessionOptions, ShellMark, Side, SpawnError,
     TerminalSize,
 };
 pub use shells::{DetectedShell, ShellEnvironment, detect_shells};

@@ -419,6 +419,45 @@ pub(crate) struct Shared {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Copies the screen of a session from any thread
+/// ([`Session::screen`]); it keeps the emulator state alive, not the shell.
+#[derive(Clone)]
+pub struct Screen {
+    shared: Arc<Shared>,
+}
+
+impl fmt::Debug for Screen {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Screen").finish_non_exhaustive()
+    }
+}
+
+impl Screen {
+    /// [`Session::snapshot_into`].
+    pub fn snapshot_into(&self, out: &mut Snapshot) {
+        fill_snapshot(&self.shared, out);
+    }
+}
+
+/// Copies the visible state under the terminal's lock.
+fn fill_snapshot(shared: &Shared, out: &mut Snapshot) {
+    // Output after this point sends a new wakeup.
+    shared
+        .notifier
+        .wakeup_pending
+        .store(false, Ordering::Release);
+    let mut guard = shared.state.lock();
+    let State { term, search } = &mut *guard;
+    snapshot::fill(term, out);
+    if let Some(search) = search {
+        visible_matches(term, &mut search.regex, &mut out.matches);
+        out.current_match = search
+            .current
+            .as_ref()
+            .and_then(|m| clip_span(term, *m.start(), *m.end(), false));
+    }
+}
+
 /// A running (or ended) shell session. Dropping it stops the shell: hang
 /// up, then kill after a grace period, on a background thread.
 pub struct Session {
@@ -643,20 +682,14 @@ impl Session {
     /// [`Session::snapshot`] into an existing snapshot, reusing its
     /// buffers (once per frame).
     pub fn snapshot_into(&self, out: &mut Snapshot) {
-        // Output after this point sends a new wakeup.
-        self.shared
-            .notifier
-            .wakeup_pending
-            .store(false, Ordering::Release);
-        let mut guard = self.shared.state.lock();
-        let State { term, search } = &mut *guard;
-        snapshot::fill(term, out);
-        if let Some(search) = search {
-            visible_matches(term, &mut search.regex, &mut out.matches);
-            out.current_match = search
-                .current
-                .as_ref()
-                .and_then(|m| clip_span(term, *m.start(), *m.end(), false));
+        fill_snapshot(&self.shared, out);
+    }
+
+    /// A handle that copies the screen from another thread, so the view
+    /// never waits for the terminal's lock on the UI thread.
+    pub fn screen(&self) -> Screen {
+        Screen {
+            shared: self.shared.clone(),
         }
     }
 
@@ -738,6 +771,12 @@ impl Session {
         term.selection = Some(selection);
         drop(state);
         self.shared.notifier.wake();
+    }
+
+    /// Whether a selection was started, empty or not: a click sets the
+    /// anchor that Shift+click extends.
+    pub fn has_selection(&self) -> bool {
+        self.shared.state.lock().term.selection.is_some()
     }
 
     /// The selected text, if anything is selected.

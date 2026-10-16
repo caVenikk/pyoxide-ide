@@ -1,6 +1,8 @@
-//! The session view: one terminal session in a focusable view. It takes a
-//! snapshot of the session at most once per frame after the session said
-//! the screen changed, passes keys, typed and composed text, pastes, mouse
+//! The session view: one terminal session in a focusable view. After the
+//! session says the screen changed it copies the screen on a background
+//! thread, at most once per frame (ten times a second while output
+//! floods), and repaints at the start of the next frame; it passes keys,
+//! typed and composed text, pastes, mouse
 //! reports and resizes to the session, selects text with the mouse
 //! (drag, double click for a word, triple click for a line, Alt or
 //! Shift+Alt drag for a rectangle, Shift+click to extend), scrolls the
@@ -12,10 +14,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, IntoElement,
-    KeyDownEvent, Modifiers as GpuiModifiers, MouseButton as GpuiButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render, ScrollWheelEvent, Size, Task,
-    Window, div, prelude::*, px,
+    AnyWindowHandle, App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable,
+    IntoElement, KeyDownEvent, Modifiers as GpuiModifiers, MouseButton as GpuiButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, Render,
+    ScrollWheelEvent, Size, Task, Window, div, prelude::*, px,
 };
 use serde_json::{Value, json};
 use terminal::{
@@ -32,9 +34,18 @@ use crate::keys;
 
 /// The key context of the view (keymaps' `Terminal` sections).
 pub const KEY_CONTEXT: &str = "Terminal";
-/// Shortest time between two snapshots: one frame, so a flood of output
-/// costs one repaint per frame.
+/// Shortest time between two copies of the screen: one frame, so output
+/// costs at most one repaint per frame.
 pub const FRAME: Duration = Duration::from_millis(16);
+/// Shortest time between two copies while output floods: the screen is
+/// copied and its lines shaped ten times a second, which leaves the
+/// frames in between to the rest of the window (the editor being typed
+/// in while a build prints).
+pub const FLOOD_FRAME: Duration = Duration::from_millis(100);
+/// Output that keeps coming this long (each change within
+/// [`FLOOD_FRAME`] of the last copy) is a flood. Input and scrolling end
+/// it.
+pub const FLOOD_AFTER: Duration = Duration::from_millis(200);
 /// How long the blinking cursor stays visible or hidden (the editor's).
 pub const BLINK_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -129,14 +140,31 @@ impl Geometry {
 /// What a frame of the view showed (measurements).
 #[derive(Clone, Debug)]
 pub struct FrameRecord {
-    /// When the frame was laid out (its snapshot taken).
+    /// When the frame was laid out.
     pub at: Instant,
     /// Snapshots taken up to this frame.
     pub snapshots: u64,
     pub cursor: Option<Point>,
     pub display_offset: usize,
-    /// The last visible line that is not blank.
-    pub last_line: String,
+    /// The last visible lines that are not blank, the bottom one first
+    /// (at most [`FrameRecord::TAIL`]).
+    pub tail: Vec<String>,
+    /// When the first change this snapshot shows was reported (the
+    /// session's wakeup reached the view).
+    pub woke: Option<Instant>,
+    /// When the snapshot was copied.
+    pub copied: Option<Instant>,
+}
+
+impl FrameRecord {
+    /// Lines kept in [`FrameRecord::tail`]: a prompt can follow the
+    /// output that is looked for.
+    pub const TAIL: usize = 4;
+
+    /// Whether one of the last lines is `text`.
+    pub fn shows_line(&self, text: &str) -> bool {
+        self.tail.iter().any(|l| l == text)
+    }
 }
 
 /// The mouse gesture in progress.
@@ -165,10 +193,31 @@ pub struct SessionView {
     focus: FocusHandle,
     options: TerminalOptions,
     pub(crate) snapshot: Snapshot,
-    /// A snapshot is due in the next frame.
-    dirty: bool,
+    /// The buffers of the next copy (the snapshot shown before).
+    spare: Snapshot,
+    /// Copy the screen in the next frame, on the UI thread: a new session,
+    /// a new size, or the user scrolled or selected, which the frame must
+    /// show.
+    copy_in_frame: bool,
+    /// The session reported a change that is not copied yet.
+    changed: bool,
+    /// The copy running on a background thread.
+    copying: Option<Task<()>>,
+    /// Counts copies in a frame: a background copy started before one is
+    /// older and dropped.
+    copy_epoch: u64,
+    /// The last copy is not drawn yet (no new copy until it is).
+    unshown: bool,
+    /// A repaint is requested for the start of the next frame.
+    frame_requested: bool,
+    /// Waits out the shortest time between two copies.
     refresh_task: Option<Task<()>>,
-    last_snapshot: Option<Instant>,
+    /// When the last copy started.
+    last_copy: Option<Instant>,
+    /// Since when output keeps coming.
+    busy_since: Option<Instant>,
+    /// The window the view was last drawn in (its frames repaint it).
+    pub(crate) window: AnyWindowHandle,
     pub(crate) resolver: Resolver,
     /// The colours the session answers colour queries with.
     palette: Option<terminal::Palette>,
@@ -192,6 +241,10 @@ pub struct SessionView {
     snapshots: u64,
     /// What each frame showed, while a measurement records it.
     frame_log: Option<Vec<FrameRecord>>,
+    /// The first wakeup since the last snapshot, and the wakeup and copy
+    /// times of the snapshot shown (measurements).
+    woke: Option<Instant>,
+    shown_times: (Option<Instant>, Option<Instant>),
     _events: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -267,9 +320,17 @@ impl SessionView {
             focus,
             options: TerminalOptions::default(),
             snapshot: Snapshot::default(),
-            dirty: true,
+            spare: Snapshot::default(),
+            copy_in_frame: false,
+            changed: false,
+            copying: None,
+            copy_epoch: 0,
+            unshown: false,
+            frame_requested: false,
             refresh_task: None,
-            last_snapshot: None,
+            last_copy: None,
+            busy_since: None,
+            window: window.window_handle(),
             resolver: Resolver::default(),
             palette: None,
             geometry: None,
@@ -286,6 +347,8 @@ impl SessionView {
             frames: 0,
             snapshots: 0,
             frame_log: None,
+            woke: None,
+            shown_times: (None, None),
             _events: None,
             _subscriptions: subscriptions,
         }
@@ -305,7 +368,7 @@ impl SessionView {
         }
         self.palette = None;
         self.session = Some(session);
-        self.dirty = true;
+        self.copy_in_frame = true;
         self._events = Some(cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv_async().await {
                 if this.update(cx, |v, cx| v.on_event(event, cx)).is_err() {
@@ -340,7 +403,7 @@ impl SessionView {
 
     fn on_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         match event {
-            SessionEvent::Wakeup => self.request_refresh(cx),
+            SessionEvent::Wakeup => self.screen_changed(cx),
             SessionEvent::Title(title) => {
                 self.title = title.clone();
                 cx.emit(SessionViewEvent::TitleChanged(title));
@@ -356,40 +419,147 @@ impl SessionView {
             SessionEvent::Mark(_) | SessionEvent::Integration(_) => {}
             SessionEvent::Exited(status) => {
                 self.exit = Some(status);
-                self.dirty = true;
+                self.show_now(cx);
                 cx.emit(SessionViewEvent::Exited(status));
-                cx.notify();
             }
         }
     }
 
-    /// The screen changed: take a snapshot in the next frame, at most one
-    /// per [`FRAME`].
-    fn request_refresh(&mut self, cx: &mut Context<Self>) {
-        if self.dirty || self.refresh_task.is_some() {
+    /// The session reported a change of its screen.
+    fn screen_changed(&mut self, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        if self.frame_log.is_some() && self.woke.is_none() {
+            self.woke = Some(now);
+        }
+        // A change while the last copy is still on its way to the screen,
+        // or soon after it: output keeps coming. (The UI thread may see the
+        // change late, after a long frame: "soon" is generous.)
+        let on_the_way = self.copying.is_some() || self.unshown || self.refresh_task.is_some();
+        let soon = self
+            .last_copy
+            .is_some_and(|copy| now.duration_since(copy) < FLOOD_FRAME);
+        if on_the_way || soon {
+            self.busy_since.get_or_insert(now);
+        } else {
+            self.busy_since = None;
+        }
+        self.changed = true;
+        self.pump(cx);
+    }
+
+    /// Whether output has kept coming for [`FLOOD_AFTER`].
+    fn flooding(&self) -> bool {
+        self.busy_since
+            .is_some_and(|since| since.elapsed() >= FLOOD_AFTER)
+    }
+
+    /// Starts the next copy of the screen when one is due: after a change,
+    /// once the last copy was drawn, at most one per [`FRAME`] (per
+    /// [`FLOOD_FRAME`] while output floods).
+    fn pump(&mut self, cx: &mut Context<Self>) {
+        if !self.changed
+            || self.session.is_none()
+            || self.copying.is_some()
+            || self.unshown
+            || self.refresh_task.is_some()
+        {
             return;
         }
+        let interval = if self.flooding() { FLOOD_FRAME } else { FRAME };
         let wait = self
-            .last_snapshot
-            .map(|t| FRAME.saturating_sub(t.elapsed()))
+            .last_copy
+            .map(|copy| interval.saturating_sub(copy.elapsed()))
             .unwrap_or_default();
-        if wait.is_zero() {
-            self.dirty = true;
-            cx.notify();
+        if !wait.is_zero() {
+            self.refresh_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |v, cx| {
+                    v.refresh_task = None;
+                    v.pump(cx);
+                });
+            }));
             return;
         }
-        self.refresh_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = this.update(cx, |v, cx| {
-                v.refresh_task = None;
-                v.dirty = true;
-                cx.notify();
-            });
+        let Some(session) = &self.session else {
+            return;
+        };
+        let screen = session.screen();
+        let mut buffer = std::mem::take(&mut self.spare);
+        let epoch = self.copy_epoch;
+        let woke = self.woke.take();
+        self.changed = false;
+        self.last_copy = Some(Instant::now());
+        // The lock may be held by the reader while it parses a batch of
+        // output: the UI thread does not wait for it.
+        let copy = cx.background_executor().spawn(async move {
+            screen.snapshot_into(&mut buffer);
+            buffer
+        });
+        self.copying = Some(cx.spawn(async move |this, cx| {
+            let snapshot = copy.await;
+            let _ = this.update(cx, |v, cx| v.copied(snapshot, epoch, woke, cx));
         }));
     }
 
-    /// Takes the snapshot of this frame if one is due; sizes the session to
-    /// the grid and gives it the theme's colours.
+    /// A background copy is done: show it at the next frame.
+    fn copied(
+        &mut self,
+        snapshot: Snapshot,
+        epoch: u64,
+        woke: Option<Instant>,
+        cx: &mut Context<Self>,
+    ) {
+        self.copying = None;
+        if epoch != self.copy_epoch {
+            // A copy in a frame since is newer.
+            self.spare = snapshot;
+            self.pump(cx);
+            return;
+        }
+        self.spare = std::mem::replace(&mut self.snapshot, snapshot);
+        self.snapshots += 1;
+        self.shown_times = (woke, Some(Instant::now()));
+        self.unshown = true;
+        self.repaint_next_frame(cx);
+    }
+
+    /// Repaints the view at the start of the next display frame. Notifying
+    /// now would mark the window for drawing until then, and GPUI draws a
+    /// marked window before it dispatches a key: a key typed in the editor
+    /// meanwhile would wait for a frame of the whole window first.
+    fn repaint_next_frame(&mut self, cx: &mut Context<Self>) {
+        if self.frame_requested {
+            return;
+        }
+        let this = cx.entity().downgrade();
+        let requested = cx.update_window(self.window, |_, window, _| {
+            window.on_next_frame(move |_, cx| {
+                let _ = this.update(cx, |v, cx| {
+                    v.frame_requested = false;
+                    // Not drawn by a frame for another reason meanwhile.
+                    if v.unshown {
+                        cx.notify();
+                    }
+                });
+            });
+        });
+        match requested {
+            Ok(()) => self.frame_requested = true,
+            Err(_) => cx.notify(),
+        }
+    }
+
+    /// The user changed what the screen shows (scrolling, selecting): copy
+    /// it in the next frame.
+    fn show_now(&mut self, cx: &mut Context<Self>) {
+        self.busy_since = None;
+        self.copy_in_frame = true;
+        cx.notify();
+    }
+
+    /// Sizes the session to the grid, gives it the theme's colours and
+    /// copies the screen when this frame must show it; the copy drawn
+    /// now is shown, so the next one may start.
     pub(crate) fn prepare(
         &mut self,
         size: TerminalSize,
@@ -405,19 +575,26 @@ impl SessionView {
         if self.size != Some(size) {
             self.size = Some(size);
             session.resize(size);
-            self.dirty = true;
+            self.copy_in_frame = true;
         }
         let palette = colors.palette();
         if self.palette.as_ref() != Some(&palette) {
             session.set_palette(palette.clone());
             self.palette = Some(palette);
         }
-        if self.dirty {
-            self.dirty = false;
+        if self.copy_in_frame {
+            self.copy_in_frame = false;
+            // A background copy still running is older.
+            self.copy_epoch += 1;
+            let start = Instant::now();
             session.snapshot_into(&mut self.snapshot);
-            self.last_snapshot = Some(Instant::now());
+            self.changed = false;
+            self.last_copy = Some(start);
+            self.shown_times = (self.woke.take(), Some(Instant::now()));
             self.snapshots += 1;
         }
+        self.unshown = false;
+        self.pump(cx);
     }
 
     // ---- state ----------------------------------------------------------
@@ -514,10 +691,19 @@ impl SessionView {
         }
     }
 
+    /// Input went to the session: its echo is copied without the flood's
+    /// wait, and the cursor stays visible for a blink interval. The echo's
+    /// copy repaints the view.
     fn after_input(&mut self, cx: &mut Context<Self>) {
         self.blink_epoch += 1;
-        self.blink_on = true;
-        cx.notify();
+        if !self.blink_on {
+            self.blink_on = true;
+            cx.notify();
+        }
+        self.busy_since = None;
+        if self.refresh_task.take().is_some() {
+            self.pump(cx);
+        }
     }
 
     fn key_down(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -562,21 +748,21 @@ impl SessionView {
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(s) = &self.session {
             s.select_all();
-            cx.notify();
+            self.show_now(cx);
         }
     }
 
     fn clear(&mut self, _: &Clear, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(s) = &self.session {
             s.clear();
-            cx.notify();
+            self.show_now(cx);
         }
     }
 
     fn scroll(&mut self, scroll: Scroll, cx: &mut Context<Self>) {
         if let Some(s) = &self.session {
             s.scroll(scroll);
-            cx.notify();
+            self.show_now(cx);
         }
     }
 
@@ -653,7 +839,9 @@ impl SessionView {
         }
         match e.button {
             GpuiButton::Left => {
-                let has_selection = self.snapshot.selection.is_some();
+                // The session's selection: the snapshot may not show a
+                // click's empty one yet.
+                let has_selection = session.has_selection();
                 if e.modifiers.shift && !e.modifiers.alt && has_selection && e.click_count == 1 {
                     session.update_selection(point, side);
                 } else {
@@ -666,7 +854,7 @@ impl SessionView {
                     session.start_selection(kind, point, side);
                 }
                 self.gesture = Gesture::Selecting;
-                cx.notify();
+                self.show_now(cx);
             }
             GpuiButton::Middle if self.options.paste_on_middle_click => {
                 // The primary selection on Linux, else the clipboard.
@@ -699,7 +887,7 @@ impl SessionView {
                 }
                 let (point, side) = geometry.cell_at(e.position);
                 session.update_selection(point, side);
-                cx.notify();
+                self.show_now(cx);
             }
             Gesture::Reporting(button) => {
                 let (point, _) = geometry.cell_at(e.position);
@@ -797,7 +985,7 @@ impl SessionView {
             return;
         }
         session.scroll(Scroll::Lines(lines));
-        cx.notify();
+        self.show_now(cx);
     }
 
     fn drag_scrollbar(&mut self, y: Pixels, cx: &mut Context<Self>) {
@@ -820,7 +1008,7 @@ impl SessionView {
         let current = self.snapshot.display_offset as i32;
         if target != current {
             session.scroll(Scroll::Lines(target - current));
-            cx.notify();
+            self.show_now(cx);
         }
     }
 
@@ -865,11 +1053,14 @@ impl SessionView {
                 snapshots: self.snapshots,
                 cursor: self.snapshot.cursor.map(|c| c.point),
                 display_offset: self.snapshot.display_offset,
-                last_line: (0..self.snapshot.rows)
+                tail: (0..self.snapshot.rows)
                     .rev()
                     .map(|l| self.snapshot.line_text(l))
-                    .find(|t| !t.is_empty())
-                    .unwrap_or_default(),
+                    .filter(|t| !t.trim().is_empty())
+                    .take(FrameRecord::TAIL)
+                    .collect(),
+                woke: self.shown_times.0,
+                copied: self.shown_times.1,
             });
         }
     }

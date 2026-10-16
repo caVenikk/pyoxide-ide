@@ -72,10 +72,13 @@ the PTY, pre-scans the bytes for the sequences `Term` ignores (OSC 7 working
 directory, OSC 133 prompt and command marks, Pyoxide's own integration
 events) and feeds them to the parser under the terminal's lock; a writer
 path sends input, and resizes and the child's exit are handled there too.
-Selection and search use the crate's `Selection` and regex search. The UI
-thread takes a snapshot of the visible cells, the cursor, the modes, the
-selection and the matches under the lock, at most once per frame, and
-paints from it. Types of the crate do not leave the `terminal` crate.
+Selection and search use the crate's `Selection` and regex search. A
+snapshot of the visible cells, the cursor, the modes, the selection and the
+matches is copied under the lock on a background thread, at most once per
+frame and ten times a second while output floods, and the UI thread paints
+from the last copy at the start of the next frame; it never waits for the
+lock while the reader parses. Types of the crate do not leave the
+`terminal` crate.
 Scrollback: 10 000 lines by default (the reference keeps 1024 KB of output;
 the crate counts lines), measured against the idle memory budget.
 
@@ -92,7 +95,9 @@ terminal:
   adding one would put terminal concerns (cell alignment, wide cells,
   alternate screen, mouse reporting) into the most performance-sensitive
   crate for one user, and the snapshot already is a grid. Repaint is
-  coalesced to one per frame, as the Run console does.
+  coalesced to one per frame, as the Run console does, and to ten a second
+  while output floods, so typing in an editor beside a busy terminal
+  keeps its frames.
 - **Shell integration**: Pyoxide's own scripts for zsh (`ZDOTDIR`), bash
   (`--rcfile`), fish (`--init-command`) and PowerShell (`-File`), emitting
   standard OSC 7 and OSC 133. The injection mechanism is adapted from the
