@@ -74,7 +74,10 @@ fn bench_flood_through_the_pty() {
         "{}",
         snapshot.text()
     );
-    assert_eq!(snapshot.history_size, terminal::DEFAULT_SCROLLBACK);
+    // ConPTY may repaint the screen instead of scrolling it.
+    if cfg!(unix) {
+        assert_eq!(snapshot.history_size, terminal::DEFAULT_SCROLLBACK);
+    }
     let mib = BYTES as f64 / (1 << 20) as f64;
     println!();
     println!(
