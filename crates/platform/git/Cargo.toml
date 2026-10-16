@@ -1,0 +1,20 @@
+[package]
+name = "git"
+description = "Git for Pyoxide IDE through the git executable: lookup and version, a runner with per-repository locks and cancellation, porcelain parsers, readers of the .git folder, repository detection, the status service, base texts and git.* engine commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+commands.workspace = true
+flume.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+vcs.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+tempfile = "3"
