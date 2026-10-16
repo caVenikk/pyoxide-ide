@@ -16,6 +16,7 @@ use ui::theme::{Theme, ThemeExt, color};
 
 use crate::diagnostics::{Analysis, Look, MarkSeverity, line_looks};
 use crate::editor::{DragUnit, Editor, EditorEvent};
+use crate::gutter::{self, DecorationGeometry, DecorationPaint};
 use crate::highlight::InlineStyle;
 use crate::wrap::Segment;
 
@@ -117,6 +118,9 @@ pub(crate) struct LayoutInfo {
     pub links: Vec<LinkRect>,
     /// Signs drawn at soft wraps.
     pub wrap_signs: usize,
+    /// The gutter's lanes, the change markers and the clickable after-line
+    /// texts.
+    pub decorations: DecorationGeometry,
 }
 
 /// A problem's mark on the error stripe.
@@ -380,6 +384,10 @@ pub(crate) struct Prepaint {
     /// Signs at soft wraps: before a wrap at the end of its row, after it
     /// before the next row's text.
     wrap_signs: Vec<(ShapedLine, gpui::Point<Pixels>)>,
+    /// Gutter icons, change markers, line backgrounds and after-line texts.
+    decorations: DecorationPaint,
+    /// The decorations' error stripe marks as painted.
+    decoration_spans: Vec<(Bounds<Pixels>, Hsla)>,
     colors: Colors,
 }
 
@@ -512,6 +520,11 @@ pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics 
 }
 
 impl Metrics {
+    /// Offset of the baseline from the top of a line.
+    fn baseline(&self) -> Pixels {
+        (self.line_height - self.ascent - self.descent) / 2.0 + self.ascent
+    }
+
     /// Offsets from the top of a line of the underline and the
     /// strikethrough of its text, where the text system draws them.
     fn effect_offsets(&self) -> (Pixels, Pixels) {
@@ -1396,11 +1409,36 @@ impl Element for EditorElement {
             Vec::new()
         };
 
-        // Line numbers, right-aligned, on the first row of each line.
+        // Line numbers, right-aligned, on the first row of each line, unless
+        // a gutter icon is drawn there.
         let numbers_right = bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32;
+        let (mut decoration_paint, decoration_geometry) = gutter::prepaint(
+            editor,
+            &gutter::Frame {
+                bounds,
+                text_x,
+                scroll,
+                line_height: lh,
+                char_width: m.char_width,
+                baseline: m.baseline(),
+                font: &m.font,
+                font_size: m.font_size,
+                numbers_right,
+                lines: &lines,
+                total_rows,
+                gutter: !single_line && !console,
+            },
+            theme,
+            window,
+        );
         let numbers = lines
             .iter()
-            .filter(|l| l.sub == 0 && !single_line && !console)
+            .filter(|l| {
+                l.sub == 0
+                    && !single_line
+                    && !console
+                    && !decoration_paint.hidden_numbers.contains(&l.line)
+            })
             .map(|l| {
                 let label = SharedString::from((l.line + 1).to_string());
                 let color = if caret_lines.contains(&l.line) {
@@ -1456,7 +1494,13 @@ impl Element for EditorElement {
         // The error stripe: the scrollbar's track, or the same strip when
         // the text does not scroll but problems are shown (as the
         // reference's editor always has its error stripe).
-        let shows_problems = editor.analysis != Analysis::Off || !editor.diagnostics().is_empty();
+        let shows_problems = editor.analysis != Analysis::Off
+            || !editor.diagnostics().is_empty()
+            || editor
+                .decorations
+                .entries()
+                .iter()
+                .any(|e| e.decoration.stripe.is_some());
         let stripe = scrollbar.map(|s| s.track).or_else(|| {
             (!single_line && !console && shows_problems).then(|| {
                 Bounds::new(
@@ -1541,6 +1585,52 @@ impl Element for EditorElement {
             }
         }
         let problem_spans = stripe_spans(stripe.as_ref(), &problem_stripes);
+        // The decorations' marks: thin ones at the left of the stripe (the
+        // reference's thin marks of changed lines), wide ones like a
+        // problem's, each drawn once per pixel row.
+        let mut decoration_spans = Vec::new();
+        if let Some(track) = &stripe {
+            let lines = editor.decorations.lines(&editor.buffer);
+            let (mut thin, mut wide) = (Vec::new(), Vec::new());
+            for (entry, l) in editor.decorations.entries().iter().zip(lines.iter()) {
+                let Some(mark) = &entry.decoration.stripe else {
+                    continue;
+                };
+                let first = editor.line_row(l.start.min(len_lines - 1));
+                let last = if l.end > l.start + 1 {
+                    editor.line_row((l.end - 1).min(len_lines - 1))
+                } else {
+                    first
+                };
+                let (top, bottom) = (stripe_y(track, first), stripe_y(track, last));
+                let color = theme.color(mark.color);
+                if mark.thin {
+                    // As the reference widens short thin marks.
+                    let mut top = top;
+                    let mut bottom = bottom.max(top + px(STRIPE_MARK));
+                    if bottom - top < px(6.0) {
+                        top -= px(1.0);
+                        bottom += bottom - top - px(1.0);
+                    }
+                    thin.push(StripeMark {
+                        bounds: Bounds::from_corners(
+                            point(track.left(), top),
+                            point(track.left() + px(STRIPE_MARK), bottom),
+                        ),
+                        color,
+                        mark: usize::MAX,
+                    });
+                } else {
+                    wide.push(StripeMark {
+                        bounds: mark_bounds(track, top, bottom),
+                        color,
+                        mark: usize::MAX,
+                    });
+                }
+            }
+            decoration_spans = stripe_spans(Some(track), &wide);
+            decoration_spans.extend(stripe_spans(Some(track), &thin));
+        }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let text_right = stripe.map_or(bounds.right(), |s| s.left());
@@ -1551,6 +1641,7 @@ impl Element for EditorElement {
             ),
             HitboxBehavior::Normal,
         );
+        gutter::insert_hitboxes(&mut decoration_paint, &decoration_geometry, bounds, window);
         let link_hitboxes = link_rects
             .iter()
             .map(|l| {
@@ -1590,6 +1681,7 @@ impl Element for EditorElement {
             problem_stripes,
             links: link_rects,
             wrap_signs: wrap_signs.len(),
+            decorations: decoration_geometry,
         };
         let stored = layout.clone();
         self.editor.update(cx, |e, _| e.layout = Some(stored));
@@ -1611,6 +1703,8 @@ impl Element for EditorElement {
             dotted,
             after_end,
             wrap_signs,
+            decorations: decoration_paint,
+            decoration_spans,
             colors,
         }
     }
@@ -1640,7 +1734,12 @@ impl Element for EditorElement {
         // Arrow over the gutter and the scrollbar, I-beam over the text.
         ui::pointer::request(CursorStyle::Arrow, &p.hitbox, window);
         ui::pointer::request(CursorStyle::IBeam, &p.text_hitbox, window);
-        for link in p.link_hitboxes.iter().chain(&p.link_highlight_hitboxes) {
+        for link in p
+            .link_hitboxes
+            .iter()
+            .chain(&p.link_highlight_hitboxes)
+            .chain(&p.decorations.hand_hitboxes)
+        {
             ui::pointer::request(CursorStyle::PointingHand, link, window);
         }
 
@@ -1653,9 +1752,11 @@ impl Element for EditorElement {
             for r in &p.current_lines {
                 window.paint_quad(fill(*r, p.colors.current_line));
             }
+            gutter::paint_backgrounds(&p.decorations, window);
             for (shaped, origin) in &p.numbers {
                 let _ = shaped.paint(*origin, lh, window, cx);
             }
+            gutter::paint_gutter(&p.decorations, window, cx);
         });
         window.with_content_mask(
             Some(ContentMask {
@@ -1711,6 +1812,7 @@ impl Element for EditorElement {
                 for (shaped, origin) in &p.wrap_signs {
                     let _ = shaped.paint(*origin, lh, window, cx);
                 }
+                gutter::paint_after_texts(&p.decorations, lh, window, cx);
                 for d in &p.dotted {
                     paint_dots(window, d.x0, d.x1, d.y, d.color);
                 }
@@ -1744,7 +1846,7 @@ impl Element for EditorElement {
         for r in &p.stripe_marks {
             window.paint_quad(fill(*r, p.colors.search_stripe));
         }
-        for (bounds, color) in &p.problem_spans {
+        for (bounds, color) in p.decoration_spans.iter().chain(&p.problem_spans) {
             window.paint_quad(fill(*bounds, *color));
         }
         if let Some(bar) = p.layout.scrollbar {
@@ -1763,7 +1865,19 @@ impl Element for EditorElement {
         let hitbox = p.hitbox.clone();
         let editor = self.editor.clone();
         window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
-            if !phase.bubble() || e.button != MouseButton::Left || !hitbox.is_hovered(window) {
+            if !phase.bubble() || !hitbox.is_hovered(window) {
+                return;
+            }
+            // Decorations take presses of any button (a breakpoint's
+            // right-click).
+            let taken = editor.update(cx, |ed, cx| {
+                ed.decoration_press(e.position, e.button, e.modifiers, window, cx)
+            });
+            if taken {
+                cx.stop_propagation();
+                return;
+            }
+            if e.button != MouseButton::Left {
                 return;
             }
             editor.update(cx, |ed, cx| {

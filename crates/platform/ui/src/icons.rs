@@ -67,6 +67,7 @@ impl IconName {
     pub const QUESTION_DIALOG: Self = Self("general/questionDialog");
     pub const WARNING_DIALOG: Self = Self("general/warningDialog");
     pub const BRANCH: Self = Self("vcs/branch");
+    pub const BREAKPOINT: Self = Self("breakpoints/breakpoint");
     pub const FOLDER: Self = Self("nodes/folder");
     pub const PACKAGE: Self = Self("nodes/package");
     pub const PREVIEW: Self = Self("general/previewHorizontally");
@@ -233,6 +234,7 @@ platform_icons! {
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [
+        "breakpoints/breakpoint",
         "fileTypes/gitLabLogo", "run/debug_stroke", "run/rerun_stroke", "run/run_stroke",
         "run/stop_stroke",
         "general/inspections/inspectionsError", "general/inspections/inspectionsWarning",
@@ -240,8 +242,8 @@ platform_icons! {
 }
 
 /// A rasterized icon: name, dark variant, size in device pixels, tint
-/// (RGBA).
-type ImageKey = (&'static str, bool, u32, Option<u32>);
+/// (RGBA), opacity (0-255).
+type ImageKey = (&'static str, bool, u32, Option<u32>, u8);
 
 /// Registered icons and the rasterized images.
 #[derive(Default)]
@@ -290,11 +292,27 @@ fn image(
     window: &Window,
     cx: &App,
 ) -> Option<Arc<RenderImage>> {
+    image_with_opacity(name, size, tint, 1.0, window, cx)
+}
+
+/// The icon as an image for a custom element to paint
+/// (`Window::paint_image`): `size` logical pixels square for the current
+/// theme and the window's scale, optionally tinted, every pixel's alpha
+/// times `opacity`; rasterized once and cached.
+pub fn image_with_opacity(
+    name: IconName,
+    size: Pixels,
+    tint: Option<Hsla>,
+    opacity: f32,
+    window: &Window,
+    cx: &App,
+) -> Option<Arc<RenderImage>> {
     let icons = cx.try_global::<Icons>()?;
     let dark = cx.theme().is_dark();
     let pixels = (f32::from(size) * window.scale_factor()).round().max(1.0) as u32;
     let tint = tint.map(rgba8);
-    let key = (name.0, dark, pixels, tint.map(u32::from_be_bytes));
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let key = (name.0, dark, pixels, tint.map(u32::from_be_bytes), alpha);
     if let Some(image) = icons.images.borrow().get(&key) {
         return image.clone();
     }
@@ -308,9 +326,29 @@ fn image(
         Some(tint) => rasterize_tinted(svg, pixels, tint),
         None => rasterize(svg, pixels),
     }
+    .map(|image| fade(image, alpha))
     .map(Arc::new);
     icons.images.borrow_mut().insert(key, image.clone());
     image
+}
+
+/// The image with every pixel's alpha times `alpha` / 255 (straight alpha).
+fn fade(image: RenderImage, alpha: u8) -> RenderImage {
+    if alpha == u8::MAX {
+        return image;
+    }
+    let size = image.size(0);
+    let Some(bytes) = image.as_bytes(0) else {
+        return image;
+    };
+    let mut data = bytes.to_vec();
+    for pixel in data.as_chunks_mut::<4>().0 {
+        pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha) + 127) / 255) as u8;
+    }
+    match image::RgbaImage::from_raw(size.width.0 as u32, size.height.0 as u32, data) {
+        Some(buffer) => RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)]),
+        None => image,
+    }
 }
 
 /// A colour as 8-bit RGBA.

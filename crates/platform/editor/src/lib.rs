@@ -6,11 +6,13 @@
 //! an editor and shows the matches in it.
 
 pub mod commands;
+pub mod decorations;
 mod diagnostics;
 mod editor;
 mod element;
 pub mod field;
 pub mod find;
+mod gutter;
 pub mod highlight;
 mod input;
 mod inspection;
@@ -18,6 +20,10 @@ mod soft_wrap;
 mod viewer;
 mod wrap;
 
+pub use decorations::{
+    AfterLineText, ChangeKind, Decoration, DecorationId, GutterIcon, LineBackground, StripeMark,
+    TextPiece,
+};
 pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
 pub use editor::{
     BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, SearchHighlights,
