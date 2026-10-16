@@ -9,8 +9,12 @@
 //! The [`import`] module reads PyCharm colour schemes (`.icls`), UI themes
 //! (`.theme.json`) and plugin archives that contain them, and reports what
 //! could and could not be mapped. `docs/theme-mapping.md` lists the mapping.
+//!
+//! A [`Catalog`] holds the themes the IDE offers: the built-in ones and the
+//! ones imported into the configuration folder, in the reference's groups.
 
 pub mod builtin;
+pub mod catalog;
 mod color;
 pub mod contrast;
 pub mod import;
@@ -19,6 +23,7 @@ mod registry;
 mod roles;
 mod token_names;
 
+pub use catalog::{Catalog, CatalogEntry, ThemeGroup};
 pub use color::{ColorParseError, ColorRef, Rgba, contrast_ratio};
 pub use model::{
     FORMAT_VERSION, FontPatch, Fonts, Metrics, TextStyle, TextStyles, Theme, ThemeFile,
