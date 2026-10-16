@@ -64,6 +64,11 @@ release work uses `/replica-brand` (sweep), `/replica-launch`, `/replica-deploy`
 Artifacts go to `replica/`. Reference screenshots of proprietary products stay
 local in `replica/screens/` (git-ignored) and are never published.
 
+Work with sub-agents uses two more skills in `skills/`: `pyoxide-lead` (the
+lead's procedures: briefs, model choice, review, merge, builds to try, usage
+pauses, status reports) and `pyoxide-agent` (rules for a sub-agent working on
+one issue in its own git worktree, including the report format).
+
 ## Private files
 `.private/` is git-ignored and for personal notes only. Never reference it from
 public files and never commit it.
