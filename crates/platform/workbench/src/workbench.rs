@@ -221,8 +221,9 @@ impl Workbench {
         });
         let find_in_files = cx.new(|cx| FindInFiles::new(file_types.clone(), window, cx));
         let host = cx.entity().downgrade();
-        find_in_files.update(cx, |p, _| p.set_host(host));
+        find_in_files.update(cx, |p, cx| p.set_host(host.clone(), cx));
         let search_everywhere = cx.new(|cx| SearchEverywhere::new(file_types.clone(), window, cx));
+        search_everywhere.update(cx, |p, cx| p.set_host(host, cx));
         let project_files = cx.new(|_| ProjectFiles::new());
         let recent_place = search_everywhere::settings(cx).recent_files;
         let recent_files =

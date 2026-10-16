@@ -23,6 +23,10 @@ pub struct SearchEverywhereSettings {
     pub files_all_places: bool,
     /// Where Recent Files was moved and how it was resized.
     pub recent_files: Option<PopupPlace>,
+    /// The preview under the list is on.
+    pub preview: bool,
+    /// Share of the list in the split with the preview.
+    pub preview_split: Option<f32>,
 }
 
 #[derive(Default)]

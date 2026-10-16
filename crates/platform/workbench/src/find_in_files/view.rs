@@ -637,7 +637,7 @@ impl FindInFiles {
     /// The preview's title: the file name, then its folder in the project
     /// (shortened in the middle when long), muted.
     fn render_preview_title(&self, cx: &App) -> Option<AnyElement> {
-        let path = self.preview.path()?;
+        let path = self.preview.path(cx)?;
         let theme = cx.theme();
         let name = path
             .file_name()
@@ -795,7 +795,7 @@ impl FindInFiles {
                             .key_context("FindInFilesPreview")
                             .flex_1()
                             .min_h(px(0.0))
-                            .child(self.preview.editor().clone())
+                            .child(self.preview.view().clone())
                             .children(self.render_preview_hint(cx)),
                     ),
             )

@@ -136,6 +136,7 @@ pub fn init(cx: &mut App, product: &Product) {
     editor::init(cx);
     crate::find_in_files::init(cx, &product.find_file_masks);
     crate::search_everywhere::init(cx);
+    crate::file_preview::init(cx);
     crate::recent_files::init(cx);
     crate::navigation::init(cx);
     crate::run::init(cx);
@@ -352,6 +353,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         }
         if let Some(file) = crate::editor_settings::settings_file() {
             crate::editor_settings::load_settings(cx, file);
+        }
+        if let Some(file) = crate::file_preview::settings_file() {
+            crate::file_preview::load_settings(cx, file);
         }
         // Frames follow the display's refresh. After a keystroke the window
         // draws at once instead: the typed text is then ready for the next

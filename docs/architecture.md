@@ -108,8 +108,10 @@ Platform (`crates/platform/`, language-agnostic):
   window in the left, bottom or right area, one shown per area with a size
   per area, and other crates register their views through
   `ToolWindowView`), a movable and resizable popup frame, the Find in Files
-  and Replace in Files popup with its preview, Search Everywhere and Go to
-  File, Recent Files), the project tool window's file operations (New
+  and Replace in Files popup, Search Everywhere and Go to File with one
+  file preview component (`file_preview`: editable in Find in Files,
+  read-only in Search Everywhere, with the Soft-Wrap button), Recent
+  Files), the project tool window's file operations (New
   with the product's kinds, Rename, Delete, Cut, Copy, Paste, Move, Copy
   Path and drag and drop, with their popups and dialogs; tabs, the file
   index, the navigation history and the language services follow), file

@@ -13,6 +13,7 @@ pub mod commands;
 pub mod dialog;
 pub mod editor_settings;
 pub mod env;
+pub mod file_preview;
 pub mod file_types;
 pub mod find_in_files;
 pub mod keymap;

@@ -30,6 +30,7 @@
 //! until the text no longer contains the text that found nothing.
 
 pub mod actions;
+mod preview;
 mod providers;
 mod settings;
 mod view;
@@ -127,6 +128,9 @@ ui::ui_commands! {
     /// Regex on the Text tab.
     ToggleRegex => "search-everywhere.toggle-regex", "Regex",
         "Switches Regex of the Text tab (shared with Find in Files).";
+    /// The preview under the list.
+    TogglePreview => "search-everywhere.toggle-preview", "Preview",
+        "Shows or hides the preview of the selected item's file under the list (remembered).";
 }
 
 /// Rows of each kind a page shows: on All and Files (the reference's Files
@@ -326,6 +330,8 @@ pub struct SearchEverywhere {
     frame: PopupFrame,
     /// Checks in the background which recent files still exist.
     recent_check: Option<Task<()>>,
+    /// The selected row's file under the list.
+    preview: preview::Preview,
     /// Measurements: when the last search started and how long it took.
     started: Option<std::time::Instant>,
     finished: Option<Duration>,
@@ -379,6 +385,7 @@ impl SearchEverywhere {
         if let Some(place) = settings(cx).popup {
             frame.restore(place);
         }
+        let preview = preview::Preview::new(file_types.clone(), window, cx);
         Self {
             focus,
             field,
@@ -409,6 +416,7 @@ impl SearchEverywhere {
             list: UniformListScrollHandle::new(),
             frame,
             recent_check: None,
+            preview,
             started: None,
             finished: None,
             _subscriptions: subscriptions,
@@ -478,6 +486,11 @@ impl SearchEverywhere {
             "selected": self.selected,
             "dropdown": self.dropdown.as_ref().map(|d| format!("{d:?}").to_lowercase()),
             "footer": self.footer().0,
+            "preview": {
+                "on": settings(cx).preview,
+                "shown": self.preview_shown(cx),
+                "view": self.preview.view.read(cx).state_json(|p| self.rel(p), cx),
+            },
         })
     }
 
@@ -648,6 +661,7 @@ impl SearchEverywhere {
         self.recent_check = None;
         self.dropdown = None;
         self.frame.cancel_drag();
+        self.clear_preview(cx);
         let place = self.frame.place();
         update_settings(cx, |s| s.popup = place);
         if restore_focus {
@@ -1188,6 +1202,7 @@ impl SearchEverywhere {
         } else {
             self.restored_selection(&text).or(Some(0))
         };
+        self.preview_selected(cx);
         cx.notify();
     }
 
@@ -1260,6 +1275,7 @@ impl SearchEverywhere {
             gpui::ScrollStrategy::Bottom
         };
         self.list.scroll_to_item(index, strategy);
+        self.preview_selected(cx);
         cx.notify();
     }
 
@@ -1395,6 +1411,12 @@ impl SearchEverywhere {
         self.change_options(|o| o.whole_words = !o.whole_words, cx);
     }
 
+    fn toggle_preview_action(&mut self, _: &TogglePreview, _: &mut Window, cx: &mut Context<Self>) {
+        if self.tab != Tab::Actions {
+            self.toggle_preview(cx);
+        }
+    }
+
     fn toggle_regex_action(&mut self, _: &ToggleRegex, _: &mut Window, cx: &mut Context<Self>) {
         if self.tab != Tab::Text {
             cx.propagate();
@@ -1451,4 +1473,5 @@ popup_actions! {
     ToggleCase => toggle_case_action,
     ToggleWords => toggle_words_action,
     ToggleRegex => toggle_regex_action,
+    TogglePreview => toggle_preview_action,
 }

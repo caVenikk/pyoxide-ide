@@ -6,7 +6,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use editor::Editor;
-use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{
+    AppContext as _, Focusable as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle,
+};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use workbench::keymap::{self, Keymap};
@@ -663,5 +665,198 @@ fn recent_files(cx: &mut TestAppContext) {
         let active = s["active_tab"].as_u64().unwrap() as usize;
         assert_eq!(s["tabs"][active]["path"], json!("pkg/util.py"));
         assert_eq!(s["tabs"].as_array().unwrap().len(), 2);
+    });
+}
+
+impl H<'_> {
+    /// Lets the preview follow the selection and read its file.
+    fn preview_settle(&mut self) {
+        self.cx
+            .executor()
+            .advance_clock(workbench::find_in_files::PREVIEW_DELAY * 2);
+        self.draw();
+    }
+
+    fn preview(&mut self) -> Value {
+        self.state()["preview"].clone()
+    }
+
+    fn mouse_move(&mut self, selector: &'static str) {
+        let bounds = self
+            .vcx()
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"));
+        self.vcx()
+            .simulate_mouse_move(bounds.center(), None, Modifiers::none());
+        self.draw();
+    }
+
+    fn preview_editor(&mut self) -> gpui::Entity<Editor> {
+        self.window
+            .read_with(self.cx, |w, cx| {
+                w.search_everywhere().read(cx).preview_editor(cx)
+            })
+            .unwrap()
+    }
+}
+
+#[gpui::test]
+fn the_preview_follows_the_selection(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("search-everywhere.toml");
+        h.cx.update(|cx| workbench::search_everywhere::load_settings(cx, settings.clone()));
+        h.press(h.keys.go_to_text);
+        h.type_text("needle");
+        h.settle();
+        // Off by default: no preview.
+        let p = h.preview();
+        assert_eq!(p["on"], json!(false), "{p}");
+        assert_eq!(p["shown"], json!(false));
+        assert!(
+            h.vcx()
+                .debug_bounds("search-everywhere-preview-pane")
+                .is_none()
+        );
+        // The header's button turns it on (remembered).
+        h.click("search-everywhere-preview");
+        h.preview_settle();
+        let p = h.preview();
+        assert_eq!(p["on"], json!(true), "{p}");
+        assert_eq!(p["shown"], json!(true));
+        assert!(
+            h.vcx()
+                .debug_bounds("search-everywhere-preview-pane")
+                .is_some()
+        );
+        let saved = std::fs::read_to_string(&settings).unwrap();
+        assert!(saved.contains("preview = true"), "{saved}");
+        // The selected line's file at its line, the match marked.
+        let rows = h.state()["rows"].clone();
+        let row_at = |i: usize| {
+            (
+                rows[i]["path"].as_str().unwrap().to_owned(),
+                rows[i]["line"].as_u64().unwrap() - 1,
+            )
+        };
+        let (path, line) = row_at(0);
+        let view = h.preview()["view"].clone();
+        assert_eq!(view["path"], json!(path), "{view}");
+        assert_eq!(view["caret"][0], json!(line), "{view}");
+        assert_eq!(view["highlights"], json!(1), "{view}");
+        assert_eq!(view["viewer"], json!(true), "{view}");
+        // It follows the selection.
+        h.press("down");
+        h.preview_settle();
+        let (path, line) = row_at(1);
+        let view = h.preview()["view"].clone();
+        assert_eq!(view["path"], json!(path), "{view}");
+        assert_eq!(view["caret"][0], json!(line), "{view}");
+        // Still on after the popup is opened again; the footer stays.
+        h.press("escape");
+        h.press(h.keys.go_to_text);
+        h.settle();
+        h.preview_settle();
+        let s = h.state();
+        assert_eq!(s["preview"]["shown"], json!(true), "{s}");
+        assert!(!s["footer"].as_str().unwrap().is_empty(), "{s}");
+        // Off again.
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        assert_eq!(h.preview()["on"], json!(false));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_preview_is_read_only_and_shows_no_preview_for_other_items(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.type_text("app.py");
+        h.settle();
+        h.preview_settle();
+        let view = h.preview()["view"].clone();
+        assert_eq!(view["path"], json!("app.py"), "{view}");
+        assert_eq!(view["caret"], json!([0, 0]), "{view}");
+        // A click puts the focus and the caret in the preview; typing
+        // changes nothing and shows the read-only hint.
+        h.click("search-everywhere-preview-area");
+        let editor = h.preview_editor();
+        let focused =
+            h.cx.update_window(h.window.into(), |_, window, cx| {
+                editor.read(cx).focus_handle(cx).is_focused(window)
+            })
+            .unwrap();
+        assert!(focused, "the preview has the focus");
+        // A key press (the test input sends an empty keystroke after the
+        // text, which would hide the hint at once).
+        h.press("x");
+        let text = std::fs::read_to_string(h.root.join("app.py")).unwrap();
+        assert_eq!(h.cx.update(|cx| editor.read(cx).text()), text);
+        assert_eq!(
+            h.preview()["view"]["read_only_hint"],
+            json!(editor::READ_ONLY_HINT)
+        );
+        assert!(h.vcx().debug_bounds("editor-read-only-hint").is_some());
+        assert_eq!(h.state()["open"], json!(true));
+        // The next key hides it.
+        h.press("right");
+        assert_eq!(h.preview()["view"]["read_only_hint"], json!(null));
+        // A folder is not a place in a file.
+        h.press("escape");
+        h.press(h.keys.go_to_file);
+        h.press(h.keys.select_all);
+        h.type_text("tests/");
+        h.settle();
+        h.preview_settle();
+        assert_eq!(h.rows()[0], "folder:tests");
+        let p = h.preview();
+        assert_eq!(p["shown"], json!(true), "{p}");
+        assert_eq!(
+            p["view"]["empty"],
+            json!("There is no preview for the selected item")
+        );
+        assert!(
+            h.vcx()
+                .debug_bounds("search-everywhere-preview-empty")
+                .is_some()
+        );
+        // Off again (the next keymap's run shares the settings).
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_soft_wrap_button_of_the_previews(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.type_text("app.py");
+        h.settle();
+        h.preview_settle();
+        // Shown while the mouse moves over the preview, hidden a while
+        // after it stopped.
+        assert_eq!(h.preview()["view"]["soft_wrap_button"], json!(false));
+        h.mouse_move("search-everywhere-preview-area");
+        assert_eq!(h.preview()["view"]["soft_wrap_button"], json!(true));
+        h.cx.executor().advance_clock(
+            workbench::file_preview::SHOWING + workbench::file_preview::RETENTION * 2,
+        );
+        h.draw();
+        assert_eq!(h.preview()["view"]["soft_wrap_button"], json!(false));
+        // A click turns soft wraps on in the previews (remembered).
+        h.mouse_move("search-everywhere-preview-area");
+        h.click("search-everywhere-preview-soft-wrap");
+        assert_eq!(h.preview()["view"]["soft_wraps"], json!(true));
+        assert_eq!(h.state()["open"], json!(true));
+        let fif = h.invoke("find-in-files.state", json!(null));
+        let on =
+            h.cx.update(|cx| workbench::file_preview::settings(cx).soft_wraps);
+        assert!(on, "{fif}");
+        h.invoke("preview.toggle-soft-wraps", json!(null));
+        assert_eq!(h.preview()["view"]["soft_wraps"], json!(false));
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.press("escape");
     });
 }
