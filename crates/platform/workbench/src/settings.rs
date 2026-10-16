@@ -14,7 +14,7 @@ use gpui::{
     Pixels, Subscription, Window, anchored, canvas, deferred, div, point, prelude::*, px,
 };
 use settings_ui::commands::{OpenSettings, QuickSwitch, SwitchTheme};
-use settings_ui::pages::appearance;
+use settings_ui::pages::{appearance, font, general};
 use settings_ui::theme_switch;
 use settings_ui::{OpenRequest, PageContext, PageSpec, Scope};
 use ui::components::{Tooltip, icon_button};
@@ -38,6 +38,8 @@ pub use ::settings::{SaveSettings, SyncSettings};
 
 /// Id of the Appearance & Behavior group.
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
+/// Id of the Editor group.
+pub const EDITOR: &str = "editor";
 
 /// The platform's pages, in the reference's places (`PlatformExtensions.xml`
 /// group weights).
@@ -70,6 +72,33 @@ fn pages() -> Vec<PageSpec> {
             description: None,
             create: Some(settings_ui::page::create(system::SystemPage::new)),
         },
+        PageSpec {
+            weight: 60,
+            description: Some(
+                "Personalize source code appearance by changing fonts, highlighting styles, indents, etc. Customize the Editor from line numbers, caret placement and tabs to source code inspections, setting up templates and file encodings.",
+            ),
+            ..PageSpec::group(EDITOR, None, "Editor")
+        },
+        PageSpec {
+            id: general::ID,
+            parent: Some(EDITOR),
+            title: general::TITLE,
+            weight: 190,
+            scope: Scope::Application,
+            search_terms: general::SEARCH_TERMS,
+            description: None,
+            create: Some(settings_ui::page::create(general::GeneralPage::new)),
+        },
+        PageSpec {
+            id: font::ID,
+            parent: Some(EDITOR),
+            title: font::TITLE,
+            weight: 188,
+            scope: Scope::Application,
+            search_terms: font::SEARCH_TERMS,
+            description: None,
+            create: Some(settings_ui::page::create(font::FontPage::new)),
+        },
     ]
 }
 
@@ -80,6 +109,7 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
     ui::command::register(cx, COMMANDS);
     settings_ui::store::register::<SaveSettings>(cx);
     settings_ui::store::register::<SyncSettings>(cx);
+    settings_ui::store::register::<::settings::SoftWrapSettings>(cx);
     settings_ui::page::register(cx, pages());
     settings_ui::page::register(cx, product_pages.iter().cloned());
     // After the current update: the change may come from a main window
@@ -87,6 +117,11 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
     settings_ui::store::observe(cx, <SaveSettings as ::settings::Section>::KEY, |cx| {
         cx.defer(follow_files_settings)
     });
+    settings_ui::store::observe(
+        cx,
+        <::settings::SoftWrapSettings as ::settings::Section>::KEY,
+        |cx| cx.defer(crate::editor_settings::follow),
+    );
     // Theme imports report in a main window.
     theme_switch::set_notify(cx, Rc::new(notify_main_window));
 }

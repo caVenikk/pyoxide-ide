@@ -13,12 +13,13 @@
    continuation row.
 7. Type at the end of a short line until it no longer fits; undo.
 8. Turn Soft-Wrap off again.
-9. With "Soft-wrap these files" on for `*.md` (`editor.toml` in the
-   configuration folder: `[soft_wraps] enabled = true`, `files = "*.md"`),
-   open a Markdown file and a Python file.
-10. Turn "use original line's indent" off (`use_original_indent = false`),
-    then give it 2 extra columns (`use_original_indent = true`,
-    `indent = 2`); turn "show all soft wraps" on (`show_all = true`).
+9. With "Soft-wrap these files" on for `*.md` (Settings > Editor >
+   General, or `[editor.soft-wraps] enabled = true`, `files = "*.md"` in
+   `settings.toml`), open a Markdown file and a Python file.
+10. Turn "Use the original line's indent for wrapped fragments" off
+    (`use-original-indent = false`), then give it 2 extra columns
+    (`use-original-indent = true`, `indent = 2`); clear "Only show
+    soft-wrap indicators for the current line" (`show-all = true`).
 
 ## Expected
 - A line wider than the view goes on in the next visual rows; nothing
@@ -49,7 +50,7 @@
 - A Python line without spaces near the edge wraps after a comma or an
   opening bracket.
 
-Not yet: the settings page (the options are in `editor.toml`), the
+Not yet: the
 console's own Soft-Wrap toggle (#77 uses `Editor::set_soft_wraps`), the
 caret stop at column 1 of a continuation row's indent (Home goes from the
 row's start straight to the line's text), the Python wrap rules that
