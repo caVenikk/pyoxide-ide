@@ -19,6 +19,19 @@ const BYTES: usize = 16 << 20;
 const LIMIT: Duration = Duration::from_secs(300);
 /// The view's frame (60 Hz).
 const FRAME: Duration = Duration::from_micros(16_667);
+/// How often the run reports where it is, so a hang can be told from a
+/// slow run in the CI log.
+const PROGRESS: Duration = Duration::from_secs(5);
+
+/// The number of the last numbered line on the screen (`line 00000042 ...`).
+fn last_line_number(text: &str) -> Option<u64> {
+    text.lines()
+        .filter_map(|line| {
+            let digits = line.trim_start().strip_prefix("line ")?.get(..8)?;
+            digits.parse().ok()
+        })
+        .next_back()
+}
 
 fn build() -> &'static str {
     if cfg!(debug_assertions) {
@@ -47,13 +60,28 @@ fn bench_flood_through_the_pty() {
     let mut snapshot = terminal::Snapshot::default();
     let mut snapshot_time = Duration::ZERO;
     let mut last_frame = Instant::now();
+    let mut last_wakeup = Instant::now();
+    let mut next_progress = start + PROGRESS;
     // The helper stays alive after its last line (ConPTY may drop the output
     // of a program that exits right after writing it), so the end of the run
     // is the last line on the screen.
     loop {
-        match rx.recv_deadline(start + LIMIT) {
+        let now = Instant::now();
+        if now >= start + LIMIT {
+            session.kill();
+            session.snapshot_into(&mut snapshot);
+            panic!(
+                "no last line within {LIMIT:?}: {frames} frames, last wakeup {:?} ago, \
+                 last numbered line {:?}; the screen:\n{}",
+                last_wakeup.elapsed(),
+                last_line_number(&snapshot.text()),
+                snapshot.text(),
+            );
+        }
+        match rx.recv_deadline(next_progress.min(start + LIMIT)) {
             // A view takes a snapshot after a wakeup, at most once per frame.
             Ok(SessionEvent::Wakeup) => {
+                last_wakeup = Instant::now();
                 std::thread::sleep(FRAME.saturating_sub(last_frame.elapsed()));
                 frames += 1;
                 let t = Instant::now();
@@ -65,13 +93,22 @@ fn bench_flood_through_the_pty() {
                 }
             }
             Ok(SessionEvent::Exited(status)) => {
-                panic!("the helper exited before the last line: {status:?}")
+                panic!(
+                    "the helper exited before the last line: {status:?}; the screen:\n{}",
+                    snapshot.text()
+                )
             }
-            Ok(_) => {}
-            Err(e) => {
-                session.kill();
-                panic!("no last line within {LIMIT:?}: {e:?}");
-            }
+            // Other events, or the time for a progress line.
+            _ => {}
+        }
+        if Instant::now() >= next_progress {
+            next_progress += PROGRESS;
+            println!(
+                "  {:>5.1} s: {frames} frames, last wakeup {:.1} s ago, last numbered line {:?}",
+                start.elapsed().as_secs_f64(),
+                last_wakeup.elapsed().as_secs_f64(),
+                last_line_number(&snapshot.text()),
+            );
         }
     }
     let elapsed = start.elapsed();

@@ -99,6 +99,7 @@ pub(crate) fn start(
         writing: None,
         shutdown_deadline: None,
         killed: false,
+        read_again: false,
     };
     std::thread::Builder::new()
         .name(format!("terminal-{id}"))
@@ -118,6 +119,11 @@ struct IoLoop {
     writing: Option<(Cow<'static, [u8]>, usize)>,
     shutdown_deadline: Option<Instant>,
     killed: bool,
+    /// The last read stopped at [`MAX_LOCKED_READ`] without seeing the PTY
+    /// empty, so more output may be waiting that no poller event will
+    /// announce: the Windows reader only posts an event after a read found
+    /// the pipe empty. Level-triggered polling on Unix reports it anyway.
+    read_again: bool,
 }
 
 impl IoLoop {
@@ -134,11 +140,15 @@ impl IoLoop {
         let mut events = Events::with_capacity(NonZeroUsize::new(64).unwrap_or(NonZeroUsize::MIN));
         let status = 'run: loop {
             let sync = self.parser.sync_timeout().sync_timeout();
-            let timeout = [sync, self.shutdown_deadline]
-                .into_iter()
-                .flatten()
-                .min()
-                .map(|at| at.saturating_duration_since(Instant::now()));
+            let timeout = if self.read_again {
+                Some(Duration::ZERO)
+            } else {
+                [sync, self.shutdown_deadline]
+                    .into_iter()
+                    .flatten()
+                    .min()
+                    .map(|at| at.saturating_duration_since(Instant::now()))
+            };
             events.clear();
             if let Err(e) = self.poller.wait(&mut events, timeout) {
                 if e.kind() != ErrorKind::Interrupted {
@@ -176,29 +186,29 @@ impl IoLoop {
                     }
                 }
             }
+            let mut read_due = std::mem::take(&mut self.read_again);
             for event in events.iter() {
                 if event.key == CHILD_EVENT_KEY {
                     if let Some(ChildEvent::Exited(status)) = self.pty.next_child_event() {
                         // Output written just before the exit.
-                        let _ = self.read(&mut buf);
+                        while matches!(self.read(&mut buf), Ok(false)) {}
                         break 'run Some(status);
                     }
                     continue;
                 }
-                if event.readable
-                    && let Err(e) = self.read(&mut buf)
-                {
+                read_due |= event.readable;
+                if event.writable && self.write().is_err() {
+                    break 'run None;
+                }
+            }
+            if read_due {
+                match self.read(&mut buf) {
+                    Ok(drained) => self.read_again = !drained,
                     // Linux reports EIO once the shell's side is closed;
                     // the exit event follows.
                     #[cfg(target_os = "linux")]
-                    if e.raw_os_error() == Some(libc::EIO) {
-                        continue;
-                    }
-                    let _ = e;
-                    break 'run None;
-                }
-                if event.writable && self.write().is_err() {
-                    break 'run None;
+                    Err(e) if e.raw_os_error() == Some(libc::EIO) => {}
+                    Err(_) => break 'run None,
                 }
             }
             let wants_write = self.writing.is_some() || !self.writes.is_empty();
@@ -244,10 +254,12 @@ impl IoLoop {
     }
 
     /// Reads what is available and parses it, at most [`MAX_LOCKED_READ`]
-    /// bytes per lock.
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<()> {
+    /// bytes per lock. Returns whether the PTY was seen empty (`false`: the
+    /// cap was hit, call again).
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<bool> {
         let mut unprocessed = 0;
         let mut processed = 0;
+        let mut drained = true;
         let shared = self.shared.clone();
         // Reserve the next turn of the lock for the reader.
         let lease = shared.state.lease();
@@ -277,6 +289,7 @@ impl IoLoop {
             processed += unprocessed;
             unprocessed = 0;
             if processed >= MAX_LOCKED_READ {
+                drained = false;
                 break;
             }
         }
@@ -289,7 +302,7 @@ impl IoLoop {
         if processed > 0 && self.parser.sync_bytes_count() < processed {
             shared.notifier.wake();
         }
-        Ok(())
+        Ok(drained)
     }
 
     /// Parses `bytes`, stopping after each recognised OSC sequence to note
