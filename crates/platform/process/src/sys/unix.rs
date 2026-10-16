@@ -22,8 +22,24 @@ impl OsProcess {
 
 /// Starts the process as the leader of a new process group, so that a kill
 /// of the group reaches descendants that lost their parent.
+///
+/// `SIGINT` is reset to its default action in the child. An ignored signal
+/// stays ignored across `exec`, and the application itself ignores `SIGINT`
+/// when it was started as a background job of a non-interactive shell; the
+/// program would then not stop on an interrupt (Python does not install its
+/// `KeyboardInterrupt` handler when `SIGINT` is ignored at startup).
 pub(crate) fn spawn(command: &mut Command) -> io::Result<Child> {
     command.process_group(0);
+    // SAFETY: the closure runs between `fork` and `exec` and calls only
+    // `signal`, which is async-signal-safe, and does not allocate.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::signal(libc::SIGINT, libc::SIG_DFL) == libc::SIG_ERR {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     command.spawn()
 }
 
