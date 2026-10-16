@@ -5,6 +5,7 @@ members = [
     "crates/platform/code-intel-ui",
     "crates/platform/commands",
     "crates/platform/console",
+    "crates/platform/dap-client",
     "crates/platform/db-core",
     "crates/platform/db-oracle-thin",
     "crates/platform/db-oracle-odpi",
@@ -89,6 +90,7 @@ code-intel = { path = "crates/platform/code-intel" }
 code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }
 console = { path = "crates/platform/console" }
+dap-client = { path = "crates/platform/dap-client" }
 db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
 lsp-client = { path = "crates/platform/lsp-client" }
