@@ -13,6 +13,7 @@ members = [
     "crates/platform/db-sqlite",
     "crates/platform/db-service",
     "crates/platform/db-testkit",
+    "crates/platform/debugger",
     "crates/platform/name-match",
     "crates/platform/process",
     "crates/platform/project",
@@ -105,6 +106,7 @@ db-postgres = { path = "crates/platform/db-postgres" }
 db-sqlite = { path = "crates/platform/db-sqlite" }
 db-service = { path = "crates/platform/db-service" }
 db-testkit = { path = "crates/platform/db-testkit" }
+debugger = { path = "crates/platform/debugger" }
 project = { path = "crates/platform/project" }
 project-search = { path = "crates/platform/project-search" }
 run-config = { path = "crates/platform/run-config" }
