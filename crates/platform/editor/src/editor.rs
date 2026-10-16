@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gpui::{
     App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, Div, Entity,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, Modifiers,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, Modifiers, MouseButton,
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Task, Window, div, point,
     px,
 };
@@ -18,6 +18,7 @@ use text::movement::{self, WordStop};
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point, Selection, SelectionSet};
 
 use crate::commands::*;
+use crate::decorations::{DecorationId, Decorations};
 use crate::diagnostics::{Analysis, DiagnosticMark, Marks, ProblemCounts, problem_to_go};
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
@@ -202,6 +203,29 @@ pub enum EditorEvent {
     /// the owner asks first ([`Editor::set_confirm_reload_undo`]); nothing
     /// changed. [`Editor::undo_confirmed`] does it.
     ConfirmUndo { redo: bool },
+    /// The mouse moved onto the line number of another line (`None`: off
+    /// the line numbers). The owner may set a hover icon for it
+    /// ([`Editor::set_gutter_hover_icon`]).
+    GutterHovered { line: Option<usize> },
+    /// A press on the line number of `line` (with
+    /// [`Editor::set_line_number_clicks`]): any button, with modifiers
+    /// (Alt-click, Shift-click, right-click).
+    GutterClicked {
+        line: usize,
+        button: MouseButton,
+        modifiers: Modifiers,
+        position: gpui::Point<Pixels>,
+    },
+    /// A press on a decoration's change marker.
+    ChangeMarkerClicked {
+        id: DecorationId,
+        position: gpui::Point<Pixels>,
+    },
+    /// A press on a decoration's clickable text after the end of a line.
+    AfterLineTextClicked {
+        id: DecorationId,
+        position: gpui::Point<Pixels>,
+    },
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -330,6 +354,21 @@ pub struct Editor {
     /// A read-only view ([`Editor::set_viewer`]), and its hint when shown.
     pub(crate) viewer: bool,
     pub(crate) read_only_hint: Option<crate::viewer::ReadOnlyHint>,
+    /// Gutter icons, change markers, line backgrounds, after-line texts and
+    /// stripe marks of the editor's owners, moved through edits.
+    pub(crate) decorations: Decorations,
+    /// Presses on the line numbers are reported instead of moving the
+    /// caret.
+    pub(crate) line_number_clicks: bool,
+    /// The line whose line number the mouse is over.
+    pub(crate) gutter_hover: Option<usize>,
+    /// The owner's hover icon and its line.
+    pub(crate) gutter_hover_icon: Option<(usize, ui::icons::IconName)>,
+    /// The decoration whose change marker the mouse is over (drawn wider).
+    pub(crate) hovered_change: Option<DecorationId>,
+    /// The decoration whose clickable after-line text the mouse is over
+    /// (drawn as a link).
+    pub(crate) hovered_after: Option<DecorationId>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -419,6 +458,12 @@ impl Editor {
             show_all_soft_wraps: false,
             viewer: false,
             read_only_hint: None,
+            decorations: Decorations::default(),
+            line_number_clicks: false,
+            gutter_hover: None,
+            gutter_hover_icon: None,
+            hovered_change: None,
+            hovered_after: None,
             _subscriptions: subscriptions,
         }
     }
@@ -773,6 +818,7 @@ impl Editor {
         over_editor: bool,
         cx: &mut Context<Self>,
     ) {
+        self.decoration_hover(position, over_editor, cx);
         let stripe = self.layout.as_ref().filter(|_| over_editor).and_then(|l| {
             if !l.stripe?.contains(&position) {
                 return None;
@@ -1138,6 +1184,8 @@ impl Editor {
                 "weak_warnings": counts.weak_warnings,
             },
             "hovered": self.hovered().map(point),
+            "decorations": self.decorations_json(),
+            "gutter_hover": self.gutter_hover,
         })
     }
 
@@ -1218,6 +1266,8 @@ impl Editor {
     /// problems move with it; the link highlight was about the old text.
     fn text_edited(&mut self, applied: &[AppliedEdit]) {
         self.diagnostics.edited(applied);
+        self.decorations.edited(applied);
+        self.decoration_hover_reset();
         self.link_highlight = None;
         // Indices of marks may have changed.
         self.stripe_hover = None;
@@ -1238,7 +1288,15 @@ impl Editor {
     ) -> bool {
         let mut selections = self.selections.clone();
         let changed = match self.buffer.apply_reload(plan, &mut selections) {
-            Ok(applied) => applied.is_some(),
+            Ok(applied) => {
+                // Decorations follow the replacement, then stay at their
+                // lines in `buffer_reloaded`.
+                if let Some(a) = &applied {
+                    self.decorations.edited(std::slice::from_ref(a));
+                    let _ = self.decorations.lines(&self.buffer);
+                }
+                applied.is_some()
+            }
             Err(text::StalePlan) => return false,
         };
         self.buffer.set_read_only(read_only);
@@ -1256,8 +1314,11 @@ impl Editor {
     /// Notifies observers that the buffer was replaced from disk or saved.
     pub fn buffer_reloaded(&mut self, cx: &mut Context<Self>) {
         self.selections.clamp(self.buffer.len_chars());
-        // Positions in the old text mean nothing in the new one.
+        // Positions in the old text mean nothing in the new one; the
+        // decorations stay at their lines.
         self.diagnostics.clear();
+        self.decorations.text_replaced(&self.buffer);
+        self.decoration_hover_reset();
         self.link_highlight = None;
         self.stripe_hover = None;
         self.pressed_stripe = None;
@@ -2840,6 +2901,7 @@ editor_actions! {
     NextProblem => next_problem,
     PreviousProblem => previous_problem,
     ToggleSoftWraps => toggle_soft_wraps,
+    SampleDecorations => sample_decorations,
 }
 
 impl Render for Editor {

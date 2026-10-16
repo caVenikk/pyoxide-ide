@@ -128,4 +128,8 @@ ui::ui_commands! {
         "Moves the caret to the previous problem in the file, errors first.";
     ToggleSoftWraps => "editor.toggle-soft-wraps", "Soft-Wrap",
         "Turns soft wraps of the editor on or off: lines wider than the view go on in the next rows.";
+    // For screenshots and checks of the decorations API (no menu item, no
+    // key): what the debugger and version control draw, on fixed lines.
+    SampleDecorations => "editor.sample-decorations", "Show Sample Decorations",
+        "Test only: draws a breakpoint, the execution point, inline values and change markers on fixed lines.";
 }
