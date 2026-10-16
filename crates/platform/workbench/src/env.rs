@@ -5,6 +5,7 @@
 //! | `PYOXIDE_BACKGROUND=1` | open windows without activating the app or taking focus |
 //! | `PYOXIDE_THEME=light` | use the light theme in this run (`dark`, or a theme id), whatever the settings store, until a theme is chosen in the IDE |
 //! | `PYOXIDE_SHOT=<file.png>` | save an image of the main window after it settled, then quit (macOS) |
+//! | `PYOXIDE_WINDOW_SIZE=<w>x<h>` | open the main window with this content size in points, below the usual minimum too (pictures at several widths) |
 //! | `PYOXIDE_RUN=<json>` | run UI commands once the window settled, e.g. `[["find.search", {"text": "def"}]]` (before `PYOXIDE_SHOT`) |
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
 //! | `PYOXIDE_BENCH=typing` | type 3 x 200 keys at line 50,000 of the open file, print key-to-frame times, quit |
@@ -57,6 +58,18 @@ pub fn debug_cursor() -> bool {
 /// `PYOXIDE_SHOT`: where to save a screenshot of the main window.
 pub fn shot_path() -> Option<std::path::PathBuf> {
     std::env::var_os("PYOXIDE_SHOT").map(Into::into)
+}
+
+/// `PYOXIDE_WINDOW_SIZE=<width>x<height>`: the main window's content size
+/// in points; `None` when unset or not two numbers.
+pub fn window_size() -> Option<(f32, f32)> {
+    parse_window_size(&std::env::var("PYOXIDE_WINDOW_SIZE").ok()?)
+}
+
+fn parse_window_size(text: &str) -> Option<(f32, f32)> {
+    let (w, h) = text.trim().split_once('x')?;
+    let (w, h) = (w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?);
+    (w > 0.0 && h > 0.0).then_some((w, h))
 }
 
 /// `PYOXIDE_RUN`: UI commands with their arguments to run once the window
@@ -154,4 +167,18 @@ pub fn marker(text: &str) {
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "PYOXIDE {text}");
     let _ = out.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_window_size;
+
+    #[test]
+    fn window_sizes() {
+        assert_eq!(parse_window_size("900x700"), Some((900.0, 700.0)));
+        assert_eq!(parse_window_size(" 480 x 600 "), Some((480.0, 600.0)));
+        assert_eq!(parse_window_size("900"), None);
+        assert_eq!(parse_window_size("0x700"), None);
+        assert_eq!(parse_window_size("wide x 700"), None);
+    }
 }

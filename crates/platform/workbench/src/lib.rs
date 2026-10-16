@@ -17,6 +17,7 @@ pub mod file_preview;
 pub mod file_types;
 pub mod find_in_files;
 pub mod keymap;
+pub mod main_toolbar;
 pub mod navigation;
 pub mod notifications;
 pub mod popup;

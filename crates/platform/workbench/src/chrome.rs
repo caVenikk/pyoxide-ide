@@ -7,6 +7,8 @@ use gpui::{
 };
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, icon_button};
+
+use crate::main_toolbar::Fitted;
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
@@ -38,6 +40,20 @@ pub fn initials(name: &str) -> String {
     out
 }
 
+/// Horizontal padding of a dropdown-like widget of the main toolbar.
+const WIDGET_PADDING: f32 = 8.0;
+/// Size of the chevron after a widget's text.
+const CHEVRON: f32 = 16.0;
+/// Size of the project badge and the gap between the project widget's
+/// parts.
+const BADGE: f32 = 20.0;
+const PROJECT_GAP: f32 = 6.0;
+/// Size of the file widget's icon, its gap to the text and the text's gap
+/// to the chevron.
+const FILE_ICON: f32 = 16.0;
+const FILE_ICON_GAP: f32 = 6.0;
+const FILE_CHEVRON_GAP: f32 = 4.0;
+
 /// A dropdown-like widget of the main toolbar: rounded hover background,
 /// content in a row.
 pub fn toolbar_widget(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
@@ -51,22 +67,55 @@ pub fn toolbar_widget(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
         .flex_none()
         .items_center()
         .h(theme.metric(Metric::ToolbarButtonSize))
-        .px(px(8.0))
+        .px(px(WIDGET_PADDING))
         .rounded(theme.metric(Metric::ButtonRadius))
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(pressed))
 }
 
-/// The project widget: coloured badge with initials, name, chevron.
-pub fn project_widget(name: Option<&str>, cx: &App) -> Stateful<Div> {
+/// Width of a toolbar widget's padding and chevron, with `gap` before the
+/// chevron.
+pub fn toolbar_widget_chrome(gap: f32) -> f32 {
+    2.0 * WIDGET_PADDING + gap + CHEVRON
+}
+
+/// A widget's text in the box the main toolbar gave it, cut short
+/// already; centred when the cut leaves room (`AbstractToolbarComboUI`).
+pub fn widget_text(text: &Fitted) -> Div {
+    div()
+        .flex_none()
+        .w(text.width)
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_center()
+        .child(text.text.clone())
+}
+
+/// The project widget's label: the name, or "No project".
+pub fn project_label(name: Option<&str>) -> &str {
+    name.unwrap_or("No project")
+}
+
+/// Width of the project widget without its label.
+pub fn project_widget_chrome(has_project: bool) -> f32 {
+    let badge = if has_project {
+        BADGE + PROJECT_GAP
+    } else {
+        0.0
+    };
+    toolbar_widget_chrome(PROJECT_GAP) + badge
+}
+
+/// The project widget: coloured badge with initials, name, chevron; the
+/// name as the toolbar fitted it (see [`project_label`]).
+pub fn project_widget(name: Option<&str>, label: &Fitted, cx: &App) -> Stateful<Div> {
     let theme = cx.theme();
-    let label: SharedString = name.unwrap_or("No project").to_owned().into();
     let badge = div()
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(20.0))
+        .size(px(BADGE))
         .rounded(px(4.0))
         .bg(theme.color(UiRole::Accent))
         .text_color(theme.color(UiRole::OnAccent))
@@ -75,42 +124,44 @@ pub fn project_widget(name: Option<&str>, cx: &App) -> Stateful<Div> {
         .child(initials(name.unwrap_or("?")));
     toolbar_widget("project-widget", cx)
         .debug_selector(|| "project-widget".into())
-        .gap(px(6.0))
+        .gap(px(PROJECT_GAP))
         .when(name.is_some(), |d| d.child(badge))
         .child(
-            div()
-                .font_weight(FontWeight::SEMIBOLD)
-                .whitespace_nowrap()
-                .child(label),
-        )
-        .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
-}
-
-/// The active file in the middle of the main toolbar: file type icon, the
-/// path relative to the project with the full path in brackets, chevron.
-/// The text is cut short with an ellipsis when the widget is narrowed.
-pub fn file_path_widget(icon: IconName, text: String, cx: &App) -> Stateful<Div> {
-    let theme = cx.theme();
-    toolbar_widget("file-path-widget", cx)
-        .debug_selector(|| "file-path-widget".into())
-        .flex_shrink()
-        .min_w(px(0.0))
-        .text_color(theme.color(UiRole::Text))
-        .child(Icon::new(icon))
-        .child(
-            div()
-                .ml(px(6.0))
-                .min_w(px(0.0))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(text),
+            widget_text(label)
+                .debug_selector(|| "project-widget-label".into())
+                .font_weight(FontWeight::SEMIBOLD),
         )
         .child(
             div()
                 .flex_none()
-                .ml(px(4.0))
-                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0))),
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(CHEVRON))),
+        )
+}
+
+/// Width of the file widget without its text.
+pub fn file_path_widget_chrome() -> f32 {
+    toolbar_widget_chrome(FILE_CHEVRON_GAP) + FILE_ICON + FILE_ICON_GAP
+}
+
+/// The active file in the middle of the main toolbar: file type icon, the
+/// path relative to the project with the full path in brackets, chevron;
+/// the text as the toolbar fitted it.
+pub fn file_path_widget(icon: IconName, text: &Fitted, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    toolbar_widget("file-path-widget", cx)
+        .debug_selector(|| "file-path-widget".into())
+        .text_color(theme.color(UiRole::Text))
+        .child(div().flex_none().child(Icon::new(icon).size(px(FILE_ICON))))
+        .child(
+            widget_text(text)
+                .debug_selector(|| "file-path-widget-text".into())
+                .ml(px(FILE_ICON_GAP)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .ml(px(FILE_CHEVRON_GAP))
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(CHEVRON))),
         )
 }
 

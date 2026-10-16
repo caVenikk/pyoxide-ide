@@ -396,13 +396,16 @@ fn current_file_item(state: &MenuState<'_>) -> MenuItem {
     item.inline(InlineButton::disabled(IconName::DEBUG, "Debug"))
 }
 
+/// The longest configuration name the run widget shows uncut.
+pub const NAME_MAX_CHARS: usize = 33 + 8;
+
 /// A configuration's name cut in the middle for the run widget, as the
 /// reference cuts it (`trimRunConfigurationName`, `splitCharCount`): the
 /// end keeps 8 characters when it can, the beginning gets the rest.
 /// The reference measures widths; Pyoxide counts characters, up to
-/// 33 + 8 of them.
+/// [`NAME_MAX_CHARS`] of them.
 pub fn trim_name(name: &str) -> String {
-    const MAX: usize = 33 + 8;
+    const MAX: usize = NAME_MAX_CHARS;
     let chars: Vec<char> = name.chars().collect();
     if chars.len() <= MAX {
         return name.to_owned();

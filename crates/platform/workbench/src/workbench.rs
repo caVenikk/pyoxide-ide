@@ -59,12 +59,14 @@ const MODIFIED_DOT: f32 = 6.0;
 /// How long a notice stays in the status bar (about as long as the
 /// reference's balloons stay).
 const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
-/// Room kept on each side of the file path in the middle of the toolbar
-/// for the widgets at the toolbar's ends; a longer path is cut short.
-const TOOLBAR_SIDE_ROOM: f32 = 320.0;
-/// Between the run widget and the toolbar's buttons right of it: 31 (see
-/// `render_toolbar`) less the toolbar's gaps of 4 on both sides.
-const TOOLBAR_RUN_GAP: f32 = 31.0 - 2.0 * 4.0;
+/// Between the run widget and the toolbar's buttons right of it: the run
+/// widget's toolbar ends 16 after its buttons, the main toolbar's groups
+/// are 10 apart, its buttons have 5 on both sides (`RedesignedRunWidget`
+/// insets, `MainToolbar` layout gap, `MainToolbar.Icon.insets`).
+const TOOLBAR_RUN_GAP: f32 = 31.0;
+/// Between Search Everywhere and the gear, and after the gear.
+const TOOLBAR_BUTTON_GAP: f32 = 10.0;
+const TOOLBAR_END: f32 = 5.0;
 /// Width of the Go to Line popup and its distance below the toolbar.
 const GO_TO_LINE_WIDTH: f32 = 320.0;
 const GO_TO_LINE_TOP: f32 = 80.0;
@@ -1553,12 +1555,17 @@ impl Workbench {
 
     // ---- drawing --------------------------------------------------------------
 
+    /// The main toolbar: the project widget on the left, the active file in
+    /// the middle, the run widget, Search Everywhere and the gear on the
+    /// right, laid out by [`main_toolbar`] (texts shrink first, then the
+    /// right group runs past the window's edge).
     fn render_toolbar(
         &self,
-        window_width: Pixels,
+        window: &Window,
         run: &crate::run::widget::WidgetState,
         cx: &App,
     ) -> impl IntoElement {
+        use crate::main_toolbar::{Cut, Measure, Widget};
         let theme = cx.theme();
         let height = theme.metric(Metric::ToolbarHeight);
         let button = theme.metric(Metric::ToolbarButtonSize);
@@ -1567,71 +1574,77 @@ impl Workbench {
         } else {
             px(8.0)
         };
+        let measure = Measure::new(window, theme.ui_family(), theme.ui_size());
         let project = self.project(cx);
-        // The active file's path, centered in the toolbar right of the
-        // window buttons.
-        let path_widget = self.title_path(cx).map(|text| {
+        let name = project.as_ref().map(|p| p.name().to_owned());
+        let label = measure.text(
+            chrome::project_label(name.as_deref()),
+            FontWeight::SEMIBOLD,
+            Cut::End,
+        );
+        let project_widget = Widget::text(
+            chrome::project_widget_chrome(name.is_some()),
+            label,
+            move |label| {
+                chrome::project_widget(name.as_deref(), &label, cx)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(OpenFolder { path: None }), cx)
+                    })
+                    .into_any_element()
+            },
+        );
+        // The active file's path, centred in the toolbar while it fits.
+        let file_widget = self.title_path(cx).map(|text| {
             let icon = self
                 .active_editor()
                 .and_then(|e| e.read(cx).path().map(|p| self.file_types.icon(p)))
                 .unwrap_or(IconName::FILE_UNKNOWN);
-            let room = window_width - left - px(2.0 * TOOLBAR_SIDE_ROOM);
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .left(left)
-                .right_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(room > px(80.0), |d| {
-                    d.child(chrome::file_path_widget(icon, text, cx).max_w(room))
-                })
+            let text = measure.text(&text, FontWeight::NORMAL, Cut::End);
+            Widget::text(chrome::file_path_widget_chrome(), text, move |text| {
+                chrome::file_path_widget(icon, &text, cx).into_any_element()
+            })
         });
+        let run_selector = Widget::text(
+            crate::run::widget::selector_chrome(run),
+            crate::run::widget::selector_text(run, &measure),
+            |text| {
+                crate::run::widget::render_selector(run, &self.run_anchors, &text, cx)
+                    .into_any_element()
+            },
+        );
+        let run_buttons = Widget::fixed(
+            px(crate::run::widget::buttons_width(cx)),
+            crate::run::widget::render_buttons(run, &self.run_anchors, cx),
+        );
+        let search = icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
+            .tooltip(Tooltip::text("Search Everywhere", None));
+        let groups = [
+            vec![project_widget],
+            file_widget.into_iter().collect(),
+            vec![
+                run_selector,
+                run_buttons,
+                Widget::space(TOOLBAR_RUN_GAP),
+                Widget::fixed(button, search),
+                Widget::space(TOOLBAR_BUTTON_GAP),
+                Widget::fixed(button, self.render_gear(button, cx)),
+                Widget::space(TOOLBAR_END),
+            ],
+        ];
+        let width = window.viewport_size().width - left;
         div()
             .id("toolbar")
             .debug_selector(|| "toolbar".into())
             .relative()
-            .flex()
-            .flex_row()
             .flex_none()
-            .items_center()
             .h(height)
-            .pl(left)
-            .pr(px(5.0))
-            .gap(px(4.0))
             .bg(theme.color(UiRole::Toolbar))
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
                     window.titlebar_double_click();
                 }
             })
-            .child(
-                chrome::project_widget(project.as_ref().map(|p| p.name()), cx).on_click(
-                    |_, window, cx| window.dispatch_action(Box::new(OpenFolder { path: None }), cx),
-                ),
-            )
-            .child(div().flex_1())
-            .child(crate::run::widget::render(run, &self.run_anchors, cx))
-            // The run widget's toolbar ends 16 after its buttons, the main
-            // toolbar's groups are 10 apart, its buttons have 5 on both
-            // sides (`RedesignedRunWidget` insets, `MainToolbar` layout gap,
-            // `MainToolbar.Icon.insets`): 31 in all, less the gaps here.
-            .child(div().flex_none().w(px(TOOLBAR_RUN_GAP)))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(
-                        icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
-                            .tooltip(Tooltip::text("Search Everywhere", None)),
-                    )
-                    .child(self.render_gear(button, cx)),
-            )
-            .children(path_widget)
+            .children(crate::main_toolbar::render(left, width, groups))
     }
 
     fn render_project(&self, cx: &App) -> impl IntoElement {
@@ -2046,15 +2059,23 @@ impl Workbench {
     fn render_status_bar(&self, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let (height, text_size) = chrome::status_metrics(cx);
+        // Nothing shrinks (`IdeStatusBarImpl`: a `BorderLayout` with the
+        // breadcrumbs in the centre and the widgets east): the breadcrumbs
+        // are cut where the widgets begin; with no room left the widgets
+        // keep their width and run past the window's left edge.
         let mut left = div()
+            .debug_selector(|| "status-left".into())
             .flex()
             .flex_row()
+            .flex_1()
             .items_center()
             .gap(px(2.0))
-            .min_w(px(0.0));
+            .min_w(px(0.0))
+            .overflow_hidden();
         if let Some(message) = &self.message {
             left = left.child(
                 div()
+                    .flex_none()
                     .whitespace_nowrap()
                     .text_color(theme.color(UiRole::Danger))
                     .child(message.clone()),
@@ -2063,6 +2084,7 @@ impl Workbench {
             left = left.child(
                 div()
                     .debug_selector(|| "status-notice".into())
+                    .flex_none()
                     .whitespace_nowrap()
                     .child(notice.clone()),
             );
@@ -2079,10 +2101,15 @@ impl Workbench {
             let last = parts.len() - 1;
             for (i, part) in parts.into_iter().enumerate() {
                 if i > 0 {
-                    left = left.child(Icon::new(IconName::CHEVRON_RIGHT).size(px(16.0)));
+                    left = left.child(
+                        div()
+                            .flex_none()
+                            .child(Icon::new(IconName::CHEVRON_RIGHT).size(px(16.0))),
+                    );
                 }
                 let item = div()
                     .flex()
+                    .flex_none()
                     .flex_row()
                     .items_center()
                     .gap(px(4.0))
@@ -2155,15 +2182,16 @@ impl Workbench {
             .flex_row()
             .flex_none()
             .items_center()
-            .justify_between()
+            // Too narrow, the widgets run past the left edge.
+            .justify_end()
             .h(height)
             .px(px(10.0))
             .gap(px(16.0))
             .bg(theme.color(UiRole::StatusBar))
             .text_size(text_size)
             .text_color(theme.color(UiRole::StatusBarText))
-            .child(left.overflow_hidden())
-            .child(right)
+            .child(left)
+            .child(right.debug_selector(|| "status-right".into()).flex_none())
     }
 }
 
@@ -2180,7 +2208,6 @@ impl Render for Workbench {
             crate::bench::frame_started();
         }
         let gap = cx.theme().metric(Metric::IslandGap);
-        let window_width = window.viewport_size().width;
         let run_widget = self.run_widget_state(window, cx);
         if let Some(tool_window) = self.focused_tool_window(window, cx) {
             self.tool_windows.set_last_active(tool_window);
@@ -2324,7 +2351,7 @@ impl Render for Workbench {
         root.flex()
             .flex_col()
             .bg(frame)
-            .child(self.render_toolbar(window_width, &run_widget, cx))
+            .child(self.render_toolbar(window, &run_widget, cx))
             .child(
                 div()
                     .flex()

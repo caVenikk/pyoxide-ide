@@ -416,8 +416,13 @@ fn toolbar_shows_the_active_file_path(cx: &mut TestAppContext) {
     let expected = format!("README.md [{}]", root.join("README.md").display());
     assert_eq!(state(cx, window)["title_path"], json!(expected));
 
-    // Centred in the toolbar right of the space for the window buttons.
+    // Centred in the toolbar right of the space for the window buttons
+    // while there is room on both sides (tests/toolbar_layout.rs: with
+    // less room).
     let cx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    cx.simulate_resize(gpui::size(gpui::px(2400.0), gpui::px(800.0)));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear());
     let toolbar = cx.debug_bounds("toolbar").unwrap();
     let widget = cx.debug_bounds("file-path-widget").unwrap();
     let inset = if cfg!(target_os = "macos") {
