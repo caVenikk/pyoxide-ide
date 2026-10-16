@@ -223,6 +223,21 @@ and the generated 20,000-file tree of the Find in Files rows.
 | 2026-10-13 | mac-1 | 20k files, `mod_1234`: key to rows / search | p50 143 ms / 23 ms | p90 146 ms / 29 ms; ranking every match (`m` matches every file) |
 | 2026-10-13 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 127 ms / 1.4 ms | p90 157 ms / 31 ms |
 
+### Terminal sessions
+`cargo test -p terminal --release --test throughput -- --ignored --nocapture`:
+16 MiB of 77-byte lines from the test helper through the pseudo-terminal
+into the emulator (120x40, 10,000 lines of scrollback) while a view takes a
+snapshot at most once per 16.7 ms frame, spawn to exit; and the same bytes
+parsed by the emulator alone. CI runs both on every OS (debug build) and
+prints the numbers in the log. The machine was busy with other builds
+(load average about 50), so these are lower bounds.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | emulator alone | 66-81 MiB/s | `alacritty_terminal` 0.26.0 with the OSC pre-scan |
+| 2026-10-16 | mac-1 | through the PTY, snapshots per frame | 20-25 MiB/s | macOS openpty; without snapshots 36 MiB/s |
+| 2026-10-16 | mac-1 | a snapshot during the flood (lock wait and copy) | 0.26-6 ms | 0.2 ms without output; 5 ms before the reader released the lock fairly |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

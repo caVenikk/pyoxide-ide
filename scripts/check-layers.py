@@ -7,6 +7,8 @@
 #   toolkit; protocol types stay inside the client; platform UI crates
 #   depend on the code intelligence traits, never on the client; the
 #   editor has diagnostic marks of its own and does not know the model.
+# - ADR 0014 (terminal): the `terminal` crate knows no UI toolkit, and only
+#   it depends on the emulator (`alacritty_terminal`).
 #
 #     python3 scripts/check-layers.py
 #
@@ -21,11 +23,15 @@ CRATES = ROOT / "crates"
 
 # ADR 0010.
 TOOLKIT = "gpui"
-NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings"]
+NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal"]
 CLIENT = "lsp-client"
 PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"
 NOT_MODEL = ["editor"]
+
+# ADR 0014.
+EMULATOR = "alacritty_terminal"
+EMULATOR_USER = "terminal"
 
 
 def layer(manifest: Path):
@@ -86,6 +92,9 @@ def main():
             bad.append(f"{name} depends on {PROTOCOL_TYPES}: protocol types stay in {CLIENT} (ADR 0010)")
         if by_name.get(name) == "platform" and uses(name, TOOLKIT) and uses(name, CLIENT):
             bad.append(f"{name} is a UI crate and depends on {CLIENT}: UI crates use {MODEL} (ADR 0010)")
+    for name in sorted(direct):
+        if name != EMULATOR_USER and EMULATOR in direct[name]:
+            bad.append(f"{name} depends on {EMULATOR}: only {EMULATOR_USER} sees the emulator (ADR 0014)")
     for name in NOT_MODEL:
         if name in direct and uses(name, MODEL):
             bad.append(f"{name} depends on {MODEL}: it has diagnostic marks of its own (ADR 0010)")
@@ -93,7 +102,7 @@ def main():
     if unclassified:
         print("not classified yet:", ", ".join(sorted(unclassified)))
     if bad:
-        print("layer violations (ADR 0005, 0010):")
+        print("layer violations (ADR 0005, 0010, 0014):")
         for b in bad:
             print("  " + b)
         sys.exit(1)

@@ -28,6 +28,7 @@ members = [
     "crates/platform/settings-import",
     "crates/platform/settings-ui",
     "crates/platform/syntax",
+    "crates/platform/terminal",
     "crates/platform/text",
     "crates/platform/themes",
     "crates/platform/ui",
@@ -71,6 +72,9 @@ pulldown-cmark = { version = "0.13", default-features = false }
 # Changes on disk made outside the application (CC0-1.0): FSEvents on
 # macOS, inotify on Linux, ReadDirectoryChangesW on Windows.
 notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+# Terminal emulator and pseudo-terminal (ADR 0014, Apache-2.0), pinned
+# exactly: only the `terminal` crate uses it, without its event loop.
+alacritty_terminal = "=0.26.0"
 # UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
@@ -101,6 +105,7 @@ settings = { path = "crates/platform/settings" }
 settings-import = { path = "crates/platform/settings-import" }
 settings-ui = { path = "crates/platform/settings-ui" }
 syntax = { path = "crates/platform/syntax" }
+terminal = { path = "crates/platform/terminal" }
 text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }

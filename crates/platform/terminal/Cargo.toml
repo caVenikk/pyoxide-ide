@@ -1,0 +1,40 @@
+[package]
+name = "terminal"
+description = "Terminal sessions of Pyoxide IDE (ADR 0014): a shell over a pseudo-terminal, the emulator state and its snapshots, xterm input encoding, start rules and shell detection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The emulator and the pseudo-terminal; its types stay inside this crate.
+alacritty_terminal = { workspace = true }
+flume = { workspace = true }
+# The guards of the terminal's lock (`alacritty_terminal::sync::FairMutex`),
+# released fairly by the reader.
+parking_lot = "0.12"
+# The I/O loop waits on the PTY through the poller `alacritty_terminal::tty`
+# registers with (the version that crate uses).
+polling = "3.8"
+process = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
+# A small program the PTY tests start instead of real shells, so they behave
+# the same on every OS.
+[[bin]]
+name = "terminal-test-helper"
+path = "src/bin/terminal-test-helper.rs"
+test = false
+doc = false
