@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 52%** `██████████░░░░░░░░░░`
+**Overall parity: 28%** `██████░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -11,8 +11,10 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 50% `█████░░░░░` | 2 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 32% `███░░░░░░░` | 1 | 1 | 3 |
-| vcs | 0% `░░░░░░░░░░` | 0 | 0 | 3 |
+| run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
+| terminal | 0% `░░░░░░░░░░` | 0 | 0 | 21 |
+| vcs | 0% `░░░░░░░░░░` | 0 | 0 | 25 |
+| settings | 3% `░░░░░░░░░░` | 0 | 1 | 17 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -89,7 +91,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Keymap import | must |  |
+| ⬜ | Keymap import | must | reference keymap XML with its parent chain (#40); choice and switching: area settings |
 | ⬜ | Code style import | should |  |
 | 🟡 | Editor colour scheme import (.icls) | must | themes crate: schemes with parents and baseAttributes, report; no settings UI yet |
 | 🟡 | UI theme import (.theme.json) | must | themes crate: theme.json and plugin jars (data files only), report; no settings UI yet |
@@ -99,9 +101,9 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75 |
+| 🟡 | Interpreter and virtualenv discovery | must | py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters, the Python > Interpreter page and Add Python Interpreter: area settings (#75) |
 | ✅ | Language services over LSP (start, stop, restart, status widget) | must | Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85) |
-| 🟡 | External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly) | must | Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings page: #92; Pyright / Pyrefly not offered yet |
+| 🟡 | External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly) | must | Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings pages: area settings (#92); Pyright / Pyrefly not offered yet |
 | ✅ | Type engine choice (Types widget) | could | Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here: ty / basedpyright (#87) |
 | ✅ | Problems highlighted in the editor (severity, unused, deprecated, tooltip) | must | Community; from ruff and the type server (#84, #86: one hover popup with problems, first fix and documentation) |
 | ✅ | Error stripe, inspection widget, next / previous problem (F2) | must | Community (#84) |
@@ -127,17 +129,109 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|
 | ✅ | Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun) | must | #45; uv run for uv environments; soft wraps, print and console find later |
 | 🟡 | Run configurations | must | Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75 |
-| ⬜ | Debugger (breakpoints / stepping / variables) | must | DAP / debugpy |
+| ⬜ | Debug the current file and run configurations (debugpy over DAP) | must | Community (pydevd; debugpy through a separate plugin in the reference); debugpy 1.8.21 shipped with the app, ADR 0015 (#90) |
+| ⬜ | Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog) | must | Community; Debug buttons of #74 enabled (#90) |
+| ⬜ | Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin) | must | Community; Console through DAP runInTerminal like the Run console (#90) |
+| ⬜ | Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun) | must | Community; keys of the macOS and Windows keymaps (#90) |
+| ⬜ | Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers) | must | Community; stoppable lines as the reference (#90) |
+| ⬜ | Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints | must | Community (#90) |
+| ⬜ | Python exception breakpoints (Any exception on termination / on raise) | must | Community (#90) |
+| ⬜ | Frames list and thread chooser (library frames folded) | must | Community (#90) |
+| ⬜ | Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value) | must | Community (#90) |
+| ⬜ | Execution point and inline values in the editor | must | Community (#90) |
+| ⬜ | Breakpoints saved per project with one-time import from .idea | must | Community; .oxide/workspace.toml, .idea/workspace.xml read once (#90) |
+| ⬜ | Evaluate Expression dialog, Quick Evaluate and value tooltip | should | Community |
+| ⬜ | Watches and the evaluate field in Variables | should | Community; watches kept per run configuration |
+| ⬜ | Logging breakpoints (log message, stack trace, Evaluate and log) | should | Community |
+| ⬜ | Smart Step Into | should | Community; on by default in the reference |
+| ⬜ | Debug Console (prompt in the current frame) | should | Community |
+| ⬜ | Attach to Process | should | Community |
+| ⬜ | Subprocess debugging | should | Community; debugpy child sessions over TCP |
+| ⬜ | Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views) | should | Community |
+| ⬜ | Jump To Cursor and the Run to Cursor inlay | could | Community |
+| ⬜ | Dependent breakpoints (disable until another is hit) | could | Community |
+| ⬜ | Remote, Docker and WSL debugging | could | remote interpreters |
+| ⬜ | Data views for numpy and pandas and type renderers | could | Community |
 | ⬜ | Test runner (pytest) | should |  |
-| ⬜ | Integrated terminal | must |  |
+
+## terminal
+
+| | Feature | Priority | Notes |
+|---|---|---|---|
+| ⬜ | Terminal tool window (Alt+F12, stripe button, Hide) | must | Community (Reworked engine, the 2026.2 default); ADR 0014 (#89) |
+| ⬜ | Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows) | must | Community; default shell per OS, login and interactive options, environment (#89) |
+| ⬜ | VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback) | must | Community; candidate alacritty_terminal (#89) |
+| ⬜ | Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast) | must | Community (#89) |
+| ⬜ | Terminal tabs (new, close with confirmation, rename, unique names, close on exit) | must | Community (#89) |
+| ⬜ | Select, copy, paste, select all and clear in the terminal | must | Community (#89) |
+| ⬜ | Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell | must | Community; Pyoxide uses OSC 7 / OSC 133 with its own scripts (#89) |
+| ⬜ | Virtual environment activation and start directory in the terminal | must | Community; venv and uv environments through their activate script (#89) |
+| ⬜ | Links in terminal output (URLs, file paths with line:column, Python tracebacks) | must | Community (#89) |
+| ⬜ | Find in terminal output | must | Community (#89) |
+| ⬜ | Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta) | must | Community (#89) |
+| ⬜ | Terminal tabs restored on project open | should | Community |
+| ⬜ | New Predefined Session popup (detected shells) | should | Community |
+| ⬜ | Open In > Terminal | should | Community |
+| ⬜ | Command separators in the terminal | should | Community; needs shell integration |
+| ⬜ | Terminal tab and output context menus | should | Community |
+| ⬜ | Settings > Tools > Terminal page with one-time import from .idea | should | Community; after the settings window (#92) |
+| ⬜ | Split terminal tabs and Move to Editor | could | Community |
+| ⬜ | Shell command completion in the terminal | could | Community |
+| ⬜ | Paste from History and command history search in the terminal | could | Community |
+| ⬜ | Conda environment activation in the terminal | could | Community |
 
 ## vcs
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Git status and diff | must |  |
-| ⬜ | Commit and branches | must |  |
-| ⬜ | Blame and history | should |  |
+| ⬜ | Git repository detection and git executable lookup | must | Community; the git executable for every operation, ADR 0016 (#91) |
+| ⬜ | File status colours in the project tree, editor tabs and file lists (ignored included) | must | Community (#91) |
+| ⬜ | Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change) | must | Community (#91) |
+| ⬜ | Commit tool window (changes tree with check boxes, message, Commit, legend, errors) | must | Community; Cmd+K / Ctrl+K, non-modal commit (#91) |
+| ⬜ | Amend and commit options (author, sign-off, hooks) | must | Community (#91) |
+| ⬜ | Rollback of files (Rollback Changes dialog) | must | Community (#91) |
+| ⬜ | Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side) | must | Community (#91) |
+| ⬜ | VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind) | must | Community (#28) |
+| ⬜ | Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout) | must | Community (#28, #91) |
+| ⬜ | Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected) | must | Community; credentials through the user's helper and ssh-agent (#91) |
+| ⬜ | Update Project, Fetch and Pull | must | Community (#91) |
+| ⬜ | Create Git Repository for a project without version control | must | Community (#91) |
+| ⬜ | Git main menu and VCS Operations popup | must | Community (#91) |
+| ⬜ | Annotate with Git Blame | should | Community |
+| ⬜ | Git log tool window and file history | should | Community |
+| ⬜ | Merge conflict resolution (three-way merge) | should | Community |
+| ⬜ | Stash and shelve UI | should | Community |
+| ⬜ | Credentials prompt for HTTPS and SSH | should | Community; askpass helper |
+| ⬜ | Unified diff viewer | could | Community |
+| ⬜ | Changelists and partial commits (chunks, lines) | could | Community |
+| ⬜ | Cherry-pick and interactive rebase | could | Community |
+| ⬜ | Commit checks (reformat, optimize imports, ruff) | could | Community |
+| ⬜ | .gitignore support and Add to .gitignore | could | Community |
+| ⬜ | Compare with branch, worktrees and tags UI | could | Community |
+| ⬜ | Clone and share on a hosting service | could | Community |
+
+## settings
+
+| | Feature | Priority | Notes |
+|---|---|---|---|
+| ⬜ | Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S) | must | Community; ADR 0017 (#92) |
+| ⬜ | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); reads the reference's XML data files once (#92, #40) |
+| 🟡 | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; live switch (workbench.set-theme) and the themes importer exist; no page yet (#92) |
+| ⬜ | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community (#92) |
+| ⬜ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
+| ⬜ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40) |
+| ⬜ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |
+| ⬜ | Editor > Font page | must | Community (#92) |
+| ⬜ | Editor > General page (soft wraps) | must | Community; after #119 (#92) |
+| ⬜ | Python > Interpreter page (combo, Show All, add / remove / rename) | must | Community (#75) |
+| ⬜ | Add Python Interpreter dialog (new virtualenv or uv, existing interpreter) | must | Community; through py-env (#75) |
+| ⬜ | Configured interpreters as an application list with one-time import from the reference | must | Community; interpreters of the reference that still exist (#75) |
+| ⬜ | Python > Type Engine and Python > Tools > External Tools pages | must | Community; settings model and storage exist (#87); pages: #92 |
+| ⬜ | Search highlight on settings pages (spotlight) | should | Community |
+| ⬜ | Keymap editing (custom keymaps, edit shortcuts) | should | Community |
+| ⬜ | Editor > File Types page | should | Community; associations from #121 |
+| ⬜ | First-run window (import, choose theme, choose keymap) | should | Community (#40) |
+| ⬜ | Appearance options beyond the theme (zoom, UI font, UI options) | could | Community |
 
 ## docker
 

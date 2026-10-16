@@ -482,3 +482,720 @@ without duplicate problems, caret popups that leave the focus in the
 editor, Markdown rendering, keeping typing latency with server traffic.
 Size: L (first version about 60 agent-hours; usages, rename, Problems
 window and settings pages about 40 more).
+
+---
+
+## Area: terminal (integrated terminal)
+
+Scope: the Terminal tool window in the reference's default engine: local
+shell sessions in tabs over a pseudo-terminal, a VT/xterm emulator on a
+character grid, shell integration, activation of the project's virtual
+environment, links, find, key routing between the shell and the IDE, and
+the settings page. Remote and SSH sessions, AI agent sessions and the
+engine choice are not part of it.
+Date: 2026-10-16. Reference: PyCharm 2026.2.3 (IntelliJ Community tag
+`pycharm/2026.2.3`).
+
+### Sources
+
+| # | source | URL | notes |
+|---|---|---|---|
+| 1 | Terminal | https://www.jetbrains.com/help/pycharm/terminal-emulator.html | tool window, tabs, engines, shell integration, keys |
+| 2 | Terminal settings | https://www.jetbrains.com/help/pycharm/settings-tools-terminal.html | options and defaults |
+| 3 | IntelliJ Community at `pycharm/2026.2.3`, Apache-2.0 | https://github.com/JetBrains/intellij-community/tree/pycharm/2026.2.3 | `plugins/terminal` (Reworked view, shell start rules, integration scripts, options, actions, bundles), `python/terminal` (virtualenv activation), `platform/execution-impl` (tab titles), keymaps in `platform/platform-resources/src/keymaps/`, colour keys in `platform/platform-resources/src/DefaultColorSchemesManager.xml` |
+| 4 | xterm control sequences | https://invisible-island.net/xterm/ctlseqs/ctlseqs.html | modes, mouse reporting, bracketed paste, OSC 0/2/7/8 |
+| 5 | Windows pseudoconsole | https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session | ConPTY, Windows 10 1809 or later |
+| 6 | `alacritty_terminal` | https://docs.rs/alacritty_terminal | candidate emulator and PTY crate (Apache-2.0) |
+
+No reference screenshots yet: header, menus, command separators, the find
+bar and the settings page are to verify against a reference screenshot.
+
+### How the reference is built
+- The default engine is "Reworked 2025" (since 2025.2); "Classic" is the
+  alternative. The clone has the Reworked look and behaviour, no choice.
+- The view draws an emulator core as a character grid (wide characters
+  take two cells, line height 1.0); the alternate screen has its own view.
+- Shell integration (zsh, bash, PowerShell) reports prompt, command and
+  working directory through private OSC sequences and drives separators,
+  tab titles and directory tracking; the clone uses the standard OSC 7 and
+  OSC 133 sequences with its own scripts.
+
+### Core loop
+Press Alt+F12, get a shell in the project root with the project's virtual
+environment active, run commands, open a file from a path in the output,
+keep several sessions in tabs.
+
+### Screens
+
+| ID | screen | how to reach | purpose | key components | states |
+|---|---|---|---|---|---|
+| S-TM01 | Terminal tool window | Option+F12 / Alt+F12, stripe button (left stripe, bottom group), Open In > Terminal | host the sessions | header: title "Terminal", content tabs, "+" (New Tab) and a chevron (New Predefined Session) right after the tabs, ⋮ Options, Hide; bottom anchor, a third of the window high by default | no tab (showing it creates one), one tab, many tabs |
+| S-TM02 | Session view | a tab | the shell | character grid, block cursor, selection, vertical scrollbar, 6 px insets at the top and bottom; alternate screen without scrollbars | focused, unfocused (hollow cursor), alternate screen, session ended |
+| S-TM03 | Command separators | each finished command, shell integration on | split the output by command | a gap with a 1 px line; a red marker on the left of a command that exited non-zero | success, error |
+| S-TM04 | Find bar | Cmd+F / Ctrl+F in a session | search the output | overlay at the top right (500 px): field, match count, up, down, Match Case, Regex, close; matches yellow, the current one orange | empty, matches, no match |
+| S-TM05 | Rename balloon | double-click a tab, Rename Session | rename a session | balloon pointing at the tab: bold "Session name:", field with the text selected | valid, empty (red outline) |
+| S-TM06 | New Predefined Session popup | chevron next to "+" | start another shell | detected shells (`name (path)` when two share a name; WSL distributions on Windows), separator, "Settings" | - |
+| S-TM07 | Tab context menu | right-click a tab | manage tabs | Rename Session, Move to Editor; Close Tab, Close All Tabs, Close Other Tabs; Split Right, Split Down (and move), Unsplit; Select Next Tab, Select Previous Tab, Show List of Tabs | - |
+| S-TM08 | Output context menu | right-click in a session | edit actions | Find, New Tab, Close Tab; Copy, Paste, Paste from History…, Select All; Clear Terminal, Page Up, Page Down, Line Up, Line Down; link actions over a link | selection, no selection, on a link |
+| S-TM09 | Options menu | ⋮ in the header | settings | Settings, then the standard tool window items (engine choice, AI agent and feedback items are not cloned) | - |
+| S-TM10 | Close confirmation | close a tab whose shell runs a child process | protect running work | "Process 'Terminal Local' Is Running" (the tab name after "Terminal "), "Do you want to terminate the process 'Terminal Local'?", Terminate, Cancel, "Don't ask again" | - |
+| S-TM11 | Link hint | plain click on a file path link | teach Cmd/Ctrl+click | after 180 ms a hint at the click: "Open" with "⌘Click" / "Ctrl+Click" | - |
+| S-TM12 | Settings > Tools > Terminal | Settings, ⋮ > Settings | options | Project Settings: Start directory, Environment variables; Font Settings: font, fallback, size, line height 1.0, column width 1.0, Configure colors…; Application Settings: Shell path, Default tab name "Local", application title as tab name (on), minimum contrast 4.5, separators (on), Audible bell (on), Close session when it ends (on), Mouse reporting (on), copy on selection (off), middle-click paste (on), Override IDE shortcuts (on), Shell integration (on), Highlight hyperlinks (on), Option as Meta (off), Activate virtualenv (on), cursor shape Block | defaults, modified |
+
+Colours: theme keys `BLOCK_TERMINAL_*` (default colours, ANSI 0 to 15 with
+separate text and cell background values, search matches, separators),
+falling back to the console colours; the scheme's console font; a minimum
+contrast ratio of 4.5.
+
+### Flows
+
+```
+F-TM01 Open the terminal
+    Alt+F12 -> S-TM01, focus in S-TM02, a tab "Local" created when there is
+    none (then "Local (2)", "Local (3)"); Alt+F12 while focused hides it
+    edge: last tab closed (a fresh "Local"); untrusted project (no restore)
+
+F-TM02 Start a shell in the project
+    shell from Settings, else PowerShell (Windows) or the login $SHELL;
+    interactive (and login on macOS) with the integration script; working
+    directory: the requested folder, "Start directory", the current file's
+    content root, the project root, home; TERM=xterm-256color
+    edge: shell path missing; cmd.exe (no integration); no ConPTY; rc files
+          that change ZDOTDIR or use `set -u`
+
+F-TM03 Activate the virtual environment
+    the interpreter of the module owning the working directory; a venv
+    (uv's too) is activated by its own script after the user's rc files,
+    before the first prompt, so the prompt shows its prefix
+    edge: system interpreter (nothing); interpreter changed while a tab runs
+          (balloon "Terminal: project environment changed"); cmd.exe; conda
+
+F-TM04 Work with tabs
+    "+" or Cmd+T / Ctrl+Shift+T -> new tab; chevron -> S-TM06; Open In >
+    Terminal -> a tab in the file's folder; Cmd+W / Ctrl+F4 -> S-TM10 when a
+    child runs; `exit` closes the tab, the last one hides the window;
+    double-click -> S-TM05; a running command's title replaces the name
+    (cut to 30 characters) unless the user named the tab
+    edge: empty name refused; a folder dropped on the tabs opens a tab there
+
+F-TM05 Select, copy, paste, clear
+    drag, double and triple click select; Copy needs a selection (Ctrl+C
+    without one goes to the shell); bracketed paste; middle click pastes;
+    TUI applications get the mouse, Shift selects; Cmd+K clears the
+    scrollback and keeps the prompt line
+    edge: pasted lines do not run; copy on selection (off)
+
+F-TM06 Follow links
+    URLs and Python tracebacks are visible links; file paths (absolute or
+    relative to the tracked folder, with :line:column) and OSC 8 links show
+    on Cmd/Ctrl+hover and open with Cmd/Ctrl+click; a plain click -> S-TM11
+    edge: deleted file; relative path before the folder is known
+
+F-TM07 Find
+    Cmd+F / Ctrl+F -> S-TM04 with the selection; Enter or F3 / Cmd+G next,
+    with Shift previous; Escape closes it, otherwise Escape goes to the shell
+
+F-TM08 Keys go to the shell
+    "Override IDE shortcuts" (on): every key goes to the shell except
+    allowed IDE actions (tool windows, window and tab switching, Find in
+    Files, Go to Action / File / Class / Symbol, Settings, terminal actions)
+    edge: Ctrl+E (Windows, Linux) goes to the shell; Option as Meta; IME
+```
+
+Keys (macOS / Windows and Linux): New Tab Cmd+T / Ctrl+Shift+T; Close Tab
+Cmd+W / Ctrl+F4; Copy, Paste Cmd+C, Cmd+V / Ctrl+C, Ctrl+V; Clear Cmd+K;
+Line Up and Down Cmd+Up, Cmd+Down / Ctrl+Up, Ctrl+Down; Page Up and Down
+Shift+PgUp, Shift+PgDn; next and previous tab Cmd+Shift+], [ / Alt+Right,
+Alt+Left; Hide Shift+Escape.
+
+### Components
+
+| component | variants | states | used on |
+|---|---|---|---|
+| Tool window header with content tabs | terminal (shared with Run and Debug) | idle, hover, selected | S-TM01 |
+| Terminal grid | normal screen, alternate screen | focused, unfocused, selection, find matches, hovered link | S-TM02, S-TM03 |
+| Search overlay | find bar | empty, matches, no match | S-TM04 |
+| Balloon with a field | rename | valid, error | S-TM05 |
+| Menu, dialog, hint | popups, context menus, terminate process, link hint | - | S-TM06 to S-TM11 |
+
+### Inferred data model
+
+```
+TerminalTab      name, user-named flag, shell command, last working
+                 directory, environment; order and selected tab
+                 stored: the IDE's own workspace file (not in .idea)
+                 evidence: source 3                      confidence: high
+Session          PTY, shell process, grid, scrollback (1024 KB of output in
+                 the reference), alternate screen, modes, title, working
+                 directory, command marks with exit codes
+                 evidence: sources 1, 3                  confidence: high
+TerminalOptions  application (terminal.xml, terminal-local.xml,
+                 terminal-font.xml): shell path, tab name, toggles of
+                 S-TM12, cursor shape, font; project: start directory,
+                 environment variables (workspace.xml), Activate virtualenv
+                 (.idea/python-terminal.xml)
+                 evidence: sources 2, 3                  confidence: high
+```
+
+Pyoxide mapping: application options in the application settings store;
+project options and tabs in `.oxide/workspace.toml` (ADR 0009), imported
+once from `.idea`. Emulator and PTY: ADR 0014 (proposed; candidate
+`alacritty_terminal`, a grid element of its own); venv activation through
+a product hook (ADR 0005).
+
+### Feature matrix
+See `replica/features.csv`, area `terminal`.
+
+### Out of scope or deferred
+- Engine choice, the Classic engine, AI agent sessions, SSH and remote
+  sessions.
+- Later: split tabs, Move to Editor, command completion, Paste from
+  History, command history search, conda activation.
+- Zed's terminal crates are GPL and are not read.
+
+### Size
+Screens 12, flows 8, entities 3. Hard parts: key routing (the terminal
+wins except for the allowed IDE actions), an exact cell grid with wide
+characters and fallback fonts, flood output that leaves typing smooth,
+ConPTY on Windows, shell integration that survives users' rc files, IME.
+Size: L (first version about 25 to 30 agent-hours; persistence, predefined
+sessions, separators, context menus and the settings page about 10 more).
+
+---
+
+## Area: run-debug (debugger)
+
+The run part of this area (Run tool window, run widget, run
+configurations: #45, #74) is still to be written here; its scenarios are
+in `tests/scenarios/run-debug/`.
+
+Scope: debugging Python programs with the reference's debugger UI: Debug
+for the current file and run configurations, line breakpoints in the
+gutter with their popup and dialog, exception breakpoints, the Debug tool
+window (toolbar, frames, variables, watches, console), stepping,
+evaluation, the execution point and inline values in the editor. Pyoxide
+debugs through debugpy over the Debug Adapter Protocol (DAP).
+Date: 2026-10-16. Reference: PyCharm 2026.2.3 (IntelliJ Community tag
+`pycharm/2026.2.3`).
+
+### Sources
+
+| # | source | URL | notes |
+|---|---|---|---|
+| 1 | Debug tool window | https://www.jetbrains.com/help/pycharm/debug-tool-window.html | layout, toolbar, frames, console |
+| 2 | Variables | https://www.jetbrains.com/help/pycharm/debug-tool-window-variables.html | variables, watches, evaluate field |
+| 3 | Breakpoints | https://www.jetbrains.com/help/pycharm/using-breakpoints.html | types, gutter, properties, Breakpoints dialog |
+| 4 | Debug code | https://www.jetbrains.com/help/pycharm/debugging-code.html | stepping, run to cursor, evaluate |
+| 5 | Debugger settings | https://www.jetbrains.com/help/pycharm/settings-debugger.html, https://www.jetbrains.com/help/pycharm/settings-debugger-data-views.html, https://www.jetbrains.com/help/pycharm/python-debugger.html | options and defaults |
+| 6 | IntelliJ Community at `pycharm/2026.2.3`, Apache-2.0 | https://github.com/JetBrains/intellij-community/tree/pycharm/2026.2.3 | `platform/xdebugger-impl` (session tab, frames, variables, watches, evaluate dialog, breakpoints dialog and popup, inline values, execution point), `platform/xdebugger-api` (bundle, colour keys, breakpoint types), `python/src/com/jetbrains/python/debugger` (Python breakpoints, settings, frames), `python/helpers/debugpy`, `platform/platform-resources/src/idea/{ExecutionActions,LangActions}.xml`, keymaps, icons in `platform/icons/src/expui/{run,debugger,breakpoints}` |
+| 7 | Debug Adapter Protocol | https://microsoft.github.io/debug-adapter-protocol/specification | protocol |
+| 8 | debugpy | https://github.com/microsoft/debugpy, https://github.com/microsoft/debugpy/wiki/Debug-configuration-settings, https://pypi.org/project/debugpy/1.8.21/ | MIT; launch settings; 1.8.21 supports Python 3.8 and later |
+
+No reference screenshots yet: toolbar order, the console's first lines,
+gutter icons and the run widget states are to verify against a reference
+screenshot.
+
+### How the reference is built
+- Two Python debugger backends share one UI: pydevd (Community) and
+  debugpy, the default when available; debugpy comes with a separate
+  plugin that is not in Community and falls back to pydevd for remote
+  interpreters and Python before 3.9. With it the Debug tool window has a
+  "Mode: debugpy | pydevd" switch. The bundled debugpy is 1.8.21.
+- Pyoxide has one backend, debugpy 1.8.21 shipped with the application and
+  driven over DAP, so no Mode switch; the UI follows the reference.
+
+### Core loop
+Click the gutter to set a breakpoint, press Debug, stop on the line, look
+at the frames and variables, step, evaluate an expression, resume.
+
+### Screens
+
+| ID | screen | how to reach | purpose | key components | states |
+|---|---|---|---|---|---|
+| S-DG01 | Debug tool window | Debug, Cmd+5 / Alt+5, stripe button | host debug sessions | one tab per session named after the configuration (closing it stops the session); toolbar above the sub-tabs "Threads & Variables" and "Console"; layout menu at the top right (show Frames / Variables, Separate Watches, Show Tab Labels, Restore Default Layout) | running, suspended, finished |
+| S-DG02 | Debug toolbar | S-DG01 | control the session | Rerun, Stop; Resume Program, Pause Program, Step Over, Step Into, Step Into My Code, Step Out; View Breakpoints…, Mute Breakpoints, More ⋮ (Force Step Over, Smart Step Into, Run to Cursor, Force Run to Cursor, Show Execution Point, Evaluate Expression…, Debugger Settings ▸, Modify Run Configuration…) | steps disabled while running, Pause disabled while suspended |
+| S-DG03 | Threads & Variables | S-DG01 | inspect a stop | Frames on the left, Variables on the right (split 0.35; stacked when docked left or right) | - |
+| S-DG04 | Frames | S-DG03 | choose a frame | thread combo on top, Show / Hide Library Frames; rows `func, file.py:12` with a frame icon, frames outside the project greyed, library frames folded; Copy Stack | suspended, "Frames are not available", "Frames not available in non-suspended state" |
+| S-DG05 | Variables | S-DG03 | see values | evaluate field on top (history, placeholder "Evaluate expression (Enter) or add a watch (Cmd+Shift+Enter / Ctrl+Shift+Enter)", Add to Watches); watches first, then results, then the frame's variables; rows `name = {type} value` with lazy children ("Collecting data…"); groups "Special Variables", "Return Values"; Simplified Variables View (on) hides functions, classes, modules; menu: New Watch…, Remove Watch, Set Value… (F2), Copy Value, Copy Name, Evaluate Expression…, Add to Watches, Jump To Source (F4) | values, changed after a step, error, "Variables are not available" |
+| S-DG06 | Console | S-DG01 | program output and input | the Run console (stdin, ANSI colours, traceback and URL links); "Show Debug Console" turns it into a prompt in the current frame (off) | running, finished |
+| S-DG07 | Editor during a session | a stop | show where and what | execution line background (top frame) or a second background (other frames), breakpoint line background, inline values after the line end (`name: value`, italic, changed ones in another colour) on the line where the name is bound, value tooltip after 700 ms, Quick Evaluate (Alt+click) | suspended, running |
+| S-DG08 | Gutter breakpoints | line numbers of a Python file | set breakpoints | the icon replaces the line number (New UI default); hover over a stoppable line shows the icon, a hand cursor and "Add Breakpoint"; right-click: Add Breakpoint, Add Conditional Breakpoint…, Add Logging Breakpoint…; tooltip `file.py:12` with suspend policy, condition, log, "Right-click to edit" | enabled, disabled, muted, non-suspending, conditional (question badge), verified, invalid, several on a line |
+| S-DG09 | Breakpoint properties popup | right-click a breakpoint; Cmd+Shift+F8 on its line | edit one breakpoint | title `file.py:12`, Enabled, Suspend with All / Thread (Python default Thread) and Make Default, Condition (Python expression editor), "More (Cmd+Shift+F8)", Done | - |
+| S-DG10 | Breakpoints dialog | View Breakpoints…, Cmd+Shift+F8 / Ctrl+Shift+F8 | manage breakpoints | "Breakpoints": tree by type ("Python Line Breakpoints", "Python Exception Breakpoints" with "Any exception"), add (Python Exception Breakpoint, class chooser), remove; right: Enabled, Suspend, Condition, Log ("Breakpoint hit" message, Stack trace), Evaluate and log, Remove once hit, Disable until hitting another; exceptions: On termination / On raise, Ignore library files; Done | "Select a breakpoint" |
+| S-DG11 | Evaluate dialog | Alt+F8 | evaluate | "Evaluate": expression with history (the selection or the word at the caret), "Result:" tree, Code Fragment Mode / Expression Mode, Evaluate (default), Close; size remembered | result, error |
+| S-DG12 | Run widget during a session | main toolbar | control from the toolbar | the Run slot shows "Pause '{name}'" while running and "Resume '{name}'" while suspended; Debug becomes Rerun; Stop appears; dropdown rows have an inline "Debug '{name}'" | running, suspended |
+| S-DG13 | Debugger settings pages | Settings > Build, Execution, Deployment > Python Debugger, Debugger (Data Views, Stepping) | options | fields in the data model | later |
+
+### Flows
+
+```
+F-DG01 Debug the current file or a configuration
+    Debug or "Debug '{name}'" -> S-DG01 with a tab, the Console shows the
+    command line; without a breakpoint the Console is focused, "Process
+    finished with exit code 0", Rerun offered
+    edge: interpreter missing or too old for debugpy; file not runnable;
+          single-instance configuration already running (the Run "Process
+          Is Running" dialog); adapter fails to start
+
+F-DG02 Stop at a breakpoint
+    hit -> S-DG01 shown, Threads & Variables selected once, the file opened
+    at the execution line, top frame selected, its variables and inline
+    values shown; Resume (F9) runs to the next hit
+    edge: several threads; library file; lines edited while running (marks
+          move); unverified breakpoint (invalid icon); where the focus goes
+          (to verify against a reference screenshot)
+
+F-DG03 Step
+    over, into (libraries too), into my code, out, run to cursor, force run
+    to cursor (breakpoints ignored), show execution point; each stop updates
+    frames, variables (changed values coloured) and inline values
+    edge: step past the end (session ends); generators, async code
+
+F-DG04 Inspect and evaluate
+    expand lazily; F2 edits a value; Copy Value; Enter in the evaluate field
+    adds a result, Cmd+Shift+Enter / Ctrl+Shift+Enter a watch (kept per
+    configuration); Alt+F8 -> S-DG11 with the selection, Code Fragment Mode
+    edge: huge containers (paging); long strings; errors (red); slow repr
+
+F-DG05 Edit a breakpoint
+    right-click -> S-DG09 -> condition -> Done -> question badge; Suspend
+    off -> non-suspending; Alt+click toggles enabled; Shift+click adds a
+    logging breakpoint; a click removes it; Cmd+Shift+F8 -> S-DG10
+
+F-DG06 Stop on an exception
+    default "Any exception" On termination: an uncaught exception suspends
+    where it was raised; Resume prints the traceback, exit code 1; On raise
+    stops at every raise
+
+F-DG07 Stop, rerun, pause, mute
+    Stop kills the program and the adapter; Rerun restarts in the same tab;
+    Pause suspends all threads; Mute greys every breakpoint until unmuted
+```
+
+Keys (macOS / Windows and Linux): Debug Ctrl+D / Shift+F9; Debug the
+current file Ctrl+Shift+D / not in the Community default keymap (docs:
+Ctrl+Shift+F9; to verify); Resume Cmd+Alt+R, F9 / F9; Step Over F8; Step
+Into F7; Step Into My Code Alt+Shift+F7; Step Out Shift+F8; Run to Cursor
+Alt+F9; Force Run to Cursor Cmd+Alt+F9 / Ctrl+Alt+F9; Show Execution Point
+Alt+F10; Evaluate Alt+F8; Quick Evaluate Cmd+Alt+F8 / Ctrl+Alt+F8; Toggle
+Line Breakpoint Cmd+F8 / Ctrl+F8; View Breakpoints Cmd+Shift+F8 /
+Ctrl+Shift+F8; Stop Cmd+F2 / Ctrl+F2; Rerun Cmd+R / Ctrl+F5; Debug window
+Cmd+5 / Alt+5; Pause: none.
+
+### Components
+
+| component | variants | states | used on |
+|---|---|---|---|
+| Session tabs with a toolbar | debug (shares the Run tab strip) | running, suspended, finished | S-DG01, S-DG02 |
+| Tree with lazy children | variables, watches, evaluation result | collecting, loaded, error, changed | S-DG05, S-DG11 |
+| Gutter icon over a line number | breakpoint kinds | hover, enabled, disabled, muted, invalid | S-DG08 |
+| Line background and after-line text | execution point, breakpoint line, inline value | current, other frame, changed | S-DG07 |
+| Popup or dialog with a form | breakpoint properties, Breakpoints, Evaluate | - | S-DG09 to S-DG11 |
+
+### Inferred data model
+
+```
+LineBreakpoint       file, line, enabled, suspend ALL | THREAD | NONE,
+                     condition, log message, log stack, log expression,
+                     temporary, group, description
+                     stored: .idea/workspace.xml, XDebuggerManager
+                     (type python-line, 0-based line)
+                     evidence: sources 3, 6               confidence: high
+ExceptionBreakpoint  class ("Any exception" = BaseException), on termination
+                     | on raise, ignore library files; Watch: expression
+                     per run configuration (both in workspace.xml)
+                     evidence: sources 3, 6               confidence: high
+DebugSession         configuration, adapter and program processes, running
+                     | suspended | finished, threads, frames, lazy variables
+                     evidence: sources 1, 7               confidence: high
+DebuggerOptions      project (workspace.xml): attach to subprocesses (on),
+                     evaluation timeout 60000 ms; application
+                     (debugger.xml): show window on breakpoint (on), inline
+                     values (on), value tooltip (700 ms), simplified view
+                     evidence: sources 5, 6               confidence: high
+```
+
+Pyoxide mapping: breakpoints, watches, mute state and project options in
+`.oxide/workspace.toml` (ADR 0009), imported once from
+`.idea/workspace.xml` (never written); application options in the
+application settings store. debugpy 1.8.21 ships with the application;
+the program starts through DAP `runInTerminal` so the Console keeps stdin
+like Run. DAP client and debugpy distribution: ADR 0015 (proposed).
+
+### Feature matrix
+See `replica/features.csv`, area `run-debug` (debugger rows).
+
+### Out of scope or deferred
+- The Mode switch and pydevd (one backend).
+- First version: breakpoints (gutter, conditions, dialog), Frames and
+  Variables, inline values, stepping, the Console, run configurations.
+- Later: the Evaluate dialog, Quick Evaluate, value tooltip and watches,
+  logging details, Smart Step Into, Jump To Cursor, the Debug Console
+  prompt, Reset Frame (not in debugpy), dependent breakpoints,
+  subprocesses, Attach to Process, remote, Docker and WSL, numpy and
+  pandas views, type renderers, settings pages.
+
+### Size
+Screens 13, flows 7, entities 5. Hard parts: three processes per session
+(adapter, launcher, program) that must all end on Stop, close or crash,
+also on Windows; DAP message ordering; gutter icons and inline values in
+the editor; paged variable trees with slow repr; function keys on macOS.
+Size: L (first version about 36 to 48 agent-hours).
+
+---
+
+## Area: vcs (git and branch widget)
+
+Scope: Git for the project through the `git` executable: repository
+detection, file status colours, change markers in the editor gutter, the
+Commit tool window with a side-by-side diff viewer, rollback, the version
+control widget in the main toolbar with its branches popup, push, update
+(pull) and the Git menu. Blame, history, merge conflicts and stash come
+later.
+Date: 2026-10-16. Reference: PyCharm 2026.2.3 (IntelliJ Community tag
+`pycharm/2026.2.3`).
+
+### Sources
+
+| # | source | URL | notes |
+|---|---|---|---|
+| 1 | Commit and push changes | https://www.jetbrains.com/help/pycharm/commit-and-push-changes.html | Commit tool window, amend, options, push |
+| 2 | Manage branches | https://www.jetbrains.com/help/pycharm/manage-branches.html | branches popup, checkout, new branch, Smart Checkout |
+| 3 | File status highlights | https://www.jetbrains.com/help/pycharm/file-status-highlights.html | colour per status |
+| 4 | Undo changes | https://www.jetbrains.com/help/pycharm/undo-changes.html | rollback of files and lines |
+| 5 | Sync with a remote | https://www.jetbrains.com/help/pycharm/sync-with-a-remote-repository.html | fetch, pull, Update Project |
+| 6 | Enable version control | https://www.jetbrains.com/help/pycharm/enabling-version-control.html | detection, Create Git Repository |
+| 7 | Gutter and diff | https://www.jetbrains.com/help/pycharm/editor-gutter.html, https://www.jetbrains.com/help/pycharm/comparing-file-versions.html | change markers, diff viewer |
+| 8 | Version Control settings | https://www.jetbrains.com/help/pycharm/settings-version-control.html, https://www.jetbrains.com/help/pycharm/settings-version-control-git.html | options and defaults |
+| 9 | IntelliJ Community at `pycharm/2026.2.3`, Apache-2.0 | https://github.com/JetBrains/intellij-community/tree/pycharm/2026.2.3 | `plugins/git4idea` (commands, status, branches popup, toolbar widget, push, update, bundles), `platform/vcs-impl`, `platform/vcs-api`, `platform/dvcs-impl` (Commit tool window, line markers, file status), `platform/diff-impl` (diff viewer), keymaps, schemes `islands/IslandSchemeDark.xml`, `expUI/expUI_{dark,light}Scheme.xml` |
+| 10 | Git documentation | https://git-scm.com/docs/git-status, https://git-scm.com/docs/git-for-each-ref, https://git-scm.com/docs/gitrepository-layout | porcelain output, refs, the `.git` layout |
+
+No reference screenshots yet: toolbar sets, the icons of ignored files,
+dialogs and branch submenus are to verify against a reference screenshot.
+
+### Core loop
+Edit files and see what changed in the tree and the gutter, review a diff,
+commit with Cmd+K, create or switch a branch from the toolbar widget, push.
+
+### Screens
+
+| ID | screen | how to reach | purpose | key components | states |
+|---|---|---|---|---|---|
+| S-VC01 | File status colours | Git on for the project | show a file's state | name in the status colour in the project tree, editor tabs, Commit tree, Recent Files and Go to File rows; folders not coloured by default; an unsaved edit of a tracked file counts as modified at once | added, modified, renamed, deleted, unversioned, ignored, conflict |
+| S-VC02 | Gutter change markers | edit a tracked file | show changed lines | a 4 px pill next to the line numbers (wider on hover); deleted lines as a short pill on the boundary; a mark per range in the error stripe | added, modified, deleted, whitespace only |
+| S-VC03 | Change marker popup | click a marker | act on one change | Previous Change, Next Change, Rollback Lines, Show Diff for Lines, Copy; the base text with word highlights | - |
+| S-VC04 | Commit tool window | Cmd+K / Ctrl+K, Cmd+0 / Alt+0, stripe "Commit" (left, under Project) | commit | toolbar (Refresh, Rollback…, Show Diff, View Options, expand and collapse); changes tree with check boxes: "Changes" (bold) and a grey count "3 files", rows with icon, name in status colour and grey path, "Unversioned Files"; Amend and the message history button; legend "2 modified, 1 added, 1 deleted"; message editor ("Commit Message"); error line; Commit (default), Commit and Push…, gear | empty, changes, updating, committing, amend |
+| S-VC05 | Commit options popup | gear, Ctrl+O | options | Author (previous authors), Sign-off commit, Run Git hooks (when hooks exist) | - |
+| S-VC06 | Diff viewer | double-click, Cmd+D / Ctrl+D or Enter in S-VC04; Show Diff for Lines | review a change | editor tab "Commit: <file>"; side by side: base on the left (short hash title, read-only), "Your version" on the right (editable); line and word highlights, divider, synchronized scrolling, "{n} differences"; unchanged fragments collapsed with 4 lines of context | differences, "No differences" |
+| S-VC07 | Rollback Changes dialog | Cmd+Alt+Z / Ctrl+Alt+Z in S-VC04 | undo file changes | tree of the selection with check boxes, "Delete local copies of added files", Rollback | - |
+| S-VC08 | Push dialog | Cmd+Shift+K / Ctrl+Shift+K, Commit and Push… | push | "Push Commits to <repo>": `<branch> → <remote>:<target>` (editable target, "New" tag), commits with subjects, files of the selected commit; Push tags; Push with Force Push (with lease); "Push Rejected" dialog: Merge, Rebase, Cancel | up to date, commits, new branch, rejected |
+| S-VC09 | Update Project dialog | Cmd+T / Ctrl+T | pull | merge or rebase incoming changes, clean the working tree with stash or shelve, "Don't show again" | - |
+| S-VC10 | VCS widget | main toolbar, right of the project widget | show the branch | branch icon and name (cut in the middle at 80 characters), incoming / outgoing arrows; detached HEAD: warning icon, short hash or tag; "Rebasing {b}", "Merging {b}"; tooltip "Git Branch: {b}"; without VCS "Version Control" without an icon | branch, ahead / behind, detached, operation, no VCS, loading ("Git") |
+| S-VC11 | Branches popup | click S-VC10 | branch actions | search "Search for branches and actions" with Fetch and a settings menu; Update Project…, Commit…, Push…; New Branch…, Checkout Tag or Revision…; groups Recent, Local, Remote, Tags, folders for `a/b` names; row: icon (current, favourite star), name, incoming / outgoing counts, grey tracked branch, submenu arrow | git, no VCS (Create Git Repository…) |
+| S-VC12 | Branch submenu | a branch row | act on a branch | Checkout, New Branch from '{b}'…, Checkout and Rebase onto '{current}'; Compare with '{b}', Show Diff with Working Tree; Rebase, Merge; Update, Push…, Tracked Branch; Rename… (F2), Delete; items per current / local / remote branch to verify against a reference screenshot | current, local, remote |
+| S-VC13 | Branch dialogs | New Branch…; checkout over local changes | create, check out | "Create New Branch": "Branch Name:", "Checkout branch" (on), "Overwrite existing branch"; errors for an empty, existing or invalid name and HEAD; "Git Checkout Problem": Smart Checkout, Force Checkout, Don't Checkout | valid, error |
+| S-VC14 | Git menu, VCS Operations popup | main menu, Ctrl+V / Alt+` | all actions | Commit…, Push…, Update Project…, Pull…, Fetch; Merge…, Rebase…; Branches…, New Branch…, New Tag…, Reset HEAD…; Show Git Log; Manage Remotes…, Clone…; without Git the menu is "VCS" | git, no VCS |
+| S-VC15 | Balloons | after an operation | report | "{n} files committed" with the message, "Commit failed with error(s)", "Pushed {n} commits to {b}", "Everything is up to date", "Checked out {b}", "Deleted branch {b}" with Restore | success, error |
+
+Status colours (`FILESTATUS_*` keys; Islands Dark / Light): added
+`73BD79` / `067D17`; modified and renamed `70AEFF` / `0033B3`; deleted
+`6F737A` / `6C707E`; unversioned `E88F89` / `B23247`; ignored `D69A6B` /
+`8C4F00` (everything below an ignored folder too; excluded folders keep
+their style); conflict `DE6A66` / `DE1B2E`. Gutter `*_LINES_COLOR`, diff
+`DIFF_INSERTED`, `DIFF_DELETED`, `DIFF_MODIFIED`.
+
+### Flows
+
+```
+F-VC01 Open a Git work tree
+    .git found in a content root or above -> S-VC10 shows the branch,
+    S-VC01 colours appear; no Git: "Version Control" -> Create Git
+    Repository… -> git init -> files red, the default branch shown
+    edge: git missing ("Git is not installed"); "Unsupported Git Version"
+          (below 2.17, 2.19.2 on Windows); macOS without command line tools
+          (the /usr/bin/git shim is not run); project mapped to no VCS
+
+F-VC02 See changes while editing
+    type in a tracked file -> name blue at once, gutter marker; new file
+    red; `git add` outside -> green within about 0.5 s; .gitignore edits
+    update the ignored colours
+
+F-VC03 Commit
+    Cmd+K -> S-VC04, changes checked, focus in the message -> type ->
+    Cmd+Enter / Ctrl+Enter -> balloon "{n} files committed" (3 keys);
+    Amend loads the last message, unticking restores the draft
+    edge: nothing checked or empty message (red "Select files to commit",
+          "Specify commit message"); unversioned file checked (added);
+          user name unset ("Git User Name Is Not Defined"); detached HEAD
+          warning; failing hooks; other staged changes stay staged
+
+F-VC04 Review and roll back
+    double-click -> S-VC06 -> F7 / Shift+F7 -> edit on the right -> markers
+    follow; Cmd+Alt+Z -> S-VC07 -> HEAD content (an added file becomes
+    unversioned or is deleted); marker -> S-VC03 -> Rollback Lines (undoable)
+
+F-VC05 Branches
+    S-VC10 -> New Branch… -> name -> Create -> widget shows it; Checkout
+    edge: invalid or existing name; local changes in the way (S-VC13, Smart
+          Checkout stashes and restores); remote branch (a tracking local
+          branch); tag or revision (detached HEAD); branch deleted outside
+
+F-VC06 Push, update
+    Cmd+Shift+K (or Commit and Push…) -> S-VC08 -> Push -> balloon; a new
+    branch gets its upstream; rejected -> Merge or Rebase; Cmd+T -> S-VC09
+    -> stash, fetch, merge or rebase, unstash -> "{n} files updated in {m}
+    commits" or "All files are up to date"
+    edge: authentication (no prompt yet: git's message); no tracked branch;
+          conflicts (error, repository left merging or rebasing)
+```
+
+Keys (macOS / Windows and Linux): Commit… Cmd+K / Ctrl+K; Commit window
+Cmd+0 / Alt+0; Commit and Push… Cmd+Alt+K / Ctrl+Alt+K; Amend Ctrl+Alt+M
+/ Alt+M; Rollback Cmd+Alt+Z / Ctrl+Alt+Z; Show Diff Cmd+D / Ctrl+D; Push…
+Cmd+Shift+K / Ctrl+Shift+K; Update Project… Cmd+T / Ctrl+T; next change
+Ctrl+Alt+Shift+Down; next difference F7; New Branch… Cmd+Alt+N /
+Ctrl+Alt+N; VCS Operations Ctrl+V / Alt+`.
+
+### Components
+
+| component | variants | states | used on |
+|---|---|---|---|
+| Status-coloured file name | tree row, tab, list row | per status | S-VC01, S-VC04 |
+| Gutter change marker | added, modified, deleted, whitespace | idle, hover | S-VC02 |
+| Changes tree with check boxes | changes, unversioned | included, partly included, updating | S-VC04, S-VC07 |
+| Diff panes | side by side (unified later) | differences, none | S-VC06 |
+| Toolbar widget and branch menu | VCS widget, branches popup with groups and submenus | branch, detached, no VCS, search | S-VC10 to S-VC12 |
+| Dialog, balloon | rollback, push, update, branch, user name; info and error balloons | valid, error | S-VC07 to S-VC15 |
+
+### Inferred data model
+
+```
+Repository   root, git dir (`gitdir:` for worktrees), HEAD (branch or
+             detached), state (merging, rebasing, ...), remotes, branches
+             with upstream and ahead / behind; read from .git files (HEAD,
+             refs, packed-refs, config) and `git for-each-ref`
+             evidence: sources 2, 9, 10           confidence: high
+FileStatus   path -> added | modified | renamed | deleted | unversioned |
+             ignored | conflict (`git status --porcelain -z`)
+             evidence: sources 3, 9, 10           confidence: high
+LineRanges   per open tracked file: base text (`git cat-file --filters
+             HEAD:<path>`) against the buffer -> inserted, modified, deleted
+             evidence: sources 7, 9               confidence: high
+CommitDraft  message, included paths, amend, author, sign-off, run hooks
+VcsSettings  mapping root -> Git (shared .idea/vcs.xml); path to git
+             (git.xml); update method, recent branches and messages
+             (workspace.xml)
+             evidence: sources 1, 8, 9            confidence: high
+```
+
+Pyoxide mapping: path to git in the application settings store; commit
+draft, recent messages and branches in `.oxide/workspace.toml` (ADR 0009);
+only `.idea/vcs.xml` is imported once. Every operation runs the `git`
+executable as the reference does (ADR 0016, proposed): reads with
+`GIT_OPTIONAL_LOCKS=0`, no terminal prompts, the user's credential helper
+and ssh-agent, status 300 ms after a watcher batch, never on the UI
+thread. Proposed budgets: status of a 10k-file repository within 150 ms of
+the watcher batch; gutter markers within 50 ms of the last keystroke.
+
+### Feature matrix
+See `replica/features.csv`, area `vcs`.
+
+### Out of scope or deferred
+- Later: blame, Git log tool window and file history, merge conflict UI,
+  stash and shelve UI, cherry-pick, interactive rebase, changelists,
+  partial commits, compare with a branch, worktrees, tags, a credentials
+  prompt, `.gitignore` support, commit checks, hosting services, clone.
+- Version control systems other than Git.
+
+### Size
+Screens 15, flows 6, entities 5. Hard parts: the status pipeline with the
+file watcher (own writes, `.git` events, large repositories) within the
+budgets; the diff viewer as a new kind of editor tab; the gutter marker
+layer; process cost and line endings on Windows; balloons as a shared
+component. Size: L (about 42 agent-hours).
+
+---
+
+## Area: settings (Settings window, keymap, interpreters)
+
+Scope: the Settings window (page tree with search, pages, Revert changes,
+Apply / OK / Cancel), Pyoxide's application settings store, the first
+pages (Appearance with themes, System Settings for autosave, Keymap,
+Editor > Font, Editor > General soft wraps, Python > Interpreter with the
+Add Python Interpreter dialog, Python > Type Engine, Python > Tools >
+External Tools) and a one-time pick-up of the reference IDE's settings.
+Pages of other areas come with those areas.
+Date: 2026-10-16. Reference: PyCharm 2026.2.3 (IntelliJ Community tag
+`pycharm/2026.2.3`).
+
+### Sources
+
+| # | source | URL | notes |
+|---|---|---|---|
+| 1 | Settings dialog | https://www.jetbrains.com/help/pycharm/settings-preferences-dialog.html | tree, search, Apply / OK |
+| 2 | Appearance | https://www.jetbrains.com/help/pycharm/settings-appearance.html | theme, sync with OS, UI options |
+| 3 | System Settings | https://www.jetbrains.com/help/pycharm/system-settings.html | autosave and sync |
+| 4 | Keymap | https://www.jetbrains.com/help/pycharm/settings-keymap.html | keymap choice, actions tree, find by shortcut |
+| 5 | Editor > Font, Editor > General | https://www.jetbrains.com/help/pycharm/settings-editor-font.html, https://www.jetbrains.com/help/pycharm/settings-editor-general.html | font, line height, soft wraps |
+| 6 | File Types | https://www.jetbrains.com/help/pycharm/settings-file-types.html | associations, ignored files |
+| 7 | Python interpreter | https://www.jetbrains.com/help/pycharm/configuring-python-interpreter.html, https://www.jetbrains.com/help/pycharm/creating-virtual-environment.html | Interpreter page, Add Python Interpreter |
+| 8 | Share and import settings | https://www.jetbrains.com/help/pycharm/sharing-your-ide-settings.html | import, first run |
+| 9 | IntelliJ Community at `pycharm/2026.2.3`, Apache-2.0 | https://github.com/JetBrains/intellij-community/tree/pycharm/2026.2.3 | `platform/platform-impl` (Settings window: `SettingsEditor`, `SettingsTreeView`, `SettingsFilter`, `SettingsNonModalDialog`, `ConfigurablesListPanel`; `AppearanceConfigurable`, `GeneralSettingsConfigurable`, `KeymapPanel`, `QuickChangeLookAndFeel`), `platform/platform-resources` (advanced settings, keymaps), `plugins/keymaps/vscode-keymap` (VS Code keymaps), `python/` (`PyActiveSdkConfigurable`, `PythonAddCustomInterpreter`, the Python settings group) |
+
+No reference screenshots yet: tree row height and order, the banner, theme
+combo groups, the gear menu and the Python pages are to verify against a
+reference screenshot.
+
+### How the reference is built
+- The Settings window is non-modal by default in 2026.2 (advanced setting
+  "Show settings in a non-modal dialog", on): one window per application,
+  title `Settings – <project>`, with Pin Window; modal from the welcome
+  screen.
+- The Python pages form a top-level "Python" group (Interpreter, Type
+  Engine, Tools > External Tools) sorted first in the tree.
+- Autosave lives in Appearance & Behavior > System Settings; the page
+  reset link is "Revert changes"; there is no Reset button.
+- Theme changes apply at once, not on Apply; the quick switcher previews a
+  theme 500 ms after the selection moves and restores it on Escape.
+
+### Core loop
+Press Cmd+, / Ctrl+Alt+S, type a few letters to find an option, change it,
+Apply; pick a theme or a keymap and see it at once.
+
+### Screens
+
+| ID | screen | how to reach | purpose | key components | states |
+|---|---|---|---|---|---|
+| S-SE01 | Settings window | Cmd+, / Ctrl+Alt+S, toolbar gear > Settings…, macOS app menu Settings… | change settings | left: search field and page tree (top-level rows bold, project-level mark, modified pages in the link colour, errors red, sticky group name); right: banner (bold breadcrumbs "Appearance & Behavior › Appearance", Revert changes, Back, Forward, Pin Window) and the page; bottom bar: help "?", Cancel, Apply, OK (macOS) or OK, Cancel, Apply (Windows, Linux); 900×700 initial and minimum, splitter 0.2, both remembered | page, filtered, no match (red field), modified, error |
+| S-SE02 | Group page | a group row | overview | description and links to the child pages | - |
+| S-SE03 | Appearance | Appearance & Behavior > Appearance | look | Theme combo, Sync with OS and its gear, editor scheme; later: zoom, UI font, UI options | - |
+| S-SE04 | Theme quick switch | gear > Theme ▸, Ctrl+` > Theme | switch themes | themes in groups (Islands, New UI, Classic, "Custom" for imported ones), current marked, separator, "Import Theme…" (in place of the marketplace link) | preview |
+| S-SE05 | System Settings | Appearance & Behavior > System Settings | autosave | Files: "Save files if the IDE is idle for [15] seconds", "Save files when switching to a different application or a built-in terminal", "Sync external changes" | - |
+| S-SE06 | Keymap | tree, gear > Keymap ▸ | choose and read shortcuts | keymap combo (predefined bold, custom below their parent) and gear (Duplicate, Rename, Restore Defaults, Delete); "Based on {name} keymap"; Expand All, Collapse All, Edit Shortcut; search by name, Find Actions by Shortcut; actions tree with shortcuts | predefined (read-only), custom |
+| S-SE07 | Editor > Font | tree | editor font | Font with "Show only monospaced fonts", Size, Line height (1.2), Enable ligatures, Restore defaults (when changed), Typography Settings (weights, fallback font), preview | defaults, changed |
+| S-SE08 | Editor > General | tree | editor behaviour | groups Mouse Control, Soft Wraps ("Soft-wrap these files:" `*.md; *.txt; *.rst; *.adoc`, original indent (on), additional indent 0, indicators for the current line only (off)), Scrolling, On Save | - |
+| S-SE09 | Editor > File Types | tree | associations | Recognized File Types (types, file name patterns, hashbangs), Ignored Files and Folders | later |
+| S-SE10 | Python > Interpreter | tree, interpreter popup "Interpreter Settings…" | project interpreter | "Python Interpreter:" combo (No interpreter, environments, system, separator, "Show All…"), "Add Interpreter" ▸; packages table (Package, Version, Latest version; install, uninstall, upgrade) | none, loading packages, configuring |
+| S-SE11 | Python Interpreters | "Show All…" | manage the list | configured interpreters, add, remove, rename, path; "Hide virtual environments associated with other projects" | duplicate name error |
+| S-SE12 | Add Python Interpreter | Add Interpreter ▸ Add Local Interpreter…, interpreter popup | add one | "Environment: Generate new / Select existing"; "Type:" Virtualenv, Conda, Pipenv, Poetry, uv, Hatch (new) or Python, Conda, Poetry, uv, Hatch (existing); Base Python, Location, Inherit packages, Python path | tool not found, folder exists |
+| S-SE13 | Python > Type Engine | tree | type engine | see S-PI14 | - |
+| S-SE14 | Python > Tools > External Tools | tree | language tools | see S-PI13 | - |
+| S-SE15 | Unsaved Changes | close the project or quit with edits | keep edits | "Unsaved Changes", Apply, Don't Save, Cancel | - |
+| S-SE16 | First run import | first start without settings | carry settings over | "Import Settings From" (the reference's configuration) or "Skip Import"; "Choose Theme"; "Choose Keymap" with sample shortcuts; Back, Continue | later |
+
+Pyoxide's tree lists only implemented pages, in the reference's order:
+Python (Interpreter, Type Engine, Tools > External Tools), Appearance &
+Behavior (Appearance, System Settings), Keymap, Editor (General, Font, File
+Types). The default page is the last one selected, else Appearance.
+
+### Flows
+
+```
+F-SE01 Open Settings
+    Cmd+, / Ctrl+Alt+S -> S-SE01 on the last page (first time Appearance),
+    focus in the tree; again while open: the same window to the front
+    edge: opened from another project with unsaved edits -> S-SE15
+
+F-SE02 Search
+    typing (the tree forwards it to the field) -> after 100 ms the tree
+    keeps pages whose name or options match (word prefixes) and selects the
+    first hit; matching labels highlighted; Enter focuses the page
+    edge: no hit (red field); Escape clears the filter, a second one closes
+
+F-SE03 Change, Apply, OK, Cancel
+    a change -> page name in the modified colour, Revert changes and Apply
+    enabled -> Apply saves every modified page; OK = Apply and close;
+    Cancel or Escape drop the edits
+    edge: Apply error (page selected, name red, message under the page)
+
+F-SE04 Switch the theme
+    Theme combo switches at once (Cancel keeps it); gear > Theme ▸ previews
+    after 500 ms, Enter keeps, Escape restores; Import Theme… (.theme.json,
+    .icls, .xml, .jar, .zip, folder) -> report -> listed under "Custom"
+    edge: unknown keys (report); a plugin theme id that cannot be resolved
+
+F-SE05 Switch the keymap
+    Keymap combo -> Apply (gear > Keymap ▸ at once) -> bindings and menu
+    shortcuts change; "macOS", "Windows", "GNOME", "KDE", "XWin", "VSCode",
+    "VSCode (macOS)"; the default follows the platform
+
+F-SE06 Font, soft wraps, autosave
+    change -> Apply -> every editor relayouts, matching files wrap, the
+    autosave delay applies
+
+F-SE07 Interpreter
+    combo -> Apply; Add Interpreter ▸ Add Local Interpreter… -> S-SE12 -> OK
+    -> created off the UI thread, added to the application list, selected
+    edge: broken base Python; "The specified folder already exists"; "No
+          {tool} executable found. Make sure {tool} is installed and added
+          to PATH."
+
+F-SE08 First start
+    no settings -> S-SE16: import the newest reference configuration or
+    skip -> theme -> keymap; later starts do not import again
+```
+
+Keys: Settings Cmd+, / Ctrl+Alt+S; Quick Switch Scheme Ctrl+`. Gear menu:
+Settings… | Theme ▸, Keymap ▸ (the reference also has Run Anything,
+Plugins, View Mode).
+
+### Components
+
+| component | variants | states | used on |
+|---|---|---|---|
+| Settings tree with search | page, group, project page | selected, modified, error, filtered, no match | S-SE01 |
+| Banner | breadcrumbs, Revert changes, history | modified, unmodified | S-SE01 |
+| Form rows | label and field, check box, combo, link, group header, collapsible group | enabled, disabled, error | S-SE03 to S-SE14 |
+| Bottom bar | per-OS button order | Apply enabled or not | S-SE01, S-SE12 |
+| Quick switch popup | theme, keymap | preview | S-SE04 |
+| Table | packages, interpreters | loading, empty | S-SE10, S-SE11 |
+
+### Inferred data model
+
+```
+ReferenceConfig  the reference's per-OS configuration directory, options/:
+                 laf.xml (theme id, absent = Islands Dark), colors.scheme.xml
+                 and colors/*.icls (scheme), keymap.xml and keymaps/*.xml
+                 (active and custom keymaps), editor-font.xml (family, size,
+                 line spacing, ligatures), editor.xml (soft wraps),
+                 ui.lnf.xml (UI options), ide.general.xml (autosave),
+                 filetypes.xml (associations, ignored files), jdk.table.xml
+                 (interpreters: name, home, flavour, associated project)
+                 evidence: sources 8, 9               confidence: high
+SettingsPage     id, parent, title, weight, scope (application | project
+                 shared | project personal), search terms, draft with
+                 modified / apply / reset
+                 evidence: source 9                   confidence: high
+Interpreter      name, path, kind, associated project; an application list,
+                 a project refers to one by name
+                 evidence: sources 7, 9               confidence: high
+```
+
+Pyoxide mapping (ADR 0017, proposed): `<config>/pyoxide/settings.toml`
+(versioned, unknown keys kept, atomic writes, a done-once import marker),
+growing data in their own files (`interpreters.toml`, themes, keymaps);
+project settings in `.oxide/project.toml` and `.oxide/workspace.toml`
+(ADR 0009). The import reads only the XML data files above and theme,
+scheme and keymap data in plugin archives; reading a plugin descriptor to
+resolve a theme id is a decision for that ADR. Keymap format and runtime
+switching: ADR 0018 (proposed); VS Code keymaps come from Community data
+files (NOTICE entry).
+
+### Feature matrix
+See `replica/features.csv`, area `settings`; import formats stay in area
+`settings-import`, the packages table is the python-env row "Package
+manager panel".
+
+### Out of scope or deferred
+- Pages for features Pyoxide does not have yet; a page comes with its
+  feature.
+- Later: search spotlight on the page, keymap editing, File Types page,
+  the first-run window, other Appearance options.
+- A Zed keymap (no permissively licensed source); marketplace links.
+
+### Size
+Screens 16, flows 8, entities 3. Hard parts: a non-modal window with
+drafts and live apply, runtime keymap switching (menus, gestures), search
+highlights on pages, monospaced font detection, theme ids of plugin
+themes, several main windows in sync. Size: L (first version about 32 to
+39 agent-hours; packages table, File Types and first run about 10 more).
