@@ -8038,6 +8038,7 @@ dependencies = [
  "editor",
  "gpui",
  "imara-diff",
+ "name-match",
  "serde_json",
  "text",
  "themes",

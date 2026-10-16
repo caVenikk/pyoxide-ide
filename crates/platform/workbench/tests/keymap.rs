@@ -659,6 +659,15 @@ impl H<'_> {
         if !self.run()["tabs"].as_array().unwrap().is_empty() {
             self.invoke("run.close-all-tabs", json!(null));
         }
+        let vcs = self.state()["vcs"].clone();
+        if !vcs["branches_popup"].is_null() {
+            self.invoke("vcs.branches-popup", json!(null));
+        }
+        if vcs["branch_dialog"]["buttons"].is_array() {
+            self.invoke("dialog.cancel", json!(null));
+        } else if !vcs["branch_dialog"].is_null() {
+            self.invoke("branch-dialog.cancel", json!(null));
+        }
         if !self.state()["vcs"]["marker_popup"].is_null() {
             self.invoke("marker-popup.close", json!(null));
         }
@@ -2302,6 +2311,11 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "code.reformat"
         | "code.optimize-imports" => check_docs(h, &b.command, keys, &what),
         // Version control: lines 1 and 3 differ from the committed text.
+        "git.new-branch"
+        | "vcs.branches-popup"
+        | "branch-dialog.confirm"
+        | "branch-dialog.cancel" => check_branches(h, &b.command, keys, &what),
+        c if c.starts_with("branches-popup.") => check_branches(h, c, keys, &what),
         "vcs.next-change" => {
             h.set_editor_with_base("|a\nB\nc\nD\ne\n", "a\nb\nc\nd\ne\n");
             h.press(keys);
@@ -2484,6 +2498,161 @@ fn mark_os(h: &mut H) {
     };
     h.cx.update(|cx| editor.update(cx, |e, cx| e.set_diagnostics(vec![mark], cx)));
     h.draw();
+}
+
+/// Version control of the project, waited for until `f` holds.
+fn wait_vcs(h: &mut H, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..3000 {
+        support::tick(h.cx);
+        h.draw();
+        let vcs = h.invoke("vcs.state", json!(null));
+        if f(&vcs) {
+            return vcs;
+        }
+    }
+    panic!("timed out waiting for {what}");
+}
+
+/// Makes the project a Git repository with `main`, `feat/x` and `other`
+/// (once) and opens the branches popup with its branches.
+fn open_branches(h: &mut H) -> Value {
+    if h.invoke("vcs.state", json!(null))["widget"]["kind"] != "repository" {
+        let git = |args: &[&str]| {
+            let exe = git::GitExe::find(None).expect("git is installed");
+            let out = std::process::Command::new(exe.path)
+                .args(args)
+                .current_dir(&h.root)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["add", "a.py"]);
+        git(&["commit", "-q", "-m", "first"]);
+        git(&["branch", "feat/x"]);
+        git(&["branch", "other"]);
+        let path = h.root.display().to_string();
+        h.invoke("git.init", json!({ "path": path }));
+        wait_vcs(h, "the repository", |v| v["widget"]["kind"] == "repository");
+    }
+    h.invoke("vcs.branches-popup", json!(null));
+    wait_vcs(h, "the branches", |v| v["branches_popup"]["loaded"] == true)["branches_popup"].clone()
+}
+
+/// The selected row of the branches popup.
+fn selected_row(popup: &Value) -> Value {
+    popup["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["selected"] == true)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn branches_popup(h: &mut H) -> Value {
+    h.invoke("vcs.state", json!(null))["branches_popup"].clone()
+}
+
+fn check_branches(h: &mut H, command: &str, keys: &str, what: &str) {
+    match command {
+        "git.new-branch" => {
+            h.press(keys);
+            let vcs = wait_vcs(h, "the New Branch dialog", |v| {
+                !v["branch_dialog"].is_null()
+            });
+            assert_eq!(vcs["branch_dialog"]["title"], "Create New Branch", "{what}");
+        }
+        "branch-dialog.cancel" | "branch-dialog.confirm" => {
+            if command == "branch-dialog.confirm" {
+                open_branches(h);
+                h.invoke("vcs.branches-popup", json!(null));
+            }
+            h.invoke("git.new-branch", json!(null));
+            wait_vcs(h, "the New Branch dialog", |v| {
+                !v["branch_dialog"].is_null()
+            });
+            h.invoke("branch-dialog.set-name", json!({ "text": "from-keys" }));
+            h.press(keys);
+            let vcs = h.invoke("vcs.state", json!(null));
+            assert!(vcs["branch_dialog"].is_null(), "{what}: closed");
+            if command == "branch-dialog.confirm" {
+                wait_vcs(h, "the new branch", |v| v["widget"]["text"] == "from-keys");
+                h.invoke("git.checkout", json!({ "ref": "main" }));
+                wait_vcs(h, "main", |v| v["widget"]["text"] == "main");
+                h.invoke("git.delete-branch", json!({ "name": "from-keys" }));
+            }
+        }
+        "vcs.branches-popup" => {
+            h.press(keys);
+            assert!(!branches_popup(h).is_null(), "{what}: the popup shows");
+        }
+        _ => {
+            let popup = open_branches(h);
+            assert_eq!(selected_row(&popup)["name"], "main", "{what}");
+            match command {
+                "branches-popup.down" | "branches-popup.up" => {
+                    h.press(keys);
+                    let row = selected_row(&branches_popup(h));
+                    let expected = if command == "branches-popup.down" {
+                        "folder"
+                    } else {
+                        "group"
+                    };
+                    assert_eq!(row["kind"], expected, "{what}: {row}");
+                }
+                "branches-popup.left" => {
+                    h.press(keys);
+                    let row = selected_row(&branches_popup(h));
+                    assert_eq!(row["text"], "Local", "{what}");
+                }
+                "branches-popup.right" => {
+                    h.invoke("branches-popup.left", json!(null));
+                    h.invoke("branches-popup.left", json!(null));
+                    assert_eq!(selected_row(&branches_popup(h))["expanded"], false);
+                    h.press(keys);
+                    let row = selected_row(&branches_popup(h));
+                    assert_eq!(
+                        (row["text"].clone(), row["expanded"].clone()),
+                        (json!("Local"), json!(true)),
+                        "{what}"
+                    );
+                }
+                "branches-popup.confirm" => {
+                    h.press(keys);
+                    let submenu = branches_popup(h)["submenu"].clone();
+                    assert!(
+                        submenu.to_string().contains("New Branch from 'main'"),
+                        "{what}: {submenu}"
+                    );
+                }
+                "branches-popup.close" => {
+                    h.invoke("branches-popup.search", json!({ "text": "ma" }));
+                    h.press(keys);
+                    let popup = branches_popup(h);
+                    assert_eq!(popup["search"], "", "{what}: the search is cleared");
+                }
+                "branches-popup.delete" => {
+                    h.invoke("branches-popup.search", json!({ "text": "ma" }));
+                    h.press(keys);
+                    assert_eq!(branches_popup(h)["search"], "m", "{what}");
+                }
+                "branches-popup.rename" => {
+                    h.invoke("branches-popup.search", json!({ "text": "other" }));
+                    h.press(keys);
+                    let vcs = wait_vcs(h, "the rename dialog", |v| !v["branch_dialog"].is_null());
+                    assert_eq!(
+                        vcs["branch_dialog"]["title"], "Rename Branch other",
+                        "{what}"
+                    );
+                }
+                _ => panic!("no check for {command}"),
+            }
+        }
+    }
 }
 
 fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {

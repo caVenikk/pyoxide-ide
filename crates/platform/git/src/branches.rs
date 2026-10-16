@@ -164,7 +164,42 @@ impl GitRepo {
         mode: CheckoutMode,
         cancel: &Cancel,
     ) -> Result<Checkout, CheckoutError> {
-        let (args, checked_out) = self.checkout_plan(target, cancel)?;
+        let plan = self.checkout_plan(target, cancel)?;
+        self.run_checkout(target, plan, mode, cancel)
+    }
+
+    /// Checks out the commit `target` names (a tag, a branch, a commit)
+    /// with `HEAD` detached (Checkout Tag or Revision…).
+    pub fn checkout_detached(
+        &self,
+        target: &str,
+        mode: CheckoutMode,
+        cancel: &Cancel,
+    ) -> Result<Checkout, CheckoutError> {
+        if self.resolve_commit(target, cancel)?.is_none() {
+            return Err(CheckoutError::NotFound(target.to_owned()));
+        }
+        let plan = (
+            vec![
+                "checkout".to_owned(),
+                "--detach".to_owned(),
+                target.to_owned(),
+                "--".to_owned(),
+            ],
+            CheckedOut::Detached {
+                target: target.to_owned(),
+            },
+        );
+        self.run_checkout(target, plan, mode, cancel)
+    }
+
+    fn run_checkout(
+        &self,
+        target: &str,
+        (args, checked_out): (Vec<String>, CheckedOut),
+        mode: CheckoutMode,
+        cancel: &Cancel,
+    ) -> Result<Checkout, CheckoutError> {
         match mode {
             CheckoutMode::Normal | CheckoutMode::Force => {
                 let mut args = args;

@@ -37,6 +37,7 @@ use crate::run::RunToolWindow;
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
 
+mod branches;
 mod file_events;
 mod file_sync;
 mod history;
@@ -211,6 +212,8 @@ pub struct Workbench {
     notifications: Entity<Notifications>,
     /// The project's Git repository and its statuses.
     version_control: version_control::VersionControl,
+    /// The VCS widget's popups and dialogs.
+    branch_ui: branches::BranchUi,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -379,6 +382,7 @@ impl Workbench {
             file_sync: Default::default(),
             notifications,
             version_control,
+            branch_ui: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -1649,8 +1653,10 @@ impl Workbench {
         );
         let search = icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
             .tooltip(Tooltip::text("Search Everywhere", None));
+        let mut left_group = vec![project_widget];
+        left_group.extend(self.vcs_toolbar_widget(&measure, cx));
         let groups = [
-            vec![project_widget],
+            left_group,
             file_widget.into_iter().collect(),
             vec![
                 run_selector,
@@ -2385,6 +2391,7 @@ impl Render for Workbench {
         }
         root = project_panel::forward_actions(root, self.panel.clone());
         root = self.vcs_actions(root, cx);
+        root = self.branch_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         root.flex()
             .flex_col()
@@ -2427,6 +2434,7 @@ impl Render for Workbench {
             .child(self.notifications.clone())
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
+            .children(self.render_branch_overlays(window, cx))
             .children(self.render_switch_popup(window))
             .children(ui::dialog_window::blocker(window, cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))

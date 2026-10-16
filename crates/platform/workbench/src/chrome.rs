@@ -165,6 +165,70 @@ pub fn file_path_widget(icon: IconName, text: &Fitted, cx: &App) -> Stateful<Div
         )
 }
 
+/// Room between the project widget and the VCS widget, and the VCS
+/// widget's gaps: icon to text, text to the incoming and outgoing arrows
+/// (12 px each), arrows to the chevron.
+pub const VCS_WIDGET_SPACE: f32 = 16.0;
+const VCS_ICON_GAP: f32 = 6.0;
+const VCS_ARROWS_GAP: f32 = 6.0;
+const VCS_ARROW: f32 = 12.0;
+
+/// Width of the VCS widget without its text.
+pub fn vcs_widget_chrome(icon: bool, arrows: usize) -> f32 {
+    let icon = if icon { FILE_ICON + VCS_ICON_GAP } else { 0.0 };
+    let arrows = if arrows > 0 {
+        VCS_ARROWS_GAP + arrows as f32 * VCS_ARROW
+    } else {
+        0.0
+    };
+    toolbar_widget_chrome(FILE_CHEVRON_GAP) + icon + arrows
+}
+
+/// The VCS widget next to the project widget (`GitToolbarWidgetAction`):
+/// the branch icon (a tag or a warning when `HEAD` is detached), the
+/// branch, the incoming and outgoing arrows, the chevron; "Version
+/// Control" without an icon when the project has no repository.
+pub fn vcs_widget(
+    icon: Option<IconName>,
+    text: &Fitted,
+    incoming: bool,
+    outgoing: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    toolbar_widget("vcs-widget", cx)
+        .debug_selector(|| "vcs-widget".into())
+        .text_color(theme.color(UiRole::Text))
+        .children(icon.map(|icon| {
+            div()
+                .flex_none()
+                .mr(px(VCS_ICON_GAP))
+                .child(Icon::new(icon).size(px(FILE_ICON)))
+        }))
+        .child(widget_text(text).debug_selector(|| "vcs-widget-text".into()))
+        .when(incoming || outgoing, |d| {
+            d.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_none()
+                    .ml(px(VCS_ARROWS_GAP))
+                    .when(incoming, |d| {
+                        d.child(Icon::new(IconName::INCOMING).size(px(VCS_ARROW)))
+                    })
+                    .when(outgoing, |d| {
+                        d.child(Icon::new(IconName::OUTGOING).size(px(VCS_ARROW)))
+                    }),
+            )
+        })
+        .child(
+            div()
+                .flex_none()
+                .ml(px(FILE_CHEVRON_GAP))
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(CHEVRON))),
+        )
+}
+
 /// An icon with a round badge at its top right, cut out of the icon by a
 /// ring of the background colour, as the New UI draws a running process
 /// (`IconManager.withIconBadge`, `BadgeDotProvider`: a dot of radius 3.5
