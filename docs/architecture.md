@@ -60,8 +60,9 @@ Platform (`crates/platform/`, language-agnostic):
   (ignored folders count for everything below them, an unsaved document
   of a clean tracked file is modified), line ranges of a document against
   its base text (`imara-diff`, git's histogram algorithm) shifted on
-  edits, `HEAD`, the operation in progress, branches and the `Backend`
-  trait UI crates depend on.
+  edits, `HEAD`, the operation in progress, branches, the checks and
+  cleaning of new branch names, and the `Backend` trait UI crates depend
+  on.
 - `git`: Git through the git executable (ADR 0016): lookup and version
   check, a runner with per-repository read/write locks and cancellation
   (`GIT_OPTIONAL_LOCKS=0` for reads), porcelain and `for-each-ref`
@@ -70,7 +71,10 @@ Platform (`crates/platform/`, language-agnostic):
   or above a folder, the status service fed by the file watcher (300 ms
   debounce, limited to the dirty paths when few, own writes suppressed),
   base texts through `cat-file --filters` cached by blob, the
-  `.idea/vcs.xml` mapping, `git.status`, `git.branches`, `git.state`.
+  `.idea/vcs.xml` mapping, branch operations (checkout, Smart and Force
+  Checkout with the changes stashed around it, new branch, rename, delete
+  and restore, recent checkouts from the reflog, `git init`), git's
+  messages in English, and the `git.*` engine commands.
 - `vcs-ui`: version control UI on GPUI (ADR 0016), knowing the model
   only: file status colours of names (folders only when ignored, an open
   document by its unsaved text), the change markers of an editor against
@@ -78,7 +82,11 @@ Platform (`crates/platform/`, language-agnostic):
   the UI thread, whitespace-only lines in their own colour, thin error
   stripe marks), the marker popup with the old text and its changed
   words, Next / Previous Change and Rollback Lines as one undoable edit
-  (`vcs.*` commands; the workbench reads base texts through `git`).
+  (`vcs.*` commands; the workbench reads base texts through `git`); the
+  VCS widget's text, icon, tooltip and arrows, the branches popup (search,
+  top actions, groups Recent, Local, Remote and Tags with prefix
+  folders, the actions of a branch) and the New Branch, Rename Branch and
+  Checkout dialogs (`git.*` UI commands the workbench runs through `git`).
 - `run-config`: run configurations without a toolkit (ADR 0012): the
   language-neutral model (common settings, environment variables with
   shared or personal values, options per type), the list with the
@@ -229,7 +237,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `console-ui` | platform | yes | the Run console view, moved out of `workbench` so that Run and Debug share it | 0015 |
 | `vcs` | platform | no | the version control model and backend trait: file status, changes, the status map, line ranges against the base text (`imara-diff`), branches | 0016 |
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
-| `vcs-ui` | platform | yes | file status colours, change markers and their popup; later the Commit tool window, changes tree, diff viewer tab, VCS widget and branch popup, git dialogs | 0016 |
+| `vcs-ui` | platform | yes | file status colours, change markers and their popup, the VCS widget, branches popup and branch dialogs; later the Commit tool window, changes tree, diff viewer tab, other git dialogs | 0016 |
 | `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
 | `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import | 0017, 0018 |
 | `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |

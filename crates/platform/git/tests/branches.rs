@@ -116,6 +116,18 @@ fn checkout_of_a_branch_a_tag_and_a_revision() {
         repo.checkout("no-such-ref", CheckoutMode::Normal, &c),
         Err(CheckoutError::NotFound("no-such-ref".into()))
     );
+
+    // Checkout Tag or Revision… detaches HEAD even at a branch.
+    let done = repo
+        .checkout_detached("other", CheckoutMode::Normal, &c)
+        .unwrap();
+    assert_eq!(
+        done.checked_out,
+        CheckedOut::Detached {
+            target: "other".into()
+        }
+    );
+    assert!(matches!(head(&repo), Head::Detached { .. }));
 }
 
 #[test]

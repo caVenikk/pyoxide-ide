@@ -19,7 +19,8 @@
   not installed.
 
 ## Commands
-`git.init {"path": ...}`, `git.status`, `vcs.state` (widget).
+`vcs.branches-popup` (Create Git Repository…), `git.init {"path": ...}`
+(without a path a folder chooser), `git.status`, `vcs.state` (widget).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/enabling-version-control.html;
