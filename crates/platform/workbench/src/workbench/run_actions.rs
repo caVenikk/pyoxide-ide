@@ -757,6 +757,7 @@ impl Workbench {
             )),
             activate: !crate::env::background(),
             themed_title: true,
+            ..ui::dialog_window::DialogOptions::default()
         };
         let mut built = None;
         let handle = ui::dialog_window::open(window, options, cx, |window, cx| {
