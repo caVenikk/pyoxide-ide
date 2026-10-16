@@ -149,7 +149,7 @@ pub fn invoke(
                 }
                 available
             });
-            if ran == Ok(true) {
+            if ran.unwrap_or(false) {
                 return Ok(Json::Null);
             }
         }
