@@ -7,7 +7,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, IntoElement, Pixels, SharedString, canvas, div, prelude::*, px,
+    AnyElement, App, Bounds, FontWeight, IntoElement, Pixels, SharedString, canvas, div,
+    prelude::*, px,
 };
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, spinner};
@@ -15,7 +16,8 @@ use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
 use super::commands::*;
-use crate::chrome::toolbar_widget;
+use crate::chrome::{toolbar_widget, toolbar_widget_chrome, widget_text};
+use crate::main_toolbar::{Cut, Fitted, Measure, Measured};
 
 /// Opacity of a temporary configuration's icon
 /// (`ProgramRunnerUtil.getTemporaryIcon`).
@@ -98,9 +100,24 @@ impl WidgetState {
     pub fn selector_tooltip(&self) -> String {
         match &self.configuration {
             Some(config) if super::dropdown::trim_name(&config.name) != config.name => {
-                format!("Run / Debug Configuration: {}", config.name)
+                self.cut_selector_tooltip()
             }
             _ => "Run / Debug Configurations".to_owned(),
+        }
+    }
+
+    /// The selector's tooltip when its text is cut, by length or because
+    /// the toolbar is narrow.
+    fn cut_selector_tooltip(&self) -> String {
+        format!("Run / Debug Configuration: {}", self.selector_full_text())
+    }
+
+    /// The selector's text before any cut: the configuration's name, or
+    /// "Current File".
+    pub fn selector_full_text(&self) -> &str {
+        match &self.configuration {
+            Some(config) => &config.name,
+            None => "Current File",
         }
     }
 
@@ -197,28 +214,89 @@ fn inactive(name: IconName, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// The widget for `state`.
-pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
-    let icon = |name: IconName| Icon::new(name).size(px(16.0)).into_any_element();
+/// Between the parts of the selector and between the widget's parts.
+const GAP: f32 = 4.0;
+/// Size of the icons of the selector.
+const SELECTOR_ICON: f32 = 16.0;
+/// Button slots after the selector: Run, Debug, Stop or its empty slot,
+/// More.
+const BUTTONS: f32 = 4.0;
+
+/// The selector's text as measured for the main toolbar: the name cut in
+/// the middle when the toolbar is narrow, never longer than the name the
+/// widget shows ([`super::dropdown::trim_name`]).
+pub fn selector_text(state: &WidgetState, measure: &Measure) -> Measured {
+    measure
+        .text(state.selector_full_text(), FontWeight::NORMAL, Cut::Middle)
+        .max_chars(super::dropdown::NAME_MAX_CHARS)
+}
+
+/// Width of the selector without its text: padding, icon and chevron.
+pub fn selector_chrome(state: &WidgetState) -> f32 {
+    let icon = if state.configuration.is_some() {
+        SELECTOR_ICON + GAP
+    } else {
+        0.0
+    };
+    toolbar_widget_chrome(GAP) + icon
+}
+
+/// Width of the buttons after the selector, with the gap before them.
+pub fn buttons_width(cx: &App) -> f32 {
+    let button = f32::from(cx.theme().metric(Metric::ToolbarButtonSize));
+    BUTTONS * (button + GAP)
+}
+
+/// The configuration selector for `state` with its text as the toolbar
+/// fitted it (see [`selector_text`]). Of the widget only the selector gives
+/// way when the toolbar is narrow; the buttons ([`render_buttons`]) keep
+/// their width (`CompressingLayoutStrategy`).
+pub fn render_selector(
+    state: &WidgetState,
+    anchors: &Anchors,
+    text: &Fitted,
+    cx: &App,
+) -> impl IntoElement {
     // A configuration shows its type's icon (temporary ones at 45 %);
     // Current File shows none.
     let config_icon = state.configuration.as_ref().map(|c| {
         div()
             .flex_none()
             .when(c.temporary, |d| d.opacity(TEMPORARY_ICON_ALPHA))
-            .child(Icon::new(c.icon.unwrap_or(IconName::FILE_UNKNOWN)).size(px(16.0)))
+            .child(Icon::new(c.icon.unwrap_or(IconName::FILE_UNKNOWN)).size(px(SELECTOR_ICON)))
     });
-    let selector = toolbar_widget("run-configuration", cx)
+    // A name cut short shows in full in the tooltip (`getToolTipText`).
+    let tooltip = if text.cut {
+        state.cut_selector_tooltip()
+    } else {
+        state.selector_tooltip()
+    };
+    toolbar_widget("run-configuration", cx)
         .debug_selector(|| "run-configuration".into())
         .relative()
-        .gap(px(4.0))
+        .gap(px(GAP))
         .children(config_icon)
-        .child(div().whitespace_nowrap().child(state.selector_text()))
-        .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
+        // Left-aligned (`setHorizontalTextAlignment(LEFT)`).
+        .child(
+            widget_text(text)
+                .debug_selector(|| "run-configuration-text".into())
+                .text_left(),
+        )
+        .child(
+            div()
+                .flex_none()
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(SELECTOR_ICON))),
+        )
         .child(anchor(anchors.selector.clone()))
-        .tooltip(Tooltip::text(state.selector_tooltip(), None))
-        .on_click(|_, window, cx| window.dispatch_action(Box::new(ChooseConfiguration), cx));
+        .tooltip(Tooltip::text(tooltip, None))
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(ChooseConfiguration), cx))
+}
+
+/// Run, Debug, Stop and More Actions of the widget for `state`, after the
+/// selector.
+pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let icon = |name: IconName| Icon::new(name).size(px(16.0)).into_any_element();
     let run_icon = if state.launching {
         spinner("run-launching", cx).into_any_element()
     } else if state.file_running {
@@ -308,15 +386,16 @@ pub fn render(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElem
     )
     .child(anchor(anchors.more.clone()));
     div()
-        .id("run-widget")
-        .debug_selector(|| "run-widget".into())
+        .id("run-buttons")
+        .debug_selector(|| "run-buttons".into())
         .flex()
+        .flex_none()
         .flex_row()
         .items_center()
         // Buttons of 30 with 2 on both sides (`RunWidget.actionButtonWidth`,
         // `toolbarBorderDirectionalGap`).
-        .gap(px(4.0))
-        .child(selector)
+        .pl(px(GAP))
+        .gap(px(GAP))
         .child(run)
         .child(debug)
         .children(stop)

@@ -307,7 +307,12 @@ pub fn init(cx: &mut App, product: &Product) {
 /// transparent title bar on macOS (the main toolbar takes its place, the
 /// window buttons sit inside it); other platforms keep the native frame.
 pub fn window_options(cx: &App, product: &Product) -> WindowOptions {
-    let content = size(px(WINDOW_SIZE.0), px(WINDOW_SIZE.1));
+    let (width, height) = env::window_size().unwrap_or(WINDOW_SIZE);
+    let content = size(px(width), px(height));
+    let min_size = size(
+        px(WINDOW_MIN_SIZE.0.min(width)),
+        px(WINDOW_MIN_SIZE.1.min(height)),
+    );
     let mut bounds = Bounds::centered(None, content, cx);
     // A fractional origin makes macOS round the frame and the content size.
     bounds.origin = bounds.origin.map(|v| v.floor());
@@ -322,7 +327,7 @@ pub fn window_options(cx: &App, product: &Product) -> WindowOptions {
         }),
         focus: !env::background(),
         show: true,
-        window_min_size: Some(size(px(WINDOW_MIN_SIZE.0), px(WINDOW_MIN_SIZE.1))),
+        window_min_size: Some(min_size),
         app_id: Some(product.name.to_lowercase()),
         ..Default::default()
     }
