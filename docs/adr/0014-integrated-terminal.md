@@ -101,7 +101,10 @@ terminal:
   They source the activation script named by the session (below) after the
   user's rc files and before the first prompt, so `pyenv` or `conda init`
   in rc files cannot undo it. The "Shell integration" setting turns them
-  off; cmd.exe and unknown shells run without them.
+  off; cmd.exe and unknown shells run without them. `/bin/sh` of macOS
+  (bash in POSIX mode) ignores `--rcfile`, which the reference passes; it
+  gets `ENV` instead, a POSIX script that reads the profile files and the
+  user's own `ENV` before the bash part.
 - **Start rules** as the reference: shell from the settings, else
   `powershell.exe` on Windows and `$SHELL`, `/bin/zsh` (macOS), `/bin/bash`,
   `/bin/sh` elsewhere; `--login` for local macOS shells and `-i` for
@@ -117,7 +120,9 @@ terminal:
   module that owns the working directory: the venv's `activate`,
   `activate.fish`, `Activate.ps1` (uv venvs included); for shells without
   integration the variables of the activation script are merged into the
-  process environment. Conda comes later. "Activate virtualenv" is a
+  process environment, set as the script sets them (the reference runs
+  the script to read them). The workbench takes the hook from
+  `Product.terminal` and plans sessions on the background executor. Conda comes later. "Activate virtualenv" is a
   project setting, on by default.
 - **Keys**: with "Override IDE shortcuts" on (the default) the terminal's
   key context wins over every binding except the reference's allowed list
