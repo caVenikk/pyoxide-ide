@@ -270,6 +270,7 @@ pub fn probe_version(python: &Path) -> Result<String, String> {
 mod tests {
     use std::path::PathBuf;
 
+    #[cfg(not(windows))]
     use py_run::UvRun;
 
     use super::*;
