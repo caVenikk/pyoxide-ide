@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 31%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 32%** `██████░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
