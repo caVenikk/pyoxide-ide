@@ -106,6 +106,9 @@ pub enum WarningKind {
     InheritanceCycle { id: String },
     /// Values supplied by the base theme because the sources omit them.
     MissingBaseValues { count: usize },
+    /// The scheme sets the deprecated `<colors>` option `BACKGROUND` but no
+    /// `TEXT` attribute, so its editor text is black (as in the reference).
+    TextFromBackground { scheme: String },
     /// A file or archive entry was skipped.
     Skipped { path: String, reason: String },
 }

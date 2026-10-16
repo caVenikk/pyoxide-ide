@@ -3,7 +3,16 @@
 
 use std::collections::BTreeMap;
 
+use crate::color::Rgba;
+
 use super::xml::{self, Element};
+
+/// The `<colors>` option that older schemes use for the editor background.
+/// It is deprecated in favour of the background of [`TEXT`].
+pub(crate) const BACKGROUND_OPTION: &str = "BACKGROUND";
+
+/// The attribute key of plain editor text: the editor's default colours.
+pub(crate) const TEXT: &str = "TEXT";
 
 /// One text attribute entry of a scheme. Every field holds the raw text of
 /// the option; empty and absent options are `None` ("inherit").
@@ -17,6 +26,23 @@ pub struct Attribute {
     pub effect_color: Option<String>,
     pub effect_type: Option<String>,
     pub error_stripe: Option<String>,
+    /// What the scheme's `<colors>` option `BACKGROUND` did to this entry
+    /// (only the `TEXT` entry is touched).
+    pub background_option: BackgroundOption,
+}
+
+/// How the deprecated `<colors>` option `BACKGROUND` shaped an attribute
+/// entry, see [`Scheme::apply_background_option`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackgroundOption {
+    /// The entry is as the file wrote it.
+    #[default]
+    Unused,
+    /// The option replaced the background of the scheme's own entry.
+    Replaced,
+    /// The scheme had no entry; one was made with black text on the
+    /// option's colour.
+    Created,
 }
 
 impl Attribute {
@@ -31,6 +57,11 @@ impl Attribute {
             effect_color: pick(&self.effect_color, &under.effect_color),
             effect_type: pick(&self.effect_type, &under.effect_type),
             error_stripe: pick(&self.error_stripe, &under.error_stripe),
+            background_option: if self.background.is_some() {
+                self.background_option
+            } else {
+                under.background_option
+            },
         }
     }
 }
@@ -166,7 +197,38 @@ impl Scheme {
                 scheme.read_font_option(option, FontScope::Console);
             }
         }
+        scheme.apply_background_option();
         scheme
+    }
+
+    /// `<colors><option name="BACKGROUND">` is the deprecated form of the
+    /// `TEXT` background, and it wins over it: as `AbstractColorsScheme.readScheme`
+    /// does once a `<scheme>` is read, a colour in it replaces the background
+    /// of the scheme's own `TEXT` entry, and a scheme without one gets a
+    /// `TEXT` entry with black text on that colour. The rule works inside one
+    /// scheme: the option of a parent does not reach a child's `TEXT`. An
+    /// empty or unreadable value changes nothing.
+    fn apply_background_option(&mut self) {
+        let Some(value) = self
+            .colors
+            .get(BACKGROUND_OPTION)
+            .filter(|v| Rgba::parse_scheme(v).is_ok())
+            .cloned()
+        else {
+            return;
+        };
+        let text = self
+            .attributes
+            .entry(TEXT.to_owned())
+            .or_insert_with(|| Attribute {
+                foreground: Some("000000".to_owned()),
+                background_option: BackgroundOption::Created,
+                ..Attribute::default()
+            });
+        text.background = Some(value);
+        if text.background_option == BackgroundOption::Unused {
+            text.background_option = BackgroundOption::Replaced;
+        }
     }
 
     fn read_font_option(&mut self, option: &Element, scope: FontScope) {
@@ -407,6 +469,80 @@ mod tests {
         assert_eq!(chain.color("B"), Some("222222"));
         // The child's empty entry replaces the parent's entry entirely.
         assert_eq!(chain.attribute("K").unwrap().foreground, None);
+    }
+
+    fn one(doc: &str) -> Scheme {
+        Scheme::parse(doc, "x", "x").unwrap().remove(0)
+    }
+
+    #[test]
+    fn the_background_option_replaces_the_text_background() {
+        let s = one(
+            r#"<scheme name="s"><colors><option name="BACKGROUND" value="101010"/></colors>
+            <attributes><option name="TEXT"><value>
+              <option name="FOREGROUND" value="e0e0e0"/><option name="BACKGROUND" value="303030"/>
+              <option name="EFFECT_TYPE" value="5"/>
+            </value></option></attributes></scheme>"#,
+        );
+        let text = &s.attributes[TEXT];
+        assert_eq!(text.background.as_deref(), Some("101010"));
+        assert_eq!(text.foreground.as_deref(), Some("e0e0e0"));
+        assert_eq!(text.effect_type.as_deref(), Some("5"));
+        assert_eq!(text.background_option, BackgroundOption::Replaced);
+        // The option stays a colour of the scheme.
+        assert_eq!(s.colors[BACKGROUND_OPTION], "101010");
+    }
+
+    #[test]
+    fn the_background_option_without_text_makes_black_text() {
+        // `<colors>` after `<attributes>`: the order does not matter.
+        let s = one(
+            r#"<scheme name="s"><attributes/><colors><option name="BACKGROUND" value="f0f0f0"/></colors></scheme>"#,
+        );
+        let text = &s.attributes[TEXT];
+        assert_eq!(text.foreground.as_deref(), Some("000000"));
+        assert_eq!(text.background.as_deref(), Some("f0f0f0"));
+        assert_eq!(text.background_option, BackgroundOption::Created);
+    }
+
+    #[test]
+    fn an_empty_or_broken_background_option_changes_nothing() {
+        for value in ["", "not a colour"] {
+            let s = one(&format!(
+                r#"<scheme name="s"><colors><option name="BACKGROUND" value="{value}"/></colors>
+                <attributes><option name="TEXT"><value><option name="BACKGROUND" value="303030"/></value></option></attributes></scheme>"#
+            ));
+            let text = &s.attributes[TEXT];
+            assert_eq!(text.background.as_deref(), Some("303030"), "{value:?}");
+            assert_eq!(text.background_option, BackgroundOption::Unused);
+        }
+        let none = one(
+            r#"<scheme name="s"><colors><option name="BACKGROUND" value=""/></colors></scheme>"#,
+        );
+        assert!(!none.attributes.contains_key(TEXT));
+    }
+
+    #[test]
+    fn the_background_option_stays_inside_its_scheme() {
+        let parent = one(
+            r#"<scheme name="p"><colors><option name="BACKGROUND" value="111111"/></colors></scheme>"#,
+        );
+        let child = one(r#"<scheme name="c" parent_scheme="p">
+            <attributes><option name="TEXT"><value><option name="BACKGROUND" value="222222"/></value></option></attributes></scheme>"#);
+        let chain = SchemeChain {
+            layers: vec![&child, &parent],
+        };
+        let text = chain.attribute(TEXT).unwrap();
+        assert_eq!(text.background.as_deref(), Some("222222"));
+        assert_eq!(text.background_option, BackgroundOption::Unused);
+        // Without a TEXT of its own the child shows the parent's result.
+        let bare = one(r#"<scheme name="c" parent_scheme="p"/>"#);
+        let chain = SchemeChain {
+            layers: vec![&bare, &parent],
+        };
+        let text = chain.attribute(TEXT).unwrap();
+        assert_eq!(text.background.as_deref(), Some("111111"));
+        assert_eq!(text.background_option, BackgroundOption::Created);
     }
 
     #[test]

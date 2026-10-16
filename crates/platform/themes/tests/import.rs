@@ -924,3 +924,136 @@ fn language_attribute_lists_extend_their_base_scheme() {
         library.skipped()
     );
 }
+
+// ---- the deprecated BACKGROUND colour -----------------------------------
+
+/// A theme plugin whose scheme sets the editor background with the
+/// deprecated `<colors>` option `BACKGROUND` and a different `TEXT`
+/// background: the option wins, as in the reference, and is reported under
+/// its own name.
+#[test]
+fn the_deprecated_background_colour_is_the_editor_background() {
+    let dir = tempfile::tempdir().unwrap();
+    let themes = dir.path().join("themes");
+    std::fs::create_dir(&themes).unwrap();
+    std::fs::write(
+        themes.join("Ember.theme.json"),
+        r##"{
+  "name": "Ember",
+  "dark": true,
+  "parentTheme": "Islands Dark",
+  "editorScheme": "/themes/Ember.xml",
+  "ui": { "*": { "background": "#2a2420" } }
+}"##,
+    )
+    .unwrap();
+    std::fs::write(
+        themes.join("Ember.xml"),
+        r#"<scheme name="Ember" version="142" parent_scheme="Darcula">
+  <colors>
+    <option name="BACKGROUND" value="1e1a17"/>
+    <option name="GUTTER_BACKGROUND" value="1e1a17"/>
+    <option name="LINE_NUMBERS_COLOR" value="5c5148"/>
+  </colors>
+  <attributes>
+    <option name="TEXT"><value>
+      <option name="FOREGROUND" value="f2e8dc"/>
+      <option name="BACKGROUND" value="3a322b"/>
+      <option name="EFFECT_TYPE" value="5"/>
+    </value></option>
+  </attributes>
+</scheme>"#,
+    )
+    .unwrap();
+    let all = import_path(dir.path(), &[fixtures().join("base")]).unwrap();
+    let item = by_name(&all, "Ember");
+    let t = &item.theme;
+    assert_eq!(t.ui[UiRole::EditorBackground], rgba("#1e1a17"));
+    assert_eq!(t.ui[UiRole::EditorText], rgba("#f2e8dc"));
+    assert_eq!(t.ui[UiRole::LineNumber], rgba("#5c5148"));
+    // The scheme sets no EDITOR_GUTTER_BACKGROUND: the gutter is the editor.
+    assert_eq!(t.ui[UiRole::Gutter], rgba("#1e1a17"));
+
+    let mapped = |key: &str| {
+        item.report
+            .mapped
+            .iter()
+            .find(|m| m.key == key && m.target == "ui.editor-background")
+    };
+    let background = mapped("BACKGROUND").expect("BACKGROUND is reported");
+    assert_eq!(background.source, KeySource::SchemeColor);
+    assert!(background.used);
+    assert!(
+        mapped("TEXT.BACKGROUND").is_none(),
+        "{:?}",
+        item.report.mapped
+    );
+    assert!(
+        !item.report.unmapped.iter().any(|u| u.key == "BACKGROUND"),
+        "{:?}",
+        item.report.unmapped
+    );
+    assert!(
+        !item
+            .report
+            .warnings
+            .iter()
+            .any(|w| matches!(w.kind, WarningKind::TextFromBackground { .. }))
+    );
+}
+
+/// The option of a scheme without a `TEXT` entry makes black text, also
+/// over a parent's `TEXT`, and the report says so. A child's own `TEXT`
+/// is not changed by its parent's option.
+#[test]
+fn the_deprecated_background_colour_without_text_and_across_parents() {
+    let mut library = Library::new();
+    library
+        .add_scheme_xml(
+            r#"<scheme name="Paper Base" version="142" parent_scheme="Default">
+              <colors><option name="BACKGROUND" value="f6f1e7"/></colors></scheme>"#,
+            "base",
+            "base.icls",
+            false,
+        )
+        .unwrap();
+    library
+        .add_scheme_xml(
+            r#"<scheme name="Paper" version="142" parent_scheme="Paper Base">
+              <attributes><option name="TEXT"><value>
+                <option name="FOREGROUND" value="2b2620"/><option name="BACKGROUND" value="fffdf8"/>
+              </value></option></attributes></scheme>"#,
+            "child",
+            "child.icls",
+            true,
+        )
+        .unwrap();
+    library
+        .add_path(
+            &fixtures().join("base/DefaultColorSchemesManager.xml"),
+            false,
+        )
+        .unwrap();
+    let child = library.import_all().remove(0);
+    assert_eq!(child.theme.name, "Paper");
+    assert_eq!(child.theme.ui[UiRole::EditorBackground], rgba("#fffdf8"));
+    assert_eq!(child.theme.ui[UiRole::EditorText], rgba("#2b2620"));
+    assert_eq!(child.theme.kind, ThemeKind::Light);
+
+    let base = library
+        .schemes()
+        .find(|s| s.name == "Paper Base")
+        .unwrap()
+        .clone();
+    let item = library.import_scheme(&base);
+    assert_eq!(item.theme.ui[UiRole::EditorBackground], rgba("#f6f1e7"));
+    // Not the Default scheme's text colour: the reference makes it black.
+    assert_eq!(item.theme.ui[UiRole::EditorText], Rgba::BLACK);
+    let note = item
+        .report
+        .warnings
+        .iter()
+        .find(|w| matches!(&w.kind, WarningKind::TextFromBackground { scheme } if scheme == "Paper Base"))
+        .expect("a note on the black text");
+    assert_eq!(note.level, Level::Info);
+}
