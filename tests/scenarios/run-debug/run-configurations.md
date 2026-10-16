@@ -20,6 +20,9 @@
 7. Select the pytest configuration; give a Python configuration an
    interpreter name that does not exist and run it.
 8. Reopen the project; delete `.oxide/workspace.toml` and reopen it.
+9. Show the Run tool window before any run (Cmd+4 / Alt+4): hover the
+   "run configuration" link of its last line and click it, with a
+   configuration selected and then with Current File selected.
 
 ## Expected
 - Step 1: one notification "Imported N run configurations (M kept
@@ -88,6 +91,18 @@
 - Step 8: no second import; the selection is kept. Without the personal
   state only the per-user configurations are imported again; the shared
   ones are not duplicated.
+- Step 9: the empty Run tool window lists "To run your code, do one of
+  the following:", the gutter icon, the editor context menu and "— Launch
+  a run configuration (⌃⌥R)": the shortcut of Choose Run Configuration
+  from the active keymap, as symbols on macOS (⌃⌥R in the macOS keymap),
+  as words elsewhere (Alt+Shift+F10 in the default keymap), no brackets
+  when the keymap has no key for it. The link shows the hand and an
+  underline under the pointer; a click opens "Run/Debug Configurations"
+  without its Run button (Cancel, Apply, OK only), with the selected
+  configuration selected, or with nothing selected and
+  the types collapsed while Current File is selected: the form then
+  shows the link "Add new run configuration…" (it offers the types) over
+  "or select run configuration to edit".
 
 ## Commands
 `run.configurations`, `run.configuration.select {"name": ..., "type":
@@ -101,7 +116,8 @@
 `toggle-option {"option"}`, `modify-options`, `apply`, `ok`, `cancel`,
 `run`, `expand`, `collapse`, `browse {"field"}`, `remove-tag`),
 `dialog.choose`,
-`run.run`, `run.state` (`configurations`, `widget`, `menu`,
+`run.run`, `run.state` (`configurations`, `widget`, `menu`, `empty` with
+its `lines`, `shortcut` and `link_hovered`,
 `edit_dialog` with its `prompt`), `workbench.state` (`notice`,
 `message`, `dialog`). While the dialog is open, commands sent to the
 main window run in the dialog.
@@ -113,7 +129,8 @@ IntelliJ Platform Community (Apache-2.0) `RunManagerImpl`,
 `RunConfigurationSchemeManager`, `RCInArbitraryFileManager`,
 `RunToolbarPopup`, `RedesignedRunWidget`, `RunConfigurationsComboBoxAction`,
 `ChooseRunConfigurationManager`, `RunConfigurable`,
-`EditConfigurationsDialog`; Python plugin `AbstractPythonRunConfiguration`,
+`ProjectRunConfigurationConfigurable`, `EditConfigurationsDialog`,
+`ActivateRunToolWindowAction`; Python plugin `AbstractPythonRunConfiguration`,
 `PythonRunConfiguration`, `PythonScriptCommandLineState`,
 `PythonCommandLineState`, `PythonConfigurationFragmentedEditor`,
 `UvRunToolProvider`, `LegacyUvRunConfigurationConverter`; Shell Script

@@ -211,6 +211,7 @@ fn config_submenu(c: &RunConfiguration, pinned: bool) -> Vec<MenuItem> {
             EditConfigurations {
                 name: name.clone(),
                 r#type: ty.clone(),
+                run_button: None,
             },
         ),
     ];
@@ -356,6 +357,7 @@ pub fn menu(state: &MenuState<'_>) -> (Vec<MenuItem>, Option<usize>) {
                 EditConfigurations {
                     name: None,
                     r#type: None,
+                    run_button: None,
                 },
             )),
         }

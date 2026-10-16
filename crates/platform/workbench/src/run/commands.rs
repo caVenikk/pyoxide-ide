@@ -45,9 +45,9 @@ ui::ui_commands! {
         "Runs a run configuration by name (and type id when two types have the name), or the selected one.",
         r#"{"name": "server"}"#;
     /// Open the Run/Debug Configurations dialog.
-    EditConfigurations { name: Option<String>, r#type: Option<String> }
+    EditConfigurations { name: Option<String>, r#type: Option<String>, run_button: Option<bool> }
         => "run.configurations.edit", "Edit Configurations\u{2026}",
-        "Opens the Run/Debug Configurations dialog, on a configuration by name (and type id), else on the selected one.",
+        "Opens the Run/Debug Configurations dialog, on a configuration by name (and type id), else on the selected one (on nothing with Current File selected). `run_button: false` leaves out the dialog's Run button, as the reference's dialog opened from the empty Run tool window has none.",
         r#"{"name": "server"}"#;
     /// Make a temporary configuration permanent.
     SaveTemporary { name: Option<String>, r#type: Option<String> }

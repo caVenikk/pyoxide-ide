@@ -40,6 +40,9 @@
 "ctrl-r" = "run.run"
 "ctrl-shift-r" = "run.current-file"
 "cmd-f2" = "run.stop"
+# Choose Run Configuration: the run widget's dropdown (the Run tool window's
+# empty state names this key).
+"ctrl-alt-r" = "run.configurations"
 
 [[context]]
 name = "ProjectTree"

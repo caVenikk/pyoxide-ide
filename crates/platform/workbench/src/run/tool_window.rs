@@ -8,9 +8,9 @@ use std::sync::atomic::Ordering;
 use console::{ContentKind, LinkTarget};
 use futures::StreamExt as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render,
-    SharedString, Subscription, Task, Window, div, prelude::*, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, HitboxBehavior, IntoElement, MouseButton, MouseDownEvent,
+    Pixels, Point, Render, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use process::{ExitStatus, ProcessEvent, ProcessHandle};
 use themes::{Metric, UiRole};
@@ -27,6 +27,25 @@ use crate::chrome;
 /// Size of the buttons of the run and console toolbars and of their icons.
 const BUTTON: f32 = 24.0;
 const ICON: f32 = 16.0;
+
+/// The lines of the empty state (`run.toolwindow.empty.text.0` to `.2` of
+/// the reference's `LangBundle.properties`) and the one with the link
+/// (`.3`: the link is the part in angle brackets, the shortcut of
+/// `ChooseRunConfiguration` follows it in brackets).
+const EMPTY_LINES: [&str; 3] = [
+    "To run your code, do one of the following:",
+    "\u{2014} Click the Run icon in the editor gutter",
+    "\u{2014} Select \"Run\u{2026}\" in the editor context menu",
+];
+const EMPTY_LAUNCH: &str = "\u{2014} Launch a";
+const EMPTY_LINK: &str = "run configuration";
+
+/// The text after the link: the shortcut in brackets, as the reference
+/// shows it (`ActivateRunToolWindowAction.Manager`), or nothing for an
+/// action without one.
+fn empty_shortcut(shortcut: Option<&str>) -> String {
+    shortcut.map_or_else(String::new, |s| format!(" ({s})"))
+}
 
 /// What the Run tool window asks of the workbench.
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +191,8 @@ pub struct RunToolWindow {
     next_id: u64,
     /// The main window (a rerun after the process ended starts there).
     window_handle: gpui::AnyWindowHandle,
+    /// The pointer is over the empty state's link: its text is underlined.
+    empty_link: ui::form::Hover,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -200,6 +221,7 @@ impl RunToolWindow {
             edit_dialog: None,
             next_id: 0,
             window_handle: window.window_handle(),
+            empty_link: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -1062,13 +1084,52 @@ impl RunToolWindow {
             .children(buttons)
     }
 
+    /// The shortcut of Choose Run Configuration as the empty state shows it
+    /// (the keymap in use decides; `ChooseRunConfiguration`).
+    fn choose_shortcut(&self, window: &Window) -> Option<String> {
+        ui::keys::shortcut_in(&ChooseConfiguration, &self.focus, window)
+    }
+
     /// The reference's empty state of the Run tool window
     /// (`ActivateRunToolWindowAction.setupEmptyText`), without the help
-    /// link.
-    fn render_empty(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let muted = theme.color(UiRole::TextMuted);
-        let link = theme.color(UiRole::TextLink);
+    /// link. The link opens the Run/Debug Configurations dialog
+    /// (`EditConfigurationsDialog`: on the selected configuration, on
+    /// nothing with Current File selected); the last line ends with the
+    /// shortcut of Choose Run Configuration in brackets.
+    fn render_empty(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().color(UiRole::TextMuted);
+        let shortcut = self.choose_shortcut(window);
+        // A space at the end of a text run would be dropped, so the spaces
+        // around the link do not break.
+        let launch = format!("{EMPTY_LAUNCH}\u{00a0}");
+        let tail = empty_shortcut(shortcut.as_deref()).replacen(' ', "\u{00a0}", 1);
+        let link = ui::form::link("run-empty-link", EMPTY_LINK, &self.empty_link, cx)
+            .debug_selector(|| "run-empty-link".into())
+            .relative()
+            // The hand over the link (see `ui::pointer`).
+            .child(
+                canvas(
+                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                    |_, hitbox, window, _| {
+                        ui::pointer::request(CursorStyle::PointingHand, &hitbox, window)
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .on_click(|_, window, cx| {
+                window.dispatch_action(
+                    // `EditConfigurationsDialog(project)` has no Run button.
+                    Box::new(EditConfigurations {
+                        name: None,
+                        r#type: None,
+                        run_button: Some(false),
+                    }),
+                    cx,
+                )
+            });
         div()
             .id("run-empty")
             .debug_selector(|| "run-empty".into())
@@ -1082,17 +1143,37 @@ impl RunToolWindow {
                     .flex_col()
                     .gap(px(4.0))
                     .text_color(muted)
-                    .child("To run your code, do one of the following:")
-                    .child("\u{2014} Click the Run icon in the editor gutter")
-                    .child("\u{2014} Select \"Run\u{2026}\" in the editor context menu")
+                    .children(EMPTY_LINES)
                     .child(
                         div()
                             .flex()
                             .flex_row()
-                            .child("\u{2014} Launch a\u{00a0}")
-                            .child(div().text_color(link).child("run configuration")),
+                            .child(launch)
+                            .child(link)
+                            .when(!tail.is_empty(), |d| d.child(tail)),
                     ),
             )
+    }
+
+    /// The empty state as `run.state` reports it (`null` while a tab is
+    /// shown): its lines, the link, the shortcut and whether the pointer
+    /// is over the link.
+    pub fn empty_state_json(&self, window: &Window) -> serde_json::Value {
+        if self.selected.is_some_and(|i| i < self.tabs.len()) {
+            return serde_json::Value::Null;
+        }
+        let shortcut = self.choose_shortcut(window);
+        let mut lines: Vec<String> = EMPTY_LINES.iter().map(|l| (*l).to_owned()).collect();
+        lines.push(format!(
+            "{EMPTY_LAUNCH} {EMPTY_LINK}{}",
+            empty_shortcut(shortcut.as_deref())
+        ));
+        serde_json::json!({
+            "lines": lines,
+            "link": EMPTY_LINK,
+            "shortcut": shortcut,
+            "link_hovered": self.empty_link.get(),
+        })
     }
 }
 
@@ -1137,7 +1218,7 @@ impl Render for RunToolWindow {
                     )
                     .into_any_element()
             }
-            _ => self.render_empty(cx).into_any_element(),
+            _ => self.render_empty(window, cx).into_any_element(),
         };
         div()
             .id("run-tool-window-content")
