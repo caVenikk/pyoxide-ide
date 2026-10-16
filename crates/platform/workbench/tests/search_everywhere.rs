@@ -2,13 +2,17 @@
 //! driven by real keystrokes and modifier events through both default
 //! keymaps in a headless main window over a project on disk.
 
+mod mouse;
+
 use std::rc::Rc;
 use std::time::Duration;
 
 use editor::Editor;
 use gpui::{
-    AppContext as _, Focusable as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle,
+    AppContext as _, Bounds, Focusable as _, Modifiers, Pixels, PlatformInput, Point,
+    TestAppContext, VisualTestContext, WindowHandle, point, px,
 };
+use mouse::{drag_to, hover, press, release};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use workbench::keymap::{self, Keymap};
@@ -856,6 +860,175 @@ fn the_soft_wrap_button_of_the_previews(cx: &mut TestAppContext) {
         assert!(on, "{fif}");
         h.invoke("preview.toggle-soft-wraps", json!(null));
         assert_eq!(h.preview()["view"]["soft_wraps"], json!(false));
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.press("escape");
+    });
+}
+
+// ---- moving the popup and the splitter --------------------------------------
+
+impl H<'_> {
+    fn bounds(&mut self, selector: &'static str) -> Bounds<Pixels> {
+        self.vcx()
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"))
+    }
+
+    fn popup_at(&mut self) -> Point<Pixels> {
+        self.bounds("search-everywhere").origin
+    }
+
+    /// A point on the header's free space, between the tabs and the
+    /// toolbar.
+    fn on_header(&mut self) -> Point<Pixels> {
+        let tab = self.bounds("search-everywhere-tab-text");
+        let toolbar = ["search-everywhere-everywhere", "search-everywhere-scope"]
+            .into_iter()
+            .find_map(|s| self.vcx().debug_bounds(s))
+            .expect("the toolbar is drawn");
+        assert!(
+            toolbar.left() - tab.right() > px(20.0),
+            "{tab:?} {toolbar:?}"
+        );
+        point((tab.right() + toolbar.left()) / 2.0, tab.center().y)
+    }
+
+    fn dragging(&mut self) -> Value {
+        self.state()["dragging"].clone()
+    }
+
+    fn split(&mut self) -> f64 {
+        self.preview()["split"].as_f64().unwrap()
+    }
+
+    /// Each event in its own frame.
+    fn send(&mut self, events: Vec<PlatformInput>) {
+        mouse::send(self.cx, self.window.into(), events);
+    }
+
+    /// The events with no frame between them that they did not ask for.
+    fn quick(&mut self, events: Vec<PlatformInput>) {
+        mouse::quick(self.cx, self.window.into(), events);
+    }
+
+    /// The window loses the focus to another application, and gets it back
+    /// once `check` ran.
+    fn away(&mut self, check: impl FnOnce(&mut Self)) {
+        self.vcx().deactivate_window();
+        self.draw();
+        check(self);
+        self.cx
+            .update_window(self.window.into(), |_, window, _| window.activate_window())
+            .unwrap();
+        self.draw();
+    }
+}
+
+fn offset(x: f32, y: f32) -> Point<Pixels> {
+    point(px(x), px(y))
+}
+
+#[gpui::test]
+fn the_popup_moves_only_while_its_header_is_held(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_file);
+        let start = h.popup_at();
+        let idle = json!({ "popup": false, "split": false });
+        // A quick click on the header leaves no move (the release before
+        // the next frame: tests/popup_frame.rs).
+        let at = h.on_header();
+        h.quick(vec![press(at), release(at)]);
+        assert_eq!(h.dragging(), idle);
+        h.send(vec![hover(at + offset(80.0, 60.0))]);
+        assert_eq!(h.popup_at(), start);
+        // A click on a tab selects it and does not move the popup.
+        let tab = h.bounds("search-everywhere-tab-text").center();
+        h.quick(vec![press(tab), release(tab)]);
+        assert_eq!(h.state()["tab"], json!("text"));
+        assert_eq!(h.dragging(), idle);
+        h.send(vec![press(tab), drag_to(tab + offset(30.0, 20.0))]);
+        assert_eq!(h.popup_at(), start, "not moved from a tab");
+        h.send(vec![release(tab + offset(30.0, 20.0))]);
+        // A button in the header neither.
+        let button = h.bounds("search-everywhere-preview").center();
+        h.send(vec![press(button), drag_to(button + offset(-30.0, 20.0))]);
+        assert_eq!(h.dragging(), idle);
+        assert_eq!(h.popup_at(), start, "not moved from a button");
+        h.send(vec![release(button + offset(-30.0, 20.0))]);
+        // Held on the header: the popup follows the mouse; a release
+        // outside the window ends the move.
+        let at = h.on_header();
+        h.send(vec![press(at), drag_to(at + offset(30.0, 20.0))]);
+        assert_eq!(h.dragging()["popup"], json!(true));
+        assert_eq!(h.popup_at(), start + offset(30.0, 20.0));
+        h.send(vec![release(at + offset(30.0, 20.0) - offset(0.0, 2000.0))]);
+        assert_eq!(h.dragging(), idle);
+        let moved = h.popup_at();
+        h.send(vec![hover(at + offset(120.0, 90.0))]);
+        assert_eq!(h.popup_at(), moved);
+        // A lost release: the next move has no button and ends the move.
+        let at = h.on_header();
+        h.send(vec![press(at), drag_to(at + offset(20.0, 30.0))]);
+        h.send(vec![hover(at + offset(200.0, 100.0))]);
+        assert_eq!(h.dragging(), idle);
+        let moved = moved + offset(20.0, 30.0);
+        assert_eq!(h.popup_at(), moved);
+        // The window losing the focus ends a move (the popup stays open).
+        let at = h.on_header();
+        h.send(vec![press(at), drag_to(at + offset(10.0, 10.0))]);
+        h.away(|h| {
+            assert_eq!(h.dragging(), json!({ "popup": false, "split": false }));
+            assert_eq!(h.state()["open"], json!(true));
+            h.send(vec![drag_to(at + offset(90.0, 90.0)), release(at)]);
+        });
+        assert_eq!(h.popup_at(), moved + offset(10.0, 10.0));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_preview_splitter_moves_only_while_held(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_text);
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.type_text("needle");
+        h.settle();
+        h.preview_settle();
+        let split = json!({ "popup": false, "split": true });
+        let idle = json!({ "popup": false, "split": false });
+        let start = h.split();
+        // A quick click on the splitter: no drag is left.
+        let bar = h.bounds("search-everywhere-splitter").center();
+        h.quick(vec![press(bar), release(bar)]);
+        assert_eq!(h.dragging(), idle);
+        h.send(vec![hover(bar + offset(0.0, 60.0))]);
+        assert_eq!(h.split(), start);
+        // Held: the split follows; a lost release ends the drag.
+        h.send(vec![press(bar), drag_to(bar + offset(0.0, 40.0))]);
+        assert_eq!(h.dragging(), split);
+        let moved = h.split();
+        assert!(moved > start + 0.02, "{start} -> {moved}");
+        h.send(vec![hover(bar + offset(0.0, 120.0))]);
+        assert_eq!(h.dragging(), idle);
+        assert_eq!(h.split(), moved);
+        // A release outside the window ends it there, and keeps it.
+        let bar = h.bounds("search-everywhere-splitter").center();
+        h.send(vec![press(bar), drag_to(bar + offset(0.0, -30.0))]);
+        h.send(vec![release(point(px(-20.0), bar.y - px(40.0)))]);
+        assert_eq!(h.dragging(), idle);
+        let kept = h.split();
+        assert!(kept < moved, "{moved} -> {kept}");
+        let saved =
+            h.cx.update(|cx| workbench::search_everywhere::settings(cx).preview_split);
+        assert!((f64::from(saved.unwrap()) - kept).abs() < 1e-6, "{saved:?}");
+        // The window losing the focus ends it.
+        let bar = h.bounds("search-everywhere-splitter").center();
+        h.send(vec![press(bar), drag_to(bar + offset(0.0, 10.0))]);
+        assert_eq!(h.dragging(), split);
+        h.away(|h| {
+            assert_eq!(h.dragging(), json!({ "popup": false, "split": false }));
+            h.send(vec![release(bar)]);
+        });
         h.invoke("search-everywhere.toggle-preview", json!(null));
         h.press("escape");
     });

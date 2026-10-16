@@ -6,9 +6,8 @@
 
 use gpui::{
     AnyElement, ClickEvent, Context, CursorStyle, FontWeight, HighlightStyle, HitboxBehavior,
-    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Render, SharedString, StyledText, Window, anchored, canvas, deferred, div,
-    point, px, uniform_list,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
+    SharedString, StyledText, Window, anchored, canvas, deferred, div, point, px, uniform_list,
 };
 use themes::{Metric, UiRole};
 use ui::components::{
@@ -50,6 +49,7 @@ impl FindInFiles {
             input_frame(mask_focused, self.invalid_field == Some(Field::Mask), cx)
                 .id("find-in-files-mask")
                 .debug_selector(|| "find-in-files-mask".into())
+                .on_mouse_down(MouseButton::Left, crate::popup::no_move)
                 .key_context("FindInFilesMask")
                 .w(px(MASK_WIDTH))
                 .h(px(SMALL_BUTTON + 4.0))
@@ -133,6 +133,7 @@ impl FindInFiles {
                 div()
                     .id("find-in-files-mask-toggle")
                     .debug_selector(|| "find-in-files-mask-toggle".into())
+                    .on_mouse_down(MouseButton::Left, crate::popup::no_move)
                     .flex()
                     .flex_row()
                     .flex_none()
@@ -159,6 +160,8 @@ impl FindInFiles {
             .child(mask_field)
             .child(
                 toggle_button("find-in-files-pin", IconName::PIN, self.pinned, cx)
+                    .debug_selector(|| "find-in-files-pin".into())
+                    .on_mouse_down(MouseButton::Left, crate::popup::no_move)
                     .tooltip(Tooltip::text(
                         "Pin Window",
                         self.shortcut(&TogglePin, window, cx),
@@ -733,33 +736,20 @@ impl FindInFiles {
                         cx.listener(|this, e: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
-                            this.split_drag = Some((e.position.y, this.split));
+                            this.split_drag.start((e.position.y, this.split));
                             cx.notify();
                         }),
                     ),
             );
-        let tracking = self.split_drag.is_some().then(|| {
-            let this = cx.entity();
-            canvas(
-                |_, _, _| (),
-                move |_, _, window, _| {
-                    ui::pointer::request_window(CursorStyle::ResizeUpDown, window);
-                    let moved = this.clone();
-                    window.on_mouse_event(move |e: &MouseMoveEvent, _, _, cx| {
-                        moved.update(cx, |this, cx| this.drag_split(e.position.y, cx))
-                    });
-                    let released = this.clone();
-                    window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
-                        released.update(cx, |this, cx| {
-                            this.split_drag = None;
-                            cx.notify();
-                        })
-                    });
-                },
-            )
-            .absolute()
-            .size_0()
-        });
+        let tracking = crate::popup::track_held_drag(
+            cx.entity(),
+            |this: &mut Self| &mut this.split_drag,
+            |this, mouse, cx| this.drag_split(mouse.y, cx),
+            |_, _| {},
+            self.split_drag
+                .is_dragging()
+                .then_some(CursorStyle::ResizeUpDown),
+        );
         let list_share = self.split;
         div()
             .id("find-in-files-split")
@@ -799,7 +789,7 @@ impl FindInFiles {
                             .children(self.render_preview_hint(cx)),
                     ),
             )
-            .children(tracking)
+            .child(tracking)
             .into_any_element()
     }
 
@@ -843,7 +833,8 @@ impl FindInFiles {
     }
 
     fn drag_split(&mut self, y: gpui::Pixels, cx: &mut Context<Self>) {
-        let (Some((start, share)), Some(bounds)) = (self.split_drag, self.split_bounds) else {
+        let (Some((start, share)), Some(bounds)) = (self.split_drag.get(), self.split_bounds)
+        else {
             return;
         };
         let height = f32::from(bounds.size.height).max(1.0);

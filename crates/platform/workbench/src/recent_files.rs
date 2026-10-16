@@ -588,6 +588,7 @@ impl Render for RecentFiles {
                 div()
                     .id("recent-files-edited")
                     .debug_selector(|| "recent-files-edited".into())
+                    .on_mouse_down(MouseButton::Left, crate::popup::no_move)
                     .flex()
                     .items_center()
                     .gap(px(6.0))

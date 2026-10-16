@@ -351,7 +351,7 @@ pub struct FindInFiles {
     /// Share of the list in the split with the preview, and the split's
     /// drag in progress.
     split: f32,
-    split_drag: Option<(gpui::Pixels, f32)>,
+    split_drag: crate::popup::HeldDrag<(gpui::Pixels, f32)>,
     split_bounds: Option<gpui::Bounds<gpui::Pixels>>,
     /// A replacement runs in the background.
     replace_task: Option<Task<()>>,
@@ -493,7 +493,7 @@ impl FindInFiles {
             dropdown_focus,
             preview,
             split: settings.splitter.unwrap_or(SPLIT).clamp(0.1, 0.9),
-            split_drag: None,
+            split_drag: Default::default(),
             split_bounds: None,
             replace_task: None,
             browsing: false,
@@ -691,6 +691,10 @@ impl FindInFiles {
             "dropdown": self.dropdown.as_ref().map(|d| d.state_json()),
             "preview": self.preview.state_json(self, cx),
             "split": self.split,
+            "dragging": {
+                "popup": self.frame.is_dragging(),
+                "split": self.split_drag.is_dragging(),
+            },
             "browsing": self.browsing,
             "browse_requests": self.browse_requests,
         })
@@ -858,7 +862,7 @@ impl FindInFiles {
         self.open = false;
         self.dropdown = None;
         self.frame.cancel_drag();
-        self.split_drag = None;
+        self.split_drag.end();
         self.cancel_search();
         self.clear_preview(cx);
         self.save(cx);

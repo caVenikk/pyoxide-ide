@@ -2,6 +2,8 @@
 //! keystrokes through both default keymaps in a headless main window over
 //! a project on disk.
 
+mod mouse;
+
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -10,6 +12,7 @@ use gpui::{
     AppContext as _, Entity, Focusable as _, Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent,
     TestAppContext, TouchPhase, VisualTestContext, WindowHandle, point, px,
 };
+use mouse::{drag_to, hover, press, release};
 use serde_json::{Value, json};
 use text::{Buffer, Selection, SelectionSet};
 use workbench::find_in_files::{DEBOUNCE, FindInFiles};
@@ -1385,5 +1388,98 @@ fn replace_changes_the_match_where_preview_edits_moved_it(cx: &mut TestAppContex
         h.press("escape");
         h.draw();
         assert_eq!(h.read("notes.txt"), b"a big pin and a Needle\n");
+    });
+}
+
+// ---- moving the popup and the splitter --------------------------------------
+
+impl H<'_> {
+    fn dragging(&mut self) -> Value {
+        self.state()["dragging"].clone()
+    }
+
+    fn split(&mut self) -> f64 {
+        self.state()["split"].as_f64().unwrap()
+    }
+
+    /// Each event in its own frame.
+    fn send(&mut self, events: Vec<gpui::PlatformInput>) {
+        mouse::send(self.cx, self.window.into(), events);
+    }
+
+    /// The events with no frame between them that they did not ask for.
+    fn quick(&mut self, events: Vec<gpui::PlatformInput>) {
+        mouse::quick(self.cx, self.window.into(), events);
+    }
+}
+
+#[gpui::test]
+fn a_quick_click_on_the_header_leaves_no_move(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke("find-in-files.search", json!({ "text": "needle" }));
+        let start = h.bounds_of("find-in-files").origin;
+        let header = h.bounds_of("find-in-files-header");
+        let at = header.origin + point(px(200.0), px(10.0));
+        h.quick(vec![press(at), release(at)]);
+        assert_eq!(h.dragging(), json!({ "popup": false, "split": false }));
+        h.send(vec![hover(at + point(px(80.0), px(60.0)))]);
+        assert_eq!(h.bounds_of("find-in-files").origin, start);
+        // A click on the pin button selects it; pressed and dragged, the
+        // button does not move the popup.
+        let pin = h.bounds_of("find-in-files-pin").center();
+        let pinned = h.state()["pinned"].clone();
+        h.quick(vec![press(pin), release(pin)]);
+        assert_ne!(h.state()["pinned"], pinned);
+        let away = pin + point(px(-80.0), px(60.0));
+        h.send(vec![press(pin), drag_to(away), release(away)]);
+        assert_eq!(h.dragging(), json!({ "popup": false, "split": false }));
+        assert_eq!(h.bounds_of("find-in-files").origin, start);
+        assert_ne!(h.state()["pinned"], pinned, "released elsewhere");
+        h.quick(vec![press(pin), release(pin)]);
+        assert_eq!(h.state()["pinned"], pinned);
+        h.invoke("find-in-files.close", json!(null));
+    });
+}
+
+#[gpui::test]
+fn the_splitter_moves_only_while_held(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.invoke("find-in-files.search", json!({ "text": "needle" }));
+        let split = json!({ "popup": false, "split": true });
+        let idle = json!({ "popup": false, "split": false });
+        let start = h.split();
+        // A quick click on the splitter: no drag is left.
+        let bar = h.bounds_of("find-in-files-splitter").center();
+        h.quick(vec![press(bar), release(bar)]);
+        assert_eq!(h.dragging(), idle);
+        h.send(vec![hover(bar + point(px(0.0), px(60.0)))]);
+        assert_eq!(h.split(), start);
+        // Held: the split follows; a lost release ends the drag.
+        h.send(vec![press(bar), drag_to(bar + point(px(0.0), px(40.0)))]);
+        assert_eq!(h.dragging(), split);
+        let moved = h.split();
+        assert!(moved > start + 0.02, "{start} -> {moved}");
+        h.send(vec![hover(bar + point(px(0.0), px(120.0)))]);
+        assert_eq!(h.dragging(), idle);
+        assert_eq!(h.split(), moved);
+        // A release outside the window ends it there.
+        let bar = h.bounds_of("find-in-files-splitter").center();
+        h.send(vec![press(bar), drag_to(bar - point(px(0.0), px(30.0)))]);
+        h.send(vec![release(point(px(-20.0), bar.y - px(40.0)))]);
+        assert_eq!(h.dragging(), idle);
+        let kept = h.split();
+        assert!(kept < moved, "{moved} -> {kept}");
+        // The window losing the focus ends it.
+        let bar = h.bounds_of("find-in-files-splitter").center();
+        h.send(vec![press(bar), drag_to(bar + point(px(0.0), px(10.0)))]);
+        assert_eq!(h.dragging(), split);
+        VisualTestContext::from_window(h.window.into(), h.cx).deactivate_window();
+        h.draw();
+        assert_eq!(h.dragging(), idle);
+        h.send(vec![release(bar)]);
+        h.cx.update_window(h.window.into(), |_, window, _| window.activate_window())
+            .unwrap();
+        h.draw();
+        h.invoke("find-in-files.close", json!(null));
     });
 }

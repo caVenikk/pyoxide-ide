@@ -2,12 +2,18 @@
 //! from its edges and corners, like the reference IDE's Find in Files and
 //! Search Everywhere popups. The owner keeps a [`PopupFrame`], draws its
 //! content into [`PopupFrame::render`] and starts a move from its header
-//! with [`PopupFrame::start_move`].
+//! with [`PopupFrame::start_move`]; the header's tabs, buttons and fields
+//! take [`no_move`] so that a press on them does not move the popup. A
+//! move or resize lasts while the left button is held ([`HeldDrag`]).
+
+mod held_drag;
+
+pub use held_drag::{HeldDrag, track_held_drag};
 
 use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, Div, Entity, HitboxBehavior, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Size, Styled, Window, canvas, div, point, px, size,
+    AnyElement, App, Bounds, Context, CursorStyle, Div, Entity, HitboxBehavior, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Size, Styled, Window,
+    canvas, div, point, px, size,
 };
 use serde::{Deserialize, Serialize};
 use themes::{Metric, UiRole};
@@ -63,7 +69,7 @@ pub struct PopupFrame {
     offset: Point<Pixels>,
     /// Resized by the user.
     size: Option<Size<Pixels>>,
-    drag: Option<Drag>,
+    drag: HeldDrag<Drag>,
     /// The bounds of the last frame.
     last: Option<Bounds<Pixels>>,
     /// Shown with its fixed part only, this high (Search Everywhere with
@@ -79,7 +85,7 @@ impl PopupFrame {
             top,
             offset: point(px(0.0), px(0.0)),
             size: None,
-            drag: None,
+            drag: HeldDrag::default(),
             last: None,
             collapsed: None,
         }
@@ -113,12 +119,12 @@ impl PopupFrame {
     }
 
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_dragging()
     }
 
     /// Stops a move or resize (the popup closed).
     pub fn cancel_drag(&mut self) {
-        self.drag = None;
+        self.drag.end();
     }
 
     /// The popup's bounds in a window of this size: horizontally centred,
@@ -145,7 +151,7 @@ impl PopupFrame {
 
     /// Starts moving the popup with the mouse (from its header).
     pub fn start_move(&mut self, mouse: Point<Pixels>) {
-        self.drag = Some(Drag::Move {
+        self.drag.start(Drag::Move {
             mouse,
             offset: self.offset,
         });
@@ -157,7 +163,7 @@ impl PopupFrame {
             edges.bottom = false;
         }
         if let Some(bounds) = self.last {
-            self.drag = Some(Drag::Resize {
+            self.drag.start(Drag::Resize {
                 edges,
                 mouse,
                 bounds,
@@ -167,11 +173,20 @@ impl PopupFrame {
 
     /// The mouse moved while dragging.
     fn drag_to(&mut self, mouse: Point<Pixels>, viewport: Size<Pixels>) {
-        match self.drag {
+        match self.drag.get() {
             Some(Drag::Move {
                 mouse: start,
                 offset,
-            }) => self.offset = offset + (mouse - start),
+            }) => {
+                self.offset = offset + (mouse - start);
+                // Kept as drawn: moved past an edge, the popup stays at it
+                // and the next move starts from there.
+                let b = self.bounds(viewport);
+                self.offset = point(
+                    b.origin.x - (viewport.width - b.size.width) / 2.0,
+                    b.origin.y - self.top,
+                );
+            }
             Some(Drag::Resize {
                 edges,
                 mouse: start,
@@ -210,8 +225,8 @@ impl PopupFrame {
     }
 
     /// Draws the popup: `content` in a raised, rounded frame at its bounds,
-    /// with the resize grips along the edges and, while dragging, the
-    /// window-wide mouse tracking. `frame` finds the frame in the owner.
+    /// with the resize grips along the edges and the window-wide mouse
+    /// tracking of its drags. `frame` finds the frame in the owner.
     pub fn render<T: 'static>(
         &mut self,
         id: &'static str,
@@ -225,10 +240,17 @@ impl PopupFrame {
         self.last = Some(bounds);
         let theme = cx.theme();
         let owner = cx.entity();
-        let tracking = self
-            .drag
-            .is_some()
-            .then(|| drag_tracking(owner.clone(), frame, viewport));
+        let cursor = match self.drag.get() {
+            Some(Drag::Resize { edges, .. }) => Some(edges.cursor()),
+            _ => None,
+        };
+        let tracking = track_held_drag(
+            owner.clone(),
+            move |this: &mut T| &mut frame(this).drag,
+            move |this, mouse, _| frame(this).drag_to(mouse, viewport),
+            |_, _| {},
+            cursor,
+        );
         let grips = grips(owner, frame);
         div()
             .absolute()
@@ -252,50 +274,16 @@ impl PopupFrame {
                     .child(content),
             )
             .children(grips)
-            .children(tracking)
+            .child(tracking)
     }
 }
 
-/// While dragging: follows the mouse anywhere in the window.
-fn drag_tracking<T: 'static>(
-    owner: Entity<T>,
-    frame: fn(&mut T) -> &mut PopupFrame,
-    viewport: Size<Pixels>,
-) -> AnyElement {
-    canvas(
-        |_, _, _| (),
-        move |_, _, window, cx| {
-            if let Some(Drag::Resize { edges, .. }) = frame_of(&owner, frame, cx) {
-                ui::pointer::request_window(edges.cursor(), window);
-            }
-            let moved = owner.clone();
-            window.on_mouse_event(move |e: &MouseMoveEvent, _, _, cx| {
-                moved.update(cx, |this, cx| {
-                    frame(this).drag_to(e.position, viewport);
-                    cx.notify();
-                })
-            });
-            let released = owner.clone();
-            window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
-                released.update(cx, |this, cx| {
-                    frame(this).drag = None;
-                    cx.notify();
-                })
-            });
-        },
-    )
-    .absolute()
-    .size_0()
-    .into_any_element()
-}
-
-/// The drag in progress of the owner's frame.
-fn frame_of<T: 'static>(
-    owner: &Entity<T>,
-    frame: fn(&mut T) -> &mut PopupFrame,
-    cx: &mut gpui::App,
-) -> Option<Drag> {
-    owner.update(cx, |this, _| frame(this).drag)
+/// A mouse-down listener for the tabs, buttons and fields in a popup's
+/// header: a press on them does not move the popup (the reference moves it
+/// from the header's free space; its controls take their own presses).
+pub fn no_move(_: &MouseDownEvent, window: &mut Window, cx: &mut App) {
+    window.prevent_default();
+    cx.stop_propagation();
 }
 
 impl Edges {
@@ -397,7 +385,7 @@ mod tests {
         let mut f = frame();
         f.start_move(point(px(500.0), px(130.0)));
         f.drag_to(point(px(520.0), px(150.0)), viewport);
-        f.drag = None;
+        f.cancel_drag();
         let b = f.bounds(viewport);
         assert_eq!(b.origin, point(px(260.0), px(135.0)));
         // Wider from the right edge; the left edge stays.
