@@ -12,7 +12,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
-| terminal | 9% `█░░░░░░░░░` | 0 | 3 | 18 |
+| terminal | 12% `█░░░░░░░░░` | 0 | 4 | 17 |
 | vcs | 21% `██░░░░░░░░` | 3 | 2 | 20 |
 | settings | 41% `████░░░░░░` | 5 | 3 | 10 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -168,7 +168,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Terminal tabs (new, close with confirmation, rename, unique names, close on exit) | must | Community (#89) |
 | ⬜ | Select, copy, paste, select all and clear in the terminal | must | Community (#89) |
 | 🟡 | Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell | must | Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); used once the Terminal tool window starts sessions through workbench::terminal::plan |
-| ⬜ | Virtual environment activation and start directory in the terminal | must | Community; venv and uv environments through their activate script (#89) |
+| 🟡 | Virtual environment activation and start directory in the terminal | must | Community; project venv / uv activated through its activate script or env merge, [python.terminal] activate-virtualenv imported from .idea (#159); start directory and conda later |
 | ⬜ | Links in terminal output (URLs, file paths with line:column, Python tracebacks) | must | Community (#89) |
 | ⬜ | Find in terminal output | must | Community (#89) |
 | ⬜ | Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta) | must | Community (#89) |

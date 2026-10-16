@@ -111,7 +111,7 @@ Test runner (pytest),run-debug,should,yes,no,
 "Terminal tabs (new, close with confirmation, rename, unique names, close on exit)",terminal,must,yes,no,Community (#89)
 "Select, copy, paste, select all and clear in the terminal",terminal,must,yes,no,Community (#89)
 "Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell",terminal,must,yes,partial,"Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); used once the Terminal tool window starts sessions through workbench::terminal::plan"
-Virtual environment activation and start directory in the terminal,terminal,must,yes,no,Community; venv and uv environments through their activate script (#89)
+Virtual environment activation and start directory in the terminal,terminal,must,yes,partial,"Community; project venv / uv activated through its activate script or env merge, [python.terminal] activate-virtualenv imported from .idea (#159); start directory and conda later"
 "Links in terminal output (URLs, file paths with line:column, Python tracebacks)",terminal,must,yes,no,Community (#89)
 Find in terminal output,terminal,must,yes,no,Community (#89)
 "Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,no,Community (#89)
