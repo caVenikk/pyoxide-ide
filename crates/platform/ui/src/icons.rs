@@ -67,6 +67,10 @@ impl IconName {
     pub const QUESTION_DIALOG: Self = Self("general/questionDialog");
     pub const WARNING_DIALOG: Self = Self("general/warningDialog");
     pub const BRANCH: Self = Self("vcs/branch");
+    /// Rollback and Show Diff of the popup of a change marker (the New
+    /// UI's `AllIcons.Actions.Rollback` and `Diff`).
+    pub const ROLLBACK: Self = Self("vcs/revert");
+    pub const DIFF: Self = Self("vcs/diff");
     pub const BREAKPOINT: Self = Self("breakpoints/breakpoint");
     pub const FOLDER: Self = Self("nodes/folder");
     pub const PACKAGE: Self = Self("nodes/package");
@@ -230,7 +234,7 @@ platform_icons! {
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
         "toolwindows/services@20x20", "toolwindows/structure@20x20",
         "toolwindows/terminal@20x20", "toolwindows/todo@20x20", "toolwindows/vcs@20x20",
-        "vcs/branch", "vcs/vendors/github",
+        "vcs/branch", "vcs/diff", "vcs/revert", "vcs/vendors/github",
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [
