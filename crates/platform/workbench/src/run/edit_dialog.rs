@@ -136,6 +136,10 @@ const INDENT: f32 = 19.0;
 const FORM_LEFT: f32 = 17.0;
 const FORM_RIGHT: f32 = 18.0;
 const FORM_TOP: f32 = 18.0;
+/// The tip shown when nothing is selected: its distance from the top of the
+/// form (measured on the reference) and the space between its lines.
+const TIP_TOP: f32 = 196.0;
+const TIP_GAP: f32 = 6.0;
 const NAME_LABEL: f32 = 59.0;
 const NAME_FIELD: f32 = 280.0;
 const LABEL_WIDTH: f32 = 153.0;
@@ -213,6 +217,8 @@ pub struct EditDialog {
     /// The pointer is over the Modify options link: its text is
     /// underlined.
     link_hover: ui::form::Hover,
+    /// The same for the link of the tip shown when nothing is selected.
+    tip_hover: ui::form::Hover,
     /// The project folder: path fields show their paths expanded from it.
     root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -237,7 +243,7 @@ fn anchor(cell: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>) -> impl IntoElemen
 
 impl EditDialog {
     /// The dialog on the project's configurations, `select` selected (else
-    /// the selected configuration, else the first).
+    /// the selected configuration, else nothing).
     pub fn new(
         configs: Entity<RunConfigs>,
         select: Option<ConfigKey>,
@@ -279,6 +285,7 @@ impl EditDialog {
             hints: false,
             tag_focus: HashMap::new(),
             link_hover: Default::default(),
+            tip_hover: Default::default(),
             root,
             _subscriptions: Vec::new(),
         };
@@ -290,16 +297,12 @@ impl EditDialog {
             }
             false
         });
+        // With Current File selected nothing is: the form shows the tip
+        // (`RunConfigurable.getInitialSelectedConfiguration`).
         let first = select
             .or_else(|| dialog.list.selected.clone())
             .filter(|k| dialog.list.contains(k))
-            .map(Node::Config)
-            .or_else(|| {
-                dialog
-                    .nodes()
-                    .into_iter()
-                    .find_map(|(n, _)| matches!(n, Node::Config(_)).then_some(n))
-            });
+            .map(Node::Config);
         // The tree opens collapsed but for the way to the selected
         // configuration (`RunConfigurable.selectConfigurableOnShow`:
         // `TreeUtil.selectInTree` makes the node visible).
@@ -1930,16 +1933,46 @@ impl EditDialog {
                         )
                         .into_any_element()
                 }
-                _ => div()
-                    .pt(px(FORM_TOP))
-                    .pl(px(FORM_LEFT))
-                    .text_color(c.muted)
-                    .child(if self.list.is_empty() {
-                        "Add a configuration with the + button"
-                    } else {
-                        "Select a configuration"
-                    })
-                    .into_any_element(),
+                // The tip of `ProjectRunConfigurationConfigurable`: the link
+                // adds a configuration, of the selected type if there is
+                // one, else asks for the type.
+                other => {
+                    let type_id = match other {
+                        Some(Node::Type(t)) => Some(t.clone()),
+                        _ => None,
+                    };
+                    div()
+                        .id("run-dialog-tip")
+                        .debug_selector(|| "run-dialog-tip".into())
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .pt(px(TIP_TOP))
+                        .gap(px(TIP_GAP))
+                        .child(
+                            ui::form::link(
+                                "run-dialog-tip-add",
+                                "Add new run configuration\u{2026}",
+                                &self.tip_hover,
+                                cx,
+                            )
+                            .debug_selector(|| "run-dialog-tip-add".into())
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(DialogAdd {
+                                        r#type: type_id.clone(),
+                                    }),
+                                    cx,
+                                )
+                            }),
+                        )
+                        .child(
+                            div()
+                                .text_color(c.muted)
+                                .child("or select run configuration to edit"),
+                        )
+                        .into_any_element()
+                }
             };
         };
         let Some(config) = config else {

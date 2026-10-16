@@ -153,6 +153,7 @@ impl Workbench {
         state["visible"] = json!(self.is_visible(ToolWindow::Run));
         state["registered"] = json!(self.tool_windows.is_registered(ToolWindow::Run));
         state["alive"] = json!(self.run_window.read(cx).any_alive());
+        state["empty"] = self.run_window.read(cx).empty_state_json(window);
         state["widget"] = self.run_widget_state(window, cx).state_json();
         state["configurations"] = self.run_configs(cx).read(cx).state_json();
         state["edit_dialog"] = self

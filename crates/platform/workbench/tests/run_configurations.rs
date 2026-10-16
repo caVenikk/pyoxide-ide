@@ -169,6 +169,11 @@ fn project() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn setup<'a>(cx: &'a mut TestAppContext, root: &Path) -> H<'a> {
+    setup_with(cx, root, if MAC { keymap::MACOS } else { keymap::DEFAULT })
+}
+
+/// The window with the keymap in `text`.
+fn setup_with<'a>(cx: &'a mut TestAppContext, root: &Path, text: &str) -> H<'a> {
     support::allow_processes(cx);
     let product = Product {
         name: "Test IDE",
@@ -180,7 +185,6 @@ fn setup<'a>(cx: &'a mut TestAppContext, root: &Path) -> H<'a> {
         run: Some(support::run_hook()),
         ..Product::default()
     };
-    let text = if MAC { keymap::MACOS } else { keymap::DEFAULT };
     let window = cx.update(|cx| {
         workbench::init(cx, &product);
         cx.clear_key_bindings();
@@ -818,4 +822,183 @@ fn the_modify_options_link_underlines_under_the_pointer(cx: &mut TestAppContext)
     );
     h.draw();
     assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(false));
+}
+
+/// The empty Run tool window's link: its bounds in the main window.
+fn empty_link(h: &mut H<'_>) -> gpui::Bounds<gpui::Pixels> {
+    let main: gpui::AnyWindowHandle = h.window.into();
+    gpui::VisualTestContext::from_window(main, h.cx)
+        .debug_bounds("run-empty-link")
+        .expect("the link of the empty Run tool window")
+}
+
+/// Shows the empty Run tool window (no run yet).
+fn show_empty_run_window(h: &mut H<'_>) {
+    h.loaded();
+    h.invoke("workbench.toggle-run", json!(null));
+    assert_eq!(h.run()["tabs"], json!([]));
+    assert!(!h.run()["empty"].is_null());
+}
+
+/// A click on the "run configuration" link of the empty Run tool window
+/// opens the Run/Debug Configurations window (`EditConfigurationsDialog`)
+/// with the selected configuration selected, or with nothing selected
+/// while Current File is selected (#183).
+#[gpui::test]
+fn the_empty_run_window_link_opens_the_configurations_dialog(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    show_empty_run_window(&mut h);
+    let main: gpui::AnyWindowHandle = h.window.into();
+
+    // The project's selected configuration (`selected="Script.beta"`).
+    assert_eq!(h.run()["configurations"]["selected"]["name"], json!("beta"));
+    assert!(h.run()["edit_dialog"].is_null());
+    let link = empty_link(&mut h);
+    gpui::VisualTestContext::from_window(main, h.cx)
+        .simulate_click(link.center(), gpui::Modifiers::none());
+    h.draw();
+    assert_eq!(dialog(&mut h)["selected"]["name"], json!("beta"));
+    h.invoke("run.configurations.dialog.cancel", json!(null));
+    assert!(h.run()["edit_dialog"].is_null());
+
+    // Current File: the dialog opens with nothing selected and the tree
+    // collapsed, as the reference shows it.
+    h.invoke("run.select-current-file", json!(null));
+    let link = empty_link(&mut h);
+    gpui::VisualTestContext::from_window(main, h.cx)
+        .simulate_click(link.center(), gpui::Modifiers::none());
+    h.draw();
+    let d = dialog(&mut h);
+    assert!(!d.is_null(), "the dialog opened");
+    assert_eq!(d["selected"], json!(null), "{d:#}");
+    let rows = tree(&mut h);
+    assert!(rows.iter().all(|row| !row.starts_with("  ")), "{rows:?}");
+}
+
+/// The link shows the hand and underlines its text while the pointer is
+/// over it.
+#[gpui::test]
+fn the_empty_run_window_link_shows_the_hand_and_underlines(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    show_empty_run_window(&mut h);
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let link = empty_link(&mut h);
+    let shape = |h: &mut H<'_>| {
+        gpui::VisualTestContext::from_window(main, h.cx)
+            .update(|window, _| ui::pointer::resolve(window))
+    };
+    assert_eq!(h.run()["empty"]["link_hovered"], json!(false));
+    assert_eq!(shape(&mut h), gpui::CursorStyle::Arrow);
+
+    gpui::VisualTestContext::from_window(main, h.cx).simulate_mouse_move(
+        link.center(),
+        None,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(h.run()["empty"]["link_hovered"], json!(true));
+    assert_eq!(shape(&mut h), gpui::CursorStyle::PointingHand);
+
+    gpui::VisualTestContext::from_window(main, h.cx).simulate_mouse_move(
+        gpui::point(link.origin.x - gpui::px(40.0), link.center().y),
+        None,
+        gpui::Modifiers::none(),
+    );
+    h.draw();
+    assert_eq!(h.run()["empty"]["link_hovered"], json!(false));
+    assert_eq!(shape(&mut h), gpui::CursorStyle::Arrow);
+}
+
+/// The last line of the empty state and the shortcut in it.
+fn launch_line(h: &mut H<'_>) -> (String, Value) {
+    let empty = h.run()["empty"].clone();
+    let line = empty["lines"][3].as_str().unwrap().to_owned();
+    (line, empty["shortcut"].clone())
+}
+
+/// The last line ends with the shortcut of Choose Run Configuration in
+/// brackets, from the active keymap: symbols on macOS (⌃⌥R in the macOS
+/// keymap), the words elsewhere.
+#[gpui::test]
+fn the_empty_run_window_names_the_key_of_the_macos_keymap(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup_with(cx, &root, keymap::MACOS);
+    show_empty_run_window(&mut h);
+    let keys = if MAC {
+        "\u{2303}\u{2325}R"
+    } else {
+        "Ctrl+Alt+R"
+    };
+    let (line, shortcut) = launch_line(&mut h);
+    assert_eq!(
+        line,
+        format!("\u{2014} Launch a run configuration ({keys})")
+    );
+    assert_eq!(shortcut, json!(keys));
+}
+
+/// The default keymap's key (Alt+Shift+F10), the other lines of the
+/// reference, and no brackets for a keymap without a key for the action.
+#[gpui::test]
+fn the_empty_run_window_names_the_key_of_the_default_keymap(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup_with(cx, &root, keymap::DEFAULT);
+    show_empty_run_window(&mut h);
+    let keys = if MAC {
+        "\u{2325}\u{21E7}F10"
+    } else {
+        "Alt+Shift+F10"
+    };
+    let (line, shortcut) = launch_line(&mut h);
+    assert_eq!(
+        line,
+        format!("\u{2014} Launch a run configuration ({keys})")
+    );
+    assert_eq!(shortcut, json!(keys));
+    let lines = h.run()["empty"]["lines"].clone();
+    assert_eq!(lines.as_array().unwrap().len(), 4);
+    assert_eq!(
+        lines[0],
+        json!("To run your code, do one of the following:")
+    );
+    assert_eq!(
+        lines[1],
+        json!("\u{2014} Click the Run icon in the editor gutter")
+    );
+    assert_eq!(
+        lines[2],
+        json!("\u{2014} Select \"Run\u{2026}\" in the editor context menu")
+    );
+
+    h.cx.update(|cx| cx.clear_key_bindings());
+    h.draw();
+    let (line, shortcut) = launch_line(&mut h);
+    assert_eq!(line, "\u{2014} Launch a run configuration");
+    assert_eq!(shortcut, json!(null));
+}
+
+/// With nothing selected the dialog's form shows the reference's tip; its
+/// link asks for the type of a new configuration.
+#[gpui::test]
+fn the_dialog_without_a_selection_shows_the_tip(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    h.invoke("run.select-current-file", json!(null));
+    h.invoke("run.configurations.edit", json!(null));
+    assert_eq!(dialog(&mut h)["selected"], json!(null));
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let win =
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .expect("the dialog window");
+    let link = gpui::VisualTestContext::from_window(win, h.cx)
+        .debug_bounds("run-dialog-tip-add")
+        .expect("the tip's link");
+    assert!(dialog(&mut h)["menu"].is_null());
+    gpui::VisualTestContext::from_window(win, h.cx)
+        .simulate_click(link.center(), gpui::Modifiers::none());
+    h.draw();
+    assert!(!dialog(&mut h)["menu"].is_null(), "the types are offered");
 }

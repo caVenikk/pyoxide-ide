@@ -1601,6 +1601,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["visible"], json!(true), "{what}");
             assert!(h.editor_focused(), "{what}: the editor keeps the focus");
         }
+        "run.configurations" => {
+            // Choose Run Configuration opens the run widget's dropdown.
+            assert!(h.run()["menu"].is_null(), "{what}");
+            h.press(keys);
+            assert!(!h.run()["menu"].is_null(), "{what}: the dropdown opens");
+        }
         "run.stop" => {
             h.start_run(&support::long_running(), "started");
             h.press(keys);
