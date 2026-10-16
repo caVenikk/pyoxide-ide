@@ -77,7 +77,10 @@ Platform (`crates/platform/`, language-agnostic):
   carets, selections, clipboard, input method, highlighting, editing
   commands) and its find bar (Find / Replace in the file); diagnostic
   marks, a link highlight, hover events and geometry for popups (stored
-  and reported; painting comes with the problems in the editor).
+  and reported; painting comes with the problems in the editor); soft
+  wraps: the reference's wrap positions, the rows of every line with
+  prefix sums, updated by edits and computed off the UI thread for large
+  texts, carets and painting by visual rows.
 - `code-intel`: the language-agnostic model and `CodeIntel` trait of code
   intelligence (ADR 0010): documents, positions as `text::Point`,
   diagnostics, completion items, documentation, signatures, locations,
