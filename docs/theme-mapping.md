@@ -12,7 +12,7 @@ a key or a role is missing from this file.
 
 A theme assigns a value to every role of three kinds, plus fonts:
 
-- **UI roles** (`ui.*`, 104 of them): flat colours of the interface, the
+- **UI roles** (`ui.*`, 110 of them): flat colours of the interface, the
   editor chrome, version control, diagnostics and the terminal.
 - **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
   Each has text attributes: foreground `fg`, background `bg`, `bold`, `italic`,
@@ -201,7 +201,13 @@ report says which parent was missing.
 | `ui.scrollbar-track` | `ScrollBar.trackColor` (UI theme or scheme color), `ScrollBar.Transparent.trackColor` (UI theme or scheme color), `ScrollBar.Mac.trackColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.trackColor` (UI theme or scheme color) | Scrollbar track |
 | `ui.progress` | `ProgressBar.progressColor` | Progress bar fill |
 | `ui.progress-track` | `ProgressBar.trackColor` | Progress bar track |
-| `ui.notification` | `NOTIFICATION_BACKGROUND` (scheme color), `Notification.background` | Notification balloon |
+| `ui.notification` | `Notification.background` | Background of notification balloons (the scheme colour `NOTIFICATION_BACKGROUND` is the editor's notification panel, not a balloon) |
+| `ui.notification-border` | `Notification.borderColor` | Border of notification balloons |
+| `ui.notification-text` | `Notification.foreground` | Title and content of notification balloons |
+| `ui.notification-link` | `Notification.linkForeground` | Action links of notification balloons |
+| `ui.notification-icon-hover` | `Notification.iconHoverBackground` | Background of the hovered close button of a notification balloon |
+| `ui.notification-more` | `Notification.MoreButton.background` | Strip below the balloons that counts the collapsed notifications |
+| `ui.notification-more-text` | `Notification.MoreButton.foreground` | Text of that strip |
 | `ui.non-project-file` | `FileColor.Yellow` | Row background of files outside the project content, such as excluded folders (the reference's "Non-Project Files" file colour) |
 | `ui.run-widget-running` | `RunWidget.runningBackground` | Background of the run widget's Run button while its process runs |
 | `ui.run-widget-stop` | `RunWidget.stopBackground` | Background of the run widget's Stop button |
@@ -333,6 +339,12 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.tree-indent-guide` | `ui.divider` |
 | `ui.list-button-hover` | `ui.hover` |
 | `ui.list-button-separator` | `ui.pressed` |
+| `ui.notification-border` | `ui.popup-border` |
+| `ui.notification-text` | `ui.text` |
+| `ui.notification-link` | `ui.text-link` |
+| `ui.notification-icon-hover` | `ui.hover` |
+| `ui.notification-more` | `ui.notification` |
+| `ui.notification-more-text` | `ui.text-muted` |
 
 ## Text roles
 
