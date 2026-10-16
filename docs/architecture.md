@@ -165,7 +165,10 @@ services as watched-file changes (`file-watcher`, issue #36).
   editor does not depend on `code-intel`.
 
 ## Terminal, debugger, git and settings (proposed, ADR 0014-0018)
-Planned crates. Crates without a toolkit are tested without GPUI; UI
+Planned crates; `terminal` exists (#156: sessions, snapshots, input
+encoding, start rules, shell detection, the `ShellCustomizer` hook; the
+integration scripts and the `terminal.*` commands come with their users).
+Crates without a toolkit are tested without GPUI; UI
 crates depend on the model crates, never on the protocol or backend
 crates (`scripts/check-layers.py` gets these rules).
 

@@ -37,6 +37,13 @@ jobs:
         shell: bash
       - run: cargo test --workspace --config 'profile.dev.package."*".opt-level=0'
         shell: bash
+      # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
+      # Windows) into the emulator, and the emulator alone; the numbers go
+      # to the log. Reuses the test build of the step above.
+      - run: >-
+          cargo test -p terminal --test throughput
+          --config 'profile.dev.package."*".opt-level=0' -- --ignored --nocapture
+        shell: bash
 
   progress:
     runs-on: ubuntu-latest
