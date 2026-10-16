@@ -15,6 +15,7 @@ pub mod icons;
 pub mod keys;
 pub mod markdown;
 pub mod menu;
+pub mod notification;
 pub mod pointer;
 pub mod theme;
 pub mod tree_guides;

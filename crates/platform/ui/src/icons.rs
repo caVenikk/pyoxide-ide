@@ -139,6 +139,9 @@ impl IconName {
     pub const STOP_AND_RESTART: Self = Self("actions/stopAndRestart");
     pub const SETTINGS_SMALL: Self = Self("general/settings");
     pub const ERROR: Self = Self("status/error");
+    /// Balloon icons of information and warning notifications.
+    pub const INFO: Self = Self("status/info");
+    pub const WARNING: Self = Self("status/warning");
     pub const ERROR_MARK: Self = Self("nodes/errorMark");
     // The toolbar of the Run/Debug Configurations dialog.
     pub const REMOVE: Self = Self("general/remove");
@@ -214,7 +217,7 @@ platform_icons! {
         "nodes/sourceRoot", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
-        "status/error",
+        "status/error", "status/info", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
