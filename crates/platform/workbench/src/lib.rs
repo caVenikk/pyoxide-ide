@@ -30,6 +30,7 @@ pub mod search_everywhere;
 pub mod settings;
 mod shot;
 pub mod simulate;
+pub mod terminal;
 pub mod tool_windows;
 pub mod workbench;
 
@@ -40,4 +41,5 @@ pub use file_types::{FileAssociation, FileType, HighlighterFactory};
 pub use project::AutoExclusions;
 pub use project_panel::{NewItem, NewItemKind, NewTemplate, RootKind, TreeHooks};
 pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};
+pub use terminal::{TerminalHook, TerminalProvider};
 pub use workbench::{Workbench, WorkbenchEvent};

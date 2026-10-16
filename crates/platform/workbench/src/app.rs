@@ -17,6 +17,7 @@ use crate::env;
 use crate::file_types::{FileAssociation, FileType};
 use crate::project_panel;
 use crate::run::RunHook;
+use crate::terminal::TerminalHook;
 use crate::workbench::Workbench;
 
 /// A tool window button of a stripe that a product adds.
@@ -111,6 +112,10 @@ pub struct Product {
     pub tree: project_panel::TreeHooks,
     /// The product's pages of the Settings window (ADR 0017).
     pub settings_pages: Vec<settings_ui::PageSpec>,
+    /// What the product adds to terminal sessions (ADR 0014): environment
+    /// variables and scripts to source, such as a virtual environment's
+    /// activation.
+    pub terminal: Option<TerminalHook>,
 }
 
 /// Default size of the main window's content.
@@ -146,6 +151,7 @@ pub fn init(cx: &mut App, product: &Product) {
     vcs_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
+    crate::terminal::init(cx, product.terminal.clone());
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()

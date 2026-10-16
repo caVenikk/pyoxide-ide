@@ -30,6 +30,7 @@ run-config.workspace = true
 search.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+terminal.workspace = true
 text.workspace = true
 themes.workspace = true
 toml.workspace = true
