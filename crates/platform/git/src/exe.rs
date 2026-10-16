@@ -141,7 +141,10 @@ impl GitExe {
 }
 
 /// What every git call gets: no terminal prompts, machine-readable paths,
-/// no signature lines in logs, and no console window on Windows.
+/// no signature lines in logs, messages in English (the reference's
+/// `VcsLocaleHelper`: `LANGUAGE` empty, `LC_ALL=en_US.UTF-8`; a missing
+/// locale falls back to git's own English), and no console window on
+/// Windows.
 pub(crate) fn prepare(cmd: &mut Command) {
     cmd.args([
         "-c",
@@ -150,6 +153,8 @@ pub(crate) fn prepare(cmd: &mut Command) {
         "log.showSignature=false",
     ])
     .env("GIT_TERMINAL_PROMPT", "0")
+    .env("LANGUAGE", "")
+    .env("LC_ALL", "en_US.UTF-8")
     .stdin(Stdio::null());
     #[cfg(windows)]
     {
