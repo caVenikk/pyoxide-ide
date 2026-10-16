@@ -106,7 +106,10 @@ Platform (`crates/platform/`, language-agnostic):
   File, Recent Files), the project tool window's file operations (New
   with the product's kinds, Rename, Delete, Cut, Copy, Paste, Move, Copy
   Path and drag and drop, with their popups and dialogs; tabs, the file
-  index, the navigation history and the language services follow), the
+  index, the navigation history and the language services follow), file
+  types (associations by whole name, pattern and extension kept as data
+  that later ones override, files of unknown names typed by their first
+  bytes off the UI thread, file icons and icon rules), the
   navigation history (Back and Forward), keymaps (with double taps of a
   modifier and the mouse's back and forward buttons), application
   start-up, environment switches and in-app measurements; files changed

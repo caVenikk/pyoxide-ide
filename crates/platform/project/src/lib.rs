@@ -25,6 +25,7 @@ pub use document::{
 };
 pub use filter::{
     AutoExclusions, DEFAULT_IGNORED, Filter, NameMasks, auto_exclusions, set_auto_exclusions,
+    wildcard_match,
 };
 pub use roots::{DetectRoots, FolderKind, FolderRules, Roots};
 pub use store::{Exclusions, STORE_DIR, StoreError};
