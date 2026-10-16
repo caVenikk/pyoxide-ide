@@ -139,7 +139,7 @@ const FORM_TOP: f32 = 18.0;
 /// The tip shown when nothing is selected: its distance from the top of the
 /// form (measured on the reference) and the space between its lines.
 const TIP_TOP: f32 = 196.0;
-const TIP_GAP: f32 = 6.0;
+const TIP_GAP: f32 = 2.5;
 const NAME_LABEL: f32 = 59.0;
 const NAME_FIELD: f32 = 280.0;
 const LABEL_WIDTH: f32 = 153.0;
@@ -219,6 +219,10 @@ pub struct EditDialog {
     link_hover: ui::form::Hover,
     /// The same for the link of the tip shown when nothing is selected.
     tip_hover: ui::form::Hover,
+    /// The footer has the Run button (`EditConfigurationsDialog` has none
+    /// without a data context, as when opened from the empty Run tool
+    /// window).
+    run_button: bool,
     /// The project folder: path fields show their paths expanded from it.
     root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -286,6 +290,7 @@ impl EditDialog {
             tag_focus: HashMap::new(),
             link_hover: Default::default(),
             tip_hover: Default::default(),
+            run_button: true,
             root,
             _subscriptions: Vec::new(),
         };
@@ -316,6 +321,12 @@ impl EditDialog {
         dialog.rebuild(window, cx);
         window.focus(&dialog.tree_focus);
         dialog
+    }
+
+    /// Whether the footer has the Run button.
+    pub fn with_run_button(mut self, shown: bool) -> Self {
+        self.run_button = shown;
+        self
     }
 
     /// Where the focus is in the tree.
@@ -1426,6 +1437,7 @@ impl EditDialog {
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
             "prompt": self.prompt.as_ref().map(|(d, _)| d.read(cx).state_json()),
             "modify_options_underlined": self.link_hover.get(),
+            "run_button": self.run_button,
         })
     }
 }
@@ -2405,37 +2417,41 @@ impl EditDialog {
             .child(anchor(self.run_anchor.clone()));
         // Run, then the dialog's OK, Cancel and Apply in the platform's
         // order (`EditConfigurationsDialog.createActions`).
-        BottomBar::new()
+        let bar = BottomBar::new()
             .help(ui::form::help_button("run-dialog-help", None, cx))
             .status(
                 div()
                     .debug_selector(|| "run-dialog-error".into())
                     .text_color(c.danger)
                     .children(self.error.clone().map(|e| format!("Error: {e}"))),
+            );
+        let bar = if self.run_button {
+            bar.element(run, RUN_MAC_ORDER, RUN_GAP)
+        } else {
+            bar
+        };
+        bar.button(BarButton::new(
+            "run-dialog-ok",
+            "OK",
+            ButtonRole::Ok,
+            Box::new(DialogOk),
+        ))
+        .button(BarButton::new(
+            "run-dialog-cancel",
+            "Cancel",
+            ButtonRole::Cancel,
+            Box::new(DialogCancel),
+        ))
+        .button(
+            BarButton::new(
+                "run-dialog-apply",
+                "Apply",
+                ButtonRole::Apply,
+                Box::new(DialogApply),
             )
-            .element(run, RUN_MAC_ORDER, RUN_GAP)
-            .button(BarButton::new(
-                "run-dialog-ok",
-                "OK",
-                ButtonRole::Ok,
-                Box::new(DialogOk),
-            ))
-            .button(BarButton::new(
-                "run-dialog-cancel",
-                "Cancel",
-                ButtonRole::Cancel,
-                Box::new(DialogCancel),
-            ))
-            .button(
-                BarButton::new(
-                    "run-dialog-apply",
-                    "Apply",
-                    ButtonRole::Apply,
-                    Box::new(DialogApply),
-                )
-                .enabled(self.modified),
-            )
-            .render(cx)
+            .enabled(self.modified),
+        )
+        .render(cx)
     }
 }
 

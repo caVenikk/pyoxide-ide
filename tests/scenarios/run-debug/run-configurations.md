@@ -98,7 +98,8 @@
   as words elsewhere (Alt+Shift+F10 in the default keymap), no brackets
   when the keymap has no key for it. The link shows the hand and an
   underline under the pointer; a click opens "Run/Debug Configurations"
-  with the selected configuration selected, or with nothing selected and
+  without its Run button (Cancel, Apply, OK only), with the selected
+  configuration selected, or with nothing selected and
   the types collapsed while Current File is selected: the form then
   shows the link "Add new run configuration…" (it offers the types) over
   "or select run configuration to edit".

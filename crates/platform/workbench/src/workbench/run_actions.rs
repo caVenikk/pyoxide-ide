@@ -761,7 +761,10 @@ impl Workbench {
         };
         let mut built = None;
         let handle = ui::dialog_window::open(window, options, cx, |window, cx| {
-            let dialog = cx.new(|cx| EditDialog::new(configs, select, window, cx));
+            let dialog = cx.new(|cx| {
+                EditDialog::new(configs, select, window, cx)
+                    .with_run_button(action.run_button.unwrap_or(true))
+            });
             built = Some(dialog.clone());
             dialog
         });

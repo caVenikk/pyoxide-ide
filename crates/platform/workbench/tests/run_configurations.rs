@@ -859,6 +859,8 @@ fn the_empty_run_window_link_opens_the_configurations_dialog(cx: &mut TestAppCon
         .simulate_click(link.center(), gpui::Modifiers::none());
     h.draw();
     assert_eq!(dialog(&mut h)["selected"]["name"], json!("beta"));
+    // `EditConfigurationsDialog(project)` has no Run button.
+    assert_eq!(dialog(&mut h)["run_button"], json!(false));
     h.invoke("run.configurations.dialog.cancel", json!(null));
     assert!(h.run()["edit_dialog"].is_null());
 
@@ -989,6 +991,8 @@ fn the_dialog_without_a_selection_shows_the_tip(cx: &mut TestAppContext) {
     h.invoke("run.select-current-file", json!(null));
     h.invoke("run.configurations.edit", json!(null));
     assert_eq!(dialog(&mut h)["selected"], json!(null));
+    // From the dropdown's Edit Configurations the dialog has Run.
+    assert_eq!(dialog(&mut h)["run_button"], json!(true));
     let main: gpui::AnyWindowHandle = h.window.into();
     let win =
         h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))

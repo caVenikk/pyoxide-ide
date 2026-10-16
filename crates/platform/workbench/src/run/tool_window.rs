@@ -1121,9 +1121,11 @@ impl RunToolWindow {
             )
             .on_click(|_, window, cx| {
                 window.dispatch_action(
+                    // `EditConfigurationsDialog(project)` has no Run button.
                     Box::new(EditConfigurations {
                         name: None,
                         r#type: None,
+                        run_button: Some(false),
                     }),
                     cx,
                 )
