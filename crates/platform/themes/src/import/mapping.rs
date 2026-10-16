@@ -210,6 +210,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         IndentGuideActive => &[Color("SELECTED_INDENT_GUIDE")],
         RightMargin => &[Color("RIGHT_MARGIN_COLOR")],
         Whitespace => &[Color("WHITESPACES")],
+        SoftWrapSign => &[Color("SOFT_WRAP_SIGN_COLOR")],
         CompletionPopup => &[Color("LOOKUP_COLOR")],
         CompletionSelection => &[Ui("CompletionPopup.selectionBackground")],
         CompletionMatch => &[Ui("CompletionPopup.matchForeground")],

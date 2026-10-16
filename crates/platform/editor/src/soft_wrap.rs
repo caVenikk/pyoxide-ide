@@ -134,6 +134,26 @@ impl Editor {
         self.soft_wrap.is_some()
     }
 
+    /// Continuation rows also take the line's indentation plus `extra`
+    /// columns (the reference's "Use original line's indent for wrapped
+    /// part", on with 0 by default), or only the sign's column with
+    /// `None`.
+    pub fn set_soft_wrap_indent(&mut self, extra: Option<usize>, cx: &mut Context<Self>) {
+        if self.soft_wrap_indent != extra {
+            self.soft_wrap_indent = extra;
+            cx.notify();
+        }
+    }
+
+    /// Shows the signs at the soft wraps of every line rather than only of
+    /// the caret's lines (the reference's "show all soft wraps").
+    pub fn set_show_all_soft_wraps(&mut self, all: bool, cx: &mut Context<Self>) {
+        if self.show_all_soft_wraps != all {
+            self.show_all_soft_wraps = all;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn toggle_soft_wraps(
         &mut self,
         _: &ToggleSoftWraps,
@@ -158,7 +178,7 @@ impl Editor {
             before_sign: SIGN_COLUMNS,
             after_sign: SIGN_COLUMNS,
             tab_size: self.config().tab_size.max(1),
-            relative_indent: Some(0),
+            relative_indent: self.soft_wrap_indent,
             rules: self.wrap_rules(),
         };
         if self.last_wrap_params.as_ref() != Some(&params) {

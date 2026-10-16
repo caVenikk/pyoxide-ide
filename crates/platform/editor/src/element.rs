@@ -115,6 +115,8 @@ pub(crate) struct LayoutInfo {
     pub problem_stripes: Vec<StripeMark>,
     /// Hyperlinks on the visible lines.
     pub links: Vec<LinkRect>,
+    /// Signs drawn at soft wraps.
+    pub wrap_signs: usize,
 }
 
 /// A problem's mark on the error stripe.
@@ -375,6 +377,9 @@ pub(crate) struct Prepaint {
     dotted: Vec<Dotted>,
     /// Problems drawn after the end of a line.
     after_end: Vec<AfterEnd>,
+    /// Signs at soft wraps: before a wrap at the end of its row, after it
+    /// before the next row's text.
+    wrap_signs: Vec<(ShapedLine, gpui::Point<Pixels>)>,
     colors: Colors,
 }
 
@@ -1260,6 +1265,39 @@ impl Element for EditorElement {
                 }
             }
         }
+        // Signs at the soft wraps of the caret's lines (of every line with
+        // "show all soft wraps"), as the reference's editor painter draws
+        // them: the arrow before a wrap after the row's last char, the one
+        // after it in the last column of the next row's indent.
+        let mut wrap_signs = Vec::new();
+        if wrapping {
+            let run = |len: usize| TextRun {
+                len,
+                font: m.font.clone(),
+                color: theme.color(UiRole::SoftWrapSign),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shape = |sign: &'static str| {
+                window
+                    .text_system()
+                    .shape_line(sign.into(), m.font_size, &[run(sign.len())], None)
+            };
+            let (before, after) = (shape("\u{2926}"), shape("\u{2925}"));
+            for l in &lines {
+                if !editor.show_all_soft_wraps && !caret_lines.contains(&l.line) {
+                    continue;
+                }
+                if !l.last {
+                    wrap_signs.push((before.clone(), point(line_x(l, l.end_col), top_of(l.row))));
+                }
+                if l.sub > 0 {
+                    let x = text_x - scroll.x + l.x_offset - m.char_width;
+                    wrap_signs.push((after.clone(), point(x, top_of(l.row))));
+                }
+            }
+        }
         // Search matches on the visible lines.
         let mut search_rects = Vec::new();
         if let Some(h) = &editor.search {
@@ -1548,6 +1586,7 @@ impl Element for EditorElement {
             stripe,
             problem_stripes,
             links: link_rects,
+            wrap_signs: wrap_signs.len(),
         };
         let stored = layout.clone();
         self.editor.update(cx, |e, _| e.layout = Some(stored));
@@ -1568,6 +1607,7 @@ impl Element for EditorElement {
             link_highlight_hitboxes,
             dotted,
             after_end,
+            wrap_signs,
             colors,
         }
     }
@@ -1663,6 +1703,9 @@ impl Element for EditorElement {
                     let _ = l.shaped.paint(origin, lh, window, cx);
                 }
                 if let Some((shaped, origin)) = &p.placeholder {
+                    let _ = shaped.paint(*origin, lh, window, cx);
+                }
+                for (shaped, origin) in &p.wrap_signs {
                     let _ = shaped.paint(*origin, lh, window, cx);
                 }
                 for d in &p.dotted {

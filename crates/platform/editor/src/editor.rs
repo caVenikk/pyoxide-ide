@@ -322,6 +322,11 @@ pub struct Editor {
     pub(crate) last_wrap_params: Option<WrapParams>,
     /// The config's wrap rules, shared with the wrap parameters.
     pub(crate) wrap_rules: std::sync::Arc<[WrapRule]>,
+    /// Continuation rows take the line's indentation plus this many
+    /// columns; `None`: only the sign's column.
+    pub(crate) soft_wrap_indent: Option<usize>,
+    /// Signs at the soft wraps of every line, not only the caret's.
+    pub(crate) show_all_soft_wraps: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -407,6 +412,8 @@ impl Editor {
             lean_back: BTreeSet::new(),
             last_wrap_params: None,
             wrap_rules: WrapRule::defaults().into(),
+            soft_wrap_indent: Some(0),
+            show_all_soft_wraps: false,
             _subscriptions: subscriptions,
         }
     }
@@ -1111,6 +1118,7 @@ impl Editor {
             "wrap_columns": self.wrap_columns(),
             "rows": self.display_rows(),
             "caret_row": self.primary_row(),
+            "wrap_signs": self.layout.as_ref().map(|l| l.wrap_signs),
             "problems": {
                 "errors": counts.errors,
                 "warnings": counts.warnings,

@@ -329,6 +329,48 @@ fn large_texts_wrap_in_the_background(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn signs_show_on_the_caret_line_and_the_indent_follows_the_option(cx: &mut TestAppContext) {
+    let text = format!("{TEXT}{}", TEXT.replace("    ", ""));
+    let mut t = open(cx, &text);
+    t.wrap(25);
+    // The caret's line: two wraps, each with a sign before and after.
+    t.caret(EPSILON);
+    assert_eq!(t.state()["wrap_signs"], 4);
+    // On a short line: none.
+    t.caret(SHORT);
+    assert_eq!(t.state()["wrap_signs"], 0);
+    // Every line's with "show all soft wraps".
+    t.editor
+        .update(t.cx, |e, cx| e.set_show_all_soft_wraps(true, cx));
+    t.draw();
+    let all = t.state()["wrap_signs"].as_u64().unwrap();
+    assert!(all > 4, "{all}");
+    // The second row starts after the sign and the line's indent, or after
+    // the sign only without the original indent.
+    let (origin, _, cw) = t.geometry();
+    t.caret(DELTA);
+    assert_eq!(t.caret_bounds().left(), origin.x + cw * 5.0);
+    t.editor
+        .update(t.cx, |e, cx| e.set_soft_wrap_indent(None, cx));
+    t.draw();
+    t.caret(DELTA + 2);
+    let p = t.state()["caret_row"].as_u64().unwrap();
+    assert_eq!(p, 1);
+    let left = t.caret_bounds().left();
+    t.run("editor.move-line-start");
+    assert!(t.caret_bounds().left() < left);
+    // The row starts after the sign.
+    let x = f32::from(t.caret_bounds().left() - origin.x);
+    assert!((x - f32::from(cw)).abs() < 0.01, "{x}");
+    // A range over a wrap: its box spans both rows.
+    let b = t
+        .editor
+        .read_with(t.cx, |e, _| e.bounds_for_range(ALPHA..EPSILON).unwrap());
+    let lh = t.geometry().1;
+    assert_eq!(b.size.height, lh * 2.0);
+}
+
+#[gpui::test]
 fn many_edits_at_once_wrap_all_lines_again(cx: &mut TestAppContext) {
     // 100 short lines; a caret at the end of each; typing makes each line
     // wrap.
