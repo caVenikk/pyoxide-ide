@@ -16,10 +16,9 @@ use std::ops::Range;
 use code_intel::{CodeAction, Markup, MarkupKind};
 use editor::{DiagnosticMark, MarkSeverity};
 use gpui::{
-    Action, App, Context, FontWeight, InteractiveElement, InteractiveText, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, TextRun, WeakEntity, Window, div, font,
-    prelude::FluentBuilder, px,
+    Action, App, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText,
+    TextRun, WeakEntity, Window, div, font, prelude::FluentBuilder, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
@@ -491,9 +490,13 @@ impl DocPopup {
         runs.retain(|r| r.len > 0);
         let styled = StyledText::new(SharedString::from(text)).with_runs(runs);
         let element = match (code_range, problem.href.clone()) {
-            (Some(range), Some(href)) => InteractiveText::new(("doc-problem", index), styled)
-                .on_click(vec![range], move |_, _, cx| markdown::open_link(&href, cx))
-                .into_any_element(),
+            (Some(range), Some(href)) => ui::link::linked_text(
+                ("doc-problem", index),
+                styled,
+                vec![range],
+                move |_, _, cx| markdown::open_link(&href, cx),
+            )
+            .into_any_element(),
             _ => styled.into_any_element(),
         };
         div()
@@ -506,7 +509,6 @@ impl DocPopup {
 
     fn render_actions(&self, content: &DocContent, window: &Window, cx: &App) -> gpui::AnyElement {
         let theme = cx.theme();
-        let link = theme.color(UiRole::TextLink);
         let muted = theme.color(UiRole::TextMuted);
         let shortcut = |action: &dyn Action| {
             window
@@ -521,18 +523,14 @@ impl DocPopup {
                 .flex_row()
                 .gap(px(6.0))
                 .child(
-                    div()
-                        .id("doc-fix")
+                    ui::link::link("doc-fix", fix.action.title.clone(), cx)
                         .debug_selector(|| "doc-fix".into())
-                        .text_color(link)
-                        .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                             cx.stop_propagation();
                             if let Some(owner) = owner.upgrade() {
                                 owner.update(cx, |v, cx| v.apply_doc_fix(window, cx));
                             }
-                        })
-                        .child(fix.action.title.clone()),
+                        }),
                 )
                 .children(shortcut(&ApplyFirstFix).map(|s| div().text_color(muted).child(s)))
         });
@@ -543,19 +541,15 @@ impl DocPopup {
                 .flex_row()
                 .gap(px(6.0))
                 .child(
-                    div()
-                        .id("doc-more-actions")
+                    ui::link::link("doc-more-actions", "More actions...", cx)
                         .debug_selector(|| "doc-more-actions".into())
-                        .text_color(link)
-                        .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                             cx.stop_propagation();
                             if let Some(owner) = owner.upgrade() {
                                 owner.update(cx, |v, cx| v.close_doc(cx));
                             }
                             window.dispatch_action(ShowIntentions.boxed_clone(), cx);
-                        })
-                        .child("More actions..."),
+                        }),
                 )
                 .children(shortcut(&ShowIntentions).map(|s| div().text_color(muted).child(s)))
         });

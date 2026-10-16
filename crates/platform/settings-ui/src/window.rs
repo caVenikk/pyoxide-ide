@@ -21,7 +21,7 @@ use gpui::{
 use serde_json::{Value as Json, json};
 use themes::UiRole;
 use ui::components::Tooltip;
-use ui::form::{BarButton, BottomBar, ButtonRole, Hover};
+use ui::form::{BarButton, BottomBar, ButtonRole};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
@@ -183,8 +183,6 @@ pub struct SettingsWindow {
     errors: HashMap<&'static str, String>,
     focus: FocusHandle,
     pub(crate) tree_focus: FocusHandle,
-    revert_hover: Hover,
-    link_hovers: HashMap<&'static str, Hover>,
     /// The search field and the search in effect.
     pub(crate) search: Entity<Editor>,
     pub(crate) filter: Filter,
@@ -256,8 +254,6 @@ impl SettingsWindow {
             errors: HashMap::new(),
             focus: cx.focus_handle(),
             tree_focus: cx.focus_handle(),
-            revert_hover: Hover::default(),
-            link_hovers: HashMap::new(),
             search,
             filter: Filter::default(),
             search_text: String::new(),
@@ -867,7 +863,7 @@ impl SettingsWindow {
         });
         let modified = self.is_modified(self.selected, cx) || self.has_error(self.selected);
         let revert = modified.then(|| {
-            ui::form::link("settings-revert", REVERT, &self.revert_hover, cx)
+            ui::link::link("settings-revert", REVERT, cx)
                 .debug_selector(|| "settings-revert".into())
                 .ml(px(REVERT_GAP))
                 .on_click(|_, window, cx| window.dispatch_action(Box::new(Revert), cx))
@@ -876,6 +872,7 @@ impl SettingsWindow {
         let can_back = self.history.can_back(&exists);
         let can_forward = self.history.can_forward(&exists);
         let back = ui::components::small_icon_button("settings-back", IconName::BACK, can_back, cx)
+            .debug_selector(|| "settings-back".into())
             .tooltip(Tooltip::text("Back", None))
             .when(can_back, |d| {
                 d.on_click(|_, window, cx| window.dispatch_action(Box::new(Back), cx))
@@ -939,9 +936,8 @@ impl SettingsWindow {
             .into_iter()
             .map(|c| {
                 let child = &self.pages[c];
-                let hover = self.link_hovers.entry(child.id).or_default().clone();
                 let id = child.id;
-                ui::form::link(("settings-link", c), child.title, &hover, cx)
+                ui::link::link(("settings-link", c), child.title, cx)
                     .debug_selector(move || format!("settings-link:{id}"))
                     .mb(px(4.0))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -1174,6 +1170,8 @@ impl Render for SettingsWindow {
             .children(resizing)
             .children(history_menu)
             .children(ui::dialog_window::blocker(window, cx))
+            // The links and the divider ask for their pointer shapes.
+            .child(ui::pointer::frame())
     }
 }
 

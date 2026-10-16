@@ -52,6 +52,7 @@ use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 
 use crate::icons::{Icon, IconName};
+use crate::pointer::PointerExt as _;
 use crate::theme::ThemeExt;
 
 crate::ui_commands! {
@@ -1523,7 +1524,10 @@ impl ContextMenu {
                     .flex_col()
                     .when(!header, |d| d.pt(px(m.pad_top)))
                     .pb(px(m.pad_bottom))
-                    .children(rows),
+                    .children(rows)
+                    // The hand over a list popup's list (`ListPopupImpl`);
+                    // the rows of a context menu keep the arrow.
+                    .when(list, |d| d.pointing_hand()),
             )
             .into_any_element()
     }
@@ -1920,6 +1924,7 @@ mod tests {
                 .on_action(cx.listener(|this, _: &Second, _, _| this.got.push("second")))
                 .on_action(cx.listener(|this, _: &Third, _, _| this.got.push("third")))
                 .size_full()
+                .child(crate::pointer::frame())
                 .children(menu)
         }
     }
@@ -2097,6 +2102,34 @@ mod tests {
         assert_eq!(line.size.height, px(1.0));
         // The line spans the popup less `Popup.separatorInsets` (8).
         assert_eq!(line.size.width, row.size.width - px(2.0 * LIST.separator_x));
+    }
+
+    /// The pointer shape over the element with this debug selector.
+    fn shape_over(selector: &'static str, cx: &mut VisualTestContext) -> gpui::CursorStyle {
+        let at = cx
+            .debug_bounds(selector)
+            .expect("the row is drawn")
+            .center();
+        cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+        redraw(cx);
+        cx.update(|window, _| crate::pointer::resolve(window))
+    }
+
+    #[gpui::test]
+    fn a_list_popup_shows_the_hand_over_its_rows_and_a_context_menu_the_arrow(
+        cx: &mut TestAppContext,
+    ) {
+        // `ListPopupImpl` sets the hand on its list; a popup menu is not one.
+        let (_, _, popup_cx) = popup(cx, None);
+        assert_eq!(
+            shape_over("menu-item:uv (demo)", popup_cx),
+            gpui::CursorStyle::PointingHand
+        );
+        let (_, _, menu_cx) = open(cx);
+        assert_eq!(
+            shape_over("menu-item:Second", menu_cx),
+            gpui::CursorStyle::Arrow
+        );
     }
 
     #[gpui::test]

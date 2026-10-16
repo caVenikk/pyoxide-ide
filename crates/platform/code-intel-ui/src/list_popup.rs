@@ -27,6 +27,7 @@ use themes::{Metric, UiRole};
 use ui::menu::{
     Cancel, CloseSubmenu, Confirm, KEY_CONTEXT, OpenSubmenu, SelectNext, SelectPrevious,
 };
+use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName, ThemeExt};
 
 /// Room around the rows and their content (the list popup metrics of
@@ -456,7 +457,6 @@ impl ListPopup {
                         .id("list-more")
                         .debug_selector(move || format!("{name}-more"))
                         .flex_none()
-                        .cursor_pointer()
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
@@ -598,15 +598,21 @@ impl Render for ListPopup {
             .children(title)
             .children(search)
             .child(
+                // The hand over the list (`ListPopupImpl`), on an element
+                // that does not scroll.
                 div()
-                    .id("list-rows")
-                    .flex()
-                    .flex_col()
-                    .when(self.options.title.is_none(), |d| d.pt(px(PAD_Y)))
-                    .pb(px(PAD_Y))
-                    .max_h(px(height * visible as f32 + 2.0 * PAD_Y))
-                    .overflow_y_scroll()
-                    .children(rows),
+                    .child(
+                        div()
+                            .id("list-rows")
+                            .flex()
+                            .flex_col()
+                            .when(self.options.title.is_none(), |d| d.pt(px(PAD_Y)))
+                            .pb(px(PAD_Y))
+                            .max_h(px(height * visible as f32 + 2.0 * PAD_Y))
+                            .overflow_y_scroll()
+                            .children(rows),
+                    )
+                    .pointing_hand(),
             );
         let header = if self.options.title.is_some() {
             TITLE_TOP + height + TITLE_BOTTOM - PAD_Y
@@ -618,7 +624,8 @@ impl Render for ListPopup {
                 frame()
                     .debug_selector(move || format!("{name}-sub"))
                     .py(px(PAD_Y))
-                    .children(rows),
+                    .children(rows)
+                    .pointing_hand(),
             )
         });
         div()

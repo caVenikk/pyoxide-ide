@@ -17,6 +17,7 @@ use gpui::{
 use themes::UiRole;
 use ui::components::Tooltip;
 use ui::icons::{Icon, IconName};
+use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt;
 
 use crate::commands::{Search, SearchHistory};
@@ -456,7 +457,7 @@ impl SettingsWindow {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .cursor_pointer()
+                    .pointing_hand()
                     .child(Icon::new(IconName::SEARCH_HISTORY))
                     .tooltip(Tooltip::text("Search History", None))
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(SearchHistory), cx)),
@@ -477,7 +478,7 @@ impl SettingsWindow {
                         .flex_none()
                         .flex()
                         .items_center()
-                        .cursor_pointer()
+                        .pointing_hand()
                         .child(Icon::new(IconName::CLOSE_SMALL))
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             cx.stop_propagation();

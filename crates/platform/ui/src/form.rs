@@ -9,9 +9,6 @@
 //! The one-line text field is `editor::field` (an editor in one-line mode;
 //! `ui` is below `editor`). Every colour and size comes from the theme.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use gpui::{
     Action, AnyElement, AnyWindowHandle, App, Context, Div, ElementId, Entity, FocusHandle,
     IntoElement, Pixels, Point, SharedString, Stateful, Subscription, Window, div, prelude::*, px,
@@ -21,6 +18,7 @@ use themes::{Metric, UiRole};
 use crate::components::{DISABLED_ALPHA, Tooltip, checkbox};
 use crate::icons::{Icon, IconName};
 use crate::menu::{ChosenEvent, ContextMenu, MenuItem, PopupOptions};
+use crate::pointer::PointerExt as _;
 use crate::theme::ThemeExt;
 
 /// Height of a field (text field, combo box) and the space between rows.
@@ -92,49 +90,6 @@ pub fn group_header(title: impl Into<SharedString>, cx: &App) -> Div {
         )
 }
 
-/// The pointer is over an element. GPUI lays text out before it knows
-/// what is hovered, so a hover style cannot underline text; the state keeps
-/// it for the next frame (the window redraws when it changes).
-#[derive(Clone, Default)]
-pub struct Hover(Rc<Cell<bool>>);
-
-impl Hover {
-    pub fn get(&self) -> bool {
-        self.0.get()
-    }
-}
-
-/// A link (`ActionLink`, `DropDownLink`): text in the link colour, the
-/// hand and the underline under the pointer. The caller adds the click
-/// handler and anything after the text (a drop-down arrow).
-pub fn link(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    hover: &Hover,
-    cx: &App,
-) -> Stateful<Div> {
-    let cell = hover.0.clone();
-    div()
-        .id(id)
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(4.0))
-        .text_color(cx.theme().color(UiRole::TextLink))
-        .cursor_pointer()
-        .on_hover(move |hovered: &bool, window, _| {
-            if cell.get() != *hovered {
-                cell.set(*hovered);
-                window.refresh();
-            }
-        })
-        .child(
-            div()
-                .when(hover.get(), |d| d.underline())
-                .child(label.into()),
-        )
-}
-
 /// A combo box, closed (`ComboBox` in the New UI's dialogs): filled, the
 /// content on one line, the arrow at its end. The caller opens the list on
 /// click ([`MenuPopup`]).
@@ -188,7 +143,10 @@ pub fn field_button(
         .child(Icon::new(icon))
         .tooltip(Tooltip::text(tooltip, None))
         .when_some(action, |d, action| {
-            d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+            // The icons inside a text field are extensions with an action:
+            // `TextFieldWithPopupHandlerUI` gives them the hand.
+            d.pointing_hand()
+                .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         })
         .into_any_element()
 }

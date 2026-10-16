@@ -17,6 +17,7 @@ use gpui::{
     ParentElement, Styled, Task, WeakEntity, Window, anchored, deferred, div, point, px,
 };
 use serde_json::{Value as Json, json};
+use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName};
 
 use crate::doc;
@@ -293,7 +294,9 @@ impl CodeIntelView {
                         .id("intention-bulb")
                         .debug_selector(|| "intention-bulb".into())
                         .size(px(BULB_SIZE))
-                        .cursor_pointer()
+                        // Over the editor: its own request for the hand
+                        // wins over the editor's text cursor.
+                        .pointing_hand()
                         .on_mouse_down(MouseButton::Left, move |_, _: &mut Window, cx| {
                             cx.stop_propagation();
                             if let Some(owner) = owner.upgrade() {

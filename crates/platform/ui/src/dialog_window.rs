@@ -16,10 +16,11 @@
 //! button, the element of the parent that had the focus gets it back.
 //!
 //! The dialog's view is the root of its window: nothing of the parent
-//! window draws into it; a dialog that can have a modal dialog over it
-//! draws [`blocker`] itself. On macOS a dialog can draw its own title bar
-//! in the theme's colours under the system's window buttons
-//! ([`title_bar`]), as the reference does.
+//! window draws into it; a dialog draws [`crate::pointer::frame`] so that
+//! its links and lists get their pointer shapes, and one that can have a
+//! modal dialog over it draws [`blocker`] itself. On macOS a dialog can
+//! draw its own title bar in the theme's colours under the system's window
+//! buttons ([`title_bar`]), as the reference does.
 //!
 //! A popup of a dialog that may reach beyond it (the reference's popups
 //! are windows of their own) opens with [`open_popup`]: a borderless window
@@ -313,29 +314,33 @@ pub struct PopupHost {
 impl Render for PopupHost {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let fitted = self.fitted.clone();
-        div().size_full().child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .child(self.content.clone())
-                .child(
-                    canvas(
-                        move |bounds, window, cx| {
-                            let size = bounds.size;
-                            if fitted.get() != Some(size) && size.width > px(0.0) {
-                                fitted.set(Some(size));
-                                window.defer(cx, move |window, _| native::fit(window, size));
-                            }
-                        },
-                        |_, _, _, _| {},
-                    )
+        div()
+            .size_full()
+            .child(
+                div()
                     .absolute()
                     .top_0()
                     .left_0()
-                    .size_full(),
-                ),
-        )
+                    .child(self.content.clone())
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                let size = bounds.size;
+                                if fitted.get() != Some(size) && size.width > px(0.0) {
+                                    fitted.set(Some(size));
+                                    window.defer(cx, move |window, _| native::fit(window, size));
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
+            )
+            // The popup's rows ask for the pointing hand.
+            .child(crate::pointer::frame())
     }
 }
 

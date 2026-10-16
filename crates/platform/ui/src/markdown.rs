@@ -16,8 +16,8 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, ElementId, Font, FontStyle, FontWeight, Hsla, InteractiveText, IntoElement,
-    ParentElement, SharedString, StrikethroughStyle, Styled, StyledText, TextRun, div, font, px,
+    AnyElement, App, ElementId, Font, FontStyle, FontWeight, Hsla, IntoElement, ParentElement,
+    SharedString, StrikethroughStyle, Styled, StyledText, TextRun, div, font, px,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use serde_json::{Value as Json, json};
@@ -750,15 +750,12 @@ fn render_inline_with(text: &Inline, id: ElementId, weight: FontWeight, cx: &App
     }
     let ranges: Vec<Range<usize>> = text.links.iter().map(|(r, _)| r.clone()).collect();
     let targets: Vec<String> = text.links.iter().map(|(_, h)| h.clone()).collect();
-    div()
-        .child(
-            InteractiveText::new(id, styled).on_click(ranges, move |i, _, cx| {
-                if let Some(href) = targets.get(i) {
-                    open_link(href, cx);
-                }
-            }),
-        )
-        .into_any_element()
+    crate::link::linked_text(id, styled, ranges, move |i, _, cx| {
+        if let Some(href) = targets.get(i) {
+            open_link(href, cx);
+        }
+    })
+    .into_any_element()
 }
 
 /// Opens a web link in the browser; other targets are ignored.

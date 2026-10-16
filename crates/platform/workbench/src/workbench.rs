@@ -2177,7 +2177,6 @@ impl Focusable for Workbench {
 
 impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        ui::pointer::begin_frame();
         let bench = env::bench().is_some();
         if bench {
             crate::bench::frame_started();
@@ -2423,15 +2422,11 @@ impl Render for Workbench {
             })
             // The pointer shape is set again on every mouse move (see
             // ui::pointer).
+            .child(ui::pointer::frame())
             .child(
                 canvas(|_, _, _| (), {
                     let this = cx.entity();
                     move |_, _, window, _| {
-                        window.on_mouse_event(|_: &MouseMoveEvent, phase, window, _| {
-                            if phase == DispatchPhase::Capture {
-                                ui::pointer::apply(window);
-                            }
-                        });
                         // Mouse input for the idle save.
                         let input = this.clone();
                         window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, cx| {

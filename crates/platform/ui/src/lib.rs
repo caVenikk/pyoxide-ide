@@ -13,6 +13,7 @@ pub mod fonts;
 pub mod form;
 pub mod icons;
 pub mod keys;
+pub mod link;
 pub mod markdown;
 pub mod menu;
 pub mod notification;

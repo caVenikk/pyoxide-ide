@@ -17,6 +17,7 @@ use name_match::{Matcher, MatchingMode};
 use themes::{Metric, UiRole};
 use ui::components::{SMALL_BUTTON, Tooltip, checkbox, small_icon_button, spinner, toggle_button};
 use ui::icons::{Icon, IconName};
+use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt;
 
 use super::*;
@@ -375,6 +376,9 @@ impl SearchEverywhere {
             cx,
         )
         .debug_selector(|| "search-everywhere-history".into())
+        // An icon inside the search field with an action: the hand
+        // (`TextFieldWithPopupHandlerUI`).
+        .pointing_hand()
         .tooltip(Tooltip::text(
             "Recent Searches",
             self.shortcut(&HistoryPrevious, window, cx),
@@ -562,18 +566,12 @@ impl SearchEverywhere {
     /// What an empty list says.
     fn empty_text(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let link = theme.color(UiRole::TextLink);
         let text = self.field.read(cx).text();
         if self.is_searching() || text.trim().is_empty() {
             return div().flex_1().into_any_element();
         }
         let link_to = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
-                .debug_selector(move || id.into())
-                .text_color(link)
-                .cursor_pointer()
-                .child(label)
+            ui::link::link(id, label, cx).debug_selector(move || id.into())
         };
         let scope_link = (!self.everywhere() && self.tab != Tab::Actions).then(|| {
             link_to("search-everywhere-set-scope", "all places").on_click(
@@ -697,7 +695,6 @@ impl SearchEverywhere {
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let (text, file) = self.footer();
-        let link = theme.color(UiRole::TextLink);
         div()
             .id("search-everywhere-footer")
             .debug_selector(|| "search-everywhere-footer".into())
@@ -720,13 +717,9 @@ impl SearchEverywhere {
             )
             .when(file, |d| {
                 d.child(
-                    div()
-                        .id("search-everywhere-right-split")
+                    ui::link::link("search-everywhere-right-split", "Open In Right Split", cx)
                         .debug_selector(|| "search-everywhere-right-split".into())
                         .flex_none()
-                        .text_color(link)
-                        .cursor_pointer()
-                        .child("Open In Right Split")
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             if let Some(i) = this.selected {
                                 this.choose(i, window, cx);
@@ -831,13 +824,9 @@ impl SearchEverywhere {
                     .gap(px(8.0))
                     .px(px(8.0))
                     .pb(px(4.0))
-                    .text_color(theme.color(UiRole::TextLink))
                     .child(
-                        div()
-                            .id("search-everywhere-filter-all")
+                        ui::link::link("search-everywhere-filter-all", "All", cx)
                             .debug_selector(|| "search-everywhere-filter-all".into())
-                            .cursor_pointer()
-                            .child("All")
                             .on_click({
                                 let kind = kind.clone();
                                 cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -846,11 +835,8 @@ impl SearchEverywhere {
                             }),
                     )
                     .child(
-                        div()
-                            .id("search-everywhere-filter-none")
+                        ui::link::link("search-everywhere-filter-none", "None", cx)
                             .debug_selector(|| "search-everywhere-filter-none".into())
-                            .cursor_pointer()
-                            .child("None")
                             .on_click({
                                 let kind = kind.clone();
                                 cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -859,11 +845,8 @@ impl SearchEverywhere {
                             }),
                     )
                     .child(
-                        div()
-                            .id("search-everywhere-filter-invert")
+                        ui::link::link("search-everywhere-filter-invert", "Invert", cx)
                             .debug_selector(|| "search-everywhere-filter-invert".into())
-                            .cursor_pointer()
-                            .child("Invert")
                             .on_click({
                                 let kind = kind.clone();
                                 cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -922,11 +905,6 @@ impl SearchEverywhere {
                     .when(under_field, |d| d.left(px(8.0)))
                     .when(!under_field, |d| d.right(px(8.0)))
                     .w(px(DROPDOWN_WIDTH))
-                    .max_h(px(height))
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .p(px(4.0))
                     .rounded(theme.metric(Metric::CornerRadius) * 2.0)
                     .border_1()
                     .border_color(theme.color(UiRole::PopupBorder))
@@ -936,7 +914,23 @@ impl SearchEverywhere {
                         this.dropdown = None;
                         cx.notify();
                     }))
-                    .children(rows),
+                    .child(
+                        div()
+                            .id("search-everywhere-dropdown-rows")
+                            .max_h(px(height))
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .p(px(4.0))
+                            .children(rows),
+                    )
+                    // The hand over the list of a list popup
+                    // (`PopupChooserBuilder`, `ListPopupImpl`); the check
+                    // box lists of the filters keep the arrow.
+                    .when(
+                        matches!(kind, Dropdown::Scope | Dropdown::History | Dropdown::Masks),
+                        |d| d.pointing_hand(),
+                    ),
             )
             .with_priority(1)
             .into_any_element(),
