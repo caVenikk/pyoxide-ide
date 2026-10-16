@@ -1,6 +1,6 @@
 # 0015. Debugger over DAP with debugpy
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-16
 
 ## Context

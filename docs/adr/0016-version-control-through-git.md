@@ -1,6 +1,6 @@
 # 0016. Version control through the git executable
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-16
 
 ## Context

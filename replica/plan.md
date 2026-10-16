@@ -120,10 +120,27 @@ Wave 1 (parallel sub-agents in worktrees, merged in this order):
 | #135 Run widget inactive icons, toolbar spacing, submenu aim | sub-agent run-config | `ui` (menu), `workbench` (toolbar, run) | done (PR #138, #140) |
 | #136 Dialog title bar, option tags, Modify options popup window | sub-agent run-config | `ui` (`dialog_window` popups), `workbench/src/run` | done (PR #139, #140) |
 
-Wave 2 (on command): recon (`/replica-recon`) for terminal (#89),
-debugger (#90), git (#91, #28), settings window (#92, #40) and configured
-interpreters (#75); small items without a recon: #119, #118, #120, #121.
-The settings window reuses `ui::dialog_window` (#127).
+Wave 2: recon for terminal, debugger, git and settings (`replica/recon.md`,
+`tests/scenarios/`, ADR 0014-0018), plus the small items:
+
+| issue | crates / files | status |
+|---|---|---|
+| #120 Python packages and source roots | `project`, `workbench` (project panel), `pyoxide-ide` | PR #143 |
+| #121 File type icons | `workbench` (`file_types`), `ui`, `pyoxide-ide` | PR #146 |
+| #119 Editor soft wraps | `editor`, `workbench` | in progress |
+| #118 Search Everywhere preview | `workbench` (find in files preview, search everywhere) | in progress |
+
+Wave 2 implementation (4 lanes in parallel, foundations first; hot files:
+`workbench.rs`, keymaps, `ui/menu.rs`, the editor crate):
+
+| lane | issues in order |
+|---|---|
+| shell / debugger | #148 tool window slots, #149 balloons, #150 editor decorations (after #119), #163 debugpy helper, #164 breakpoints, #165 debug sessions, #166 frames and variables, #167 inline values |
+| settings | #151 non-modal dialogs and forms, #152 settings shell and store, #40 keymaps, #153 appearance, #75 interpreters, #154 font / general / Python pages, #155 first run |
+| terminal | #156 PTY sessions, #157 grid view (perf checkpoint), #159 shell integration, #158 tool window and tabs, #160 links / find / separators, #161 persistence and menus |
+| git | #168 repository state, #162 DAP client (lane swap), #28 VCS widget, #169 status colours and markers, #170 Commit tool window, #171 diff viewer, #172 push / update |
+
+Umbrellas: #89 terminal, #90 debugger, #91 git, #92 settings.
 Wave 3: rebrand (#93), release (#94), announcement.
 
 Queue: MVP (M3 first version first), then #13 control channel, then #50 (find filters for comments and string
