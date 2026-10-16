@@ -1049,6 +1049,11 @@ impl Editor {
         self.scroll.y
     }
 
+    /// Horizontal scroll offset in pixels.
+    pub fn scroll_left(&self) -> Pixels {
+        self.scroll.x
+    }
+
     /// First and last line drawn in the last frame.
     pub fn visible_lines(&self) -> Option<Range<usize>> {
         self.layout.as_ref().map(|l| l.visible.clone())
