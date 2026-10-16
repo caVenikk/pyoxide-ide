@@ -250,7 +250,10 @@ impl Workbench {
     pub fn new(product: Rc<Product>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus);
-        let file_types = Rc::new(FileTypes::new(&product.file_types));
+        let file_types = Rc::new(FileTypes::with_associations(
+            &product.file_types,
+            &product.file_associations,
+        ));
         let panel = cx.new(|cx| {
             let mut panel = ProjectPanel::new(file_types.clone(), cx);
             panel.set_new_items(product.new_items.clone());

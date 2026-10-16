@@ -15,7 +15,8 @@ use std::sync::Arc;
 use editor::{SyntaxHighlighter, WrapCondition, WrapRule};
 use ui::icons::{IconName, IconSvg};
 use workbench::{
-    AutoExclusions, FileType, NavigationHooks, Product, RootKind, RunHook, StripeItem, TreeHooks,
+    AutoExclusions, FileAssociation, FileType, NavigationHooks, Product, RootKind, RunHook,
+    StripeItem, TreeHooks,
 };
 
 /// Icons of the Python product (IntelliJ Platform Community, Apache-2.0,
@@ -78,13 +79,10 @@ fn tree() -> TreeHooks {
     }
 }
 
-/// Python source files.
+/// Python source files (and `#!` scripts naming Python).
 fn python() -> FileType {
     FileType {
-        name: "Python",
-        extensions: &["py", "pyi", "pyw"],
-        file_names: &[],
-        icon: IconName("python/file"),
+        hash_bangs: &["python"],
         // A block opens after a colon at the end of a line and ends after
         // a statement that leaves it.
         indent_after: &[':'],
@@ -97,6 +95,7 @@ fn python() -> FileType {
         highlighter: Some(Arc::new(SyntaxHighlighter::factory(py_syntax::language()))),
         language_id: Some("python"),
         wrap_rules: PYTHON_WRAP_RULES,
+        ..FileType::plain("Python", &["py", "pyi", "pyw"], IconName("python/file"))
     }
 }
 
@@ -114,6 +113,54 @@ const PYTHON_WRAP_RULES: &[WrapRule] = &[
     WrapRule::new('(', WrapCondition::After),
     WrapRule::new('[', WrapCondition::After),
     WrapRule::new('{', WrapCondition::After),
+];
+
+/// The other file types of the reference's Python plugin: requirements
+/// files and the `py.typed` marker, both drawn as text.
+fn python_files() -> [FileType; 2] {
+    [
+        FileType {
+            file_names_any_case: &["requirements.txt"],
+            ..FileType::plain("Requirements", &[], IconName::FILE_TEXT).with_comment("# ")
+        },
+        FileType {
+            file_names_any_case: &["py.typed"],
+            ..FileType::plain("PyTyped", &[], IconName::FILE_TEXT)
+        },
+    ]
+}
+
+/// Python files of the platform's types, as the reference's Python, TOML
+/// and conda support associate them.
+const FILE_ASSOCIATIONS: [FileAssociation; 7] = [
+    FileAssociation {
+        mask: "pyproject.toml",
+        file_type: "TOML",
+    },
+    FileAssociation {
+        mask: "Pipfile",
+        file_type: "TOML",
+    },
+    FileAssociation {
+        mask: "pdm.lock",
+        file_type: "TOML",
+    },
+    FileAssociation {
+        mask: "poetry.lock",
+        file_type: "TOML",
+    },
+    FileAssociation {
+        mask: "uv.lock",
+        file_type: "TOML",
+    },
+    FileAssociation {
+        mask: "environment.yml",
+        file_type: "YAML",
+    },
+    FileAssociation {
+        mask: "environment.yaml",
+        file_type: "YAML",
+    },
 ];
 
 /// Virtual environments are excluded from a project on their own, as the
@@ -190,7 +237,8 @@ fn init(cx: &mut gpui::App) {
 pub fn product() -> Product {
     Product {
         name: "Pyoxide",
-        file_types: vec![python()],
+        file_types: [python()].into_iter().chain(python_files()).collect(),
+        file_associations: FILE_ASSOCIATIONS.to_vec(),
         icons: ICONS,
         left_stripe_bottom: vec![
             StripeItem {
@@ -263,6 +311,42 @@ mod tests {
             Some("flask.sansio")
         );
         assert_eq!(file_location("app.rst", "docs"), None);
+    }
+
+    /// The Python files of a project root get the reference's types:
+    /// lock files and `pyproject.toml` are TOML, requirements files in any
+    /// case are requirements, `#!` scripts naming Python are Python.
+    #[test]
+    fn python_file_types() {
+        let p = product();
+        let types = workbench::file_types::FileTypes::with_associations(
+            &p.file_types,
+            &p.file_associations,
+        );
+        let type_of = |name: &str| types.for_path(Path::new(name)).map(|t| t.name);
+        for (name, expected) in [
+            ("app.py", "Python"),
+            ("stubs.pyi", "Python"),
+            ("conftest.py", "Python"),
+            ("pyproject.toml", "TOML"),
+            ("uv.lock", "TOML"),
+            ("poetry.lock", "TOML"),
+            ("Pipfile", "TOML"),
+            ("environment.yml", "YAML"),
+            ("Requirements.TXT", "Requirements"),
+            ("py.typed", "PyTyped"),
+            ("notes.txt", "Text"),
+        ] {
+            assert_eq!(type_of(name), Some(expected), "{name}");
+        }
+        assert_eq!(
+            types.icon(Path::new("requirements.txt")),
+            IconName::FILE_TEXT
+        );
+        assert_eq!(
+            types.content_type(b"#!/usr/bin/env python3\n"),
+            workbench::file_types::Detected::Type("Python")
+        );
     }
 
     #[test]

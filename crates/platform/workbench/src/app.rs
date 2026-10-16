@@ -14,7 +14,7 @@ use ui::icons::{IconName, IconSvg};
 
 use crate::commands::{self, Quit, SetTheme, ToggleProject};
 use crate::env;
-use crate::file_types::FileType;
+use crate::file_types::{FileAssociation, FileType};
 use crate::project_panel;
 use crate::run::RunHook;
 use crate::workbench::Workbench;
@@ -72,6 +72,10 @@ pub struct Product {
     /// File types of the product's languages (icons, indentation,
     /// highlighting); they take precedence over the platform's.
     pub file_types: Vec<FileType>,
+    /// The product's associations of file names with its types or the
+    /// platform's (`uv.lock` is TOML); they replace the built-in ones of
+    /// the same mask.
+    pub file_associations: Vec<FileAssociation>,
     /// Name shown in the window title and the application menu.
     pub name: &'static str,
     /// Icons of the product (file types, tool windows).

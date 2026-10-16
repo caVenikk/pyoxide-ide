@@ -96,8 +96,9 @@ impl NameMasks {
     }
 }
 
-/// `*` matches any run of characters, `?` one character.
-fn wildcard_match(pattern: &str, name: &str) -> bool {
+/// A name mask with wildcards as the reference IDE matches it
+/// (case-sensitive): `*` matches any run of characters, `?` one character.
+pub fn wildcard_match(pattern: &str, name: &str) -> bool {
     let p: Vec<char> = pattern.chars().collect();
     let n: Vec<char> = name.chars().collect();
     let (mut pi, mut ni) = (0, 0);
