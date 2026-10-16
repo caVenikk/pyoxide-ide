@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 36%** `███████░░░░░░░░░░░░░`
+**Overall parity: 37%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
-| vcs | 13% `█░░░░░░░░░` | 2 | 1 | 22 |
+| vcs | 21% `██░░░░░░░░` | 3 | 2 | 20 |
 | settings | 41% `████░░░░░░` | 5 | 3 | 10 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -194,8 +194,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Amend and commit options (author, sign-off, hooks) | must | Community (#91) |
 | ⬜ | Rollback of files (Rollback Changes dialog) | must | Community (#91) |
 | ⬜ | Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side) | must | Community (#91) |
-| ⬜ | VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind) | must | Community (#28) |
-| ⬜ | Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout) | must | Community (#28, #91) |
+| ✅ | VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind) | must | Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28) |
+| 🟡 | Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout) | must | Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch wait for #170 #172, favourites not saved |
 | ⬜ | Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected) | must | Community; credentials through the user's helper and ssh-agent (#91) |
 | ⬜ | Update Project, Fetch and Pull | must | Community (#91) |
 | ⬜ | Create Git Repository for a project without version control | must | Community (#91) |
