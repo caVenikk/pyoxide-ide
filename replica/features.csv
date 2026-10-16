@@ -49,14 +49,14 @@ Navigation history (Back / Forward),editor,must,yes,yes,"places and keys as in t
 Multi-cursor and column selection,editor,should,yes,no,
 Code folding,editor,should,yes,no,
 Live templates,editor,should,yes,no,
-Keymap import,settings-import,must,yes,no,
+Keymap import,settings-import,must,yes,no,"reference keymap XML with its parent chain (#40); choice and switching: area settings"
 Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
 UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
-Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters and settings: #75"
+Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters, the Python > Interpreter page and Add Python Interpreter: area settings (#75)"
 "Language services over LSP (start, stop, restart, status widget)",python-intel,must,yes,yes,Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85)
-External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly),python-intel,must,yes,partial,"Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings page: #92; Pyright / Pyrefly not offered yet"
+External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly),python-intel,must,yes,partial,"Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings pages: area settings (#92); Pyright / Pyrefly not offered yet"
 Type engine choice (Types widget),python-intel,could,yes,yes,"Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here: ty / basedpyright (#87)"
 "Problems highlighted in the editor (severity, unused, deprecated, tooltip)",python-intel,must,yes,yes,"Community; from ruff and the type server (#84, #86: one hover popup with problems, first fix and documentation)"
 "Error stripe, inspection widget, next / previous problem (F2)",python-intel,must,yes,yes,Community (#84)
@@ -77,12 +77,94 @@ Inlay hints,python-intel,could,yes,no,Community
 Semantic highlighting,python-intel,could,yes,no,Community
 "Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun)",run-debug,must,yes,yes,"#45; uv run for uv environments; soft wraps, print and console find later"
 Run configurations,run-debug,must,yes,partial,"Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75"
-Debugger (breakpoints / stepping / variables),run-debug,must,yes,no,DAP / debugpy
+Debug the current file and run configurations (debugpy over DAP),run-debug,must,yes,no,"Community (pydevd; debugpy through a separate plugin in the reference); debugpy 1.8.21 shipped with the app, ADR 0015 (#90)"
+"Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog)",run-debug,must,yes,no,Community; Debug buttons of #74 enabled (#90)
+"Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin)",run-debug,must,yes,no,Community; Console through DAP runInTerminal like the Run console (#90)
+"Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun)",run-debug,must,yes,no,Community; keys of the macOS and Windows keymaps (#90)
+"Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,no,Community; stoppable lines as the reference (#90)
+"Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,no,Community (#90)
+Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,no,Community (#90)
+Frames list and thread chooser (library frames folded),run-debug,must,yes,no,Community (#90)
+"Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,no,Community (#90)
+Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
+Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,no,"Community; .oxide/workspace.toml, .idea/workspace.xml read once (#90)"
+"Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community
+Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; watches kept per run configuration
+"Logging breakpoints (log message, stack trace, Evaluate and log)",run-debug,should,yes,no,Community
+Smart Step Into,run-debug,should,yes,no,Community; on by default in the reference
+Debug Console (prompt in the current frame),run-debug,should,yes,no,Community
+Attach to Process,run-debug,should,yes,no,Community
+Subprocess debugging,run-debug,should,yes,no,Community; debugpy child sessions over TCP
+"Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views)",run-debug,should,yes,no,Community
+Jump To Cursor and the Run to Cursor inlay,run-debug,could,yes,no,Community
+Dependent breakpoints (disable until another is hit),run-debug,could,yes,no,Community
+"Remote, Docker and WSL debugging",run-debug,could,yes,no,remote interpreters
+Data views for numpy and pandas and type renderers,run-debug,could,yes,no,Community
 Test runner (pytest),run-debug,should,yes,no,
-Integrated terminal,run-debug,must,yes,no,
-Git status and diff,vcs,must,yes,no,
-Commit and branches,vcs,must,yes,no,
-Blame and history,vcs,should,yes,no,
+"Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,no,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89)"
+"Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,no,"Community; default shell per OS, login and interactive options, environment (#89)"
+"VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,no,Community; candidate alacritty_terminal (#89)
+"Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,no,Community (#89)
+"Terminal tabs (new, close with confirmation, rename, unique names, close on exit)",terminal,must,yes,no,Community (#89)
+"Select, copy, paste, select all and clear in the terminal",terminal,must,yes,no,Community (#89)
+"Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell",terminal,must,yes,no,Community; Pyoxide uses OSC 7 / OSC 133 with its own scripts (#89)
+Virtual environment activation and start directory in the terminal,terminal,must,yes,no,Community; venv and uv environments through their activate script (#89)
+"Links in terminal output (URLs, file paths with line:column, Python tracebacks)",terminal,must,yes,no,Community (#89)
+Find in terminal output,terminal,must,yes,no,Community (#89)
+"Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,no,Community (#89)
+Terminal tabs restored on project open,terminal,should,yes,no,Community
+New Predefined Session popup (detected shells),terminal,should,yes,no,Community
+Open In > Terminal,terminal,should,yes,no,Community
+Command separators in the terminal,terminal,should,yes,no,Community; needs shell integration
+Terminal tab and output context menus,terminal,should,yes,no,Community
+Settings > Tools > Terminal page with one-time import from .idea,terminal,should,yes,no,Community; after the settings window (#92)
+Split terminal tabs and Move to Editor,terminal,could,yes,no,Community
+Shell command completion in the terminal,terminal,could,yes,no,Community
+Paste from History and command history search in the terminal,terminal,could,yes,no,Community
+Conda environment activation in the terminal,terminal,could,yes,no,Community
+Git repository detection and git executable lookup,vcs,must,yes,no,"Community; the git executable for every operation, ADR 0016 (#91)"
+"File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,no,Community (#91)
+"Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,no,Community (#91)
+"Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,no,"Community; Cmd+K / Ctrl+K, non-modal commit (#91)"
+"Amend and commit options (author, sign-off, hooks)",vcs,must,yes,no,Community (#91)
+Rollback of files (Rollback Changes dialog),vcs,must,yes,no,Community (#91)
+"Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,no,Community (#91)
+"VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind)",vcs,must,yes,no,Community (#28)
+"Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,no,"Community (#28, #91)"
+"Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected)",vcs,must,yes,no,Community; credentials through the user's helper and ssh-agent (#91)
+"Update Project, Fetch and Pull",vcs,must,yes,no,Community (#91)
+Create Git Repository for a project without version control,vcs,must,yes,no,Community (#91)
+Git main menu and VCS Operations popup,vcs,must,yes,no,Community (#91)
+Annotate with Git Blame,vcs,should,yes,no,Community
+Git log tool window and file history,vcs,should,yes,no,Community
+Merge conflict resolution (three-way merge),vcs,should,yes,no,Community
+Stash and shelve UI,vcs,should,yes,no,Community
+Credentials prompt for HTTPS and SSH,vcs,should,yes,no,Community; askpass helper
+Unified diff viewer,vcs,could,yes,no,Community
+"Changelists and partial commits (chunks, lines)",vcs,could,yes,no,Community
+Cherry-pick and interactive rebase,vcs,could,yes,no,Community
+"Commit checks (reformat, optimize imports, ruff)",vcs,could,yes,no,Community
+.gitignore support and Add to .gitignore,vcs,could,yes,no,Community
+"Compare with branch, worktrees and tags UI",vcs,could,yes,no,Community
+Clone and share on a hosting service,vcs,could,yes,no,Community
+"Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S)",settings,must,yes,no,Community; ADR 0017 (#92)
+"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,no,"own store (settings.toml); reads the reference's XML data files once (#92, #40)"
+"Appearance page: theme choice with live switch, Custom themes and Import Theme…",settings,must,yes,partial,Community; live switch (workbench.set-theme) and the themes importer exist; no page yet (#92)
+"Theme quick switch with preview (gear > Theme, Quick Switch Scheme)",settings,must,yes,no,Community (#92)
+System Settings page (autosave and sync of external changes),settings,must,yes,no,Community; defaults in code today (#92)
+"Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,no,Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40)
+Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,no,Community (#40)
+Editor > Font page,settings,must,yes,no,Community (#92)
+Editor > General page (soft wraps),settings,must,yes,no,Community; after #119 (#92)
+"Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,no,Community (#75)
+"Add Python Interpreter dialog (new virtualenv or uv, existing interpreter)",settings,must,yes,no,Community; through py-env (#75)
+Configured interpreters as an application list with one-time import from the reference,settings,must,yes,no,Community; interpreters of the reference that still exist (#75)
+Python > Type Engine and Python > Tools > External Tools pages,settings,must,yes,no,Community; settings model and storage exist (#87); pages: #92
+Search highlight on settings pages (spotlight),settings,should,yes,no,Community
+"Keymap editing (custom keymaps, edit shortcuts)",settings,should,yes,no,Community
+Editor > File Types page,settings,should,yes,no,Community; associations from #121
+"First-run window (import, choose theme, choose keymap)",settings,should,yes,no,Community (#40)
+"Appearance options beyond the theme (zoom, UI font, UI options)",settings,could,yes,no,Community
 Docker containers and images,docker,should,yes,no,
 Command registry and palette,platform,must,no,partial,registry and JSON channel; no palette yet
 Plugin API (WASM),platform,could,yes,no,
