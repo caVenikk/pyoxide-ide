@@ -42,6 +42,7 @@ mod file_sync;
 mod history;
 mod run_actions;
 mod tool_window_areas;
+mod version_control;
 
 use crate::tool_windows::Area;
 pub use crate::tool_windows::{BOTTOM_WEIGHT, PROJECT_WIDTH, ToolWindow};
@@ -206,6 +207,8 @@ pub struct Workbench {
     file_sync: file_sync::FileSync,
     /// Notification balloons.
     notifications: Entity<Notifications>,
+    /// The project's Git repository and its statuses.
+    version_control: version_control::VersionControl,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -363,6 +366,7 @@ impl Workbench {
             navigation: Default::default(),
             file_sync: Default::default(),
             notifications: cx.new(|cx| Notifications::new(window, cx)),
+            version_control: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -612,6 +616,7 @@ impl Workbench {
             "notice": self.notice.as_ref().map(|m| m.to_string()),
             "notifications": self.notifications.read(cx).state_json(cx),
             "theme": cx.theme().id(),
+            "vcs": self.vcs_state_json(cx),
         })
     }
 

@@ -5341,6 +5341,7 @@ dependencies = [
  "clap",
  "commands",
  "db-service",
+ "git",
  "py-env",
  "secrets",
  "serde",
@@ -8930,6 +8931,7 @@ dependencies = [
  "file-index",
  "file-watcher",
  "futures",
+ "git",
  "gpui",
  "image",
  "name-match",
@@ -8951,6 +8953,7 @@ dependencies = [
  "themes",
  "toml 1.1.8+spec-1.1.0",
  "ui",
+ "vcs",
 ]
 
 [[package]]

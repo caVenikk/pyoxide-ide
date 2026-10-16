@@ -131,6 +131,11 @@ pub(super) struct FileSync {
 /// elsewhere by the file's name) and the application's own temporary save
 /// files.
 fn ignored(root: Option<&Path>, path: &Path) -> bool {
+    // Inside a `.git` folder: the files of the repository's state reach
+    // version control (`version_control.rs`), the rest stays out.
+    if let Some(state) = git::watched_in_git_dir(path) {
+        return !state;
+    }
     let hidden = Filter::default();
     let name_hidden = |name: &std::ffi::OsStr| hidden.is_hidden(&name.to_string_lossy());
     let hidden_path = match root.and_then(|r| path.strip_prefix(r).ok()) {
@@ -195,6 +200,12 @@ impl Workbench {
         sync.dialogs.clear();
         sync.root = Some(root.to_owned());
         self.start_watcher(cx);
+        self.vcs_project_opened(root, cx);
+    }
+
+    /// The project folder the watcher watches.
+    pub(super) fn file_sync_root(&self) -> Option<&Path> {
+        self.file_sync.root.as_deref()
     }
 
     /// Starts the watcher afresh (off the UI thread): the project folder,
@@ -512,6 +523,7 @@ impl Workbench {
         self.check_open_files(None, cx);
         if matches!(self.file_sync.watch, Watch::Off | Watch::Failed) {
             self.rescan_project(cx);
+            self.vcs_refresh();
         }
     }
 
@@ -557,7 +569,8 @@ impl Workbench {
     /// A batch of the watcher: the paths are looked at off the UI thread,
     /// then the tree, the index, the language services and the open files
     /// follow.
-    fn files_changed_on_disk(&mut self, batch: Batch, cx: &mut Context<Self>) {
+    fn files_changed_on_disk(&mut self, mut batch: Batch, cx: &mut Context<Self>) {
+        self.vcs_files_changed(&mut batch, cx);
         if batch.rescan {
             self.rescan_project(cx);
             self.check_open_files(None, cx);

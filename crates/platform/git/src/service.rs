@@ -15,6 +15,7 @@ enum Msg {
     Paths(Vec<PathBuf>),
     Refresh,
     WriteFinished,
+    Stop,
 }
 
 /// What the service tells its owner.
@@ -121,6 +122,22 @@ impl StatusService {
     }
 }
 
+impl Drop for StatusService {
+    /// Stops the thread (the runner's write hook keeps a sender of its
+    /// own) and a status that runs.
+    fn drop(&mut self) {
+        if let Some(cancel) = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            cancel.cancel();
+        }
+        let _ = self.tx.send(Msg::Stop);
+    }
+}
+
 struct Worker {
     repo: Arc<GitRepo>,
     out: flume::Sender<StatusUpdate>,
@@ -195,7 +212,7 @@ impl Worker {
                     full = false;
                     deadline = None;
                 }
-                Err(flume::RecvTimeoutError::Disconnected) => return,
+                Ok(Msg::Stop) | Err(flume::RecvTimeoutError::Disconnected) => return,
             }
         }
     }

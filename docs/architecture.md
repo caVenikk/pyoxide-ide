@@ -55,6 +55,22 @@ Platform (`crates/platform/`, language-agnostic):
   FSEvents, inotify, ReadDirectoryChangesW) for the project folder,
   gathered into batches of changed paths with a hint each and a rescan
   flag when events were lost.
+- `vcs`: the version control model without a backend or a toolkit (ADR
+  0016): file statuses, changes and the status map of a repository
+  (ignored folders count for everything below them, an unsaved document
+  of a clean tracked file is modified), line ranges of a document against
+  its base text (`imara-diff`, git's histogram algorithm) shifted on
+  edits, `HEAD`, the operation in progress, branches and the `Backend`
+  trait UI crates depend on.
+- `git`: Git through the git executable (ADR 0016): lookup and version
+  check, a runner with per-repository read/write locks and cancellation
+  (`GIT_OPTIONAL_LOCKS=0` for reads), porcelain and `for-each-ref`
+  parsers, readers of `HEAD`, refs, `packed-refs`, the config and the
+  state markers (reftable repositories ask git), repository detection at
+  or above a folder, the status service fed by the file watcher (300 ms
+  debounce, limited to the dirty paths when few, own writes suppressed),
+  base texts through `cat-file --filters` cached by blob, the
+  `.idea/vcs.xml` mapping, `git.status`, `git.branches`, `git.state`.
 - `run-config`: run configurations without a toolkit (ADR 0012): the
   language-neutral model (common settings, environment variables with
   shared or personal values, options per type), the list with the
@@ -123,7 +139,8 @@ Platform (`crates/platform/`, language-agnostic):
   start-up, environment switches and in-app measurements; files changed
   outside the application (the file watcher, a look at the open files
   when the window gets the focus, Reload All from Disk, the File Cache
-  Conflict dialog, saves that never write over a newer file).
+  Conflict dialog, saves that never write over a newer file); the
+  project's Git repository with its statuses (`version_control.rs`).
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model

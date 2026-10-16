@@ -238,6 +238,26 @@ prints the numbers in the log. The machine was busy with other builds
 | 2026-10-16 | mac-1 | through the PTY, snapshots per frame | 20-25 MiB/s | macOS openpty; without snapshots 36 MiB/s |
 | 2026-10-16 | mac-1 | a snapshot during the flood (lock wait and copy) | 0.26-6 ms | 0.2 ms without output; 5 ms before the reader released the lock fairly |
 
+### Git status and line ranges
+Engine measurements (ADR 0016 budgets), release builds, git 2.56.0, other
+builds running on the machine. Status: a generated repository of 10,000
+committed files in 100 folders with 5 files changed;
+`cargo test --release --workspace --test perf -- --ignored --nocapture`
+(`crates/platform/git/tests/perf.rs`), medians of 7 runs (5 for the
+service). "Watcher batch to snapshot" is the time from a reported batch to
+the merged snapshot minus the 300 ms debounce: the limited status of the
+dirty path, the readers and the merge. Line ranges: a 10,000-line file with
+175 changed ranges, `cargo test -p vcs --release perf -- --ignored
+--nocapture`, median of 9.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | 10k files: full status | 42 ms | one `status --porcelain=v2` with untracked and ignored files |
+| 2026-10-16 | mac-1 | 10k files: status limited to 5 paths | 26 ms | |
+| 2026-10-16 | mac-1 | 10k files: watcher batch to snapshot (after the debounce) | 25 ms | budget 150 ms |
+| 2026-10-16 | mac-1 | 10,000 lines: line ranges against the base | 1.8 ms | budget 50 ms after the last keystroke |
+| 2026-10-16 | mac-1 | 10,000 lines: ranges shifted by an edit | 0.9 µs | until the next computation |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

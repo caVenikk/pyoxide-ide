@@ -9,6 +9,9 @@
 #   editor has diagnostic marks of its own and does not know the model.
 # - ADR 0014 (terminal): the `terminal` crate knows no UI toolkit, and only
 #   it depends on the emulator (`alacritty_terminal`).
+# - ADR 0016 (version control): the model (`vcs`) and the backend (`git`)
+#   know no UI toolkit; the model knows no backend; UI crates depend on the
+#   model, never on the backend (the workbench composes them).
 #
 #     python3 scripts/check-layers.py
 #
@@ -32,6 +35,11 @@ NOT_MODEL = ["editor"]
 # ADR 0014.
 EMULATOR = "alacritty_terminal"
 EMULATOR_USER = "terminal"
+# ADR 0016.
+VCS_MODEL = "vcs"
+VCS_BACKEND = "git"
+VCS_NO_TOOLKIT = [VCS_MODEL, VCS_BACKEND]
+COMPOSER = "workbench"
 
 
 def layer(manifest: Path):
@@ -99,10 +107,20 @@ def main():
         if name in direct and uses(name, MODEL):
             bad.append(f"{name} depends on {MODEL}: it has diagnostic marks of its own (ADR 0010)")
 
+    for name in VCS_NO_TOOLKIT:
+        if name in direct and uses(name, TOOLKIT):
+            bad.append(f"{name} uses the UI toolkit ({TOOLKIT}) (ADR 0016)")
+    if VCS_MODEL in direct and uses(VCS_MODEL, VCS_BACKEND):
+        bad.append(f"{VCS_MODEL} depends on {VCS_BACKEND}: the model knows no backend (ADR 0016)")
+    for name in sorted(direct):
+        if (by_name.get(name) == "platform" and name != COMPOSER
+                and TOOLKIT in direct[name] and uses(name, VCS_BACKEND)):
+            bad.append(f"{name} is a UI crate and depends on {VCS_BACKEND}: UI crates use {VCS_MODEL} (ADR 0016)")
+
     if unclassified:
         print("not classified yet:", ", ".join(sorted(unclassified)))
     if bad:
-        print("layer violations (ADR 0005, 0010, 0014):")
+        print("layer violations (ADR 0005, 0010, 0014, 0016):")
         for b in bad:
             print("  " + b)
         sys.exit(1)

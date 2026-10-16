@@ -275,4 +275,53 @@ mod tests {
             &[Range::new(0, 0, 0, 2), Range::new(1, 1, 3, 5)]
         );
     }
+
+    /// A measurement for `replica/perf.md`, not run by default:
+    /// `cargo test -p vcs --release perf -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn perf_line_ranges_of_a_10k_line_file() {
+        use std::time::{Duration, Instant};
+        let base: String = (0..10_000)
+            .map(|i| format!("    value_{i} = compute({i}, \"text\")  # line {i}\n"))
+            .collect();
+        // About a hundred scattered edits: changed, added and removed lines.
+        let text: String = base
+            .lines()
+            .enumerate()
+            .filter(|(i, _)| i % 300 != 7)
+            .flat_map(|(i, l)| {
+                let mut out = vec![if i % 97 == 3 {
+                    format!("{l} edited")
+                } else {
+                    l.to_owned()
+                }];
+                if i % 251 == 11 {
+                    out.push("    inserted()".to_owned());
+                }
+                out
+            })
+            .map(|l| l + "\n")
+            .collect();
+        let mut times: Vec<Duration> = (0..9)
+            .map(|_| {
+                let t = Instant::now();
+                let r = LineRanges::compute(&base, &text);
+                assert!(r.ranges().len() > 100);
+                t.elapsed()
+            })
+            .collect();
+        times.sort();
+        let mut ranges = LineRanges::compute(&base, &text);
+        let count = ranges.ranges().len();
+        let t = Instant::now();
+        for i in 0..1000 {
+            ranges.edited(i * 5, i * 5 + 1, i * 5 + 1);
+        }
+        let shift = t.elapsed() / 1000;
+        eprintln!(
+            "line ranges, 10 000 lines, {count} ranges: compute {:?} (median of 9), shift on an edit {shift:?}",
+            times[4]
+        );
+    }
 }

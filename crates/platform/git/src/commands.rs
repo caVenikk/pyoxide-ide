@@ -110,8 +110,9 @@ fn state(args: PathArgs) -> Result<Json, CommandError> {
     }))
 }
 
-/// Shortens `path` for JSON: relative to `root` with `/`, or as it is.
-pub(crate) fn rel(root: &Path, path: &Path) -> String {
+/// A path for JSON: relative to `root` with `/` separators, or as it is
+/// when outside.
+pub fn relative_path(root: &Path, path: &Path) -> String {
     crate::parse::relative(root, path).unwrap_or_else(|| path.display().to_string())
 }
 

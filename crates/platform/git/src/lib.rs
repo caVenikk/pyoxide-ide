@@ -55,7 +55,7 @@ pub fn info_json(info: &vcs::RepoInfo) -> Json {
 /// `/` separators.
 pub fn snapshot_json(snapshot: &vcs::Snapshot) -> Json {
     let root = snapshot.info.root.as_path();
-    let rel = |p: &Path| commands::rel(root, p);
+    let rel = |p: &Path| commands::relative_path(root, p);
     let changes: Vec<Json> = snapshot
         .status
         .changes()
