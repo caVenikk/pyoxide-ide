@@ -450,6 +450,9 @@ pub(crate) fn known_keys() -> &'static KnownKeys {
         for &role in TextRole::ALL {
             keys.attributes.extend(text_sources(role));
         }
+        // Read into the `TEXT` background of its scheme, see
+        // `Scheme::apply_background_option`.
+        keys.colors.insert(super::scheme::BACKGROUND_OPTION);
         for &metric in Metric::ALL {
             keys.ui.extend(metric_sources(metric).0);
         }
@@ -488,6 +491,7 @@ mod tests {
         assert!(keys.colors.contains("CARET_ROW_COLOR"));
         assert!(keys.attributes.contains("PY.BUILTIN_NAME"));
         assert!(keys.attributes.contains("TEXT"));
+        assert!(keys.colors.contains("BACKGROUND"));
         assert!(keys.wildcard_properties.contains("background"));
         assert!(keys.colors.contains("ScrollBar.thumbColor"));
         assert!(keys.ui.contains("ScrollBar.thumbColor"));

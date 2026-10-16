@@ -1089,6 +1089,15 @@ here with: source URL, commit, file(s), license, and what was changed.
   used; reimplemented in Rust. The icons are unchanged copies of
   platform/icons/src/expui/vcs/revert.svg and diff.svg (with the _dark
   variants) @ f5a0bddb9cee9135c700de9a67534e11cdf61c07.
+- crates/platform/themes/src/import/scheme.rs (the `<colors>` option
+  `BACKGROUND`)
+  Closely adapted from IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2): the handling of the deprecated
+  background colour in platform/editor-ui-ex/src/com/intellij/openapi/editor/
+  colors/impl/AbstractColorsScheme.java (readScheme, readColors). Changes:
+  reimplemented in Rust over the raw option values of one scheme; the
+  importer reports the colour under its own name.
 
 Trademarks
 ----------

@@ -145,7 +145,15 @@ brightness (`Darcula` for dark, `Default` for light) when it is among the inputs
    `baseAttributes="KEY"` starts an entry from another entry; own options win.
    An entry that exists but is empty replaces the parent's entry.
 5. **Editor roles prefer the scheme.** `ui.editor-background` takes the `TEXT`
-   background before `Editor.background`.
+   background before `Editor.background`. The `<colors>` option `BACKGROUND`
+   is the deprecated form of that background and wins over it, as in the
+   reference (`AbstractColorsScheme.readScheme`): when a scheme sets it to a
+   colour, it replaces the background of the scheme's own `TEXT` entry, and a
+   scheme without a `TEXT` entry gets one with black text on that colour (the
+   report notes this, `text-from-background`). The rule works inside one
+   scheme: the option of a parent scheme does not change a child's `TEXT`. The
+   report lists such a background as `BACKGROUND` (scheme color). An empty
+   value or one that is not a colour changes nothing.
 6. **Derived values.** A role no source supplies takes the value of its
    fallback role (tables below) when that role was imported or derived itself,
    and is listed as an approximation.
@@ -239,7 +247,7 @@ report says which parent was missing.
 
 | Pyoxide role | Sources, in order | Used for |
 |---|---|---|
-| `ui.editor-background` | `TEXT` background, `Editor.background` | Editor background |
+| `ui.editor-background` | `TEXT` background (the scheme color `BACKGROUND` replaces it, see rule 5), `Editor.background` | Editor background |
 | `ui.editor-text` | `TEXT` foreground, `Editor.foreground` | Default editor text |
 | `ui.gutter` | `EDITOR_GUTTER_BACKGROUND` (scheme color) | Gutter background; the New UI reads only this key (`GUTTER_BACKGROUND` of older schemes is not used), and an empty value means the editor background |
 | `ui.line-number` | `LINE_NUMBERS_COLOR` (scheme color) | Line numbers |

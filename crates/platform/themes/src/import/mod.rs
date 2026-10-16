@@ -36,5 +36,5 @@ pub use report::{
     Approximation, Defaulted, ImportReport, KeySource, Level, MappedKey, SourceKind, Summary,
     UnmappedKey, Warning, WarningKind,
 };
-pub use scheme::{Attribute, Scheme, SchemeFonts};
+pub use scheme::{Attribute, BackgroundOption, Scheme, SchemeFonts};
 pub use ui_theme::UiThemeData;

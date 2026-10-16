@@ -18,7 +18,7 @@ use super::report::{
     Approximation, Defaulted, ImportReport, KeySource, Level, MappedKey, SourceKind, UnmappedKey,
     Warning, WarningKind,
 };
-use super::scheme::{Attribute, Scheme, SchemeChain};
+use super::scheme::{Attribute, BACKGROUND_OPTION, BackgroundOption, Scheme, SchemeChain, TEXT};
 use super::ui_theme::UiThemeData;
 
 /// A finished import.
@@ -84,6 +84,7 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
     );
 
     cx.fill_ui(&mut theme.ui, &base.ui);
+    cx.note_text_from_background();
     cx.fill_text(&mut theme.text, &base.text);
     cx.fill_metrics(&mut theme);
     cx.fill_fonts(&mut theme);
@@ -243,17 +244,25 @@ impl<'a> Converter<'a> {
 
     fn eval_attr(&mut self, key: &str, part: Part) -> Option<Hit> {
         let attribute = self.chain.attribute(key)?;
+        let from_option =
+            matches!(part, Part::Bg) && attribute.background_option != BackgroundOption::Unused;
         let raw = match part {
             Part::Fg => attribute.foreground,
             Part::Bg => attribute.background,
             Part::Effect => attribute.effect_color,
             Part::Stripe => attribute.error_stripe,
         }?;
-        let label = format!("{key}.{}", part.name());
+        // A background the `<colors>` option put there is reported under
+        // that option, the key the file wrote.
+        let (source, label) = if from_option {
+            (KeySource::SchemeColor, BACKGROUND_OPTION.to_owned())
+        } else {
+            (KeySource::SchemeAttribute, format!("{key}.{}", part.name()))
+        };
         let color = self.scheme_color(&label, &raw)?;
         Some(Hit {
             color,
-            source: KeySource::SchemeAttribute,
+            source,
             key: label,
             wildcard: false,
         })
@@ -340,6 +349,32 @@ impl<'a> Converter<'a> {
                 }
             }
         }
+    }
+
+    /// The file sets no text colour when `TEXT` was made from the `<colors>`
+    /// option `BACKGROUND` alone; the black text that follows is worth a note.
+    fn note_text_from_background(&mut self) {
+        let Some(layer) = self
+            .chain
+            .layers
+            .iter()
+            .find(|l| l.attributes.contains_key(TEXT))
+        else {
+            return;
+        };
+        if layer.attributes[TEXT].background_option != BackgroundOption::Created {
+            return;
+        }
+        let scheme = layer.name.clone();
+        self.report.warn(
+            Level::Info,
+            WarningKind::TextFromBackground {
+                scheme: scheme.clone(),
+            },
+            format!(
+                "`{scheme}` sets the editor background with the deprecated `BACKGROUND` colour and has no `TEXT` attribute; as in PyCharm, the editor text is black"
+            ),
+        );
     }
 
     // ---- text styles ------------------------------------------------
