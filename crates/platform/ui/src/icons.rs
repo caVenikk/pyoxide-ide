@@ -73,6 +73,10 @@ impl IconName {
     pub const OPEN_IN_TOOL_WINDOW: Self = Self("general/openInToolWindow");
     pub const MODULE: Self = Self("nodes/module");
     pub const EXCLUDED_FOLDER: Self = Self("nodes/excludeRoot");
+    /// A sources root and a test sources root (`AllIcons.Modules.SourceRoot`,
+    /// `TestRoot`).
+    pub const SOURCE_ROOT: Self = Self("nodes/sourceRoot");
+    pub const TEST_ROOT: Self = Self("nodes/testRoot");
     pub const SYMLINK: Self = Self("nodes/symlink");
     pub const TOOL_PROJECT: Self = Self("toolwindows/project@20x20");
     pub const TOOL_COMMIT: Self = Self("toolwindows/commit@20x20");
@@ -205,6 +209,7 @@ platform_icons! {
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
         "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/type", "nodes/variable", "nodes/word",
+        "nodes/sourceRoot", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
         "status/error",

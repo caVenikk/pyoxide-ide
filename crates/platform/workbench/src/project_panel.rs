@@ -6,12 +6,15 @@
 //!
 //! The context menu of a row has *New*, *Rename…* and *Delete…*
 //! ([`file_ops`]) and *Mark Directory As* (*Mark File As* for a file) with
-//! *Excluded* and *Cancel Exclusion*; the project settings are written in
-//! the background after every change.
+//! the product's kinds of roots, *Excluded*, *Cancel Exclusion* and
+//! *Unmark as … Root* ([`roots`]); the project settings are written in the
+//! background after every change. Packages, source roots and modules have
+//! their own icons, and a module's content root its hint ([`roots`]).
 
 mod file_ops;
 pub mod name_popup;
 mod new_items;
+mod roots;
 mod row_expansion;
 mod transfer;
 pub mod transfer_dialog;
@@ -20,6 +23,8 @@ pub use file_ops::COMMANDS as FILE_COMMANDS;
 pub use file_ops::{Delete, NewDirectory, NewElement, NewFile, ReloadFromDisk, Rename};
 pub use new_items::COMMANDS as NEW_ITEM_COMMANDS;
 pub use new_items::{NewFromTemplate, NewItem, NewItemKind, NewTemplate};
+pub use roots::COMMANDS as ROOT_COMMANDS;
+pub use roots::{MarkRoot, RootKind, TreeHooks, UnmarkRoot};
 pub use transfer::COMMANDS as TRANSFER_COMMANDS;
 pub use transfer::{Copy, CopyElement, CopyPath, CopyPaths, Cut, DraggedFiles, Move, Paste};
 
@@ -134,6 +139,10 @@ pub struct ProjectPanel {
     indent_guides: bool,
     /// The tree had the focus when it was last drawn (for the state).
     focus_seen: Cell<bool>,
+    /// The product's kinds of roots and folder rules.
+    rules: roots::ProductRules,
+    /// The roots changed since the project settings were last written.
+    roots_dirty: bool,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -167,6 +176,8 @@ impl ProjectPanel {
             expansion: row_expansion::RowExpansion::default(),
             indent_guides: true,
             focus_seen: Cell::new(false),
+            rules: roots::ProductRules::default(),
+            roots_dirty: false,
         }
     }
 
@@ -221,13 +232,10 @@ impl ProjectPanel {
         self.tree = Some(FileTree::new(&root));
         self.project = Some(project);
         self.selected = Some(FileTree::ROOT);
+        self.roots_dirty = false;
         self.loading += 1;
-        let task = cx.background_spawn(async move {
-            // A failed import leaves the project as it was; the rules
-            // still read `.idea` until the project has its own folder.
-            let _ = project::store::import_idea(&root);
-            Filter::for_root(&root)
-        });
+        let rules = self.rules.clone();
+        let task = cx.background_spawn(async move { roots::load_rules(&root, &rules) });
         cx.spawn(async move |this, cx| {
             let filter = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -236,6 +244,7 @@ impl ProjectPanel {
                     return;
                 }
                 this.filter = Some(filter);
+                this.publish_roots();
                 for id in std::mem::take(&mut this.waiting) {
                     this.list(id, cx);
                 }
@@ -259,15 +268,18 @@ impl ProjectPanel {
         let path = tree.node(id).entry.path.clone();
         let generation = self.generation;
         self.loading += 1;
-        let task = cx.background_spawn(async move { list_dir(&path, &filter) });
+        // The folder's own kind is looked at again with its content.
+        let task = cx
+            .background_spawn(async move { (list_dir(&path, &filter), filter.folder_kind(&path)) });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let (result, kind) = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading -= 1;
                 if this.generation != generation {
                     return;
                 }
                 if let Some(tree) = &mut this.tree {
+                    tree.set_folder_kind(id, kind);
                     match result {
                         Ok(entries) => tree.set_children(id, entries),
                         Err(e) => tree.set_error(id, e.to_string()),
@@ -339,14 +351,19 @@ impl ProjectPanel {
     /// listed so far are; the others are listed when they are expanded.
     pub fn refresh_dirs(&mut self, dirs: &[PathBuf], cx: &mut Context<Self>) {
         let Some(tree) = &self.tree else { return };
-        let ids: Vec<NodeId> = dirs
+        let (ids, unlisted): (Vec<NodeId>, Vec<NodeId>) = dirs
             .iter()
             .filter_map(|dir| tree.find(dir))
-            .filter(|&id| tree.node(id).children.is_some())
+            .partition(|&id| tree.node(id).children.is_some());
+        // A folder not listed yet may have become a package.
+        let unlisted = unlisted
+            .into_iter()
+            .map(|id| tree.node(id).entry.path.clone())
             .collect();
         for id in ids {
             self.list(id, cx);
         }
+        self.refresh_folder_kinds(unlisted, cx);
     }
 
     /// Lists every folder listed so far again (changes on disk may have
@@ -423,6 +440,7 @@ impl ProjectPanel {
                     "icon": self.icon(n).0,
                     "background": n.entry.excluded.then(|| UiRole::NonProjectFile.name()),
                     "overflows": self.overflow_json(id),
+                    "roots": self.row_roots_json(n),
                     "guides": guides.map(|g| {
                         g.row_lines(n.depth, n.expanded)
                             .into_iter()
@@ -437,6 +455,7 @@ impl ProjectPanel {
             "first_visible_row": first_visible,
             "context_menu": self.context_menu().map(|m| m.read(cx).state_json()),
             "exclusions": self.filter.as_ref().map(|f| &f.exclusions().paths),
+            "roots": self.roots_json(),
             "settings_error": self.settings_error,
             "name_popup": self.name_popup().map(|p| p.read(cx).state_json(cx)),
             "dialog": self.dialog().map(|d| d.read(cx).state_json()),
@@ -631,10 +650,20 @@ impl ProjectPanel {
         };
         let root = project.root().to_owned();
         let exclusions = filter.exclusions().clone();
+        // The roots only once they changed: until then detected roots stay
+        // rules rather than stored entries.
+        let roots = std::mem::take(&mut self.roots_dirty).then(|| filter.roots().clone());
+        let with_roots = roots.is_some();
         let generation = self.generation;
         self.saving = true;
         self.loading += 1;
-        let task = cx.background_spawn(async move { project::store::save(&root, &exclusions) });
+        let task = cx.background_spawn(async move {
+            project::store::save(&root, &exclusions)?;
+            match roots {
+                Some(roots) => project::store::save_roots(&root, &roots),
+                None => Ok(false),
+            }
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -642,6 +671,7 @@ impl ProjectPanel {
                 this.saving = false;
                 let current = this.generation == generation;
                 if current {
+                    this.roots_dirty |= with_roots && result.is_err();
                     this.settings_error = result.err().map(|e| e.to_string());
                 }
                 if std::mem::take(&mut this.resave) && current {
@@ -656,40 +686,24 @@ impl ProjectPanel {
     /// The rows of the context menu of `id`, in the reference IDE's order:
     /// *New*, *Find in Files…* and *Replace in Files…* (the row's folder,
     /// or the folder of a file, becomes the Directory scope), *Rename…*,
-    /// *Delete…*, then *Mark Directory
-    /// As* (or *Mark File As*) with *Excluded* for project content or
-    /// *Cancel Exclusion* for a stored exclusion. The project root, rows
-    /// inside an excluded folder and folders a product excludes have
-    /// nothing to mark.
+    /// *Delete…*, then *Mark Directory As* (or *Mark File As*) with the
+    /// kinds of roots, *Excluded* and *Unmark as … Root*, or *Cancel
+    /// Exclusion* for a stored exclusion ([`roots`]). A folder a product
+    /// excludes has nothing to mark.
     fn context_menu_items(&self, id: NodeId) -> Vec<MenuItem> {
-        let (Some(tree), Some(filter)) = (&self.tree, &self.filter) else {
+        if self.tree.is_none() || self.filter.is_none() {
             return Vec::new();
-        };
+        }
         let mut items = self.new_menu_items(id);
         items.extend([
             MenuItem::action("Find in Files…", crate::find_in_files::Open),
             MenuItem::action("Replace in Files…", crate::find_in_files::OpenReplace),
         ]);
         items.extend(self.edit_menu_items(id));
-        let entry = &tree.node(id).entry;
-        let Some(rel) = filter.relative(&entry.path) else {
-            return items;
-        };
-        let mark = if filter.is_excluded_root(&entry.path) {
-            MenuItem::action("Cancel Exclusion", CancelExclusion { path: Some(rel) })
-        } else if !entry.excluded {
-            MenuItem::action("Excluded", MarkExcluded { path: Some(rel) })
-                .icon(IconName::EXCLUDED_FOLDER)
-        } else {
-            return items;
-        };
-        let title = if entry.is_dir() {
-            MARK_DIRECTORY_AS
-        } else {
-            MARK_FILE_AS
-        };
-        items.push(MenuItem::separator());
-        items.push(MenuItem::submenu(title, vec![mark]));
+        if let Some((title, marks)) = self.mark_menu(id) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::submenu(title, marks));
+        }
         items
     }
 
@@ -749,19 +763,14 @@ impl ProjectPanel {
         cx.notify();
     }
 
-    /// The icon of a row: the project root, an excluded folder (also one
-    /// inside an excluded folder, as in the reference IDE), a folder, or the
-    /// file type's.
+    /// The icon of a row: the file type's, or a folder's ([`roots`]: a
+    /// module's content root, a root, an excluded folder, a package).
     fn icon(&self, node: &Node) -> IconName {
         let entry = &node.entry;
         if !entry.is_dir() {
             self.file_types.icon(&entry.path)
-        } else if node.depth == 0 {
-            IconName::MODULE
-        } else if entry.excluded {
-            IconName::EXCLUDED_FOLDER
         } else {
-            IconName::FOLDER
+            self.folder_icon(node)
         }
     }
 
@@ -972,6 +981,8 @@ panel_actions! {
     ShowContextMenu => show_context_menu,
     MarkExcluded => mark_excluded,
     CancelExclusion => cancel_exclusion,
+    MarkRoot => mark_root,
+    UnmarkRoot => unmark_root,
     NewElement => new_element,
     NewFile => new_file,
     NewDirectory => new_directory,

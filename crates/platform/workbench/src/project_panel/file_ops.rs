@@ -1010,7 +1010,7 @@ impl ProjectPanel {
     }
 
     /// Shows changes made on disk in the tree, keeps the stored exclusions
-    /// on renamed and deleted folders, and tells the workbench.
+    /// and roots on renamed and deleted folders, and tells the workbench.
     pub fn apply_changes(&mut self, changes: &[FsChange], cx: &mut Context<Self>) {
         if changes.is_empty() {
             return;
@@ -1082,6 +1082,10 @@ impl ProjectPanel {
         } else {
             tree.refresh_excluded(&filter);
         }
+        // Roots follow their folders; packages and modules show as such.
+        self.follow_roots(changes, cx);
+        let dirs = self.folder_kind_targets(changes);
+        self.refresh_folder_kinds(dirs, cx);
         cx.emit(PanelEvent::FilesChanged(changes.to_vec()));
         cx.notify();
     }
@@ -1118,6 +1122,8 @@ fn insert(tree: &mut FileTree, filter: &project::Filter, path: &Path, is_dir: bo
             },
             symlink: false,
             excluded: filter.is_excluded(path, is_dir),
+            // Looked at in the background (`refresh_folder_kinds`).
+            folder: project::FolderKind::Plain,
         },
     );
 }

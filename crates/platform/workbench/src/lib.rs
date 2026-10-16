@@ -30,7 +30,7 @@ pub use app::{NavigationHooks, Product, StatusWidget, StripeItem, init, open_mai
 pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use file_types::{FileType, HighlighterFactory};
 pub use project::AutoExclusions;
-pub use project_panel::{NewItem, NewItemKind, NewTemplate};
+pub use project_panel::{NewItem, NewItemKind, NewTemplate, RootKind, TreeHooks};
 pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};
 pub use settings::{SaveSettings, SyncSettings};
 pub use workbench::{Workbench, WorkbenchEvent};
