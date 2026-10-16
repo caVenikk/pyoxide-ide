@@ -104,9 +104,27 @@ Platform (`crates/platform/`, language-agnostic):
   diagnostics, completion items, documentation, signatures, locations,
   text and workspace edits, code actions, server status and events; an
   in-memory `FakeCodeIntel` (feature `fake`) for tests.
+- `stream-framing`: the `Content-Length` framing of a byte stream (an
+  encoder and a decoder of chunks that never panics on malformed input),
+  used by `lsp-client` and `dap-client`; no protocol types.
 - `lsp-client`: the LSP client (ADR 0010): server specs, the product's
   `ServerCustomizer`, and `LspCodeIntel`, `CodeIntel` over several
   servers. A skeleton: servers are not started yet.
+- `dap-client`: the Debug Adapter Protocol client (ADR 0015) without a
+  toolkit or an async runtime: a `Transport` (an adapter process's
+  standard streams, or memory for tests), typed requests that are futures
+  (dropping one sends `cancel`), events and reverse requests
+  (`runInTerminal`) passed to a `Handler`, `shutdown` (`terminate`, then
+  `disconnect`, then kill after a timeout). The protocol's structs are
+  private; the `dap-fake-adapter` binary and the `fake` feature run
+  scripted adapters for tests.
+- `debugger`: the debugger model without a toolkit (ADR 0015): the
+  `Debugger` of a project (line and exception breakpoints, watches per
+  run configuration type, mute, the personal `[debugger]` table, the
+  one-time import from `.idea/workspace.xml`) and its `Session`s over DAP
+  (state machine, threads, frames and variables in pages, evaluate, Set
+  Value, stepping, Stop), the `DebugAdapterProvider` product hook and the
+  `debug.*` engine commands. UI crates use it, never `dap-client`.
 - `code-intel-ui`: the code intelligence of a main window: the product
   hook (`CodeIntelProvider`, `CodeIntelHook`), the `CodeIntelView` the
   workbench reports editors to, the `code.*` and `completion.*` commands.
@@ -181,11 +199,12 @@ services as watched-file changes (`file-watcher`, issue #36).
   platform UI crates depend on `code-intel`, never on `lsp-client`; the
   editor does not depend on `code-intel`.
 
-## Terminal, debugger, git and settings (proposed, ADR 0014-0018)
-Planned crates; `terminal` exists (#156: sessions, snapshots, input
-encoding, start rules, shell detection, the `ShellCustomizer` hook; the
-integration scripts and the `terminal.*` commands come with their users).
-Crates without a toolkit are tested without GPUI; UI
+## Terminal, debugger, git and settings (ADR 0014-0018)
+`terminal` exists (#156: sessions, snapshots, input encoding, start rules,
+shell detection, the `ShellCustomizer` hook; the integration scripts and
+the `terminal.*` commands come with their users), and so do
+`stream-framing`, `dap-client` and `debugger` (#162); the other crates are
+planned. Crates without a toolkit are tested without GPUI; UI
 crates depend on the model crates, never on the protocol or backend
 crates (`scripts/check-layers.py` gets these rules).
 
@@ -209,9 +228,15 @@ crates (`scripts/check-layers.py` gets these rules).
 Dependencies: `terminal-ui` -> `terminal`, `console`, `ui`;
 `debugger-ui` -> `debugger`, `console-ui`, `editor`, `ui`; `vcs-ui` ->
 `vcs`, `editor`, `ui`; `git` -> `vcs`, `process`; `dap-client` ->
-`stream-framing`, `process`; `lsp-client` -> `stream-framing`;
+`stream-framing`, `process`; `debugger` -> `dap-client`, `commands`,
+`process`, `project`, `run-config`; `lsp-client` -> `stream-framing`;
 `workbench` -> the UI crates and `git`, and registers their tool windows,
 settings pages and commands. Keymaps stay in `workbench` (ADR 0018).
+`scripts/check-layers.py` checks the debugger's rules (ADR 0015):
+`stream-framing`, `dap-client` and `debugger` know no UI toolkit, and a
+crate that uses the toolkit never depends directly on `dap-client`; it
+reaches a session through `debugger`, which re-exports the plain value
+types it shows (threads, frames, scopes, variables).
 
 ## Cross-cutting foundations
 Several of these areas need the same pieces of the shell. Each is built

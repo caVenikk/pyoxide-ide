@@ -154,6 +154,18 @@ table; `.idea` is never written.
   folder; release packaging and NOTICE handle them. CI tests that need a
   real debugpy and Python are `#[ignore]`; the client is tested against
   the fake adapter on all three systems.
+- `dap-client` and `debugger` run on threads and callbacks like
+  `lsp-client`, with no async runtime: a request is a future completed by
+  the reader thread, and Stop reports completion on a channel. A
+  transport is a pair of traits (`Outlet`, `Inlet`): an adapter's standard
+  streams, or memory. The feature `fake` of `dap-client` starts scripted
+  adapters in a test's process (`fake::adapter`), the `dap-fake-adapter`
+  binary starts them as a process; the framing, cancellation, ordering of
+  `initialized` before the `launch` answer, `runInTerminal`, adapter
+  crash and both shutdown paths are tested with them on all three
+  systems. `debugger` re-exports the client's plain value types, so UI
+  crates name only `debugger`; `scripts/check-layers.py` fails when a
+  crate that uses the toolkit depends directly on `dap-client`.
 - Three processes per session (adapter, launcher, debuggee); their
   lifetime is the riskiest part, especially on Windows.
 - The editor gets gutter icons, line backgrounds and after-line texts
