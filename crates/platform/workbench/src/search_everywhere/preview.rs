@@ -2,8 +2,11 @@
 //! `PreviewAction`, off by default and remembered,
 //! `showPreviewInSearchEverywhere`): the selected row's file in the shared
 //! read-only preview ([`crate::file_preview`]), a file row at its start (at
-//! the line typed after its name), a text row at its line with the matches
-//! marked, shown [`PREVIEW_DELAY`] after the selection settles. A row that
+//! the line typed after its name), a text row as a found usage at its line
+//! with the caret after its first match, shown [`PREVIEW_DELAY`] after the
+//! selection settles. Until the caret moves, every occurrence of the text
+//! in the file is marked too, as the reference's editor marks the symbol at
+//! the caret; then only the row's matches stay marked. A row that
 //! is not a place in a file (a folder, an action) shows "There is no
 //! preview for the selected item"; without a selected row (or on "… more")
 //! there is no preview and the list takes the room.
@@ -32,11 +35,17 @@ use crate::popup::{HeldDrag, track_held_drag};
 pub const SPLIT: f32 = 0.33;
 /// Smallest height of the list and of the preview.
 const MIN_PART: f32 = 48.0;
+/// Most occurrences of the text searched for marked in the preview (the
+/// reference's limit of matches highlighted in an editor,
+/// `LivePreviewController.MATCHES_LIMIT`).
+const OCCURRENCE_LIMIT: usize = 10_000;
 
 pub(super) struct Preview {
     pub(super) view: Entity<FilePreview>,
     /// The wait for the selection to settle.
     task: Option<Task<()>>,
+    /// The search for the occurrences of the text in the preview's file.
+    occurrences: Option<(Task<()>, search::CancelToken)>,
     /// Share of the list in the split, the split's drag in progress
     /// (start y, share) and its bounds.
     split: f32,
@@ -66,6 +75,7 @@ impl Preview {
         Self {
             view,
             task: None,
+            occurrences: None,
             split: settings(cx).preview_split.unwrap_or(SPLIT).clamp(0.1, 0.9),
             drag: HeldDrag::default(),
             bounds: None,
@@ -81,6 +91,13 @@ impl Preview {
     /// The splitter is dragged.
     pub(super) fn is_dragging(&self) -> bool {
         self.drag.is_dragging()
+    }
+
+    /// Stops the search for occurrences.
+    fn stop_occurrences(&mut self) {
+        if let Some((_, cancel)) = self.occurrences.take() {
+            cancel.cancel();
+        }
     }
 }
 
@@ -136,12 +153,14 @@ impl SearchEverywhere {
     /// The popup closed: the preview lets go of its file.
     pub(super) fn clear_preview(&mut self, cx: &mut Context<Self>) {
         self.preview.task = None;
+        self.preview.stop_occurrences();
         self.preview.drag.end();
         self.preview.view.update(cx, |p, cx| p.clear(cx));
     }
 
     fn show_preview(&mut self, cx: &mut Context<Self>) {
         self.preview.task = None;
+        self.preview.stop_occurrences();
         let row = self.selected.and_then(|i| self.rows.get(i)).cloned();
         let path = match &row {
             Some(Row::File(f)) if !f.is_dir => f.path.clone(),
@@ -173,22 +192,24 @@ impl SearchEverywhere {
     }
 
     /// The selected row's place in the preview: a file at its start (or
-    /// the line and column typed after its name), a text row at its
-    /// matches, its line in the middle.
+    /// the line and column typed after its name); a text row as a found
+    /// usage, its line in the middle, with the other occurrences of the
+    /// text in the file, found in the background.
     fn mark_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview.stop_occurrences();
         let row = self.selected.and_then(|i| self.rows.get(i)).cloned();
         let text = self.field.read(cx).text();
         let view = self.preview.view.clone();
         let buffer = view.read(cx).editor().read(cx).buffer().clone();
         let lines = buffer.len_lines();
-        let (ranges, line, at) = match row {
+        match row {
             Some(Row::File(_)) => {
                 let position = parse_position(&text);
                 let at = Point::new(
                     position.line.unwrap_or(0).min(lines.saturating_sub(1)),
                     position.column.unwrap_or(0),
                 );
-                (Vec::new(), None, at)
+                view.update(cx, |p, cx| p.mark(&[], None, None, Some(at), cx));
             }
             Some(Row::Text(t)) => {
                 let line = t.line.min(lines.saturating_sub(1));
@@ -204,11 +225,54 @@ impl SearchEverywhere {
                     .iter()
                     .map(|r| start + (indent + r.start).min(len)..start + (indent + r.end).min(len))
                     .collect();
-                (ranges, Some(line), Point::new(line, t.column.min(len)))
+                // The caret at the end of the first match.
+                let column = t
+                    .ranges
+                    .first()
+                    .map_or(t.column, |r| indent + r.end)
+                    .min(len);
+                view.update(cx, |p, cx| {
+                    p.mark_usage(&ranges, Some(line), Point::new(line, column), cx)
+                });
+                self.find_occurrences(&text, buffer.rope().clone(), cx);
             }
-            _ => return,
+            _ => {}
+        }
+    }
+
+    /// Finds the occurrences of the text searched for in the preview's
+    /// text in the background (the Text tab's options; plain on All).
+    fn find_occurrences(&mut self, text: &str, rope: text::Rope, cx: &mut Context<Self>) {
+        let options = if self.tab == Tab::Text {
+            self.options
+        } else {
+            search::SearchOptions::default()
         };
-        view.update(cx, |p, cx| p.mark(&ranges, None, line, Some(at), cx));
+        let Ok(matcher) = search::Query::new(text, options).compile() else {
+            return;
+        };
+        let cancel = search::CancelToken::new();
+        let token = cancel.clone();
+        let found = cx.background_spawn(async move {
+            let haystack = rope.to_string();
+            let mut found = matcher
+                .find_all(&haystack, 0..haystack.len(), OCCURRENCE_LIMIT, &token)
+                .ok()?;
+            search::to_char_ranges(&haystack, &mut found.ranges);
+            Some(found.ranges)
+        });
+        let task = cx.spawn(async move |this, cx| {
+            let Some(ranges) = found.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.preview.occurrences = None;
+                this.preview
+                    .view
+                    .update(cx, |p, cx| p.show_occurrences(ranges, cx));
+            });
+        });
+        self.preview.occurrences = Some((task, cancel));
     }
 
     // ---- drawing ------------------------------------------------------------

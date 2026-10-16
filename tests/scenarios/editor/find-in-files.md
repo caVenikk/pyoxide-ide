@@ -132,7 +132,8 @@ replacing in files).
       row of the file is marked where its match is now, a row opens there,
       and Replace changes the match there.
     - Moving the mouse over the preview fades in the Soft-Wrap button
-      ("Soft-Wrap Preview Editor") at the text's top right (half a second);
+      ("Soft-Wrap Preview Editor"), a plain icon 46 pixels below the
+      text's top and 49 left of its scrollbar (half a second);
       it stays 1.5 s after the mouse stopped (longer while the mouse is
       over it) and fades out (a second). A click turns soft wraps on or off
       in both previews (Find in Files and Search Everywhere); the choice is

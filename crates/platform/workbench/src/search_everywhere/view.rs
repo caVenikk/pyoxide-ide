@@ -517,34 +517,38 @@ impl SearchEverywhere {
                     .child(div().flex_1())
             }
             Row::Text(line) => {
-                let ranges = if selected {
-                    line.ranges.clone()
+                // As the reference's text search rows
+                // (`TextSearchListAgnosticRenderer`): the line in the UI font
+                // with its syntax colours, the matches marked on the selected
+                // row, whose text takes the selection's colour; the file and
+                // line on the right.
+                let highlights = if selected {
+                    highlight(&line.text, &line.ranges, match_bg)
                 } else {
-                    Vec::new()
+                    syntax_highlights(&line.text, &line.spans, theme)
                 };
                 let file = line
                     .path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                base.child(Icon::new(IconName::FILE_TEXT).size(px(16.0)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .overflow_hidden()
-                            .font_family(theme.mono_family())
-                            .child(
-                                StyledText::new(line.text.clone())
-                                    .with_highlights(highlight(&line.text, &ranges, match_bg)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(muted)
-                            .child(format!("{file} {}", line.line + 1)),
-                    )
+                base.when(selected, |d| {
+                    d.text_color(theme.color(UiRole::SelectionText))
+                })
+                .child(Icon::new(IconName::TEXT_AREA).size(px(16.0)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .child(StyledText::new(line.text.clone()).with_highlights(highlights)),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .when(!selected, |d| d.text_color(muted))
+                        .child(format!("{file} {}", line.line + 1)),
+                )
             }
             Row::More => base
                 .debug_selector(|| "search-everywhere-more".into())
@@ -993,6 +997,35 @@ fn substring(text: &str, pattern: &str) -> Vec<Range<usize>> {
         .find(|&i| lower[i..].starts_with(&p))
         .map(|i| std::iter::once(i..i + p.len()).collect())
         .unwrap_or_default()
+}
+
+/// Syntax colours (char ranges of `text`, sorted) as byte ranges with the
+/// roles' text colours and italics; backgrounds are left out, and a bold
+/// style without italics is drawn plain (bold marks the matches in the
+/// reference's rows, `TextSearchListAgnosticRenderer.getAttributes`).
+fn syntax_highlights(
+    text: &str,
+    spans: &[(Range<usize>, themes::TextRole)],
+    theme: &ui::theme::Theme,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let mut offsets: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    offsets.push(text.len());
+    let last = offsets.len() - 1;
+    spans
+        .iter()
+        .filter_map(|(r, role)| {
+            let style = theme.text_style(*role);
+            let italic = style.italic == Some(true);
+            let highlight = HighlightStyle {
+                color: style.fg.map(ui::theme::color),
+                font_style: italic.then_some(gpui::FontStyle::Italic),
+                font_weight: (italic && style.bold == Some(true)).then_some(FontWeight::BOLD),
+                ..HighlightStyle::default()
+            };
+            let (a, b) = (r.start.min(last), r.end.min(last));
+            (b > a).then(|| (offsets[a]..offsets[b], highlight))
+        })
+        .collect()
 }
 
 /// Char ranges of `text` as byte ranges with a background.

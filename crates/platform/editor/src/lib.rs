@@ -26,8 +26,8 @@ pub use decorations::{
 };
 pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
 pub use editor::{
-    BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, SearchHighlights,
-    forward_actions, new_editor,
+    BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, MatchBackground,
+    SearchHighlights, forward_actions, new_editor,
 };
 pub use element::LONG_LINE;
 pub use find::FindBar;

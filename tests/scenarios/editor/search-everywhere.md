@@ -115,9 +115,11 @@ scenario, `recent-files.md`. The preview is the one of Find in Files
 
 ### Text
 12. On the Text tab type `needle`.
-    - The lines with matches, each with the line (without its
-      indentation) and the file name and line number on the right, in Find
-      in Files' order of files. Enter opens the file at the match.
+    - The lines with matches, each with the text icon, the line (without
+      its indentation) in the UI font with the syntax colours of its file
+      and the file name and line number on the right, in Find in Files'
+      order of files. The selected row shows its text in the selection's
+      colour with the matches marked. Enter opens the file at the match.
 13. Match Case, Words, Regex and the file mask.
     - They search again at once; they are the same options and mask as
       Find in Files', both ways. With nothing found the options used are
@@ -159,18 +161,21 @@ scenario, `recent-files.md`. The preview is the one of Find in Files
 21. Click the Preview toggle (off by default) on the Text tab with rows.
     - The list keeps a third of the room (the splitter between them is
       dragged like Find in Files' and remembered) and the preview under it
-      shows the selected line's file with its syntax colours, the matches
-      marked and the caret on the first one, its line in the middle; the
-      footer keeps the path and "Open In Right Split". The toggle is
-      remembered across sessions.
+      shows the selected line's file with its syntax colours and the caret
+      after the row's first match, its line in the middle; every
+      occurrence of the text in the file is marked (as the reference marks
+      the symbol at the caret). The footer keeps the path and "Open In
+      Right Split". The toggle is remembered across sessions.
 22. Down, Up, or a click on another row.
     - 50 ms after the selection settles the preview follows it: a file row
       at its start (or at the line typed after its name), a text row at its
       line. With the preview on a click selects a row and a double click
       opens it.
 23. Click into the preview and type.
-    - It takes the focus and shows a caret; the text does not change and
-      "This view is read-only" shows above the caret until the next key.
+    - It takes the focus and shows a caret; once the caret moved only the
+      row's matches stay marked (in the found usage's colour). The text
+      does not change and "This view is read-only" shows in a balloon
+      above the caret's line, its pointer at the caret, until the next key.
 24. Select a folder or an action (All tab).
     - The preview shows "There is no preview for the selected item".
       Without a selected row, on "… more" and on the Actions tab there is

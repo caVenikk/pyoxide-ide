@@ -110,6 +110,23 @@ pub struct SearchHighlights {
     pub excluded: BTreeSet<usize>,
     /// Lines with matches (sorted, each once), marked on the scrollbar.
     pub lines: Vec<usize>,
+    /// The background of the matches.
+    pub background: MatchBackground,
+}
+
+/// The background of [`SearchHighlights`]' matches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MatchBackground {
+    /// Text found by a search (the reference's
+    /// `TEXT_SEARCH_RESULT_ATTRIBUTES`).
+    #[default]
+    Match,
+    /// A found usage in a usage preview (`SEARCH_RESULT_ATTRIBUTES`).
+    Active,
+    /// Occurrences of the text at the caret
+    /// (`IDENTIFIER_UNDER_CARET_ATTRIBUTES`, also used for the occurrences
+    /// of the selected text).
+    Occurrence,
 }
 
 /// Edits of more than this many replacements drop the highlighted matches
@@ -132,6 +149,7 @@ impl SearchHighlights {
         if edits.len() > MAX_EDITS_TO_TRACK {
             *self = Self {
                 current_background: self.current_background,
+                background: self.background,
                 ..Self::default()
             };
             return;

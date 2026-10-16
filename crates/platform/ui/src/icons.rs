@@ -126,6 +126,8 @@ impl IconName {
     pub const NODE_TYPE: Self = Self("nodes/type");
     pub const NODE_TEMPLATE: Self = Self("nodes/template");
     pub const NODE_WORD: Self = Self("nodes/word");
+    /// A line found by text search (`AllIcons.Nodes.TextArea`).
+    pub const TEXT_AREA: Self = Self("nodes/textArea");
     pub const INTENTION_BULB: Self = Self("codeInsight/intentionBulb");
     pub const QUICKFIX_BULB: Self = Self("codeInsight/quickfixBulb");
     pub const JSON_OBJECT: Self = Self("json/object");
@@ -220,7 +222,7 @@ platform_icons! {
         "nodes/field",
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
         "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
-        "nodes/type", "nodes/variable", "nodes/word",
+        "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
         "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",

@@ -6,7 +6,7 @@
 //! | `PYOXIDE_THEME=light` | use the light theme in this run (`dark`, or a theme id), whatever the settings store, until a theme is chosen in the IDE |
 //! | `PYOXIDE_SHOT=<file.png>` | save an image of the main window after it settled, then quit (macOS) |
 //! | `PYOXIDE_WINDOW_SIZE=<w>x<h>` | open the main window with this content size in points, below the usual minimum too (pictures at several widths) |
-//! | `PYOXIDE_RUN=<json>` | run UI commands once the window settled, e.g. `[["find.search", {"text": "def"}]]` (before `PYOXIDE_SHOT`) |
+//! | `PYOXIDE_RUN=<json>` | run UI commands once the window settled, e.g. `[["find.search", {"text": "def"}]]` (before `PYOXIDE_SHOT`); `workbench.simulate-mouse` moves the mouse or clicks for hover states |
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
 //! | `PYOXIDE_BENCH=typing` | type 3 x 200 keys at line 50,000 of the open file, print key-to-frame times, quit |
 //! | `PYOXIDE_BENCH_MARKS=<n>` | with `typing`: show `n` problems spread over the file first (underlines, error stripe, inspection widget) |

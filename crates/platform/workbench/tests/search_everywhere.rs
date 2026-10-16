@@ -735,7 +735,7 @@ fn the_preview_follows_the_selection(cx: &mut TestAppContext) {
         );
         let saved = std::fs::read_to_string(&settings).unwrap();
         assert!(saved.contains("preview = true"), "{saved}");
-        // The selected line's file at its line, the match marked.
+        // The selected line's file at its line, every occurrence marked.
         let rows = h.state()["rows"].clone();
         let row_at = |i: usize| {
             (
@@ -747,7 +747,11 @@ fn the_preview_follows_the_selection(cx: &mut TestAppContext) {
         let view = h.preview()["view"].clone();
         assert_eq!(view["path"], json!(path), "{view}");
         assert_eq!(view["caret"][0], json!(line), "{view}");
-        assert_eq!(view["highlights"], json!(1), "{view}");
+        let occurrences = std::fs::read_to_string(h.root.join(&path))
+            .unwrap()
+            .matches("needle")
+            .count();
+        assert_eq!(view["highlights"], json!(occurrences), "{view}");
         assert_eq!(view["viewer"], json!(true), "{view}");
         // It follows the selection.
         h.press("down");
@@ -826,6 +830,56 @@ fn the_preview_is_read_only_and_shows_no_preview_for_other_items(cx: &mut TestAp
                 .is_some()
         );
         // Off again (the next keymap's run shares the settings).
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.press("escape");
+    });
+}
+
+#[gpui::test]
+fn the_preview_marks_every_occurrence_until_the_caret_moves(cx: &mut TestAppContext) {
+    both(cx, |h| {
+        h.press(h.keys.go_to_text);
+        h.invoke("search-everywhere.toggle-preview", json!(null));
+        h.type_text("needle");
+        h.settle();
+        // The row of the comment in pkg/util.py (two occurrences there).
+        let rows = h.state()["rows"].clone();
+        let index = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|r| r["path"] == json!("pkg/util.py") && r["line"] == json!(4))
+            .expect("the comment's row");
+        for _ in 0..index {
+            h.press("down");
+        }
+        h.preview_settle();
+        let view = h.preview()["view"].clone();
+        assert_eq!(view["path"], json!("pkg/util.py"), "{view}");
+        // "x = 1\n\n\n# needle here\nneedle = 2\n": the row's match at 10..16,
+        // the other one on the next line at 22..28; the caret after the
+        // row's match.
+        assert_eq!(
+            view["highlight_ranges"],
+            json!([[10, 16], [22, 28]]),
+            "{view}"
+        );
+        assert_eq!(view["highlight_background"], json!("occurrence"), "{view}");
+        assert_eq!(view["caret"], json!([3, 8]), "{view}");
+        // A click moves the caret in the preview: only the row's match
+        // stays, as a found usage.
+        h.click("search-everywhere-preview-area");
+        let view = h.preview()["view"].clone();
+        assert_ne!(view["caret"], json!([3, 8]), "{view}");
+        assert_eq!(view["highlight_ranges"], json!([[10, 16]]), "{view}");
+        assert_eq!(view["highlight_background"], json!("active"), "{view}");
+        // A row shown again marks the occurrences again.
+        h.invoke("search-everywhere.close", json!(null));
+        h.press(h.keys.go_to_text);
+        h.settle();
+        h.preview_settle();
+        let view = h.preview()["view"].clone();
+        assert_eq!(view["highlight_background"], json!("occurrence"), "{view}");
         h.invoke("search-everywhere.toggle-preview", json!(null));
         h.press("escape");
     });

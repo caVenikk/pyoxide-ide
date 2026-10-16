@@ -2235,6 +2235,7 @@ impl Render for Workbench {
             .id("workbench")
             .key_context("Workbench")
             .track_focus(&self.focus)
+            .on_action(crate::simulate::simulate_mouse)
             .on_action(cx.listener(Self::toggle_project))
             .on_action(cx.listener(Self::toggle_run))
             .on_action(cx.listener(Self::activate_tool_window_action))

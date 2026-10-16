@@ -893,6 +893,7 @@ impl FindBar {
             current_background: in_selection,
             excluded,
             lines: found.lines,
+            background: Default::default(),
         };
         self.editor.update(cx, |e, cx| {
             e.set_search_highlights(Some(highlights), cx);
