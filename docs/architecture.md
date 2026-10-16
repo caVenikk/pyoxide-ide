@@ -104,7 +104,10 @@ Platform (`crates/platform/`, language-agnostic):
   Configurations dialog), the UI command index (`ui_commands!`,
   `command::invoke`, which runs commands in an open dialog).
 - `workbench`: the main window (toolbar, stripes, tool windows, editor
-  area, status bar, a movable and resizable popup frame, the Find in Files
+  area, status bar; the tool window registry `tool_windows` puts each tool
+  window in the left, bottom or right area, one shown per area with a size
+  per area, and other crates register their views through
+  `ToolWindowView`), a movable and resizable popup frame, the Find in Files
   and Replace in Files popup with its preview, Search Everywhere and Go to
   File, Recent Files), the project tool window's file operations (New
   with the product's kinds, Rename, Delete, Cut, Copy, Paste, Move, Copy
