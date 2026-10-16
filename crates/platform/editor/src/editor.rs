@@ -327,6 +327,9 @@ pub struct Editor {
     pub(crate) soft_wrap_indent: Option<usize>,
     /// Signs at the soft wraps of every line, not only the caret's.
     pub(crate) show_all_soft_wraps: bool,
+    /// A read-only view ([`Editor::set_viewer`]), and its hint when shown.
+    pub(crate) viewer: bool,
+    pub(crate) read_only_hint: Option<crate::viewer::ReadOnlyHint>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -414,6 +417,8 @@ impl Editor {
             wrap_rules: WrapRule::defaults().into(),
             soft_wrap_indent: Some(0),
             show_all_soft_wraps: false,
+            viewer: false,
+            read_only_hint: None,
             _subscriptions: subscriptions,
         }
     }
@@ -447,6 +452,9 @@ impl Editor {
     /// Undoes (or redoes) the last change without asking (after the
     /// owner's confirmation).
     pub fn undo_confirmed(&mut self, redo: bool, cx: &mut Context<Self>) {
+        if !self.modification_allowed(cx) {
+            return;
+        }
         let done = if redo {
             self.buffer.redo()
         } else {
@@ -1138,6 +1146,9 @@ impl Editor {
         carets: CaretPlacement,
         cx: &mut Context<Self>,
     ) {
+        if !edits.is_empty() && !self.modification_allowed(cx) {
+            return;
+        }
         let mut selections = self.selections.clone();
         let applied = self.buffer.transact(&mut selections, edits, kind, carets);
         if applied.is_empty() {
@@ -1175,6 +1186,7 @@ impl Editor {
         self.selections = selections;
         self.marked = None;
         self.lean_back.clear();
+        self.hide_read_only_hint(cx);
         self.autoscroll = true;
         self.caret_visible = true;
         self.blink_epoch += 1;
@@ -2659,6 +2671,7 @@ impl Editor {
     /// Scrolls by a wheel or trackpad delta (positive y scrolls down).
     /// Soft-wrapped text does not scroll sideways.
     pub(crate) fn scroll_by(&mut self, delta: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        self.hide_read_only_hint(cx);
         let max_y = self.max_scroll_y();
         self.scroll.y = (self.scroll.y + delta.y).clamp(px(0.0), max_y);
         if self.soft_wrap.is_none() {
@@ -2844,7 +2857,8 @@ impl Render for Editor {
             .relative()
             .child(EditorElement::new(cx.entity()))
             .children(widget)
-            .children(tooltip);
+            .children(tooltip)
+            .children(crate::viewer::render_read_only_hint(self, cx));
         Self::bind_actions(el, cx)
     }
 }
