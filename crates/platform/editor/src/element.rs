@@ -11,13 +11,13 @@ use gpui::{
     MouseUpEvent, Pixels, ScrollWheelEvent, ShapedLine, SharedString, StrikethroughStyle, Style,
     TextRun, UnderlineStyle, Window, fill, outline, point, px, relative, size,
 };
-use text::movement;
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
 use ui::theme::{Theme, ThemeExt, color};
 
 use crate::diagnostics::{Analysis, Look, MarkSeverity, line_looks};
 use crate::editor::{DragUnit, Editor, EditorEvent};
 use crate::highlight::InlineStyle;
+use crate::wrap::Segment;
 
 /// Lines longer than this are shaped only around the visible columns.
 pub const LONG_LINE: usize = 2000;
@@ -41,14 +41,28 @@ const STRIPE_MARK: f32 = 2.0;
 /// (the reference's bold dotted line: dots as large as the line is thick).
 const DOT: f32 = 2.0;
 
-/// One painted line: its shaped text and the mapping from char columns to
-/// bytes of the shaped text (tabs are expanded to spaces).
+/// One painted visual row (a line, or a part of a soft-wrapped line): its
+/// shaped text and the mapping from char columns to bytes of the shaped
+/// text (tabs are expanded to spaces).
 #[derive(Clone)]
 pub(crate) struct LineLayout {
     pub line: usize,
-    /// First char column that was shaped (non-zero only on long lines).
+    /// Char offset of the line's column 0.
+    pub line_start: usize,
+    /// Index of the row in its line, and in the text.
+    pub sub: usize,
+    pub row: usize,
+    /// First char column of the row (0 on a line's first row).
+    pub seg_start: usize,
+    /// First char column that was shaped (the row's first, or on a long
+    /// line without soft wraps the first near the view).
     pub start_col: usize,
-    /// X of `start_col` relative to column 0.
+    /// Char column where the row ends: the next row's first, or the
+    /// line's end.
+    pub end_col: usize,
+    /// The row ends its line.
+    pub last: bool,
+    /// X of `start_col` relative to column 0 (a continuation row's indent).
     pub x_offset: Pixels,
     pub shaped: ShapedLine,
     /// Byte offset in the shaped text of each char column from `start_col`
@@ -87,7 +101,9 @@ pub(crate) struct LayoutInfo {
     pub text_x: Pixels,
     pub line_height: Pixels,
     pub char_width: Pixels,
+    /// Lines with a row in the view.
     pub visible: Range<usize>,
+    /// The rows drawn, in order.
     pub lines: Vec<LineLayout>,
     pub viewport_lines: usize,
     pub scrollbar: Option<Scrollbar>,
@@ -99,6 +115,8 @@ pub(crate) struct LayoutInfo {
     pub problem_stripes: Vec<StripeMark>,
     /// Hyperlinks on the visible lines.
     pub links: Vec<LinkRect>,
+    /// Signs drawn at soft wraps.
+    pub wrap_signs: usize,
 }
 
 /// A problem's mark on the error stripe.
@@ -178,43 +196,93 @@ pub(crate) struct Scrollbar {
     pub thumb: Bounds<Pixels>,
 }
 
+/// The drawn row showing char column `col` of `line`; at a soft wrap the
+/// row it starts, or with `lean` the row it ends.
+fn layout_row(lines: &[LineLayout], line: usize, col: usize, lean: bool) -> Option<&LineLayout> {
+    let first = lines.partition_point(|l| l.line < line);
+    let mut found = None;
+    for l in lines[first..].iter().take_while(|l| l.line == line) {
+        if l.sub == 0 || l.seg_start < col || (l.seg_start == col && !lean) {
+            found = Some(l);
+        } else {
+            break;
+        }
+    }
+    found
+}
+
 impl LayoutInfo {
-    pub fn line(&self, line: usize) -> Option<&LineLayout> {
-        let i = line.checked_sub(self.visible.start)?;
-        self.lines.get(i).filter(|l| l.line == line)
+    /// The drawn row showing char column `col` of `line`; at a soft wrap
+    /// the row it starts, or with `lean` the row it ends.
+    pub fn row_for(&self, line: usize, col: usize, lean: bool) -> Option<&LineLayout> {
+        layout_row(&self.lines, line, col, lean)
+    }
+
+    /// The drawn row with index `row` in the text.
+    pub fn row_at(&self, row: usize) -> Option<&LineLayout> {
+        let first = self.lines.first()?.row;
+        self.lines
+            .get(row.checked_sub(first)?)
+            .filter(|l| l.row == row)
     }
 }
 
 impl Editor {
     /// Char offset under a window position (clamped into the text).
     pub(crate) fn offset_for_position(&self, position: gpui::Point<Pixels>) -> usize {
+        self.position_for_point(position).0
+    }
+
+    /// Char offset under a window position (clamped into the text), and
+    /// whether it is the end of a row before a soft wrap.
+    pub(crate) fn position_for_point(&self, position: gpui::Point<Pixels>) -> (usize, bool) {
         let Some(layout) = &self.layout else {
-            return 0;
+            return (0, false);
         };
         let y = position.y - layout.bounds.top() + self.scroll.y;
-        let last = self.buffer.len_lines() - 1;
-        let line = if y < px(0.0) {
+        let last = self.display_rows() - 1;
+        let row = if y < px(0.0) {
             0
         } else {
             ((y / layout.line_height).floor() as usize).min(last)
         };
         let x = position.x - layout.text_x + self.scroll.x;
-        let col = match layout.line(line) {
-            Some(l) => l.col_for_x(x),
-            None => (x / layout.char_width).round().max(0.0) as usize,
-        };
-        self.buffer.line_start(line) + col.min(self.buffer.line_len(line))
+        match layout.row_at(row) {
+            Some(l) => {
+                let col = l.col_for_x(x).min(self.buffer.line_len(l.line));
+                let lean = !l.last && col >= l.end_col;
+                let col = if lean { l.end_col } else { col };
+                (l.line_start + col, lean)
+            }
+            None => {
+                let col = (x / layout.char_width).round().max(0.0) as usize;
+                self.offset_at_visual(row, col)
+            }
+        }
     }
 
     /// Window bounds of the char at `offset` (for the input method).
     pub(crate) fn bounds_for_offset(&self, offset: usize) -> Option<Bounds<Pixels>> {
+        self.bounds_for_offset_lean(offset, false)
+    }
+
+    /// Window bounds of the char at `offset`; `lean`: a position at a soft
+    /// wrap is at the end of the row before it.
+    pub(crate) fn bounds_for_offset_lean(
+        &self,
+        offset: usize,
+        lean: bool,
+    ) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
         let p = self.buffer.offset_to_point(offset);
-        let x = match layout.line(p.line) {
-            Some(l) => l.x_for_col(p.column),
-            None => layout.char_width * p.column as f32,
+        let (row, x) = match layout.row_for(p.line, p.column, lean) {
+            Some(l) => (l.row, l.x_for_col(p.column)),
+            None => {
+                let (row, col) = self.visual_point(offset, lean);
+                (row, layout.char_width * col as f32)
+            }
         };
-        let top = layout.bounds.top() + layout.line_height * p.line as f32 - self.scroll.y;
+        let top = layout.bounds.top() + layout.line_height * row as f32 - self.scroll.y;
         Some(Bounds::new(
             point(layout.text_x + x - self.scroll.x, top),
             size(layout.char_width, layout.line_height),
@@ -231,32 +299,29 @@ impl Editor {
             return None;
         }
         let y = position.y - layout.bounds.top() + self.scroll.y;
-        let line = (y / layout.line_height).floor();
-        if line < 0.0 || line as usize >= self.buffer.len_lines() {
+        let row = (y / layout.line_height).floor();
+        if row < 0.0 || row as usize >= self.display_rows() {
             return None;
         }
-        let line = line as usize;
+        let row = row as usize;
         let x = position.x - layout.text_x + self.scroll.x;
+        let l = layout.row_at(row)?;
+        let line = l.line;
         let len = self.buffer.line_len(line);
-        let (col, end_x) = match layout.line(line) {
-            Some(l) => {
-                let col = l.col_for_x(x);
-                // The char whose cell holds `x`, not the nearest boundary.
-                let col = if col > 0 && l.x_for_col(col) > x {
-                    col - 1
-                } else {
-                    col
-                };
-                (col, l.x_for_col(len))
-            }
-            None => (
-                (x / layout.char_width).floor().max(0.0) as usize,
-                layout.char_width * len as f32,
-            ),
+        let col = l.col_for_x(x);
+        // The char whose cell holds `x`, not the nearest boundary.
+        let col = if col > l.start_col && l.x_for_col(col) > x {
+            col - 1
+        } else {
+            col
         };
-        let line_start = self.buffer.line_start(line);
-        if col < len {
+        let end_x = l.x_for_col(len);
+        let line_start = l.line_start;
+        if col < len.min(l.end_col) {
             return Some(line_start + col);
+        }
+        if !l.last {
+            return None;
         }
         // The cell after the line end shows the empty problems of the line.
         if x >= end_x + layout.char_width {
@@ -312,6 +377,9 @@ pub(crate) struct Prepaint {
     dotted: Vec<Dotted>,
     /// Problems drawn after the end of a line.
     after_end: Vec<AfterEnd>,
+    /// Signs at soft wraps: before a wrap at the end of its row, after it
+    /// before the next row's text.
+    wrap_signs: Vec<(ShapedLine, gpui::Point<Pixels>)>,
     colors: Colors,
 }
 
@@ -456,18 +524,21 @@ impl Metrics {
     }
 }
 
-/// Display text of a line (tabs expanded), the first shaped column and the
-/// column-to-byte map.
+/// Display text of columns `cols` of a line (tabs expanded) and the
+/// column-to-byte map; the first column is at display column `start_x`.
 fn display_text(
     editor: &Editor,
     line: usize,
     cols: Range<usize>,
     tab_size: usize,
+    start_x: usize,
 ) -> (String, Option<Vec<u32>>) {
     let slice = editor.buffer.line(line);
     let mut text = String::with_capacity(cols.len() + 8);
     let mut map: Option<Vec<u32>> = None;
-    let mut display_col = 0usize;
+    // Tab stops count from the left edge of the text (a soft-wrapped
+    // row's indent included).
+    let mut display_col = start_x;
     for (i, c) in slice.chars_at(cols.start).take(cols.len()).enumerate() {
         if c == '\t' || !c.is_ascii() {
             map.get_or_insert_with(|| (0..=i as u32).collect::<Vec<_>>());
@@ -874,19 +945,30 @@ impl Element for EditorElement {
         let text_width = (bounds.right() - text_x).max(px(0.0));
         let viewport_lines = (bounds.size.height / lh).floor().max(1.0) as usize;
 
+        // Soft wraps fill the view up to the scrollbar's strip (the
+        // reference does not wrap text under its scrollbar).
+        let wrap_cols = (f32::from(bounds.right() - scrollbar_width - text_x)
+            / f32::from(m.char_width))
+        .floor()
+        .max(1.0) as usize;
+
         // Keep the caret in view after edits and caret moves.
-        self.editor.update(cx, |e, _| {
+        self.editor.update(cx, |e, cx| {
+            if !single_line {
+                e.update_wrap_width(wrap_cols, cx);
+            }
+            let rows = e.display_rows();
             let max_y = if console {
-                (lh * len_lines as f32 - bounds.size.height).max(px(0.0))
+                (lh * rows as f32 - bounds.size.height).max(px(0.0))
             } else {
-                lh * len_lines.saturating_sub(1) as f32
+                lh * rows.saturating_sub(1) as f32
             };
             if std::mem::take(&mut e.scroll_to_end) {
                 e.scroll.y = max_y;
             }
             if let Some(pos) = e.reveal.take() {
                 // A search match goes to the middle of the view when hidden.
-                let y = lh * e.buffer.char_to_line(pos) as f32;
+                let y = lh * e.caret_row(pos, false) as f32;
                 if y < e.scroll.y || y + lh > e.scroll.y + bounds.size.height {
                     e.scroll.y = y - (bounds.size.height - lh) / 2.0;
                 }
@@ -895,15 +977,14 @@ impl Element for EditorElement {
             if e.autoscroll {
                 e.autoscroll = false;
                 let head = e.selections.primary().head;
-                let p = e.buffer.offset_to_point(head);
-                let y = lh * p.line as f32;
+                let (row, col) = e.visual_point(head, e.leans_back(head));
+                let y = lh * row as f32;
                 if y < e.scroll.y {
                     e.scroll.y = y;
                 } else if y + lh > e.scroll.y + bounds.size.height {
                     e.scroll.y = y + lh - bounds.size.height;
                 }
-                let dcol = movement::display_column(&e.buffer, p.line, p.column, tab_size);
-                let x = m.char_width * dcol as f32;
+                let x = m.char_width * col as f32;
                 let margin = m.char_width * 4.0;
                 if x < e.scroll.x {
                     e.scroll.x = (x - margin).max(px(0.0));
@@ -912,15 +993,21 @@ impl Element for EditorElement {
                 }
             }
             if e.center_caret {
-                // Go to Line: the caret line in the middle of the view.
+                // Go to Line: the caret row in the middle of the view.
                 e.center_caret = false;
-                let line = e.buffer.char_to_line(e.selections.primary().head);
-                e.scroll.y = lh * line as f32 - (bounds.size.height - lh) / 2.0;
+                let row = e.primary_row();
+                e.scroll.y = lh * row as f32 - (bounds.size.height - lh) / 2.0;
             }
             e.scroll.y = e.scroll.y.clamp(px(0.0), max_y);
-            e.scroll.x = e.scroll.x.max(px(0.0));
-            // Highlight spans for the lines about to be painted.
-            let first = ((e.scroll.y / lh).floor() as usize).min(len_lines - 1);
+            e.scroll.x = if e.soft_wraps() {
+                px(0.0)
+            } else {
+                e.scroll.x.max(px(0.0))
+            };
+            // Highlight spans for the lines about to be painted (a line has
+            // at least one row).
+            let first_row = ((e.scroll.y / lh).floor() as usize).min(rows - 1);
+            let first = e.row_line(first_row).0;
             let last = (first + viewport_lines + 2).min(len_lines);
             if let Some(h) = &mut e.highlighter {
                 h.prepare(&e.buffer, first..last);
@@ -930,18 +1017,20 @@ impl Element for EditorElement {
         let editor = self.editor.read(cx);
         let theme = cx.theme();
         let scroll = editor.scroll;
-        let first = ((scroll.y / lh).floor() as usize).min(len_lines - 1);
-        let last = (first + viewport_lines + 2).min(len_lines);
-        let visible = first..last;
+        let wrapping = editor.wrapping();
+        let total_rows = editor.display_rows();
+        let first_row = ((scroll.y / lh).floor() as usize).min(total_rows - 1);
+        let (first, first_sub) = editor.row_line(first_row);
+        let row_budget = viewport_lines + 2;
 
-        // Shape the visible lines.
+        // Shape the visible rows.
         let mut spans = Vec::new();
         let mut errors = Vec::new();
         let mut styles = Vec::new();
         let mut line_links = Vec::new();
         // Hyperlinks: (line, char range).
         let mut links: Vec<(usize, Range<usize>)> = Vec::new();
-        let mut lines = Vec::with_capacity(visible.len());
+        let mut lines: Vec<LineLayout> = Vec::with_capacity(row_budget);
         let visible_cols = (text_width / m.char_width).ceil() as usize + 1;
         let scroll_col = (scroll.x / m.char_width).floor() as usize;
         // Problems the text runs do not draw: dotted underlines (line,
@@ -950,15 +1039,20 @@ impl Element for EditorElement {
         let mut line_after_end: Vec<(usize, Look)> = Vec::new();
         // The link highlight's parts: (line, char columns).
         let mut link_highlight_cols: Vec<(usize, Range<usize>)> = Vec::new();
-        for line in visible.clone() {
+        let mut line = first;
+        let mut row = first_row;
+        let mut skip = first_sub;
+        while lines.len() < row_budget && line < len_lines {
             let len = editor.buffer.line_len(line);
-            let cols = if len > LONG_LINE {
-                let start = scroll_col.saturating_sub(LONG_LINE_MARGIN).min(len);
-                start..(scroll_col + visible_cols + LONG_LINE_MARGIN).min(len)
+            let segments = if wrapping {
+                editor.line_segments(line)
             } else {
-                0..len
+                vec![Segment {
+                    start: 0,
+                    end: len,
+                    indent: 0,
+                }]
             };
-            let (text, col_bytes) = display_text(editor, line, cols.clone(), tab_size);
             spans.clear();
             errors.clear();
             styles.clear();
@@ -1000,111 +1094,207 @@ impl Element for EditorElement {
             if let Some(cols) = &link_highlight {
                 link_highlight_cols.push((line, cols.clone()));
             }
-            let text_runs = runs(
-                &spans,
-                LineExtras {
-                    errors: &errors,
-                    styles: &styles,
-                    links: &line_links,
-                    diagnostics: &looks.ranges,
-                    link_highlight,
-                },
-                &cols,
-                col_bytes.as_ref(),
-                text.len(),
-                &m.font,
-                text_color,
-                theme,
-                marked,
-            );
-            let shaped = window.text_system().shape_line(
-                SharedString::from(text),
-                m.font_size,
-                &text_runs,
-                None,
-            );
-            lines.push(LineLayout {
-                line,
-                start_col: cols.start,
-                x_offset: m.char_width * cols.start as f32,
-                shaped,
-                col_bytes,
-            });
+            let count = segments.len();
+            for (sub, seg) in segments.into_iter().enumerate().skip(skip.min(count - 1)) {
+                if lines.len() >= row_budget {
+                    break;
+                }
+                let (cols, start_x) = if wrapping {
+                    (seg.start..seg.end, seg.indent)
+                } else if len > LONG_LINE {
+                    let start = scroll_col.saturating_sub(LONG_LINE_MARGIN).min(len);
+                    (
+                        start..(scroll_col + visible_cols + LONG_LINE_MARGIN).min(len),
+                        0,
+                    )
+                } else {
+                    (0..len, 0)
+                };
+                let x_offset = if wrapping {
+                    m.char_width * seg.indent as f32
+                } else {
+                    m.char_width * cols.start as f32
+                };
+                let (text, col_bytes) = display_text(editor, line, cols.clone(), tab_size, start_x);
+                let text_runs = runs(
+                    &spans,
+                    LineExtras {
+                        errors: &errors,
+                        styles: &styles,
+                        links: &line_links,
+                        diagnostics: &looks.ranges,
+                        link_highlight: link_highlight.clone(),
+                    },
+                    &cols,
+                    col_bytes.as_ref(),
+                    text.len(),
+                    &m.font,
+                    text_color,
+                    theme,
+                    marked.clone(),
+                );
+                let shaped = window.text_system().shape_line(
+                    SharedString::from(text),
+                    m.font_size,
+                    &text_runs,
+                    None,
+                );
+                lines.push(LineLayout {
+                    line,
+                    line_start,
+                    sub,
+                    row,
+                    seg_start: seg.start,
+                    start_col: cols.start,
+                    end_col: seg.end,
+                    last: sub + 1 == count,
+                    x_offset,
+                    shaped,
+                    col_bytes,
+                });
+                row += 1;
+            }
+            skip = 0;
+            line += 1;
         }
+        let last = lines.last().map_or(first + 1, |l| l.line + 1);
+        let visible = first..last;
 
-        let top_of = |line: usize| bounds.top() + lh * line as f32 - scroll.y;
+        let top_of = |row: usize| bounds.top() + lh * row as f32 - scroll.y;
         let line_x = |l: &LineLayout, col: usize| text_x - scroll.x + l.x_for_col(col);
-        let layout_of = |line: usize| lines.get(line.wrapping_sub(first));
+        // The drawn rows of a line.
+        let rows_of = |line: usize| {
+            let from = lines.partition_point(|l| l.line < line);
+            lines[from..].iter().take_while(move |l| l.line == line)
+        };
+        // The parts of char columns `range` of a line on its drawn rows:
+        // (row, x0, x1), empty parts left out.
+        let parts = |line: usize, range: Range<usize>| -> Vec<(&LineLayout, Pixels, Pixels)> {
+            rows_of(line)
+                .filter_map(|l| {
+                    let a = range.start.max(l.seg_start);
+                    let b = range.end.min(l.end_col);
+                    (b > a).then(|| (l, line_x(l, a), line_x(l, b)))
+                })
+                .collect()
+        };
 
         let (underline_offset, strike_offset) = m.effect_offsets();
         let dotted: Vec<Dotted> = line_dotted
             .into_iter()
-            .filter_map(|(line, range, color)| {
-                let l = layout_of(line)?;
-                Some(Dotted {
-                    x0: line_x(l, range.start),
-                    x1: line_x(l, range.end),
-                    y: top_of(line) + underline_offset,
-                    color,
-                })
+            .flat_map(|(line, range, color)| {
+                parts(line, range)
+                    .into_iter()
+                    .map(move |(l, x0, x1)| Dotted {
+                        x0,
+                        x1,
+                        y: top_of(l.row) + underline_offset,
+                        color,
+                    })
             })
             .collect();
         let after_end: Vec<AfterEnd> = line_after_end
             .into_iter()
             .filter_map(|(line, look)| {
-                let l = layout_of(line)?;
+                let l = rows_of(line).find(|l| l.last)?;
                 let x = line_x(l, editor.buffer.line_len(line));
                 Some(AfterEnd {
-                    cell: Bounds::new(point(x, top_of(line)), size(m.char_width, lh)),
-                    underline_y: top_of(line) + underline_offset,
-                    strike_y: top_of(line) + strike_offset,
+                    cell: Bounds::new(point(x, top_of(l.row)), size(m.char_width, lh)),
+                    underline_y: top_of(l.row) + underline_offset,
+                    strike_y: top_of(l.row) + strike_offset,
                     look,
                     text: text_color,
                 })
             })
             .collect();
+        let visible_rows = first_row..row;
 
-        // Selections: up to the end of the text on the last line, the full
-        // width on lines whose line break is selected.
+        // Selections: from row to row, up to the right edge on rows the
+        // selection goes on from (a line break or a soft wrap), from the
+        // left edge on rows it comes from.
         let mut selection_rects = Vec::new();
+        let mut caret_rows = Vec::new();
         let mut caret_lines = Vec::new();
         let mut caret = None;
         let focused = editor.focus_handle_ref().is_focused(window);
         for s in editor.selections.iter() {
+            let head_lean = editor.leans_back(s.head);
+            let head_row = editor.caret_row(s.head, head_lean);
+            caret_rows.push(head_row);
+            caret_lines.push(editor.buffer.char_to_line(s.head));
             let head = editor.buffer.offset_to_point(s.head);
-            caret_lines.push(head.line);
             if focused
                 && editor.caret_visible
                 && s.head == editor.selections.primary().head
-                && let Some(l) = layout_of(head.line)
+                && let Some(l) = layout_row(&lines, head.line, head.column, head_lean)
             {
                 caret = Some(Bounds::new(
-                    point(line_x(l, head.column), top_of(head.line)),
+                    point(line_x(l, head.column), top_of(l.row)),
                     size(caret_width, lh),
                 ));
             }
             if s.is_empty() {
                 continue;
             }
-            let a = editor.buffer.offset_to_point(s.start());
-            let b = editor.buffer.offset_to_point(s.end());
-            for line in a.line.max(first)..=b.line.min(last.saturating_sub(1)) {
-                let Some(l) = layout_of(line) else { continue };
-                let x0 = if line == a.line {
-                    line_x(l, a.column)
+            let (a, b) = (s.start(), s.end());
+            // A selection's end at a wrap ends the row before it, unless
+            // the caret there starts the next.
+            let a_lean = s.head == a && head_lean;
+            let b_lean = s.head != b || head_lean;
+            let ra = editor.caret_row(a, a_lean);
+            let rb = editor.caret_row(b, b_lean);
+            for l in &lines {
+                if l.row < ra || l.row > rb {
+                    continue;
+                }
+                let x0 = if l.row == ra {
+                    line_x(l, a - l.line_start)
                 } else {
                     text_x - scroll.x
                 };
-                let x1 = if line == b.line {
-                    line_x(l, b.column)
+                let x1 = if l.row == rb {
+                    line_x(l, b - l.line_start)
                 } else {
                     bounds.right()
                 };
                 if x1 > x0 {
                     selection_rects.push(Bounds::from_corners(
-                        point(x0, top_of(line)),
-                        point(x1, top_of(line) + lh),
+                        point(x0, top_of(l.row)),
+                        point(x1, top_of(l.row) + lh),
                     ));
+                }
+            }
+        }
+        // Signs at the soft wraps of the caret's lines (of every line with
+        // "show all soft wraps"), as the reference's editor painter draws
+        // them: the arrow before a wrap after the row's last char, the one
+        // after it in the last column of the next row's indent.
+        let mut wrap_signs = Vec::new();
+        if wrapping {
+            let run = |len: usize| TextRun {
+                len,
+                font: m.font.clone(),
+                color: theme.color(UiRole::SoftWrapSign),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shape = |sign: &'static str| {
+                window
+                    .text_system()
+                    .shape_line(sign.into(), m.font_size, &[run(sign.len())], None)
+            };
+            let (before, after) = (shape("\u{2926}"), shape("\u{2925}"));
+            for l in &lines {
+                if !editor.show_all_soft_wraps && !caret_lines.contains(&l.line) {
+                    continue;
+                }
+                if !l.last {
+                    wrap_signs.push((before.clone(), point(line_x(l, l.end_col), top_of(l.row))));
+                }
+                if l.sub > 0 {
+                    let x = text_x - scroll.x + l.x_offset - m.char_width;
+                    wrap_signs.push((after.clone(), point(x, top_of(l.row))));
                 }
             }
         }
@@ -1121,27 +1311,32 @@ impl Element for EditorElement {
                 if r.start > vis_end {
                     break;
                 }
-                let a = editor.buffer.offset_to_point(r.start);
-                let b = editor.buffer.offset_to_point(r.end);
-                for line in a.line.max(first)..=b.line.min(last.saturating_sub(1)) {
-                    let Some(l) = layout_of(line) else { continue };
-                    let x0 = if line == a.line {
-                        line_x(l, a.column)
+                // A match ending at a wrap ends the row before it.
+                let ra = editor.caret_row(r.start, false);
+                let rb = editor.caret_row(r.end, r.end > r.start);
+                for l in &lines {
+                    if l.row < ra || l.row > rb {
+                        continue;
+                    }
+                    let x0 = if l.row == ra {
+                        line_x(l, r.start - l.line_start)
                     } else {
-                        text_x - scroll.x
+                        line_x(l, l.seg_start)
                     };
-                    let x1 = if line == b.line {
-                        line_x(l, b.column)
-                    } else {
+                    let x1 = if l.row == rb {
+                        line_x(l, r.end - l.line_start)
+                    } else if l.last {
                         // The line break of a match that goes on.
-                        line_x(l, editor.buffer.line_len(line)) + m.char_width
+                        line_x(l, editor.buffer.line_len(l.line)) + m.char_width
+                    } else {
+                        line_x(l, l.end_col)
                     };
                     // An empty match is a thin bar.
                     let x1 = if x1 > x0 { x1 } else { x0 + px(2.0) };
                     search_rects.push(SearchRect {
                         bounds: Bounds::from_corners(
-                            point(x0, top_of(line)),
-                            point(x1, top_of(line) + lh),
+                            point(x0, top_of(l.row)),
+                            point(x1, top_of(l.row) + lh),
                         ),
                         current: h.current == Some(i),
                         excluded: h.excluded.contains(&i),
@@ -1166,47 +1361,46 @@ impl Element for EditorElement {
             (shaped, point(text_x - scroll.x, top_of(0)))
         });
 
-        // Hyperlink rectangles on the visible lines.
+        // Hyperlink rectangles on the visible rows.
         let link_rects: Vec<LinkRect> = links
             .into_iter()
-            .filter_map(|(line, range)| {
-                let l = layout_of(line)?;
-                let x0 = line_x(l, range.start);
-                let x1 = line_x(l, range.end);
-                (x1 > x0).then(|| LinkRect {
-                    bounds: Bounds::from_corners(
-                        point(x0, top_of(line)),
-                        point(x1, top_of(line) + lh),
-                    ),
-                    line,
-                    range,
-                })
+            .flat_map(|(line, range)| {
+                parts(line, range.clone())
+                    .into_iter()
+                    .map(move |(l, x0, x1)| LinkRect {
+                        bounds: Bounds::from_corners(
+                            point(x0, top_of(l.row)),
+                            point(x1, top_of(l.row) + lh),
+                        ),
+                        line,
+                        range: range.clone(),
+                    })
             })
             .collect();
 
-        // The caret line is highlighted when nothing is selected (not in a
+        // The caret row is highlighted when nothing is selected (not in a
         // console).
         let current_lines = if !single_line
             && !console
             && editor.selections.iter().all(|s| s.is_empty())
         {
-            caret_lines
+            caret_rows
                 .iter()
-                .filter(|l| visible.contains(l))
-                .map(|&l| Bounds::new(point(bounds.left(), top_of(l)), size(bounds.size.width, lh)))
+                .filter(|r| visible_rows.contains(r))
+                .map(|&r| Bounds::new(point(bounds.left(), top_of(r)), size(bounds.size.width, lh)))
                 .collect()
         } else {
             Vec::new()
         };
 
-        // Line numbers, right-aligned.
+        // Line numbers, right-aligned, on the first row of each line.
         let numbers_right = bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32;
-        let numbers = visible
-            .clone()
-            .filter(|_| !single_line && !console)
-            .map(|line| {
-                let label = SharedString::from((line + 1).to_string());
-                let color = if caret_lines.contains(&line) {
+        let numbers = lines
+            .iter()
+            .filter(|l| l.sub == 0 && !single_line && !console)
+            .map(|l| {
+                let label = SharedString::from((l.line + 1).to_string());
+                let color = if caret_lines.contains(&l.line) {
                     number_active
                 } else {
                     number_color
@@ -1222,19 +1416,19 @@ impl Element for EditorElement {
                 let shaped = window
                     .text_system()
                     .shape_line(label, m.number_size, &[run], None);
-                let origin = point(numbers_right - shaped.width, top_of(line));
+                let origin = point(numbers_right - shaped.width, top_of(l.row));
                 (shaped, origin)
             })
             .collect();
 
         // Vertical scrollbar when the text is taller than the view; the view
-        // can scroll until the last line is at the top.
+        // can scroll until the last row is at the top.
         let content = if console {
-            (lh * len_lines as f32).max(bounds.size.height)
+            (lh * total_rows as f32).max(bounds.size.height)
         } else {
-            lh * (len_lines.saturating_sub(1)) as f32 + bounds.size.height
+            lh * (total_rows.saturating_sub(1)) as f32 + bounds.size.height
         };
-        let scrollbar = (!single_line && len_lines > viewport_lines).then(|| {
+        let scrollbar = (!single_line && total_rows > viewport_lines).then(|| {
             let track = Bounds::new(
                 point(bounds.right() - scrollbar_width, bounds.top()),
                 size(scrollbar_width, bounds.size.height),
@@ -1268,10 +1462,10 @@ impl Element for EditorElement {
                 )
             })
         });
-        // A line's y on the stripe: where it is in the view while the whole
+        // A row's y on the stripe: where it is in the view while the whole
         // text fits, else in proportion (the reference's error stripe).
-        let stripe_y = |track: &Bounds<Pixels>, line: usize| -> Pixels {
-            let y = lh * line as f32;
+        let stripe_y = |track: &Bounds<Pixels>, row: usize| -> Pixels {
+            let y = lh * row as f32;
             let target = track.size.height;
             let y = if content <= target {
                 y
@@ -1292,8 +1486,9 @@ impl Element for EditorElement {
         let mut stripe_marks = Vec::new();
         if let (Some(track), Some(h)) = (&stripe, &editor.search) {
             let mut last_y = None;
+            let mut row_of = editor.line_row_cursor();
             for &line in &h.lines {
-                let y = stripe_y(track, line);
+                let y = stripe_y(track, row_of(line));
                 if last_y == Some(y) {
                     continue;
                 }
@@ -1308,6 +1503,19 @@ impl Element for EditorElement {
         if let Some(track) = &stripe {
             let marks = editor.diagnostics();
             let lines = editor.diagnostics.lines(&editor.buffer);
+            let mut row_of = editor.line_row_cursor();
+            let rows: Vec<(usize, usize)> = lines
+                .iter()
+                .map(|&(first, last)| {
+                    let top = row_of(first);
+                    let bottom = if last == first {
+                        top
+                    } else {
+                        editor.line_row(last)
+                    };
+                    (top, bottom)
+                })
+                .collect();
             let mut order: Vec<usize> = (0..marks.len())
                 .filter(|&i| marks[i].severity != MarkSeverity::Information)
                 .collect();
@@ -1319,7 +1527,7 @@ impl Element for EditorElement {
                     MarkSeverity::Warning => UiRole::DiagnosticWarningStripe,
                     _ => UiRole::DiagnosticWeakWarningStripe,
                 };
-                let (first, last) = lines[i];
+                let (first, last) = rows[i];
                 let top = stripe_y(track, first);
                 let bottom = stripe_y(track, last);
                 problem_stripes.push(StripeMark {
@@ -1357,13 +1565,11 @@ impl Element for EditorElement {
         );
         let link_highlight_hitboxes = link_highlight_cols
             .into_iter()
-            .filter_map(|(line, cols)| {
-                let l = layout_of(line)?;
-                let rect = Bounds::from_corners(
-                    point(line_x(l, cols.start), top_of(line)),
-                    point(line_x(l, cols.end), top_of(line) + lh),
-                )
-                .intersect(&text_area);
+            .flat_map(|(line, cols)| parts(line, cols))
+            .filter_map(|(l, x0, x1)| {
+                let rect =
+                    Bounds::from_corners(point(x0, top_of(l.row)), point(x1, top_of(l.row) + lh))
+                        .intersect(&text_area);
                 (rect.size.width > px(0.0))
                     .then(|| window.insert_hitbox(rect, HitboxBehavior::Normal))
             })
@@ -1380,6 +1586,7 @@ impl Element for EditorElement {
             stripe,
             problem_stripes,
             links: link_rects,
+            wrap_signs: wrap_signs.len(),
         };
         let stored = layout.clone();
         self.editor.update(cx, |e, _| e.layout = Some(stored));
@@ -1400,6 +1607,7 @@ impl Element for EditorElement {
             link_highlight_hitboxes,
             dotted,
             after_end,
+            wrap_signs,
             colors,
         }
     }
@@ -1468,7 +1676,7 @@ impl Element for EditorElement {
                 for l in &p.layout.lines {
                     let origin = point(
                         p.layout.text_x - scroll_x + l.x_offset,
-                        bounds.top() + lh * l.line as f32 - self.editor.read(cx).scroll.y,
+                        bounds.top() + lh * l.row as f32 - self.editor.read(cx).scroll.y,
                     );
                     let _ = l.shaped.paint_background(origin, lh, window, cx);
                 }
@@ -1490,11 +1698,14 @@ impl Element for EditorElement {
                 for l in &p.layout.lines {
                     let origin = point(
                         p.layout.text_x - scroll_x + l.x_offset,
-                        bounds.top() + lh * l.line as f32 - self.editor.read(cx).scroll.y,
+                        bounds.top() + lh * l.row as f32 - self.editor.read(cx).scroll.y,
                     );
                     let _ = l.shaped.paint(origin, lh, window, cx);
                 }
                 if let Some((shaped, origin)) = &p.placeholder {
+                    let _ = shaped.paint(*origin, lh, window, cx);
+                }
+                for (shaped, origin) in &p.wrap_signs {
                     let _ = shaped.paint(*origin, lh, window, cx);
                 }
                 for d in &p.dotted {
@@ -1603,8 +1814,8 @@ impl Element for EditorElement {
                     .and_then(|l| l.link_at(e.position))
                     .filter(|_| e.click_count == 1)
                     .map(|l| (l.line, l.range.clone(), e.position));
-                let pos = ed.offset_for_position(e.position);
-                ed.mouse_down(pos, e.click_count, e.modifiers.shift, window, cx);
+                let (pos, lean) = ed.position_for_point(e.position);
+                ed.mouse_down(pos, lean, e.click_count, e.modifiers.shift, window, cx);
             });
             cx.stop_propagation();
         });
@@ -1638,8 +1849,8 @@ impl Element for EditorElement {
                             ed.scroll_by(point(px(0.0), lh), cx);
                         }
                     }
-                    let pos = ed.offset_for_position(e.position);
-                    ed.mouse_drag(pos, cx);
+                    let (pos, lean) = ed.position_for_point(e.position);
+                    ed.mouse_drag(pos, lean, cx);
                 }
                 None => {}
             });

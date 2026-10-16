@@ -837,6 +837,7 @@ impl Workbench {
             return;
         }
         let file_type = self.file_types.for_path(&path).cloned();
+        let soft_wraps = crate::editor_settings::settings(cx).soft_wraps;
         let editor = cx.new(|cx| {
             let mut editor = Editor::new(buffer, window, cx);
             editor.set_path(Some(path.clone()));
@@ -846,6 +847,7 @@ impl Workbench {
                     editor.set_highlighter(Some(factory()), cx);
                 }
             }
+            soft_wraps.apply(&mut editor, &path, cx);
             editor
         });
         let subscription = cx.subscribe(&editor, move |this, editor, event: &EditorEvent, cx| {

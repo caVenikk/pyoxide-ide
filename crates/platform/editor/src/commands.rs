@@ -126,4 +126,6 @@ ui::ui_commands! {
         "Moves the caret to the next problem in the file, errors first.";
     PreviousProblem => "code.previous-problem", "Previous Highlighted Error",
         "Moves the caret to the previous problem in the file, errors first.";
+    ToggleSoftWraps => "editor.toggle-soft-wraps", "Soft-Wrap",
+        "Turns soft wraps of the editor on or off: lines wider than the view go on in the next rows.";
 }

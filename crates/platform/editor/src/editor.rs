@@ -21,6 +21,8 @@ use crate::commands::*;
 use crate::diagnostics::{Analysis, DiagnosticMark, Marks, ProblemCounts, problem_to_go};
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
+use crate::soft_wrap::SoftWrap;
+use crate::wrap::{WrapParams, WrapRule};
 
 /// How long the caret stays visible or hidden while blinking.
 pub const BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -49,6 +51,9 @@ pub struct EditorConfig {
     /// Letters that may precede an opening quote as a string prefix (`f`,
     /// `r`, `b` ...); after other word characters a quote is not paired.
     pub string_prefixes: Vec<char>,
+    /// Where a soft-wrapped line may wrap when no space is near (the
+    /// file type's line wrap strategy).
+    pub wrap_rules: Vec<WrapRule>,
 }
 
 impl Default for EditorConfig {
@@ -63,6 +68,7 @@ impl Default for EditorConfig {
             quotes: Vec::new(),
             triple_quotes: false,
             string_prefixes: Vec::new(),
+            wrap_rules: WrapRule::defaults(),
         }
     }
 }
@@ -306,6 +312,21 @@ pub struct Editor {
     /// A press on a problem's stripe mark (index, position): followed when
     /// released in place.
     pub(crate) pressed_stripe: Option<(usize, gpui::Point<Pixels>)>,
+    /// Soft wraps, when on ([`Editor::set_soft_wraps`]).
+    pub(crate) soft_wrap: Option<SoftWrap>,
+    /// Carets (by head) at a soft wrap drawn at the end of the row before
+    /// it rather than at the start of the next (after End, or moving up
+    /// or down to the end of a row).
+    pub(crate) lean_back: BTreeSet<usize>,
+    /// What lines would wrap for in the last frame's width.
+    pub(crate) last_wrap_params: Option<WrapParams>,
+    /// The config's wrap rules, shared with the wrap parameters.
+    pub(crate) wrap_rules: std::sync::Arc<[WrapRule]>,
+    /// Continuation rows take the line's indentation plus this many
+    /// columns; `None`: only the sign's column.
+    pub(crate) soft_wrap_indent: Option<usize>,
+    /// Signs at the soft wraps of every line, not only the caret's.
+    pub(crate) show_all_soft_wraps: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -387,6 +408,12 @@ impl Editor {
             hover: None,
             stripe_hover: None,
             pressed_stripe: None,
+            soft_wrap: None,
+            lean_back: BTreeSet::new(),
+            last_wrap_params: None,
+            wrap_rules: WrapRule::defaults().into(),
+            soft_wrap_indent: Some(0),
+            show_all_soft_wraps: false,
             _subscriptions: subscriptions,
         }
     }
@@ -480,6 +507,7 @@ impl Editor {
             search.edited(&applied);
         }
         self.text_edited(&applied);
+        self.wrap_edited(&applied, cx);
         self.schedule_highlighting(cx);
         cx.emit(EditorEvent::Edited(applied));
         cx.notify();
@@ -904,6 +932,9 @@ impl Editor {
     }
 
     pub fn set_config(&mut self, config: EditorConfig) {
+        if config.wrap_rules[..] != self.wrap_rules[..] {
+            self.wrap_rules = config.wrap_rules.clone().into();
+        }
         self.config = config;
     }
 
@@ -1029,7 +1060,8 @@ impl Editor {
     /// Window bounds of the primary caret's character in the last frame
     /// (where hints about the caret go).
     pub fn caret_bounds(&self) -> Option<gpui::Bounds<Pixels>> {
-        self.bounds_for_offset(self.selections.primary().head)
+        let head = self.selections.primary().head;
+        self.bounds_for_offset_lean(head, self.leans_back(head))
     }
 
     /// Lines shaped in the last frame (virtualization check).
@@ -1082,6 +1114,11 @@ impl Editor {
                 "end": point(r.end),
             })),
             "analysis": self.analysis.name(),
+            "soft_wraps": self.soft_wraps(),
+            "wrap_columns": self.wrap_columns(),
+            "rows": self.display_rows(),
+            "caret_row": self.primary_row(),
+            "wrap_signs": self.layout.as_ref().map(|l| l.wrap_signs),
             "problems": {
                 "errors": counts.errors,
                 "warnings": counts.warnings,
@@ -1118,6 +1155,7 @@ impl Editor {
             search.edited(&applied);
         }
         self.text_edited(&applied);
+        self.wrap_edited(&applied, cx);
         self.schedule_highlighting(cx);
         self.autoscroll = true;
         self.caret_visible = true;
@@ -1136,6 +1174,7 @@ impl Editor {
         }
         self.selections = selections;
         self.marked = None;
+        self.lean_back.clear();
         self.autoscroll = true;
         self.caret_visible = true;
         self.blink_epoch += 1;
@@ -1209,6 +1248,7 @@ impl Editor {
             h.reset(&self.buffer);
         }
         self.highlight_task = None;
+        self.wrap_reloaded(cx);
         self.schedule_highlighting(cx);
         cx.emit(EditorEvent::Reloaded);
         cx.emit(EditorEvent::SelectionsChanged);
@@ -1264,34 +1304,33 @@ impl Editor {
         self.set_selections(set, cx);
     }
 
-    fn vertical(&mut self, lines: isize, extend: bool, cx: &mut Context<Self>) {
-        let tab = self.config.tab_size;
-        let buffer = &self.buffer;
+    /// Moves the carets by visual rows (lines without soft wraps), each
+    /// keeping its goal column.
+    fn vertical(&mut self, rows: isize, extend: bool, cx: &mut Context<Self>) {
         let mut set = self.selections.clone();
+        let last = self.display_rows() - 1;
+        let mut leaning = BTreeSet::new();
         set.update(|s| {
             let head = if !extend && !s.is_empty() {
-                if lines < 0 { s.start() } else { s.end() }
+                if rows < 0 { s.start() } else { s.end() }
             } else {
                 s.head
             };
-            let p = buffer.offset_to_point(head);
-            let goal = s
-                .goal
-                .unwrap_or_else(|| movement::display_column(buffer, p.line, p.column, tab));
-            let last = buffer.len_lines() - 1;
-            let target_line = (p.line as isize + lines).clamp(0, last as isize) as usize;
-            let to = if target_line == p.line {
-                // Up on the first line or down on the last: line start or end.
-                if lines < 0 && p.line == 0 {
-                    0
-                } else if lines > 0 && p.line == last {
-                    buffer.len_chars()
+            let lean = head == s.head && self.leans_back(head);
+            let (row, col) = self.visual_point(head, lean);
+            let goal = s.goal.unwrap_or(col);
+            let target = (row as isize + rows).clamp(0, last as isize) as usize;
+            let (to, to_lean) = if target == row {
+                // Up on the first row or down on the last: text start or end.
+                if rows < 0 && row == 0 {
+                    (0, false)
+                } else if rows > 0 && row == last {
+                    (self.buffer.len_chars(), false)
                 } else {
-                    head
+                    (head, lean)
                 }
             } else {
-                buffer.line_start(target_line)
-                    + movement::column_for_display(buffer, target_line, goal, tab)
+                self.offset_at_visual(target, goal)
             };
             if extend {
                 s.head = to;
@@ -1300,8 +1339,12 @@ impl Editor {
                 s.head = to;
             }
             s.goal = Some(goal);
+            if to_lean {
+                leaning.insert(to);
+            }
         });
         self.set_selections(set, cx);
+        self.lean_back = leaning;
     }
 
     fn page_lines(&self) -> isize {
@@ -1362,15 +1405,34 @@ impl Editor {
     }
 
     fn move_line_start(&mut self, _: &MoveLineStart, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_carets(false, cx, |e, s| {
-            movement::smart_line_start(&e.buffer, s.head)
-        });
+        self.move_carets(false, cx, |e, s| e.row_start_target(s.head));
     }
 
     fn move_line_end(&mut self, _: &MoveLineEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_carets(false, cx, |e, s| {
-            e.buffer.line_end(e.buffer.char_to_line(s.head))
+        self.move_to_row_ends(false, cx);
+    }
+
+    /// End: every caret to the end of its visual row, or from there to the
+    /// end of its line.
+    fn move_to_row_ends(&mut self, extend: bool, cx: &mut Context<Self>) {
+        let targets: Vec<(usize, bool)> = self
+            .selections
+            .iter()
+            .map(|s| self.row_end_target(s.head))
+            .collect();
+        let mut i = 0;
+        let mut set = self.selections.clone();
+        set.update(|s| {
+            let to = targets[i].0;
+            i += 1;
+            if extend {
+                s.extend_to(to);
+            } else {
+                s.collapse_to(to);
+            }
         });
+        self.set_selections(set, cx);
+        self.lean_back = targets.iter().filter(|t| t.1).map(|t| t.0).collect();
     }
 
     fn move_document_start(
@@ -1426,15 +1488,11 @@ impl Editor {
     }
 
     fn select_line_start(&mut self, _: &SelectLineStart, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_carets(true, cx, |e, s| {
-            movement::smart_line_start(&e.buffer, s.head)
-        });
+        self.move_carets(true, cx, |e, s| e.row_start_target(s.head));
     }
 
     fn select_line_end(&mut self, _: &SelectLineEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_carets(true, cx, |e, s| {
-            e.buffer.line_end(e.buffer.char_to_line(s.head))
-        });
+        self.move_to_row_ends(true, cx);
     }
 
     fn select_document_start(
@@ -1563,9 +1621,9 @@ impl Editor {
     }
 
     fn scroll_to_line(&mut self, a: &ScrollToLine, _: &mut Window, cx: &mut Context<Self>) {
-        let line_height = self.layout.as_ref().map_or(px(20.0), |l| l.line_height);
+        let line_height = self.row_height();
         let line = a.line.min(self.buffer.len_lines().saturating_sub(1));
-        self.scroll.y = line_height * line as f32;
+        self.scroll.y = line_height * self.line_row(line) as f32;
         cx.notify();
     }
 
@@ -2499,10 +2557,12 @@ impl Editor {
 
     // ---- mouse ----------------------------------------------------------------
 
-    /// Mouse press at char offset `pos` with `clicks` (1, 2, 3).
+    /// Mouse press at char offset `pos` with `clicks` (1, 2, 3); `lean`:
+    /// the press was at the end of a row before a soft wrap at `pos`.
     pub(crate) fn mouse_down(
         &mut self,
         pos: usize,
+        lean: bool,
         clicks: usize,
         shift: bool,
         window: &mut Window,
@@ -2536,6 +2596,9 @@ impl Editor {
                     Selection::caret(pos)
                 };
                 self.set_selections(SelectionSet::single(sel), cx);
+                if lean {
+                    self.lean_back.insert(pos);
+                }
                 // A click elsewhere without a selection is a navigation.
                 if !shift && s.is_empty() && s.head != pos {
                     self.jumped_from(s.head, cx);
@@ -2554,8 +2617,9 @@ impl Editor {
         start..end
     }
 
-    /// Mouse drag to char offset `pos`.
-    pub(crate) fn mouse_drag(&mut self, pos: usize, cx: &mut Context<Self>) {
+    /// Mouse drag to char offset `pos` (`lean`: to the end of a row before
+    /// a soft wrap there).
+    pub(crate) fn mouse_drag(&mut self, pos: usize, lean: bool, cx: &mut Context<Self>) {
         let s = *self.selections.primary();
         let sel = match self.drag.clone() {
             Some(DragUnit::Char) => Selection::new(s.anchor, pos),
@@ -2577,8 +2641,12 @@ impl Editor {
             }
             _ => return,
         };
-        if sel != s {
+        let lean = lean && sel.head == pos && matches!(self.drag, Some(DragUnit::Char));
+        if sel != s || lean != self.leans_back(pos) {
             self.set_selections(SelectionSet::single(sel), cx);
+            if lean {
+                self.lean_back.insert(pos);
+            }
         }
     }
 
@@ -2589,10 +2657,13 @@ impl Editor {
     }
 
     /// Scrolls by a wheel or trackpad delta (positive y scrolls down).
+    /// Soft-wrapped text does not scroll sideways.
     pub(crate) fn scroll_by(&mut self, delta: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let max_y = self.max_scroll_y();
         self.scroll.y = (self.scroll.y + delta.y).clamp(px(0.0), max_y);
-        self.scroll.x = (self.scroll.x + delta.x).max(px(0.0));
+        if self.soft_wrap.is_none() {
+            self.scroll.x = (self.scroll.x + delta.x).max(px(0.0));
+        }
         cx.notify();
     }
 
@@ -2605,14 +2676,14 @@ impl Editor {
     }
 
     /// How far the text scrolls in a view of `view_height`: until the last
-    /// line is at the top, or for a console until it is at the bottom.
+    /// row is at the top, or for a console until it is at the bottom.
     pub(crate) fn max_scroll_y_for(&self, view_height: Pixels) -> Pixels {
-        let line_height = self.layout.as_ref().map_or(px(20.0), |l| l.line_height);
-        let lines = self.buffer.len_lines();
+        let line_height = self.row_height();
+        let rows = self.display_rows();
         if self.console {
-            (line_height * lines as f32 - view_height).max(px(0.0))
+            (line_height * rows as f32 - view_height).max(px(0.0))
         } else {
-            line_height * lines.saturating_sub(1) as f32
+            line_height * rows.saturating_sub(1) as f32
         }
     }
 
@@ -2625,17 +2696,18 @@ impl Editor {
 // ---- navigation history -------------------------------------------------
 
 impl Editor {
-    /// How far line `line` is from the top of the view, as of the last
-    /// frame (`None` before the first).
+    /// How far line `line` (its first row) is from the top of the view, as
+    /// of the last frame (`None` before the first).
     pub fn line_view_y(&self, line: usize) -> Option<Pixels> {
         let line_height = self.layout.as_ref()?.line_height;
-        Some(line_height * line as f32 - self.scroll.y)
+        Some(line_height * self.line_row(line) as f32 - self.scroll.y)
     }
 
-    /// How far the primary caret's line is from the top of the view (the
+    /// How far the primary caret's row is from the top of the view (the
     /// reference's relative caret position).
     pub fn caret_view_y(&self) -> Option<Pixels> {
-        self.line_view_y(self.caret_point().line)
+        let line_height = self.layout.as_ref()?.line_height;
+        Some(line_height * self.primary_row() as f32 - self.scroll.y)
     }
 
     /// Reports that the caret jumped from char offset `from` as a
@@ -2665,8 +2737,7 @@ impl Editor {
     /// the caret is kept visible; `line_height` of this frame).
     pub(crate) fn apply_caret_view_y(&mut self, line_height: Pixels) {
         if let Some(y) = self.caret_view_y.take() {
-            let line = self.buffer.char_to_line(self.selections.primary().head);
-            self.scroll.y = line_height * line as f32 - y;
+            self.scroll.y = line_height * self.primary_row() as f32 - y;
         }
     }
 }
@@ -2750,6 +2821,7 @@ editor_actions! {
     ScrollToLine => scroll_to_line,
     NextProblem => next_problem,
     PreviousProblem => previous_problem,
+    ToggleSoftWraps => toggle_soft_wraps,
 }
 
 impl Render for Editor {

@@ -234,6 +234,7 @@ report says which parent was missing.
 | `ui.indent-guide-active` | `SELECTED_INDENT_GUIDE` (scheme color) | Indent guide of the caret block |
 | `ui.right-margin` | `RIGHT_MARGIN_COLOR` (scheme color) | Right margin line |
 | `ui.whitespace` | `WHITESPACES` (scheme color) | Visible whitespace markers |
+| `ui.soft-wrap-sign` | `SOFT_WRAP_SIGN_COLOR` (scheme color) | Signs at the soft wraps of a line |
 | `ui.completion-popup` | `LOOKUP_COLOR` (scheme color) | Completion popup background |
 | `ui.completion-selection` | `CompletionPopup.selectionBackground` | Selected completion item |
 | `ui.completion-match` | `CompletionPopup.matchForeground` | Matched characters in completion items |

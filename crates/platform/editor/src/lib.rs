@@ -13,6 +13,8 @@ pub mod find;
 pub mod highlight;
 mod input;
 mod inspection;
+mod soft_wrap;
+mod wrap;
 
 pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
 pub use editor::{
@@ -22,6 +24,7 @@ pub use editor::{
 pub use element::LONG_LINE;
 pub use find::FindBar;
 pub use highlight::{Highlighter, InlineStyle, Job, JobResult, Span, SyntaxHighlighter};
+pub use wrap::{WrapCondition, WrapRule};
 
 /// Height of a one-line field in the UI font ([`Editor::set_ui_font`]),
 /// for laying out its container.

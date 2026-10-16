@@ -12,7 +12,7 @@ pub mod type_engine;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use editor::SyntaxHighlighter;
+use editor::{SyntaxHighlighter, WrapCondition, WrapRule};
 use ui::icons::{IconName, IconSvg};
 use workbench::{
     AutoExclusions, FileAssociation, FileType, NavigationHooks, Product, RootKind, RunHook,
@@ -94,9 +94,26 @@ fn python() -> FileType {
         string_prefixes: &['r', 'R', 'b', 'B', 'f', 'F', 't', 'T', 'u', 'U'],
         highlighter: Some(Arc::new(SyntaxHighlighter::factory(py_syntax::language()))),
         language_id: Some("python"),
+        wrap_rules: PYTHON_WRAP_RULES,
         ..FileType::plain("Python", &["py", "pyi", "pyw"], IconName("python/file"))
     }
 }
+
+/// Where a soft-wrapped Python line may wrap when no space is near: after
+/// a comma (preferred a little) or an opening bracket, around spaces and
+/// tabs (the reference's Python line wrap strategy).
+const PYTHON_WRAP_RULES: &[WrapRule] = &[
+    WrapRule::weighted(
+        ',',
+        WrapCondition::After,
+        WrapRule::DEFAULT_WEIGHT * 11 / 10,
+    ),
+    WrapRule::new(' ', WrapCondition::Both),
+    WrapRule::new('\t', WrapCondition::Both),
+    WrapRule::new('(', WrapCondition::After),
+    WrapRule::new('[', WrapCondition::After),
+    WrapRule::new('{', WrapCondition::After),
+];
 
 /// The other file types of the reference's Python plugin: requirements
 /// files and the `py.typed` marker, both drawn as text.
