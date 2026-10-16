@@ -435,33 +435,29 @@ fn imported(
     {
         eprintln!("themes: {e}");
     }
-    report(import_notification(&themes, &schemes, &reports), cx);
+    log_reports(&reports);
+    report(import_notification(&themes, &schemes), cx);
     cx.refresh_windows();
 }
 
-/// The balloon of a finished import.
-fn import_notification(
-    themes: &[(String, String)],
-    schemes: &[String],
-    reports: &[ImportReport],
-) -> Notification {
-    let mapped: usize = reports.iter().map(|r| r.summary().mapped).sum();
-    let unmapped: usize = reports.iter().map(|r| r.summary().unmapped_keys).sum();
-    let mut groups: std::collections::BTreeMap<String, usize> = Default::default();
-    for r in reports {
-        for (g, n) in r.unmapped_groups() {
-            *groups.entry(g).or_default() += n;
+/// The balloon of a finished import: what came in, in a sentence or two
+/// (the reference says "Color scheme added" for a scheme). What could not
+/// be mapped goes to the log ([`log_reports`]), not into the balloon.
+fn import_notification(themes: &[(String, String)], schemes: &[String]) -> Notification {
+    let (title, text) = match (themes, schemes) {
+        ([], []) => {
+            return Notification::new(
+                NotificationKind::Warning,
+                "Nothing imported",
+                "No UI theme or editor color scheme could be imported.",
+            );
         }
-    }
-    let mut groups: Vec<(String, usize)> = groups.into_iter().collect();
-    groups.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let (title, mut text) = match (themes, schemes) {
         ([(_, name)], []) => (
             "Theme imported".to_owned(),
             format!("{name} is now the theme."),
         ),
         ([], [name]) => (
-            "Editor color scheme imported".to_owned(),
+            "Color scheme added".to_owned(),
             format!("{name} is offered as an editor color scheme."),
         ),
         (themes, schemes) => {
@@ -479,32 +475,28 @@ fn import_notification(
             ("Themes imported".to_owned(), text)
         }
     };
-    text.push_str(&format!(" {} mapped", plural(mapped, "key")));
-    if unmapped == 0 {
-        text.push('.');
-    } else {
-        let shown: Vec<String> = groups
+    Notification::new(NotificationKind::Information, title, text)
+}
+
+/// Writes what each imported file mapped and what it could not map, by
+/// group, to the log (stderr).
+fn log_reports(reports: &[ImportReport]) {
+    for r in reports {
+        let summary = r.summary();
+        let groups: Vec<String> = r
+            .unmapped_groups()
             .iter()
-            .take(4)
             .map(|(g, n)| format!("{g} {n}"))
             .collect();
-        let more = groups.len().saturating_sub(shown.len());
-        text.push_str(&format!(
-            "; {unmapped} could not be mapped: {}{}.",
-            shown.join(", "),
-            if more > 0 {
-                format!(" and {more} more groups")
-            } else {
-                String::new()
-            }
-        ));
+        eprintln!(
+            "themes: imported {}: {} mapped, {} not mapped{}{}",
+            r.name,
+            plural(summary.mapped, "key"),
+            summary.unmapped_keys,
+            if groups.is_empty() { "" } else { ": " },
+            groups.join(", "),
+        );
     }
-    let kind = if themes.is_empty() && schemes.is_empty() {
-        NotificationKind::Warning
-    } else {
-        NotificationKind::Information
-    };
-    Notification::new(kind, title, text)
 }
 
 fn plural(n: usize, word: &str) -> String {

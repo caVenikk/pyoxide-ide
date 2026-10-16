@@ -92,6 +92,6 @@ ui::ui_commands! {
         "Shows the Switch popup (Quick Switch Scheme): its Theme row opens the Theme popup.";
     /// Import a theme.
     ImportTheme { path: Option<String> } => "settings.import-theme", "Import Theme\u{2026}",
-        "Imports a PyCharm UI theme (`.theme.json`), colour scheme (`.icls`, `.xml`), theme plugin (`.jar`, `.zip`) or a folder of them into the `themes` folder of the configuration: the first UI theme becomes the theme at once, a scheme alone is offered as an editor colour scheme, and a balloon reports what could not be mapped (an error balloon when nothing could be imported). Without a path a file chooser is shown.",
+        "Imports a PyCharm UI theme (`.theme.json`), colour scheme (`.icls`, `.xml`), theme plugin (`.jar`, `.zip`) or a folder of them into the `themes` folder of the configuration: the first UI theme becomes the theme at once, a scheme alone is offered as an editor colour scheme, and a short balloon says what was imported (an error balloon when nothing could be read; the keys that could not be mapped go to the log). Without a path a file chooser is shown.",
         r#"{"path": "/path/to/MyTheme.jar"}"#;
 }

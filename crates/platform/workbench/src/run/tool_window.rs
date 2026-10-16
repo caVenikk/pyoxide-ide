@@ -1095,7 +1095,9 @@ impl RunToolWindow {
     /// shortcut of Choose Run Configuration in brackets.
     fn render_empty(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().color(UiRole::TextMuted);
-        let shortcut = self.choose_shortcut(window);
+        // Drawn again once the binding is found: on the tool window's
+        // first frame GPUI does not know its focus handle yet (#201).
+        let shortcut = ui::keys::shortcut_in_view(&ChooseConfiguration, &self.focus, window, cx);
         // A space at the end of a text run would be dropped, so the spaces
         // around the link do not break.
         let launch = format!("{EMPTY_LAUNCH}\u{00a0}");
@@ -1127,14 +1129,16 @@ impl RunToolWindow {
                     .gap(px(4.0))
                     .text_color(muted)
                     .children(EMPTY_LINES)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .child(launch)
-                            .child(link)
-                            .when(!tail.is_empty(), |d| d.child(tail)),
-                    ),
+                    .child(div().flex().flex_row().child(launch).child(link).when(
+                        !tail.is_empty(),
+                        |d| {
+                            d.child(
+                                div()
+                                    .debug_selector(|| "run-empty-shortcut".into())
+                                    .child(tail),
+                            )
+                        },
+                    )),
             )
     }
 

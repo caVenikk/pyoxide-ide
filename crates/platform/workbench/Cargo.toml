@@ -7,6 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The time of a notification in the Notifications tool window.
+chrono.workspace = true
 code-intel-ui.workspace = true
 commands.workspace = true
 console.workspace = true

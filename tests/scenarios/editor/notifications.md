@@ -20,6 +20,11 @@
    imported yet (see `run-debug/run-configurations.md`), then run
    `run.configurations.import-reference` again.
 9. Switch between the dark and light theme with a balloon shown.
+10. Run `workbench.notify` with a title and a content of three long
+    sentences. Click the chevron at the right of its last line, then the
+    chevron below the text.
+11. Click the bell at the top of the right stripe, then run
+    `workbench.notify` twice; click "Clear all"; click the bell again.
 
 ## Expected
 - The balloon sits at the bottom right of the main window: its right edge
@@ -28,8 +33,9 @@
   It has a fixed width; on the left the kind's icon (information, warning or
   error), then the title in bold (only when there is content; a balloon
   with only a title shows it in the normal weight), the content below it
-  (wrapped at the balloon's width) and the action links in a row below that,
-  16 px apart, underlined under the pointer.
+  and the action links in a row below that, 16 px apart, underlined under
+  the pointer. Content that does not fit on one line of 320 px wraps at
+  240 px and never runs past the balloon's edge.
 - Step 1: an information balloon is not removed before the first input
   after it was shown; the close button is not shown.
 - Step 2: the balloon goes ten seconds after the first input.
@@ -40,8 +46,8 @@
   button closes it at once (with Alt held, every balloon closes).
 - Step 5: at most three balloons are shown, the newest on top; the oldest
   collapses into a line "1 more notification" under the stack ("2 more
-  notifications" for two). A click on the line closes every balloon (the
-  reference opens the Notifications tool window, which does not exist yet).
+  notifications" for two). A click on the line closes every balloon and
+  opens the Notifications tool window.
 - Step 6: the balloon closes and the link's command runs.
 - Step 7: the time does not run while the window is inactive; the balloon
   is still there on return.
@@ -51,20 +57,34 @@
   saved gives an error balloon.
 - Step 9: the balloon's colours follow the theme (background, border,
   title, content, link, shadow).
+- Step 10: the balloon shows three lines of the content (four less one
+  for the title and one for action links), with a down chevron at the
+  right of the third; a click on it or on the text shows the whole
+  content (ten lines, then it scrolls) with an up chevron below it, which
+  collapses it again.
+- Step 11: the Notifications tool window opens on the right with
+  "Suggestions, events," / "and errors will appear here" in the middle;
+  with notifications it shows "Timeline" with "Clear all" at the right and
+  the notifications, the newest on top: icon, title, the time at the
+  right, content and action links. "Clear all" empties it (and closes the
+  balloons); the bell hides the tool window.
 - `workbench.state` (`notifications`) lists the open balloons, the newest
-  first: id, kind, title, content, action texts, sticky, hovered, whether
-  the time runs and the milliseconds left.
+  first: id, kind, title, content, its wrapped lines, the lines shown,
+  expandable and expanded, action texts, sticky, hovered, whether the time
+  runs and the milliseconds left; and the timeline, the newest first, with
+  each notification's time.
 
 ## Commands
 `workbench.notify {"kind": "information"|"warning"|"error", "title": ...,
 "content": ..., "sticky": ..., "actions": [{"text": ..., "command": ...,
 "args": ...}]}`, `workbench.state` (`notifications`),
-`workbench.set-theme {"id": ...}`.
+`workbench.set-theme {"id": ...}`, `notifications.clear-all`,
+`workbench.activate-tool-window {"id": "notifications"}`.
 
 ## Notes
-- The reference also lists every notification in the Notifications tool
-  window and has per-group "Don't show again" settings; neither exists yet
-  (the stripe button has no tool window behind it).
+- The reference also has per-group "Don't show again" settings, the
+  Suggestions group, search, "Mark all as read" and the unread dot on the
+  bell; none exists yet.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/notifications.html and the sources

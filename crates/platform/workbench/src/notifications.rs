@@ -6,6 +6,13 @@
 //! `ActionCenterBalloonLayout`), over the tool windows and below popups
 //! and dialogs. An action link runs its command in the window and closes
 //! the balloon.
+//!
+//! Every notification also goes into the timeline that the Notifications
+//! tool window lists ([`tool_window`]), until "Clear all".
+
+mod tool_window;
+
+pub use tool_window::{ID, NotificationsToolWindow};
 
 use std::rc::Rc;
 use std::time::Instant;
@@ -25,6 +32,9 @@ use ui::theme::ThemeExt;
 
 ui::ui_commands! {
     COMMANDS, scope = "Workbench";
+    /// Clear the Notifications tool window.
+    ClearAllNotifications => "notifications.clear-all", "Clear All Notifications",
+        "Removes every notification from the Notifications tool window's timeline and closes the balloons shown (`ClearAllNotifications`).";
     /// Show a balloon.
     Notify {
         kind: Option<String>,
@@ -80,9 +90,38 @@ impl Notify {
     }
 }
 
-/// The balloons of a main window.
+/// A notification of the timeline.
+#[derive(Debug, Clone)]
+pub struct TimelineEntry {
+    /// The id of its balloon.
+    pub id: u64,
+    pub notification: Notification,
+    /// When it came.
+    pub time: chrono::DateTime<chrono::Local>,
+}
+
+impl TimelineEntry {
+    /// The time as the timeline shows it (`NotificationGroupComponent`'s
+    /// `formatPrettyDateTime`): the time of day today, "Yesterday", or
+    /// the date.
+    pub fn time_text(&self, now: chrono::DateTime<chrono::Local>) -> String {
+        let day = self.time.date_naive();
+        let today = now.date_naive();
+        if day == today {
+            self.time.format("%H:%M").to_string()
+        } else if today.pred_opt() == Some(day) {
+            "Yesterday".to_owned()
+        } else {
+            self.time.format("%Y-%m-%d").to_string()
+        }
+    }
+}
+
+/// The balloons of a main window and the timeline of its notifications.
 pub struct Notifications {
     stack: BalloonStack,
+    /// Oldest first.
+    timeline: Vec<TimelineEntry>,
     timer: Task<()>,
     _activation: Subscription,
 }
@@ -96,6 +135,7 @@ impl Notifications {
         });
         Self {
             stack: BalloonStack::default(),
+            timeline: Vec::new(),
             timer: Task::ready(()),
             _activation: activation,
         }
@@ -105,11 +145,29 @@ impl Notifications {
         &self.stack
     }
 
-    /// Shows a balloon; returns its id.
+    /// The notifications of the timeline, oldest first.
+    pub fn timeline(&self) -> &[TimelineEntry] {
+        &self.timeline
+    }
+
+    /// Shows a balloon and adds the notification to the timeline; returns
+    /// its id.
     pub fn notify(&mut self, notification: Notification, cx: &mut Context<Self>) -> u64 {
-        let id = self.stack.add(notification);
+        let id = self.stack.add(notification.clone());
+        self.timeline.push(TimelineEntry {
+            id,
+            notification,
+            time: chrono::Local::now(),
+        });
         cx.notify();
         id
+    }
+
+    /// Empties the timeline; the balloons go with it (the reference
+    /// expires the notifications).
+    pub fn clear_timeline(&mut self, cx: &mut Context<Self>) {
+        self.timeline.clear();
+        self.close_all(cx);
     }
 
     /// Closes a balloon.
@@ -126,9 +184,27 @@ impl Notifications {
         cx.notify();
     }
 
-    /// The balloons for `workbench.state`.
+    /// The balloons and the timeline for `workbench.state`.
     pub fn state_json(&self, cx: &App) -> Value {
-        self.stack.state_json(cx.background_executor().now())
+        let mut state = self.stack.state_json(cx.background_executor().now());
+        let now = chrono::Local::now();
+        state["timeline"] = self
+            .timeline
+            .iter()
+            .rev()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id,
+                    "kind": e.notification.kind.name(),
+                    "title": e.notification.title.as_ref(),
+                    "content": e.notification.content.as_ref(),
+                    "actions": e.notification.actions.iter()
+                        .map(|a| a.text.as_ref()).collect::<Vec<_>>(),
+                    "time": e.time_text(now),
+                })
+            })
+            .collect();
+        state
     }
 
     fn now(cx: &App) -> Instant {
@@ -194,8 +270,23 @@ impl Notifications {
                 self.stack.set_hovered_action(*id, *index);
                 cx.notify();
             }
-            // The reference also opens the Notifications tool window.
-            BalloonEvent::ShowMore => self.close_all(cx),
+            BalloonEvent::Expand { id } => {
+                self.stack.toggle_expanded(*id);
+                cx.notify();
+            }
+            // And the Notifications tool window opens
+            // (`ActionCenterBalloonLayout`: `closeAll`, `showLog`).
+            BalloonEvent::ShowMore => {
+                self.close_all(cx);
+                window.defer(cx, |window, cx| {
+                    window.dispatch_action(
+                        Box::new(crate::commands::ActivateToolWindow {
+                            id: tool_window::ID.to_owned(),
+                        }),
+                        cx,
+                    )
+                });
+            }
         }
     }
 }
@@ -234,14 +325,15 @@ fn listen_for_input(this: WeakEntity<Notifications>, window: &mut Window) {
 }
 
 impl Render for Notifications {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.stack.wrap(cx);
         let this = cx.entity().downgrade();
         let handler: ui::notification::BalloonHandler = Rc::new(move |event, window, cx| {
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| this.event(event, window, cx));
             }
         });
-        let Some(stack) = render_stack(&self.stack, handler, window, cx) else {
+        let Some(stack) = render_stack(&self.stack, handler, cx) else {
             return div().into_any_element();
         };
         let theme = cx.theme();

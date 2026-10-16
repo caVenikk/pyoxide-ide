@@ -921,6 +921,24 @@ fn the_empty_run_window_link_shows_the_hand_and_underlines(cx: &mut TestAppConte
     assert_eq!(shape(&mut h), gpui::CursorStyle::Arrow);
 }
 
+/// The shortcut is drawn as soon as the Run tool window opens, without
+/// the pointer over the link (#201). Only the frames the window asks for
+/// are drawn, as in the application: no draw is forced after the key.
+#[gpui::test]
+fn the_empty_run_window_shows_the_shortcut_when_it_opens(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
+    vcx.simulate_keystrokes(if MAC { "cmd-4" } else { "alt-4" });
+    assert!(vcx.debug_bounds("run-empty").is_some(), "the empty state");
+    assert!(
+        vcx.debug_bounds("run-empty-shortcut").is_some(),
+        "the shortcut is drawn"
+    );
+}
+
 /// The last line of the empty state and the shortcut in it.
 fn launch_line(h: &mut H<'_>) -> (String, Value) {
     let empty = h.run()["empty"].clone();
