@@ -150,11 +150,11 @@ Cherry-pick and interactive rebase,vcs,could,yes,no,Community
 .gitignore support and Add to .gitignore,vcs,could,yes,no,Community
 "Compare with branch, worktrees and tags UI",vcs,could,yes,no,Community
 Clone and share on a hosting service,vcs,could,yes,no,Community
-"Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S)",settings,must,yes,no,Community; ADR 0017 (#92)
-"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,no,"own store (settings.toml); reads the reference's XML data files once (#92, #40)"
+"Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S)",settings,must,yes,yes,Community; ADR 0017 (#92)
+"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,partial,"own store (settings.toml); reads the reference's XML data files once (#92, #40)"
 "Appearance page: theme choice with live switch, Custom themes and Import Theme…",settings,must,yes,partial,Community; live switch (workbench.set-theme) and the themes importer exist; no page yet (#92)
 "Theme quick switch with preview (gear > Theme, Quick Switch Scheme)",settings,must,yes,no,Community (#92)
-System Settings page (autosave and sync of external changes),settings,must,yes,no,Community; defaults in code today (#92)
+System Settings page (autosave and sync of external changes),settings,must,yes,yes,Community; defaults in code today (#92)
 "Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,no,Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40)
 Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,no,Community (#40)
 Editor > Font page,settings,must,yes,no,Community (#92)

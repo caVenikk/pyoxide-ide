@@ -6382,6 +6382,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings"
+version = "0.0.1"
+dependencies = [
+ "dirs 7.0.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml_edit 0.25.17+spec-1.1.0",
+]
+
+[[package]]
 name = "settings-import"
 version = "0.0.1"
 dependencies = [
@@ -6396,6 +6408,22 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "settings-ui"
+version = "0.0.1"
+dependencies = [
+ "editor",
+ "gpui",
+ "serde",
+ "serde_json",
+ "settings",
+ "tempfile",
+ "text",
+ "themes",
+ "toml 1.1.8+spec-1.1.0",
+ "ui",
 ]
 
 [[package]]
@@ -8791,6 +8819,8 @@ dependencies = [
  "search",
  "serde",
  "serde_json",
+ "settings",
+ "settings-ui",
  "smallvec",
  "tempfile",
  "text",

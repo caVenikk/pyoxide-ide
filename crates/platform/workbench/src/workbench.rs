@@ -195,6 +195,8 @@ pub struct Workbench {
     dialog: Option<run_actions::OpenDialog>,
     /// Where the run widget's popups open.
     run_anchors: crate::run::widget::Anchors,
+    /// Where the main toolbar's gear menu opens.
+    pub(crate) gear: crate::settings::Gear,
     /// Code intelligence of the editor tabs, when the product has language
     /// services.
     code_intel: Option<Entity<CodeIntelView>>,
@@ -356,6 +358,7 @@ impl Workbench {
             run_menu: None,
             dialog: None,
             run_anchors: crate::run::widget::Anchors::default(),
+            gear: Default::default(),
             code_intel,
             navigation: Default::default(),
             file_sync: Default::default(),
@@ -1623,10 +1626,7 @@ impl Workbench {
                         icon_button("search", IconName::SEARCH, button, px(20.0), false, cx)
                             .tooltip(Tooltip::text("Search Everywhere", None)),
                     )
-                    .child(
-                        icon_button("settings", IconName::SETTINGS, button, px(20.0), false, cx)
-                            .tooltip(Tooltip::text("Settings", None)),
-                    ),
+                    .child(self.render_gear(button, cx)),
             )
             .children(path_widget)
     }
@@ -2214,6 +2214,8 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::hide_tool_window))
             .on_action(cx.listener(Self::locate_file))
             .on_action(cx.listener(Self::set_theme))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::open_folder_action))
             .on_action(cx.listener(Self::open_file_action))
             .on_action(cx.listener(Self::save))

@@ -985,7 +985,10 @@ impl Element for EditorElement {
                     e.scroll.y = y + lh - bounds.size.height;
                 }
                 let x = m.char_width * col as f32;
-                let margin = m.char_width * 4.0;
+                // Four columns of context, but never more than a quarter
+                // of the view: a narrow field (a number of three digits)
+                // must not scroll its text away.
+                let margin = (m.char_width * 4.0).min(text_width / 4.0);
                 if x < e.scroll.x {
                     e.scroll.x = (x - margin).max(px(0.0));
                 } else if x + margin > e.scroll.x + text_width {

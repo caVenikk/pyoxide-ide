@@ -1,0 +1,17 @@
+[package]
+name = "settings"
+description = "Application settings of Pyoxide IDE (ADR 0017): the settings.toml store, typed sections with defaults, change events, background saves that merge with the file, settings.get and settings.set"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dirs = "7"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"

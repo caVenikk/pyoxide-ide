@@ -8,6 +8,9 @@
 5. Open Settings again; resize the window and move the splitter; close
    it and open it again.
 6. Open Settings from the toolbar gear menu and from the macOS app menu.
+7. Select two other pages; click Back twice (or Cmd+[ / Ctrl+Alt+Left),
+   then Forward.
+8. Scroll the page tree down past the top of a group.
 
 ## Expected
 - Step 1: one window titled "Settings – <project>" on Appearance (first
@@ -20,12 +23,18 @@
   (non-modal).
 - Step 4: Escape without edits closes the window.
 - Step 5: it opens on Editor > Font with the size and splitter kept.
-- Step 6: both open the same window.
+- Step 6: the gear (tooltip "IDE and Project Settings") opens a menu with
+  "Settings…" and its shortcut; both open the same window.
+- Step 7: Back returns to the pages selected before, Forward goes again;
+  Back is disabled on the first page, Forward after the last.
+- Step 8: the group of the rows under the top edge stays there as a bold
+  header while the rows below belong to it.
 
 ## Commands
 `settings.open {"page": ...}`, `settings.select {"page": ...}`,
-`settings.cancel`, `settings.state` (page, modified pages, filter,
-window).
+`settings.back`, `settings.forward`, `settings.cancel`,
+`workbench.settings-menu`, `settings.state` (page, modified pages,
+search, Back and Forward, sticky header, window size and split).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/settings-preferences-dialog.html;

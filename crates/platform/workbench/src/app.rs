@@ -109,6 +109,8 @@ pub struct Product {
     /// Packages, modules and the kinds of roots of *Mark Directory As* in
     /// the project tool window (ADR 0013).
     pub tree: project_panel::TreeHooks,
+    /// The product's pages of the Settings window (ADR 0017).
+    pub settings_pages: Vec<settings_ui::PageSpec>,
 }
 
 /// Default size of the main window's content.
@@ -143,6 +145,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::run::init(cx);
     code_intel_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
+    crate::settings::init(cx, &product.settings_pages);
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
         window
             .root::<Workbench>()
@@ -257,7 +260,10 @@ pub fn init(cx: &mut App, product: &Product) {
         "code.servers",
         Rc::new(|_, window, cx| Ok(code_intel(window, cx)?.read(cx).servers_json(cx))),
     );
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    // Changes not applied in the Settings window are asked about first.
+    cx.on_action(|_: &Quit, cx| {
+        settings_ui::leave::resolve(settings_ui::leave::Leaving::Application, cx, |cx| cx.quit())
+    });
     // Any key ends a double tap of a modifier in progress.
     cx.intercept_keystrokes(|event, _, cx| crate::keymap::key_pressed(&event.keystroke, cx))
         .detach();
@@ -268,6 +274,14 @@ pub fn init(cx: &mut App, product: &Product) {
         Menu {
             name: product.name.into(),
             items: vec![
+                MenuItem::action(
+                    "Settings\u{2026}",
+                    settings_ui::commands::OpenSettings {
+                        page: None,
+                        filter: None,
+                    },
+                ),
+                MenuItem::separator(),
                 MenuItem::action("Project", ToggleProject),
                 MenuItem::action(
                     "Light Theme",
@@ -331,8 +345,21 @@ pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Work
     let options = window_options(cx, &product);
     cx.open_window(options, |window, cx| {
         let workbench = cx.new(|cx| Workbench::new(product.clone(), window, cx));
+        // Autosave and sync follow the application settings.
+        workbench.update(cx, |w, cx| {
+            w.set_save_settings(settings_ui::store::get(cx));
+            w.set_sync_settings(crate::SyncSettings {
+                watch: w.sync_settings().watch,
+                ..settings_ui::store::get(cx)
+            });
+        });
         // The product's status bar widgets get the finished workbench.
         Workbench::create_status_widgets(&workbench, &product, window, cx);
+        // Closing the window with changes not applied in its Settings
+        // window asks first.
+        window.on_window_should_close(cx, |window, cx| {
+            settings_ui::leave::can_close_parent(window.window_handle(), cx)
+        });
         workbench
     })
     .expect("open the main window")
@@ -346,6 +373,12 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     Application::new().run(move |cx| {
         init(cx, &product);
         // Settings that last across sessions (tests keep the defaults).
+        if let Some(file) = ::settings::settings_file() {
+            settings_ui::store::load(cx, file);
+        }
+        if let Some(dir) = ::settings::config_dir() {
+            settings_ui::window_state::load(cx, dir.join(settings_ui::window_state::FILE));
+        }
         if let Some(file) = crate::find_in_files::settings_file() {
             crate::find_in_files::load_settings(cx, file);
         }

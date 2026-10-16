@@ -24,7 +24,9 @@ members = [
     "crates/platform/file-watcher",
     "crates/platform/lsp-client",
     "crates/platform/secrets",
+    "crates/platform/settings",
     "crates/platform/settings-import",
+    "crates/platform/settings-ui",
     "crates/platform/syntax",
     "crates/platform/text",
     "crates/platform/themes",
@@ -95,7 +97,9 @@ project-search = { path = "crates/platform/project-search" }
 run-config = { path = "crates/platform/run-config" }
 search = { path = "crates/platform/search" }
 secrets = { path = "crates/platform/secrets" }
+settings = { path = "crates/platform/settings" }
 settings-import = { path = "crates/platform/settings-import" }
+settings-ui = { path = "crates/platform/settings-ui" }
 syntax = { path = "crates/platform/syntax" }
 text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }

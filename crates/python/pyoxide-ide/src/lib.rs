@@ -272,6 +272,9 @@ pub fn product() -> Product {
         )),
         new_items: new_items::new_items(),
         tree: tree(),
+        // The Python group (Interpreter, Type Engine, External Tools)
+        // comes with those pages.
+        settings_pages: Vec::new(),
     }
 }
 

@@ -7,7 +7,8 @@
 3. Click "Revert changes".
 4. Change the value to 30 again and press Apply.
 5. Change a check box on the page and press Cancel; reopen Settings.
-6. Change the value, then close the project.
+6. Change the value, then close the project; again, then quit (Cmd+Q);
+   again, then open Settings from the window of another project.
 7. Enter an invalid value and press Apply.
 
 ## Expected
@@ -17,8 +18,12 @@
 - Step 4: the settings file holds the value; autosave waits 30 seconds of
   idle time; Apply is disabled again.
 - Step 5: the check box is unchanged after reopening.
-- Step 6: the message "Unsaved Changes" with Apply, Don't Save and
-  Cancel.
+- Step 6: the message "Unsaved Changes" ("You have unsaved changes in
+  the settings for "<project>". Do you want to apply them before closing
+  the project?", "... closing the application?", "... switching to
+  "<other>"?") with Apply, Don't Save and Cancel: Apply stores and goes
+  on, Don't Save drops the changes and goes on, Cancel keeps everything
+  open. Without changes nothing is asked.
 - Step 7: the page stays selected, its name turns red and the error is
   shown under the page.
 
@@ -31,4 +36,4 @@
 https://www.jetbrains.com/help/pycharm/settings-preferences-dialog.html,
 https://www.jetbrains.com/help/pycharm/system-settings.html; IntelliJ
 Community (Apache-2.0) at `pycharm/2026.2.3`: `SettingsEditor`,
-`GeneralSettingsConfigurable`.
+`SettingsNonModalDialog`, `GeneralSettingsConfigurable`.

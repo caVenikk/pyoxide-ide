@@ -21,7 +21,7 @@ CRATES = ROOT / "crates"
 
 # ADR 0010.
 TOOLKIT = "gpui"
-NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp"]
+NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings"]
 CLIENT = "lsp-client"
 PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"

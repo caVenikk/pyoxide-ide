@@ -5,8 +5,9 @@
 use editor::commands::*;
 use editor::{Editor, EditorConfig};
 use gpui::{
-    Entity, Focusable, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ScrollDelta,
-    ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px,
+    Context, Entity, Focusable, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+    Render, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, Window,
+    div, point, prelude::*, px,
 };
 use serde_json::json;
 use text::{Buffer, Point};
@@ -358,4 +359,32 @@ fn a_reload_from_disk_keeps_the_caret_line_and_the_view(cx: &mut TestAppContext)
     let ok = editor.update(cx, |e, cx| e.reload(plan, false, cx));
     assert!(!ok);
     assert!(text(&editor, cx).contains('x'));
+}
+
+/// A narrow one-line field, like the idle time of the Settings window.
+struct Narrow(Entity<Editor>);
+
+impl Render for Narrow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(52.0))
+            .child(editor::field::frame(&self.0, true, false, window, cx))
+    }
+}
+
+#[gpui::test]
+fn a_narrow_field_keeps_a_short_text_in_view(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        ui::init(cx, themes::ThemeKind::Dark);
+        editor::init(cx);
+    });
+    let (view, cx) =
+        cx.add_window_view(|window, cx| Narrow(editor::field::new("2", None, true, window, cx)));
+    let editor = view.read_with(cx, |v, _| v.0.clone());
+    draw(cx);
+    // The caret follows the text with four columns of context, which is
+    // more than such a field is wide: it must not scroll a text that fits.
+    editor.update(cx, |e, cx| e.set_text_selected("300", cx));
+    draw(cx);
+    assert_eq!(editor.read_with(cx, |e, _| e.scroll_left()), px(0.0));
 }

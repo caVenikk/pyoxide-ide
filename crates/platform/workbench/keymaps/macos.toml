@@ -8,6 +8,7 @@
 
 [[context]]
 [context.bindings]
+"cmd-," = "settings.open"
 "cmd-q" = "app.quit"
 "cmd-1" = "workbench.toggle-project"
 "cmd-4" = "workbench.toggle-run"
@@ -498,3 +499,43 @@ name = "NameInput > Editor"
 "up" = "name-input.previous-kind"
 "tab" = "name-input.next-field"
 "shift-tab" = "name-input.previous-field"
+
+# The Settings window: Enter is OK, Escape clears the search, else
+# Cancel (`SettingsDialog`, `SettingsEditor.cancel`), in its fields too;
+# Find goes to the search field, Back and Forward to the pages selected
+# before (`SettingsNonModalDialog`, `SettingsEditor` history toolbar).
+[[context]]
+name = "SettingsWindow"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.escape"
+"cmd-f" = "settings.find"
+"cmd-[" = "settings.back"
+"cmd-alt-left" = "settings.back"
+"cmd-]" = "settings.forward"
+"cmd-alt-right" = "settings.forward"
+
+[[context]]
+name = "SettingsWindow > Editor"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.escape"
+"cmd-f" = "settings.find"
+
+# The page tree (`TreeUtil.installActions`).
+[[context]]
+name = "SettingsTree"
+[context.bindings]
+"up" = "settings.select-previous"
+"down" = "settings.select-next"
+"left" = "settings.collapse"
+"right" = "settings.expand"
+
+# The search field: Up and Down move the tree's selection, Enter goes to
+# the page (`SettingsSearch`, `SettingsEditor`).
+[[context]]
+name = "SettingsSearch > Editor"
+[context.bindings]
+"up" = "settings.select-previous"
+"down" = "settings.select-next"
+"enter" = "settings.go-to-page"
