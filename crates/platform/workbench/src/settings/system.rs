@@ -119,14 +119,16 @@ impl SystemPage {
         cx.notify();
     }
 
+    /// A check box with its label, lit up while the window's search finds
+    /// the label.
     fn check(
         &self,
         field: &'static str,
         checked: bool,
         label: &'static str,
         cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        ui::form::check_row(
+    ) -> AnyElement {
+        let row = ui::form::check_row(
             gpui::ElementId::Name(format!("system-row:{field}").into()),
             gpui::ElementId::Name(format!("system-check:{field}").into()),
             checked,
@@ -134,7 +136,9 @@ impl SystemPage {
             cx,
         )
         .debug_selector(move || format!("system:{field}"))
-        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle(field, cx)))
+        .min_h(px(ROW_HEIGHT))
+        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle(field, cx)));
+        settings_ui::search::spotlight(label, row, cx)
     }
 }
 
@@ -236,7 +240,7 @@ impl Render for SystemPage {
             .child(div().w(px(SMALL_GAP)))
             .child(idle_field)
             .child(div().w(px(SMALL_GAP)))
-            .child(div().whitespace_nowrap().child(SECONDS));
+            .child(settings_ui::search::label(SECONDS, cx));
         let rows: Vec<AnyElement> = vec![
             idle_row.into_any_element(),
             self.check(
@@ -244,31 +248,27 @@ impl Render for SystemPage {
                 self.save.save_on_deactivation,
                 SAVE_ON_DEACTIVATION,
                 cx,
-            )
-            .min_h(px(ROW_HEIGHT))
-            .into_any_element(),
+            ),
             div()
                 .min_h(px(ROW_HEIGHT))
                 .flex()
                 .items_center()
-                .child(SYNC)
+                .child(settings_ui::search::label(SYNC, cx))
                 .into_any_element(),
             div()
                 .pl(px(GROUP_INDENT))
-                .child(
-                    self.check(
-                        "sync-on-activation",
-                        self.sync.sync_on_activation,
-                        SYNC_ON_ACTIVATION,
-                        cx,
-                    )
-                    .min_h(px(ROW_HEIGHT)),
-                )
+                .child(self.check(
+                    "sync-on-activation",
+                    self.sync.sync_on_activation,
+                    SYNC_ON_ACTIVATION,
+                    cx,
+                ))
                 .into_any_element(),
             div()
                 .mt(px(TOP_GAP_SMALL))
+                .flex()
                 .text_color(muted)
-                .child(AUTOSAVE_COMMENT)
+                .child(settings_ui::search::label(AUTOSAVE_COMMENT, cx))
                 .into_any_element(),
         ];
         div()

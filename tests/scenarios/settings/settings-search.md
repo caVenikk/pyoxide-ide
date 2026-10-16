@@ -7,6 +7,8 @@
 4. Type `zzzz`.
 5. Press Escape twice.
 6. Open Settings and press Cmd+F (macOS) or Ctrl+F.
+7. Type `soft` with a Keymap page that has its own search.
+8. Click the search field's magnifier arrow.
 
 ## Expected
 - Step 1: the typing goes to the search field; after a short delay the
@@ -19,14 +21,20 @@
 - Step 4: no page matches; the field turns red.
 - Step 5: the first Escape clears the filter, the second closes the
   window.
-- Step 6: the focus goes to the search field.
+- Step 6: the focus goes to the search field, its text selected.
+- Step 7: Keymap (found by an action, not by its name) is selected and
+  its own search field shows `soft`.
+- Step 8: the last five searches; choosing one searches for it.
 
 ## Commands
-`settings.search {"text": ...}`, `settings.state` (filter, visible pages,
-selected page).
+`settings.search {"text": ...}`, `settings.escape`, `settings.find`,
+`settings.search-history`, `settings.select-next`,
+`settings.go-to-page`, `settings.state` (search, rows, selected page).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/settings-preferences-dialog.html;
 IntelliJ Community (Apache-2.0) at `pycharm/2026.2.3`: `SettingsFilter`,
-`SettingsTreeView`. The highlight on the page (spotlight) is a later
-feature and to verify against a reference screenshot.
+`SettingsSearch`, `SettingsTreeView`, `SearchableOptionsRegistrarImpl`,
+`SearchUtil`, `GlassPanel`. The page's labels found light up with the
+spotlight's outline; the overlay that dims the rest of the page is to
+verify against a reference screenshot.

@@ -150,6 +150,16 @@ pub trait SettingsPage: Render + Sized {
     ) -> Result<(), String> {
         Err(format!("no field `{field}` on this page"))
     }
+    /// A page with a search of its own (Keymap) takes the window's search
+    /// text into it when the page is shown from a search that did not find
+    /// it by name (`SearchableConfigurable.enableSearch`); `""` when the
+    /// search is cleared. Pages without one light up their labels instead
+    /// ([`crate::search::label`]).
+    fn search(&mut self, _text: &str, _window: &mut Window, _cx: &mut Context<Self>) {}
+    /// Whether the page has a search of its own ([`Self::search`]).
+    fn has_search(&self) -> bool {
+        false
+    }
 }
 
 /// Called when a page's view changes.
@@ -170,6 +180,8 @@ trait ErasedPage {
         cx: &mut App,
     ) -> Result<(), String>;
     fn observe(&self, window: &mut Window, cx: &mut App, on_change: OnChange) -> Subscription;
+    fn search(&self, text: &str, window: &mut Window, cx: &mut App);
+    fn has_search(&self, cx: &App) -> bool;
 }
 
 impl<V: SettingsPage + 'static> ErasedPage for Entity<V> {
@@ -205,6 +217,14 @@ impl<V: SettingsPage + 'static> ErasedPage for Entity<V> {
 
     fn observe(&self, window: &mut Window, cx: &mut App, on_change: OnChange) -> Subscription {
         window.observe(self, cx, move |_, window, cx| on_change(window, cx))
+    }
+
+    fn search(&self, text: &str, window: &mut Window, cx: &mut App) {
+        self.update(cx, |p, cx| p.search(text, window, cx))
+    }
+
+    fn has_search(&self, cx: &App) -> bool {
+        self.read(cx).has_search()
     }
 }
 
@@ -251,6 +271,16 @@ impl PageHandle {
         cx: &mut App,
     ) -> Result<(), String> {
         self.page.edit(field, value, window, cx)
+    }
+
+    /// Hands the window's search text to the page's own search.
+    pub fn search(&self, text: &str, window: &mut Window, cx: &mut App) {
+        self.page.search(text, window, cx)
+    }
+
+    /// The page has a search of its own.
+    pub fn has_search(&self, cx: &App) -> bool {
+        self.page.has_search(cx)
     }
 
     /// Calls `on_change` whenever the page's view changes.

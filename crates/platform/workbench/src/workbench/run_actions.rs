@@ -822,7 +822,7 @@ impl Workbench {
         self.open_run_menu(items, anchor.bottom_left(), window, cx);
     }
 
-    fn open_run_menu(
+    pub(crate) fn open_run_menu(
         &mut self,
         items: Vec<MenuItem>,
         position: Point<Pixels>,
@@ -1065,7 +1065,8 @@ impl Workbench {
         self.dialog.as_ref().map(|d| d.dialog.focus_handle(cx))
     }
 
-    /// The open popup menu of the run widget or a Run tab.
+    /// The open popup menu of the run widget, a Run tab or the main
+    /// toolbar's gear.
     pub(super) fn render_run_menu(&self, window: &Window) -> Option<AnyElement> {
         let open = self.run_menu.as_ref()?;
         Some(ui::menu::overlay(&open.menu, open.position, window))

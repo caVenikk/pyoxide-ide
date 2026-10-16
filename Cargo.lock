@@ -6420,7 +6420,9 @@ dependencies = [
  "serde_json",
  "settings",
  "tempfile",
+ "text",
  "themes",
+ "toml 1.1.8+spec-1.1.0",
  "ui",
 ]
 

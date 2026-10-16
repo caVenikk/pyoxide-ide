@@ -20,7 +20,7 @@ mod store;
 use std::path::PathBuf;
 
 pub use files::{SaveSettings, SyncSettings};
-pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION};
+pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
 
 /// The application's configuration folder: `PYOXIDE_CONFIG_DIR`, else
 /// `pyoxide` in the user's configuration folder.

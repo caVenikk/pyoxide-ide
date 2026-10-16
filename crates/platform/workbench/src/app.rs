@@ -260,7 +260,10 @@ pub fn init(cx: &mut App, product: &Product) {
         "code.servers",
         Rc::new(|_, window, cx| Ok(code_intel(window, cx)?.read(cx).servers_json(cx))),
     );
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    // Changes not applied in the Settings window are asked about first.
+    cx.on_action(|_: &Quit, cx| {
+        settings_ui::leave::resolve(settings_ui::leave::Leaving::Application, cx, |cx| cx.quit())
+    });
     // Any key ends a double tap of a modifier in progress.
     cx.intercept_keystrokes(|event, _, cx| crate::keymap::key_pressed(&event.keystroke, cx))
         .detach();
@@ -352,6 +355,11 @@ pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Work
         });
         // The product's status bar widgets get the finished workbench.
         Workbench::create_status_widgets(&workbench, &product, window, cx);
+        // Closing the window with changes not applied in its Settings
+        // window asks first.
+        window.on_window_should_close(cx, |window, cx| {
+            settings_ui::leave::can_close_parent(window.window_handle(), cx)
+        });
         workbench
     })
     .expect("open the main window")
@@ -367,6 +375,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // Settings that last across sessions (tests keep the defaults).
         if let Some(file) = ::settings::settings_file() {
             settings_ui::store::load(cx, file);
+        }
+        if let Some(dir) = ::settings::config_dir() {
+            settings_ui::window_state::load(cx, dir.join(settings_ui::window_state::FILE));
         }
         if let Some(file) = crate::find_in_files::settings_file() {
             crate::find_in_files::load_settings(cx, file);

@@ -156,6 +156,11 @@ impl IconName {
     pub const EXPAND: Self = Self("inline/expand");
     pub const INLINE_SETTINGS: Self = Self("inline/inlineSettings");
     pub const HELP: Self = Self("general/help");
+    // The Settings window: Back and Forward of its banner, the mark of
+    // pages with project settings.
+    pub const BACK: Self = Self("general/left");
+    pub const FORWARD: Self = Self("general/right");
+    pub const PROJECT_CONFIGURABLE: Self = Self("general/projectConfigurable");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -198,9 +203,10 @@ platform_icons! {
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down", "general/expandAll", "general/filter",
         "general/help", "general/hide",
-        "general/inspections/inspectionsOK", "general/locate", "general/locked",
+        "general/inspections/inspectionsOK", "general/left", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
-        "general/previewHorizontally", "general/print", "general/questionDialog", "general/refresh", "general/remove",
+        "general/previewHorizontally", "general/print", "general/projectConfigurable",
+        "general/questionDialog", "general/refresh", "general/remove", "general/right",
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/softWrap",
