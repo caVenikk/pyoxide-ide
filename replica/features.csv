@@ -125,7 +125,7 @@ Split terminal tabs and Move to Editor,terminal,could,yes,no,Community
 Shell command completion in the terminal,terminal,could,yes,no,Community
 Paste from History and command history search in the terminal,terminal,could,yes,no,Community
 Conda environment activation in the terminal,terminal,could,yes,no,Community
-Git repository detection and git executable lookup,vcs,must,yes,no,"Community; the git executable for every operation, ADR 0016 (#91)"
+Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; the git executable for every operation, ADR 0016 (#91)"
 "File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,no,Community (#91)
 "Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,no,Community (#91)
 "Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,no,"Community; Cmd+K / Ctrl+K, non-modal commit (#91)"

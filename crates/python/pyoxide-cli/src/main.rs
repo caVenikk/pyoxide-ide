@@ -299,6 +299,7 @@ fn registry(profiles: Option<PathBuf>) -> Registry {
     let mut r = Registry::new();
     db_service::ops::register(&mut r, Arc::new(db::service(profiles)));
     py_env::register(&mut r, Arc::new(EnvService::from_process()));
+    git::commands::register(&mut r);
     r
 }
 

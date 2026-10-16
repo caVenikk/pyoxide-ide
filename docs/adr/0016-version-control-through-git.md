@@ -66,11 +66,13 @@ notification.
 - Machine-readable output only: porcelain formats with `-z`,
   `for-each-ref --format`. Long path lists are split under the
   command-line limit (`--pathspec-from-file` where the version has it).
-- Status: `git status --porcelain=v2 -z --branch --untracked-files=no` for
-  tracked changes (renames on) with the branch's ahead and behind, and
-  `--porcelain -z --no-renames --untracked-files=all --ignored=matching` for
-  untracked and ignored files; both limited to the dirty paths when the
-  watcher reported few.
+- Status: one `git status --porcelain=v2 -z --branch
+  --untracked-files=all --ignored=matching` (`--literal-pathspecs`):
+  tracked changes (renames on) with the branch's ahead and behind,
+  untracked files, and ignored files and folders (an ignored folder once,
+  everything below it counting as ignored). One call stats the work tree
+  once; it is limited to the dirty paths when the watcher reported few
+  (up to 100).
 - Base text: `git cat-file --filters HEAD:<path>` (end-of-line and smudge
   filters applied, so no false CRLF changes on Windows), cached by blob.
 - Branches: one `git for-each-ref` over `refs/heads`, `refs/remotes`,
@@ -102,7 +104,8 @@ everything under `.git` is dropped) and skip `objects/**`, `logs/**` and
 batch; results are merged into the status map within 100 ms and repainted
 (the reference's queues). Events caused by Pyoxide's own commands are
 suppressed while they run and followed by one refresh. An edited, unsaved
-document of a tracked file is "modified" at once, from its text against
+document of a clean tracked file is "modified" at once
+(`FileStatusManagerImpl`); its change markers come from its text against
 the base.
 
 ### Crates

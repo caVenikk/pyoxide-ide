@@ -1,0 +1,11 @@
+[package]
+name = "vcs"
+description = "Version control model of Pyoxide IDE: file statuses, changes, the status map with ignored folders, line ranges of a document against its base text, branches, repository state and the backend trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+imara-diff.workspace = true
+serde.workspace = true

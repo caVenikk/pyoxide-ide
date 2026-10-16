@@ -11,6 +11,8 @@ projects and machines (macOS and Windows) and then enforced in CI.
 | Open a 10 MB file | <= 0.2 s, scrolling without dropped frames |
 | Idle memory, mid-size project | <= 300 MB |
 | Completion popup after the language server answers | <= 100 ms; the UI never waits for the server |
+| Git status of a 10 000-file repository after a watcher batch (after the 300 ms debounce, off the UI thread) | <= 150 ms |
+| Change markers (line ranges) of a 10 000-line file after the last keystroke | <= 50 ms |
 
 ## Measuring
 Record baseline and current numbers in `replica/perf.md` (method, machine, OS,
