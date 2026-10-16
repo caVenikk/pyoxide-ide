@@ -25,6 +25,7 @@ pub mod run;
 pub mod search_everywhere;
 pub mod settings;
 mod shot;
+pub mod tool_windows;
 pub mod workbench;
 
 pub use app::{NavigationHooks, Product, StatusWidget, StripeItem, init, open_main_window, run};
