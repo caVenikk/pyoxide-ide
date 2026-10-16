@@ -32,6 +32,8 @@ members = [
     "crates/platform/text",
     "crates/platform/themes",
     "crates/platform/ui",
+    "crates/platform/vcs",
+    "crates/platform/git",
     "crates/platform/workbench",
     "crates/python/py-env",
     "crates/python/py-lsp",
@@ -75,6 +77,9 @@ notify = { version = "8.2", default-features = false, features = ["macos_fsevent
 # Terminal emulator and pseudo-terminal (ADR 0014, Apache-2.0), pinned
 # exactly: only the `terminal` crate uses it, without its event loop.
 alacritty_terminal = "=0.26.0"
+# Line diffs of version control (ADR 0016, Apache-2.0): git's histogram
+# algorithm, so change markers match the hunks of `git diff`.
+imara-diff = "0.2"
 # UI toolkit (ADR 0006, 0007): the crates.io release, pinned exactly.
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
@@ -90,6 +95,7 @@ name-match = { path = "crates/platform/name-match" }
 process = { path = "crates/platform/process" }
 file-index = { path = "crates/platform/file-index" }
 file-watcher = { path = "crates/platform/file-watcher" }
+git = { path = "crates/platform/git" }
 db-oracle-thin = { path = "crates/platform/db-oracle-thin" }
 db-oracle-odpi = { path = "crates/platform/db-oracle-odpi" }
 db-postgres = { path = "crates/platform/db-postgres" }
@@ -109,6 +115,7 @@ terminal = { path = "crates/platform/terminal" }
 text = { path = "crates/platform/text" }
 themes = { path = "crates/platform/themes" }
 ui = { path = "crates/platform/ui" }
+vcs = { path = "crates/platform/vcs" }
 workbench = { path = "crates/platform/workbench" }
 py-env = { path = "crates/python/py-env" }
 py-lsp = { path = "crates/python/py-lsp" }
