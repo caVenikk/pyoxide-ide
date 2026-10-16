@@ -180,7 +180,8 @@ struct Chosen(HashMap<PathBuf, PathBuf>);
 
 impl Global for Chosen {}
 
-fn chosen(root: &Path, cx: &App) -> Option<PathBuf> {
+/// The interpreter chosen for the project at `root` in this session.
+pub(crate) fn chosen(root: &Path, cx: &App) -> Option<PathBuf> {
     cx.try_global::<Chosen>()
         .and_then(|c| c.0.get(root).cloned())
 }
@@ -560,6 +561,13 @@ impl ProjectInterpreters {
         list.sort_by(|a, b| a.group().cmp(&b.group()).then_with(|| a.name.cmp(&b.name)));
         list
     }
+}
+
+/// The executable of the interpreter of the project at `root`, as
+/// [`for_project`] selects it with `chosen` ([`chosen`] on the UI thread).
+/// Blocking.
+pub(crate) fn project_python(root: &Path, chosen: Option<&Path>) -> Option<PathBuf> {
+    scan(root, chosen).selected.map(|s| s.python)
 }
 
 /// The project's interpreters and the selected one: `chosen` (or the
