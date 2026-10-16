@@ -17,6 +17,8 @@ use crate::env::{self, Bench};
 use crate::search_everywhere::SearchEverywhere;
 use crate::workbench::Workbench;
 
+mod terminal;
+
 /// Text typed by the typing measurement: 200 characters of a comment, the
 /// same text the reference runner types (scripts/perf/pycharm_typing.py).
 pub const TYPING_TEXT: &str = "# the quick brown fox jumps over the lazy dog and keeps typing to fill \
@@ -203,6 +205,9 @@ pub fn start(window: WindowHandle<Workbench>, cx: &mut App) {
             Bench::FindInFiles(query) => find_in_files(window, query, cx).await,
             Bench::GoToFile(query) => go_to_file(window, query, cx).await,
             Bench::Completion(latency) => completion(window, latency, cx).await,
+            Bench::TerminalTyping => terminal::typing(window, cx).await,
+            Bench::TerminalFlood(mib) => terminal::flood(window, mib, cx).await,
+            Bench::TerminalScroll => terminal::scroll(window, cx).await,
             Bench::Startup => {}
         }
         if let Some(rss) = rss_mb() {
@@ -252,6 +257,7 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         }
         e.go_to(TYPING_LINE, Some(1), cx)
     });
+    let flood = terminal::flood_requested() && terminal::start_flood(window, cx).await;
     sleep(cx, Duration::from_secs(3)).await;
     let display = display_frames(window, cx).await;
 
@@ -342,6 +348,7 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         json!({
             "frames": frame_source(display),
             "marks": marks,
+            "terminal_flood": flood,
             "keys": keys.len(),
             "frames_missing": missed,
             "caret_line": line,

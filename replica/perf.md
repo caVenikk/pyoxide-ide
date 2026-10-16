@@ -237,6 +237,23 @@ prints the numbers in the log. The machine was busy with other builds
 | 2026-10-16 | mac-1 | emulator alone | 66-81 MiB/s | `alacritty_terminal` 0.26.0 with the OSC pre-scan |
 | 2026-10-16 | mac-1 | through the PTY, snapshots per frame | 20-25 MiB/s | macOS openpty; without snapshots 36 MiB/s |
 | 2026-10-16 | mac-1 | a snapshot during the flood (lock wait and copy) | 0.26-6 ms | 0.2 ms without output; 5 ms before the reader released the lock fairly |
+| 2026-10-16 | mac-1 | emulator alone (rerun, load average 5-15) | 168 MiB/s | release build |
+| 2026-10-16 | mac-1 | through the PTY, snapshots per frame (rerun) | 42 MiB/s | a snapshot of 120x40 in 0.22 ms |
+
+### Terminal view (headless)
+`cargo test --release -p terminal-ui --test perf -- --ignored --nocapture --test-threads=1`,
+no window: the work of a frame before painting (the snapshot and the plan of
+backgrounds, text runs and the cursor), `cat` of a 16 MiB file of 85-byte
+lines with SGR colours through the pseudo-terminal with a snapshot and a plan
+per 16.7 ms frame, and a key written to `cat` to the snapshot that shows its
+echo (three runs, release build, load average 4-15).
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | plan of a 120x40 frame | 90-93 us | a busy listing: 679 text runs, 76 background quads |
+| 2026-10-16 | mac-1 | plan of a 240x70 frame | 260-297 us | 2333 text runs, 258 background quads |
+| 2026-10-16 | mac-1 | `cat` 16 MiB, snapshot and plan per frame | 124-151 MiB/s | snapshot 0.14-0.22 ms, plan 0.05 ms per frame |
+| 2026-10-16 | mac-1 | key to snapshot through the PTY | p50 0.06-0.10 ms, p99 0.13-0.15 ms | 200 keys |
 
 ### Git status and line ranges
 Engine measurements (ADR 0016 budgets), release builds, git 2.56.0, other

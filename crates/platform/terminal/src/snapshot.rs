@@ -295,6 +295,8 @@ pub struct Cursor {
     /// The shape the program asked for; the renderer draws a hollow block
     /// when the view is not focused.
     pub shape: CursorShape,
+    /// The cursor blinks (the default style, or the program asked for it).
+    pub blinking: bool,
 }
 
 /// Mouse reporting requested by the program.
@@ -519,6 +521,7 @@ pub(crate) fn fill<T: EventListener>(term: &Term<T>, out: &mut Snapshot) {
     // A screen that was not fully written yet (should not happen): pad.
     out.cells.resize(out.columns * out.rows, Cell::default());
 
+    let blinking = term.cursor_style().blinking;
     let cursor_shape = match content.cursor.shape {
         ansi::CursorShape::Block => CursorShape::Block,
         ansi::CursorShape::Underline => CursorShape::Underline,
@@ -531,6 +534,7 @@ pub(crate) fn fill<T: EventListener>(term: &Term<T>, out: &mut Snapshot) {
         .map(|point| Cursor {
             point,
             shape: cursor_shape,
+            blinking,
         });
     out.selection = content
         .selection
@@ -621,7 +625,8 @@ mod tests {
             snap.cursor,
             Some(Cursor {
                 point: Point::new(0, 6),
-                shape: CursorShape::Block
+                shape: CursorShape::Block,
+                blinking: false,
             })
         );
         assert!(snap.modes.show_cursor);

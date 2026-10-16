@@ -330,6 +330,96 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         TerminalBrightMagenta => &[Fg("CONSOLE_MAGENTA_BRIGHT_OUTPUT")],
         TerminalBrightCyan => &[Fg("CONSOLE_CYAN_BRIGHT_OUTPUT")],
         TerminalBrightWhite => &[Fg("CONSOLE_WHITE_OUTPUT")],
+        TerminalDefaultBackground => &[Color("BLOCK_TERMINAL_DEFAULT_BACKGROUND")],
+        TerminalDefaultForeground => &[Color("BLOCK_TERMINAL_DEFAULT_FOREGROUND")],
+        TerminalAnsiBlack => &[Fg("BLOCK_TERMINAL_BLACK"), Bg("BLOCK_TERMINAL_BLACK")],
+        TerminalAnsiRed => &[Fg("BLOCK_TERMINAL_RED"), Bg("BLOCK_TERMINAL_RED")],
+        TerminalAnsiGreen => &[Fg("BLOCK_TERMINAL_GREEN"), Bg("BLOCK_TERMINAL_GREEN")],
+        TerminalAnsiYellow => &[Fg("BLOCK_TERMINAL_YELLOW"), Bg("BLOCK_TERMINAL_YELLOW")],
+        TerminalAnsiBlue => &[Fg("BLOCK_TERMINAL_BLUE"), Bg("BLOCK_TERMINAL_BLUE")],
+        TerminalAnsiMagenta => &[Fg("BLOCK_TERMINAL_MAGENTA"), Bg("BLOCK_TERMINAL_MAGENTA")],
+        TerminalAnsiCyan => &[Fg("BLOCK_TERMINAL_CYAN"), Bg("BLOCK_TERMINAL_CYAN")],
+        TerminalAnsiWhite => &[Fg("BLOCK_TERMINAL_WHITE"), Bg("BLOCK_TERMINAL_WHITE")],
+        TerminalAnsiBrightBlack => &[
+            Fg("BLOCK_TERMINAL_BLACK_BRIGHT"),
+            Bg("BLOCK_TERMINAL_BLACK_BRIGHT"),
+        ],
+        TerminalAnsiBrightRed => &[
+            Fg("BLOCK_TERMINAL_RED_BRIGHT"),
+            Bg("BLOCK_TERMINAL_RED_BRIGHT"),
+        ],
+        TerminalAnsiBrightGreen => &[
+            Fg("BLOCK_TERMINAL_GREEN_BRIGHT"),
+            Bg("BLOCK_TERMINAL_GREEN_BRIGHT"),
+        ],
+        TerminalAnsiBrightYellow => &[
+            Fg("BLOCK_TERMINAL_YELLOW_BRIGHT"),
+            Bg("BLOCK_TERMINAL_YELLOW_BRIGHT"),
+        ],
+        TerminalAnsiBrightBlue => &[
+            Fg("BLOCK_TERMINAL_BLUE_BRIGHT"),
+            Bg("BLOCK_TERMINAL_BLUE_BRIGHT"),
+        ],
+        TerminalAnsiBrightMagenta => &[
+            Fg("BLOCK_TERMINAL_MAGENTA_BRIGHT"),
+            Bg("BLOCK_TERMINAL_MAGENTA_BRIGHT"),
+        ],
+        TerminalAnsiBrightCyan => &[
+            Fg("BLOCK_TERMINAL_CYAN_BRIGHT"),
+            Bg("BLOCK_TERMINAL_CYAN_BRIGHT"),
+        ],
+        TerminalAnsiBrightWhite => &[
+            Fg("BLOCK_TERMINAL_WHITE_BRIGHT"),
+            Bg("BLOCK_TERMINAL_WHITE_BRIGHT"),
+        ],
+        TerminalAnsiBlackBackground => &[Bg("BLOCK_TERMINAL_BLACK"), Fg("BLOCK_TERMINAL_BLACK")],
+        TerminalAnsiRedBackground => &[Bg("BLOCK_TERMINAL_RED"), Fg("BLOCK_TERMINAL_RED")],
+        TerminalAnsiGreenBackground => &[Bg("BLOCK_TERMINAL_GREEN"), Fg("BLOCK_TERMINAL_GREEN")],
+        TerminalAnsiYellowBackground => &[Bg("BLOCK_TERMINAL_YELLOW"), Fg("BLOCK_TERMINAL_YELLOW")],
+        TerminalAnsiBlueBackground => &[Bg("BLOCK_TERMINAL_BLUE"), Fg("BLOCK_TERMINAL_BLUE")],
+        TerminalAnsiMagentaBackground => {
+            &[Bg("BLOCK_TERMINAL_MAGENTA"), Fg("BLOCK_TERMINAL_MAGENTA")]
+        }
+        TerminalAnsiCyanBackground => &[Bg("BLOCK_TERMINAL_CYAN"), Fg("BLOCK_TERMINAL_CYAN")],
+        TerminalAnsiWhiteBackground => &[Bg("BLOCK_TERMINAL_WHITE"), Fg("BLOCK_TERMINAL_WHITE")],
+        TerminalAnsiBrightBlackBackground => &[
+            Bg("BLOCK_TERMINAL_BLACK_BRIGHT"),
+            Fg("BLOCK_TERMINAL_BLACK_BRIGHT"),
+        ],
+        TerminalAnsiBrightRedBackground => &[
+            Bg("BLOCK_TERMINAL_RED_BRIGHT"),
+            Fg("BLOCK_TERMINAL_RED_BRIGHT"),
+        ],
+        TerminalAnsiBrightGreenBackground => &[
+            Bg("BLOCK_TERMINAL_GREEN_BRIGHT"),
+            Fg("BLOCK_TERMINAL_GREEN_BRIGHT"),
+        ],
+        TerminalAnsiBrightYellowBackground => &[
+            Bg("BLOCK_TERMINAL_YELLOW_BRIGHT"),
+            Fg("BLOCK_TERMINAL_YELLOW_BRIGHT"),
+        ],
+        TerminalAnsiBrightBlueBackground => &[
+            Bg("BLOCK_TERMINAL_BLUE_BRIGHT"),
+            Fg("BLOCK_TERMINAL_BLUE_BRIGHT"),
+        ],
+        TerminalAnsiBrightMagentaBackground => &[
+            Bg("BLOCK_TERMINAL_MAGENTA_BRIGHT"),
+            Fg("BLOCK_TERMINAL_MAGENTA_BRIGHT"),
+        ],
+        TerminalAnsiBrightCyanBackground => &[
+            Bg("BLOCK_TERMINAL_CYAN_BRIGHT"),
+            Fg("BLOCK_TERMINAL_CYAN_BRIGHT"),
+        ],
+        TerminalAnsiBrightWhiteBackground => &[
+            Bg("BLOCK_TERMINAL_WHITE_BRIGHT"),
+            Fg("BLOCK_TERMINAL_WHITE_BRIGHT"),
+        ],
+        TerminalSearchMatch => &[Bg("BLOCK_TERMINAL_SEARCH_ENTRY")],
+        TerminalSearchMatchText => &[Fg("BLOCK_TERMINAL_SEARCH_ENTRY")],
+        TerminalSearchMatchCurrent => &[Bg("BLOCK_TERMINAL_CURRENT_SEARCH_ENTRY")],
+        TerminalSearchMatchCurrentText => &[Fg("BLOCK_TERMINAL_CURRENT_SEARCH_ENTRY")],
+        TerminalSeparator => &[Color("BLOCK_TERMINAL_PROMPT_SEPARATOR_COLOR")],
+        TerminalErrorMarker => &[Color("BLOCK_TERMINAL_ERROR_BLOCK_STROKE_COLOR")],
     }
 }
 

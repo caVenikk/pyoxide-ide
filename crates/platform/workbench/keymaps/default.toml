@@ -740,3 +740,19 @@ name = "BreakpointsTree"
 "delete" = "breakpoints-dialog.remove"
 "enter" = "breakpoints-dialog.go-to-source"
 "f4" = "breakpoints-dialog.go-to-source"
+
+# A focused terminal (the reference's `Terminal.*` actions): Copy only
+# with a selection (without one Ctrl+C goes to the shell), Paste
+# (bracketed when the program asked for it), Line Up and Down, Page Up
+# and Down. Ctrl+A and Ctrl+K stay the shell's.
+[[context]]
+name = "Terminal"
+[context.bindings]
+"ctrl-c" = "terminal.copy"
+"ctrl-insert" = "terminal.copy"
+"ctrl-v" = "terminal.paste"
+"shift-insert" = "terminal.paste"
+"ctrl-up" = "terminal.line-up"
+"ctrl-down" = "terminal.line-down"
+"shift-pageup" = "terminal.page-up"
+"shift-pagedown" = "terminal.page-down"

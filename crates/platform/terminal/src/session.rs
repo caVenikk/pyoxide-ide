@@ -17,6 +17,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 use alacritty_terminal::term::{self, Term, TermMode};
 use alacritty_terminal::tty;
+use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle};
 use process::ExitStatus;
 
 use crate::input::{self, Key, Modifiers, MouseAction};
@@ -486,6 +487,12 @@ impl Session {
         };
         let config = term::Config {
             scrolling_history: scrollback,
+            // The reference's default: a block that blinks (the editor's
+            // caret blinks by default); a program can ask for another.
+            default_cursor_style: CursorStyle {
+                shape: CursorShape::Block,
+                blinking: true,
+            },
             ..term::Config::default()
         };
         let term = Term::new(config, &size, Listener(notifier.clone()));

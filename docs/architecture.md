@@ -240,7 +240,8 @@ services as watched-file changes (`file-watcher`, issue #36).
 shell detection, the `ShellCustomizer` hook; #159: the shell integration
 scripts, the workbench's `Product.terminal` hook and the Python product's
 virtual environment activation; the `terminal.*` commands come with their
-users), and so do
+users), `terminal-ui` has the grid element and the session view (#157; the
+tool window comes with #158), and so do
 `stream-framing`, `dap-client` and `debugger` (#162) and `py-debug` (#163:
 the helper, launch arguments, stoppable lines, exception breakpoints and
 the provider; the helper is fetched by `scripts/fetch-debugpy.py`) and
