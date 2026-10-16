@@ -268,9 +268,16 @@ impl ProjectPanel {
         let path = tree.node(id).entry.path.clone();
         let generation = self.generation;
         self.loading += 1;
-        // The folder's own kind is looked at again with its content.
-        let task = cx
-            .background_spawn(async move { (list_dir(&path, &filter), filter.folder_kind(&path)) });
+        // The folder's own kind is looked at again with its content; files
+        // no association names get their type (and icon) from their first
+        // bytes. Both are read here, off the UI thread.
+        let types = FileTypes::clone(&self.file_types);
+        let task = cx.background_spawn(async move {
+            let entries = list_dir(&path, &filter).inspect(|entries| {
+                types.detect(entries.iter().filter(|e| !e.is_dir()).map(|e| &*e.path));
+            });
+            (entries, filter.folder_kind(&path))
+        });
         cx.spawn(async move |this, cx| {
             let (result, kind) = task.await;
             let _ = this.update(cx, |this, cx| {

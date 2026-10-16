@@ -1,0 +1,6 @@
+<!-- Pyoxide IDE: a configuration file of pre-commit (YAML). MIT OR Apache-2.0. -->
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M5.5 1.5H9.5C10.0523 1.5 10.5 1.94772 10.5 2.5V13.5C10.5 14.0523 10.0523 14.5 9.5 14.5H3.5C2.94772 14.5 2.5 14.0523 2.5 13.5V4.5L5.5 1.5Z" fill="#FFF7F7" stroke="#E55765" stroke-linejoin="round"/>
+<path d="M2.5 4.5H4.5C5.05228 4.5 5.5 4.05228 5.5 3.5V1.5" stroke="#E55765" stroke-linejoin="round"/>
+<path d="M11.5 9.5L13.25 12M13.25 12L15 9.5M13.25 12V15" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
