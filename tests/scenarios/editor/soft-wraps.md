@@ -16,6 +16,9 @@
 9. With "Soft-wrap these files" on for `*.md` (`editor.toml` in the
    configuration folder: `[soft_wraps] enabled = true`, `files = "*.md"`),
    open a Markdown file and a Python file.
+10. Turn "use original line's indent" off (`use_original_indent = false`),
+    then give it 2 extra columns (`use_original_indent = true`,
+    `indent = 2`); turn "show all soft wraps" on (`show_all = true`).
 
 ## Expected
 - A line wider than the view goes on in the next visual rows; nothing
@@ -36,11 +39,22 @@
   top when the width or the Soft-Wrap state changes.
 - Large files are wrapped without blocking typing or scrolling.
 - Files matching the masks open with soft wraps; others do not.
+- On the caret's line a sign (⤦) follows the last char of each row before
+  a wrap and a sign (⤥) stands in the last column of the next row's
+  indent, in the scheme's soft wrap sign colour; with "show all soft
+  wraps" on every wrapped line.
+- Without the original indent continuation rows start after the sign
+  only; with an extra indent that many columns further right.
+- The caret row highlight covers the caret's visual row only.
+- A Python line without spaces near the edge wraps after a comma or an
+  opening bracket.
 
-Not yet: the wrap signs in the text and the gutter, the "use original
-line's indent" option (on, as in the reference's default), settings UI,
-the console's own Soft-Wrap toggle. Needs a reference screenshot: whether
-the caret row highlight covers one visual row or the whole line.
+Not yet: the settings page (the options are in `editor.toml`), the
+console's own Soft-Wrap toggle (#77 uses `Editor::set_soft_wraps`), the
+caret stop at column 1 of a continuation row's indent (Home goes from the
+row's start straight to the line's text), the Python wrap rules that
+look at strings and f-strings. Needs a reference screenshot: the sign
+colour of the Islands schemes (the whitespace colour for now).
 
 ## Commands
 `editor.toggle-soft-wraps`, `editor.move-up`, `editor.move-down`,

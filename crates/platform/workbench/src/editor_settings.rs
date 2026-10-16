@@ -1,9 +1,12 @@
 //! Editor settings that last across sessions (`editor.toml` next to Find
-//! in Files' settings): which files open with soft wraps.
+//! in Files' settings): which files open with soft wraps and how wrapped
+//! lines look.
 //!
 //! The reference keeps "Soft-wrap these files" (off by default) with file
 //! masks separated by `;` (`*.md; *.txt; *.rst; *.adoc` by default; `*`
-//! when it is turned on without masks of its own).
+//! when it is turned on without masks of its own), "Use original line's
+//! indent for wrapped part" (on) with an extra indent (0), and whether the
+//! signs at soft wraps show on every line (off: on the caret's line).
 
 use std::path::{Path, PathBuf};
 
@@ -14,16 +17,47 @@ use serde::{Deserialize, Serialize};
 /// The masks shown while soft wraps are off and none were set.
 pub const DEFAULT_SOFT_WRAP_FILES: &str = "*.md; *.txt; *.rst; *.adoc";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SoftWrapSettings {
     /// "Soft-wrap these files".
     pub enabled: bool,
     /// The file masks, separated by `;`; `None` for the reference's default.
     pub files: Option<String>,
+    /// Continuation rows take the line's indentation.
+    pub use_original_indent: bool,
+    /// Columns added to that indentation.
+    pub indent: usize,
+    /// Signs at the soft wraps of every line, not only the caret's.
+    pub show_all: bool,
+}
+
+impl Default for SoftWrapSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            files: None,
+            use_original_indent: true,
+            indent: 0,
+            show_all: false,
+        }
+    }
 }
 
 impl SoftWrapSettings {
+    /// Sets up the editor of `path`: soft wraps when the file matches, the
+    /// indent of continuation rows and where the signs show.
+    pub fn apply(
+        &self,
+        editor: &mut editor::Editor,
+        path: &Path,
+        cx: &mut gpui::Context<editor::Editor>,
+    ) {
+        editor.set_soft_wrap_indent(self.use_original_indent.then_some(self.indent), cx);
+        editor.set_show_all_soft_wraps(self.show_all, cx);
+        editor.set_soft_wraps(self.applies_to(path), cx);
+    }
+
     /// The masks in effect.
     pub fn masks(&self) -> &str {
         match &self.files {
@@ -97,6 +131,7 @@ mod tests {
         let on = SoftWrapSettings {
             enabled: true,
             files: Some(DEFAULT_SOFT_WRAP_FILES.into()),
+            ..SoftWrapSettings::default()
         };
         assert!(on.applies_to(Path::new("/p/README.md")));
         assert!(on.applies_to(Path::new("/p/notes.TXT")));
@@ -105,6 +140,7 @@ mod tests {
         let all = SoftWrapSettings {
             enabled: true,
             files: None,
+            ..SoftWrapSettings::default()
         };
         assert!(all.applies_to(Path::new("/p/main.py")));
         let parsed: EditorSettings =

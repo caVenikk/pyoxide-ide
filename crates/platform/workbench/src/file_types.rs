@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use editor::{EditorConfig, Highlighter};
+use editor::{EditorConfig, Highlighter, WrapRule};
 use ui::icons::IconName;
 
 /// Creates the highlighter of a file type for a new editor.
@@ -38,6 +38,9 @@ pub struct FileType {
     /// The language id language services know the files by (`"python"`);
     /// editor tabs of a type without one get no code intelligence.
     pub language_id: Option<&'static str>,
+    /// Where a soft-wrapped line may wrap when no space is near (the
+    /// language's line wrap strategy); empty for the rules of any text.
+    pub wrap_rules: &'static [WrapRule],
 }
 
 impl std::fmt::Debug for FileType {
@@ -68,6 +71,7 @@ impl FileType {
             string_prefixes: &[],
             highlighter: None,
             language_id: None,
+            wrap_rules: &[],
         }
     }
 
@@ -100,6 +104,11 @@ impl FileType {
             quotes: self.quotes.to_vec(),
             triple_quotes: self.triple_quotes,
             string_prefixes: self.string_prefixes.to_vec(),
+            wrap_rules: if self.wrap_rules.is_empty() {
+                WrapRule::defaults()
+            } else {
+                self.wrap_rules.to_vec()
+            },
             ..EditorConfig::default()
         }
     }

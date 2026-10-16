@@ -66,6 +66,7 @@ fn masked_files_open_wrapped_and_the_command_toggles_the_active_editor(cx: &mut 
                 soft_wraps: SoftWrapSettings {
                     enabled: true,
                     files: None,
+                    ..SoftWrapSettings::default()
                 },
             },
         )
@@ -93,6 +94,7 @@ fn masked_files_open_wrapped_and_the_command_toggles_the_active_editor(cx: &mut 
                 soft_wraps: SoftWrapSettings {
                     enabled: true,
                     files: Some(workbench::editor_settings::DEFAULT_SOFT_WRAP_FILES.into()),
+                    ..SoftWrapSettings::default()
                 },
             },
         )
