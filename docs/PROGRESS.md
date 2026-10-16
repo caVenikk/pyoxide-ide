@@ -12,7 +12,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
-| terminal | 0% `░░░░░░░░░░` | 0 | 0 | 21 |
+| terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 25 |
 | settings | 19% `██░░░░░░░░` | 2 | 2 | 14 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -162,8 +162,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ⬜ | Terminal tool window (Alt+F12, stripe button, Hide) | must | Community (Reworked engine, the 2026.2 default); ADR 0014 (#89) |
-| ⬜ | Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows) | must | Community; default shell per OS, login and interactive options, environment (#89) |
-| ⬜ | VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback) | must | Community; candidate alacritty_terminal (#89) |
+| 🟡 | Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows) | must | Community; default shell per OS, login and interactive options, environment (#89) |
+| 🟡 | VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback) | must | Community; candidate alacritty_terminal (#89) |
 | ⬜ | Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast) | must | Community (#89) |
 | ⬜ | Terminal tabs (new, close with confirmation, rename, unique names, close on exit) | must | Community (#89) |
 | ⬜ | Select, copy, paste, select all and clear in the terminal | must | Community (#89) |

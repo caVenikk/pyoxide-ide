@@ -105,8 +105,8 @@ Dependent breakpoints (disable until another is hit),run-debug,could,yes,no,Comm
 Data views for numpy and pandas and type renderers,run-debug,could,yes,no,Community
 Test runner (pytest),run-debug,should,yes,no,
 "Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,no,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89)"
-"Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,no,"Community; default shell per OS, login and interactive options, environment (#89)"
-"VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,no,Community; candidate alacritty_terminal (#89)
+"Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,partial,"Community; default shell per OS, login and interactive options, environment (#89)"
+"VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,partial,Community; candidate alacritty_terminal (#89)
 "Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,no,Community (#89)
 "Terminal tabs (new, close with confirmation, rename, unique names, close on exit)",terminal,must,yes,no,Community (#89)
 "Select, copy, paste, select all and clear in the terminal",terminal,must,yes,no,Community (#89)
