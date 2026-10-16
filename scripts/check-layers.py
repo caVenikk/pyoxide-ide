@@ -12,6 +12,9 @@
 # - ADR 0016 (version control): the model (`vcs`) and the backend (`git`)
 #   know no UI toolkit; the model knows no backend; UI crates depend on the
 #   model, never on the backend (the workbench composes them).
+# - ADR 0015 (debugger): the DAP client and the debugger model know no UI
+#   toolkit; UI crates depend on the debugger, never directly on the DAP
+#   client.
 #
 #     python3 scripts/check-layers.py
 #
@@ -24,9 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CRATES = ROOT / "crates"
 
-# ADR 0010.
+# ADR 0010; stream-framing, dap-client and debugger: ADR 0015.
 TOOLKIT = "gpui"
-NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal"]
+NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal", "stream-framing", "dap-client", "debugger"]
 CLIENT = "lsp-client"
 PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"
@@ -40,6 +43,10 @@ VCS_MODEL = "vcs"
 VCS_BACKEND = "git"
 VCS_NO_TOOLKIT = [VCS_MODEL, VCS_BACKEND]
 COMPOSER = "workbench"
+
+# ADR 0015.
+DAP_CLIENT = "dap-client"
+DEBUGGER = "debugger"
 
 
 def layer(manifest: Path):
@@ -103,6 +110,11 @@ def main():
     for name in sorted(direct):
         if name != EMULATOR_USER and EMULATOR in direct[name]:
             bad.append(f"{name} depends on {EMULATOR}: only {EMULATOR_USER} sees the emulator (ADR 0014)")
+    # Direct dependencies only: a UI crate reaches the client through the
+    # debugger, which is the point.
+    for name in sorted(direct):
+        if name != DEBUGGER and DAP_CLIENT in direct[name] and uses(name, TOOLKIT):
+            bad.append(f"{name} uses the UI toolkit and depends on {DAP_CLIENT}: UI crates use {DEBUGGER} (ADR 0015)")
     for name in NOT_MODEL:
         if name in direct and uses(name, MODEL):
             bad.append(f"{name} depends on {MODEL}: it has diagnostic marks of its own (ADR 0010)")
@@ -120,7 +132,7 @@ def main():
     if unclassified:
         print("not classified yet:", ", ".join(sorted(unclassified)))
     if bad:
-        print("layer violations (ADR 0005, 0010, 0014, 0016):")
+        print("layer violations (ADR 0005, 0010, 0014, 0015, 0016):")
         for b in bad:
             print("  " + b)
         sys.exit(1)
