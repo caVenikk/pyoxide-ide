@@ -10,6 +10,7 @@ use gpui::{
     WindowHandle, div, point, px,
 };
 use serde_json::{Value, json};
+use workbench::tool_windows::{Area, ToolWindowContent, ToolWindowSpec, ToolWindowView};
 use workbench::workbench::ToolWindow;
 use workbench::{Product, StatusWidget, Workbench, WorkbenchEvent};
 
@@ -258,4 +259,257 @@ fn the_run_stripe_button_toggles_the_tool_window(cx: &mut TestAppContext) {
     click(cx);
     let state = invoke(cx, window, "workbench.state", json!(null));
     assert_eq!(state["tool_windows"]["run"]["visible"], json!(false));
+}
+
+/// A tool window of a test: an empty view with its own focus.
+struct TestToolWindow {
+    focus: gpui::FocusHandle,
+}
+
+impl Render for TestToolWindow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().track_focus(&self.focus).size_full()
+    }
+}
+
+impl gpui::Focusable for TestToolWindow {
+    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl ToolWindowView for TestToolWindow {}
+
+/// Registers a test tool window `id` in `area` and returns its view.
+fn register(
+    cx: &mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    id: &'static str,
+    area: Area,
+    registered: bool,
+) -> gpui::Entity<TestToolWindow> {
+    let view = window
+        .update(cx, |w, _, cx| {
+            let view = cx.new(|cx| TestToolWindow {
+                focus: cx.focus_handle(),
+            });
+            w.register_tool_window(
+                ToolWindowSpec {
+                    id: ToolWindow(id),
+                    area,
+                    order: 5,
+                    icon: ui::icons::IconName::TOOL_TERMINAL,
+                    title: "Test",
+                    command: None,
+                    registered,
+                },
+                Some(ToolWindowContent::new(view.clone())),
+                cx,
+            );
+            view
+        })
+        .unwrap();
+    draw(cx, window);
+    view
+}
+
+fn has_focus(
+    cx: &mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    view: &gpui::Entity<TestToolWindow>,
+) -> bool {
+    cx.update_window(window.into(), |_, window, cx| {
+        view.read(cx).focus.contains_focused(window, cx)
+    })
+    .unwrap()
+}
+
+/// A tool window of the bottom area replaces Run there and back; the
+/// area keeps its height, the left area its width.
+#[gpui::test]
+fn a_bottom_tool_window_replaces_run_and_back(cx: &mut TestAppContext) {
+    let window = open(cx, test_product());
+    let view = register(cx, window, "test-bottom", Area::Bottom, true);
+    assert!(bounds(cx, window, "stripe-test-bottom").is_some());
+    invoke(cx, window, "workbench.toggle-run", json!(null));
+    // A taller bottom area.
+    let splitter = bounds(cx, window, "bottom-splitter").unwrap().center();
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_move(splitter, None, Modifiers::none());
+    vcx.simulate_mouse_down(splitter, MouseButton::Left, Modifiers::none());
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear());
+    let to = point(splitter.x, splitter.y - px(60.0));
+    vcx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx, window);
+    let run = bounds(cx, window, "run-tool-window").unwrap();
+    let width =
+        invoke(cx, window, "workbench.state", json!(null))["tool_windows"]["project"]["width"]
+            .clone();
+
+    invoke(
+        cx,
+        window,
+        "workbench.activate-tool-window",
+        json!({"id": "test-bottom"}),
+    );
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["run"]["visible"], json!(false));
+    assert_eq!(state["tool_windows"]["test-bottom"]["visible"], json!(true));
+    assert_eq!(
+        state["tool_windows"]["test-bottom"]["area"],
+        json!("bottom")
+    );
+    assert_eq!(
+        state["tool_window_areas"]["bottom"]["visible"],
+        json!("test-bottom")
+    );
+    assert!(has_focus(cx, window, &view));
+    let test = bounds(cx, window, "test-bottom-tool-window").unwrap();
+    assert!((test.size.height - run.size.height).abs() < px(1.0));
+    assert_eq!(test.bottom(), run.bottom());
+    assert_eq!(state["tool_windows"]["project"]["width"], width);
+
+    // ⌘4 brings Run back at the same height.
+    invoke(cx, window, "workbench.toggle-run", json!(null));
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["run"]["visible"], json!(true));
+    assert_eq!(
+        state["tool_windows"]["test-bottom"]["visible"],
+        json!(false)
+    );
+    assert_eq!(focused(cx, window), Some(ToolWindow::Run));
+    let back = bounds(cx, window, "run-tool-window").unwrap();
+    assert!((back.size.height - run.size.height).abs() < px(1.0));
+    // The project tool window stayed.
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
+}
+
+/// A tool window of the left area replaces Project (as Commit does); ⌘1
+/// brings Project back at its width.
+#[gpui::test]
+fn a_left_tool_window_replaces_project_and_back(cx: &mut TestAppContext) {
+    let window = open(cx, test_product());
+    let project = bounds(cx, window, "project-tool-window").unwrap();
+    let view = register(cx, window, "test-left", Area::Left, true);
+    let button = bounds(cx, window, "stripe-test-left").unwrap().center();
+    VisualTestContext::from_window(window.into(), cx).simulate_click(button, Modifiers::none());
+    draw(cx, window);
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(false));
+    assert_eq!(state["tool_windows"]["test-left"]["visible"], json!(true));
+    assert!(has_focus(cx, window, &view));
+    let test = bounds(cx, window, "test-left-tool-window").unwrap();
+    assert_eq!(test.left(), project.left());
+    assert!((test.size.width - project.size.width).abs() < px(1.0));
+
+    // Hide Active Tool Window hides it and returns the focus to the editor.
+    invoke(cx, window, "workbench.hide-tool-window", json!(null));
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["test-left"]["visible"], json!(false));
+    assert_eq!(state["tool_window_areas"]["left"]["visible"], json!(null));
+    assert!(!has_focus(cx, window, &view));
+    assert_eq!(focused(cx, window), None);
+
+    invoke(cx, window, "workbench.toggle-project", json!(null));
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
+    assert_eq!(focused(cx, window), Some(ToolWindow::Project));
+    let back = bounds(cx, window, "project-tool-window").unwrap();
+    assert!((back.size.width - project.size.width).abs() < px(1.0));
+}
+
+/// Toggling by id: the first command shows and focuses the tool window,
+/// the second one (while it has the focus) hides it. A tool window that
+/// is created by its first use has no stripe button before it.
+#[gpui::test]
+fn toggle_tool_window_by_id(cx: &mut TestAppContext) {
+    let window = open(cx, test_product());
+    let view = register(cx, window, "test-late", Area::Bottom, false);
+    assert!(bounds(cx, window, "stripe-test-late").is_none());
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(
+        state["tool_windows"]["test-late"]["registered"],
+        json!(false)
+    );
+
+    invoke(
+        cx,
+        window,
+        "workbench.toggle-tool-window",
+        json!({"id": "test-late"}),
+    );
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(
+        state["tool_windows"]["test-late"]["registered"],
+        json!(true)
+    );
+    assert_eq!(state["tool_windows"]["test-late"]["visible"], json!(true));
+    assert!(has_focus(cx, window, &view));
+    assert!(bounds(cx, window, "stripe-test-late").is_some());
+
+    invoke(
+        cx,
+        window,
+        "workbench.toggle-tool-window",
+        json!({"id": "test-late"}),
+    );
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["test-late"]["visible"], json!(false));
+    assert!(!has_focus(cx, window, &view));
+
+    // Unknown ids and stripe buttons without a tool window change nothing.
+    let before = invoke(cx, window, "workbench.state", json!(null))["tool_window_areas"].clone();
+    invoke(
+        cx,
+        window,
+        "workbench.activate-tool-window",
+        json!({"id": "no-such-window"}),
+    );
+    invoke(
+        cx,
+        window,
+        "workbench.activate-tool-window",
+        json!({"id": "terminal"}),
+    );
+    let after = invoke(cx, window, "workbench.state", json!(null))["tool_window_areas"].clone();
+    assert_eq!(before, after);
+}
+
+/// A tool window of the right area sits between the editor and the right
+/// stripe; dragging its splitter to the left widens it.
+#[gpui::test]
+fn the_right_area_is_resized_by_its_splitter(cx: &mut TestAppContext) {
+    let window = open(cx, test_product());
+    register(cx, window, "test-right", Area::Right, true);
+    invoke(
+        cx,
+        window,
+        "workbench.activate-tool-window",
+        json!({"id": "test-right"}),
+    );
+    let before = bounds(cx, window, "test-right-tool-window").unwrap();
+    let editor = bounds(cx, window, "editor-area").unwrap();
+    let stripe = bounds(cx, window, "right-stripe").unwrap();
+    assert!(before.left() > editor.right());
+    assert!(before.right() <= stripe.left());
+    let from = bounds(cx, window, "right-splitter").unwrap().center();
+    let to = point(from.x - px(50.0), from.y);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_move(from, None, Modifiers::none());
+    vcx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear());
+    vcx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx, window);
+    let after = bounds(cx, window, "test-right-tool-window").unwrap();
+    assert!(
+        (after.size.width - before.size.width - px(50.0)).abs() < px(1.0),
+        "{before:?} -> {after:?}"
+    );
+    assert_eq!(after.right(), before.right());
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
 }

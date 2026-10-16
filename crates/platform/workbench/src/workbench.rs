@@ -9,10 +9,10 @@ use code_intel_ui::{CodeIntelEvent, CodeIntelView};
 use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, CursorStyle, DispatchPhase,
-    Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render,
-    ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
+    AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, DispatchPhase, Div, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollWheelEvent,
+    SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
 use serde_json::json;
@@ -38,18 +38,11 @@ use crate::settings::SaveSettings;
 mod file_events;
 mod file_sync;
 mod history;
-/// Default width of the project tool window.
 mod run_actions;
+mod tool_window_areas;
 
-pub const PROJECT_WIDTH: f32 = 333.0;
-/// Default height of a tool window below the editor, as a share of the
-/// space between the toolbar and the status bar (the reference IDE's
-/// default tool window weight).
-pub const BOTTOM_WEIGHT: f32 = 0.33;
-/// Lowest tool window below the editor when resizing it.
-const MIN_BOTTOM_HEIGHT: f32 = 80.0;
-/// Lowest editor area left when raising a tool window below it.
-const MIN_EDITOR_HEIGHT: f32 = 100.0;
+use crate::tool_windows::Area;
+pub use crate::tool_windows::{BOTTOM_WEIGHT, PROJECT_WIDTH, ToolWindow};
 /// Space before the first editor tab.
 const FIRST_TAB_OFFSET: f32 = 3.0;
 /// Space between a tab's area and its rounded background.
@@ -60,13 +53,9 @@ const TAB_PADDING: f32 = 8.0;
 const INACTIVE_TAB_ALPHA: f32 = 0.75;
 /// Diameter of the dot that marks a modified file in its tab.
 const MODIFIED_DOT: f32 = 6.0;
-/// Narrowest project tool window when resizing it.
-const MIN_PROJECT_WIDTH: f32 = 120.0;
 /// How long a notice stays in the status bar (about as long as the
 /// reference's balloons stay).
 const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
-/// Narrowest editor area left when widening the project tool window.
-const MIN_EDITOR_WIDTH: f32 = 200.0;
 /// Room kept on each side of the file path in the middle of the toolbar
 /// for the widgets at the toolbar's ends; a longer path is cut short.
 const TOOLBAR_SIDE_ROOM: f32 = 320.0;
@@ -137,24 +126,6 @@ pub enum WorkbenchEvent {
     ActiveFileChanged(Option<PathBuf>),
 }
 
-/// A tool window of the main window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolWindow {
-    /// The project tool window, left of the editor.
-    Project,
-    /// The Run tool window, below the editor.
-    Run,
-}
-
-impl ToolWindow {
-    pub fn id(self) -> &'static str {
-        match self {
-            ToolWindow::Project => "project",
-            ToolWindow::Run => "run",
-        }
-    }
-}
-
 /// An open file.
 struct Tab {
     path: PathBuf,
@@ -170,8 +141,8 @@ pub struct Workbench {
     product: Rc<Product>,
     file_types: Rc<FileTypes>,
     focus: FocusHandle,
-    project_visible: bool,
-    project_width: Pixels,
+    /// The tool windows and the areas that show them.
+    tool_windows: crate::tool_windows::ToolWindows,
     first_frame_reported: bool,
     panel: Entity<ProjectPanel>,
     tabs: Vec<Tab>,
@@ -186,8 +157,8 @@ pub struct Workbench {
     notice_timer: Task<()>,
     /// The Go to Line field while it is open, and its blur subscription.
     go_to_line: Option<(Entity<Editor>, Subscription)>,
-    /// Resizing the project tool window: mouse x and width at the start.
-    resizing: Option<(Pixels, Pixels)>,
+    /// Resizing a tool window area.
+    resizing: Option<tool_window_areas::Resizing>,
     save_settings: SaveSettings,
     /// The last keyboard or mouse input or edit (executor clock).
     last_input: Option<Instant>,
@@ -211,22 +182,10 @@ pub struct Workbench {
     recently_changed: Vec<PathBuf>,
     /// The Run tool window (below the editor while visible).
     run_window: Entity<RunToolWindow>,
-    run_visible: bool,
-    /// Height of the tool window below the editor, as a share of the
-    /// space between the toolbar and the status bar.
-    bottom_weight: f32,
-    /// Resizing the tool window below the editor: mouse y and weight at
-    /// the start.
-    resizing_bottom: Option<(Pixels, f32)>,
-    /// The tool window that had the focus last (Hide Active Tool Window).
-    last_tool_window: ToolWindow,
     /// The product's status bar widgets.
     status_widgets: Vec<AnyView>,
     /// The active file last reported with [`WorkbenchEvent::ActiveFileChanged`].
     reported_active_file: Option<PathBuf>,
-    /// The Run tool window exists (its stripe button shows): after the
-    /// first run or its first activation, as the reference registers it.
-    run_registered: bool,
     run_settings: run_actions::RunSettings,
     /// A popup of the run widget or a Run tab while open.
     run_menu: Option<run_actions::OpenMenu>,
@@ -358,12 +317,12 @@ impl Workbench {
                 this.code_intel_event(event, window, cx)
             }));
         }
+        let tool_windows = tool_window_areas::default_tool_windows(&product, &run_window);
         Self {
             product,
             file_types,
             focus,
-            project_visible: true,
-            project_width: px(PROJECT_WIDTH),
+            tool_windows,
             first_frame_reported: false,
             panel,
             tabs: Vec::new(),
@@ -386,13 +345,8 @@ impl Workbench {
             recently_viewed: Vec::new(),
             recently_changed: Vec::new(),
             run_window,
-            run_visible: false,
-            bottom_weight: BOTTOM_WEIGHT,
-            resizing_bottom: None,
-            last_tool_window: ToolWindow::Project,
             status_widgets: Vec::new(),
             reported_active_file: None,
-            run_registered: false,
             run_settings: run_actions::RunSettings::default(),
             run_menu: None,
             dialog: None,
@@ -509,14 +463,6 @@ impl Workbench {
         &self.run_window
     }
 
-    /// The tool window is shown.
-    pub fn is_visible(&self, tool_window: ToolWindow) -> bool {
-        match tool_window {
-            ToolWindow::Project => self.project_visible,
-            ToolWindow::Run => self.run_visible,
-        }
-    }
-
     /// Reports a change of the active file to subscribers.
     fn report_active_file(&mut self, cx: &mut Context<Self>) {
         let active = self.active_file(cx);
@@ -530,11 +476,12 @@ impl Workbench {
     }
 
     pub fn project_visible(&self) -> bool {
-        self.project_visible
+        self.is_visible(ToolWindow::Project)
     }
 
+    /// Width of the left tool window area.
     pub fn project_width(&self) -> Pixels {
-        self.project_width
+        self.tool_windows.width(Area::Left)
     }
 
     /// The Go to Line field, while it is open.
@@ -617,16 +564,8 @@ impl Workbench {
                 "root": p.root().display().to_string(),
             })),
             "tree": self.panel.read(cx).state_json(cx),
-            "tool_windows": {
-                "project": {
-                    "visible": self.project_visible,
-                    "width": f32::from(self.project_width),
-                },
-                "run": {
-                    "visible": self.run_visible,
-                    "weight": self.bottom_weight,
-                },
-            },
+            "tool_windows": self.tool_windows.state_json(),
+            "tool_window_areas": self.tool_windows.areas_json(),
             "title_path": self.title_path(cx),
             "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
             "tabs": self.tabs.iter().map(|t| json!({
@@ -665,7 +604,7 @@ impl Workbench {
         self.tabs.clear();
         self.active = None;
         self.clear_navigation();
-        self.project_visible = true;
+        self.tool_windows.show(ToolWindow::Project);
         self.project_files.update(cx, |files, cx| files.clear(cx));
         self.sync_project_opened(&path, window, cx);
         self.panel.update(cx, |panel, cx| {
@@ -808,7 +747,7 @@ impl Workbench {
                         Dropped::Folder(path) => match this.project(cx) {
                             None => this.open_folder(path, window, cx),
                             Some(project) if project.relative(&path).is_some() => {
-                                this.project_visible = true;
+                                this.tool_windows.show(ToolWindow::Project);
                                 this.panel.update(cx, |panel, cx| panel.reveal(&path, cx));
                                 window.focus(&this.panel.focus_handle(cx));
                             }
@@ -1068,97 +1007,6 @@ impl Workbench {
 
     // ---- commands -------------------------------------------------------------
 
-    fn tool_window_focus(&self, tool_window: ToolWindow, cx: &App) -> FocusHandle {
-        match tool_window {
-            ToolWindow::Project => self.panel.focus_handle(cx),
-            ToolWindow::Run => self.run_window.focus_handle(cx),
-        }
-    }
-
-    /// The tool window that has the focus.
-    pub fn focused_tool_window(&self, window: &Window, cx: &App) -> Option<ToolWindow> {
-        [ToolWindow::Project, ToolWindow::Run]
-            .into_iter()
-            .find(|t| self.tool_window_focus(*t, cx).contains_focused(window, cx))
-    }
-
-    fn set_visible(&mut self, tool_window: ToolWindow, visible: bool) {
-        match tool_window {
-            ToolWindow::Project => self.project_visible = visible,
-            ToolWindow::Run => self.run_visible = visible,
-        }
-    }
-
-    /// Shows a tool window and moves the focus into it.
-    pub fn activate_tool_window(
-        &mut self,
-        tool_window: ToolWindow,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.set_visible(tool_window, true);
-        self.last_tool_window = tool_window;
-        let focus = match tool_window {
-            ToolWindow::Project => self.panel.focus_handle(cx),
-            ToolWindow::Run => {
-                // The first activation creates the Run tool window
-                // (`ToolWindowEmptyStateAction`).
-                self.run_registered = true;
-                self.run_window.read(cx).content_focus(cx)
-            }
-        };
-        window.focus(&focus);
-        cx.notify();
-    }
-
-    /// Hides a tool window; the focus goes to the editor.
-    pub fn hide(&mut self, tool_window: ToolWindow, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_visible(tool_window, false);
-        self.focus_editor(&FocusEditor, window, cx);
-        cx.notify();
-    }
-
-    /// The reference IDE's tool window activation: a tool window that has
-    /// the focus is hidden, otherwise it is shown and focused.
-    fn toggle_tool_window(
-        &mut self,
-        tool_window: ToolWindow,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let focused = self
-            .tool_window_focus(tool_window, cx)
-            .contains_focused(window, cx);
-        if self.is_visible(tool_window) && focused {
-            self.hide(tool_window, window, cx);
-        } else {
-            self.activate_tool_window(tool_window, window, cx);
-        }
-    }
-
-    fn toggle_project(&mut self, _: &ToggleProject, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_tool_window(ToolWindow::Project, window, cx);
-    }
-
-    fn toggle_run(&mut self, _: &ToggleRun, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_tool_window(ToolWindow::Run, window, cx);
-    }
-
-    /// Hides the tool window that has the focus, or else the one that had
-    /// it last.
-    fn hide_tool_window(
-        &mut self,
-        _: &HideToolWindow,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let tool_window = self
-            .focused_tool_window(window, cx)
-            .or(Some(self.last_tool_window).filter(|t| self.is_visible(*t)))
-            .unwrap_or(ToolWindow::Project);
-        self.hide(tool_window, window, cx);
-    }
-
     fn locate_file(&mut self, _: &LocateFile, window: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self
             .active_editor()
@@ -1166,7 +1014,7 @@ impl Workbench {
         else {
             return;
         };
-        self.project_visible = true;
+        self.tool_windows.show(ToolWindow::Project);
         self.panel.update(cx, |panel, cx| panel.reveal(&path, cx));
         window.focus(&self.panel.focus_handle(cx));
         cx.notify();
@@ -1327,18 +1175,7 @@ impl Workbench {
         }
         let shortcut =
             ui::keys::shortcut_in(&recent_files::Open, &self.focus, window).map(Into::into);
-        let mut tool_windows = vec![recent_files::ToolWindowItem {
-            id: "project",
-            title: "Project",
-            shortcut: ui::keys::shortcut_in(&ToggleProject, &self.focus, window).map(Into::into),
-        }];
-        if self.run_registered {
-            tool_windows.push(recent_files::ToolWindowItem {
-                id: "run",
-                title: "Run",
-                shortcut: ui::keys::shortcut_in(&ToggleRun, &self.focus, window).map(Into::into),
-            });
-        }
+        let tool_windows = self.tool_window_items(window, cx);
         let context = recent_files::OpenContext {
             root: self.project(cx).map(|p| p.root().to_owned()),
             viewed,
@@ -1361,12 +1198,7 @@ impl Workbench {
         match event {
             RecentFilesEvent::OpenFile(path) => self.open_file(path.clone(), window, cx),
             RecentFilesEvent::ShowToolWindow(id) => {
-                let tool_window = if *id == "run" {
-                    ToolWindow::Run
-                } else {
-                    ToolWindow::Project
-                };
-                self.activate_tool_window(tool_window, window, cx);
+                self.activate_tool_window(ToolWindow(id), window, cx);
             }
             RecentFilesEvent::Remove { path, edited } => {
                 self.recently_viewed.retain(|p| p != path);
@@ -1542,7 +1374,7 @@ impl Workbench {
                 None => self.open_file(path.clone(), window, cx),
             },
             SearchEverywhereEvent::RevealFolder(path) => {
-                self.project_visible = true;
+                self.tool_windows.show(ToolWindow::Project);
                 self.panel.update(cx, |panel, cx| panel.reveal(path, cx));
                 window.focus(&self.panel.focus_handle(cx));
             }
@@ -1777,111 +1609,6 @@ impl Workbench {
             .children(path_widget)
     }
 
-    fn render_left_stripe(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let shortcut: SharedString = if cfg!(target_os = "macos") {
-            "⌘1".into()
-        } else {
-            "Alt+1".into()
-        };
-        let project = chrome::stripe_button(
-            "stripe-project",
-            IconName::TOOL_PROJECT,
-            "Project",
-            Some(shortcut),
-            self.project_visible,
-            cx,
-        )
-        .on_click(cx.listener(|this, _, window, cx| {
-            if this.project_visible {
-                this.hide_tool_window(&HideToolWindow, window, cx);
-            } else {
-                this.toggle_project(&ToggleProject, window, cx);
-            }
-        }))
-        .into_any_element();
-        let top = vec![
-            project,
-            chrome::stripe_button(
-                "stripe-commit",
-                IconName::TOOL_COMMIT,
-                "Commit",
-                None,
-                false,
-                cx,
-            )
-            .into_any_element(),
-            chrome::stripe_button(
-                "stripe-structure",
-                IconName::TOOL_STRUCTURE,
-                "Structure",
-                None,
-                false,
-                cx,
-            )
-            .into_any_element(),
-        ];
-        let run_shortcut: SharedString = if cfg!(target_os = "macos") {
-            "⌘4".into()
-        } else {
-            "Alt+4".into()
-        };
-        // The live indicator while a process of the Run tool window runs
-        // (`RunContentManagerImpl.setToolWindowIcon`).
-        let live = self
-            .run_window
-            .read(cx)
-            .any_alive()
-            .then(|| cx.theme().color(UiRole::Success));
-        let run = chrome::stripe_button_badged(
-            "stripe-run",
-            IconName::TOOL_RUN,
-            "Run",
-            Some(run_shortcut),
-            self.run_visible,
-            live,
-            cx,
-        )
-        .debug_selector(|| "stripe-run".into())
-        .on_click(cx.listener(|this, _, window, cx| {
-            if this.run_visible {
-                this.hide(ToolWindow::Run, window, cx);
-            } else {
-                this.activate_tool_window(ToolWindow::Run, window, cx);
-            }
-        }))
-        .into_any_element();
-        // The button shows once the tool window exists.
-        let mut bottom: Vec<AnyElement> = self.run_registered.then_some(run).into_iter().collect();
-        bottom.extend(self.product.left_stripe_bottom.iter().map(|item| {
-            chrome::stripe_button(item.id, item.icon, item.title, None, false, cx)
-                .into_any_element()
-        }));
-        for (id, icon, title) in [
-            ("stripe-services", IconName::TOOL_SERVICES, "Services"),
-            ("stripe-terminal", IconName::TOOL_TERMINAL, "Terminal"),
-            ("stripe-problems", IconName::TOOL_PROBLEMS, "Problems"),
-            ("stripe-vcs", IconName::TOOL_VCS, "Version Control"),
-        ] {
-            bottom.push(chrome::stripe_button(id, icon, title, None, false, cx).into_any_element());
-        }
-        chrome::stripe("left-stripe", top, bottom, cx)
-    }
-
-    fn render_right_stripe(&self, cx: &App) -> impl IntoElement {
-        let top = vec![
-            chrome::stripe_button(
-                "stripe-notifications",
-                IconName::TOOL_NOTIFICATIONS,
-                "Notifications",
-                None,
-                false,
-                cx,
-            )
-            .into_any_element(),
-        ];
-        chrome::stripe("right-stripe", top, Vec::new(), cx)
-    }
-
     fn render_project(&self, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let header_h = theme.metric(Metric::ToolWindowHeaderHeight);
@@ -1942,75 +1669,10 @@ impl Workbench {
             .id("project-tool-window")
             .debug_selector(|| "project-tool-window".into())
             .flex_none()
-            .w(self.project_width)
+            .w(self.project_width())
             .h_full()
             .child(header)
             .child(self.panel.clone())
-    }
-
-    /// The gap between the project tool window and the editor; dragging it
-    /// resizes the tool window.
-    fn render_splitter(&self, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("project-splitter")
-            .debug_selector(|| "project-splitter".into())
-            .flex_none()
-            .w(width)
-            .h_full()
-            .child(
-                canvas(
-                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-                    |_, hitbox, window, _| {
-                        ui::pointer::request(CursorStyle::ResizeLeftRight, &hitbox, window)
-                    },
-                )
-                .size_full(),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.resizing = Some((e.position.x, this.project_width));
-                    cx.stop_propagation();
-                }),
-            )
-    }
-
-    /// The Run tool window below the editor.
-    fn render_bottom(&self, height: Pixels, cx: &App) -> impl IntoElement {
-        island(cx, UiRole::ToolWindow)
-            .id("run-tool-window")
-            .debug_selector(|| "run-tool-window".into())
-            .flex_none()
-            .w_full()
-            .h(height)
-            .child(self.run_window.clone())
-    }
-
-    /// The gap between the editor and the tool window below it; dragging
-    /// it resizes the tool window.
-    fn render_bottom_splitter(&self, height: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("bottom-splitter")
-            .debug_selector(|| "bottom-splitter".into())
-            .flex_none()
-            .w_full()
-            .h(height)
-            .child(
-                canvas(
-                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-                    |_, hitbox, window, _| {
-                        ui::pointer::request(CursorStyle::ResizeUpDown, &hitbox, window)
-                    },
-                )
-                .size_full(),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.resizing_bottom = Some((e.position.y, this.bottom_weight));
-                    cx.stop_propagation();
-                }),
-            )
     }
 
     /// Height of the space between the toolbar and the status bar, which
@@ -2020,40 +1682,6 @@ impl Workbench {
         window.viewport_size().height
             - theme.metric(Metric::ToolbarHeight)
             - chrome::status_metrics(cx).0
-    }
-
-    fn resize_bottom(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((y0, weight0)) = self.resizing_bottom else {
-            return;
-        };
-        if e.pressed_button != Some(MouseButton::Left) {
-            self.resizing_bottom = None;
-            cx.notify();
-            return;
-        }
-        let pane = self.pane_height(window, cx);
-        if pane <= px(0.0) {
-            return;
-        }
-        let max = (pane - px(MIN_EDITOR_HEIGHT)).max(px(MIN_BOTTOM_HEIGHT));
-        let height = (pane * weight0 - (e.position.y - y0)).clamp(px(MIN_BOTTOM_HEIGHT), max);
-        self.bottom_weight = height / pane;
-        cx.notify();
-    }
-
-    fn resize_project(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.resize_bottom(e, window, cx);
-        let Some((x0, w0)) = self.resizing else {
-            return;
-        };
-        if e.pressed_button != Some(MouseButton::Left) {
-            self.resizing = None;
-            cx.notify();
-            return;
-        }
-        let max = (window.viewport_size().width - px(MIN_EDITOR_WIDTH)).max(px(MIN_PROJECT_WIDTH));
-        self.project_width = (w0 + e.position.x - x0).clamp(px(MIN_PROJECT_WIDTH), max);
-        cx.notify();
     }
 
     fn render_go_to_line(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -2268,7 +1896,7 @@ impl Workbench {
             }
         };
         hint("Search Everywhere", "search-everywhere.open");
-        if !self.project_visible {
+        if !self.project_visible() {
             hint("Project View", "workbench.toggle-project");
         }
         hint("Go to File", "search-everywhere.go-to-file");
@@ -2529,10 +2157,9 @@ impl Render for Workbench {
         }
         let gap = cx.theme().metric(Metric::IslandGap);
         let window_width = window.viewport_size().width;
-        let bottom_height = (self.pane_height(window, cx) * self.bottom_weight).max(px(0.0));
         let run_widget = self.run_widget_state(window, cx);
         if let Some(tool_window) = self.focused_tool_window(window, cx) {
-            self.last_tool_window = tool_window;
+            self.tool_windows.set_last_active(tool_window);
         }
         // The frame around the islands has the toolbar colour.
         let frame = cx.theme().color(UiRole::Toolbar);
@@ -2559,6 +2186,8 @@ impl Render for Workbench {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::toggle_project))
             .on_action(cx.listener(Self::toggle_run))
+            .on_action(cx.listener(Self::activate_tool_window_action))
+            .on_action(cx.listener(Self::toggle_tool_window_action))
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::hide_tool_window))
             .on_action(cx.listener(Self::locate_file))
@@ -2630,7 +2259,7 @@ impl Render for Workbench {
             .on_modifiers_changed(|e: &gpui::ModifiersChangedEvent, window, cx| {
                 crate::keymap::modifiers_changed(e.modifiers, window, cx)
             })
-            .on_mouse_move(cx.listener(Self::resize_project))
+            .on_mouse_move(cx.listener(Self::resize_area))
             .when(env::debug_cursor(), |d| {
                 d.on_mouse_move(|e: &MouseMoveEvent, window, _| {
                     env::marker(&format!(
@@ -2646,9 +2275,7 @@ impl Render for Workbench {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
-                    let project = this.resizing.take().is_some();
-                    let bottom = this.resizing_bottom.take().is_some();
-                    if project || bottom {
+                    if this.end_resizing() {
                         cx.notify();
                     }
                 }),
@@ -2675,7 +2302,7 @@ impl Render for Workbench {
                     .flex_row()
                     .flex_1()
                     .min_h(px(0.0))
-                    .child(self.render_left_stripe(cx))
+                    .child(self.render_left_stripe(window, cx))
                     .child(
                         // A tool window below the editor spans under the
                         // project tool window too, as in the reference
@@ -2694,18 +2321,13 @@ impl Render for Workbench {
                                     .flex_row()
                                     .flex_1()
                                     .min_h(px(0.0))
-                                    .when(self.project_visible, |d| {
-                                        d.child(self.render_project(cx))
-                                            .child(self.render_splitter(gap, cx))
-                                    })
-                                    .child(self.render_editor_area(window, cx)),
+                                    .children(self.render_side_area(Area::Left, gap, window, cx))
+                                    .child(self.render_editor_area(window, cx))
+                                    .children(self.render_side_area(Area::Right, gap, window, cx)),
                             )
-                            .when(self.run_visible, |d| {
-                                d.child(self.render_bottom_splitter(gap, cx))
-                                    .child(self.render_bottom(bottom_height, cx))
-                            }),
+                            .children(self.render_bottom_area(gap, window, cx)),
                     )
-                    .child(self.render_right_stripe(cx)),
+                    .child(self.render_right_stripe(window, cx)),
             )
             .child(self.render_status_bar(cx))
             .children(self.render_go_to_line(cx))
@@ -2758,25 +2380,11 @@ impl Render for Workbench {
                 )
             })
             // While resizing, the resize pointer stays wherever the mouse is.
-            .when(self.resizing.is_some(), |d| {
+            .when_some(self.resizing_cursor(), |d, cursor| {
                 d.child(
                     canvas(
                         |_, _, _| (),
-                        |_, _, window, _| {
-                            ui::pointer::request_window(CursorStyle::ResizeLeftRight, window)
-                        },
-                    )
-                    .absolute()
-                    .size_0(),
-                )
-            })
-            .when(self.resizing_bottom.is_some(), |d| {
-                d.child(
-                    canvas(
-                        |_, _, _| (),
-                        |_, _, window, _| {
-                            ui::pointer::request_window(CursorStyle::ResizeUpDown, window)
-                        },
+                        move |_, _, window, _| ui::pointer::request_window(cursor, window),
                     )
                     .absolute()
                     .size_0(),

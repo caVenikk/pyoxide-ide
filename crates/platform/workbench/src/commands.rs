@@ -10,6 +10,14 @@ ui::ui_commands! {
     /// Show, focus or hide the Run tool window.
     ToggleRun => "workbench.toggle-run", "Run",
         "Shows and focuses the Run tool window; hides it when it has the focus.";
+    /// Show and focus a tool window.
+    ActivateToolWindow { id: String } => "workbench.activate-tool-window", "Activate Tool Window",
+        "Shows a tool window by id (as `workbench.state` lists them) in its area, in place of the one there, and moves the focus into it.",
+        r#"{"id": "run"}"#;
+    /// Show, focus or hide a tool window.
+    ToggleToolWindow { id: String } => "workbench.toggle-tool-window", "Toggle Tool Window",
+        "Shows and focuses a tool window by id; hides it when it has the focus.",
+        r#"{"id": "run"}"#;
     /// Hide the active tool window.
     HideToolWindow => "workbench.hide-tool-window", "Hide Active Tool Window",
         "Hides the tool window that has the focus (or was used last) and moves the focus to the editor.";

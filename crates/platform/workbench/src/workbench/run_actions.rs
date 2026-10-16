@@ -150,8 +150,8 @@ impl Workbench {
     /// The state reported by `run.state`.
     pub fn run_state_json(&self, window: &Window, cx: &App) -> serde_json::Value {
         let mut state = self.run_window.read(cx).state_json(cx);
-        state["visible"] = json!(self.run_visible);
-        state["registered"] = json!(self.run_registered);
+        state["visible"] = json!(self.is_visible(ToolWindow::Run));
+        state["registered"] = json!(self.tool_windows.is_registered(ToolWindow::Run));
         state["alive"] = json!(self.run_window.read(cx).any_alive());
         state["widget"] = self.run_widget_state(window, cx).state_json();
         state["configurations"] = self.run_configs(cx).read(cx).state_json();
@@ -290,8 +290,7 @@ impl Workbench {
     /// (`activateToolWindowBeforeRun`, not `focusToolWindowBeforeRun`); it
     /// takes it when nothing has it.
     fn show_run_for_launch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_registered = true;
-        self.run_visible = true;
+        self.tool_windows.show(ToolWindow::Run);
         if window.focused(cx).is_none() {
             let focus = self.run_window.read(cx).content_focus(cx);
             window.focus(&focus);
@@ -462,7 +461,7 @@ impl Workbench {
     ) {
         self.run_window
             .update(cx, |w, cx| w.select(action.index, cx));
-        if self.run_visible {
+        if self.is_visible(ToolWindow::Run) {
             let focus = self.run_window.read(cx).content_focus(cx);
             window.focus(&focus);
         }
@@ -892,10 +891,10 @@ impl Workbench {
                 // `ToolWindowContentUi.contentRemoved`: a tool window that
                 // hides on empty content also leaves the stripe; the next
                 // run or ⌘4 brings its button back.
-                if self.run_visible {
+                if self.is_visible(ToolWindow::Run) {
                     self.hide(ToolWindow::Run, window, cx);
                 }
-                self.run_registered = false;
+                self.tool_windows.set_registered(ToolWindow::Run, false);
                 cx.notify();
             }
             RunToolWindowEvent::OpenLink(target) => self.open_link(target, window, cx),
