@@ -8,7 +8,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 50% `█████░░░░░` | 2 | 6 | 3 |
+| editor | 55% `█████░░░░░` | 3 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
@@ -80,6 +80,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Python syntax highlighting | must | tree-sitter off the UI thread mapped to theme text roles |
 | 🟡 | Tabs and split views | must | tabs with modified marker and keyboard switching; no split views |
 | 🟡 | File tree and project model | must | open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; New (File, Directory, Python File / Package), Rename, Delete to the trash, Cut / Copy / Paste, Copy / Move dialogs, drag and drop, Copy Path (#37); no multi-selection (#125), no Safe Delete or rename with usages (#123) |
+| ✅ | Python packages and source roots in the tree | must | #120: package and pyproject-module icons, sources / test sources roots with hints, Mark Directory As (incl. the project root), .oxide [roots] with one-time .idea sourceFolder import; roots feed Go to File, run PYTHONPATH and module names (ADR 0013); Namespace Package and Not Excluded later |
 | 🟡 | Search in file and project | must | find and replace in file (#31) and in files (#43: scopes, masks, editable preview, Replace in Files); missing: Find tool window (#65), multi-row selection (#66), undo across files (#67), comment/string filters (#50) |
 | 🟡 | Navigation popups (Search Everywhere, Go to File / Action, Recent Files) | must | All / Files / Actions / Text tabs, ported name matcher, file:line, recent files; Classes and Symbols with M3; preview and Find window (#65); the reference's ML ranking replaced by a fixed rule |
 | ✅ | Navigation history (Back / Forward) | must | places and keys as in the reference, mouse buttons 4 / 5, view position restored (#103); only the primary caret is kept; Recent Locations and Last Edit Location later |

@@ -284,7 +284,14 @@ pub fn module_name(path: &Path, roots: &[PathBuf]) -> Option<String> {
         .iter()
         .filter(|root| path.starts_with(root))
         .flat_map(|root| {
-            let mut bases = crate::source_roots(root);
+            // The roots in effect of the open project; the detected ones
+            // before the project tool window has read them.
+            let mut bases = match project::roots::published(root) {
+                Some(roots) => {
+                    roots.folders(root, &[project::roots::SOURCES, project::roots::TESTS])
+                }
+                None => crate::source_roots(root),
+            };
             bases.push(root.clone());
             bases
         })
@@ -769,6 +776,14 @@ mod tests {
         assert_eq!(module_name(&init, &roots).as_deref(), Some("tools"));
         assert_eq!(module_name(&api, &roots).as_deref(), Some("requests.api"));
         assert_eq!(module_name(&module, &[]).as_deref(), Some("mod"));
+        // The roots the project tool window published win over the
+        // detected ones: here `src/pkg` is a sources root, `src` none.
+        let mut marked = project::Roots::default();
+        marked.mark("src/pkg", project::roots::SOURCES);
+        project::roots::publish(&project, &marked);
+        assert_eq!(module_name(&module, &roots).as_deref(), Some("mod"));
+        project::roots::publish(&project, &project::Roots::default());
+        assert_eq!(module_name(&module, &roots).as_deref(), Some("src.pkg.mod"));
 
         let provider = PythonCodeIntel::with_search(SearchPaths::default());
         assert_eq!(

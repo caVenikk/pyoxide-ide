@@ -1,5 +1,5 @@
 //! Rows whose text does not fit the tool window (the project root with its
-//! location, a long name), drawn as the reference IDE's trees draw them:
+//! hint and location, a long name), drawn as the reference IDE's trees draw them:
 //!
 //! - The row's selection and hover run out of the visible part of the
 //!   tree: they reach its right edge but for a pixel, with square right
@@ -132,15 +132,15 @@ impl ProjectPanel {
                 .shape_line(SharedString::from(text.to_owned()), size, &[run], None)
                 .width
         };
-        let mut text = if node.depth == 0 {
-            width(&node.entry.name, FontWeight::SEMIBOLD)
+        let row_text = self.row_text(node);
+        let weight = if row_text.bold {
+            FontWeight::SEMIBOLD
         } else {
-            width(&node.entry.name, FontWeight::NORMAL)
+            FontWeight::NORMAL
         };
-        if node.depth == 0
-            && let Some(project) = &self.project
-        {
-            text += px(LOCATION_GAP) + width(&project.display_root(), FontWeight::NORMAL);
+        let mut text = width(&node.entry.name, weight);
+        if let Some(hint) = &row_text.hint {
+            text += px(LOCATION_GAP) + width(hint, FontWeight::NORMAL);
         }
         let end = label_x(node, cx) + text;
         self.expansion.label_ends.borrow_mut().insert(id, end);
@@ -328,8 +328,10 @@ impl ProjectPanel {
         )
     }
 
-    /// The row's name (and the root's location), as the row draws it.
+    /// The row's name and its grey hint (a content root's kind of root,
+    /// the project root's location), as the row draws it.
     pub(super) fn row_label(&self, node: &Node, text: Hsla, cx: &App) -> Div {
+        let row_text = self.row_text(node);
         let mut label = div()
             .flex()
             .flex_row()
@@ -337,16 +339,16 @@ impl ProjectPanel {
             .whitespace_nowrap()
             .text_color(text)
             .child(SharedString::from(node.entry.name.clone()));
-        if node.depth == 0 {
+        if row_text.bold {
             label = label.font_weight(FontWeight::SEMIBOLD);
-            if let Some(project) = &self.project {
-                label = label.child(
-                    div()
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(cx.theme().color(UiRole::TextMuted))
-                        .child(project.display_root()),
-                );
-            }
+        }
+        if let Some(hint) = row_text.hint {
+            label = label.child(
+                div()
+                    .font_weight(FontWeight::NORMAL)
+                    .text_color(cx.theme().color(UiRole::TextMuted))
+                    .child(hint),
+            );
         }
         label
     }
