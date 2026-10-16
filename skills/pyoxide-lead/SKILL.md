@@ -22,8 +22,9 @@ The lead is the session that plans, delegates and reviews; sub-agents implement 
 
 ## Merging
 - Bookkeeping in the PR branch: a `replica/features.csv` row (`clone` yes / partial) + `python3 scripts/progress.py`, commit `docs(progress): ... (#N)`.
-- When main moved: rebase (or merge main into a branch others build on); after conflicts run clippy and tests before pushing. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
+- When main moved: rebase (or merge main into a branch others build on); after conflicts run clippy and `cargo nextest run --workspace` (plus `cargo test --doc --workspace`) before pushing. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
 - Merge through auto-merge after review: `gh pr ready <n>` (if draft), `gh pr merge <n> --auto --squash --subject "<title> (#n)" --body "... Closes #N"`. Do not poll CI; disable auto-merge (`--disable-auto`) before pushing further changes. Squash merge, never a `Co-Authored-By` line. Pull requests from forks are merged only with a maintainer's explicit OK.
+- Clean up after the merge: once the PR is merged and the maintainer has tried the build (see "Builds for the maintainer"), remove the agent's worktree and its branch (`git worktree remove --force <path>`, `git branch -D <branch>`; a squash-merged branch is not seen as merged). Each worktree holds a 10-27 GB `target/`; keep only work in progress.
 
 ## Builds for the maintainer
 - After user-visible merges: update main, `cargo build --release -p pyoxide-ide`, a quick screenshot, then replace the maintainer's copy atomically (`cp` to `<name>.new`, then `mv -f`), so a running copy is not corrupted.

@@ -128,7 +128,8 @@ cargo run -p themes --example import -- path/to/theme.jar
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo nextest run --workspace     # cargo install cargo-nextest --locked
+cargo test --doc --workspace      # nextest does not run doctests
 cargo test -p db-postgres -p db-oracle-thin -- --ignored   # needs docker compose up
 ```
 

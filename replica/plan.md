@@ -11,7 +11,7 @@ skills/replica-diff/parity.py replica/features.csv` and `replica/perf.md`.
   before sub-agents start.
 - One owner per crate (or per file set). Sub-agents work in their own git
   worktree and branch, finish with `cargo fmt --all`, `cargo clippy
-  --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
+  --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace`,
   measurements and a short report.
 - Sub-agents do not edit `replica/features.csv`, `docs/PROGRESS.md`,
   `README.md` or the roadmap; the lead updates them when merging.
