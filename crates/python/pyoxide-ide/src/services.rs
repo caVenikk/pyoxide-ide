@@ -395,6 +395,12 @@ impl PythonServices {
         self.state.as_ref()
     }
 
+    /// Where its tools are searched besides the interpreter's folder;
+    /// `None`: the application's environment.
+    pub fn search(&self) -> Option<Arc<SearchPaths>> {
+        self.search.clone()
+    }
+
     /// The type engine in effect.
     pub fn type_engine(&self) -> Option<TypeEngine> {
         Some(self.state.as_ref()?.settings.type_engine)
@@ -638,7 +644,7 @@ pub fn init(cx: &mut App) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Mutex;
 
     use code_intel::fake::FakeCodeIntel;
@@ -978,12 +984,10 @@ mod tests {
             json!(root.join("venv/bin/python"))
         );
 
-        // Type Engine Settings opens the settings file.
+        // Type Engine Settings opens Settings > Python > Type Engine.
         invoke(cx, "python.type-engine.settings", Json::Null);
-        let active = cx
-            .read_window(&window, |w, cx| w.read(cx).active_file(cx))
-            .unwrap();
-        assert_eq!(active, Some(root.join(".oxide/project.toml")));
+        let settings = invoke(cx, "settings.state", Json::Null);
+        assert_eq!(settings["page"], "python.type-engine", "{settings}");
     }
 
     /// A default tool installed nowhere: the person is asked, the answer is

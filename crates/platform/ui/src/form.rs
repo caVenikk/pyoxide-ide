@@ -218,6 +218,116 @@ pub fn radio_row(
         .child(label)
 }
 
+/// The ON/OFF switch of tables (`OnOffButton`): a box with "ON" and the
+/// knob on the right, or the knob on the left and "OFF". Its size and
+/// colours are the reference's (`DefaultOnOffButtonUI`: 3 around a box
+/// 16 high with a square knob); the caller adds the click handler.
+pub fn on_off(id: impl Into<ElementId>, on: bool, cx: &App) -> Stateful<Div> {
+    const BOX: (f32, f32) = (45.0, 16.0);
+    const PAD: f32 = 3.0;
+    let theme = cx.theme();
+    let dark = theme.is_dark();
+    let gray = |light: u8, dark_value: u8| {
+        let v = f32::from(if dark { dark_value } else { light }) / 255.0;
+        gpui::Rgba {
+            r: v,
+            g: v,
+            b: v,
+            a: 1.0,
+        }
+    };
+    let on_bg = if dark {
+        gpui::rgb(0x4D694C)
+    } else {
+        gpui::rgb(0x4A9249)
+    };
+    let (bg, fg, text) = if on {
+        (on_bg.into(), gpui::white(), "ON")
+    } else {
+        (
+            theme.color(UiRole::Surface),
+            theme.color(UiRole::TextDisabled),
+            "OFF",
+        )
+    };
+    let knob = || {
+        div()
+            .flex_none()
+            .size(px(BOX.1))
+            .rounded(px(1.5))
+            .bg(gray(200, 100))
+    };
+    let label = || {
+        div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(fg)
+            .child(text)
+    };
+    div().id(id).flex_none().p(px(PAD)).child(
+        div()
+            .w(px(BOX.0))
+            .h(px(BOX.1))
+            .flex()
+            .flex_row()
+            .rounded(px(2.5))
+            .border_1()
+            .border_color(gray(192, 80))
+            .bg(bg)
+            .overflow_hidden()
+            .when(on, |d| d.child(label()).child(knob()))
+            .when(!on, |d| d.child(knob()).child(label())),
+    )
+}
+
+/// A segmented button (Kotlin UI DSL `segmentedButton`): the choices side
+/// by side in one outline, the selected one raised with an outline of its
+/// own. `on_select` gets the index of a clicked choice.
+pub fn segmented(
+    id: &'static str,
+    choices: &[SharedString],
+    selected: Option<usize>,
+    on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
+    let theme = cx.theme();
+    let radius = field_radius(cx);
+    let on_select = std::rc::Rc::new(on_select);
+    let segments = choices.iter().enumerate().map(|(ix, choice)| {
+        let chosen = selected == Some(ix);
+        let on_select = on_select.clone();
+        div()
+            .id((id, ix))
+            .debug_selector(move || format!("{id}:{ix}"))
+            .flex_none()
+            .h_full()
+            .px(px(14.0))
+            .flex()
+            .items_center()
+            .rounded(radius)
+            .whitespace_nowrap()
+            .when(chosen, |d| {
+                d.bg(theme.color(UiRole::Pressed))
+                    .border_1()
+                    .border_color(theme.color(UiRole::BorderInput))
+            })
+            .when(!chosen, |d| d.pointing_hand())
+            .child(choice.clone())
+            .on_click(move |_, window, cx| on_select(ix, window, cx))
+    });
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .h(px(FIELD_HEIGHT))
+        .rounded(radius)
+        .border_1()
+        .border_color(theme.color(UiRole::BorderInput))
+        .children(segments)
+}
+
 /// The round "?" help button at the bottom left of a dialog; without an
 /// action it is drawn disabled (the reference disables it for a dialog
 /// without a help topic).

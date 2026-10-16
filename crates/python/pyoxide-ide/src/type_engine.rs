@@ -6,8 +6,7 @@
 //! its own engine and Pyrefly; Pyoxide shows it always and offers its type
 //! servers, ty and basedpyright (ADR 0011). The popup lists them with a
 //! check mark on the current one, a separator and "Type Engine
-//! Settings…", which opens the project settings file until there is a
-//! settings window.
+//! Settings…", which opens Settings > Python > Type Engine.
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -42,7 +41,7 @@ ui::ui_commands! {
         r#"{"name": "basedpyright"}"#;
     /// Open where the type engine is set.
     TypeEngineSettings => "python.type-engine.settings", "Type Engine Settings\u{2026}",
-        "Opens the project settings file (.oxide/project.toml), where the type engine and the Python tools are set, until there is a settings window.";
+        "Opens the Settings window on Python > Type Engine.";
     /// Describe the widget.
     TypeEngineState => "python.type-engine.state", "Type Engine State",
         "Returns the type engine widget's state as JSON: whether it shows, its text and tooltip, the engine and the open popup.";
@@ -190,12 +189,16 @@ pub fn init(cx: &mut App) {
         }
     });
     cx.on_action(|_: &TypeEngineSettings, cx| {
-        let Some((window, widget)) = target(cx) else {
+        let Some((window, _)) = target(cx) else {
             return;
         };
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
-                widget.update(cx, |w, cx| w.open_settings(window, cx));
+                let open = settings_ui::commands::OpenSettings {
+                    page: Some(crate::settings_pages::TYPE_ENGINE.into()),
+                    filter: None,
+                };
+                window.dispatch_action(Box::new(open), cx);
             });
         });
     });
@@ -229,7 +232,6 @@ pub fn status_widget() -> StatusWidget {
 
 /// The type engine widget of one main window.
 pub(crate) struct TypeEngineWidget {
-    workbench: WeakEntity<Workbench>,
     root: Option<PathBuf>,
     /// The file of the active editor: the widget shows while it is a
     /// Python file of the project.
@@ -266,7 +268,6 @@ impl TypeEngineWidget {
             );
         }
         let mut this = Self {
-            workbench,
             root: None,
             active_file,
             services: None,
@@ -358,26 +359,6 @@ impl TypeEngineWidget {
         if let Some((services, _)) = &self.services {
             services.update(cx, |s, cx| s.select_type_engine(engine, cx));
         }
-    }
-
-    /// Opens `.oxide/project.toml`, created (with an empty
-    /// `[python.tools]` table) when the project has none yet.
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(root), Some(workbench)) = (self.root.clone(), self.workbench.upgrade()) else {
-            return;
-        };
-        let file = project::store::settings_file(&root);
-        let create = cx.background_spawn({
-            let root = root.clone();
-            async move { py_lsp::settings::ensure_tools_table(&root) }
-        });
-        cx.spawn_in(window, async move |_, cx| {
-            if let Err(e) = create.await {
-                eprintln!("type engine settings: {e}");
-            }
-            let _ = workbench.update_in(cx, |w, window, cx| w.open_file(file, window, cx));
-        })
-        .detach();
     }
 
     fn state_json(&self, cx: &App) -> Json {
