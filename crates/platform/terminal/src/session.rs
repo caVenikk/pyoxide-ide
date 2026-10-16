@@ -452,7 +452,7 @@ impl Session {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let tty_options = tty::Options {
             shell: Some(tty::Shell::new(
-                options.command.program.clone(),
+                program_for_tty(&options.command.program),
                 options.command.args.clone(),
             )),
             working_directory: Some(options.working_directory.clone()),
@@ -864,6 +864,17 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.loop_tx.send(Msg::Shutdown);
+    }
+}
+
+/// The program as `tty` puts it on the command line: on Windows it is not
+/// quoted there (only the arguments are), so a path with blanks is quoted
+/// here.
+fn program_for_tty(program: &str) -> String {
+    if cfg!(windows) && program.contains([' ', '\t']) && !program.starts_with('"') {
+        format!("\"{program}\"")
+    } else {
+        program.to_owned()
     }
 }
 

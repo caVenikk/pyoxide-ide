@@ -20,6 +20,7 @@ use alacritty_terminal::event::WindowSize;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::tty::{self, ChildEvent, EventedPty, EventedReadWrite};
 use alacritty_terminal::vte::ansi;
+use parking_lot::MutexGuard;
 use polling::{Event as PollEvent, Events, PollMode, Poller};
 use process::ExitStatus;
 
@@ -249,7 +250,7 @@ impl IoLoop {
         let mut processed = 0;
         let shared = self.shared.clone();
         // Reserve the next turn of the lock for the reader.
-        let _lease = shared.state.lease();
+        let lease = shared.state.lease();
         let mut state = None;
         loop {
             match self.pty.reader().read(&mut buf[unprocessed..]) {
@@ -279,6 +280,12 @@ impl IoLoop {
                 break;
             }
         }
+        // Hand the lock to a waiting view right away: with a plain unlock
+        // the reader takes it again before the view thread wakes up.
+        if let Some(state) = state {
+            MutexGuard::unlock_fair(state);
+        }
+        MutexGuard::unlock_fair(lease);
         if processed > 0 && self.parser.sync_bytes_count() < processed {
             shared.notifier.wake();
         }

@@ -579,6 +579,68 @@ mod tests {
     }
 
     #[test]
+    fn cells_colours_wide_characters_and_cursor() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::term::Config;
+
+        let size = crate::TerminalSize::new(10, 3);
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser: ansi::Processor = ansi::Processor::new();
+        parser.advance(
+            &mut term,
+            "\x1b[1;31mA\x1b[0m\x1b[48;2;1;2;3mB\x1b[0m中x\x1b[4:3me\u{301}\x1b[0m\x1b]4;1;rgb:10/20/30\x07"
+                .as_bytes(),
+        );
+        let mut snap = Snapshot::default();
+        fill(&term, &mut snap);
+        assert_eq!((snap.columns, snap.rows, snap.cells.len()), (10, 3, 30));
+        let a = snap.cell(Point::new(0, 0));
+        assert_eq!((a.c, a.fg), ('A', Color::Indexed(1)));
+        assert!(a.flags.contains(CellFlags::BOLD));
+        assert_eq!(
+            snap.cell(Point::new(0, 1)).bg,
+            Color::Rgb(Rgb::new(1, 2, 3))
+        );
+        assert!(snap.cell(Point::new(0, 2)).flags.contains(CellFlags::WIDE));
+        assert!(
+            snap.cell(Point::new(0, 3))
+                .flags
+                .contains(CellFlags::WIDE_SPACER)
+        );
+        assert_eq!(snap.cell(Point::new(0, 4)).c, 'x');
+        assert!(
+            snap.cell(Point::new(0, 5))
+                .flags
+                .contains(CellFlags::UNDERCURL)
+        );
+        assert_eq!(snap.extras.len(), 1);
+        assert_eq!(snap.extras[0].point, Point::new(0, 5));
+        assert_eq!(snap.extras[0].zerowidth, ['\u{301}']);
+        assert_eq!(snap.line_text(0), "AB中xe");
+        assert_eq!(
+            snap.cursor,
+            Some(Cursor {
+                point: Point::new(0, 6),
+                shape: CursorShape::Block
+            })
+        );
+        assert!(snap.modes.show_cursor);
+        assert_eq!(
+            snap.color_overrides,
+            [(Color::Indexed(1), Rgb::new(0x10, 0x20, 0x30))]
+        );
+
+        // The alternate screen and mouse modes.
+        parser.advance(&mut term, b"\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?25l");
+        fill(&term, &mut snap);
+        assert!(snap.modes.alt_screen && snap.modes.sgr_mouse);
+        assert_eq!(snap.modes.mouse, MouseMode::Drag);
+        assert!(!snap.modes.show_cursor);
+        assert_eq!(snap.cursor.map(|c| c.shape), Some(CursorShape::Hidden));
+        assert_eq!(snap.line_text(0), "");
+    }
+
+    #[test]
     fn span_contains_text_and_block() {
         let text = Span {
             start: Point::new(1, 5),

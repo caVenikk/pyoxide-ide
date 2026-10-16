@@ -10,6 +10,9 @@ rust-version.workspace = true
 # The emulator and the pseudo-terminal; its types stay inside this crate.
 alacritty_terminal = { workspace = true }
 flume = { workspace = true }
+# The guards of the terminal's lock (`alacritty_terminal::sync::FairMutex`),
+# released fairly by the reader.
+parking_lot = "0.12"
 # The I/O loop waits on the PTY through the poller `alacritty_terminal::tty`
 # registers with (the version that crate uses).
 polling = "3.8"

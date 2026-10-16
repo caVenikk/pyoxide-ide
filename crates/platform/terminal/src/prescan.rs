@@ -85,14 +85,9 @@ impl Scanner {
             i += 1;
             match self.state {
                 State::Ground => {
-                    // Fast path: skip to the next ESC.
-                    match bytes[i - 1..].iter().position(|&b| b == 0x1b) {
-                        Some(at) => {
-                            i += at;
-                            self.state = State::Escape;
-                        }
-                        None => return None,
-                    }
+                    // Fast path: skip to the next ESC (none: all consumed).
+                    i += bytes[i - 1..].iter().position(|&b| b == 0x1b)?;
+                    self.state = State::Escape;
                 }
                 State::Escape => {
                     self.state = if b == b']' {
