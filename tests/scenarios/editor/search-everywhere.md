@@ -13,7 +13,8 @@ modifier events and clicks through both keymaps),
 reference's matcher tests) and `crates/platform/file-index` (the index,
 the reference's own Go to File cases, the order on the Flask repository's
 layout, `name:line:column`, absolute paths). Recent Files has its own
-scenario, `recent-files.md`.
+scenario, `recent-files.md`. The preview is the one of Find in Files
+(`find-in-files.md`, step 10 for its Soft-Wrap button), read-only here.
 
 ## Keys
 | Action | Mac | Win | Where |
@@ -58,9 +59,9 @@ scenario, `recent-files.md`.
 4. The buttons right of the tabs.
    - Files and Text: the scope list ("Project Files", its P underlined;
      Ctrl+Option+O / Alt+O opens it, Ctrl+Option+P / Alt+P toggles it).
-     All and Actions: the checkbox. Then the preview button (not available
-     yet), on All and Files the filter, and "Open Results in Find Window"
-     (not available until the Find tool window).
+     All and Actions: the checkbox. Then the Preview toggle (not on
+     Actions), on All and Files the filter, and "Open Results in Find
+     Window" (not available until the Find tool window).
 
 ### Files
 5. Type `flask/app` in the Flask repository (project folder `flask`).
@@ -154,6 +155,27 @@ scenario, `recent-files.md`.
       are kept across sessions; reopened with the same text, the row
       selected before is selected again.
 
+### Preview
+21. Click the Preview toggle (off by default) on the Text tab with rows.
+    - The list keeps a third of the room (the splitter between them is
+      dragged like Find in Files' and remembered) and the preview under it
+      shows the selected line's file with its syntax colours, the matches
+      marked and the caret on the first one, its line in the middle; the
+      footer keeps the path and "Open In Right Split". The toggle is
+      remembered across sessions.
+22. Down, Up, or a click on another row.
+    - 50 ms after the selection settles the preview follows it: a file row
+      at its start (or at the line typed after its name), a text row at its
+      line. With the preview on a click selects a row and a double click
+      opens it.
+23. Click into the preview and type.
+    - It takes the focus and shows a caret; the text does not change and
+      "This view is read-only" shows above the caret until the next key.
+24. Select a folder or an action (All tab).
+    - The preview shows "There is no preview for the selected item".
+      Without a selected row, on "… more" and on the Actions tab there is
+      no preview.
+
 ## Notes
 - The reference sorts its Files tab with a machine-learning model by
   default (Settings | Advanced Settings | Search Everywhere: "Sort results
@@ -162,7 +184,7 @@ scenario, `recent-files.md`.
   shows; without that setting the reference orders by its own weights,
   where the folder part's match counts and folders go last.
 - The reference also has the Classes and Symbols tabs (they come with a
-  language server), the preview, "Open in Find Tool Window", typo-tolerant
+  language server), "Open in Find Tool Window", typo-tolerant
   action search and a "Recent Locations" row; they are not here yet.
 - Fuzzy file search is off by default in the reference and is left out.
 - A full name includes the project folder's name, as in the reference: in
