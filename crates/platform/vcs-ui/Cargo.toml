@@ -1,0 +1,25 @@
+[package]
+name = "vcs-ui"
+description = "Version control UI of Pyoxide IDE on GPUI: file status colours, the change markers of an editor against its base text, the marker popup, Next / Previous Change and Rollback Lines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor.workspace = true
+gpui.workspace = true
+imara-diff.workspace = true
+serde_json.workspace = true
+text.workspace = true
+themes.workspace = true
+ui.workspace = true
+vcs.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+# Metal shaders are compiled at start-up on machines without Xcode
+# (ADR 0007).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

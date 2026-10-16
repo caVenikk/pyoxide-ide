@@ -64,6 +64,8 @@ pub enum ChangeKind {
     /// Lines were deleted between two lines: the decoration has no lines
     /// and its marker sits on the boundary above its line.
     Deleted,
+    /// Lines that differ only in whitespace.
+    Whitespace,
 }
 
 impl ChangeKind {
@@ -72,6 +74,7 @@ impl ChangeKind {
             ChangeKind::Added => "added",
             ChangeKind::Modified => "modified",
             ChangeKind::Deleted => "deleted",
+            ChangeKind::Whitespace => "whitespace",
         }
     }
 
@@ -80,6 +83,7 @@ impl ChangeKind {
             ChangeKind::Added => UiRole::GutterAdded,
             ChangeKind::Modified => UiRole::GutterModified,
             ChangeKind::Deleted => UiRole::GutterDeleted,
+            ChangeKind::Whitespace => UiRole::GutterWhitespaceModified,
         }
     }
 }

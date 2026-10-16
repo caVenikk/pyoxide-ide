@@ -143,6 +143,8 @@ pub struct ProjectPanel {
     rules: roots::ProductRules,
     /// The roots changed since the project settings were last written.
     roots_dirty: bool,
+    /// Version control statuses of the rows (#169).
+    file_colors: vcs_ui::FileColors,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -178,6 +180,7 @@ impl ProjectPanel {
             focus_seen: Cell::new(false),
             rules: roots::ProductRules::default(),
             roots_dirty: false,
+            file_colors: vcs_ui::FileColors::default(),
         }
     }
 
@@ -446,6 +449,10 @@ impl ProjectPanel {
                     "excluded": n.entry.excluded,
                     "icon": self.icon(n).0,
                     "background": n.entry.excluded.then(|| UiRole::NonProjectFile.name()),
+                    "color": (!n.entry.excluded)
+                        .then(|| self.file_colors.role(&n.entry.path, n.entry.is_dir()))
+                        .flatten()
+                        .map(UiRole::name),
                     "overflows": self.overflow_json(id),
                     "roots": self.row_roots_json(n),
                     "guides": guides.map(|g| {
@@ -793,17 +800,27 @@ impl ProjectPanel {
         })
     }
 
-    /// The colour of a row's name.
+    /// The colour of a row's name: its version control status's (#169),
+    /// except on an excluded row, which keeps its style.
     fn row_text_color(&self, node: &Node, selected: bool, focused: bool, cx: &App) -> Hsla {
         let theme = cx.theme();
+        let entry = &node.entry;
+        let status = (!entry.excluded)
+            .then(|| self.file_colors.color(&entry.path, entry.is_dir(), cx))
+            .flatten();
         // Cut rows are greyed until Paste moves them.
         if selected && focused {
-            theme.color(UiRole::SelectionText)
-        } else if self.is_cut(&node.entry.path) {
+            status.unwrap_or(theme.color(UiRole::SelectionText))
+        } else if self.is_cut(&entry.path) {
             theme.color(UiRole::TextMuted)
         } else {
-            theme.color(UiRole::Text)
+            status.unwrap_or(theme.color(UiRole::Text))
         }
+    }
+
+    /// The statuses the rows are coloured with.
+    pub fn set_file_colors(&mut self, colors: vcs_ui::FileColors) {
+        self.file_colors = colors;
     }
 
     fn row(

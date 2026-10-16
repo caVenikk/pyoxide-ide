@@ -12,7 +12,7 @@ a key or a role is missing from this file.
 
 A theme assigns a value to every role of three kinds, plus fonts:
 
-- **UI roles** (`ui.*`, 110 of them): flat colours of the interface, the
+- **UI roles** (`ui.*`, 121 of them): flat colours of the interface, the
   editor chrome, version control, diagnostics and the terminal.
 - **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
   Each has text attributes: foreground `fg`, background `bg`, `bold`, `italic`,
@@ -274,6 +274,16 @@ report says which parent was missing.
 | `ui.gutter-added` | `ADDED_LINES_COLOR` (scheme color) | Gutter marker of added lines |
 | `ui.gutter-modified` | `MODIFIED_LINES_COLOR` (scheme color) | Gutter marker of modified lines |
 | `ui.gutter-deleted` | `DELETED_LINES_COLOR` (scheme color) | Gutter marker of deleted lines |
+| `ui.gutter-whitespace-modified` | `WHITESPACES_MODIFIED_LINES_COLOR` (scheme color) | Gutter marker of lines changed only in whitespace |
+| `ui.gutter-ignored-added` | `IGNORED_ADDED_LINES_BORDER_COLOR` (scheme color) | Outline marker of added lines that are left out (another changelist) |
+| `ui.gutter-ignored-modified` | `IGNORED_MODIFIED_LINES_BORDER_COLOR` (scheme color) | Outline marker of modified lines that are left out |
+| `ui.gutter-ignored-deleted` | `IGNORED_DELETED_LINES_BORDER_COLOR` (scheme color) | Outline marker of deleted lines that are left out |
+| `ui.stripe-added` | `DIFF_INSERTED` error stripe color | Error stripe mark of added lines |
+| `ui.stripe-modified` | `DIFF_MODIFIED` error stripe color | Error stripe mark of modified lines |
+| `ui.stripe-deleted` | `DIFF_DELETED` error stripe color | Error stripe mark of deleted lines |
+| `ui.marker-popup-border` | `VersionControl.MarkerPopup.borderColor` | Border of the popup of a change marker |
+| `ui.marker-popup-toolbar` | `VersionControl.MarkerPopup.Toolbar.background` | Toolbar background of the popup of a change marker |
+| `ui.marker-popup-text` | `CHANGED_LINES_POPUP` (scheme color) | Background of the old text in the popup of a change marker |
 | `ui.diff-added` | `DIFF_INSERTED` background | Added lines in the diff viewer |
 | `ui.diff-removed` | `DIFF_DELETED` background | Removed lines in the diff viewer |
 | `ui.diff-changed` | `DIFF_MODIFIED` background | Changed lines in the diff viewer |
@@ -285,6 +295,7 @@ report says which parent was missing.
 | `ui.git-untracked` | `FILESTATUS_UNKNOWN` (scheme color) | File name colour: untracked |
 | `ui.git-ignored` | `FILESTATUS_IDEA_FILESTATUS_IGNORED` (scheme color) | File name colour: ignored |
 | `ui.git-conflict` | `FILESTATUS_IDEA_FILESTATUS_MERGED_WITH_CONFLICTS` (scheme color), `FILESTATUS_changelistConflict` (scheme color) | File name colour: merge conflict |
+| `ui.git-merged` | `FILESTATUS_MERGED` (scheme color) | File name colour: changed by a merge |
 
 ### Diagnostics
 

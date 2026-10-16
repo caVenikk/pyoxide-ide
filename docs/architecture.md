@@ -71,6 +71,14 @@ Platform (`crates/platform/`, language-agnostic):
   debounce, limited to the dirty paths when few, own writes suppressed),
   base texts through `cat-file --filters` cached by blob, the
   `.idea/vcs.xml` mapping, `git.status`, `git.branches`, `git.state`.
+- `vcs-ui`: version control UI on GPUI (ADR 0016), knowing the model
+  only: file status colours of names (folders only when ignored, an open
+  document by its unsaved text), the change markers of an editor against
+  its base text (ranges moved at once on an edit and computed again off
+  the UI thread, whitespace-only lines in their own colour, thin error
+  stripe marks), the marker popup with the old text and its changed
+  words, Next / Previous Change and Rollback Lines as one undoable edit
+  (`vcs.*` commands; the workbench reads base texts through `git`).
 - `run-config`: run configurations without a toolkit (ADR 0012): the
   language-neutral model (common settings, environment variables with
   shared or personal values, options per type), the list with the
@@ -221,7 +229,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `console-ui` | platform | yes | the Run console view, moved out of `workbench` so that Run and Debug share it | 0015 |
 | `vcs` | platform | no | the version control model and backend trait: file status, changes, the status map, line ranges against the base text (`imara-diff`), branches | 0016 |
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
-| `vcs-ui` | platform | yes | Commit tool window, changes tree, diff viewer tab, VCS widget and branch popup, git dialogs | 0016 |
+| `vcs-ui` | platform | yes | file status colours, change markers and their popup; later the Commit tool window, changes tree, diff viewer tab, VCS widget and branch popup, git dialogs | 0016 |
 | `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
 | `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import | 0017, 0018 |
 | `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |

@@ -126,8 +126,8 @@ Shell command completion in the terminal,terminal,could,yes,no,Community
 Paste from History and command history search in the terminal,terminal,could,yes,no,Community
 Conda environment activation in the terminal,terminal,could,yes,no,Community
 Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; the git executable for every operation, ADR 0016 (#91)"
-"File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,no,Community (#91)
-"Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,no,Community (#91)
+"File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,yes,"Community; tree, tabs, Recent Files and Go to File rows, unsaved edits at once (#169)"
+"Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,partial,"Community; markers within 5 ms of a keystroke, popup with Rollback / Copy / Next / Previous (#169); no Show Diff (no diff viewer yet), no Commit this change"
 "Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,no,"Community; Cmd+K / Ctrl+K, non-modal commit (#91)"
 "Amend and commit options (author, sign-off, hooks)",vcs,must,yes,no,Community (#91)
 Rollback of files (Rollback Changes dialog),vcs,must,yes,no,Community (#91)

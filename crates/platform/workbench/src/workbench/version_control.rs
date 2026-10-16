@@ -8,6 +8,11 @@
 //! settings of its own, `<mapping directory="" vcs="" />` in the reference
 //! IDE's `.idea/vcs.xml`. Without a git executable (or with one older than
 //! the minimum) a project with a repository says so once.
+//!
+//! The change markers of the tabs and the status colours of names are in
+//! [`markers`].
+
+mod markers;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,6 +42,9 @@ pub(super) struct VersionControl {
     /// Watches a repository folder outside the project folder (a project
     /// below the work tree's root, a linked work tree).
     _git_dir_watch: Option<(FileWatcher, Task<()>)>,
+    /// Change markers of the tabs and status colours (kept across
+    /// projects: the tabs stay open).
+    pub(super) markers: markers::ChangeMarkers,
 }
 
 /// What a project's detection found off the UI thread.
@@ -73,10 +81,13 @@ impl Workbench {
     /// thread and its statuses follow.
     pub(super) fn vcs_project_opened(&mut self, root: &Path, cx: &mut Context<Self>) {
         let generation = self.version_control.generation + 1;
+        let markers = std::mem::take(&mut self.version_control.markers);
         self.version_control = VersionControl {
             generation,
+            markers,
             ..VersionControl::default()
         };
+        self.vcs_markers_reset(cx);
         let root = root.to_owned();
         let look = {
             let root = root.clone();
@@ -136,6 +147,7 @@ impl Workbench {
                         StatusUpdate::Snapshot(s) => {
                             this.version_control.snapshot = Some(s);
                             this.version_control.problem = None;
+                            this.vcs_statuses_changed(cx);
                         }
                         StatusUpdate::Failed(e) => this.version_control.problem = Some(e.message),
                     }
@@ -242,15 +254,16 @@ impl Workbench {
     }
 
     /// The status of a file, an open document's unsaved changes
-    /// included.
-    pub fn vcs_file_status(&self, path: &Path, cx: &App) -> FileStatus {
-        let Some(snapshot) = &self.version_control.snapshot else {
-            return FileStatus::NotChanged;
-        };
-        let unsaved = self
-            .editor_for(path)
-            .is_some_and(|e| e.read(cx).is_modified());
-        snapshot.status.document_status(path, unsaved)
+    /// included: modified at once when edited, not modified when its text
+    /// equals the committed one again.
+    pub fn vcs_file_status(&self, path: &Path, _: &App) -> FileStatus {
+        self.version_control.markers.colors.status(path, false)
+    }
+
+    /// The statuses names are coloured with (shared with the views that
+    /// show file names).
+    pub(super) fn vcs_file_colors(&self) -> &vcs_ui::FileColors {
+        &self.version_control.markers.colors
     }
 
     /// The version control part of `workbench.state`.
@@ -264,10 +277,24 @@ impl Workbench {
                     json!({
                         "path": git::commands::relative_path(&s.info.root, p),
                         "status": self.vcs_file_status(p, cx).id(),
+                        "markers": self.vcs_line_status(p).map(|t| t.read(cx).state_json()),
                     })
                 })
                 .collect(),
-            None => Vec::new(),
+            None => self
+                .tab_paths()
+                .iter()
+                .filter_map(|p| {
+                    let markers = self.vcs_line_status(p)?.read(cx).state_json();
+                    (markers["base"] == true).then(|| {
+                        json!({
+                            "path": p.display().to_string(),
+                            "status": self.vcs_file_status(p, cx).id(),
+                            "markers": markers,
+                        })
+                    })
+                })
+                .collect(),
         };
         json!({
             "vcs": vc.service.as_ref().map(|_| "Git"),
@@ -275,6 +302,7 @@ impl Workbench {
             "problem": vc.problem,
             "status": vc.snapshot.as_deref().map(git::snapshot_json),
             "open_files": open_files,
+            "marker_popup": self.vcs_popup_json(cx),
         })
     }
 }
