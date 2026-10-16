@@ -138,6 +138,21 @@ pub fn invoke(
     // (`App::on_action`, such as quit).
     if !window.is_action_available(action.as_ref(), cx) && !cx.is_action_available(action.as_ref())
     {
+        // A command of a non-modal dialog open from the window (the
+        // Settings window): it runs there, or in a dialog open over it.
+        for dialog in crate::dialog_window::non_modal_of(window.window_handle(), cx) {
+            let target = crate::dialog_window::innermost(dialog, cx);
+            let ran = target.update(cx, |_, window, cx| {
+                let available = window.is_action_available(action.as_ref(), cx);
+                if available {
+                    window.dispatch_action(action.boxed_clone(), cx);
+                }
+                available
+            });
+            if ran == Ok(true) {
+                return Ok(Json::Null);
+            }
+        }
         return Err(CommandError::new(
             "not_available",
             format!("{id} is not available here"),

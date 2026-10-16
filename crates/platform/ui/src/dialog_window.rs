@@ -162,7 +162,7 @@ pub fn open<V: 'static + Render>(
 ) -> Option<WindowHandle<V>> {
     ensure_init(cx);
     if !options.modal
-        && let Some(open) = options.key.as_deref().and_then(|key| find(key, cx))
+        && let Some(open) = options.key.as_ref().and_then(|key| find(key.as_ref(), cx))
     {
         if options.activate {
             let _ = open.update(cx, |_, window, _| window.activate_window());
@@ -229,7 +229,7 @@ pub fn find(key: &str, cx: &App) -> Option<AnyWindowHandle> {
         .try_global::<Modals>()?
         .non_modal
         .iter()
-        .find(|d| d.key.as_deref() == Some(key))?;
+        .find(|d| d.key.as_ref().is_some_and(|k| k.as_ref() == key))?;
     cx.windows().contains(&open.dialog).then_some(open.dialog)
 }
 
@@ -918,9 +918,7 @@ mod tests {
         assert_eq!(parent.read_with(cx, |r, _| r.got.len()).unwrap(), 3);
         // Closing the dialog closes the modal one over it; the parent gets
         // the focus back and is active again.
-        parent
-            .update(cx, |_, window, _| window.blur())
-            .unwrap();
+        parent.update(cx, |_, window, _| window.blur()).unwrap();
         cx.update(|cx| close(dialog_any, cx));
         draw(parent_any, cx);
         assert!(!cx.update(|cx| cx.windows().contains(&dialog_any)));

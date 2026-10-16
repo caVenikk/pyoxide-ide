@@ -483,7 +483,7 @@ fn run_commands_and_shot(
         let mut parent: gpui::AnyWindowHandle = window.into();
         for suffix in ["dialog", "popup"] {
             let child = cx
-                .update(|cx| ui::dialog_window::modal_of(parent, cx))
+                .update(|cx| ui::dialog_window::child_of(parent, cx))
                 .ok()
                 .flatten();
             let Some(child) = child else {

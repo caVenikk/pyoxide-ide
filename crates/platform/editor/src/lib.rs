@@ -9,6 +9,7 @@ pub mod commands;
 mod diagnostics;
 mod editor;
 mod element;
+pub mod field;
 pub mod find;
 pub mod highlight;
 mod input;
