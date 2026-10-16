@@ -950,6 +950,7 @@ here with: source URL, commit, file(s), license, and what was changed.
   InlineDebugRendererBase.java. Only behaviour and numbers are used;
   reimplemented in Rust. The icon is an unchanged copy of platform/icons/src/
   expui/breakpoints/breakpoint.svg.
+
 - crates/platform/settings-ui/src/theme_switch.rs, src/pages/appearance.rs,
   crates/platform/themes/src/catalog.rs, crates/platform/workbench/src/
   settings.rs (the Theme and Switch popups, the gear's Theme…),
