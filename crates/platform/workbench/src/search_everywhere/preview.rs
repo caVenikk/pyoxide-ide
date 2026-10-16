@@ -16,8 +16,8 @@
 use file_index::parse_position;
 use gpui::{
     AppContext as _, Bounds, Context, CursorStyle, Entity, HitboxBehavior, InteractiveElement as _,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
-    Pixels, Styled as _, Subscription, Task, Window, canvas, div, px,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Pixels, Styled as _,
+    Subscription, Task, Window, canvas, div, px,
 };
 use text::Point;
 use themes::UiRole;
@@ -26,6 +26,7 @@ use ui::theme::ThemeExt as _;
 use super::{Row, SearchEverywhere, Tab, settings, update_settings};
 use crate::file_preview::{FilePreview, FilePreviewEvent, NO_PREVIEW, PreviewOptions};
 use crate::find_in_files::PREVIEW_DELAY;
+use crate::popup::{HeldDrag, track_held_drag};
 
 /// Share of the list in the split with the preview (the reference's).
 pub const SPLIT: f32 = 0.33;
@@ -39,7 +40,7 @@ pub(super) struct Preview {
     /// Share of the list in the split, the split's drag in progress
     /// (start y, share) and its bounds.
     split: f32,
-    drag: Option<(Pixels, f32)>,
+    drag: HeldDrag<(Pixels, f32)>,
     bounds: Option<Bounds<Pixels>>,
     _subscription: Subscription,
 }
@@ -66,10 +67,20 @@ impl Preview {
             view,
             task: None,
             split: settings(cx).preview_split.unwrap_or(SPLIT).clamp(0.1, 0.9),
-            drag: None,
+            drag: HeldDrag::default(),
             bounds: None,
             _subscription: subscription,
         }
+    }
+
+    /// Share of the list in the split.
+    pub(super) fn split(&self) -> f32 {
+        self.split
+    }
+
+    /// The splitter is dragged.
+    pub(super) fn is_dragging(&self) -> bool {
+        self.drag.is_dragging()
     }
 }
 
@@ -125,7 +136,7 @@ impl SearchEverywhere {
     /// The popup closed: the preview lets go of its file.
     pub(super) fn clear_preview(&mut self, cx: &mut Context<Self>) {
         self.preview.task = None;
-        self.preview.drag = None;
+        self.preview.drag.end();
         self.preview.view.update(cx, |p, cx| p.clear(cx));
     }
 
@@ -249,35 +260,25 @@ impl SearchEverywhere {
                         cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                             window.prevent_default();
                             cx.stop_propagation();
-                            this.preview.drag = Some((e.position.y, share));
+                            this.preview.drag.start((e.position.y, share));
                             cx.notify();
                         }),
                     ),
             );
-        let tracking = self.preview.drag.is_some().then(|| {
-            let this = cx.entity();
-            canvas(
-                |_, _, _| (),
-                move |_, _, window, _| {
-                    ui::pointer::request_window(CursorStyle::ResizeUpDown, window);
-                    let moved = this.clone();
-                    window.on_mouse_event(move |e: &MouseMoveEvent, _, _, cx| {
-                        moved.update(cx, |this, cx| this.drag_split(e.position.y, cx))
-                    });
-                    let released = this.clone();
-                    window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
-                        released.update(cx, |this, cx| {
-                            this.preview.drag = None;
-                            let split = this.preview.split;
-                            update_settings(cx, |s| s.preview_split = Some(split));
-                            cx.notify();
-                        })
-                    });
-                },
-            )
-            .absolute()
-            .size_0()
-        });
+        // The split is kept once the drag ends.
+        let tracking = track_held_drag(
+            cx.entity(),
+            |this: &mut Self| &mut this.preview.drag,
+            |this, mouse, cx| this.drag_split(mouse.y, cx),
+            |this, cx| {
+                let split = this.preview.split;
+                update_settings(cx, |s| s.preview_split = Some(split));
+            },
+            self.preview
+                .drag
+                .is_dragging()
+                .then_some(CursorStyle::ResizeUpDown),
+        );
         div()
             .relative()
             .flex()
@@ -307,12 +308,13 @@ impl SearchEverywhere {
                     .overflow_hidden()
                     .child(self.preview.view.clone()),
             )
-            .children(tracking)
+            .child(tracking)
             .into_any_element()
     }
 
     fn drag_split(&mut self, y: Pixels, cx: &mut Context<Self>) {
-        let (Some((start, share)), Some(bounds)) = (self.preview.drag, self.preview.bounds) else {
+        let (Some((start, share)), Some(bounds)) = (self.preview.drag.get(), self.preview.bounds)
+        else {
             return;
         };
         let height = f32::from(bounds.size.height).max(1.0);

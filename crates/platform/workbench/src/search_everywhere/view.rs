@@ -78,6 +78,9 @@ impl SearchEverywhere {
                         tab.title(),
                         self.tab_shortcut(tab, window, cx),
                     ))
+                    // A press selects the tab (on release); it does not move
+                    // the popup.
+                    .on_mouse_down(MouseButton::Left, crate::popup::no_move)
                     .on_click(
                         cx.listener(move |this, _: &ClickEvent, _, cx| this.switch_tab(tab, cx)),
                     )
@@ -237,6 +240,15 @@ impl SearchEverywhere {
                 .into_any_element(),
             );
         }
+        // A press on a button does not move the popup; the gaps do.
+        let items = items.into_iter().map(|item| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .on_mouse_down(MouseButton::Left, crate::popup::no_move)
+                .child(item)
+        });
         div()
             .flex()
             .flex_row()

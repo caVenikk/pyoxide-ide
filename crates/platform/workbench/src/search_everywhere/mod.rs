@@ -490,6 +490,11 @@ impl SearchEverywhere {
                 "on": settings(cx).preview,
                 "shown": self.preview_shown(cx),
                 "view": self.preview.view.read(cx).state_json(|p| self.rel(p), cx),
+                "split": self.preview.split(),
+            },
+            "dragging": {
+                "popup": self.frame.is_dragging(),
+                "split": self.preview.is_dragging(),
             },
         })
     }
