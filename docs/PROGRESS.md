@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 30%** `██████░░░░░░░░░░░░░░`
+**Overall parity: 31%** `██████░░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 0% `░░░░░░░░░░` | 0 | 0 | 21 |
 | vcs | 0% `░░░░░░░░░░` | 0 | 0 | 25 |
-| settings | 3% `░░░░░░░░░░` | 0 | 1 | 17 |
+| settings | 19% `██░░░░░░░░` | 2 | 2 | 14 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -217,11 +217,11 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S) | must | Community; ADR 0017 (#92) |
-| ⬜ | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); reads the reference's XML data files once (#92, #40) |
+| ✅ | Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S) | must | Community; ADR 0017 (#92) |
+| 🟡 | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); reads the reference's XML data files once (#92, #40) |
 | 🟡 | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; live switch (workbench.set-theme) and the themes importer exist; no page yet (#92) |
 | ⬜ | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community (#92) |
-| ⬜ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
+| ✅ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
 | ⬜ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40) |
 | ⬜ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |
 | ⬜ | Editor > Font page | must | Community (#92) |
