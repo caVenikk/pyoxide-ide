@@ -27,7 +27,7 @@ debugpy's PyPI metadata.
 
 ## Options considered
 ### Backend
-1. debugpy over DAP (MIT, vendors pydevd under EPL-2.0). Public protocol,
+1. debugpy over DAP (MIT, vendors pydevd under EPL-1.0). Public protocol,
    maintained, the reference's default.
 2. The reference's pydevd protocol. Undocumented wire format; the
    reference's helpers are not used.
@@ -104,16 +104,16 @@ debugpy over DAP, with Pyoxide's own client.
   application cache. The folder is not committed. The application never
   downloads at run time without asking, and never takes debugpy from the
   project's environment (the launcher path is explicit).
-- Licences: debugpy is MIT; its vendored pydevd is EPL-2.0; other vendored
+- Licences: debugpy is MIT; its vendored pydevd is EPL-1.0; other vendored
   parts are listed in the wheel's `ThirdPartyNotices.txt`. Redistributing
-  unmodified EPL-2.0 source requires: the EPL-2.0 text shipped with it,
+  unmodified EPL-1.0 source requires: the EPL-1.0 text shipped with it,
   every copyright and licence notice in the files kept, a notice that those
-  files are under EPL-2.0 with where their source is (the files are
+  files are under EPL-1.0 with where their source is (the files are
   source; the notice also names the upstream repository and version), and
   no relicensing. Any compiled parts of the wheel shipped as such need the
   same statement of where their source is. Running pydevd as a separate
-  process does not put Pyoxide's own code under EPL-2.0; a change to a
-  pydevd file would be EPL-2.0 and published as source, so the files are
+  process does not put Pyoxide's own code under EPL-1.0; a change to a
+  pydevd file would be EPL-1.0 and published as source, so the files are
   not patched. NOTICE and a third-party notices file in the bundle carry
   this.
 
@@ -150,7 +150,7 @@ table; `.idea` is never written.
 ## Consequences
 - Four platform crates (`stream-framing`, `dap-client`, `debugger`,
   `debugger-ui`), a small `console-ui` move, one product crate.
-- The application ships Python sources under MIT and EPL-2.0 in a helper
+- The application ships Python sources under MIT and EPL-1.0 in a helper
   folder; release packaging and NOTICE handle them. CI tests that need a
   real debugpy and Python are `#[ignore]`; the client is tested against
   the fake adapter on all three systems.
