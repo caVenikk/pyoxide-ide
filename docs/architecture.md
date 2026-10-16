@@ -151,11 +151,110 @@ services as watched-file changes (`file-watcher`, issue #36).
   platform UI crates depend on `code-intel`, never on `lsp-client`; the
   editor does not depend on `code-intel`.
 
+## Terminal, debugger, git and settings (proposed, ADR 0014-0018)
+Planned crates. Crates without a toolkit are tested without GPUI; UI
+crates depend on the model crates, never on the protocol or backend
+crates (`scripts/check-layers.py` gets these rules).
+
+| crate | layer | GPUI | role | ADR |
+|---|---|---|---|---|
+| `terminal` | platform | no | sessions: PTY and emulator (`alacritty_terminal`, private to the crate), reader thread with the OSC 7 / 133 pre-scan, snapshots of the visible cells, input encoding, shell start rules and detection, shell-integration scripts, the `ShellCustomizer` hook, `terminal.*` engine commands | 0014 |
+| `terminal-ui` | platform | yes | the grid element, the session view (selection, find, links), the Terminal tool window content | 0014 |
+| `stream-framing` | platform | no | `Content-Length` framing, moved out of `lsp-client`, shared with `dap-client` | 0015 |
+| `dap-client` | platform | no | the DAP client: adapter process, requests, events, reverse requests (`runInTerminal`); protocol types private | 0015 |
+| `debugger` | platform | no | sessions, threads, frames, variables, breakpoints, watches, the `DebugAdapterProvider` hook, storage and import, `debug.*` engine commands | 0015 |
+| `debugger-ui` | platform | yes | Debug tool window, Breakpoints dialog, breakpoint popup, inline values, value tooltips, editor wiring | 0015 |
+| `console-ui` | platform | yes | the Run console view, moved out of `workbench` so that Run and Debug share it | 0015 |
+| `vcs` | platform | no | the version control model and backend trait: file status, changes, the status map, line ranges against the base text (`imara-diff`), branches | 0016 |
+| `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
+| `vcs-ui` | platform | yes | Commit tool window, changes tree, diff viewer tab, VCS widget and branch popup, git dialogs | 0016 |
+| `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
+| `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store | 0017, 0018 |
+| `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |
+| `pyoxide-ide` (extended) | python | yes | venv and uv activation in the terminal, the Python settings pages, the debug adapter provider | 0014, 0015, 0017 |
+
+Dependencies: `terminal-ui` -> `terminal`, `console`, `ui`;
+`debugger-ui` -> `debugger`, `console-ui`, `editor`, `ui`; `vcs-ui` ->
+`vcs`, `editor`, `ui`; `git` -> `vcs`, `process`; `dap-client` ->
+`stream-framing`, `process`; `lsp-client` -> `stream-framing`;
+`workbench` -> the UI crates and `git`, and registers their tool windows,
+settings pages and commands. Keymaps stay in `workbench` (ADR 0018).
+
+## Cross-cutting foundations
+Several of these areas need the same pieces of the shell. Each is built
+once, before or with its first user:
+
+- **Tool window slots.** `workbench::ToolWindow` knows Project and Run; the
+  bottom area shows only the Run tool window and the left area only the
+  project tool window; the Commit, Terminal and Version Control stripe
+  buttons have no tool window behind them. Needed: tool windows
+  registered with an area (left, bottom, right), a stripe group and
+  order, an icon, a title, shortcut text and a view; one visible tool
+  window per area (Project or Commit on the left; Run, Debug or Terminal
+  at the bottom) with a size per area; activation, toggle and hide
+  commands for each (`workbench.toggle-terminal`, `workbench.toggle-debug`,
+  `workbench.toggle-commit`), stripe badges, and registration on first use
+  as the Run tool window does now.
+- **Balloon notifications.** `Workbench::show_notice` puts a text into the
+  status bar for ten seconds in place of the reference's balloons.
+  Needed: a notification component in `ui` and a host in the workbench:
+  kind (information, warning, error), title, content, action links, timed
+  or sticky, stacking, a `workbench.notify` command. Users: commit, push,
+  update and checkout results, debugger connection errors, terminal
+  environment changes, import reports. The Notifications tool window
+  comes later.
+- **Editor decorations.** The editor has diagnostic marks that move with
+  edits, a link highlight and a problem cell after the end of a line, and
+  keeps room right of the line numbers, but paints nothing there. Needed:
+  range markers that move with edits (generalized from the diagnostic
+  marks), gutter icons drawn over line numbers with hover, click,
+  Alt-click, Shift-click and right-click events (breakpoints), a lane of
+  change markers with hover and click (git), full-line backgrounds
+  (execution point, breakpoint lines, diff), styled, clickable texts after
+  the end of a line (inline values), and error-stripe marks in given
+  colours. Owned by `editor`; it follows the soft-wrap work in the editor
+  element (#119).
+- **Editor tabs that are not editors.** The editor area's tabs hold one
+  `Editor` each, keyed by path; read-only texts reuse that with a title as
+  the path. Needed: a tab kind whose content is any view, with its own
+  title, icon, tooltip and close handling: the diff viewer
+  (`Commit: <file>`), later a terminal moved to the editor.
+- **Non-modal dialog windows.** `ui::dialog_window` is modal only: the
+  parent is blocked and its keystrokes dropped. Needed: a non-modal
+  option (no blocker, the parent keeps its input, one instance per key
+  brought to the front when opened again, focus handed back on close) for
+  the Settings window.
+- **Form widgets.** The widgets of the Run/Debug Configurations dialog
+  (label column, text fields on one-line editors, combo boxes, fields with
+  a browse button, checkbox rows, the bottom bar with its buttons) are
+  private to `workbench::run::edit_dialog`. Needed: `ui::form` for layout
+  and the widgets without text input (label column, rows and gaps, group
+  headers, links, combo, checkbox rows, the bottom bar with the per-OS
+  button order) and a one-line text field constructor in `editor` (the
+  `ui` crate is below `editor`), used by the settings pages, the
+  interpreter, git and debugger dialogs, and the Run/Debug dialog itself.
+- **Application settings store.** Terminal, debugger and git options need
+  the `settings` crate (ADR 0017) before their settings pages exist; their
+  first versions read it with defaults.
+
+The editor's context menu does not exist yet; the debugger's and git's
+entries in it (Run to Cursor, Add to Watches, Git) follow when it is added.
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded
 in [adr/](adr/).
 
 ## External processes
-Python interpreter, ruff, a type checker, debugpy. Discovered and version-checked
-at runtime; the IDE degrades gracefully when one is missing.
+Discovered and version-checked at runtime; the IDE degrades gracefully when
+one is missing.
+
+- The Python interpreter, ruff and a type checker (ADR 0010, 0011).
+- Shells in the terminal, over a pseudo-terminal (ADR 0014): zsh, bash,
+  fish, PowerShell, cmd.exe. Release builds for Windows ship
+  `conpty.dll` and `OpenConsole.exe` from Windows Terminal.
+- debugpy (ADR 0015): its adapter and launcher run with the project's
+  interpreter from a helper folder shipped with the application (pinned
+  version) and start the program being debugged.
+- `git` (ADR 0016), from the settings, `PATH` or the usual install
+  folders.
