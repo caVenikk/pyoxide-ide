@@ -322,7 +322,12 @@ pub fn stripe_button_badged(
         .tooltip(Tooltip::text(title, shortcut))
 }
 
-/// A vertical stripe with a top and a bottom group of buttons.
+/// A vertical stripe with a top and a bottom group of buttons (debug
+/// selectors `{id}-top`, `{id}-bottom`). The groups keep their places at
+/// the top and at the bottom; in a low window the top group is drawn over
+/// the bottom one and covers as much of it as the window lacks
+/// (`ToolWindowToolbar`: the top stripe in the north of a border layout,
+/// the bottom stripe in the south, the north one painted over it).
 pub fn stripe(
     id: &'static str,
     top: Vec<AnyElement>,
@@ -333,21 +338,37 @@ pub fn stripe(
     let width = theme.metric(Metric::StripeWidth);
     let button = theme.metric(Metric::StripeButtonSize);
     let inset = (width - button) / 2.0;
+    let background = theme.color(UiRole::ToolWindowStripe);
+    let group = || div().flex().flex_col().items_center().gap(px(4.0));
     div()
         .id(id)
         .debug_selector(move || id.into())
+        .relative()
         .flex()
         .flex_col()
         .flex_none()
-        .items_center()
-        .justify_between()
         .w(width)
         .h_full()
-        .pt(px(2.0))
-        .pb(inset)
-        .bg(theme.color(UiRole::ToolWindowStripe))
-        .child(div().flex().flex_col().gap(px(4.0)).children(top))
-        .child(div().flex().flex_col().gap(px(4.0)).children(bottom))
+        .overflow_hidden()
+        .bg(background)
+        // Drawn first, so that the top group covers it.
+        .child(
+            group()
+                .debug_selector(move || format!("{id}-bottom"))
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom(inset)
+                .children(bottom),
+        )
+        .child(
+            group()
+                .debug_selector(move || format!("{id}-top"))
+                .occlude()
+                .pt(px(2.0))
+                .bg(background)
+                .children(top),
+        )
 }
 
 /// One text widget of the status bar.

@@ -47,6 +47,7 @@ mod version_control;
 
 use crate::tool_windows::Area;
 pub use crate::tool_windows::{BOTTOM_WEIGHT, PROJECT_WIDTH, ToolWindow};
+pub use tool_window_areas::MainLayout;
 /// Space before the first editor tab.
 const FIRST_TAB_OFFSET: f32 = 3.0;
 /// Space between a tab's area and its rounded background.
@@ -1684,7 +1685,7 @@ impl Workbench {
             .children(crate::main_toolbar::render(left, width, groups))
     }
 
-    fn render_project(&self, cx: &App) -> impl IntoElement {
+    fn render_project(&self, width: Pixels, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let header_h = theme.metric(Metric::ToolWindowHeaderHeight);
         let action = |id: &'static str, icon: IconName, title: &'static str| {
@@ -1744,7 +1745,7 @@ impl Workbench {
             .id("project-tool-window")
             .debug_selector(|| "project-tool-window".into())
             .flex_none()
-            .w(self.project_width())
+            .w(width)
             .h_full()
             .child(header)
             .child(self.panel.clone())
@@ -1983,13 +1984,14 @@ impl Workbench {
     }
 
     /// The editor island. Files dropped anywhere on it (the tabs, the
-    /// editor or the empty area) open in tabs, as in the reference IDE.
-    fn editor_island(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    /// editor or the empty area) open in tabs, as in the reference IDE. It
+    /// takes the width the side areas leave, at least `min`.
+    fn editor_island(&self, min: Pixels, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         island(cx, UiRole::EditorBackground)
             .id("editor-area")
             .debug_selector(|| "editor-area".into())
             .flex_1()
-            .min_w(px(0.0))
+            .min_w(min)
             .h_full()
             .on_drop(
                 cx.listener(|this, dropped: &gpui::ExternalPaths, window, cx| {
@@ -2009,7 +2011,12 @@ impl Workbench {
         self.vcs_editor_container(container, editor)
     }
 
-    fn render_editor_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_editor_area(
+        &self,
+        min: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         if let Some(active) = self.active {
             let theme = cx.theme();
             let tab_h = theme.metric(Metric::TabHeight);
@@ -2018,7 +2025,7 @@ impl Workbench {
                 .map(|i| self.render_tab(i, cx))
                 .collect();
             return self
-                .editor_island(cx)
+                .editor_island(min, cx)
                 .child(
                     div()
                         .id("editor-tabs")
@@ -2072,7 +2079,7 @@ impl Workbench {
                     .child(gpui::StyledText::new(text).with_highlights(highlights)),
             );
         }
-        self.editor_island(cx)
+        self.editor_island(min, cx)
             .relative()
             .child(
                 div()
@@ -2247,7 +2254,7 @@ impl Render for Workbench {
         if bench {
             crate::bench::frame_started();
         }
-        let gap = cx.theme().metric(Metric::IslandGap);
+        let layout = self.frame_layout(window, cx);
         let run_widget = self.run_widget_state(window, cx);
         if let Some(tool_window) = self.focused_tool_window(window, cx) {
             self.tool_windows.set_last_active(tool_window);
@@ -2408,25 +2415,28 @@ impl Render for Workbench {
                         // A tool window below the editor spans under the
                         // project tool window too, as in the reference
                         // IDE's default layout ("Widescreen tool window
-                        // layout" off: `ToolWindowPane`).
+                        // layout" off: `ToolWindowPane`). Areas below their
+                        // minimums run past the pane's edges and are cut
+                        // there.
                         div()
                             .flex()
                             .flex_col()
                             .flex_1()
                             .min_w(px(0.0))
                             .h_full()
-                            .pl(px(0.5))
+                            .pl(px(tool_window_areas::PANE_INSET))
+                            .overflow_hidden()
                             .child(
                                 div()
                                     .flex()
                                     .flex_row()
                                     .flex_1()
-                                    .min_h(px(0.0))
-                                    .children(self.render_side_area(Area::Left, gap, window, cx))
-                                    .child(self.render_editor_area(window, cx))
-                                    .children(self.render_side_area(Area::Right, gap, window, cx)),
+                                    .min_h(layout.min)
+                                    .children(self.render_side_area(Area::Left, &layout, cx))
+                                    .child(self.render_editor_area(layout.min, window, cx))
+                                    .children(self.render_side_area(Area::Right, &layout, cx)),
                             )
-                            .children(self.render_bottom_area(gap, window, cx)),
+                            .children(self.render_bottom_area(&layout, cx)),
                     )
                     .child(self.render_right_stripe(window, cx)),
             )

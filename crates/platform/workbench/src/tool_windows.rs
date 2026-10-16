@@ -18,18 +18,10 @@ use ui::icons::IconName;
 
 /// Default width of the project tool window (and of a side area).
 pub const PROJECT_WIDTH: f32 = 333.0;
-/// Default height of a tool window below the editor, as a share of the
+/// Height of the bottom area when it is first shown, as a share of the
 /// space between the toolbar and the status bar (the reference IDE's
 /// default tool window weight, `WindowInfoImpl.DEFAULT_WEIGHT`).
 pub const BOTTOM_WEIGHT: f32 = 0.33;
-/// Narrowest side area when resizing it.
-pub const MIN_SIDE_WIDTH: f32 = 120.0;
-/// Lowest bottom area when resizing it.
-pub const MIN_BOTTOM_HEIGHT: f32 = 80.0;
-/// Narrowest editor area left when widening a side area.
-pub const MIN_EDITOR_WIDTH: f32 = 200.0;
-/// Lowest editor area left when raising the bottom area.
-pub const MIN_EDITOR_HEIGHT: f32 = 100.0;
 
 /// A tool window's id (`ToolWindowId`): lower case, words joined with `-`.
 /// The stripe button's debug selector is `stripe-{id}`, the tool window's
@@ -184,9 +176,11 @@ impl Entry {
 #[derive(Debug, Clone, Copy)]
 pub struct AreaSlot {
     pub visible: Option<ToolWindow>,
-    /// Width in pixels of a side area; height of the bottom area as a share
-    /// of the space between the toolbar and the status bar.
-    pub size: f32,
+    /// The size the user gave the area, in pixels: the width of a side area,
+    /// the height of the bottom area (`None` until the bottom area is first
+    /// shown). It stays while the window is resized; the layout gives way
+    /// below it only while the window is too small (`crate::layout`).
+    pub size: Option<f32>,
 }
 
 /// The registry and the areas.
@@ -212,15 +206,15 @@ impl ToolWindows {
             entries: Vec::new(),
             left: AreaSlot {
                 visible: Some(ToolWindow::Project),
-                size: PROJECT_WIDTH,
+                size: Some(PROJECT_WIDTH),
             },
             bottom: AreaSlot {
                 visible: None,
-                size: BOTTOM_WEIGHT,
+                size: None,
             },
             right: AreaSlot {
                 visible: None,
-                size: PROJECT_WIDTH,
+                size: Some(PROJECT_WIDTH),
             },
             last_active: ToolWindow::Project,
         }
@@ -357,18 +351,27 @@ impl ToolWindows {
         }
     }
 
-    /// Width of a side area.
+    /// Width the user gave a side area.
     pub fn width(&self, area: Area) -> Pixels {
-        px(self.slot(area).size)
+        px(self.slot(area).size.unwrap_or(PROJECT_WIDTH))
     }
 
-    /// Height of the bottom area as a share of the pane.
-    pub fn bottom_weight(&self) -> f32 {
-        self.bottom.size
+    /// The size the user gave an area; the bottom area takes
+    /// [`BOTTOM_WEIGHT`] of `pane_height` until it has one.
+    pub fn size(&self, area: Area, pane_height: f32) -> f32 {
+        self.slot(area).size.unwrap_or(BOTTOM_WEIGHT * pane_height)
     }
 
     pub fn set_size(&mut self, area: Area, size: f32) {
-        self.slot_mut(area).size = size;
+        self.slot_mut(area).size = Some(size);
+    }
+
+    /// A shown bottom area keeps the height it was first shown with while
+    /// the window is resized.
+    pub fn keep_bottom_height(&mut self, pane_height: f32) {
+        if self.visible_in(Area::Bottom).is_some() && self.bottom.size.is_none() {
+            self.bottom.size = Some(BOTTOM_WEIGHT * pane_height);
+        }
     }
 
     pub fn last_active(&self) -> ToolWindow {
@@ -410,7 +413,7 @@ impl ToolWindows {
 }
 
 fn size_key(area: Area) -> &'static str {
-    if area.is_side() { "width" } else { "weight" }
+    if area.is_side() { "width" } else { "height" }
 }
 
 fn area_rank(area: Area) -> u8 {
