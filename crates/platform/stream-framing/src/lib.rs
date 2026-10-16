@@ -1,14 +1,14 @@
-//! `Content-Length` framing of JSON-RPC messages over a byte stream (LSP
-//! base protocol): a header block of `Name: value` lines ended by an empty
-//! line, then exactly `Content-Length` bytes of JSON.
+//! `Content-Length` framing of JSON messages over a byte stream: a header
+//! block of `Name: value` lines ended by an empty line, then exactly
+//! `Content-Length` bytes of JSON. The base protocol of both the Language
+//! Server Protocol and the Debug Adapter Protocol (ADR 0010, 0015), used by
+//! `lsp-client`, `dap-client` and their fake servers.
 //!
 //! The decoder takes the stream in chunks of any size (a header or a
 //! multi-byte character may be split between chunks) and never panics on
 //! malformed input: junk lines between frames are skipped, a header block
 //! without a usable length is reported and dropped, and memory stays
 //! bounded by the frame size limit.
-//!
-//! The fake server binary of the tests includes this file as its own module.
 
 use std::fmt;
 
@@ -56,6 +56,13 @@ impl fmt::Display for FrameError {
 }
 
 /// Parses frames from chunks of the stream.
+///
+/// ```
+/// let mut decoder = stream_framing::FrameDecoder::new();
+/// decoder.push(&stream_framing::encode(br#"{"seq": 1}"#));
+/// assert_eq!(decoder.next_frame(), Some(Ok(serde_json::json!({"seq": 1}))));
+/// assert_eq!(decoder.next_frame(), None);
+/// ```
 #[derive(Debug, Default)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
@@ -101,7 +108,6 @@ impl FrameDecoder {
     }
 
     /// Bytes received but not yet part of a returned frame.
-    #[cfg(test)]
     pub fn buffered(&self) -> usize {
         self.buf.len() - self.pos
     }

@@ -39,10 +39,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-
-#[allow(dead_code)]
-#[path = "../framing.rs"]
-mod framing;
+use stream_framing as framing;
 
 /// How long a step waits for a message by default.
 const WAIT: Duration = Duration::from_secs(30);

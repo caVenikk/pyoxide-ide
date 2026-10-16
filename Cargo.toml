@@ -27,6 +27,7 @@ members = [
     "crates/platform/settings",
     "crates/platform/settings-import",
     "crates/platform/settings-ui",
+    "crates/platform/stream-framing",
     "crates/platform/syntax",
     "crates/platform/terminal",
     "crates/platform/text",
@@ -110,6 +111,7 @@ secrets = { path = "crates/platform/secrets" }
 settings = { path = "crates/platform/settings" }
 settings-import = { path = "crates/platform/settings-import" }
 settings-ui = { path = "crates/platform/settings-ui" }
+stream-framing = { path = "crates/platform/stream-framing" }
 syntax = { path = "crates/platform/syntax" }
 terminal = { path = "crates/platform/terminal" }
 text = { path = "crates/platform/text" }
