@@ -977,6 +977,7 @@ here with: source URL, commit, file(s), license, and what was changed.
   action.QuickChangeScheme.text). Changes: reimplemented in Rust with
   GPUI; "Import Theme…" (Pyoxide's theme import) takes the place of "Get
   More Themes…"; imported themes are kept as Pyoxide theme files.
+
 - crates/platform/workbench/src/main_toolbar.rs, src/chrome.rs (toolbar
   widgets), src/run/widget.rs (the configuration selector), the status bar
   in src/workbench.rs
