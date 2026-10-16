@@ -8,12 +8,12 @@
 //!
 //! The design (one `process` child per server, a reader thread that parses
 //! frames and answers pending requests through oneshot channels, requests
-//! cancelled by dropping their futures, no async runtime) is in ADR 0010.
+//! cancelled by dropping their futures, no async runtime) is in ADR 0010;
+//! the `Content-Length` framing is the `stream-framing` crate (ADR 0015).
 //! Protocol types (`lsp-types`) never appear in the public API.
 //!
 //! Modules:
 //!
-//! - `framing`: `Content-Length` frames over chunks of a byte stream;
 //! - `rpc`: JSON-RPC requests, notifications, server requests and
 //!   cancellation over a process's standard streams;
 //! - `capabilities`: what the client advertises and reads at `initialize`;
@@ -36,7 +36,6 @@ mod diagnostics;
 mod documents;
 mod encoding;
 mod features;
-mod framing;
 mod glob;
 mod intel;
 mod rpc;

@@ -5,6 +5,7 @@ members = [
     "crates/platform/code-intel-ui",
     "crates/platform/commands",
     "crates/platform/console",
+    "crates/platform/dap-client",
     "crates/platform/db-core",
     "crates/platform/db-oracle-thin",
     "crates/platform/db-oracle-odpi",
@@ -12,6 +13,7 @@ members = [
     "crates/platform/db-sqlite",
     "crates/platform/db-service",
     "crates/platform/db-testkit",
+    "crates/platform/debugger",
     "crates/platform/name-match",
     "crates/platform/process",
     "crates/platform/project",
@@ -27,6 +29,7 @@ members = [
     "crates/platform/settings",
     "crates/platform/settings-import",
     "crates/platform/settings-ui",
+    "crates/platform/stream-framing",
     "crates/platform/syntax",
     "crates/platform/terminal",
     "crates/platform/text",
@@ -88,6 +91,7 @@ code-intel = { path = "crates/platform/code-intel" }
 code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }
 console = { path = "crates/platform/console" }
+dap-client = { path = "crates/platform/dap-client" }
 db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
 lsp-client = { path = "crates/platform/lsp-client" }
@@ -102,6 +106,7 @@ db-postgres = { path = "crates/platform/db-postgres" }
 db-sqlite = { path = "crates/platform/db-sqlite" }
 db-service = { path = "crates/platform/db-service" }
 db-testkit = { path = "crates/platform/db-testkit" }
+debugger = { path = "crates/platform/debugger" }
 project = { path = "crates/platform/project" }
 project-search = { path = "crates/platform/project-search" }
 run-config = { path = "crates/platform/run-config" }
@@ -110,6 +115,7 @@ secrets = { path = "crates/platform/secrets" }
 settings = { path = "crates/platform/settings" }
 settings-import = { path = "crates/platform/settings-import" }
 settings-ui = { path = "crates/platform/settings-ui" }
+stream-framing = { path = "crates/platform/stream-framing" }
 syntax = { path = "crates/platform/syntax" }
 terminal = { path = "crates/platform/terminal" }
 text = { path = "crates/platform/text" }

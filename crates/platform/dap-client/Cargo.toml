@@ -1,0 +1,30 @@
+[package]
+name = "dap-client"
+description = "Debug Adapter Protocol client of Pyoxide IDE: an adapter over standard streams, requests with cancellation, events, reverse requests and shutdown"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# An adapter driven by a script in the same process (`fake::adapter`), for
+# the tests of crates that use the client.
+fake = []
+
+[dependencies]
+flume.workspace = true
+futures.workspace = true
+process.workspace = true
+# Protocol types stay private to this crate (ADR 0015): nothing public
+# mentions them.
+serde.workspace = true
+serde_json.workspace = true
+stream-framing.workspace = true
+
+# A debug adapter driven by a script, which the tests start instead of a
+# real adapter (the same on every OS).
+[[bin]]
+name = "dap-fake-adapter"
+path = "src/bin/dap-fake-adapter.rs"
+test = false
+doc = false

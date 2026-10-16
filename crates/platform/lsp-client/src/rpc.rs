@@ -3,7 +3,7 @@
 //! A [`Connection`] has two threads:
 //!
 //! - the reader takes the process's events, cuts standard output into
-//!   frames ([`crate::framing`]), parses them, answers pending requests
+//!   frames ([`stream_framing`]), parses them, answers pending requests
 //!   (running their callbacks, where answers are converted to the model) and
 //!   passes notifications, server requests, standard error and the exit to a
 //!   [`Handler`];
@@ -30,7 +30,7 @@ use futures::channel::oneshot;
 use process::{ExitStatus, ProcessEvent, ProcessHandle};
 use serde_json::{Map, Value, json};
 
-use crate::framing::{self, FrameDecoder};
+use stream_framing::{self as framing, FrameDecoder};
 
 /// JSON-RPC and LSP error codes.
 pub(crate) mod code {

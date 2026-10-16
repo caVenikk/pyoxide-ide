@@ -1659,6 +1659,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
+name = "dap-client"
+version = "0.0.1"
+dependencies = [
+ "flume",
+ "futures",
+ "process",
+ "serde",
+ "serde_json",
+ "stream-framing",
+]
+
+[[package]]
 name = "darling"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1849,6 +1861,24 @@ dependencies = [
  "once_cell",
  "sha2 0.10.9",
  "zeroize",
+]
+
+[[package]]
+name = "debugger"
+version = "0.0.1"
+dependencies = [
+ "commands",
+ "dap-client",
+ "flume",
+ "futures",
+ "process",
+ "project",
+ "run-config",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]
@@ -4003,6 +4033,7 @@ dependencies = [
  "lsp-types",
  "process",
  "serde_json",
+ "stream-framing",
  "text",
 ]
 
@@ -6756,6 +6787,13 @@ name = "str_indices"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d08889ec5408683408db66ad89e0e1f93dff55c73a4ccc71c427d5b277ee47e6"
+
+[[package]]
+name = "stream-framing"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "streaming-iterator"

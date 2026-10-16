@@ -1,0 +1,24 @@
+[package]
+name = "debugger"
+description = "The debugger model of Pyoxide IDE without a UI toolkit: debug sessions over DAP, threads, frames, variables, breakpoints, watches, their storage and import, the debug.* commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+commands.workspace = true
+dap-client.workspace = true
+flume.workspace = true
+futures.workspace = true
+process.workspace = true
+project.workspace = true
+run-config.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+toml_edit = "0.25"
+
+[dev-dependencies]
+dap-client = { workspace = true, features = ["fake"] }
+tempfile = "3"
