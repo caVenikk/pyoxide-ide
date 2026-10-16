@@ -175,6 +175,7 @@ Option 3.
   Test Sources Root, Namespace Package, Not Excluded for a folder inside an
   excluded one) and the user's own list of ignored files and folders come
   later, as does the rest of the context menu (file operations, #37).
+  Sources Root and Test Sources Root: ADR 0013.
 - Later, with the settings task: personal state such as open tabs and the
   window layout, which stays out of the repository (its location is
   decided then), and importing other `.idea` settings (run
