@@ -32,7 +32,8 @@ without `cfg` gates.
 ```bash
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo nextest run --workspace   # cargo install cargo-nextest --locked
+cargo test --doc --workspace    # doctests: nextest does not run them
 ```
 
 - Add tests with your change. Tests that need external services are `#[ignore]`

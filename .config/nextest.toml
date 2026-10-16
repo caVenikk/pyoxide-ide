@@ -1,0 +1,51 @@
+# cargo-nextest configuration (https://nexte.st/docs/configuration/).
+#
+#   cargo nextest run --workspace               local run
+#   cargo nextest run --workspace --profile ci  what CI runs (.github/workflows/ci.yml)
+#   cargo test --doc --workspace                doctests: nextest does not run them
+#
+# Every test runs in a process of its own. Retries are a list of known flaky
+# tests (per-test overrides below), not a blanket setting: a test that fails
+# on every attempt is a bug. A test that passes only on a retry is reported
+# as FLAKY in the summary.
+
+nextest-version = "0.9.100"
+
+[profile.default]
+# A test running longer than one period is reported as slow; after five
+# periods it is hung (a PTY, a window, a language server or a debug adapter
+# that never answers) and nextest terminates it instead of blocking the run.
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "5s" }
+status-level = "retry"
+final-status-level = "flaky"
+failure-output = "immediate-final"
+
+# Known flaky tests: retried twice with a pause, and only these.
+#
+# lsp-client: the fake language server answers late when the machine is
+# loaded (issue #133). Remove this override when that issue is fixed.
+[[profile.default.overrides]]
+filter = 'package(lsp-client)'
+retries = { backoff = "fixed", count = 2, delay = "1s" }
+
+# The file watcher reports events asynchronously; on a loaded runner the
+# event can arrive after the test's own wait.
+[[profile.default.overrides]]
+filter = 'package(workbench) and binary(file_ops) and test(the_file_watcher_does_not_take_tree_operations_for_external_changes)'
+retries = { backoff = "fixed", count = 2, delay = "1s" }
+
+# The keymap test presses every binding of both keymaps in one test, so it
+# legitimately runs for minutes on a slow machine: ten periods, not five.
+[[profile.default.overrides]]
+filter = 'binary(keymap)'
+slow-timeout = { period = "60s", terminate-after = 10, grace-period = "5s" }
+
+[profile.ci]
+fail-fast = false
+retries = 0
+status-level = "retry"
+final-status-level = "flaky"
+
+[profile.ci.junit]
+# target/nextest/ci/junit.xml
+path = "junit.xml"

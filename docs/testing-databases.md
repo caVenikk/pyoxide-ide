@@ -1,6 +1,7 @@
 # Testing against real databases
 
-Unit tests run everywhere with `cargo test --workspace`. SQLite tests always
+Unit tests run everywhere with `cargo nextest run --workspace` (and
+`cargo test --doc --workspace` for the doctests). SQLite tests always
 run (in memory or in a temporary file). Tests that need a server are
 `#[ignore]` and run on demand against the containers in `docker-compose.yml`.
 

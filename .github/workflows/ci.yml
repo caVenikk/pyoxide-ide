@@ -26,6 +26,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Tests run under cargo-nextest (.config/nextest.toml). The action is
+      # pinned to a commit and installs a checksummed prebuilt binary.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
       - run: cargo fmt --all --check
       # Debug builds optimize dependencies so that the IDE stays responsive
       # when run from a debug build (ADR 0007). CI does not need that:
@@ -35,7 +40,9 @@ jobs:
           cargo clippy --workspace --all-targets
           --config 'profile.dev.package."*".opt-level=0' -- -D warnings
         shell: bash
-      - run: cargo test --workspace --config 'profile.dev.package."*".opt-level=0'
+      - run: >-
+          cargo nextest run --workspace --profile ci
+          --config 'profile.dev.package."*".opt-level=0'
         shell: bash
       # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
       # Windows) into the emulator, and the emulator alone; the numbers go
@@ -44,6 +51,16 @@ jobs:
           cargo test -p terminal --test throughput
           --config 'profile.dev.package."*".opt-level=0' -- --ignored --nocapture
         shell: bash
+      # nextest does not run doctests.
+      - run: cargo test --doc --workspace --config 'profile.dev.package."*".opt-level=0'
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.os }}
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
 
   progress:
     runs-on: ubuntu-latest

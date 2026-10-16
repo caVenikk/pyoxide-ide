@@ -3,7 +3,7 @@
 ## Linked issue
 
 ## Checks
-- [ ] `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` pass
+- [ ] `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace`, `cargo test --doc --workspace` pass
 - [ ] `replica/features.csv` updated and `python3 scripts/progress.py` run (if a feature changed)
 - [ ] Tests added or updated; external-service tests are `#[ignore]` and documented
 - [ ] No secrets, personal data or machine-specific paths

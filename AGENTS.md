@@ -33,7 +33,10 @@ Rules for AI agents and human contributors. Read this file, then
 
 ## Workflow
 - Before every commit: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace`.
+  `cargo nextest run --workspace`, `cargo test --doc --workspace`. Tests run under
+  [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`; one process per
+  test, timeouts and retries for known flaky tests in `.config/nextest.toml`); nextest does not
+  run doctests, hence the second command. A new test must pass on its own in a fresh process.
 - Layering: `db-core` has no driver dependencies; UI crates depend on traits only.
   Platform crates (`crates/platform/`) know no specific language and never
   depend on product crates (`crates/python/`, ...); see ADR 0005,
