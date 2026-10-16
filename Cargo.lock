@@ -5414,6 +5414,7 @@ dependencies = [
  "py-syntax",
  "run-config",
  "serde_json",
+ "settings-ui",
  "tempfile",
  "text",
  "themes",

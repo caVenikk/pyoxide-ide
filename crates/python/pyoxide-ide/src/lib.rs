@@ -7,6 +7,7 @@ pub mod interpreter;
 mod new_items;
 pub mod run;
 pub mod services;
+pub mod settings_pages;
 pub mod type_engine;
 
 use std::path::{Path, PathBuf};
@@ -272,9 +273,8 @@ pub fn product() -> Product {
         )),
         new_items: new_items::new_items(),
         tree: tree(),
-        // The Python group (Interpreter, Type Engine, External Tools)
-        // comes with those pages.
-        settings_pages: Vec::new(),
+        // The Python group: Type Engine and Tools > External Tools.
+        settings_pages: settings_pages::pages(),
     }
 }
 

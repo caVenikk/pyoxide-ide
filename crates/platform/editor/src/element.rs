@@ -12,7 +12,7 @@ use gpui::{
     TextRun, UnderlineStyle, Window, fill, outline, point, px, relative, size,
 };
 use themes::{Metric, TextRole, UiRole, UnderlineStyle as ThemeUnderline};
-use ui::theme::{Theme, ThemeExt, color};
+use ui::theme::{EditorFont, Theme, ThemeExt, color};
 
 use crate::diagnostics::{Analysis, Look, MarkSeverity, line_looks};
 use crate::editor::{DragUnit, Editor, EditorEvent};
@@ -466,30 +466,31 @@ pub(crate) fn field_font_features() -> FontFeatures {
     ]))
 }
 
-/// Font metrics of an editor: the editor font, or the UI font of a one-line
-/// field that shows UI text (search fields).
-pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics {
-    let font = Font {
-        family: if ui_font {
-            theme.ui_family()
-        } else {
-            theme.mono_family()
-        },
-        features: if ui_font {
-            field_font_features()
-        } else if theme.raw().fonts.editor_ligatures {
-            FontFeatures::default()
-        } else {
-            FontFeatures::disable_ligatures()
-        },
-        fallbacks: None,
-        weight: FontWeight::NORMAL,
-        style: FontStyle::Normal,
-    };
-    let font_size = if ui_font {
-        theme.ui_size()
+/// Font metrics of an editor: the editor font (the theme's, or the
+/// editor's own), or the UI font of a one-line field that shows UI text
+/// (search fields).
+pub(crate) fn metrics(
+    theme: &Theme,
+    window: &Window,
+    ui_font: bool,
+    own: Option<&EditorFont>,
+) -> Metrics {
+    let (font, font_size, line_spacing) = if ui_font {
+        let font = Font {
+            family: theme.ui_family(),
+            features: field_font_features(),
+            fallbacks: None,
+            weight: FontWeight::NORMAL,
+            style: FontStyle::Normal,
+        };
+        (font, theme.ui_size(), theme.editor_line_spacing())
     } else {
-        theme.editor_size()
+        let editor_font = own.cloned().unwrap_or_else(|| theme.editor_font());
+        (
+            editor_font.font(),
+            editor_font.size,
+            editor_font.line_spacing,
+        )
     };
     let ts = window.text_system();
     let id = ts.resolve_font(&font);
@@ -498,9 +499,7 @@ pub(crate) fn metrics(theme: &Theme, window: &Window, ui_font: bool) -> Metrics 
     // 22 px lines, 14 px gives 24.
     let ascent = f32::from(ts.ascent(id, font_size)).ceil();
     let descent = f32::from(ts.descent(id, font_size)).abs().ceil();
-    let line_height = px(((ascent + descent) * theme.editor_line_spacing())
-        .ceil()
-        .max(1.0));
+    let line_height = px(((ascent + descent) * line_spacing).ceil().max(1.0));
     let advance = |size: Pixels| {
         ts.advance(id, size, '0')
             .map(|s| s.width)
@@ -900,11 +899,11 @@ impl Element for EditorElement {
         cx: &mut App,
     ) -> Prepaint {
         let theme = cx.theme();
-        let (ui_font, transparent) = {
+        let (ui_font, transparent, own_font) = {
             let e = self.editor.read(cx);
-            (e.ui_font, e.transparent)
+            (e.ui_font, e.transparent, e.font.clone())
         };
-        let m = metrics(theme, window, ui_font);
+        let m = metrics(theme, window, ui_font, own_font.as_ref());
         let mut colors = Colors {
             background: theme.color(UiRole::EditorBackground),
             gutter: theme.color(UiRole::Gutter),

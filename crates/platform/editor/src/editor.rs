@@ -318,6 +318,8 @@ pub struct Editor {
     /// A one-line field in the UI font (search fields) instead of the
     /// editor font.
     pub(crate) ui_font: bool,
+    /// A font of its own instead of the theme's editor font.
+    pub(crate) font: Option<ui::theme::EditorFont>,
     /// No background of its own: the field's container paints it.
     pub(crate) transparent: bool,
     /// Search matches shown in the text.
@@ -454,6 +456,7 @@ impl Editor {
             placeholder_unfocused: false,
             error: false,
             ui_font: false,
+            font: None,
             transparent: false,
             search: None,
             reveal: None,
@@ -624,6 +627,16 @@ impl Editor {
     /// editor font (search fields, as in the reference IDE).
     pub fn set_ui_font(&mut self, ui_font: bool) {
         self.ui_font = ui_font;
+    }
+
+    /// Shows the text in `font` instead of the theme's editor font (the
+    /// preview of Editor > Font, before the font is applied); `None` goes
+    /// back to the theme's.
+    pub fn set_font(&mut self, font: Option<ui::theme::EditorFont>, cx: &mut Context<Self>) {
+        if self.font != font {
+            self.font = font;
+            cx.notify();
+        }
     }
 
     /// Leaves the background to the field's container.

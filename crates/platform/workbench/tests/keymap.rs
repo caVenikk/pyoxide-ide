@@ -1816,11 +1816,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let before = rows(h);
             h.press_in_settings(keys);
             let after = rows(h);
-            // Appearance & Behavior with Appearance and System Settings.
+            // Appearance & Behavior with Appearance and System Settings:
+            // two rows come and go (the other groups stay as they are).
             if b.command == "settings.collapse" {
-                assert_eq!((before, after), (3, 1), "{what}");
+                assert_eq!(before, after + 2, "{what}");
             } else {
-                assert_eq!((before, after), (1, 3), "{what}");
+                assert_eq!(before + 2, after, "{what}");
             }
         }
         "settings.go-to-page" => {

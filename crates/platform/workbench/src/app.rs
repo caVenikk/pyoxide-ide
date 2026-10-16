@@ -383,9 +383,6 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         if let Some(file) = crate::search_everywhere::settings_file() {
             crate::search_everywhere::load_settings(cx, file);
         }
-        if let Some(file) = crate::editor_settings::settings_file() {
-            crate::editor_settings::load_settings(cx, file);
-        }
         if let Some(file) = crate::file_preview::settings_file() {
             crate::file_preview::load_settings(cx, file);
         }

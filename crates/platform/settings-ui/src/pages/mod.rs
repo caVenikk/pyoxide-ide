@@ -2,3 +2,5 @@
 //! workbench puts them in the tree.
 
 pub mod appearance;
+pub mod font;
+pub mod general;

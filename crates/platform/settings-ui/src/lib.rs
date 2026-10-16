@@ -12,7 +12,8 @@
 //!   application quits with changes not applied.
 //! - [`theme_switch`]: the theme and editor colour scheme in use, the
 //!   theme switchers with their preview, and theme import; [`pages`] holds
-//!   the pages that only edit sections of the store (Appearance).
+//!   the pages that only edit sections of the store (Appearance, Editor >
+//!   General and Editor > Font).
 
 pub mod commands;
 mod history;
@@ -46,6 +47,7 @@ pub fn init(cx: &mut App) {
     ui::command::register(cx, commands::QUERY_COMMANDS);
     ui::command::register(cx, commands::THEME_COMMANDS);
     theme_switch::init(cx);
+    pages::font::init(cx);
     ui::command::register_query(
         cx,
         "settings.state",

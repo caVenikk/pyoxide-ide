@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 34%** `███████░░░░░░░░░░░░░`
+**Overall parity: 36%** `███████░░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
 | vcs | 13% `█░░░░░░░░░` | 2 | 1 | 22 |
-| settings | 25% `██░░░░░░░░` | 3 | 2 | 13 |
+| settings | 41% `████░░░░░░` | 5 | 3 | 10 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -224,12 +224,12 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
 | ⬜ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40) |
 | ⬜ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |
-| ⬜ | Editor > Font page | must | Community (#92) |
-| ⬜ | Editor > General page (soft wraps) | must | Community; after #119 (#92) |
+| ✅ | Editor > Font page | must | Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants |
+| 🟡 | Editor > General page (soft wraps) | must | Community; Soft Wraps group only (#154) |
 | ⬜ | Python > Interpreter page (combo, Show All, add / remove / rename) | must | Community (#75) |
 | ⬜ | Add Python Interpreter dialog (new virtualenv or uv, existing interpreter) | must | Community; through py-env (#75) |
 | ⬜ | Configured interpreters as an application list with one-time import from the reference | must | Community; interpreters of the reference that still exist (#75) |
-| ⬜ | Python > Type Engine and Python > Tools > External Tools pages | must | Community; settings model and storage exist (#87); pages: #92 |
+| ✅ | Python > Type Engine and Python > Tools > External Tools pages | must | Community; project pages, off the UI thread (#154); no Configure dialog or Install / Upgrade yet |
 | ⬜ | Search highlight on settings pages (spotlight) | should | Community |
 | ⬜ | Keymap editing (custom keymaps, edit shortcuts) | should | Community |
 | ⬜ | Editor > File Types page | should | Community; associations from #121 |

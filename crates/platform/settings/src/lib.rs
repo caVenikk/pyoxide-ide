@@ -15,12 +15,14 @@
 //! running application, its change events and the Settings window.
 
 mod appearance;
+mod editor;
 mod files;
 mod store;
 
 use std::path::PathBuf;
 
 pub use appearance::{AppearanceSettings, themes_dir};
+pub use editor::{DEFAULT_SOFT_WRAP_FILES, EditorFontSettings, SoftWrapSettings};
 pub use files::{SaveSettings, SyncSettings};
 pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
 
