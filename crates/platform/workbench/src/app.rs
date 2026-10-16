@@ -253,26 +253,38 @@ pub fn init(cx: &mut App, product: &Product) {
     for error in crate::keymap::bind(cx, &crate::keymap::Keymap::platform_default()) {
         eprintln!("keymap: {error}");
     }
-    cx.set_menus(vec![Menu {
-        name: product.name.into(),
-        items: vec![
-            MenuItem::action("Project", ToggleProject),
-            MenuItem::action(
-                "Light Theme",
-                SetTheme {
-                    id: themes::builtin::ISLANDS_LIGHT_ID.into(),
-                },
-            ),
-            MenuItem::action(
-                "Dark Theme",
-                SetTheme {
-                    id: themes::builtin::ISLANDS_DARK_ID.into(),
-                },
-            ),
-            MenuItem::separator(),
-            MenuItem::action(format!("Quit {}", product.name), Quit),
-        ],
-    }]);
+    cx.set_menus(vec![
+        Menu {
+            name: product.name.into(),
+            items: vec![
+                MenuItem::action("Project", ToggleProject),
+                MenuItem::action(
+                    "Light Theme",
+                    SetTheme {
+                        id: themes::builtin::ISLANDS_LIGHT_ID.into(),
+                    },
+                ),
+                MenuItem::action(
+                    "Dark Theme",
+                    SetTheme {
+                        id: themes::builtin::ISLANDS_DARK_ID.into(),
+                    },
+                ),
+                MenuItem::separator(),
+                MenuItem::action(format!("Quit {}", product.name), Quit),
+            ],
+        },
+        Menu {
+            name: "View".into(),
+            items: vec![MenuItem::submenu(Menu {
+                name: "Active Editor".into(),
+                items: vec![MenuItem::action(
+                    "Soft-Wrap",
+                    editor::commands::ToggleSoftWraps,
+                )],
+            })],
+        },
+    ]);
     if let Some(init) = product.init {
         init(cx);
     }
@@ -328,6 +340,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         }
         if let Some(file) = crate::search_everywhere::settings_file() {
             crate::search_everywhere::load_settings(cx, file);
+        }
+        if let Some(file) = crate::editor_settings::settings_file() {
+            crate::editor_settings::load_settings(cx, file);
         }
         // Frames follow the display's refresh. After a keystroke the window
         // draws at once instead: the typed text is then ready for the next

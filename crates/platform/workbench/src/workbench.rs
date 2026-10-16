@@ -838,9 +838,13 @@ impl Workbench {
             return;
         }
         let file_type = self.file_types.for_path(&path).cloned();
+        let soft_wraps = crate::editor_settings::settings(cx)
+            .soft_wraps
+            .applies_to(&path);
         let editor = cx.new(|cx| {
             let mut editor = Editor::new(buffer, window, cx);
             editor.set_path(Some(path.clone()));
+            editor.set_soft_wraps(soft_wraps, cx);
             if let Some(t) = &file_type {
                 editor.set_config(t.editor_config());
                 if let Some(factory) = &t.highlighter {
