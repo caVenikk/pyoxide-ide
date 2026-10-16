@@ -40,7 +40,7 @@ here with: source URL, commit, file(s), license, and what was changed.
   LICENSE-APACHE), https://github.com/JetBrains/intellij-community @
   f5a0bddb9cee9135c700de9a67534e11cdf61c07. Files (light `name.svg` and dark
   `name_dark.svg` variants): platform/icons/src/expui/{actions,general,
-  inline,run,nodes,fileTypes,toolwindows,windows}/... (the subset under the
+  inline,run,nodes,fileTypes,status,toolwindows,windows}/... (the subset under the
   same relative paths in assets/icons/), platform/icons/src/vcs/branch.svg,
   plugins/terminal/resources/icons/expui/toolwindow/terminal@20x20.svg,
   python/python-parser/resources/icons/com/jetbrains/python/parser/expui/python.svg,
@@ -824,6 +824,22 @@ here with: source URL, commit, file(s), license, and what was changed.
   per element (no fold regions, inlays or custom wraps), the rows of all
   lines kept as counts with prefix sums and computed off the UI thread for
   large texts; no caret position inside a continuation row's indent.
+
+- crates/platform/ui/src/notification.rs, crates/platform/workbench/src/
+  notifications.rs
+  Follow the IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3:
+  notification balloons of platform/platform-impl/src/com/intellij/
+  notification/impl/NotificationsManagerImpl.java (layout of icon, title,
+  content and action links, display times of BALLOON and STICKY_BALLOON),
+  ui/BalloonLayoutConfiguration.java (sizes and spaces), ui/
+  ActionCenterBalloonLayout.kt (three shown, the "{0} more {1}" strip,
+  position), ui/NotificationBalloonActionProvider.java (close button),
+  ui/NotificationBalloonRoundShadowBorderProvider.kt and ui/BalloonImpl.java
+  (smart fade-out: from the first input, paused while hovered or
+  inactive), with the strings of platform/platform-api/resources/messages/
+  IdeBundle.properties. Changes: reimplemented in Rust on GPUI; plain-text
+  content without HTML, no expand of long content, no settings button.
 
 Trademarks
 ----------

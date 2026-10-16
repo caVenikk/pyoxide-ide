@@ -18,6 +18,7 @@ pub mod file_types;
 pub mod find_in_files;
 pub mod keymap;
 pub mod navigation;
+pub mod notifications;
 pub mod popup;
 pub mod project_files;
 pub mod project_panel;

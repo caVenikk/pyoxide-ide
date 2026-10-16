@@ -126,6 +126,7 @@ pub fn init(cx: &mut App, product: &Product) {
     ui::icons::register(cx, product.icons);
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
+    ui::command::register(cx, crate::notifications::COMMANDS);
     ui::command::register(cx, project_panel::COMMANDS);
     ui::command::register(cx, project_panel::FILE_COMMANDS);
     ui::command::register(cx, project_panel::NEW_ITEM_COMMANDS);

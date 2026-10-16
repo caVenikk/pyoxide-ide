@@ -208,14 +208,16 @@ once, before or with its first user:
   commands for each (`workbench.toggle-terminal`, `workbench.toggle-debug`,
   `workbench.toggle-commit`), stripe badges, and registration on first use
   as the Run tool window does now.
-- **Balloon notifications.** `Workbench::show_notice` puts a text into the
-  status bar for ten seconds in place of the reference's balloons.
-  Needed: a notification component in `ui` and a host in the workbench:
-  kind (information, warning, error), title, content, action links, timed
-  or sticky, stacking, a `workbench.notify` command. Users: commit, push,
-  update and checkout results, debugger connection errors, terminal
-  environment changes, import reports. The Notifications tool window
-  comes later.
+- **Balloon notifications.** `ui::notification` holds the balloon (kind
+  information, warning or error, title, content, action links, close
+  button, timed or sticky) and the stack (three shown, "N more" above,
+  hover pauses the timer); `workbench::notifications` hosts it at the
+  bottom right of the main window. `Workbench::notify` and the
+  `workbench.notify` command show a balloon; `workbench.state` lists the
+  open ones. Users: the run configuration import report now; commit, push,
+  update and checkout results, debugger connection errors and terminal
+  environment changes as those areas land. `Workbench::show_notice` stays
+  for status bar texts. The Notifications tool window comes later.
 - **Editor decorations.** The editor has diagnostic marks that move with
   edits, a link highlight and a problem cell after the end of a line, and
   keeps room right of the line numbers, but paints nothing there. Needed:

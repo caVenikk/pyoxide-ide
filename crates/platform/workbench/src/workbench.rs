@@ -19,6 +19,7 @@ use serde_json::json;
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, icon_button, island};
 use ui::icons::{Icon, IconName};
+use ui::notification::Notification;
 use ui::theme::ThemeExt;
 
 use crate::app::Product;
@@ -27,6 +28,7 @@ use crate::commands::*;
 use crate::env;
 use crate::file_types::FileTypes;
 use crate::find_in_files::{self, FindInFiles, FindInFilesEvent, OpenContext};
+use crate::notifications::{Notifications, Notify};
 use crate::project_files::ProjectFiles;
 use crate::project_panel::{self, PanelEvent, ProjectPanel};
 use crate::recent_files::{self, RecentFiles, RecentFilesEvent};
@@ -200,6 +202,8 @@ pub struct Workbench {
     navigation: history::Navigation,
     /// Changes of files on disk made outside the application.
     file_sync: file_sync::FileSync,
+    /// Notification balloons.
+    notifications: Entity<Notifications>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -355,6 +359,7 @@ impl Workbench {
             code_intel,
             navigation: Default::default(),
             file_sync: Default::default(),
+            notifications: cx.new(|cx| Notifications::new(window, cx)),
             _subscriptions: subscriptions,
         }
     }
@@ -404,6 +409,21 @@ impl Workbench {
     /// The notice shown in the status bar.
     pub fn notice(&self) -> Option<&SharedString> {
         self.notice.as_ref()
+    }
+
+    /// Shows a notification balloon; returns its id.
+    pub fn notify(&mut self, notification: Notification, cx: &mut Context<Self>) -> u64 {
+        self.notifications
+            .update(cx, |n, cx| n.notify(notification, cx))
+    }
+
+    /// The window's balloons.
+    pub fn notifications(&self) -> &Entity<Notifications> {
+        &self.notifications
+    }
+
+    fn notify_action(&mut self, action: &Notify, _: &mut Window, cx: &mut Context<Self>) {
+        self.notify(action.notification(), cx);
     }
 
     /// Opens a text that is no file (a server's error output) in a
@@ -587,6 +607,7 @@ impl Workbench {
             "busy": self.is_busy(cx),
             "message": self.message.as_ref().map(|m| m.to_string()),
             "notice": self.notice.as_ref().map(|m| m.to_string()),
+            "notifications": self.notifications.read(cx).state_json(cx),
             "theme": cx.theme().id(),
         })
     }
@@ -2242,6 +2263,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::run_save_temporary))
             .on_action(cx.listener(Self::run_delete_configuration))
             .on_action(cx.listener(Self::run_pin_configuration))
+            .on_action(cx.listener(Self::notify_action))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {
@@ -2331,6 +2353,7 @@ impl Render for Workbench {
                     .child(self.render_right_stripe(window, cx)),
             )
             .child(self.render_status_bar(cx))
+            .child(self.notifications.clone())
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(ui::dialog_window::blocker(window, cx))

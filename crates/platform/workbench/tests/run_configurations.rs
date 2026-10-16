@@ -225,11 +225,15 @@ fn the_reference_configurations_show_in_the_run_widget(cx: &mut TestAppContext) 
     assert_eq!(later["type_name"], json!("FutureType"));
     let shared = &s["configurations"]["configurations"][2];
     assert_eq!(shared["storage"], json!("shared"));
+    // The import report is a balloon.
     let state = h.invoke("workbench.state", json!(null));
+    let balloon = &state["notifications"]["balloons"][0];
     assert_eq!(
-        state["notice"],
+        balloon["content"],
         json!("Imported 4 run configurations (1 kept read-only)")
     );
+    assert_eq!(balloon["kind"], json!("information"));
+    assert_eq!(balloon["sticky"], json!(false));
     let w = h.widget();
     assert_eq!(w["configuration"], json!("beta"));
     assert_eq!(w["configuration_icon"], json!("run/run"));
