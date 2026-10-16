@@ -1,7 +1,8 @@
 # Import a theme
 
 ## Steps
-1. In the Theme combo or the gear menu's Theme ▸ choose "Import Theme…".
+1. In the Theme combo or the Theme popup (gear menu > Theme…) choose
+   "Import Theme…".
 2. Choose a theme plugin archive that contains a UI theme and an editor
    colour scheme.
 3. Import a single `.icls` file the same way.

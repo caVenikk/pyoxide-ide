@@ -70,7 +70,7 @@ ui::ui_commands! {
     QUERY_COMMANDS, scope = "Workbench";
     /// The state of the Settings window.
     State => "settings.state", "Settings Window State",
-        "Returns the Settings window's state as JSON: open, title, selected page, the tree's rows, the search (text, no match, the sticky group header), Back and Forward, modified pages, errors, the selected page's fields, the window's size and split.";
+        "Returns the Settings window's state as JSON: open, title, selected page, the tree's rows, the search (text, no match, the sticky group header), Back and Forward, modified pages, errors, the selected page's fields, the window's size and split; and, open or not, `appearance`: the theme and editor color scheme in use, the theme shown (a preview), the themes and imported schemes.";
     /// Read settings.
     Get { key: Option<String> } => "settings.get", "Get Setting",
         "Returns an application setting by dotted key (`system.files.idle-seconds`) or a table of them; without a key, all of them.",
@@ -79,4 +79,19 @@ ui::ui_commands! {
     Set { key: String, value: serde_json::Value } => "settings.set", "Set Setting",
         "Changes an application setting by dotted key; it applies at once and is saved.",
         r#"{"key": "system.files.idle-seconds", "value": 30}"#;
+}
+
+ui::ui_commands! {
+    THEME_COMMANDS, scope = "Workbench";
+    /// Switch the theme.
+    SwitchTheme { id: Option<String> } => "settings.switch-theme", "Theme",
+        "Switches to a theme by id at once, as the Theme combo box and the theme switchers do: it is stored, and Cancel in the Settings window does not undo it. Without an id, shows the Theme popup: the themes in groups with the current one selected; half a second after the selection moves the IDE previews that theme, Escape restores the starting one.",
+        r#"{"id": "islands-light"}"#;
+    /// The Switch popup.
+    QuickSwitch => "settings.quick-switch", "Quick Switch Scheme\u{2026}",
+        "Shows the Switch popup (Quick Switch Scheme): its Theme row opens the Theme popup.";
+    /// Import a theme.
+    ImportTheme { path: Option<String> } => "settings.import-theme", "Import Theme\u{2026}",
+        "Imports a PyCharm UI theme (`.theme.json`), colour scheme (`.icls`, `.xml`), theme plugin (`.jar`, `.zip`) or a folder of them into the `themes` folder of the configuration: the first UI theme becomes the theme at once, a scheme alone is offered as an editor colour scheme, and a balloon reports what could not be mapped (an error balloon when nothing could be imported). Without a path a file chooser is shown.",
+        r#"{"path": "/path/to/MyTheme.jar"}"#;
 }

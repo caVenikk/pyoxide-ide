@@ -12,7 +12,7 @@ use gpui::{
 use ui::command::CommandError;
 use ui::icons::{IconName, IconSvg};
 
-use crate::commands::{self, Quit, SetTheme, ToggleProject};
+use crate::commands::{self, Quit, ToggleProject};
 use crate::env;
 use crate::file_types::{FileAssociation, FileType};
 use crate::project_panel;
@@ -283,18 +283,6 @@ pub fn init(cx: &mut App, product: &Product) {
                 ),
                 MenuItem::separator(),
                 MenuItem::action("Project", ToggleProject),
-                MenuItem::action(
-                    "Light Theme",
-                    SetTheme {
-                        id: themes::builtin::ISLANDS_LIGHT_ID.into(),
-                    },
-                ),
-                MenuItem::action(
-                    "Dark Theme",
-                    SetTheme {
-                        id: themes::builtin::ISLANDS_DARK_ID.into(),
-                    },
-                ),
                 MenuItem::separator(),
                 MenuItem::action(format!("Quit {}", product.name), Quit),
             ],
@@ -376,6 +364,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         if let Some(file) = ::settings::settings_file() {
             settings_ui::store::load(cx, file);
         }
+        // The imported themes and the theme stored, or the one
+        // `PYOXIDE_THEME` asks for in this run.
+        settings_ui::theme_switch::load(cx, ::settings::themes_dir(), env::theme_override());
         if let Some(dir) = ::settings::config_dir() {
             settings_ui::window_state::load(cx, dir.join(settings_ui::window_state::FILE));
         }

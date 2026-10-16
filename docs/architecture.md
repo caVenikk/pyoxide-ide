@@ -130,7 +130,7 @@ Platform (`crates/platform/`, language-agnostic):
   workbench reports editors to, the `code.*` and `completion.*` commands.
   A skeleton: the commands do nothing yet.
 - `themes`: theme model and tokens, default themes, import of PyCharm colour
-  schemes and UI themes.
+  schemes and UI themes, the catalog of built-in and imported themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
   metrics, bundled fonts, colour icons rasterized at device scale, common
   components, context menus and list popups, dialog windows (a separate
@@ -221,7 +221,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
 | `vcs-ui` | platform | yes | Commit tool window, changes tree, diff viewer tab, VCS widget and branch popup, git dialogs | 0016 |
 | `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
-| `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store | 0017, 0018 |
+| `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import | 0017, 0018 |
 | `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |
 | `pyoxide-ide` (extended) | python | yes | venv and uv activation in the terminal, the Python settings pages, the debug adapter provider | 0014, 0015, 0017 |
 

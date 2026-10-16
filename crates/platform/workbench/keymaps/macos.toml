@@ -9,6 +9,8 @@
 [[context]]
 [context.bindings]
 "cmd-," = "settings.open"
+# Quick Switch Scheme: the Switch popup (Theme).
+"ctrl-`" = "settings.quick-switch"
 "cmd-q" = "app.quit"
 "cmd-1" = "workbench.toggle-project"
 "cmd-4" = "workbench.toggle-run"

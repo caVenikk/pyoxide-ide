@@ -10,13 +10,18 @@
 //!   keeps between sessions ([`window_state`]).
 //! - [`leave`]: Apply / Don't Save / Cancel when the project closes or the
 //!   application quits with changes not applied.
+//! - [`theme_switch`]: the theme and editor colour scheme in use, the
+//!   theme switchers with their preview, and theme import; [`pages`] holds
+//!   the pages that only edit sections of the store (Appearance).
 
 pub mod commands;
 mod history;
 pub mod leave;
 pub mod page;
+pub mod pages;
 pub mod search;
 pub mod store;
+pub mod theme_switch;
 mod tree;
 mod window;
 pub mod window_state;
@@ -39,23 +44,27 @@ pub fn init(cx: &mut App) {
     ui::command::register(cx, commands::OPEN_COMMANDS);
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::QUERY_COMMANDS);
+    ui::command::register(cx, commands::THEME_COMMANDS);
+    theme_switch::init(cx);
     ui::command::register_query(
         cx,
         "settings.state",
         Rc::new(|_, window, cx| {
-            let Some(handle) = find(cx) else {
-                return Ok(json!({"open": false}));
+            let mut state = match find(cx) {
+                None => json!({"open": false}),
+                Some(handle) if window.window_handle() == handle.into() => {
+                    let view = window
+                        .root::<SettingsWindow>()
+                        .flatten()
+                        .ok_or_else(|| CommandError::new("not_available", "no Settings window"))?;
+                    view.read(cx).state(window, cx)
+                }
+                Some(handle) => handle
+                    .update(cx, |view, window, cx| view.state(window, cx))
+                    .map_err(|e| CommandError::new("not_available", e.to_string()))?,
             };
-            if window.window_handle() == handle.into() {
-                let view = window
-                    .root::<SettingsWindow>()
-                    .flatten()
-                    .ok_or_else(|| CommandError::new("not_available", "no Settings window"))?;
-                return Ok(view.read(cx).state(window, cx));
-            }
-            handle
-                .update(cx, |view, window, cx| view.state(window, cx))
-                .map_err(|e| CommandError::new("not_available", e.to_string()))
+            state["appearance"] = theme_switch::state_json(cx);
+            Ok(state)
         }),
     );
     ui::command::register_query(

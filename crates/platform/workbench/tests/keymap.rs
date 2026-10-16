@@ -1698,6 +1698,13 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let s = h.invoke("settings.state", json!(null));
             assert_eq!(s["open"], json!(true), "{what}");
         }
+        "settings.quick-switch" => {
+            h.press(keys);
+            let popup = h.state()["switch_popup"].clone();
+            assert_eq!(popup["title"], json!("Switch"), "{what}: {popup}");
+            h.invoke("menu.cancel", json!(null));
+            assert!(h.state()["switch_popup"].is_null(), "{what}");
+        }
         "settings.ok" | "settings.escape" => {
             let in_field = b.context.as_deref().is_some_and(|c| c.ends_with("Editor"));
             let target = if in_field { "page" } else { "tree" };
@@ -1757,9 +1764,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
                 .is_some_and(|c| c.starts_with("SettingsSearch"));
             let target = if in_search { "search" } else { "tree" };
             let (from, to) = if b.command == "settings.select-next" {
-                ("appearance-behavior", "system")
+                ("appearance-behavior", "appearance")
             } else {
-                ("system", "appearance-behavior")
+                ("appearance", "appearance-behavior")
             };
             // System Settings first: its group is expanded.
             h.open_settings("system", target);
@@ -1786,10 +1793,11 @@ fn check(h: &mut H, b: &Binding) -> bool {
             let before = rows(h);
             h.press_in_settings(keys);
             let after = rows(h);
+            // Appearance & Behavior with Appearance and System Settings.
             if b.command == "settings.collapse" {
-                assert_eq!((before, after), (2, 1), "{what}");
+                assert_eq!((before, after), (3, 1), "{what}");
             } else {
-                assert_eq!((before, after), (1, 2), "{what}");
+                assert_eq!((before, after), (1, 3), "{what}");
             }
         }
         "settings.go-to-page" => {

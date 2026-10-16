@@ -3,7 +3,7 @@
 //! | variable | effect |
 //! |---|---|
 //! | `PYOXIDE_BACKGROUND=1` | open windows without activating the app or taking focus |
-//! | `PYOXIDE_THEME=light` | start with the light theme (default dark) |
+//! | `PYOXIDE_THEME=light` | use the light theme in this run (`dark`, or a theme id), whatever the settings store, until a theme is chosen in the IDE |
 //! | `PYOXIDE_SHOT=<file.png>` | save an image of the main window after it settled, then quit (macOS) |
 //! | `PYOXIDE_RUN=<json>` | run UI commands once the window settled, e.g. `[["find.search", {"text": "def"}]]` (before `PYOXIDE_SHOT`) |
 //! | `PYOXIDE_BENCH=startup` | print the first-frame marker and quit |
@@ -31,12 +31,21 @@ pub fn background() -> bool {
     std::env::var_os("PYOXIDE_BACKGROUND").is_some_and(|v| v == "1")
 }
 
-/// Theme kind requested with `PYOXIDE_THEME`.
+/// Theme kind requested with `PYOXIDE_THEME` (the theme drawn before
+/// the settings are read).
 pub fn theme_kind() -> ThemeKind {
     match std::env::var("PYOXIDE_THEME").as_deref() {
         Ok("light") => ThemeKind::Light,
         _ => ThemeKind::Dark,
     }
+}
+
+/// The theme `PYOXIDE_THEME` pins for this run: `light`, `dark` or a
+/// theme id.
+pub fn theme_override() -> Option<String> {
+    std::env::var("PYOXIDE_THEME")
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 /// `PYOXIDE_DEBUG_CURSOR=1`: print the system cursor after every mouse move.
