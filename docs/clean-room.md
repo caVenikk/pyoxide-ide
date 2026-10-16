@@ -12,7 +12,9 @@ Allowed sources:
    templates) as an import format. User themes and colour schemes (`.icls` XML,
    `.theme.json`, keymap and code-style XML) are plain data: the importer is
    written from documented formats and sample files. Plugin archives
-   (`.jar`/zip) may be opened **only to extract such data resources**;
+   (`.jar`/zip) may be opened **only to extract such data resources**
+   (including the plugin descriptor `META-INF/plugin.xml`, read to resolve a
+   theme's id and name);
    `.class` files and anything executable are never opened, decompiled or analysed.
 
 Forbidden:
