@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use crate::roots::{FolderKind, FolderRules, Roots};
 use crate::store::{self, Exclusions, STORE_DIR};
 
 /// The reference IDE's default "Ignored Files and Folders" list: exact
@@ -150,13 +151,14 @@ pub fn auto_exclusions() -> AutoExclusions {
     *AUTO_EXCLUSIONS.read().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Hide and exclude rules of one project. Cheap to clone.
+/// Hide and exclude rules of one project, with its roots and the
+/// product's folder rules (ADR 0013). Cheap to clone.
 #[derive(Debug, Clone, Default)]
 pub struct Filter {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Inner {
     root: Option<PathBuf>,
     exclusions: Exclusions,
@@ -166,6 +168,10 @@ struct Inner {
     auto_names: HashSet<&'static str>,
     /// Folders under the root that hold a marker of `root_dir_markers`.
     auto_root_dirs: HashSet<String>,
+    /// The folders marked as roots.
+    roots: Roots,
+    /// What makes a folder a package or a module.
+    folders: FolderRules,
 }
 
 impl Filter {
@@ -201,6 +207,8 @@ impl Filter {
                 exclusions,
                 auto_names: auto.dir_names.iter().copied().collect(),
                 auto_root_dirs,
+                roots: Roots::default(),
+                folders: FolderRules::NONE,
             }),
         }
     }
@@ -208,17 +216,79 @@ impl Filter {
     /// The same rules with other exclusions (after the person marked or
     /// unmarked a folder); the automatic ones are kept.
     pub fn with_exclusions(&self, exclusions: Exclusions) -> Self {
-        let old = &self.inner;
+        let mut inner = (*self.inner).clone();
+        inner.excluded = exclusions.paths.iter().cloned().collect();
+        inner.patterns = NameMasks::new(&exclusions.patterns);
+        inner.exclusions = exclusions;
         Self {
-            inner: Arc::new(Inner {
-                root: old.root.clone(),
-                excluded: exclusions.paths.iter().cloned().collect(),
-                patterns: NameMasks::new(&exclusions.patterns),
-                exclusions,
-                auto_names: old.auto_names.clone(),
-                auto_root_dirs: old.auto_root_dirs.clone(),
-            }),
+            inner: Arc::new(inner),
         }
+    }
+
+    /// The same rules with other roots (read, or after the person marked
+    /// or unmarked a folder).
+    pub fn with_roots(&self, roots: Roots) -> Self {
+        let mut inner = (*self.inner).clone();
+        inner.roots = roots;
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// The same rules with the product's folder rules.
+    pub fn with_folder_rules(&self, rules: FolderRules) -> Self {
+        let mut inner = (*self.inner).clone();
+        inner.folders = rules;
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// The folders marked as roots.
+    pub fn roots(&self) -> &Roots {
+        &self.inner.roots
+    }
+
+    /// The kind of root `path` is (the project root included), if any.
+    pub fn root_kind(&self, path: &Path) -> Option<&str> {
+        let root = self.inner.root.as_deref()?;
+        let rel = crate::store::relative_or_root(root, path)?;
+        self.inner.roots.kind_of(&rel)
+    }
+
+    /// The source roots: the folders marked as code or test code roots
+    /// ([`crate::roots::SOURCES`], [`crate::roots::TESTS`]), sorted.
+    pub fn source_roots(&self) -> Vec<PathBuf> {
+        let Some(root) = self.inner.root.as_deref() else {
+            return Vec::new();
+        };
+        self.inner
+            .roots
+            .folders(root, &[crate::roots::SOURCES, crate::roots::TESTS])
+    }
+
+    /// The source root `path` is in, or is (the deepest one), if any.
+    pub fn source_root_of(&self, path: &Path) -> Option<PathBuf> {
+        self.source_roots()
+            .into_iter()
+            .filter(|r| path.starts_with(r))
+            .max_by_key(|r| r.components().count())
+    }
+
+    /// What the product sees in the folder `dir` (blocking: looks for its
+    /// marker files).
+    pub fn folder_kind(&self, dir: &Path) -> FolderKind {
+        self.inner.folders.kind_of(dir)
+    }
+
+    /// The exclusions and the automatic rules are the same as `other`'s
+    /// (only the roots may differ).
+    pub fn same_exclusions(&self, other: &Filter) -> bool {
+        let (a, b) = (&self.inner, &other.inner);
+        a.root == b.root
+            && a.exclusions == b.exclusions
+            && a.auto_names == b.auto_names
+            && a.auto_root_dirs == b.auto_root_dirs
     }
 
     /// The project root, unless this is the empty filter.
@@ -488,6 +558,50 @@ mod tests {
         assert!(f.is_excluded(&root.join("a.tmp"), false));
         assert!(!f.is_excluded(&root.join("src/pkg"), true));
         assert!(!f.is_excluded_root(&root.join("a.tmp")));
+    }
+
+    #[test]
+    fn roots_and_folder_rules_ride_along() {
+        use crate::roots::{SOURCES, TESTS};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("svc/pkg")).unwrap();
+        std::fs::write(root.join("svc/pkg/__init__.py"), "").unwrap();
+        let mut roots = Roots::default();
+        roots.mark(".", SOURCES);
+        roots.mark("svc", SOURCES);
+        roots.mark("tests", TESTS);
+        roots.mark("ns", "namespace");
+        let f = Filter::new(root, Exclusions::default(), AutoExclusions::NONE)
+            .with_roots(roots.clone())
+            .with_folder_rules(FolderRules {
+                package_markers: &["__init__.py"],
+                module_markers: &[],
+            });
+        assert_eq!(f.root_kind(root), Some(SOURCES));
+        assert_eq!(f.root_kind(&root.join("svc")), Some(SOURCES));
+        assert_eq!(f.root_kind(&root.join("tests")), Some(TESTS));
+        assert_eq!(f.root_kind(&root.join("svc/pkg")), None);
+        assert_eq!(f.root_kind(Path::new("/elsewhere")), None);
+        // Other kinds are no source roots.
+        assert_eq!(
+            f.source_roots(),
+            [root.to_owned(), root.join("svc"), root.join("tests")]
+        );
+        assert_eq!(
+            f.source_root_of(&root.join("svc/pkg/mod.py")),
+            Some(root.join("svc"))
+        );
+        assert_eq!(f.source_root_of(&root.join("a.py")), Some(root.to_owned()));
+        assert_eq!(f.folder_kind(&root.join("svc/pkg")), FolderKind::Package);
+        assert_eq!(f.folder_kind(&root.join("svc")), FolderKind::Plain);
+        // Other exclusions keep the roots and the folder rules.
+        let g = f.with_exclusions(exclusions(&["svc"], &[]));
+        assert_eq!(g.roots(), &roots);
+        assert_eq!(g.folder_kind(&root.join("svc/pkg")), FolderKind::Package);
+        assert!(!g.same_exclusions(&f));
+        assert!(f.with_roots(Roots::default()).same_exclusions(&f));
+        assert!(Filter::default().source_roots().is_empty());
     }
 
     #[test]

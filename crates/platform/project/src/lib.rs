@@ -1,6 +1,7 @@
-//! The project model of Pyoxide IDE (ADR 0007, 0008): a folder opened as a
-//! project, its file tree loaded one directory at a time, the rules that
-//! hide or exclude entries, Pyoxide's own project folder with the shared
+//! The project model of Pyoxide IDE (ADR 0007, 0008, 0013): a folder opened
+//! as a project, its file tree loaded one directory at a time, the rules
+//! that hide or exclude entries, its source roots and the folders a product
+//! sees as packages or modules, Pyoxide's own project folder with the shared
 //! project settings and the personal project state, reading and writing
 //! documents, what reported paths are now on disk (for a file watcher),
 //! and the file operations of the project tool window.
@@ -13,6 +14,7 @@ mod document;
 mod filter;
 pub mod fs_ops;
 pub mod idea;
+pub mod roots;
 pub mod store;
 mod tree;
 pub mod workspace;
@@ -24,6 +26,7 @@ pub use document::{
 pub use filter::{
     AutoExclusions, DEFAULT_IGNORED, Filter, NameMasks, auto_exclusions, set_auto_exclusions,
 };
+pub use roots::{DetectRoots, FolderKind, FolderRules, Roots};
 pub use store::{Exclusions, STORE_DIR, StoreError};
 pub use tree::{Entry, EntryKind, FileTree, Node, NodeId, list_dir};
 
