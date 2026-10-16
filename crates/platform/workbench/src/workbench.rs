@@ -28,7 +28,7 @@ use crate::commands::*;
 use crate::env;
 use crate::file_types::FileTypes;
 use crate::find_in_files::{self, FindInFiles, FindInFilesEvent, OpenContext};
-use crate::notifications::{Notifications, Notify};
+use crate::notifications::{ClearAllNotifications, Notifications, NotificationsToolWindow, Notify};
 use crate::project_files::ProjectFiles;
 use crate::project_panel::{self, PanelEvent, ProjectPanel};
 use crate::recent_files::{self, RecentFiles, RecentFilesEvent};
@@ -329,7 +329,11 @@ impl Workbench {
                 this.code_intel_event(event, window, cx)
             }));
         }
-        let tool_windows = tool_window_areas::default_tool_windows(&product, &run_window);
+        let notifications = cx.new(|cx| Notifications::new(window, cx));
+        let notifications_window =
+            cx.new(|cx| NotificationsToolWindow::new(notifications.clone(), cx));
+        let tool_windows =
+            tool_window_areas::default_tool_windows(&product, &run_window, &notifications_window);
         // Names are coloured by their version control status (#169).
         let version_control = version_control::VersionControl::default();
         let colors = version_control.markers.colors.clone();
@@ -373,7 +377,7 @@ impl Workbench {
             code_intel,
             navigation: Default::default(),
             file_sync: Default::default(),
-            notifications: cx.new(|cx| Notifications::new(window, cx)),
+            notifications,
             version_control,
             _subscriptions: subscriptions,
         }
@@ -439,6 +443,15 @@ impl Workbench {
 
     fn notify_action(&mut self, action: &Notify, _: &mut Window, cx: &mut Context<Self>) {
         self.notify(action.notification(), cx);
+    }
+
+    fn clear_notifications(
+        &mut self,
+        _: &ClearAllNotifications,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.notifications.update(cx, |n, cx| n.clear_timeline(cx));
     }
 
     /// Opens a text that is no file (a server's error output) in a
@@ -2319,6 +2332,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::run_delete_configuration))
             .on_action(cx.listener(Self::run_pin_configuration))
             .on_action(cx.listener(Self::notify_action))
+            .on_action(cx.listener(Self::clear_notifications))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {

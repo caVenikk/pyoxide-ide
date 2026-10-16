@@ -19,6 +19,7 @@ use crate::chrome;
 use crate::commands::{
     ActivateToolWindow, FocusEditor, HideToolWindow, ToggleProject, ToggleRun, ToggleToolWindow,
 };
+use crate::notifications::{self, NotificationsToolWindow};
 use crate::run::RunToolWindow;
 use crate::tool_windows::{
     Area, MIN_BOTTOM_HEIGHT, MIN_EDITOR_HEIGHT, MIN_EDITOR_WIDTH, MIN_SIDE_WIDTH, ToolWindow,
@@ -46,13 +47,14 @@ impl ToolWindowView for RunToolWindow {
 
 /// The tool windows of the main window at start: the reference IDE's new
 /// UI default stripes (`defaultToolWindowLayoutProvider.kt`,
-/// `addPlatformDefaultsV2`), the product's bottom stripe buttons and Run,
-/// which its first use registers. Buttons without a tool window yet show
-/// on the stripe and do nothing. The orders leave room for the tool
-/// windows to come (Debug after Run).
+/// `addPlatformDefaultsV2`), the product's bottom stripe buttons, Run,
+/// which its first use registers, and Notifications. Buttons without a
+/// tool window yet show on the stripe and do nothing. The orders leave
+/// room for the tool windows to come (Debug after Run).
 pub(super) fn default_tool_windows(
     product: &Product,
     run_window: &Entity<RunToolWindow>,
+    notifications: &Entity<NotificationsToolWindow>,
 ) -> ToolWindows {
     let spec = |id, area, order, icon, title| ToolWindowSpec {
         id: ToolWindow(id),
@@ -110,13 +112,13 @@ pub(super) fn default_tool_windows(
     }
     windows.register(
         spec(
-            "notifications",
+            notifications::ID,
             Area::Right,
             0,
             IconName::TOOL_NOTIFICATIONS,
             "Notifications",
         ),
-        None,
+        Some(ToolWindowContent::new(notifications.clone())),
     );
     windows
 }

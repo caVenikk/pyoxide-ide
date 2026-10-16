@@ -1,7 +1,7 @@
 //! Keystrokes as shown in tooltips and hints: `⌥⇧⌘G` on macOS,
 //! `Ctrl+Shift+F3` elsewhere.
 
-use gpui::{Action, FocusHandle, KeyBinding, Keystroke, Window};
+use gpui::{Action, Context, FocusHandle, KeyBinding, Keystroke, Window};
 
 /// Text of one keystroke for the platform the IDE runs on.
 pub fn keystroke_text(keystroke: &Keystroke) -> String {
@@ -109,6 +109,31 @@ pub fn shortcut_in(action: &dyn Action, focus: &FocusHandle, window: &Window) ->
     window
         .highest_precedence_binding_for_action_in(action, focus)
         .map(|b| binding_text(&b))
+}
+
+/// [`shortcut_in`] for a view that draws the shortcut while it renders.
+/// GPUI looks bindings up in the frame drawn last, which does not hold
+/// the focus handle of a view drawn for the first time (a tool window
+/// just shown): without a binding, the view is drawn again once this
+/// frame is done if the binding is found then.
+pub fn shortcut_in_view<V: 'static>(
+    action: &dyn Action,
+    focus: &FocusHandle,
+    window: &Window,
+    cx: &mut Context<V>,
+) -> Option<String> {
+    let shortcut = shortcut_in(action, focus, window);
+    if shortcut.is_none() {
+        let action = action.boxed_clone();
+        let focus = focus.clone();
+        let view = cx.entity_id();
+        window.defer(cx, move |window, cx| {
+            if shortcut_in(action.as_ref(), &focus, window).is_some() {
+                cx.notify(view);
+            }
+        });
+    }
+    shortcut
 }
 
 #[cfg(test)]

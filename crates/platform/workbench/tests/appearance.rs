@@ -435,13 +435,17 @@ fn an_imported_theme_is_listed_under_custom_and_selected(cx: &mut TestAppContext
     for (id, _) in &custom {
         assert!(h.themes.join(format!("{id}.toml")).is_file(), "{id}");
     }
-    // The report: a balloon that names what could not be mapped.
+    // The report: a short balloon that says what came in (#201); the keys
+    // that could not be mapped go to the log.
     let balloons = h.balloons();
     let (kind, title, content) = balloons.first().expect("a balloon").clone();
     assert_eq!(kind, "information", "{balloons:?}");
-    assert!(title.contains("imported"), "{balloons:?}");
-    assert!(content.contains(&name), "{balloons:?}");
-    assert!(content.contains("mapped"), "{balloons:?}");
+    assert_eq!(title, "Themes imported", "{balloons:?}");
+    assert_eq!(
+        content,
+        format!("Imported 4 themes. {name} is now the theme."),
+        "{balloons:?}"
+    );
     // The Theme popup lists it after a line, before Import Theme….
     h.invoke("settings.switch-theme", json!(null));
     let popup = h.popup();
@@ -469,6 +473,16 @@ fn an_imported_theme_is_listed_under_custom_and_selected(cx: &mut TestAppContext
     assert_eq!(a["theme"], json!(id), "the theme stays");
     let schemes = a["schemes"].as_array().unwrap();
     assert_eq!(schemes.len(), 1, "{a}");
+    let balloons = h.balloons();
+    assert_eq!(balloons[0].1, "Color scheme added", "{balloons:?}");
+    assert_eq!(
+        balloons[0].2,
+        format!(
+            "{} is offered as an editor color scheme.",
+            schemes[0]["name"].as_str().unwrap()
+        ),
+        "{balloons:?}"
+    );
     assert_eq!(schemes[0]["scheme_only"], json!(true));
     assert!(
         !a["themes"]

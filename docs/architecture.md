@@ -267,13 +267,16 @@ once, before or with its first user:
 - **Balloon notifications.** `ui::notification` holds the balloon (kind
   information, warning or error, title, content, action links, close
   button, timed or sticky) and the stack (three shown, "N more" above,
-  hover pauses the timer); `workbench::notifications` hosts it at the
-  bottom right of the main window. `Workbench::notify` and the
-  `workbench.notify` command show a balloon; `workbench.state` lists the
-  open ones. Users: the run configuration import report now; commit, push,
+  hover pauses the timer, long content wrapped by GPUI's line wrapper and
+  expanded by a chevron); `workbench::notifications` hosts it at the
+  bottom right of the main window and keeps the timeline that the
+  Notifications tool window of the right stripe lists until "Clear all".
+  `Workbench::notify` and the `workbench.notify` command show a balloon;
+  `workbench.state` lists the open ones and the timeline. Users: the run
+  configuration import report and the theme import now; commit, push,
   update and checkout results, debugger connection errors and terminal
   environment changes as those areas land. `Workbench::show_notice` stays
-  for status bar texts. The Notifications tool window comes later.
+  for status bar texts.
 - **Editor decorations.** The editor has diagnostic marks that move with
   edits, a link highlight and a problem cell after the end of a line, and
   keeps room right of the line numbers, but paints nothing there. Needed:

@@ -12,6 +12,12 @@
 //! At most three are shown, the newest on top; a fourth collapses the
 //! oldest into a "1 more notification" strip below the stack.
 //!
+//! Content that does not fit on a line of 320 px wraps at 240 px (the
+//! `width:240px` style of `NotificationsUtil.buildHtml`); a balloon shows
+//! four lines less one for a title and one for action links, and a
+//! chevron at the right of the last line expands it to the whole text
+//! (ten lines, then it scrolls) and collapses it again.
+//!
 //! [`BalloonStack`] is the model, without a toolkit clock (the caller
 //! passes the time); [`render_stack`] draws it.
 
@@ -19,8 +25,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, BoxShadow, FontWeight, IntoElement, SharedString, Window, div, point,
-    prelude::*, px,
+    AnyElement, App, BoxShadow, FontWeight, IntoElement, LineFragment, LineWrapper, Pixels,
+    SharedString, Window, div, point, prelude::*, px,
 };
 use themes::UiRole;
 
@@ -61,8 +67,6 @@ const ICON_GAP: f32 = 2.0;
 const ICON_COLUMN: f32 = 32.0;
 const ICON_LEFT: f32 = 10.0;
 const ICON: f32 = 16.0;
-/// Width of the text column.
-const TEXT_WIDTH: f32 = WIDTH - INSET_LEFT - ICON_COLUMN - ICON_GAP;
 /// Room kept right of the title for the close button (5 + icon + 9).
 const CLOSE_OFFSET: f32 = 5.0 + ICON + 9.0;
 /// The close button: its icon 9 from the body's top and right edges, a
@@ -73,6 +77,17 @@ const CLOSE_HOVER_GAP: f32 = 2.0;
 const CLOSE_RADIUS: f32 = 4.0;
 /// Gap between action links (`BalloonLayoutConfiguration.actionGap`).
 const ACTION_GAP: f32 = 16.0;
+/// Content whose widest line is wider than this wraps at [`WRAP_WIDTH`]
+/// (`BalloonLayoutConfiguration.MaxWidth`: the fixed width less 60).
+pub const MAX_CONTENT_WIDTH: f32 = 320.0;
+/// The width long content wraps at (`MaxWidthStyle`).
+pub const WRAP_WIDTH: f32 = 240.0;
+/// Lines an expanded balloon shows before its content scrolls
+/// (`calculateContentHeight(10)`).
+pub const MAX_EXPANDED_LINES: usize = 10;
+/// The expand and collapse chevron's distance from the right edge
+/// (`rightActionsOffset` of the New UI).
+const EXPAND_RIGHT: f32 = 9.0;
 /// Line height of the label font in balloons.
 const LINE: f32 = 16.0;
 /// The strip: 10 above its text and 4 below; its top 7 px lie under the
@@ -192,9 +207,43 @@ pub struct Balloon {
     pub hovered_action: Option<usize>,
     /// Notifications collapsed into the strip below this balloon.
     pub collapsed: usize,
+    /// The whole content is shown (the chevron was clicked).
+    pub expanded: bool,
+    /// The content's lines, wrapped by [`BalloonStack::wrap`] for the font
+    /// they were wrapped with.
+    lines: Vec<SharedString>,
+    /// The width of the widest of them (the advances of its characters).
+    content_width: f32,
+    wrapped_for: Option<(SharedString, Pixels)>,
 }
 
 impl Balloon {
+    /// The content's lines (wrapped by [`BalloonStack::wrap`]).
+    pub fn lines(&self) -> &[SharedString] {
+        &self.lines
+    }
+
+    /// Lines of content shown while collapsed: four less a title and an
+    /// action row (`NotificationsManagerImpl.createBalloon`).
+    pub fn line_limit(&self) -> usize {
+        let n = &self.notification;
+        4 - usize::from(!n.title.is_empty()) - usize::from(!n.actions.is_empty())
+    }
+
+    /// The content has more lines than the balloon shows collapsed.
+    pub fn is_expandable(&self) -> bool {
+        self.lines.len() > self.line_limit()
+    }
+
+    /// The lines shown now.
+    pub fn shown_lines(&self) -> &[SharedString] {
+        if self.is_expandable() && !self.expanded {
+            &self.lines[..self.line_limit()]
+        } else {
+            &self.lines
+        }
+    }
+
     fn left(&self, now: Instant) -> Duration {
         match self.running_since {
             Some(since) => self
@@ -250,8 +299,50 @@ impl BalloonStack {
             hovered: false,
             hovered_action: None,
             collapsed: 0,
+            expanded: false,
+            lines: Vec::new(),
+            content_width: 0.0,
+            wrapped_for: None,
         });
         self.next_id
+    }
+
+    /// Wraps the content of the balloons for the UI font (before they are
+    /// drawn; again when the font changed).
+    pub fn wrap(&mut self, cx: &App) {
+        let theme = cx.theme();
+        let key = (theme.ui_family(), theme.ui_size());
+        if self
+            .balloons
+            .iter()
+            .all(|b| b.wrapped_for.as_ref() == Some(&key))
+        {
+            return;
+        }
+        let font = gpui::font(key.0.clone());
+        let text_system = cx.text_system();
+        let font_id = text_system.resolve_font(&font);
+        let width = |line: &str| -> f32 {
+            line.chars()
+                .filter_map(|c| text_system.advance(font_id, key.1, c).ok())
+                .map(|a| f32::from(a.width))
+                .sum()
+        };
+        let mut wrapper = text_system.line_wrapper(font, key.1);
+        for b in &mut self.balloons {
+            if b.wrapped_for.as_ref() != Some(&key) {
+                b.lines = content_lines(&b.notification.content, &mut wrapper);
+                b.content_width = b.lines.iter().map(|l| width(l)).fold(0.0, f32::max);
+                b.wrapped_for = Some(key.clone());
+            }
+        }
+    }
+
+    /// Expands a balloon to its whole content or collapses it again.
+    pub fn toggle_expanded(&mut self, id: u64) {
+        if let Some(b) = self.balloons.iter_mut().find(|b| b.id == id) {
+            b.expanded = !b.expanded;
+        }
     }
 
     /// Closes a balloon (its strip goes with it). Returns whether it was
@@ -350,6 +441,11 @@ impl BalloonStack {
                     "actions": b.notification.actions.iter()
                         .map(|a| a.text.as_ref()).collect::<Vec<_>>(),
                     "sticky": b.notification.sticky,
+                    "lines": b.lines.iter().map(|l| l.as_ref()).collect::<Vec<_>>(),
+                    "content_width": b.content_width,
+                    "shown_lines": b.shown_lines().len(),
+                    "expandable": b.is_expandable(),
+                    "expanded": b.expanded,
                     "hovered": b.hovered,
                     "running": b.running_since.is_some(),
                     "remaining_ms": b.left(now).as_millis() as u64,
@@ -381,6 +477,10 @@ pub enum BalloonEvent {
         id: u64,
         index: Option<usize>,
     },
+    /// The chevron, or the collapsed content: expands or collapses.
+    Expand {
+        id: u64,
+    },
     /// The "N more notifications" strip.
     ShowMore,
 }
@@ -406,26 +506,38 @@ pub fn close_tooltip() -> &'static str {
     }
 }
 
-/// The content takes more than one line of the text column (the
-/// reference's three-line layout).
-fn content_wraps(text: &SharedString, window: &Window, cx: &App) -> bool {
+/// The lines of a balloon's content: its lines as they are while the
+/// widest fits in [`MAX_CONTENT_WIDTH`], else wrapped at [`WRAP_WIDTH`]
+/// (`NotificationsManagerImpl.createBalloon`: the content gets the
+/// `width:240px` style when its preferred width is over `MaxWidth`).
+pub fn content_lines(text: &str, wrapper: &mut LineWrapper) -> Vec<SharedString> {
     if text.is_empty() {
-        return false;
+        return Vec::new();
     }
-    let theme = cx.theme();
-    let font = gpui::font(theme.ui_family());
-    let run = gpui::TextRun {
-        len: text.len(),
-        font,
-        color: gpui::black(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
+    let wraps_at = |wrapper: &mut LineWrapper, line: &str, width: f32| -> Vec<usize> {
+        let fragments = [LineFragment::text(line)];
+        wrapper
+            .wrap_line(&fragments, px(width))
+            .map(|b| b.ix)
+            .collect()
     };
-    let line = window
-        .text_system()
-        .shape_line(text.clone(), theme.ui_size(), &[run], None);
-    line.width > px(TEXT_WIDTH)
+    let wide = text
+        .lines()
+        .any(|line| !wraps_at(wrapper, line, MAX_CONTENT_WIDTH).is_empty());
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let breaks = if wide {
+            wraps_at(wrapper, line, WRAP_WIDTH)
+        } else {
+            Vec::new()
+        };
+        let mut start = 0;
+        for end in breaks.into_iter().chain([line.len()]) {
+            out.push(SharedString::from(line[start..end].trim_end().to_owned()));
+            start = end;
+        }
+    }
+    out
 }
 
 /// Vertical spaces of a balloon (`BalloonLayoutConfiguration`): top,
@@ -457,22 +569,24 @@ const THREE_LINES: Spaces = Spaces {
     icon_top: 7.0,
 };
 
-fn render_balloon(b: &Balloon, on: &BalloonHandler, window: &Window, cx: &App) -> AnyElement {
+fn render_balloon(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let n = &b.notification;
     let id = b.id;
     let has_title = !n.title.is_empty();
     let has_content = !n.content.is_empty();
     let has_actions = !n.actions.is_empty();
-    let spaces = if (has_title && has_content && has_actions)
-        || (has_content && (has_title || has_actions) && content_wraps(&n.content, window, cx))
-    {
-        &THREE_LINES
-    } else {
-        &TWO_LINES
-    };
-    // Lines of content shown (4 less a title and an action row).
-    let lines = 4 - usize::from(has_title) - usize::from(has_actions);
+    // `BalloonLayoutConfiguration.create`: three lines with a title,
+    // content and actions, or with content of more than one line (two
+    // without a title and actions).
+    let one_line = if has_title || has_actions { 1 } else { 2 };
+    let spaces =
+        if (has_title && has_content && has_actions) || (has_content && b.lines.len() > one_line) {
+            &THREE_LINES
+        } else {
+            &TWO_LINES
+        };
+    let expandable = b.is_expandable();
     let text = theme.color(UiRole::NotificationText);
     let link = theme.color(UiRole::NotificationLink);
 
@@ -500,13 +614,7 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, window: &Window, cx: &App) -
         if has_title {
             column = column.child(div().h(px(spaces.title_content)));
         }
-        column = column.child(
-            div()
-                .debug_selector(move || format!("balloon-content-{id}"))
-                .line_clamp(lines)
-                .text_ellipsis()
-                .child(n.content.clone()),
-        );
+        column = column.child(render_content(b, on));
     }
     if has_actions {
         let space = if has_content {
@@ -542,7 +650,13 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, window: &Window, cx: &App) -
                     .pointing_hand(),
             );
         }
+        if expandable && b.expanded {
+            row = row.child(div().flex_1()).child(chevron(b, on));
+        }
         column = column.child(row);
+    } else if expandable && b.expanded {
+        // The chevron takes the action row's place (`CenteredLayoutWithActions`).
+        column = column.child(div().flex().flex_row().justify_end().child(chevron(b, on)));
     }
 
     let close = {
@@ -608,6 +722,81 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, window: &Window, cx: &App) -
         .into_any_element()
 }
 
+/// The content's lines: collapsed, the first [`Balloon::line_limit`]
+/// with the expand chevron at the right of the last one, and a click
+/// anywhere on them expands (`HoverAdapter`); expanded, all of them, up to
+/// [`MAX_EXPANDED_LINES`] before they scroll.
+fn render_content(b: &Balloon, on: &BalloonHandler) -> AnyElement {
+    let id = b.id;
+    let shown = b.shown_lines();
+    let lines = shown.iter().enumerate().map(|(i, line)| {
+        div()
+            .debug_selector(move || format!("balloon-line-{id}-{i}"))
+            .h(px(LINE))
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .child(line.clone())
+            .into_any_element()
+    });
+    let content = div()
+        .id(("balloon-content", id as usize))
+        .debug_selector(move || format!("balloon-content-{id}"))
+        .relative()
+        .flex()
+        .flex_col()
+        .children(lines);
+    if !b.is_expandable() {
+        return content.into_any_element();
+    }
+    if b.expanded {
+        if shown.len() <= MAX_EXPANDED_LINES {
+            return content.into_any_element();
+        }
+        return content
+            .h(px(LINE * MAX_EXPANDED_LINES as f32))
+            .overflow_y_scroll()
+            .into_any_element();
+    }
+    let last = (shown.len().max(1) - 1) as f32;
+    let on = on.clone();
+    content
+        .child(
+            div()
+                .absolute()
+                .top(px(LINE * last))
+                .right(px(EXPAND_RIGHT))
+                .child(chevron(b, &on)),
+        )
+        .on_click(move |_, window, cx| on(&BalloonEvent::Expand { id }, window, cx))
+        .pointing_hand()
+        .into_any_element()
+}
+
+/// The expand chevron (down) or, expanded, the collapse one (up)
+/// (`AllIcons.Ide.Notification.Expand` and `Collapse`, New UI
+/// `chevronDown` and `chevronUp`).
+fn chevron(b: &Balloon, on: &BalloonHandler) -> AnyElement {
+    let id = b.id;
+    let icon = if b.expanded {
+        IconName::CHEVRON_UP
+    } else {
+        IconName::CHEVRON_DOWN
+    };
+    let on = on.clone();
+    div()
+        .id(("balloon-expand", id as usize))
+        .debug_selector(move || format!("balloon-expand-{id}"))
+        .flex_none()
+        .size(px(ICON))
+        .child(Icon::new(icon).size(px(ICON)))
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            on(&BalloonEvent::Expand { id }, window, cx)
+        })
+        .pointing_hand()
+        .into_any_element()
+}
+
 fn shadow() -> Vec<BoxShadow> {
     vec![BoxShadow {
         color: gpui::hsla(0.0, 0.0, 0.0, SHADOW_ALPHA),
@@ -648,13 +837,9 @@ fn render_more(count: usize, on: &BalloonHandler, cx: &App) -> AnyElement {
 
 /// The balloons stacked upwards from the bottom right: the caller places
 /// the returned element (absolute) with [`MARGIN`] to the right stripe
-/// and the status bar.
-pub fn render_stack(
-    stack: &BalloonStack,
-    on: BalloonHandler,
-    window: &Window,
-    cx: &App,
-) -> Option<AnyElement> {
+/// and the status bar. The balloons' content is wrapped first
+/// ([`BalloonStack::wrap`]).
+pub fn render_stack(stack: &BalloonStack, on: BalloonHandler, cx: &App) -> Option<AnyElement> {
     if stack.is_empty() {
         return None;
     }
@@ -671,7 +856,7 @@ pub fn render_stack(
         column = column.child(render_more(collapsed, &on, cx));
     }
     for (i, b) in stack.balloons().iter().enumerate() {
-        let balloon = render_balloon(b, &on, window, cx);
+        let balloon = render_balloon(b, &on, cx);
         let space = if i == 0 { 0.0 } else { GAP };
         column = column.child(div().mb(px(space)).child(balloon));
     }

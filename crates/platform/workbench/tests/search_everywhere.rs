@@ -637,7 +637,7 @@ fn recent_files(cx: &mut TestAppContext) {
         // The current file first, the one before it selected.
         assert_eq!(s["files"], json!(["app.py", "pkg/util.py", "notes.txt"]));
         assert_eq!(s["selected"], json!(1));
-        assert_eq!(s["tool_windows"], json!(["Project"]));
+        assert_eq!(s["tool_windows"], json!(["Project", "Notifications"]));
         // Typing filters the lists.
         h.press("n o");
         let s = h.invoke("recent-files.state", json!(null));

@@ -1,5 +1,7 @@
 //! Notification balloons: the stack at the bottom right, the time they
-//! stay, hover, the close button and action links (`workbench.notify`).
+//! stay, hover, the close button, action links, long content
+//! (`workbench.notify`), and the Notifications tool window that lists
+//! them.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -8,6 +10,7 @@ use gpui::{
     AppContext as _, Modifiers, TestAppContext, VisualTestContext, WindowHandle, point, px,
 };
 use serde_json::{Value, json};
+use ui::theme::ThemeExt as _;
 use workbench::{Product, Workbench};
 
 fn open(cx: &mut TestAppContext) -> WindowHandle<Workbench> {
@@ -145,6 +148,14 @@ fn balloons_stack_upwards_and_older_ones_collapse(cx: &mut TestAppContext) {
         Modifiers::none(),
     );
     assert!(titles(cx, window).is_empty());
+    // And the Notifications tool window opens with all five.
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(
+        state["tool_windows"]["notifications"]["visible"],
+        json!(true)
+    );
+    let timeline = state["notifications"]["timeline"].as_array().unwrap().len();
+    assert_eq!(timeline, 5);
 }
 
 #[gpui::test]
@@ -286,4 +297,149 @@ fn the_command_takes_kinds_and_rejects_unknown_fields(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert!(err.is_err());
+}
+
+fn tool_window_visible(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> bool {
+    invoke(cx, window, "workbench.state", json!(null))["tool_windows"]["notifications"]["visible"]
+        == json!(true)
+}
+
+fn timeline(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Vec<Value> {
+    balloons(cx, window)["timeline"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The bell of the right stripe opens the Notifications tool window
+/// (#201): the empty text, then the notifications, the newest first,
+/// until "Clear all"; a second click hides it.
+#[gpui::test]
+fn the_bell_opens_the_notifications_tool_window(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let bell = bounds(cx, window, "stripe-notifications").unwrap();
+    click(cx, window, bell.center(), Modifiers::none());
+    assert!(tool_window_visible(cx, window));
+    let tool_window = bounds(cx, window, "notifications-tool-window").unwrap();
+    let stripe = bounds(cx, window, "right-stripe").unwrap();
+    assert!(tool_window.right() <= stripe.left());
+    let empty = bounds(cx, window, "notifications-empty").unwrap();
+    assert!(tool_window.contains(&empty.center()));
+
+    let first = notify(
+        cx,
+        window,
+        json!({ "title": "3 files committed", "content": "test commit",
+                "actions": [{ "text": "Edit Commit Message", "command": "workbench.state" }] }),
+    );
+    let second = notify(
+        cx,
+        window,
+        json!({ "kind": "warning", "title": "Low memory" }),
+    );
+    let entries = timeline(cx, window);
+    let listed: Vec<&str> = entries
+        .iter()
+        .map(|e| e["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, ["Low memory", "3 files committed"]);
+    assert_eq!(entries[1]["actions"], json!(["Edit Commit Message"]));
+    assert!(!entries[0]["time"].as_str().unwrap().is_empty());
+    let newer = bounds(cx, window, &format!("notification-entry-{second}")).unwrap();
+    let older = bounds(cx, window, &format!("notification-entry-{first}")).unwrap();
+    assert!(newer.bottom() <= older.top(), "the newest on top");
+    assert!(tool_window.contains(&older.center()));
+
+    // "Clear all" empties the timeline and closes the balloons.
+    let clear = bounds(cx, window, "notifications-clear-all").unwrap();
+    click(cx, window, clear.center(), Modifiers::none());
+    assert!(timeline(cx, window).is_empty());
+    assert!(titles(cx, window).is_empty());
+    assert!(tool_window_visible(cx, window));
+
+    // The bell again: hidden.
+    click(cx, window, bell.center(), Modifiers::none());
+    assert!(!tool_window_visible(cx, window));
+}
+
+/// Long content wraps inside the balloon (#201): at 240 px once it does
+/// not fit on a line of 320, three lines under a title, the chevron at
+/// the right of the last one; a click on it (or on the text) shows the
+/// whole text, the chevron below collapses it again.
+#[gpui::test]
+fn long_content_wraps_inside_the_balloon_and_expands(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let content = "Imported 4 themes and 1 editor color scheme. Dusk is now the theme. \
+        The keys that could not be mapped are listed in the log of the IDE, \
+        group by group, with their counts.";
+    let id = notify(
+        cx,
+        window,
+        json!({ "title": "Themes imported", "content": content }),
+    );
+    let chevron = bounds(cx, window, &format!("balloon-expand-{id}"))
+        .expect("the expand chevron of long content");
+    let state = &balloons(cx, window)["balloons"][0];
+    let lines: Vec<String> = state["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap().to_owned())
+        .collect();
+    assert!(lines.len() > 3, "{lines:?}");
+    assert_eq!(lines.join(" "), content);
+    assert_eq!(state["shown_lines"], json!(3));
+    assert_eq!(state["expandable"], json!(true));
+    let width = state["content_width"].as_f64().unwrap();
+    assert!(width > 200.0 && width <= 240.0, "{width}");
+
+    let balloon = bounds(cx, window, &format!("balloon-{id}")).unwrap();
+    let text = bounds(cx, window, &format!("balloon-content-{id}")).unwrap();
+    assert_eq!(text.size.height, px(48.0), "three lines of 16");
+    assert!(text.right() <= balloon.right());
+    // Every line fits in 240 px (the test font: 0.6 em per character).
+    let ui_size = cx.update(|cx| cx.theme().ui_size());
+    for line in &lines {
+        let width = ui_size * 0.6 * line.chars().count() as f32;
+        assert!(width <= px(240.0), "{line:?} is {width:?} wide");
+    }
+    let third = bounds(cx, window, &format!("balloon-line-{id}-2")).unwrap();
+    assert_eq!(chevron.top(), third.top());
+    assert!(chevron.right() <= balloon.right() - px(9.0));
+    assert!(chevron.left() > text.left() + px(240.0));
+
+    click(cx, window, chevron.center(), Modifiers::none());
+    let state = &balloons(cx, window)["balloons"][0];
+    assert_eq!(state["expanded"], json!(true));
+    assert_eq!(state["shown_lines"], json!(lines.len()));
+    let text = bounds(cx, window, &format!("balloon-content-{id}")).unwrap();
+    assert_eq!(text.size.height, px(16.0) * lines.len() as f32);
+    let collapse = bounds(cx, window, &format!("balloon-expand-{id}")).unwrap();
+    assert!(collapse.top() >= text.bottom(), "below the text");
+    click(cx, window, collapse.center(), Modifiers::none());
+    assert_eq!(
+        balloons(cx, window)["balloons"][0]["expanded"],
+        json!(false)
+    );
+
+    // A click on the collapsed text expands it too.
+    let text = bounds(cx, window, &format!("balloon-content-{id}")).unwrap();
+    click(
+        cx,
+        window,
+        point(text.left() + px(20.0), text.center().y),
+        Modifiers::none(),
+    );
+    assert_eq!(balloons(cx, window)["balloons"][0]["expanded"], json!(true));
+
+    // Content that fits on a line of 320 px stays on one line.
+    let short = notify(
+        cx,
+        window,
+        json!({ "title": "Saved", "content": "All files were saved." }),
+    );
+    let state = &balloons(cx, window)["balloons"][0];
+    assert_eq!(state["id"], json!(short));
+    assert_eq!(state["lines"], json!(["All files were saved."]));
+    assert_eq!(state["expandable"], json!(false));
 }
