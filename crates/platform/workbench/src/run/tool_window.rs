@@ -8,9 +8,9 @@ use std::sync::atomic::Ordering;
 use console::{ContentKind, LinkTarget};
 use futures::StreamExt as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, HitboxBehavior, IntoElement, MouseButton, MouseDownEvent,
-    Pixels, Point, Render, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render,
+    SharedString, Subscription, Task, Window, div, prelude::*, px,
 };
 use process::{ExitStatus, ProcessEvent, ProcessHandle};
 use themes::{Metric, UiRole};
@@ -191,8 +191,6 @@ pub struct RunToolWindow {
     next_id: u64,
     /// The main window (a rerun after the process ended starts there).
     window_handle: gpui::AnyWindowHandle,
-    /// The pointer is over the empty state's link: its text is underlined.
-    empty_link: ui::form::Hover,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -221,7 +219,6 @@ impl RunToolWindow {
             edit_dialog: None,
             next_id: 0,
             window_handle: window.window_handle(),
-            empty_link: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -1103,22 +1100,8 @@ impl RunToolWindow {
         // around the link do not break.
         let launch = format!("{EMPTY_LAUNCH}\u{00a0}");
         let tail = empty_shortcut(shortcut.as_deref()).replacen(' ', "\u{00a0}", 1);
-        let link = ui::form::link("run-empty-link", EMPTY_LINK, &self.empty_link, cx)
+        let link = ui::link::link("run-empty-link", EMPTY_LINK, cx)
             .debug_selector(|| "run-empty-link".into())
-            .relative()
-            // The hand over the link (see `ui::pointer`).
-            .child(
-                canvas(
-                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-                    |_, hitbox, window, _| {
-                        ui::pointer::request(CursorStyle::PointingHand, &hitbox, window)
-                    },
-                )
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full(),
-            )
             .on_click(|_, window, cx| {
                 window.dispatch_action(
                     // `EditConfigurationsDialog(project)` has no Run button.
@@ -1172,7 +1155,7 @@ impl RunToolWindow {
             "lines": lines,
             "link": EMPTY_LINK,
             "shortcut": shortcut,
-            "link_hovered": self.empty_link.get(),
+            "link_hovered": ui::pointer::link_hovered(&"run-empty-link".into()),
         })
     }
 }
