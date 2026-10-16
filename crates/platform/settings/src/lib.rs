@@ -14,11 +14,13 @@
 //! The crate knows no UI toolkit; `settings-ui` keeps the store of the
 //! running application, its change events and the Settings window.
 
+mod appearance;
 mod files;
 mod store;
 
 use std::path::PathBuf;
 
+pub use appearance::{AppearanceSettings, themes_dir};
 pub use files::{SaveSettings, SyncSettings};
 pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
 

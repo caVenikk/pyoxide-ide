@@ -29,7 +29,7 @@ ui::ui_commands! {
         "Moves the keyboard focus to the active editor.";
     /// Switch the theme.
     SetTheme { id: String } => "workbench.set-theme", "Switch Theme",
-        "Switches to a built-in theme by id.", r#"{"id": "islands-light"}"#;
+        "Switches to a theme by id (built-in or imported) and stores it, as `settings.switch-theme` does.", r#"{"id": "islands-light"}"#;
     /// Describe the window.
     State => "workbench.state", "Workbench State",
         "Returns the state of the main window as JSON (project, tree, tabs, active editor).";

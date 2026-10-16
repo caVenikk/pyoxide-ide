@@ -386,6 +386,7 @@ impl Theme {
                 author: self.author.clone(),
                 description: self.description.clone(),
                 extends: None,
+                scheme_only: false,
             },
             palette: BTreeMap::new(),
             ui: self
@@ -428,6 +429,11 @@ pub struct ThemeHeader {
     /// Id of the theme whose values are used for everything this file omits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
+    /// The file holds an editor colour scheme without a UI theme (an
+    /// imported `.icls`): the IDE offers it as an editor colour scheme
+    /// only, and its UI colours are those of its base theme.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub scheme_only: bool,
 }
 
 /// A theme as written in a TOML file: sparse, with optional `extends` and

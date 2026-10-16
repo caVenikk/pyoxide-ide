@@ -31,6 +31,7 @@ pub use archive::ArchiveSummary;
 pub use convert::Imported;
 pub use known::{KNOWN_SCHEMES, KNOWN_THEMES, KnownScheme, KnownTheme};
 pub use library::{ImportError, Library, Skipped, import_path};
+pub(crate) use mapping::is_scheme_role;
 pub use report::{
     Approximation, Defaulted, ImportReport, KeySource, Level, MappedKey, SourceKind, Summary,
     UnmappedKey, Warning, WarningKind,

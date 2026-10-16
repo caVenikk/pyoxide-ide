@@ -284,6 +284,16 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
     }
 }
 
+/// The role is coloured by an editor colour scheme: one of its sources is
+/// a scheme colour or attribute (the editor, version control markers,
+/// diagnostics, the console). An editor scheme chosen apart from the theme
+/// replaces these roles and every text role.
+pub(crate) fn is_scheme_role(role: UiRole) -> bool {
+    ui_sources(role)
+        .iter()
+        .any(|s| matches!(s, Color(_) | Fg(_) | Bg(_) | Effect(_) | Stripe(_)))
+}
+
 /// Scheme attribute keys that style a [`TextRole`], in order of preference.
 /// A key that is not the first is reported as an approximation.
 pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {

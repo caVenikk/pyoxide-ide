@@ -9,6 +9,8 @@
 [[context]]
 [context.bindings]
 "ctrl-alt-s" = "settings.open"
+# Quick Switch Scheme: the Switch popup (Theme).
+"ctrl-`" = "settings.quick-switch"
 "alt-1" = "workbench.toggle-project"
 "alt-4" = "workbench.toggle-run"
 "ctrl-s" = "workbench.save-all"

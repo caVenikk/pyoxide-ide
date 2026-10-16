@@ -617,6 +617,7 @@ impl Workbench {
             "notifications": self.notifications.read(cx).state_json(cx),
             "theme": cx.theme().id(),
             "vcs": self.vcs_state_json(cx),
+            "switch_popup": self.switch_popup_json(cx),
         })
     }
 
@@ -1479,12 +1480,9 @@ impl Workbench {
     }
 
     fn set_theme(&mut self, action: &SetTheme, _: &mut Window, cx: &mut Context<Self>) {
-        match themes::Registry::with_builtin().resolve(&action.id) {
-            Ok(theme) => ui::theme::set(cx, theme),
-            Err(e) => {
-                self.message = Some(e.to_string().into());
-                cx.notify();
-            }
+        if let Err(e) = settings_ui::theme_switch::switch(&action.id, cx) {
+            self.message = Some(e.into());
+            cx.notify();
         }
     }
 
@@ -2220,6 +2218,8 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::set_theme))
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::show_gear_menu))
+            .on_action(cx.listener(Self::switch_theme))
+            .on_action(cx.listener(Self::quick_switch))
             .on_action(cx.listener(Self::open_folder_action))
             .on_action(cx.listener(Self::open_file_action))
             .on_action(cx.listener(Self::save))
@@ -2362,6 +2362,7 @@ impl Render for Workbench {
             .child(self.notifications.clone())
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
+            .children(self.render_switch_popup(window))
             .children(ui::dialog_window::blocker(window, cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))
             .children(self.panel.read(cx).overlays(window))

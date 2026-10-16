@@ -14,7 +14,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | run-debug | 7% `█░░░░░░░░░` | 1 | 1 | 24 |
 | terminal | 6% `█░░░░░░░░░` | 0 | 2 | 19 |
 | vcs | 5% `█░░░░░░░░░` | 1 | 0 | 24 |
-| settings | 19% `██░░░░░░░░` | 2 | 2 | 14 |
+| settings | 25% `██░░░░░░░░` | 3 | 2 | 13 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -219,8 +219,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 |---|---|---|---|
 | ✅ | Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S) | must | Community; ADR 0017 (#92) |
 | 🟡 | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); reads the reference's XML data files once (#92, #40) |
-| 🟡 | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; live switch (workbench.set-theme) and the themes importer exist; no page yet (#92) |
-| ⬜ | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community (#92) |
+| ✅ | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet |
+| 🟡 | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153) |
 | ✅ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
 | ⬜ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40) |
 | ⬜ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |

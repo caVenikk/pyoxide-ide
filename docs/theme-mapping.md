@@ -46,6 +46,24 @@ accent = "$rust"
 keyword = { fg = "$rust", bold = true }
 ```
 
+## Themes in the IDE
+
+The Theme list of Settings > Appearance & Behavior > Appearance, the Theme
+popup (gear menu, Quick Switch Scheme) and `settings.switch-theme` offer
+the built-in themes and the imported ones, grouped as the reference's:
+the Islands themes, the other built-in themes, then "Custom". "Import
+Theme…" takes a `.theme.json`, an `.icls` or scheme `.xml`, a theme plugin
+`.jar` / `.zip` or a folder, and writes every theme found as
+`themes/<id>.toml` in the configuration folder (ADR 0017); an id of a
+built-in theme gets `-imported` appended. A colour scheme imported alone is
+written with `scheme-only = true` in `[theme]`: it is offered as an editor
+colour scheme only. The theme in use is `[appearance] theme` of
+`settings.toml`. An editor colour scheme chosen apart from the theme
+(`[appearance] editor-scheme`) replaces every text role and the UI roles
+that have a colour scheme key among their sources (the editor, version
+control markers, diagnostics, the console); choosing another theme goes back
+to that theme's own scheme.
+
 ## Built-in themes
 
 | Id | Name | Colours |

@@ -11,7 +11,8 @@
 //! to open from any corner. The menu takes the focus and gives it back to
 //! the element that had it when it closes; the chosen item's action is then
 //! dispatched there, exactly like a key binding, so menu items are UI
-//! commands. The menu emits [`DismissEvent`] when it closes.
+//! commands. The menu emits [`DismissEvent`] when it closes and
+//! [`HighlightEvent`] when another row is highlighted.
 //!
 //! Keyboard: Up and Down move through the innermost open level, Right and
 //! Enter open a submenu, Left and Escape close it, Escape on the menu
@@ -599,6 +600,14 @@ pub struct PopupOptions {
 /// ([`PopupOptions::own_window`]); the menu closes.
 pub struct ChosenEvent(pub Box<dyn Action>);
 
+/// The highlighted row changed (the keyboard, the pointer, the speed search,
+/// a submenu that opened or closed): the action of the row now highlighted
+/// in the innermost level that has one, `None` when that row runs no action
+/// of its own (a submenu row) or nothing is highlighted. The reference's
+/// list selection listener of a popup; its theme switcher previews the
+/// highlighted theme with it (`QuickChangeLookAndFeel`).
+pub struct HighlightEvent(pub Option<Box<dyn Action>>);
+
 /// An open context menu or list popup.
 pub struct ContextMenu {
     focus: FocusHandle,
@@ -636,11 +645,15 @@ pub struct ContextMenu {
     /// the highlight and the buttons; the submenu stays with its row).
     pinned: Option<usize>,
     pinned_hover: Option<usize>,
+    /// The highlighted row last told with a [`HighlightEvent`]: the rows
+    /// selected down to the innermost one.
+    highlighted: Vec<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<DismissEvent> for ContextMenu {}
 impl EventEmitter<ChosenEvent> for ContextMenu {}
+impl EventEmitter<HighlightEvent> for ContextMenu {}
 
 impl Focusable for ContextMenu {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -712,6 +725,7 @@ impl ContextMenu {
                 _aim_timer: None,
                 pinned: None,
                 pinned_hover: None,
+                highlighted: Vec::new(),
                 _subscriptions: subscriptions,
             };
             if list {
@@ -720,6 +734,7 @@ impl ContextMenu {
                     .filter(|&ix| menu.items.get(ix).is_some_and(MenuItem::selectable))
                     .or_else(|| menu.first_selectable());
             }
+            menu.highlighted = menu.highlight_path();
             menu
         });
         let handle = menu.read(cx).focus.clone();
@@ -841,6 +856,7 @@ impl ContextMenu {
         self.selected[0] = best
             .filter(|&ix| self.items[ix].selectable())
             .or_else(|| self.first_selectable());
+        self.highlight_changed(cx);
         cx.notify();
     }
 
@@ -897,6 +913,7 @@ impl ContextMenu {
             self.selected.push(None);
         }
         self.unpin_closed();
+        self.highlight_changed(cx);
         cx.notify();
     }
 
@@ -914,6 +931,7 @@ impl ContextMenu {
             i = (i + delta).rem_euclid(n);
             if shown[i as usize] && items[i as usize].selectable() {
                 self.selected[level] = Some(i as usize);
+                self.highlight_changed(cx);
                 cx.notify();
                 return;
             }
@@ -1032,12 +1050,14 @@ impl ContextMenu {
         self.pinned_hover = None;
         if open_here {
             self.pinned = None;
+            self.highlight_changed(cx);
             cx.notify();
             return;
         }
         if self.open_selected_submenu(cx) {
             self.pinned = Some(level);
         }
+        self.highlight_changed(cx);
     }
 
     /// Forgets a pin whose submenu is closed.
@@ -1066,6 +1086,7 @@ impl ContextMenu {
         if self.selected.len() > 1 {
             self.selected.pop();
             self.unpin_closed();
+            self.highlight_changed(cx);
             cx.notify();
         }
     }
@@ -1074,6 +1095,7 @@ impl ContextMenu {
         if self.selected.len() > 1 {
             self.selected.pop();
             self.unpin_closed();
+            self.highlight_changed(cx);
             cx.notify();
         } else if !self.filter.is_empty() {
             self.set_filter(String::new(), cx);
@@ -1154,6 +1176,36 @@ impl ContextMenu {
         self.dismiss(window, cx);
         // The focus is back where it was; the action goes there.
         window.dispatch_action(action, cx);
+    }
+
+    /// The rows selected down to the innermost highlighted one.
+    fn highlight_path(&self) -> Vec<usize> {
+        let end = self
+            .selected
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |i| i + 1);
+        self.selected[..end]
+            .iter()
+            .map(|ix| ix.unwrap_or(0))
+            .collect()
+    }
+
+    /// The action of the highlighted row (see [`HighlightEvent`]).
+    pub fn highlighted_action(&self) -> Option<&dyn Action> {
+        let level = self.selected.iter().rposition(Option::is_some)?;
+        let ix = self.selected[level]?;
+        self.level_items(level).get(ix)?.run_action()
+    }
+
+    /// Emits a [`HighlightEvent`] when another row is highlighted.
+    fn highlight_changed(&mut self, cx: &mut Context<Self>) {
+        let path = self.highlight_path();
+        if path != self.highlighted {
+            self.highlighted = path;
+            let action = self.highlighted_action().map(|a| a.boxed_clone());
+            cx.emit(HighlightEvent(action));
+        }
     }
 
     /// The open levels with their rows, for tests and agents.
@@ -2028,6 +2080,41 @@ mod tests {
         assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
         let focused = cx.update(|window, cx| origin.read(cx).focus.is_focused(window));
         assert!(focused, "the focus went back");
+    }
+
+    #[gpui::test]
+    fn moving_the_highlight_tells_the_highlighted_rows_action(cx: &mut TestAppContext) {
+        let (_, menu, cx) = open(cx);
+        let seen: Rc<std::cell::RefCell<Vec<Option<&'static str>>>> = Rc::default();
+        let log = seen.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&menu, move |_, e: &HighlightEvent, _| {
+                log.borrow_mut().push(e.0.as_ref().map(|a| a.name()))
+            })
+            .detach()
+        });
+        fn step(action: impl Action, cx: &mut VisualTestContext) {
+            cx.dispatch_action(action);
+            cx.run_until_parked();
+        }
+        step(SelectNext, cx);
+        step(SelectNext, cx);
+        // Into the submenu and out again: its row, then the submenu row.
+        step(OpenSubmenu, cx);
+        step(CloseSubmenu, cx);
+        let name = |a: &dyn Action| a.name();
+        assert_eq!(
+            *seen.borrow(),
+            [Some(name(&Second)), None, Some(name(&First)), None]
+        );
+        // The same row again tells nothing.
+        step(OpenSubmenu, cx);
+        step(SelectNext, cx);
+        assert_eq!(seen.borrow().len(), 5);
+        assert_eq!(
+            menu.read_with(cx, |m, _| m.highlighted_action().map(|a| a.name())),
+            Some(name(&First))
+        );
     }
 
     #[gpui::test]

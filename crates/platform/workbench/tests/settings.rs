@@ -403,11 +403,13 @@ fn a_search_keeps_the_pages_found_and_selects_the_first(cx: &mut TestAppContext)
     assert_eq!(h.state()["page"], json!("keymap"));
     // A name finds the page, everything under it, and its parents.
     h.invoke("settings.search", json!({"text": "edito"}));
-    // System Settings has "editor tab" among its labels.
+    // Appearance has "Editor color scheme:" and System Settings "editor
+    // tab" among their labels.
     assert_eq!(
         h.rows(),
         [
             "appearance-behavior",
+            "appearance",
             "system",
             "editor",
             "editor.general",
@@ -430,7 +432,7 @@ fn a_search_keeps_the_pages_found_and_selects_the_first(cx: &mut TestAppContext)
     let s = h.state();
     assert_eq!(s["open"], json!(true));
     assert_eq!(s["search"]["text"], json!(""));
-    assert_eq!(h.rows().len(), 7);
+    assert_eq!(h.rows().len(), 8);
     h.invoke("settings.escape", json!(null));
     assert_eq!(h.state()["open"], json!(false));
 }
@@ -618,7 +620,10 @@ fn the_gear_menu_opens_settings(cx: &mut TestAppContext) {
     let menu = h.invoke("run.state", json!(null))["menu"].clone();
     let items = &menu["levels"][0]["items"];
     assert_eq!(items[0]["label"], json!("Settings\u{2026}"), "{menu}");
-    assert_eq!(items.as_array().unwrap().len(), 1, "{menu}");
+    // A line, then Theme… (tests/appearance.rs).
+    assert_eq!(items[1]["separator"], json!(true), "{menu}");
+    assert_eq!(items[2]["label"], json!("Theme\u{2026}"), "{menu}");
+    assert_eq!(items.as_array().unwrap().len(), 3, "{menu}");
     h.invoke("menu.down", json!(null));
     h.invoke("menu.confirm", json!(null));
     assert_eq!(h.state()["open"], json!(true));
