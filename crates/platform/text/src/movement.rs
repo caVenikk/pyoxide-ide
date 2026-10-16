@@ -204,8 +204,9 @@ pub fn smart_line_start(buffer: &Buffer, pos: usize) -> usize {
     }
 }
 
-/// Display width of a char at display column `col`.
-fn char_width(c: char, col: usize, tab_size: usize) -> usize {
+/// Display width of a char at display column `col`: a tab reaches the
+/// next tab stop, wide characters count two, control characters none.
+pub fn char_width(c: char, col: usize, tab_size: usize) -> usize {
     if c == '\t' {
         tab_size - col % tab_size
     } else {
