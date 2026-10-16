@@ -594,6 +594,10 @@ impl FilePreview {
                 .absolute()
                 .top(px(BUTTON_GAP))
                 .right(px(BUTTON_GAP))
+                // Over the editor: it takes the mouse from the editor, whose
+                // text cursor must not show through (ui::pointer); the wheel
+                // still scrolls the editor.
+                .block_mouse_except_scroll()
                 .opacity(opacity)
                 .p(px(2.0))
                 .rounded(px(3.0))

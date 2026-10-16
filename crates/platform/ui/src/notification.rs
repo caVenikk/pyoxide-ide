@@ -19,13 +19,14 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, BoxShadow, CursorStyle, FontWeight, HitboxBehavior, IntoElement, SharedString,
-    Window, canvas, div, point, prelude::*, px,
+    AnyElement, App, BoxShadow, FontWeight, IntoElement, SharedString, Window, div, point,
+    prelude::*, px,
 };
 use themes::UiRole;
 
 use crate::components::Tooltip;
 use crate::icons::{Icon, IconName};
+use crate::pointer::PointerExt as _;
 use crate::theme::ThemeExt;
 
 /// How long an ordinary balloon stays (`NotificationsManagerImpl.notifyByBalloon`).
@@ -538,7 +539,7 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, window: &Window, cx: &App) -
                         click(&BalloonEvent::Action { id, index }, window, cx)
                     })
                     .child(action.text.clone())
-                    .child(pointing_hand()),
+                    .pointing_hand(),
             );
         }
         column = column.child(row);
@@ -616,18 +617,6 @@ fn shadow() -> Vec<BoxShadow> {
     }]
 }
 
-/// The hand pointer over a link.
-fn pointing_hand() -> impl IntoElement {
-    canvas(
-        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
-        |_, hitbox, window, _| crate::pointer::request(CursorStyle::PointingHand, &hitbox, window),
-    )
-    .absolute()
-    .size_full()
-    .top_0()
-    .left_0()
-}
-
 /// The strip below the oldest balloon that counts the collapsed ones.
 fn render_more(count: usize, on: &BalloonHandler, cx: &App) -> AnyElement {
     let theme = cx.theme();
@@ -653,7 +642,7 @@ fn render_more(count: usize, on: &BalloonHandler, cx: &App) -> AnyElement {
         .text_color(theme.color(UiRole::NotificationMoreText))
         .on_click(move |_, window, cx| on(&BalloonEvent::ShowMore, window, cx))
         .child(more_text(count))
-        .child(pointing_hand())
+        .pointing_hand()
         .into_any_element()
 }
 

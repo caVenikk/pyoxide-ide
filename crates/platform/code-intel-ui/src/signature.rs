@@ -500,18 +500,14 @@ impl Render for SignaturePopup {
                 .font_family(theme.ui_family())
                 .text_size(theme.ui_size())
                 .child(
-                    div()
-                        .id("parameter-info-overloads")
+                    ui::link::link("parameter-info-overloads", label, cx)
                         .debug_selector(|| "parameter-info-overloads".into())
-                        .text_color(theme.color(UiRole::TextLink))
-                        .cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                             cx.stop_propagation();
                             if let Some(owner) = owner.upgrade() {
                                 owner.update(cx, |v, cx| v.toggle_overloads(cx));
                             }
-                        })
-                        .child(label),
+                        }),
                 )
                 .children(shortcut.map(|s| div().text_color(muted).child(s)))
         });

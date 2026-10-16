@@ -815,6 +815,11 @@ fn the_modify_options_link_underlines_under_the_pointer(cx: &mut TestAppContext)
     );
     h.draw();
     assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(true));
+    // The link shows the pointing hand (a dialog window applies its own
+    // pointer shapes).
+    let shape = gpui::VisualTestContext::from_window(win, h.cx)
+        .update(|window, _| ui::pointer::resolve(window));
+    assert_eq!(shape, gpui::CursorStyle::PointingHand);
     gpui::VisualTestContext::from_window(win, h.cx).simulate_mouse_move(
         gpui::point(gpui::px(5.0), gpui::px(300.0)),
         None,
@@ -822,6 +827,9 @@ fn the_modify_options_link_underlines_under_the_pointer(cx: &mut TestAppContext)
     );
     h.draw();
     assert_eq!(dialog(&mut h)["modify_options_underlined"], json!(false));
+    let shape = gpui::VisualTestContext::from_window(win, h.cx)
+        .update(|window, _| ui::pointer::resolve(window));
+    assert_eq!(shape, gpui::CursorStyle::Arrow);
 }
 
 /// The empty Run tool window's link: its bounds in the main window.

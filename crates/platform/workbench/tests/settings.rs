@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AppContext as _, Context, IntoElement, Render, TestAppContext, VisualTestContext, Window,
-    WindowHandle, div,
+    AppContext as _, Context, CursorStyle, IntoElement, Modifiers, Render, TestAppContext,
+    VisualTestContext, Window, WindowHandle, div,
 };
 use serde_json::{Value, json};
 use settings_ui::{PageContext, PageSpec, SettingsPage};
@@ -79,6 +79,24 @@ impl H<'_> {
             .iter()
             .map(|r| r["id"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    /// The pointer shape with the mouse over the element of the Settings
+    /// window with this debug selector.
+    fn shape_over(&mut self, selector: &'static str) -> CursorStyle {
+        let settings = self.settings();
+        let at = VisualTestContext::from_window(settings.into(), self.cx)
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"))
+            .center();
+        VisualTestContext::from_window(settings.into(), self.cx).simulate_mouse_move(
+            at,
+            None,
+            Modifiers::none(),
+        );
+        self.draw();
+        VisualTestContext::from_window(settings.into(), self.cx)
+            .update(|window, _| ui::pointer::resolve(window))
     }
 
     /// Lets the search run after typing (it waits for a pause).
@@ -604,4 +622,46 @@ fn the_gear_menu_opens_settings(cx: &mut TestAppContext) {
     h.invoke("menu.down", json!(null));
     h.invoke("menu.confirm", json!(null));
     assert_eq!(h.state()["open"], json!(true));
+}
+
+/// #181: links and the icons in the search field show the pointing hand,
+/// the divider its resize shape, rows and buttons the arrow.
+#[gpui::test]
+fn links_show_the_hand_and_rows_and_buttons_the_arrow(cx: &mut TestAppContext) {
+    let mut h = open_with(cx, test_pages(&Searched::default()));
+    // A group page: links to its children.
+    h.invoke("settings.open", json!({"page": "editor"}));
+    assert_eq!(
+        h.shape_over("settings-link:editor.general"),
+        CursorStyle::PointingHand
+    );
+    // The search field: the history icon, and the clear icon with a text.
+    assert_eq!(
+        h.shape_over("settings-search-history"),
+        CursorStyle::PointingHand
+    );
+    h.invoke("settings.search", json!({"text": "font"}));
+    assert_eq!(
+        h.shape_over("settings-search-clear"),
+        CursorStyle::PointingHand
+    );
+    // The divider between the tree and the page.
+    assert_eq!(
+        h.shape_over("settings-splitter"),
+        CursorStyle::ResizeLeftRight
+    );
+    // Tree rows and the Back button: the arrow.
+    assert_eq!(h.shape_over("settings-row:editor.font"), CursorStyle::Arrow);
+    h.invoke("settings.search", json!({"text": ""}));
+    h.invoke("settings.select", json!({"page": "editor.general"}));
+    assert_eq!(h.shape_over("settings-back"), CursorStyle::Arrow);
+    // "Revert changes" in the banner of a modified page.
+    h.invoke("settings.open", json!({"page": "system"}));
+    h.invoke(
+        "settings.edit",
+        json!({"field": "idle-seconds", "value": 30}),
+    );
+    assert_eq!(h.shape_over("settings-revert"), CursorStyle::PointingHand);
+    // The check boxes of the page keep the arrow.
+    assert_eq!(h.shape_over("system:save-on-idle"), CursorStyle::Arrow);
 }

@@ -214,11 +214,6 @@ pub struct EditDialog {
     hints: bool,
     /// The focus of each option's tag, by option id.
     tag_focus: HashMap<String, FocusHandle>,
-    /// The pointer is over the Modify options link: its text is
-    /// underlined.
-    link_hover: ui::form::Hover,
-    /// The same for the link of the tip shown when nothing is selected.
-    tip_hover: ui::form::Hover,
     /// The footer has the Run button (`EditConfigurationsDialog` has none
     /// without a data context, as when opened from the empty Run tool
     /// window).
@@ -288,8 +283,6 @@ impl EditDialog {
             collapsed: HashSet::new(),
             hints: false,
             tag_focus: HashMap::new(),
-            link_hover: Default::default(),
-            tip_hover: Default::default(),
             run_button: true,
             root,
             _subscriptions: Vec::new(),
@@ -1436,7 +1429,7 @@ impl EditDialog {
             "modified": self.modified,
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
             "prompt": self.prompt.as_ref().map(|(d, _)| d.read(cx).state_json()),
-            "modify_options_underlined": self.link_hover.get(),
+            "modify_options_underlined": ui::pointer::link_hovered(&"run-dialog-modify-options".into()),
             "run_button": self.run_button,
         })
     }
@@ -1709,13 +1702,11 @@ impl EditDialog {
                         .text_color(c.muted)
                         .child("No run configurations added.")
                         .child(
-                            div()
-                                .id("run-dialog-add-new")
-                                .text_color(c.link)
-                                .child("Add new\u{2026}")
-                                .on_click(|_, window, cx| {
+                            ui::link::link("run-dialog-add-new", "Add new\u{2026}", cx).on_click(
+                                |_, window, cx| {
                                     window.dispatch_action(Box::new(DialogAdd { r#type: None }), cx)
-                                }),
+                                },
+                            ),
                         ),
                 )
             });
@@ -1962,10 +1953,9 @@ impl EditDialog {
                         .pt(px(TIP_TOP))
                         .gap(px(TIP_GAP))
                         .child(
-                            ui::form::link(
+                            ui::link::link(
                                 "run-dialog-tip-add",
                                 "Add new run configuration\u{2026}",
-                                &self.tip_hover,
                                 cx,
                             )
                             .debug_selector(|| "run-dialog-tip-add".into())
@@ -2087,19 +2077,14 @@ impl EditDialog {
                 )
                 .child(
                     // A drop-down link (`DropDownLink`).
-                    ui::form::link(
-                        "run-dialog-modify-options",
-                        "Modify options",
-                        &self.link_hover,
-                        cx,
-                    )
-                    .debug_selector(|| "run-dialog-modify-options".into())
-                    .relative()
-                    .child(Icon::new(IconName::CHEVRON_DOWN))
-                    .child(anchor(self.options_anchor.clone()))
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(DialogModifyOptions), cx)
-                    }),
+                    ui::link::link("run-dialog-modify-options", "Modify options", cx)
+                        .debug_selector(|| "run-dialog-modify-options".into())
+                        .relative()
+                        .child(Icon::new(IconName::CHEVRON_DOWN))
+                        .child(anchor(self.options_anchor.clone()))
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(DialogModifyOptions), cx)
+                        }),
                 )
                 .child(div().flex_none().ml(px(12.0)).text_color(c.muted).children(
                     ui::keys::shortcut_in(&DialogModifyOptions, &self.focus, window),
@@ -2281,7 +2266,7 @@ impl EditDialog {
                             div()
                                 .id(("run-dialog-tag-remove", i))
                                 .flex_none()
-                                .cursor_pointer()
+                                // `InplaceButton`: the arrow, as the reference.
                                 .child(Icon::new(IconName::CLOSE_SMALL))
                                 .tooltip(ui::components::Tooltip::text("Remove option", keys))
                                 .on_click(move |_, window, cx| {
@@ -2523,5 +2508,6 @@ impl Render for EditDialog {
             )
             .child(footer)
             .children(prompt)
+            .child(ui::pointer::frame())
     }
 }

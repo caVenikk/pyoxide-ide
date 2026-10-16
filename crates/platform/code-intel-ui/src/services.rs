@@ -18,6 +18,7 @@ use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 use ui::components::Tooltip;
+use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName, ThemeExt};
 
 use crate::view::CodeIntelView;
@@ -685,7 +686,15 @@ impl Render for ServicesPopup {
                         .child(self.filter.clone()),
                 )
             })
-            .child(div().flex().flex_col().pb(px(8.0)).children(rows))
+            // The hand over the list (`ListPopupImpl`).
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .pb(px(8.0))
+                    .children(rows)
+                    .pointing_hand(),
+            )
     }
 }
 

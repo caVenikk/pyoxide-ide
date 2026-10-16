@@ -237,6 +237,38 @@ fn an_action_link_runs_its_command_and_closes_the_balloon(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn the_action_links_show_the_hand_and_the_close_button_the_arrow(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let shape = |cx: &mut TestAppContext, selector: String| {
+        let at = bounds(cx, window, &selector).unwrap().center();
+        move_to(cx, window, at);
+        VisualTestContext::from_window(window.into(), cx)
+            .update(|window, _| ui::pointer::resolve(window))
+    };
+    let id = notify(
+        cx,
+        window,
+        json!({
+            "title": "Theme",
+            "content": "Switch to the light theme?",
+            "actions": [{ "text": "Keep", "command": "workbench.state" }]
+        }),
+    );
+    assert_eq!(
+        shape(cx, format!("balloon-action-{id}-0")),
+        gpui::CursorStyle::PointingHand
+    );
+    assert_eq!(
+        shape(cx, format!("balloon-close-{id}")),
+        gpui::CursorStyle::Arrow
+    );
+    assert_eq!(
+        shape(cx, format!("balloon-content-{id}")),
+        gpui::CursorStyle::Arrow
+    );
+}
+
+#[gpui::test]
 fn the_command_takes_kinds_and_rejects_unknown_fields(cx: &mut TestAppContext) {
     let window = open(cx);
     notify(

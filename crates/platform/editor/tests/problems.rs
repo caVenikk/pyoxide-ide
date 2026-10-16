@@ -34,7 +34,7 @@ fn open<'a>(cx: &'a mut TestAppContext, text: &str) -> (Entity<Editor>, &'a mut 
 fn draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
     cx.update(|window, cx| {
-        ui::pointer::begin_frame();
+        ui::pointer::begin_frame(window);
         window.refresh();
         window.draw(cx).clear();
     });
