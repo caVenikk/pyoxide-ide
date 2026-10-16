@@ -528,9 +528,21 @@ impl H<'_> {
         assert!(focused, "the popup's search field has the focus");
     }
 
+    /// The Settings window, when it is open.
+    fn settings_window(&mut self) -> Option<gpui::WindowHandle<settings_ui::SettingsWindow>> {
+        self.cx.update(|cx| settings_ui::find(cx))
+    }
+
     /// Three tabs (a.py, b.py, c.txt), the first active, the project tool
     /// window shown, the editor focused.
     fn reset(&mut self) {
+        if self.settings_window().is_some() {
+            self.invoke("settings.cancel", json!(null));
+        }
+        self.invoke(
+            "settings.set",
+            json!({"key": "system.files.save-on-deactivation", "value": true}),
+        );
         while !self.state()["tree"]["context_menu"].is_null() {
             self.invoke("menu.cancel", json!(null));
         }
@@ -1628,6 +1640,39 @@ fn check(h: &mut H, b: &Binding) -> bool {
                     assert_eq!(count, expected, "{what}");
                 }
             }
+        }
+        "settings.open" => {
+            h.press(keys);
+            let s = h.invoke("settings.state", json!(null));
+            assert_eq!(s["open"], json!(true), "{what}");
+        }
+        "settings.ok" | "settings.cancel" => {
+            h.invoke("settings.open", json!({"page": "system"}));
+            h.invoke(
+                "settings.edit",
+                json!({"field": "save-on-deactivation", "value": false}),
+            );
+            let settings = h.settings_window().expect("the Settings window");
+            let in_field = b.context.as_deref().is_some_and(|c| c.ends_with("Editor"));
+            let focus =
+                h.cx.update(|cx| {
+                    let view = settings.read(cx).ok()?;
+                    if in_field {
+                        view.page_focus(cx)
+                    } else {
+                        Some(view.tree_focus())
+                    }
+                })
+                .expect("a focus target");
+            h.cx.update_window(settings.into(), |_, window, _| window.focus(&focus))
+                .unwrap();
+            h.draw();
+            h.dispatched.borrow_mut().clear();
+            h.cx.simulate_keystrokes(settings.into(), keys);
+            h.draw();
+            assert!(h.settings_window().is_none(), "{what}: the window closes");
+            let saved = h.workbench(|w, _| w.save_settings().save_on_deactivation);
+            assert_eq!(saved, b.command == "settings.cancel", "{what}");
         }
         "run.configurations.dialog.next" | "run.configurations.dialog.previous" => {
             h.open_run_dialog();

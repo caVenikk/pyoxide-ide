@@ -30,11 +30,11 @@ mod shot;
 pub mod tool_windows;
 pub mod workbench;
 
+pub use crate::settings::{SaveSettings, SyncSettings};
 pub use app::{NavigationHooks, Product, StatusWidget, StripeItem, init, open_main_window, run};
 pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use file_types::{FileAssociation, FileType, HighlighterFactory};
 pub use project::AutoExclusions;
 pub use project_panel::{NewItem, NewItemKind, NewTemplate, RootKind, TreeHooks};
 pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};
-pub use settings::{SaveSettings, SyncSettings};
 pub use workbench::{Workbench, WorkbenchEvent};

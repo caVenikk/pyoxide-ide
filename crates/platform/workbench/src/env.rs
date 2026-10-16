@@ -17,7 +17,7 @@
 //! | `PYOXIDE_BENCH=cursor` | move the mouse (synthetic events) over text, gutter, splitter and toolbar, print the system cursor shown, quit |
 //! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |
 //! | `PYOXIDE_NATIVE_POINTER=0` | do not set the pointer shape on every mouse move (leave it to GPUI) |
-//! | `PYOXIDE_CONFIG_DIR=<dir>` | keep settings that last across sessions (`find.toml`) in this folder instead of the user's configuration folder |
+//! | `PYOXIDE_CONFIG_DIR=<dir>` | keep the application settings (`settings.toml`) and other settings that last across sessions (`find.toml`) in this folder instead of the user's configuration folder |
 
 use std::sync::OnceLock;
 use std::time::Instant;

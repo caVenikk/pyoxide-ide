@@ -8,6 +8,7 @@
 
 [[context]]
 [context.bindings]
+"ctrl-alt-s" = "settings.open"
 "alt-1" = "workbench.toggle-project"
 "alt-4" = "workbench.toggle-run"
 "ctrl-s" = "workbench.save-all"
@@ -459,3 +460,17 @@ name = "NameInput > Editor"
 "up" = "name-input.previous-kind"
 "tab" = "name-input.next-field"
 "shift-tab" = "name-input.previous-field"
+
+# The Settings window: Enter is OK, Escape Cancel (`SettingsDialog`), in
+# its fields too.
+[[context]]
+name = "SettingsWindow"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.cancel"
+
+[[context]]
+name = "SettingsWindow > Editor"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.cancel"

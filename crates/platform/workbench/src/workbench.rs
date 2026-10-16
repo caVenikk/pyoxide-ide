@@ -2214,6 +2214,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::hide_tool_window))
             .on_action(cx.listener(Self::locate_file))
             .on_action(cx.listener(Self::set_theme))
+            .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::open_folder_action))
             .on_action(cx.listener(Self::open_file_action))
             .on_action(cx.listener(Self::save))
