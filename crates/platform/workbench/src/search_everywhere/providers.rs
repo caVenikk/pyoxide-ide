@@ -3,17 +3,20 @@
 //! Each returns its rows in its own order with their weights, and whether
 //! it has more than it was asked for.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use std::path::Path;
 
+use editor::Highlighter;
 use file_index::{EXACT_MATCH_DEGREE, FileHit, FileIndex, GotoQuery, absolute_path, rank};
 use name_match::{Matcher, MatchingMode};
 use project_search::{FileSearch, Results};
 use search::CancelToken;
+use text::{Buffer, Rope};
+use themes::TextRole;
 
 use super::actions::{self, ActionItem};
 use crate::app::NavigationHooks;
@@ -164,6 +167,8 @@ pub struct TextRow {
     /// ranges).
     pub text: String,
     pub ranges: Vec<Range<usize>>,
+    /// Syntax colours of the text (char ranges, sorted).
+    pub spans: Vec<(Range<usize>, TextRole)>,
 }
 
 /// What one provider found.
@@ -369,8 +374,9 @@ pub(super) fn files(q: FilesQuery, cancel: &CancelToken) -> Found {
 }
 
 /// Lines with matches, up to `search.limit` matches, in the reference's
-/// order of files; every one weighs 0 (it goes after the other kinds).
-pub(super) fn text(search: FileSearch, cancel: &CancelToken) -> Found {
+/// order of files, with the syntax colours of their files' types; every
+/// one weighs 0 (it goes after the other kinds).
+pub(super) fn text(search: FileSearch, types: &FileTypes, cancel: &CancelToken) -> Found {
     let mut results = Results::new();
     let found = std::sync::Mutex::new(Vec::new());
     let summary = search.run(cancel, &|file| {
@@ -381,6 +387,8 @@ pub(super) fn text(search: FileSearch, cancel: &CancelToken) -> Found {
     for file in found.into_inner().unwrap_or_default() {
         results.add(file);
     }
+    // The file of the rows being coloured (rows of a file come together).
+    let mut file: Option<(Arc<PathBuf>, Option<Lexed>)> = None;
     let rows = results
         .rows()
         .iter()
@@ -399,6 +407,18 @@ pub(super) fn text(search: FileSearch, cancel: &CancelToken) -> Found {
                 .map(|r| r.start.saturating_sub(shift)..r.end.saturating_sub(shift))
                 .filter(|r| r.end > r.start)
                 .collect();
+            let spans = if cancel.is_cancelled() {
+                Vec::new()
+            } else {
+                if file.as_ref().is_none_or(|(path, _)| *path != row.path) {
+                    let lexed = Lexed::read(&row.path, &search.overrides, types);
+                    file = Some((row.path.clone(), lexed));
+                }
+                file.as_mut()
+                    .and_then(|(_, lexed)| lexed.as_mut())
+                    .map(|lexed| lexed.spans(row, shift, text.chars().count()))
+                    .unwrap_or_default()
+            };
             (
                 Row::Text(TextRow {
                     path: (*row.path).clone(),
@@ -406,6 +426,7 @@ pub(super) fn text(search: FileSearch, cancel: &CancelToken) -> Found {
                     column: row.line.first.start.column,
                     text,
                     ranges,
+                    spans,
                 }),
                 0,
             )
@@ -415,5 +436,130 @@ pub(super) fn text(search: FileSearch, cancel: &CancelToken) -> Found {
         provider: Provider::Text,
         rows,
         more: summary.truncated,
+    }
+}
+
+/// A file whose found lines are coloured: its text and its type's
+/// highlighter, which colours a line as the file's lexer sees it from the
+/// start of the file (the reference's usage chunks, `ChunkExtractor`, take
+/// their colours from the file's lexer too, without the parse tree).
+struct Lexed {
+    buffer: Buffer,
+    highlighter: Box<dyn Highlighter>,
+}
+
+impl Lexed {
+    /// The open document's text (with unsaved changes) or the file on
+    /// disk; `None` for a type without highlighting or a file that cannot
+    /// be read.
+    fn read(path: &Path, overrides: &HashMap<PathBuf, Rope>, types: &FileTypes) -> Option<Self> {
+        let factory = types.for_path(path)?.highlighter.clone()?;
+        let buffer = match overrides.get(path) {
+            Some(text) => Buffer::new(&text.to_string()),
+            None => Buffer::from_decoded(project::read_document(path).ok()?.decoded),
+        };
+        let mut highlighter = factory();
+        highlighter.reset(&buffer);
+        Some(Self {
+            buffer,
+            highlighter,
+        })
+    }
+
+    /// The colours of a found line's text from char `shift` on (`len`
+    /// chars), as char ranges of that text; none when the line is not the
+    /// one found any more.
+    fn spans(
+        &mut self,
+        row: &project_search::Row,
+        shift: usize,
+        len: usize,
+    ) -> Vec<(Range<usize>, TextRole)> {
+        let line = row.line.line;
+        if line >= self.buffer.len_lines() {
+            return Vec::new();
+        }
+        let shown: String = self
+            .buffer
+            .line(line)
+            .chars()
+            .skip(row.line.text_column)
+            .take(row.line.text.chars().count())
+            .collect();
+        if shown != row.line.text {
+            return Vec::new();
+        }
+        self.highlighter.prepare(&self.buffer, line..line + 1);
+        let mut spans = Vec::new();
+        self.highlighter.line_spans(line, &mut spans);
+        spans
+            .into_iter()
+            .filter_map(|(r, role)| {
+                let start = r.start.clamp(shift, shift + len) - shift;
+                let end = r.end.clamp(shift, shift + len) - shift;
+                (end > start).then_some((start..end, role))
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Colours the text from a `#` to the end of its line as a comment.
+    #[derive(Default)]
+    struct Hashes {
+        lines: Vec<Vec<editor::Span>>,
+    }
+
+    impl Highlighter for Hashes {
+        fn reset(&mut self, buffer: &Buffer) {
+            self.lines = (0..buffer.len_lines())
+                .map(|l| {
+                    let text = buffer.line_text(l);
+                    let len = text.chars().count();
+                    text.find('#')
+                        .map(|i| vec![(text[..i].chars().count()..len, TextRole::Comment)])
+                        .unwrap_or_default()
+                })
+                .collect();
+        }
+
+        fn edited(&mut self, _: &Buffer, _: &[text::AppliedEdit]) {}
+
+        fn line_spans(&self, line: usize, out: &mut Vec<editor::Span>) {
+            out.extend(self.lines.get(line).cloned().unwrap_or_default());
+        }
+    }
+
+    fn found(line: usize, text: &str) -> project_search::Row {
+        let at = text::Point::new(line, 0);
+        project_search::Row {
+            path: Arc::new(PathBuf::from("a.py")),
+            line: project_search::LineMatch {
+                line,
+                text: text.into(),
+                text_column: 0,
+                ranges: Vec::new(),
+                first: at..at,
+            },
+        }
+    }
+
+    #[test]
+    fn found_lines_take_their_colours_without_the_indentation() {
+        let mut lexed = Lexed {
+            buffer: Buffer::new("x = 1\n    y = 2  # two\n"),
+            highlighter: Box::new(Hashes::default()),
+        };
+        lexed.highlighter.reset(&lexed.buffer);
+        // The row shows "y = 2  # two": four chars of indentation left out.
+        let row = found(1, "    y = 2  # two");
+        assert_eq!(lexed.spans(&row, 4, 12), vec![(7..12, TextRole::Comment)]);
+        // A line that changed since the search stays plain.
+        let row = found(1, "    y = 3  # two");
+        assert!(lexed.spans(&row, 4, 12).is_empty());
+        assert!(lexed.spans(&found(9, "z"), 0, 1).is_empty());
     }
 }

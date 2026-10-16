@@ -4,7 +4,9 @@
 //!
 //! It shows a file in an editor with its syntax colours; its owner marks
 //! ranges and puts the caret on a line in the middle of the view
-//! ([`FilePreview::mark`]). When there is no file to show it shows the
+//! ([`FilePreview::mark`]), or shows a found usage with the other
+//! occurrences of its text marked until the caret moves
+//! ([`FilePreview::mark_usage`]). When there is no file to show it shows the
 //! options' empty text (the reference's "There is no preview for the
 //! selected item").
 //!
@@ -21,8 +23,8 @@
 //!   read-only".
 //!
 //! The Soft-Wrap button (the reference's floating editor toolbar with
-//! `EditorToggleUseSoftWrapsInPreview`) sits over the text's top right
-//! corner: it fades in when the mouse moves over the preview and fades out
+//! `EditorToggleUseSoftWrapsInPreview`), a plain icon, sits over the text's
+//! top right corner: it fades in when the mouse moves over the preview and fades out
 //! a while after it stopped (`TransparentComponentAnimator`). The choice is
 //! one for all previews and lasts across sessions (the reference keeps it
 //! for the `PREVIEW` place in the editor settings).
@@ -32,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use editor::{Editor, EditorEvent, SearchHighlights};
+use editor::{Editor, EditorEvent, MatchBackground, SearchHighlights};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, Global,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, SharedString,
@@ -41,7 +43,7 @@ use gpui::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, Point};
-use themes::UiRole;
+use themes::{Metric, UiRole};
 use ui::components::{Tooltip, toggle_button};
 use ui::icons::IconName;
 use ui::theme::ThemeExt as _;
@@ -65,9 +67,16 @@ pub const NO_PREVIEW: &str = "There is no preview for the selected item";
 pub const SHOWING: Duration = Duration::from_millis(500);
 pub const RETENTION: Duration = Duration::from_millis(1500);
 pub const HIDING: Duration = Duration::from_millis(1000);
-/// Distance of the Soft-Wrap button from the preview's top and right
-/// edges (the floating toolbar's flow layout gaps).
-const BUTTON_GAP: f32 = 20.0;
+/// The Soft-Wrap button's toolbar: this far below the preview's top and
+/// left of the text's vertical scrollbar (the floating toolbar panel at 20
+/// with its flow layout's gaps of 20, `EditorImpl.PanelWithFloatingToolbar`,
+/// `EditorFloatingToolbar`); room around the button inside it, across and
+/// down (the New UI's toolbar insets 7 and 5 with the toolbar button's 2
+/// and 1, `ActionToolbarImpl`). The toolbar's own background is not drawn
+/// (`Toolbar.Floating.background` at 55 %, the editor's background in the
+/// reference's theme).
+const TOOLBAR_OFFSET: f32 = 40.0;
+const TOOLBAR_PADDING: (f32, f32) = (9.0, 6.0);
 
 /// How a preview is set up.
 #[derive(Debug, Clone)]
@@ -145,11 +154,27 @@ pub struct FilePreview {
     echo_tab: Option<u64>,
     /// The idle save of the preview's own document.
     save_task: Option<Task<()>>,
+    /// The usage marked with [`FilePreview::mark_usage`].
+    usage: Option<Usage>,
     /// The Soft-Wrap button: shown, the mouse over it, and its hiding.
     fade: Fade,
     button_hovered: bool,
     hide_task: Option<Task<()>>,
     _subscriptions: [Subscription; 2],
+}
+
+/// A usage shown in the preview: its found text, its line, and where the
+/// caret was put; while the caret stays there, the other occurrences of
+/// the text are marked too.
+#[derive(Debug, Clone)]
+struct Usage {
+    ranges: Vec<Range<usize>>,
+    line: Option<usize>,
+    caret: usize,
+    /// Occurrences of the found text in the file, the usage's among them.
+    occurrences: Vec<Range<usize>>,
+    /// The caret moved away: only the usage stays marked.
+    left: bool,
 }
 
 impl FilePreview {
@@ -167,10 +192,10 @@ impl FilePreview {
             e
         });
         let subscriptions = [
-            cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
-                if let EditorEvent::Edited(applied) = event {
-                    this.edited(applied, cx);
-                }
+            cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| match event {
+                EditorEvent::Edited(applied) => this.edited(applied, cx),
+                EditorEvent::SelectionsChanged => this.caret_moved(cx),
+                _ => {}
             }),
             // The choice made in one preview applies to all.
             cx.observe_global::<Store>(|this, cx| {
@@ -191,6 +216,7 @@ impl FilePreview {
             echo_preview: None,
             echo_tab: None,
             save_task: None,
+            usage: None,
             fade: Fade {
                 shown: false,
                 from: 0.0,
@@ -240,15 +266,25 @@ impl FilePreview {
             return serde_json::Value::Null;
         };
         let e = self.editor.read(cx);
+        let highlights = e.search_highlights();
         json!({
             "path": rel(path),
             "caret": [e.caret_point().line, e.caret_point().column],
-            "highlights": e.search_highlights().map(|h| h.matches.len()).unwrap_or(0),
+            "highlights": highlights.map(|h| h.matches.len()).unwrap_or(0),
+            "highlight_ranges": highlights
+                .map(|h| h.matches.iter().map(|r| [r.start, r.end]).collect::<Vec<_>>())
+                .unwrap_or_default(),
+            "highlight_background": highlights.map(|h| match h.background {
+                MatchBackground::Match => "match",
+                MatchBackground::Active => "active",
+                MatchBackground::Occurrence => "occurrence",
+            }),
             "read_only": e.buffer().is_read_only() || e.is_viewer(),
             "viewer": e.is_viewer(),
             "read_only_hint": e.read_only_hint(),
             "soft_wraps": e.soft_wraps(),
             "soft_wrap_button": self.soft_wrap_button_shown(),
+            "soft_wrap_button_hovered": self.button_hovered,
             "linked": self.linked.is_some(),
             "modified": self.linked.is_none() && e.is_modified(),
         })
@@ -325,6 +361,7 @@ impl FilePreview {
     }
 
     fn reset_editor(&mut self, cx: &mut Context<Self>) {
+        self.usage = None;
         self.editor.update(cx, |e, cx| {
             *e.buffer_mut() = Buffer::new("");
             e.buffer_mut().set_read_only(true);
@@ -335,6 +372,7 @@ impl FilePreview {
     }
 
     fn load(&mut self, path: PathBuf, buffer: Buffer, cx: &mut Context<Self>) {
+        self.usage = None;
         let file_type = self.file_types.for_path(&path).cloned();
         self.editor.update(cx, |e, cx| {
             *e.buffer_mut() = buffer;
@@ -368,17 +406,16 @@ impl FilePreview {
         go: Option<Point>,
         cx: &mut Context<Self>,
     ) {
+        self.usage = None;
         self.editor.update(cx, |e, cx| {
-            let mut matches: Vec<_> = ranges.iter().filter(|r| r.end > r.start).cloned().collect();
-            matches.sort_by_key(|r| r.start);
+            let matches = sorted(ranges);
             let current = current.filter(|&i| i < matches.len());
             e.set_search_highlights(
                 Some(SearchHighlights {
                     matches,
                     current,
-                    current_background: false,
-                    excluded: Default::default(),
                     lines: line.map(|l| vec![l]).unwrap_or_default(),
+                    ..SearchHighlights::default()
                 }),
                 cx,
             );
@@ -386,6 +423,80 @@ impl FilePreview {
                 e.go_to(p.line + 1, Some(p.column + 1), cx);
             }
         });
+        cx.notify();
+    }
+
+    /// Shows a found usage, as the reference's usage preview does
+    /// (`UsagePreviewPanel.highlight`): marks its text (`ranges`, on
+    /// `line`) and puts the caret at `go` (the end of the found text), its
+    /// line in the middle of the view. While the caret stays there, the
+    /// text found and its other occurrences in the file
+    /// ([`FilePreview::show_occurrences`]) are marked as occurrences of
+    /// the text at the caret (the reference's editor marks the symbol at
+    /// the caret); once the caret moved, only the found text stays marked,
+    /// as a found usage.
+    pub fn mark_usage(
+        &mut self,
+        ranges: &[Range<usize>],
+        line: Option<usize>,
+        go: Point,
+        cx: &mut Context<Self>,
+    ) {
+        let caret = self.editor.update(cx, |e, cx| {
+            e.go_to(go.line + 1, Some(go.column + 1), cx);
+            e.selections().primary().head
+        });
+        self.usage = Some(Usage {
+            ranges: sorted(ranges),
+            line,
+            caret,
+            occurrences: Vec::new(),
+            left: false,
+        });
+        self.paint_usage(cx);
+    }
+
+    /// The occurrences of the found text of the usage shown (char ranges,
+    /// sorted, not overlapping).
+    pub fn show_occurrences(&mut self, occurrences: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        if let Some(usage) = &mut self.usage {
+            usage.occurrences = occurrences;
+            self.paint_usage(cx);
+        }
+    }
+
+    /// The caret moved: away from the usage, only its text stays marked.
+    fn caret_moved(&mut self, cx: &mut Context<Self>) {
+        let caret = self.editor.read(cx).selections().primary().head;
+        if let Some(usage) = &mut self.usage
+            && !usage.left
+            && usage.caret != caret
+        {
+            usage.left = true;
+            self.paint_usage(cx);
+        }
+    }
+
+    fn paint_usage(&mut self, cx: &mut Context<Self>) {
+        let Some(usage) = &self.usage else {
+            return;
+        };
+        let (matches, background) = if usage.left {
+            (usage.ranges.clone(), MatchBackground::Active)
+        } else {
+            (
+                merged(&usage.ranges, &usage.occurrences),
+                MatchBackground::Occurrence,
+            )
+        };
+        let highlights = SearchHighlights {
+            matches,
+            lines: usage.line.map(|l| vec![l]).unwrap_or_default(),
+            background,
+            ..SearchHighlights::default()
+        };
+        self.editor
+            .update(cx, |e, cx| e.set_search_highlights(Some(highlights), cx));
         cx.notify();
     }
 
@@ -588,22 +699,20 @@ impl FilePreview {
         }
         let name = self.options.name;
         let on = self.editor.read(cx).soft_wraps();
-        let theme = cx.theme();
+        let scrollbar = cx.theme().metric(Metric::ScrollbarWidth);
         Some(
             div()
+                .debug_selector(move || format!("{name}-toolbar"))
                 .absolute()
-                .top(px(BUTTON_GAP))
-                .right(px(BUTTON_GAP))
+                .top(px(TOOLBAR_OFFSET))
+                .right(scrollbar + px(TOOLBAR_OFFSET))
+                .px(px(TOOLBAR_PADDING.0))
+                .py(px(TOOLBAR_PADDING.1))
                 // Over the editor: it takes the mouse from the editor, whose
                 // text cursor must not show through (ui::pointer); the wheel
                 // still scrolls the editor.
                 .block_mouse_except_scroll()
                 .opacity(opacity)
-                .p(px(2.0))
-                .rounded(px(3.0))
-                .bg(theme.color(UiRole::SurfaceRaised))
-                .border_1()
-                .border_color(theme.color(UiRole::PopupBorder))
                 .child(
                     toggle_button(
                         SharedString::from(format!("{name}-soft-wrap")),
@@ -724,6 +833,29 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &ToggleSoftWraps, cx| toggle_soft_wraps(cx));
 }
 
+// ---- marks ------------------------------------------------------------------
+
+/// The non-empty ranges, by start.
+fn sorted(ranges: &[Range<usize>]) -> Vec<Range<usize>> {
+    let mut out: Vec<_> = ranges.iter().filter(|r| r.end > r.start).cloned().collect();
+    out.sort_by_key(|r| r.start);
+    out
+}
+
+/// The non-empty ranges of both lists, sorted, overlapping ones joined.
+fn merged(a: &[Range<usize>], b: &[Range<usize>]) -> Vec<Range<usize>> {
+    let mut all: Vec<_> = a.iter().chain(b).cloned().collect();
+    all.sort_by_key(|r| (r.start, r.end));
+    let mut out: Vec<Range<usize>> = Vec::with_capacity(all.len());
+    for r in all.into_iter().filter(|r| r.end > r.start) {
+        match out.last_mut() {
+            Some(last) if r.start < last.end => last.end = last.end.max(r.end),
+            _ => out.push(r),
+        }
+    }
+    out
+}
+
 // ---- copying edits between the preview and the tab ---------------------------
 
 /// Copies an edit of `from` (as applied) to `to`, which held the same text
@@ -841,6 +973,18 @@ mod tests {
             CaretPlacement::AfterEachEdit,
         );
         assert_eq!(b.text(), "one two three four");
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)] // ranges of marks
+    fn usage_and_occurrences_are_joined() {
+        assert_eq!(
+            merged(&[10..17], &[0..7, 10..17, 30..37]),
+            vec![0..7, 10..17, 30..37]
+        );
+        assert_eq!(merged(&[5..9], &[7..12, 12..14]), vec![5..12, 12..14]);
+        assert_eq!(merged(&[3..3], &[]), Vec::<Range<usize>>::new());
+        assert_eq!(sorted(&[9..12, 1..1, 2..4]), vec![2..4, 9..12]);
     }
 
     #[test]

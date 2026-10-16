@@ -525,6 +525,7 @@ impl SearchEverywhere {
                 "path": self.rel(&t.path),
                 "line": t.line + 1,
                 "text": t.text,
+                "spans": t.spans.iter().map(|(r, role)| json!([r.start, r.end, role.name()])).collect::<Vec<_>>(),
             }),
             Row::More => json!({ "kind": "more" }),
         }
@@ -1034,13 +1035,14 @@ impl SearchEverywhere {
         }
         let cancel = CancelToken::new();
         self.cancel = Some(cancel.clone());
+        let types = (*self.file_types).clone();
         let task = cx.background_spawn(async move {
             let mut more = Vec::new();
             if let Some(q) = files {
                 more.push(providers::files(q, &cancel));
             }
             if let Some(search) = text_search {
-                more.push(providers::text(search, &cancel));
+                more.push(providers::text(search, &types, &cancel));
             }
             more
         });

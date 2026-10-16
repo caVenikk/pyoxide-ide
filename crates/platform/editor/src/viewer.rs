@@ -1,16 +1,16 @@
 //! Read-only views (the reference's viewers, `Editor.isViewer`): the text
 //! takes the focus and shows a caret, but cannot be changed. An attempt to
 //! change it (typing, pasting, deleting, undo) shows the reference's
-//! information hint "This view is read-only" above the caret
-//! (`EditorModificationUtil.checkModificationAllowed`), which goes away with
-//! the next key, a caret move or scrolling (`HIDE_BY_ANY_KEY`,
-//! `HIDE_BY_SCROLLING`).
+//! information hint "This view is read-only", a balloon that points at the
+//! caret from above its line (`EditorModificationUtil.checkModificationAllowed`),
+//! which goes away with the next key, a caret move or scrolling
+//! (`HIDE_BY_ANY_KEY`, `HIDE_BY_SCROLLING`).
 
 use gpui::{
-    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    Subscription, anchored, deferred, div, point, px,
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder,
+    Styled as _, Subscription, anchored, canvas, deferred, div, point, px,
 };
-use themes::{Metric, UiRole};
+use themes::UiRole;
 use ui::theme::ThemeExt as _;
 
 use crate::Editor;
@@ -64,7 +64,24 @@ impl Editor {
     }
 }
 
-/// The hint above the caret, over everything else.
+/// Room inside the hint's box: top, left, bottom, right (the reference's
+/// information hint in the New UI, `HintHint.applyStatus`).
+const HINT_PADDING: [f32; 4] = [12.0, 12.0, 14.0, 12.0];
+/// Rounding of the box (a balloon with its pointer at the start,
+/// `IdeTooltipManager`).
+const HINT_RADIUS: f32 = 8.0;
+/// The pointer: width and height (`LightweightHint.showAwtTooltip`), and
+/// the distance of its left end from the box's left edge (shifted to the
+/// start).
+const POINTER: (f32, f32) = (16.0, 8.0);
+const POINTER_LEFT: f32 = 12.0;
+/// Line height of the hint's text.
+const HINT_LINE: f32 = 16.0;
+
+/// The hint over everything else: a balloon above the caret's line whose
+/// pointer's tip is at the caret, a tenth of a line above the line
+/// (`HintManager.showInformationHint` ABOVE, `setCalloutShift`); under the
+/// line, pointing up, when there is no room above it.
 pub(crate) fn render_read_only_hint(
     editor: &Editor,
     cx: &mut Context<Editor>,
@@ -72,29 +89,78 @@ pub(crate) fn render_read_only_hint(
     editor.read_only_hint.as_ref()?;
     let caret = editor.caret_bounds()?;
     let theme = cx.theme();
-    Some(
-        deferred(
-            anchored()
-                .position(point(caret.left(), caret.top() - px(2.0)))
-                .anchor(gpui::Corner::BottomLeft)
-                .child(
-                    div()
-                        .id("editor-read-only-hint")
-                        .debug_selector(|| "editor-read-only-hint".into())
-                        .px(px(8.0))
-                        .py(px(4.0))
-                        .rounded(theme.metric(Metric::CornerRadius))
-                        .border_1()
-                        .border_color(theme.color(UiRole::PopupBorder))
-                        .bg(theme.color(UiRole::SurfaceRaised))
-                        .text_color(theme.color(UiRole::Text))
-                        .text_size(theme.ui_size())
-                        .shadow(ui::components::popup_shadow())
-                        .whitespace_nowrap()
-                        .child(READ_ONLY_HINT),
-                ),
+    let callout = caret.size.height * 0.1;
+    let (pointer_w, pointer_h) = (px(POINTER.0), px(POINTER.1));
+    let [top, left, bottom, right] = HINT_PADDING.map(px);
+    let height = top + px(HINT_LINE) + bottom + px(2.0) + pointer_h;
+    let above = caret.top() - callout - height >= px(0.0);
+    let fill_color = theme.color(UiRole::SurfaceRaised);
+    let border_color = theme.color(UiRole::PopupBorder);
+    let text = div()
+        .id("editor-read-only-hint")
+        .debug_selector(|| "editor-read-only-hint".into())
+        .pt(top)
+        .pl(left)
+        .pb(bottom)
+        .pr(right)
+        .rounded(px(HINT_RADIUS))
+        .border_1()
+        .border_color(border_color)
+        .bg(fill_color)
+        .text_color(theme.color(UiRole::Text))
+        .text_size(theme.ui_size())
+        .line_height(px(HINT_LINE))
+        .shadow(ui::components::popup_shadow())
+        .whitespace_nowrap()
+        .child(READ_ONLY_HINT);
+    // The pointer, over the box's border where it joins the box.
+    let pointer = canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let (x0, x1) = (bounds.left(), bounds.left() + pointer_w);
+            let mid = bounds.left() + pointer_w / 2.0;
+            let (base, tip) = if above {
+                (bounds.top() - px(1.0), bounds.bottom())
+            } else {
+                (bounds.bottom() + px(1.0), bounds.top())
+            };
+            let mut fill = PathBuilder::fill();
+            fill.move_to(point(x0, base));
+            fill.line_to(point(mid, tip));
+            fill.line_to(point(x1, base));
+            fill.close();
+            if let Ok(path) = fill.build() {
+                window.paint_path(path, fill_color);
+            }
+            let mut edge = PathBuilder::stroke(px(1.0));
+            edge.move_to(point(x0, base));
+            edge.line_to(point(mid, tip));
+            edge.line_to(point(x1, base));
+            if let Ok(path) = edge.build() {
+                window.paint_path(path, border_color);
+            }
+        },
+    )
+    .ml(px(POINTER_LEFT))
+    .w(pointer_w)
+    .h(pointer_h);
+    let x = caret.left() - px(POINTER_LEFT) - pointer_w / 2.0;
+    let (balloon, at, corner) = if above {
+        (
+            div().flex().flex_col().child(text).child(pointer),
+            point(x, caret.top() - callout),
+            gpui::Corner::BottomLeft,
         )
-        .with_priority(3)
-        .into_any_element(),
+    } else {
+        (
+            div().flex().flex_col().child(pointer).child(text),
+            point(x, caret.bottom() + callout),
+            gpui::Corner::TopLeft,
+        )
+    };
+    Some(
+        deferred(anchored().position(at).anchor(corner).child(balloon))
+            .with_priority(3)
+            .into_any_element(),
     )
 }

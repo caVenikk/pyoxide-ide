@@ -690,6 +690,19 @@ fn underline_of(kind: ThemeUnderline, color: Hsla) -> UnderlineStyle {
 }
 
 /// The theme's link style as an explicit style.
+/// The background of search matches of this kind (`search` for plain
+/// matches).
+fn match_background(kind: crate::MatchBackground, search: Hsla, theme: &Theme) -> Hsla {
+    match kind {
+        crate::MatchBackground::Match => search,
+        crate::MatchBackground::Active => theme.color(UiRole::SearchMatchActive),
+        crate::MatchBackground::Occurrence => theme
+            .text_style(TextRole::IdentifierRead)
+            .bg
+            .map_or(search, color),
+    }
+}
+
 fn link_style(theme: &Theme, default: Hsla) -> InlineStyle {
     let style = theme.text_style(TextRole::Link);
     let fg = style.fg.map(color).unwrap_or(default);
@@ -1320,6 +1333,7 @@ impl Element for EditorElement {
             if h.current_background {
                 colors.search_current_background = Some(theme.color(UiRole::SearchMatchActive));
             }
+            colors.search_match = match_background(h.background, colors.search_match, theme);
             let vis_start = editor.buffer.line_start(first);
             let vis_end = editor.buffer.line_end(last.saturating_sub(1).max(first));
             let from = h.first_ending_at_or_after(vis_start);

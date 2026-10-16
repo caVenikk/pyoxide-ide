@@ -28,6 +28,7 @@ pub mod run;
 pub mod search_everywhere;
 pub mod settings;
 mod shot;
+pub mod simulate;
 pub mod tool_windows;
 pub mod workbench;
 
