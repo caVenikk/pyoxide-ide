@@ -15,13 +15,29 @@ use serde_json::{Value, json};
 use super::RunHook;
 
 /// What the configurations tell the workbench.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RunConfigsEvent {
-    /// A notification ("Imported 3 run configurations").
+    /// A notice for the status bar ("No project is open").
     Notice(String),
+    /// A balloon: the import report ("Imported 3 run configurations") and
+    /// errors of loading, importing and saving.
+    Notify(ui::notification::Notification),
     /// Files of the project folder were written or removed: an editor
     /// that has one open takes the change as the application's own.
     FilesWritten(Vec<PathBuf>),
+}
+
+/// A balloon with only a content text.
+fn info(content: String) -> ui::notification::Notification {
+    ui::notification::Notification::new(
+        ui::notification::NotificationKind::Information,
+        "",
+        content,
+    )
+}
+
+fn error(content: String) -> ui::notification::Notification {
+    ui::notification::Notification::new(ui::notification::NotificationKind::Error, "", content)
 }
 
 /// The run configurations of the open project.
@@ -278,13 +294,13 @@ impl RunConfigs {
                         this.list = opened.list;
                         this.errors = opened.errors;
                         if let Some(report) = opened.report {
-                            cx.emit(RunConfigsEvent::Notice(report.message()));
+                            cx.emit(RunConfigsEvent::Notify(info(report.message())));
                         }
                     }
                     Err(e) => {
                         let message = format!("Cannot load run configurations: {e}");
                         this.errors = vec![message.clone()];
-                        cx.emit(RunConfigsEvent::Notice(message));
+                        cx.emit(RunConfigsEvent::Notify(error(message)));
                     }
                 }
                 cx.notify();
@@ -315,7 +331,7 @@ impl RunConfigs {
                 if this.generation != generation {
                     return;
                 }
-                let message = match result {
+                let notification = match result {
                     Ok((report, list)) => {
                         // The files the import may have written.
                         let mut written: Vec<PathBuf> = list
@@ -328,15 +344,15 @@ impl RunConfigs {
                         written.push(project::workspace::workspace_file(&files_root));
                         cx.emit(RunConfigsEvent::FilesWritten(written));
                         this.list = list;
-                        if report.imported == 0 {
+                        info(if report.imported == 0 {
                             "No new run configurations to import".to_owned()
                         } else {
                             report.message()
-                        }
+                        })
                     }
-                    Err(e) => format!("Cannot import run configurations: {e}"),
+                    Err(e) => error(format!("Cannot import run configurations: {e}")),
                 };
-                cx.emit(RunConfigsEvent::Notice(message));
+                cx.emit(RunConfigsEvent::Notify(notification));
                 cx.notify();
             });
         })
@@ -430,9 +446,9 @@ impl RunConfigs {
                     }
                 }
                 if let Err(e) = result {
-                    cx.emit(RunConfigsEvent::Notice(format!(
+                    cx.emit(RunConfigsEvent::Notify(error(format!(
                         "Cannot save run configurations: {e}"
-                    )));
+                    ))));
                 }
                 if std::mem::take(&mut this.save_again) {
                     this.save(cx);

@@ -40,8 +40,10 @@ pub enum RunToolWindowEvent {
     OpenLink(LinkTarget),
     /// A message for the status bar.
     Message(String),
-    /// A notification (the import of run configurations).
+    /// A notice for the status bar.
     Notice(String),
+    /// A balloon (the import of run configurations).
+    Notify(ui::notification::Notification),
     /// The run configurations' files were written or removed.
     FilesWritten(Vec<std::path::PathBuf>),
     /// Closing a tab whose process runs: the workbench asks first.
@@ -182,6 +184,7 @@ impl RunToolWindow {
             cx.observe(&configs, |_, _, cx| cx.notify()),
             cx.subscribe(&configs, |_, _, event: &RunConfigsEvent, cx| match event {
                 RunConfigsEvent::Notice(text) => cx.emit(RunToolWindowEvent::Notice(text.clone())),
+                RunConfigsEvent::Notify(n) => cx.emit(RunToolWindowEvent::Notify(n.clone())),
                 RunConfigsEvent::FilesWritten(paths) => {
                     cx.emit(RunToolWindowEvent::FilesWritten(paths.clone()))
                 }

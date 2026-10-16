@@ -22,7 +22,6 @@ use gpui::{
     AnyElement, App, BoxShadow, CursorStyle, FontWeight, HitboxBehavior, IntoElement, SharedString,
     Window, canvas, div, point, prelude::*, px,
 };
-use serde::Deserialize;
 use themes::UiRole;
 
 use crate::components::Tooltip;
@@ -82,17 +81,25 @@ const MORE_BOTTOM: f32 = 4.0;
 const MORE_UNDER: f32 = 7.0;
 
 /// Kind of a notification (`NotificationType`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NotificationKind {
     #[default]
-    #[serde(alias = "info")]
     Information,
     Warning,
     Error,
 }
 
 impl NotificationKind {
+    /// The kind named `information` (or `info`), `warning` or `error`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "information" | "info" => Some(NotificationKind::Information),
+            "warning" => Some(NotificationKind::Warning),
+            "error" => Some(NotificationKind::Error),
+            _ => None,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             NotificationKind::Information => "information",
