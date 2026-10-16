@@ -74,8 +74,8 @@ fn icons(cx: &mut TestAppContext, window: WindowHandle<Workbench>) -> Vec<(Strin
         .collect()
 }
 
-/// A project root as the reference shows it: Docker, GitLab CI and
-/// pre-commit files get their own icons, `.env` files, `.python-version`
+/// A project root as the reference shows it: Docker and GitLab CI files
+/// get their own icons, pre-commit files the YAML icon, `.env` files, `.python-version`
 /// and `Dockerfile.dev` the text icon (the last two by their content).
 #[gpui::test]
 fn project_root_files_get_the_reference_icons(cx: &mut TestAppContext) {
@@ -113,7 +113,7 @@ fn project_root_files_get_the_reference_icons(cx: &mut TestAppContext) {
         (".env.example", "fileTypes/text"),
         (".gitignore", "fileTypes/ignored"),
         (".gitlab-ci.yml", "fileTypes/gitLabLogo"),
-        (".pre-commit-config.yaml", "fileTypes/preCommit"),
+        (".pre-commit-config.yaml", "fileTypes/yaml"),
         (".python-version", "fileTypes/text"),
         ("alembic.ini", "fileTypes/ini"),
         ("data.bin", "fileTypes/unknown"),

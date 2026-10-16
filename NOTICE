@@ -784,8 +784,8 @@ here with: source URL, commit, file(s), license, and what was changed.
   dockerIgnore.svg (with `_dark.svg`) are adapted from platform/icons/src/
   expui/fileTypes/docker.svg: the whale unchanged, three small containers
   in place of the one container, or one small container and the whale in
-  the grey of the platform's icons. fileTypes/preCommit.svg and ini.svg
-  are Pyoxide's own drawings.
+  the grey of the platform's icons. fileTypes/ini.svg and yaml.svg (in
+  place of the copied YAML icon) are Pyoxide's own drawings.
 
 - crates/platform/ui/assets/fonts/
   Inter 4.001 (c) 2016 The Inter Project Authors, https://github.com/rsms/inter,

@@ -188,7 +188,7 @@ platform_icons! {
         "fileTypes/docker", "fileTypes/dockerCompose", "fileTypes/dockerIgnore",
         "fileTypes/editorConfig", "fileTypes/html", "fileTypes/ignored", "fileTypes/image",
         "fileTypes/ini", "fileTypes/javaScript", "fileTypes/json", "fileTypes/jupyterNotebook",
-        "fileTypes/markdown", "fileTypes/patch", "fileTypes/preCommit", "fileTypes/properties",
+        "fileTypes/markdown", "fileTypes/patch", "fileTypes/properties",
         "fileTypes/rst", "fileTypes/shell", "fileTypes/sql", "fileTypes/text", "fileTypes/toml",
         "fileTypes/unknown", "fileTypes/xml", "fileTypes/yaml",
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",

@@ -416,8 +416,9 @@ fn in_github_workflows(path: &Path) -> bool {
 }
 
 /// Icons of some YAML files: GitLab CI and GitHub Actions files (the
-/// reference's GitLab and GitHub plugins), Docker Compose and pre-commit
-/// configurations (observed).
+/// reference's GitLab and GitHub plugins) and Docker Compose files
+/// (observed); pre-commit configurations keep the YAML icon, as in the
+/// reference.
 fn platform_icon_rules() -> Vec<IconRule> {
     const GITHUB: IconName = IconName("vcs/vendors/github");
     vec![
@@ -451,12 +452,6 @@ fn platform_icon_rules() -> Vec<IconRule> {
             ],
             None,
             IconName("fileTypes/dockerCompose"),
-        ),
-        IconRule::new(
-            "YAML",
-            &[".pre-commit-config.yaml", ".pre-commit-config.yml"],
-            None,
-            IconName("fileTypes/preCommit"),
         ),
     ]
 }
@@ -928,7 +923,7 @@ mod tests {
             (".env.example", "fileTypes/text"),
             (".gitignore", "fileTypes/ignored"),
             (".gitlab-ci.yml", "fileTypes/gitLabLogo"),
-            (".pre-commit-config.yaml", "fileTypes/preCommit"),
+            (".pre-commit-config.yaml", "fileTypes/yaml"),
             ("alembic.ini", "fileTypes/ini"),
             ("tox.ini", "fileTypes/ini"),
             ("README.md", "fileTypes/markdown"),
