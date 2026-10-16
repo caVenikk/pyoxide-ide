@@ -277,9 +277,6 @@ pub fn product() -> Product {
         tree: tree(),
         // The Python group: Type Engine and Tools > External Tools.
         settings_pages: settings_pages::pages(),
-        // The Python group (Interpreter, Type Engine, External Tools)
-        // comes with those pages.
-        settings_pages: Vec::new(),
         terminal: Some(terminal::hook()),
     }
 }
