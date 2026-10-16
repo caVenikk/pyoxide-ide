@@ -1,0 +1,21 @@
+# Pyoxide shell integration for zsh: the user's .zshrc, then the integration
+# (see .zshenv).
+
+# /etc/zshrc may have pointed HISTFILE into this folder (it uses ZDOTDIR):
+# the user's configuration may rely on the usual one.
+if [[ "${HISTFILE-}" == "${__PYOXIDE_ZSH_DIR}/"* ]]; then
+  HISTFILE="${__PYOXIDE_ORIGINAL_ZDOTDIR:-$HOME}/.zsh_history"
+fi
+
+__PYOXIDE_ORIGINAL_FILE='.zshrc'
+builtin source "${__PYOXIDE_ZSH_DIR}/source-original.zsh"
+
+# From here on zsh reads the user's files itself (.zlogin of a login shell).
+if [[ -n "${__PYOXIDE_ORIGINAL_ZDOTDIR-}" ]]; then
+  ZDOTDIR="$__PYOXIDE_ORIGINAL_ZDOTDIR"
+  builtin unset __PYOXIDE_ORIGINAL_ZDOTDIR
+else
+  builtin unset ZDOTDIR
+fi
+
+builtin source "${__PYOXIDE_ZSH_DIR}/pyoxide-integration.zsh"

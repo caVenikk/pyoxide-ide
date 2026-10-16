@@ -5404,6 +5404,7 @@ dependencies = [
  "code-intel-ui",
  "dirs 7.0.0",
  "editor",
+ "flume",
  "gpui",
  "lsp-client",
  "process",
@@ -5416,6 +5417,7 @@ dependencies = [
  "serde_json",
  "settings-ui",
  "tempfile",
+ "terminal",
  "text",
  "themes",
  "ui",
@@ -7190,11 +7192,13 @@ name = "terminal"
 version = "0.0.1"
 dependencies = [
  "alacritty_terminal",
+ "dirs 7.0.0",
  "flume",
  "libc",
  "parking_lot",
  "polling",
  "process",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
@@ -9019,6 +9023,7 @@ dependencies = [
  "settings-ui",
  "smallvec",
  "tempfile",
+ "terminal",
  "text",
  "themes",
  "toml 1.1.8+spec-1.1.0",

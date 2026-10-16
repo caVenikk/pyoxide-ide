@@ -450,11 +450,9 @@ impl Session {
         }
         let size = options.size.clamped();
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let (program, args) = crate::start::pty_program(&options.command, &options.env);
         let tty_options = tty::Options {
-            shell: Some(tty::Shell::new(
-                program_for_tty(&options.command.program),
-                options.command.args.clone(),
-            )),
+            shell: Some(tty::Shell::new(program, args)),
             working_directory: Some(options.working_directory.clone()),
             drain_on_exit: true,
             env: options.env.iter().cloned().collect::<HashMap<_, _>>(),
@@ -864,17 +862,6 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.loop_tx.send(Msg::Shutdown);
-    }
-}
-
-/// The program as `tty` puts it on the command line: on Windows it is not
-/// quoted there (only the arguments are), so a path with blanks is quoted
-/// here.
-fn program_for_tty(program: &str) -> String {
-    if cfg!(windows) && program.contains([' ', '\t']) && !program.starts_with('"') {
-        format!("\"{program}\"")
-    } else {
-        program.to_owned()
     }
 }
 

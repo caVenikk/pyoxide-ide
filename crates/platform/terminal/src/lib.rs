@@ -14,14 +14,19 @@
 //!   working directory, environment) and [`plan_session`] with the
 //!   [`ShellCustomizer`] product hook; [`shells`]: the shells found on the
 //!   machine.
+//! - [`integration`]: Pyoxide's shell integration scripts (zsh, bash, fish,
+//!   PowerShell) that source what customizers ask for before the first
+//!   prompt and report the working directory, the prompt and the commands.
 //!
 //! The emulator is `alacritty_terminal` (Apache-2.0); its types do not leave
 //! this crate. `tty::setup_env` is never called: the environment is passed
-//! per session.
+//! per session, without the window id variables `tty` adds on Unix
+//! ([`start::ALACRITTY_VARS`]).
 
 mod conpty;
 mod customizer;
 pub mod input;
+pub mod integration;
 mod io_loop;
 pub mod prescan;
 mod session;

@@ -9,6 +9,8 @@ rust-version.workspace = true
 [dependencies]
 # The emulator and the pseudo-terminal; its types stay inside this crate.
 alacritty_terminal = { workspace = true }
+# The cache folder the shell integration scripts are written to.
+dirs = "7"
 flume = { workspace = true }
 # The guards of the terminal's lock (`alacritty_terminal::sync::FairMutex`),
 # released fairly by the reader.
@@ -30,6 +32,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+tempfile = "3"
 
 # A small program the PTY tests start instead of real shells, so they behave
 # the same on every OS.
