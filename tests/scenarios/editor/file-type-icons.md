@@ -14,8 +14,8 @@
 ## Expected
 - Step 1: `.dockerignore` shows a grey whale; `docker-compose*.yml` a blue
   whale carrying three containers; `Dockerfile` the blue whale with one
-  container; `.gitlab-ci.yml` the GitLab logo; `.pre-commit-config.yaml` a
-  red file with a "Y"; `.gitignore` a crossed-out circle; `alembic.ini`
+  container; `.gitlab-ci.yml` the GitLab logo; `.pre-commit-config.yaml` the
+  YAML icon (a red file with a "Y" inside), like every YAML file; `.gitignore` a crossed-out circle; `alembic.ini`
   the INI icon; `pyproject.toml` and `uv.lock` the TOML "T"; the `.md`
   files the Markdown "M↓"; `run.py` and `manage` the Python icon. `.env`,
   `.env.example`, `.python-version`, `Dockerfile.dev`, `logs.log` and
@@ -49,5 +49,6 @@ env-files-support,git4idea,hg4idea}`, `platform/vcs-impl`,
 `python/pluginResources`; `GitlabCiIconProvider`,
 `GithubYamlIconProvider` / `githubYamlFileDetection.kt`. Observed in
 PyCharm 2026.2.3 on a project root: the Docker, Docker Compose,
-`.dockerignore`, pre-commit and INI icons (closed-source plugins; Pyoxide
-draws its own), `Dockerfile.*` drawn as text.
+`.dockerignore` and INI icons (closed-source plugins; Pyoxide
+draws its own; the YAML icon is drawn anew too), pre-commit files with the
+plain YAML icon, `Dockerfile.*` drawn as text.
