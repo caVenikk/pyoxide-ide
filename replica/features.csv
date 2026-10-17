@@ -39,7 +39,7 @@ Open a SQLite file directly,db-gui,should,yes,no,feedback
 SQL*Plus commands in the Oracle console (DESCRIBE / EXEC),db-gui,should,no,no,own feature; feedback
 psql / sqlite3 meta-commands in the console (subset),db-gui,could,no,no,own feature; feedback
 Text buffer and editing,editor,must,yes,partial,"rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); files changed on disk reloaded, File Cache Conflict, Reload All from Disk (#36)"
-"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,"New UI layout and Islands themes; toolbar file path; run widget and Run tool window work for Current File; interpreter status widget; other stripe buttons and status widgets are placeholders; native caption on Windows/Linux"
+"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,New UI layout and Islands themes; toolbar file path; run widget and Run tool window work for Current File; interpreter status widget; other stripe buttons and status widgets are placeholders; native caption on Windows/Linux
 Python syntax highlighting,editor,must,yes,yes,tree-sitter off the UI thread mapped to theme text roles
 Tabs and split views,editor,must,yes,partial,tabs with modified marker and keyboard switching; no split views
 File tree and project model,editor,must,yes,partial,"open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; New (File, Directory, Python File / Package), Rename, Delete to the trash, Cut / Copy / Paste, Copy / Move dialogs, drag and drop, Copy Path (#37); no multi-selection (#125), no Safe Delete or rename with usages (#123)"
@@ -86,11 +86,11 @@ Debug the current file and run configurations (debugpy over DAP),run-debug,must,
 "Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun)",run-debug,must,yes,yes,Community; keys of the macOS and Windows keymaps (#165); debug actions not yet on the Keymap page
 "Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,yes,"Community; stoppable lines as the reference, hover icon, state icons, follow edits (#164)"
 "Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,partial,"Community; condition, popup, dialog (#164); no completion in the condition, Mute shown per project"
-Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,partial,"Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200)"
+Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,partial,Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200)
 Frames list and thread chooser (library frames folded),run-debug,must,yes,no,Community (#90)
 "Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,no,Community (#90)
 Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
-Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,partial,"Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check"
+Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,partial,Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check
 "Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community
 Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; watches kept per run configuration
 "Logging breakpoints (log message, stack trace, Evaluate and log)",run-debug,should,yes,no,Community
@@ -133,9 +133,9 @@ Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; 
 Rollback of files (Rollback Changes dialog),vcs,must,yes,yes,Community (#170)
 "Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,no,Community (#91)
 "VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind)",vcs,must,yes,yes,"Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28)"
-"Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,partial,"Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch wait for #170 #172, favourites not saved"
-"Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected)",vcs,must,yes,no,Community; credentials through the user's helper and ssh-agent (#91)
-"Update Project, Fetch and Pull",vcs,must,yes,no,Community (#91)
+"Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,partial,"Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch work (#172), favourites not saved"
+"Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected)",vcs,must,yes,yes,"Community; credentials through the user's helper and ssh-agent (#91); push dialog, force-with-lease, Commit and Push (#172)"
+"Update Project, Fetch and Pull",vcs,must,yes,partial,"Community (#91); merge/rebase with stash, fetch, pull (#172); no askpass, choices not saved"
 Create Git Repository for a project without version control,vcs,must,yes,no,Community (#91)
 Git main menu and VCS Operations popup,vcs,must,yes,no,Community (#91)
 Annotate with Git Blame,vcs,should,yes,no,Community
@@ -158,7 +158,7 @@ System Settings page (autosave and sync of external changes),settings,must,yes,y
 "Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,yes,"Community; ADR 0018; VS Code keymaps from Community data, Settings, gear menu, Quick Switch Scheme (#40); no Zed keymap (no permissive source)"
 Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,yes,Community (#40)
 Editor > Font page,settings,must,yes,yes,"Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants"
-Editor > General page (soft wraps),settings,must,yes,partial,"Community; Soft Wraps group only (#154)"
+Editor > General page (soft wraps),settings,must,yes,partial,Community; Soft Wraps group only (#154)
 "Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,no,Community (#75)
 "Add Python Interpreter dialog (new virtualenv or uv, existing interpreter)",settings,must,yes,no,Community; through py-env (#75)
 Configured interpreters as an application list with one-time import from the reference,settings,must,yes,no,Community; interpreters of the reference that still exist (#75)
