@@ -27,17 +27,47 @@ use crate::breakpoints::gutter::{Gutter, Tooltip};
 use crate::breakpoints::popup::OpenPopup;
 use crate::breakpoints::{presentation, storage_path};
 use crate::hook::DebugHook;
+use crate::session::DebugToolWindow;
+use crate::session::commands::*;
+use crate::session::execution_point::ExecutionPoint;
 
 /// How the debugger UI gets the syntax colours of a file for the
 /// Breakpoints dialog's source preview.
 pub type Highlighters = Rc<dyn Fn(&Path) -> Option<Box<dyn editor::Highlighter>>>;
 
 /// What the debugger UI asks of the window.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DebuggerViewEvent {
     /// Open a file at a line (from 1): Jump to Source of the Breakpoints
     /// dialog.
-    OpenAt { path: PathBuf, line: u32 },
+    OpenAt {
+        path: PathBuf,
+        line: u32,
+    },
+    /// Show a line (from 1) where the program is suspended, without
+    /// bringing the window to the front.
+    Navigate {
+        path: PathBuf,
+        line: u32,
+    },
+    /// Show the Debug tool window (and move the focus into it).
+    ShowToolWindow {
+        activate: bool,
+    },
+    HideToolWindow,
+    /// The last session's tab was closed: the tool window hides and its
+    /// stripe button goes.
+    Emptied,
+    /// A message for the status bar.
+    Message(String),
+    /// A balloon.
+    Notify(ui::notification::Notification),
+    /// A console link was followed.
+    OpenLink(console::LinkTarget),
+    /// The toolbar's More menu, at a window position or under its button.
+    MoreMenu(Option<gpui::Point<gpui::Pixels>>),
+    /// A Rerun waits for the window ([`DebuggerView::restart_pending`]).
+    Restart,
 }
 
 /// The debugger UI of a window.
@@ -64,6 +94,17 @@ pub struct DebuggerView {
     /// Windows and popups take the focus when they open (off for windows
     /// opened in the background).
     pub(crate) activate: bool,
+    /// The Debug tool window's content.
+    pub(crate) tool_window: Entity<DebugToolWindow>,
+    /// Where the selected session is suspended, as the editors show it.
+    pub(crate) execution: Option<ExecutionPoint>,
+    /// The stop the editor was taken to last.
+    pub(crate) navigated: Option<ExecutionPoint>,
+    /// Debug runs being prepared, by what the window started.
+    pub(crate) starting: Vec<Option<String>>,
+    /// A Rerun to start once its session ended.
+    pub(crate) pending_restart: Option<crate::session::control::PendingRestart>,
+    _tool_window_events: gpui::Subscription,
 }
 
 impl EventEmitter<DebuggerViewEvent> for DebuggerView {}
@@ -85,6 +126,10 @@ impl DebuggerView {
             }
         })
         .detach();
+        let tool_window = cx.new(DebugToolWindow::new);
+        let tool_window_events = cx.subscribe(&tool_window, |this, _, event, cx| {
+            this.tool_window_event(event, cx)
+        });
         Self {
             hook,
             debugger: None,
@@ -99,6 +144,12 @@ impl DebuggerView {
             highlighters: None,
             tooltip_delay: TOOLTIP_DELAY,
             activate: true,
+            tool_window,
+            execution: None,
+            navigated: None,
+            starting: Vec::new(),
+            pending_restart: None,
+            _tool_window_events: tool_window_events,
         }
     }
 
@@ -134,7 +185,14 @@ impl DebuggerView {
         self.close_dialog(cx);
         self.tooltip = None;
         self.gutters.clear();
+        // The previous project's sessions end with it.
+        while self.tool_window.read(cx).tab_count() > 0 {
+            self.close_session(Some(0), cx);
+        }
+        self.execution = None;
+        self.navigated = None;
         if let Some(debugger) = self.debugger.take() {
+            drop(debugger.stop_all());
             debugger.flush();
         }
         self._events = None;
@@ -144,7 +202,7 @@ impl DebuggerView {
         };
         let generation = self.generation;
         let root = root.to_owned();
-        let open = cx.background_spawn(async move { Debugger::open(&root, hook.0) });
+        let open = cx.background_spawn(async move { Debugger::open(&root, hook.provider) });
         self._load = Some(cx.spawn(async move |this, cx| {
             let debugger = open.await;
             let _ = this.update(cx, |this, cx| {
@@ -170,13 +228,46 @@ impl DebuggerView {
             }
         }));
         self.debugger = Some(debugger);
+        self.sync_muted(cx);
         self.refresh_all(cx);
         cx.notify();
     }
 
+    /// The Mute button shows whether breakpoints are muted.
+    fn sync_muted(&mut self, cx: &mut Context<Self>) {
+        let muted = self.debugger.as_ref().is_some_and(Debugger::is_muted);
+        self.tool_window.update(cx, |w, cx| {
+            if w.muted != muted {
+                w.muted = muted;
+                cx.notify();
+            }
+        });
+    }
+
     /// Breakpoints, their verification or the mute state changed: the
-    /// gutters, the popup and the dialog show them again.
+    /// gutters, the popup and the dialog show them again; sessions changed:
+    /// their tabs, consoles and the execution point follow.
     fn debugger_events(&mut self, events: &[DebuggerEvent], cx: &mut Context<Self>) {
+        let mut changed: Vec<debugger::SessionId> = Vec::new();
+        for event in events {
+            match event {
+                DebuggerEvent::SessionChanged(id) | DebuggerEvent::SessionEnded(id) => {
+                    if !changed.contains(id) {
+                        changed.push(*id);
+                    }
+                }
+                DebuggerEvent::Console(id) => self.attach_console(*id, cx),
+                DebuggerEvent::Output {
+                    session,
+                    category,
+                    text,
+                } => self.session_output(*session, category, text, cx),
+                _ => {}
+            }
+        }
+        for id in changed {
+            self.refresh_session(id, cx);
+        }
         let shown = events.iter().any(|e| {
             matches!(
                 e,
@@ -189,6 +280,7 @@ impl DebuggerView {
         if !shown {
             return;
         }
+        self.sync_muted(cx);
         self.refresh_all(cx);
         // A removed breakpoint takes its popup with it.
         if let (Some(p), Some(d)) = (&self.popup, &self.debugger)
@@ -215,6 +307,7 @@ impl DebuggerView {
         self.gutters
             .insert(editor.entity_id(), Gutter::new(editor.clone(), events));
         self.refresh_editor(editor.entity_id(), cx);
+        self.show_execution_point_in(editor, cx);
     }
 
     /// A tab was closed.
@@ -253,7 +346,7 @@ impl DebuggerView {
     /// The file and line (from 1) a command acts on: the ones given, or the
     /// caret's in the active editor; with the editor of the file when it is
     /// open.
-    fn target(
+    pub(crate) fn target(
         &self,
         file: Option<&str>,
         line: Option<u32>,
@@ -648,6 +741,10 @@ impl DebuggerView {
             .and_then(|d| d.read(cx).ok())
             .map(|d| d.state_json(cx))
             .unwrap_or(Json::Null);
+        let (tool_window, execution_point) = self.sessions_json(cx);
+        state["tool_window"] = tool_window;
+        state["execution_point"] = execution_point;
+        state["starting"] = json!(self.starting.len());
         state
     }
 
@@ -706,7 +803,7 @@ pub fn forward_actions<E: InteractiveElement>(
         v.update(cx, |v, cx| v.toggle_enabled_action(a, editor.as_ref(), cx))
     });
     let v = view.clone();
-    let editor = active;
+    let editor = active.clone();
     let el = el.on_action(move |a: &EditBreakpoint, window, cx| {
         v.update(cx, |v, cx| v.edit_action(a, editor.as_ref(), window, cx))
     });
@@ -717,8 +814,78 @@ pub fn forward_actions<E: InteractiveElement>(
     let v = view.clone();
     let el =
         el.on_action(move |a: &MuteBreakpoints, _, cx| v.update(cx, |v, cx| v.mute_action(a, cx)));
-    let v = view;
-    el.on_action(move |a: &AddExceptionBreakpoint, window, cx| {
+    let v = view.clone();
+    let el = el.on_action(move |a: &AddExceptionBreakpoint, window, cx| {
         v.update(cx, |v, cx| v.add_exception_action(a, window, cx))
-    })
+    });
+    forward_session_actions(el, view, active)
+}
+
+/// The session commands of the toolbar, the Run menu and the keys.
+fn forward_session_actions<E: InteractiveElement>(
+    el: E,
+    view: Entity<DebuggerView>,
+    active: Option<Entity<Editor>>,
+) -> E {
+    let v = view.clone();
+    let el = el.on_action(move |a: &Resume, _, cx| v.update(cx, |v, cx| v.resume_action(a, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |a: &Pause, _, cx| v.update(cx, |v, cx| v.pause_action(a, cx)));
+    let v = view.clone();
+    let el =
+        el.on_action(move |a: &StepOver, _, cx| v.update(cx, |v, cx| v.step_over_action(a, cx)));
+    let v = view.clone();
+    let el =
+        el.on_action(move |a: &StepInto, _, cx| v.update(cx, |v, cx| v.step_into_action(a, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |a: &StepIntoMyCode, _, cx| {
+        v.update(cx, |v, cx| v.step_into_my_code_action(a, cx))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |a: &StepOut, _, cx| v.update(cx, |v, cx| v.step_out_action(a, cx)));
+    let v = view.clone();
+    let editor = active.clone();
+    let el = el.on_action(move |a: &RunToCursor, _, cx| {
+        v.update(cx, |v, cx| {
+            v.run_to_cursor(a.file.as_deref(), a.line, false, editor.as_ref(), cx)
+        })
+    });
+    let v = view.clone();
+    let editor = active;
+    let el = el.on_action(move |a: &ForceRunToCursor, _, cx| {
+        v.update(cx, |v, cx| {
+            v.run_to_cursor(a.file.as_deref(), a.line, true, editor.as_ref(), cx)
+        })
+    });
+    let v = view.clone();
+    let el = el.on_action(move |a: &ShowExecutionPoint, _, cx| {
+        v.update(cx, |v, cx| v.show_execution_point_action(a, cx))
+    });
+    let v = view.clone();
+    let el = el
+        .on_action(move |a: &StopSession, _, cx| v.update(cx, |v, cx| v.stop_session(a.index, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |a: &RerunSession, window, cx| {
+        v.update(cx, |v, cx| v.rerun_session(a.index, window, cx))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |a: &CloseSession, _, cx| {
+        v.update(cx, |v, cx| v.close_session(a.index, cx))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |a: &SelectSession, _, cx| {
+        v.update(cx, |v, cx| v.select_session(a.index, cx))
+    });
+    let v = view.clone();
+    let el =
+        el.on_action(move |a: &SelectContent, _, cx| v.update(cx, |v, cx| v.select_content(a, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |_: &MoreActions, _, cx| {
+        v.update(cx, |v, cx| {
+            let position = v.tool_window().read(cx).more_menu_position();
+            cx.emit(DebuggerViewEvent::MoreMenu(position))
+        })
+    });
+    let v = view;
+    el.on_action(move |a: &TypeInput, _, cx| v.update(cx, |v, cx| v.type_input(a, cx)))
 }

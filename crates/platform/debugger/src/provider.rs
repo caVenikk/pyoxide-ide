@@ -4,7 +4,9 @@
 //! breakpoints, what it imports from the reference, and its breakpoint
 //! types (titles, stoppable lines, exception options).
 
+use std::any::Any;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use dap_client::Transport;
 use process::CommandLine;
@@ -17,13 +19,46 @@ use crate::idea::IdeaTypes;
 pub use dap_client::{ExceptionFilter, ExceptionFilterSetting};
 
 /// A debug run: a run configuration of the project.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DebugRequest {
     pub root: PathBuf,
     pub configuration: RunConfiguration,
+    /// The project's source roots.
+    pub source_roots: Vec<PathBuf>,
+    /// What the product found for this run on the UI thread before the
+    /// session starts (the interpreter it picked for it), for its own
+    /// [`DebugAdapterProvider::prepare`] to read back; `None` when the
+    /// product has no such step.
+    pub resolved: Option<Arc<dyn Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for DebugRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DebugRequest")
+            .field("root", &self.root)
+            .field("configuration", &self.configuration.name)
+            .field("source_roots", &self.source_roots)
+            .field("resolved", &self.resolved.is_some())
+            .finish()
+    }
 }
 
 impl DebugRequest {
+    /// A request without source roots or resolved data.
+    pub fn new(root: impl Into<PathBuf>, configuration: RunConfiguration) -> Self {
+        Self {
+            root: root.into(),
+            configuration,
+            source_roots: Vec::new(),
+            resolved: None,
+        }
+    }
+
+    /// What the product resolved for the request, when it is a `T`.
+    pub fn resolved<T: Any + Send + Sync>(&self) -> Option<&T> {
+        self.resolved.as_deref()?.downcast_ref()
+    }
+
     /// The key of the watches the session shows: the configuration's
     /// type, as the reference keys them.
     pub fn watches_key(&self) -> &str {
@@ -59,10 +94,15 @@ pub struct AdapterLaunch {
     pub kind: LaunchKind,
     /// The adapter's own `launch` or `attach` arguments.
     pub arguments: Value,
+    /// The program's standard input comes from this file ("Redirect input
+    /// from"); its console then takes no input.
+    pub input_file: Option<PathBuf>,
 }
 
-/// A request sent before and after one Step Into My Code (debugpy:
-/// `setDebuggerProperty` with `justMyCode` on, then off).
+/// Requests sent around one Step Into My Code: `before` is answered before
+/// the step is sent, `after` is sent at the next stop and answered before
+/// the stop's threads and frames are asked for (debugpy: its library
+/// filter on for the one step).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepIntoMyCode {
     pub before: (String, Value),
@@ -103,8 +143,22 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         IdeaTypes::default()
     }
 
+    /// A run configuration can be debugged: its type has a launch here
+    /// (the Debug buttons are enabled for it). Called while drawing: no
+    /// I/O.
+    fn can_debug(&self, configuration: &RunConfiguration) -> bool {
+        let _ = configuration;
+        true
+    }
+
     /// Step Into My Code; `None` makes it a plain Step Into.
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
+        None
+    }
+
+    /// The title of the balloon of a session whose debugger could not
+    /// connect or failed; `None`: the platform's own.
+    fn connection_failed_title(&self) -> Option<String> {
         None
     }
 

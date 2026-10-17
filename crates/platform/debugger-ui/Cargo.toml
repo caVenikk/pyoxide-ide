@@ -1,16 +1,21 @@
 [package]
 name = "debugger-ui"
-description = "Debugger UI of Pyoxide IDE on GPUI: breakpoints in the editor gutter, the breakpoint properties popup, the Breakpoints dialog and the debug.* breakpoint commands"
+description = "Debugger UI of Pyoxide IDE on GPUI: debug sessions and the Debug tool window, the execution point, breakpoints in the editor gutter, the breakpoint properties popup, the Breakpoints dialog and the debug.* commands"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+console.workspace = true
+console-ui.workspace = true
 debugger.workspace = true
 editor.workspace = true
 flume.workspace = true
+futures.workspace = true
 gpui.workspace = true
+process.workspace = true
+run-config.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 text.workspace = true

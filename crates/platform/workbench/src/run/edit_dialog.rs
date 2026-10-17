@@ -91,6 +91,9 @@ ui::ui_commands! {
     /// Apply, close and run.
     DialogRun => "run.configurations.dialog.run", "Run",
         "Saves the dialog's changes, closes it and runs the selected configuration.";
+    /// Apply, close and debug.
+    DialogDebug => "run.configurations.dialog.debug", "Debug",
+        "Saves the dialog's changes, closes it and debugs the selected configuration.";
     /// Expand the selected node.
     DialogExpand => "run.configurations.dialog.expand", "Expand",
         "Expands the selected type or folder of the dialog's tree, or selects its first child.";
@@ -168,7 +171,13 @@ pub enum EditDialogEvent {
     /// Run was chosen: the changes are applied; the dialog closes and the
     /// configuration runs.
     Run(ConfigKey),
+    /// Debug was chosen from the Run button's executors: the same, and the
+    /// configuration is debugged.
+    Debug(ConfigKey),
 }
+
+/// Whether the product can debug a configuration (the Run button's Debug).
+pub type Debuggable = std::rc::Rc<dyn Fn(&RunConfiguration) -> bool>;
 
 /// A field of the form and its text field.
 struct FieldView {
@@ -218,6 +227,8 @@ pub struct EditDialog {
     /// without a data context, as when opened from the empty Run tool
     /// window).
     run_button: bool,
+    /// Which configurations Debug is offered for.
+    debuggable: Option<Debuggable>,
     /// The project folder: path fields show their paths expanded from it.
     root: Option<std::path::PathBuf>,
     _subscriptions: Vec<Subscription>,
@@ -284,6 +295,7 @@ impl EditDialog {
             hints: false,
             tag_focus: HashMap::new(),
             run_button: true,
+            debuggable: None,
             root,
             _subscriptions: Vec::new(),
         };
@@ -320,6 +332,19 @@ impl EditDialog {
     pub fn with_run_button(mut self, shown: bool) -> Self {
         self.run_button = shown;
         self
+    }
+
+    /// Which configurations the Run button's executors can debug.
+    pub fn with_debug(mut self, debuggable: Debuggable) -> Self {
+        self.debuggable = Some(debuggable);
+        self
+    }
+
+    /// The selected configuration can be debugged.
+    fn can_debug(&self) -> bool {
+        self.selected_config()
+            .filter(|c| !c.is_unsupported())
+            .is_some_and(|c| self.debuggable.as_ref().is_some_and(|d| d(c)))
     }
 
     /// Where the focus is in the tree.
@@ -1301,6 +1326,17 @@ impl EditDialog {
         cx.emit(EditDialogEvent::Run(key));
     }
 
+    fn on_debug(&mut self, _: &DialogDebug, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.can_debug() {
+            return;
+        }
+        let Some(key) = self.selected_config().map(RunConfiguration::key) else {
+            return;
+        };
+        self.apply(cx);
+        cx.emit(EditDialogEvent::Debug(key));
+    }
+
     fn on_expand(&mut self, _: &DialogExpand, window: &mut Window, cx: &mut Context<Self>) {
         self.expand(window, cx);
     }
@@ -1348,7 +1384,9 @@ impl EditDialog {
     fn open_executors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let items = vec![
             MenuItem::action("Run", DialogRun).icon(IconName::RUN),
-            MenuItem::unavailable("Debug").icon(IconName::DEBUG),
+            MenuItem::action("Debug", DialogDebug)
+                .icon(IconName::DEBUG)
+                .enabled(self.can_debug()),
         ];
         let at = self.run_anchor.get().bottom_left();
         self.open_menu(items, None, at, window, cx);
@@ -1431,6 +1469,7 @@ impl EditDialog {
             "prompt": self.prompt.as_ref().map(|(d, _)| d.read(cx).state_json()),
             "modify_options_underlined": ui::pointer::link_hovered(&"run-dialog-modify-options".into()),
             "run_button": self.run_button,
+            "debug_enabled": self.can_debug(),
         })
     }
 }
@@ -2470,6 +2509,7 @@ impl Render for EditDialog {
             .on_action(cx.listener(Self::on_ok))
             .on_action(cx.listener(Self::on_cancel))
             .on_action(cx.listener(Self::on_run))
+            .on_action(cx.listener(Self::on_debug))
             .on_action(cx.listener(Self::on_expand))
             .on_action(cx.listener(Self::on_collapse))
             .on_action(cx.listener(Self::on_browse))

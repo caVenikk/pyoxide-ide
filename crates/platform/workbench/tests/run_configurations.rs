@@ -279,7 +279,9 @@ fn the_reference_configurations_show_in_the_run_widget(cx: &mut TestAppContext) 
         .iter()
         .map(|b| b["tooltip"].clone())
         .collect();
-    assert_eq!(inline, [json!("Run 'alpha'"), json!("Debug 'alpha'")]);
+    // This product has no debugger: no Debug button
+    // (`RunSpecifiedConfigExecutorAction` without a runner is hidden).
+    assert_eq!(inline, [json!("Run 'alpha'")]);
     let hidden_beta = items.iter().find(|i| i["label"] == json!("beta")).unwrap();
     assert_eq!(hidden_beta["hidden"], json!(true));
     assert_eq!(hidden_beta["secondary"], json!("Group"));

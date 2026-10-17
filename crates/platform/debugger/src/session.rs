@@ -206,8 +206,21 @@ struct Data {
     debuggee: Option<ProcessHandle>,
     debuggee_pid: Option<u32>,
     console: Option<flume::Receiver<ProcessEvent>>,
+    /// The program's command line as its console shows it first.
+    console_command: Option<String>,
     /// Sent at the next stop (after Step Into My Code).
     after_step: Option<(String, Value)>,
+    /// Run to Cursor: where the program runs to.
+    run_to: Option<RunTo>,
+}
+
+/// Run to Cursor's target: a breakpoint of the session only, on top of the
+/// file's breakpoints, or alone (Force Run to Cursor ignores the others).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunTo {
+    file: PathBuf,
+    line: u32,
+    ignore_breakpoints: bool,
 }
 
 pub(crate) struct SessionInner {
@@ -217,6 +230,8 @@ pub(crate) struct SessionInner {
     debugger: Weak<DebuggerInner>,
     client: OnceLock<Client>,
     step_into_my_code: Option<StepIntoMyCode>,
+    /// "Redirect input from": the file the program reads.
+    input_file: Option<PathBuf>,
     data: Mutex<Data>,
 }
 
@@ -246,6 +261,7 @@ impl Session {
         watches_key: String,
         debugger: Weak<DebuggerInner>,
         step_into_my_code: Option<StepIntoMyCode>,
+        input_file: Option<PathBuf>,
     ) -> Self {
         Self {
             inner: Arc::new(SessionInner {
@@ -255,6 +271,7 @@ impl Session {
                 debugger,
                 client: OnceLock::new(),
                 step_into_my_code,
+                input_file,
                 data: Mutex::new(Data {
                     phase: Phase::Starting,
                     configured: false,
@@ -279,7 +296,9 @@ impl Session {
                     debuggee: None,
                     debuggee_pid: None,
                     console: None,
+                    console_command: None,
                     after_step: None,
+                    run_to: None,
                 }),
             }),
         }
@@ -393,6 +412,23 @@ impl Session {
         Some((data.debuggee.clone()?, events))
     }
 
+    /// The command line the program was started with (`runInTerminal`), as
+    /// its console shows it first.
+    pub fn console_command(&self) -> Option<String> {
+        lock(&self.inner.data).console_command.clone()
+    }
+
+    /// "Redirect input from": the file the program's standard input comes
+    /// from.
+    pub fn input_file(&self) -> Option<&Path> {
+        self.inner.input_file.as_deref()
+    }
+
+    /// The program's process, while it runs.
+    pub fn debuggee(&self) -> Option<ProcessHandle> {
+        lock(&self.inner.data).debuggee.clone()
+    }
+
     fn client(&self) -> Option<Client> {
         self.inner.client.get().cloned()
     }
@@ -456,8 +492,10 @@ impl Session {
             return;
         };
         let (muted, breakpoints) = debugger.breakpoints_of(file);
+        let run_to = lock(&self.inner.data).run_to.clone();
+        let ignored = run_to.as_ref().is_some_and(|r| r.ignore_breakpoints);
         let capabilities = client.capabilities();
-        let sent: Vec<(BreakpointId, SourceBreakpoint)> = if muted {
+        let sent: Vec<(BreakpointId, SourceBreakpoint)> = if muted || ignored {
             Vec::new()
         } else {
             breakpoints
@@ -475,7 +513,16 @@ impl Session {
             }
             data.adapter_ids.retain(|_, id| !ids.contains(id));
         }
-        let list: Vec<SourceBreakpoint> = sent.into_iter().map(|(_, s)| s).collect();
+        let mut list: Vec<SourceBreakpoint> = sent.into_iter().map(|(_, s)| s).collect();
+        // Run to Cursor's target suspends whatever a breakpoint of its line
+        // says until the next stop; one of its own goes last, where its
+        // answer has no breakpoint of the project to go to.
+        if let Some(run_to) = run_to.filter(|r| r.file == file) {
+            match list.iter_mut().find(|b| b.line == run_to.line) {
+                Some(b) => *b = SourceBreakpoint::at(run_to.line),
+                None => list.push(SourceBreakpoint::at(run_to.line)),
+            }
+        }
         let weak = Arc::downgrade(&self.inner);
         client.set_breakpoints(file, &list).on_done(move |result| {
             let Some(session) = weak.upgrade().map(|inner| Session { inner }) else {
@@ -521,7 +568,15 @@ impl Session {
         let (Some(client), Some(debugger)) = (self.client(), self.inner.debugger.upgrade()) else {
             return;
         };
-        let filters = debugger.exception_filters(&client.capabilities().exception_filters);
+        let ignored = lock(&self.inner.data)
+            .run_to
+            .as_ref()
+            .is_some_and(|r| r.ignore_breakpoints);
+        let filters = if ignored {
+            Vec::new()
+        } else {
+            debugger.exception_filters(&client.capabilities().exception_filters)
+        };
         client.set_exception_breakpoints(&filters).detach();
     }
 
@@ -572,7 +627,7 @@ impl Session {
     // ---- events ----------------------------------------------------------------
 
     fn stopped(&self, stopped: dap_client::Stopped) {
-        let (generation, thread, after_step, hits) = {
+        let (generation, thread, after_step, hits, run_to) = {
             let mut data = lock(&self.inner.data);
             if matches!(data.phase, Phase::Stopping | Phase::Ended) {
                 return;
@@ -604,19 +659,59 @@ impl Session {
                 data.selected_thread,
                 data.after_step.take(),
                 hits,
+                data.run_to.take(),
             )
         };
         self.changed();
         let Some(client) = self.client() else {
             return;
         };
-        if let Some((command, arguments)) = after_step {
-            client.custom(&command, arguments).detach();
+        // Run to Cursor is over: the breakpoints as they are again.
+        if let Some(run_to) = run_to {
+            if run_to.ignore_breakpoints {
+                let mut files = self
+                    .inner
+                    .debugger
+                    .upgrade()
+                    .map(|d| d.breakpoint_files())
+                    .unwrap_or_default();
+                if !files.contains(&run_to.file) {
+                    files.push(run_to.file);
+                }
+                for file in &files {
+                    self.send_breakpoints(file);
+                }
+                self.send_exceptions();
+            } else {
+                self.send_breakpoints(&run_to.file);
+            }
         }
         if let Some(debugger) = self.inner.debugger.upgrade() {
             debugger.remove_temporary(&hits);
         }
-        if stopped.reason == "exception"
+        let reason = stopped.reason;
+        match after_step {
+            // The frames are asked for once the product's request after
+            // the step is answered (it may change what they show).
+            Some((command, arguments)) => {
+                let weak = Arc::downgrade(&self.inner);
+                client.custom(&command, arguments).on_done(move |_| {
+                    if let Some(inner) = weak.upgrade() {
+                        Session { inner }.load_stop(&reason, thread, generation);
+                    }
+                });
+            }
+            None => self.load_stop(&reason, thread, generation),
+        }
+    }
+
+    /// What a stop shows: the exception, the threads, then the frames of
+    /// the selected thread.
+    fn load_stop(&self, reason: &str, thread: Option<i64>, generation: u64) {
+        let Some(client) = self.client() else {
+            return;
+        };
+        if reason == "exception"
             && let Some(thread) = thread
             && client.capabilities().exception_info
         {
@@ -849,6 +944,7 @@ impl Session {
                     data.debuggee = Some(handle);
                     data.debuggee_pid = Some(pid);
                     data.console = Some(events);
+                    data.console_command = Some(command.display());
                 }
                 responder.run_in_terminal(Ok((Some(pid), None)));
                 self.emit(DebuggerEvent::Console(self.inner.id));
@@ -955,18 +1051,75 @@ impl Session {
         self.run(|client, thread| client.step_into(thread))
     }
 
-    /// Step Into My Code: the product's request before the step and after
-    /// the next stop, or a plain Step Into.
+    /// Step Into My Code: the product's request, answered before the step
+    /// is sent, and its request after the next stop; a plain Step Into
+    /// when the product has none.
     pub fn step_into_my_code(&self) -> Pending<()> {
-        if let Some(step) = &self.inner.step_into_my_code
-            && let Ok((client, _)) = self.thread()
-        {
-            client
-                .custom(&step.before.0, step.before.1.clone())
-                .detach();
-            lock(&self.inner.data).after_step = Some(step.after.clone());
+        let Some(step) = self.inner.step_into_my_code.clone() else {
+            return self.step_into();
+        };
+        let (client, thread) = match self.thread() {
+            Ok(found) => found,
+            Err(error) => return ready(Err(error)),
+        };
+        let weak = Arc::downgrade(&self.inner);
+        let (tx, rx) = oneshot::channel();
+        let (command, arguments) = step.before;
+        let stepping = client.clone();
+        client.custom(&command, arguments).on_done(move |before| {
+            let Some(inner) = weak.upgrade() else {
+                let _ = tx.send(Err(DebugError::Ended));
+                return;
+            };
+            // When the product's request failed, the step is a plain one.
+            if before.is_ok() {
+                lock(&inner.data).after_step = Some(step.after);
+            }
+            let weak = Arc::downgrade(&inner);
+            stepping.step_into(thread).on_done(move |result| {
+                if result.is_ok()
+                    && let Some(inner) = weak.upgrade()
+                {
+                    Session { inner }.resumed();
+                }
+                let _ = tx.send(result.map_err(DebugError::from));
+            });
+        });
+        rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed()
+    }
+
+    /// Run to Cursor: the program runs on to a line and stops there, at a
+    /// breakpoint of the session only (removed at the next stop); with
+    /// `ignore_breakpoints` (Force Run to Cursor) the project's breakpoints
+    /// do not suspend it on the way.
+    pub fn run_to_position(&self, file: &Path, line: u32, ignore_breakpoints: bool) -> Pending<()> {
+        if let Err(error) = self.thread() {
+            return ready(Err(error));
         }
-        self.step_into()
+        let files = {
+            let mut data = lock(&self.inner.data);
+            data.run_to = Some(RunTo {
+                file: file.to_owned(),
+                line: line.max(1),
+                ignore_breakpoints,
+            });
+            let mut files = vec![file.to_owned()];
+            if ignore_breakpoints {
+                files.extend(data.sent.keys().cloned());
+            }
+            files.sort();
+            files.dedup();
+            files
+        };
+        for file in &files {
+            self.send_breakpoints(file);
+        }
+        if ignore_breakpoints {
+            self.send_exceptions();
+        }
+        // `continue` is sent after the breakpoints: the adapter takes the
+        // requests in order.
+        self.resume()
     }
 
     pub fn step_out(&self) -> Pending<()> {
@@ -1049,6 +1202,18 @@ impl Session {
             client.kill();
         }
         finished
+    }
+
+    /// Kills the program's and the adapter's process trees at once (the
+    /// application quits).
+    pub fn kill(&self) {
+        let debuggee = lock(&self.inner.data).debuggee.clone();
+        if let Some(debuggee) = debuggee {
+            let _ = debuggee.kill();
+        }
+        if let Some(client) = self.client() {
+            client.kill();
+        }
     }
 
     pub fn select_thread(&self, thread: i64) {

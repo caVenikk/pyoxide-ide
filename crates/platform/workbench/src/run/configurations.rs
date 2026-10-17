@@ -388,7 +388,12 @@ impl RunConfigs {
     /// A configuration was started: first in the history, its executor
     /// remembered.
     pub fn started(&mut self, key: &ConfigKey, cx: &mut Context<Self>) {
-        self.list.started(key, "Run");
+        self.started_with(key, "Run", cx);
+    }
+
+    /// A configuration was started with an executor (`Run`, `Debug`).
+    pub fn started_with(&mut self, key: &ConfigKey, executor: &str, cx: &mut Context<Self>) {
+        self.list.started(key, executor);
         self.save(cx);
         cx.notify();
     }

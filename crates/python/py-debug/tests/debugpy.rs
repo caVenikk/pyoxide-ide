@@ -73,10 +73,7 @@ fn configuration(script: &str, edit: impl FnOnce(&mut PythonOptions)) -> RunConf
 }
 
 fn request(root: &Path, configuration: RunConfiguration) -> DebugRequest {
-    DebugRequest {
-        root: root.to_owned(),
-        configuration,
-    }
+    DebugRequest::new(root, configuration)
 }
 
 fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {

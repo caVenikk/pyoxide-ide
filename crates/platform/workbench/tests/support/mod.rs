@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,107 @@ use workbench::{RunHook, RunProvider, RunRequest, RunSpec};
 
 thread_local! {
     static SCRIPT: RefCell<String> = const { RefCell::new(String::new()) };
+    static DEBUG_SCRIPTS: RefCell<VecDeque<Vec<serde_json::Value>>> =
+        const { RefCell::new(VecDeque::new()) };
+}
+
+/// The script of the adapter of a coming debug session (`dap_client::fake`),
+/// after the ones pushed before. (The test's executor prepares sessions on
+/// its own thread.)
+pub fn push_debug_script(script: Vec<serde_json::Value>) {
+    DEBUG_SCRIPTS.with(|s| s.borrow_mut().push_back(script));
+}
+
+/// Requests a scripted adapter drops unanswered: breakpoints, and what the
+/// frames and variables views ask for.
+const DEBUG_IGNORED: [&str; 5] = [
+    "setBreakpoints",
+    "setExceptionBreakpoints",
+    "scopes",
+    "variables",
+    "source",
+];
+
+/// A scripted adapter's start: its capabilities, `launch`, the
+/// configuration, then the program started with `runInTerminal` in `cwd`
+/// (`program`: the command and its arguments; none without).
+pub fn debug_start(cwd: &Path, program: Option<Vec<String>>) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let mut steps = vec![
+        json!({"ignore": DEBUG_IGNORED}),
+        json!({"expect": "initialize"}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true,
+            "supportsTerminateRequest": true}}),
+        json!({"expect": "launch"}),
+        json!({"event": "initialized"}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "launch"}),
+    ];
+    if let Some(args) = program {
+        steps.push(
+            json!({"request": "runInTerminal", "arguments": {"kind": "integrated",
+            "cwd": cwd, "args": args, "env": {}}}),
+        );
+        steps.push(json!({"expect_response": "runInTerminal", "success": true}));
+    }
+    steps
+}
+
+/// A stop of thread 1 at a line of a file (from 1): the stop, the threads
+/// and its one frame.
+pub fn debug_stop(file: &Path, line: u32, reason: &str) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    vec![
+        json!({"event": "stopped", "body": {"reason": reason, "threadId": 1}}),
+        json!({"expect": "threads"}),
+        json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": {"stackFrames": [{"id": 100 + line, "name": "<module>",
+            "line": line, "column": 1, "source": {"path": file}}], "totalFrames": 1}}),
+    ]
+}
+
+/// A request of thread 1 (`next`, `continue`...) answered.
+pub fn debug_answer(command: &str) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    vec![
+        json!({"expect": command, "arguments": {"threadId": 1}}),
+        json!({"respond": null}),
+    ]
+}
+
+/// The program's end as the adapter reports it.
+pub fn debug_end(code: i32) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    vec![
+        json!({"event": "exited", "body": {"exitCode": code}}),
+        json!({"event": "terminated"}),
+    ]
+}
+
+/// A program that prints a line and ends at once on every OS (the
+/// system's shell: it ends well within the session's wait for the
+/// program after the adapter's end, even on a busy machine).
+pub fn quick_program() -> Vec<String> {
+    if cfg!(windows) {
+        ["cmd", "/C", "echo debugged"].map(str::to_owned).to_vec()
+    } else {
+        ["/bin/sh", "-c", "echo debugged"]
+            .map(str::to_owned)
+            .to_vec()
+    }
+}
+
+/// A program that runs until it is stopped.
+pub fn long_program() -> Vec<String> {
+    if cfg!(windows) {
+        ["cmd", "/C", "ping -n 30 127.0.0.1 >NUL"]
+            .map(str::to_owned)
+            .to_vec()
+    } else {
+        ["/bin/sh", "-c", "sleep 30"].map(str::to_owned).to_vec()
+    }
 }
 
 /// The script the next run runs (`sh -c` on Unix, `cmd /V:ON /C` on
@@ -280,12 +382,23 @@ pub fn run_hook() -> RunHook {
 
 /// The debugger of tests: the Python breakpoint types' names, line
 /// breakpoints on the lines of `.py` files that are neither blank nor
-/// comments, no adapter.
+/// comments, and an adapter that runs the next script of
+/// [`push_debug_script`] (none without one).
 pub struct TestDebug;
 
 impl debugger::DebugAdapterProvider for TestDebug {
-    fn prepare(&self, _: &debugger::DebugRequest) -> Result<debugger::AdapterLaunch, String> {
-        Err("no debug adapter in tests".to_owned())
+    fn prepare(&self, request: &debugger::DebugRequest) -> Result<debugger::AdapterLaunch, String> {
+        let script = DEBUG_SCRIPTS
+            .with(|s| s.borrow_mut().pop_front())
+            .ok_or_else(|| "no debug adapter in tests".to_owned())?;
+        Ok(debugger::AdapterLaunch {
+            title: request.configuration.name.clone(),
+            adapter: debugger::Adapter::Transport(dap_client::fake::adapter(script)),
+            adapter_id: "fake".to_owned(),
+            kind: debugger::LaunchKind::Launch,
+            arguments: serde_json::json!({"program": request.configuration.name}),
+            input_file: None,
+        })
     }
 
     fn default_exception_breakpoints(&self) -> Vec<debugger::ExceptionBreakpoint> {

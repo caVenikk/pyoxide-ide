@@ -1327,6 +1327,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "console-ui"
+version = "0.0.1"
+dependencies = [
+ "console",
+ "editor",
+ "flume",
+ "futures",
+ "gpui",
+ "process",
+ "serde_json",
+ "text",
+ "themes",
+ "ui",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1885,11 +1901,16 @@ dependencies = [
 name = "debugger-ui"
 version = "0.0.1"
 dependencies = [
+ "console",
+ "console-ui",
  "dap-client",
  "debugger",
  "editor",
  "flume",
+ "futures",
  "gpui",
+ "process",
+ "run-config",
  "serde",
  "serde_json",
  "tempfile",
@@ -9018,6 +9039,7 @@ dependencies = [
  "code-intel-ui",
  "commands",
  "console",
+ "console-ui",
  "core-graphics 0.24.0",
  "dap-client",
  "debugger",

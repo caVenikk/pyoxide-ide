@@ -12,6 +12,7 @@ chrono.workspace = true
 code-intel-ui.workspace = true
 commands.workspace = true
 console.workspace = true
+console-ui.workspace = true
 debugger-ui.workspace = true
 dirs = "7"
 editor.workspace = true

@@ -146,8 +146,18 @@ Platform (`crates/platform/`, language-agnostic):
   the UI thread), line breakpoints in the gutter through the editor's
   decorations (the hover icon, clicks with modifiers, icons by state,
   tooltips; breakpoints follow edits), the properties popup, the
-  Breakpoints dialog, the `DebugHook` product hook and the breakpoint
+  Breakpoints dialog, debug sessions (the product's resolve step on the
+  UI thread, then the adapter started off it; a tab per session in the
+  Debug tool window with its toolbar, Threads & Variables and its
+  Console, a `console-ui` view of the program started by
+  `runInTerminal`; the execution point as an editor decoration with
+  navigation; Stop, Rerun in the same tab, Run to Cursor, Step Into My
+  Code), the `DebugHook` product hook (provider and resolve step) and the
   commands (`debug.*`, `breakpoint-popup.*`, `breakpoints-dialog.*`).
+- `console-ui`: the console view on GPUI shared by the Run tool window
+  and a debug session's Console: the `console` model in a read-only
+  editor, typed input to the process, the output fed off the UI thread
+  with the exit line, a file as standard input.
 - `code-intel-ui`: the code intelligence of a main window: the product
   hook (`CodeIntelProvider`, `CodeIntelHook`), the `CodeIntelView` the
   workbench reports editors to, the `code.*` and `completion.*` commands.
@@ -235,7 +245,15 @@ users), and so do
 the helper, launch arguments, stoppable lines, exception breakpoints and
 the provider; the helper is fetched by `scripts/fetch-debugpy.py`) and
 `debugger-ui` (#164: breakpoints in the gutter, the properties popup and
-the Breakpoints dialog); the other crates are planned. Crates without a toolkit are tested without GPUI; UI
+the Breakpoints dialog; #165: debug sessions, the Debug tool window and
+the execution point) with `console-ui`; the other crates are planned.
+The workbench's Debug executor (`debug.debug`, `debug.current-file`, the
+run widget's Debug with Resume or Pause in Run's place while the selected
+configuration is debugged, the dropdown's and the Run/Debug
+Configurations dialog's Debug) shares Stop, Stop All and "Process 'x' Is
+Running" with Run: a launch key (the configuration or the file) names
+what runs or is debugged, and a configuration that may not run in
+parallel is stopped before it starts again in either executor. Crates without a toolkit are tested without GPUI; UI
 crates depend on the model crates, never on the protocol or backend
 crates (`scripts/check-layers.py` gets these rules).
 
@@ -247,7 +265,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `dap-client` | platform | no | the DAP client: adapter process, requests, events, reverse requests (`runInTerminal`); protocol types private | 0015 |
 | `debugger` | platform | no | sessions, threads, frames, variables, breakpoints, watches, the `DebugAdapterProvider` hook, storage and import, `debug.*` engine commands | 0015 |
 | `debugger-ui` | platform | yes | Debug tool window, Breakpoints dialog, breakpoint popup, inline values, value tooltips, editor wiring | 0015 |
-| `console-ui` | platform | yes | the Run console view, moved out of `workbench` so that Run and Debug share it | 0015 |
+| `console-ui` | platform | yes | the console view, moved out of `workbench` so that Run and Debug share it; the process feed and a file as standard input | 0015 |
 | `vcs` | platform | no | the version control model and backend trait: file status, changes, the status map, line ranges against the base text (`imara-diff`), branches | 0016 |
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
 | `vcs-ui` | platform | yes | file status colours, change markers and their popup, the VCS widget, branches popup and branch dialogs; later the Commit tool window, changes tree, diff viewer tab, other git dialogs | 0016 |
@@ -257,7 +275,8 @@ crates (`scripts/check-layers.py` gets these rules).
 | `pyoxide-ide` (extended) | python | yes | venv and uv activation in the terminal, the Python settings pages, the debug adapter provider | 0014, 0015, 0017 |
 
 Dependencies: `terminal-ui` -> `terminal`, `console`, `ui`;
-`debugger-ui` -> `debugger`, `console-ui`, `editor`, `ui`; `vcs-ui` ->
+`debugger-ui` -> `debugger`, `console-ui`, `editor`, `run-config`, `ui`;
+`console-ui` -> `console`, `editor`, `process`, `ui`; `vcs-ui` ->
 `vcs`, `editor`, `ui`; `git` -> `vcs`, `process`; `dap-client` ->
 `stream-framing`, `process`; `debugger` -> `dap-client`, `commands`,
 `process`, `project`, `run-config`; `lsp-client` -> `stream-framing`;

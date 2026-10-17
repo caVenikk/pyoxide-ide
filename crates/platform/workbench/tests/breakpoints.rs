@@ -678,6 +678,7 @@ impl debugger::DebugAdapterProvider for Verifying {
             adapter_id: "fake".to_owned(),
             kind: debugger::LaunchKind::Launch,
             arguments: json!({}),
+            input_file: None,
         })
     }
 
@@ -715,7 +716,7 @@ fn verified_breakpoints_during_a_session(cx: &mut TestAppContext) {
     let provider = Verifying {
         script: Mutex::new(Some(script)),
     };
-    let (mut h, _dir) = setup(cx, DebugHook(Arc::new(provider)));
+    let (mut h, _dir) = setup(cx, DebugHook::shared(Arc::new(provider)));
     h.invoke(
         "debug.toggle-breakpoint",
         json!({"file": "main.py", "line": 4}),
@@ -723,14 +724,10 @@ fn verified_breakpoints_during_a_session(cx: &mut TestAppContext) {
     let view =
         h.cx.read(|cx| h.window.read(cx).unwrap().debugger_view().clone());
     let debugger = h.cx.read(|cx| view.read(cx).debugger().unwrap().clone());
-    let request = debugger::DebugRequest {
-        root: h.root.clone(),
-        configuration: run_config::RunConfiguration::new(
-            "python",
-            "main",
-            run_config::Storage::Personal,
-        ),
-    };
+    let request = debugger::DebugRequest::new(
+        h.root.clone(),
+        run_config::RunConfiguration::new("python", "main", run_config::Storage::Personal),
+    );
     let session = debugger.start(request).unwrap();
     let start = Instant::now();
     while h.gutter()[0].1 != icon(debugger_ui::icons::VALID) {

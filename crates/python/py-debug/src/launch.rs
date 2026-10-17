@@ -28,6 +28,41 @@ use crate::helper::{DEBUGPY_VERSION, Helper};
 /// The oldest Python debugpy 1.8.21 debugs (its `requires_python`).
 pub const MIN_PYTHON: (u32, u32) = (3, 8);
 
+/// An evaluation without a frame (run in pydevd's own frame, whatever the
+/// program's names are) of `body`, a function of pydevd's debugger `d`.
+fn with_pydevd(body: &str) -> (String, Value) {
+    (
+        "evaluate".to_owned(),
+        json!({
+            "expression": format!(
+                "(lambda d: {body})(__import__('sys').modules['pydevd'].get_global_debugger())"
+            ),
+            "context": "repl",
+        }),
+    )
+}
+
+/// Where the library filter's value before Step Into My Code is kept in
+/// pydevd's debugger.
+const KEPT_FILTER: &str = "_pyoxide_libraries_filter";
+
+/// Step Into My Code with debugpy: pydevd's `stepIn` is a step into the
+/// program's own code while its library filter is on
+/// (`pydevd_process_net_command_json.on_stepin_request`); the filter is on
+/// for the one step, then back to what it was ("Debug just my code" keeps
+/// it on for the whole session).
+pub fn step_into_my_code() -> debugger::StepIntoMyCode {
+    debugger::StepIntoMyCode {
+        before: with_pydevd(&format!(
+            "vars(d).setdefault('{KEPT_FILTER}', d.get_use_libraries_filter()) is None \
+             or d.set_use_libraries_filter(True)"
+        )),
+        after: with_pydevd(&format!(
+            "d.set_use_libraries_filter(vars(d).pop('{KEPT_FILTER}', False))"
+        )),
+    }
+}
+
 /// The Python debugger options that change a launch (the reference's
 /// `PyDebuggerSettings` and `PyDebuggerOptionsProvider`), with the
 /// reference's defaults.

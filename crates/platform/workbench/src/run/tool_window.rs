@@ -3,8 +3,6 @@
 //! reference IDE's `RunContentManagerImpl`, `RunContentBuilder` and
 //! `ConsoleViewImpl` show them in the New UI.
 
-use std::sync::atomic::Ordering;
-
 use console::{ContentKind, LinkTarget};
 use futures::StreamExt as _;
 use gpui::{
@@ -12,7 +10,7 @@ use gpui::{
     Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render,
     SharedString, Subscription, Task, Window, div, prelude::*, px,
 };
-use process::{ExitStatus, ProcessEvent, ProcessHandle};
+use process::{ExitStatus, ProcessHandle};
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
@@ -20,9 +18,9 @@ use ui::theme::ThemeExt;
 
 use super::commands::*;
 use super::configurations::{RunConfigs, RunConfigsEvent};
-use super::console_view::{ConsoleEvent, ConsoleView};
 use super::{LaunchKey, RunHook, RunRequest, RunSpec};
 use crate::chrome;
+use console_ui::{ConsoleEvent, ConsoleView};
 
 /// Size of the buttons of the run and console toolbars and of their icons.
 const BUTTON: f32 = 24.0;
@@ -93,18 +91,6 @@ fn stop_process(process: ProcessHandle, cx: &mut Context<RunToolWindow>) {
     cx.spawn(async move |this, cx| {
         stop.await;
         let _ = this.update(cx, |_, cx| cx.notify());
-    })
-    .detach();
-}
-
-/// Writes a file to a process's standard input and closes it, off the UI
-/// thread.
-fn feed_input(process: ProcessHandle, file: std::path::PathBuf, cx: &mut Context<RunToolWindow>) {
-    cx.background_spawn(async move {
-        if let Ok(bytes) = std::fs::read(&file) {
-            let _ = process.write_stdin(&bytes);
-        }
-        process.close_stdin();
     })
     .detach();
 }
@@ -491,41 +477,13 @@ impl RunToolWindow {
                         cx,
                     )
                 });
-                feed_input(handle.clone(), file.clone(), cx);
+                console_ui::feed_input(handle.clone(), file.clone(), cx);
             }
             None => console.update(cx, |c, _| c.set_input(Some(handle.clone()))),
         }
         // The model is fed off the UI thread (link filters may look at the
         // file system); the view takes the changes once per frame.
-        let (model, dirty) = {
-            let c = console.read(cx);
-            (c.model(), c.dirty_flag())
-        };
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<Option<ExitStatus>>();
-        cx.background_spawn(async move {
-            while let Ok(event) = events.recv_async().await {
-                let mut model = model.lock().unwrap_or_else(|e| e.into_inner());
-                match event {
-                    ProcessEvent::Stdout(bytes) => model.push(ContentKind::Normal, &bytes),
-                    ProcessEvent::Stderr(bytes) => model.push(ContentKind::Error, &bytes),
-                    ProcessEvent::Exited(status) => {
-                        model.finish();
-                        model.push_str(
-                            ContentKind::System,
-                            &format!("\n{}\n", status.finished_message()),
-                        );
-                        drop(model);
-                        let _ = tx.unbounded_send(Some(status));
-                        return;
-                    }
-                }
-                drop(model);
-                if !dirty.swap(true, Ordering::AcqRel) {
-                    let _ = tx.unbounded_send(None);
-                }
-            }
-        })
-        .detach();
+        let mut rx = console_ui::feed(&console, events, cx);
         let id = self.tabs[index].id;
         let window_handle = self.window_handle;
         let watch = cx.spawn(async move |this, cx| {

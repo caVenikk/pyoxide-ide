@@ -539,6 +539,7 @@ impl Debugger {
             request.watches_key().to_owned(),
             Arc::downgrade(&self.inner),
             self.inner.provider.step_into_my_code(),
+            launch.input_file.clone(),
         );
         self.inner.state().sessions.push(session.clone());
         self.inner.emit(DebuggerEvent::SessionStarted(id));
@@ -593,6 +594,14 @@ impl Debugger {
                 let _ = tx.send(());
             });
         rx
+    }
+
+    /// Kills every session's processes at once (the application quits and
+    /// cannot wait for Stop).
+    pub fn kill_all(&self) {
+        for session in self.sessions_live() {
+            session.kill();
+        }
     }
 
     /// The debugger's state as JSON (`debug.state`): breakpoints with

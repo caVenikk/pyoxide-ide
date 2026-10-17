@@ -9,7 +9,7 @@ use commands::Registry;
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, Debugger, DebuggerEvent,
     EvaluateContext, ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting, IdeaTypes,
-    LaunchKind, Phase, Session, SuspendPolicy,
+    LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
 };
 use futures::executor::block_on;
 use run_config::{RunConfiguration, Storage};
@@ -21,6 +21,8 @@ const WAIT: Duration = Duration::from_secs(20);
 #[derive(Default)]
 struct Provider {
     script: Mutex<Option<Vec<Value>>>,
+    /// Step Into My Code sends `evaluate` requests around the step.
+    my_code: bool,
 }
 
 impl Provider {
@@ -47,6 +49,7 @@ impl DebugAdapterProvider for Provider {
             adapter_id: "fake".to_owned(),
             kind: LaunchKind::Launch,
             arguments: json!({"program": "main.py"}),
+            input_file: None,
         })
     }
 
@@ -68,6 +71,13 @@ impl DebugAdapterProvider for Provider {
         )]
     }
 
+    fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
+        self.my_code.then(|| StepIntoMyCode {
+            before: ("evaluate".to_owned(), json!({"expression": "filter on"})),
+            after: ("evaluate".to_owned(), json!({"expression": "filter off"})),
+        })
+    }
+
     fn idea_types(&self) -> IdeaTypes {
         IdeaTypes {
             line: vec!["python-line".into()],
@@ -79,10 +89,10 @@ impl DebugAdapterProvider for Provider {
 }
 
 fn request(root: &Path) -> DebugRequest {
-    DebugRequest {
-        root: root.to_owned(),
-        configuration: RunConfiguration::new("python", "main", Storage::Personal),
-    }
+    DebugRequest::new(
+        root,
+        RunConfiguration::new("python", "main", Storage::Personal),
+    )
 }
 
 fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
@@ -293,6 +303,107 @@ fn changes_reach_a_running_session_and_stop_ends_it() {
     wait_phase(&session, Phase::Ended);
     assert_eq!(session.snapshot().error, None);
     assert!(debugger.current_session().is_none());
+}
+
+/// Run to Cursor adds a breakpoint of the session on the line, Force Run to
+/// Cursor sends only that one and no exception filter; the next stop takes
+/// them back. Step Into My Code sends the product's request before the
+/// step and the other one at the next stop, before the frames.
+#[test]
+fn run_to_cursor_force_and_step_into_my_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    // Each stop tells its breakpoint in its description.
+    let stop = |id: i64| {
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "hitBreakpointIds": [id], "description": id.to_string()}})
+    };
+    let breakpoints = |lines: Value, answer: Value| {
+        [
+            json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "main.py"},
+                "breakpoints": lines}}),
+            json!({"respond": {"breakpoints": answer}}),
+        ]
+    };
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.push(json!({"ignore": ["threads", "stackTrace", "scopes", "variables"]}));
+    script.push(stop(11));
+    // Run to Cursor: line 7 on top of line 3.
+    script.extend(breakpoints(
+        json!([{"line": 3}, {"line": 7}]),
+        json!([{"verified": true, "line": 3, "id": 61}, {"verified": true, "line": 7, "id": 62}]),
+    ));
+    script.extend([
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+        stop(62),
+    ]);
+    script.extend(breakpoints(
+        json!([{"line": 3}]),
+        json!([{"verified": true, "line": 3, "id": 63}]),
+    ));
+    // Force Run to Cursor: line 9 alone, no exception filter.
+    script.extend(breakpoints(
+        json!([{"line": 9}]),
+        json!([{"verified": true, "line": 9, "id": 64}]),
+    ));
+    script.extend([
+        json!({"expect": "setExceptionBreakpoints", "arguments": {"filters": []}}),
+        json!({"respond": null}),
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+        stop(64),
+    ]);
+    script.extend(breakpoints(
+        json!([{"line": 3}]),
+        json!([{"verified": true, "line": 3, "id": 65}]),
+    ));
+    script.extend([
+        json!({"expect": "setExceptionBreakpoints", "arguments": {"filters": ["uncaught"]}}),
+        json!({"respond": null}),
+        // Step Into My Code.
+        json!({"expect": "evaluate", "arguments": {"expression": "filter on"}}),
+        json!({"respond": {"result": "None", "variablesReference": 0}}),
+        json!({"expect": "stepIn", "arguments": {"threadId": 1}}),
+        json!({"respond": null}),
+        json!({"event": "stopped", "body": {"reason": "step", "threadId": 1}}),
+        json!({"expect": "evaluate", "arguments": {"expression": "filter off"}}),
+        json!({"respond": {"result": "None", "variablesReference": 0}}),
+        json!({"expect": "terminate"}),
+        json!({"respond": null}),
+        json!({"expect": "disconnect"}),
+        json!({"respond": null}),
+    ]);
+    let provider = Arc::new(Provider {
+        script: Mutex::new(Some(script)),
+        my_code: true,
+    });
+    let debugger = Debugger::open(root, provider);
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    let wait_stop = |description: Option<&str>, reason: &str| {
+        wait_until(&format!("a stop ({reason} {description:?})"), || {
+            let s = session.snapshot();
+            s.phase == Phase::Suspended
+                && s.stop.as_ref().is_some_and(|stop| {
+                    stop.reason == reason && stop.description.as_deref() == description
+                })
+        })
+    };
+    wait_stop(Some("11"), "breakpoint");
+    block_on(session.run_to_position(&main, 7, false)).unwrap();
+    wait_stop(Some("62"), "breakpoint");
+    // The project's breakpoints are untouched.
+    assert!(debugger.breakpoints().at(&main, 7).is_none());
+    assert!(debugger.breakpoints().at(&main, 3).is_some());
+    block_on(session.run_to_position(&main, 9, true)).unwrap();
+    wait_stop(Some("64"), "breakpoint");
+    block_on(session.step_into_my_code()).unwrap();
+    wait_stop(None, "step");
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
 }
 
 #[test]

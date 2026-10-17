@@ -659,6 +659,13 @@ impl H<'_> {
         if !self.run()["tabs"].as_array().unwrap().is_empty() {
             self.invoke("run.close-all-tabs", json!(null));
         }
+        // No debug session: closing a tab stops its session.
+        while self.debug()["tool_window"]["tabs"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty())
+        {
+            self.invoke("debug.close-tab", json!({"index": 0}));
+        }
         let vcs = self.state()["vcs"].clone();
         if !vcs["branches_popup"].is_null() {
             self.invoke("vcs.branches-popup", json!(null));
@@ -888,7 +895,38 @@ fn check(h: &mut H, b: &Binding) -> bool {
         .context
         .as_deref()
         .is_some_and(|c| c.starts_with("RunConsole"));
+    // The Debug tool window and its console.
+    let debug_context = b.context.as_deref().is_some_and(|c| c.starts_with("Debug"));
+    let debug_console = b
+        .context
+        .as_deref()
+        .is_some_and(|c| c.starts_with("DebugConsole"));
     match b.command.as_str() {
+        "workbench.hide-tool-window" if debug_context => {
+            h.start_debug(1, None);
+            h.focus_debug(debug_console);
+            h.press(keys);
+            assert_eq!(h.debug()["visible"], json!(false), "{what}");
+            assert!(h.editor_focused(), "{what}");
+        }
+        "workbench.focus-editor" if debug_context => {
+            h.start_debug(1, None);
+            h.focus_debug(debug_console);
+            h.press(keys);
+            assert!(h.editor_focused(), "{what}");
+            assert_eq!(h.debug()["visible"], json!(true), "{what}");
+        }
+        "workbench.toggle-debug" => {
+            h.start_debug(1, None);
+            h.invoke("workbench.hide-tool-window", json!(null));
+            h.focus_editor();
+            h.press(keys);
+            assert_eq!(h.debug()["visible"], json!(true), "{what}");
+            assert!(h.debug_focused(), "{what}: first press focuses it");
+            h.press(keys);
+            assert_eq!(h.debug()["visible"], json!(false), "{what}");
+        }
+        c if SESSION_COMMANDS.contains(&c) => check_debug_session(h, c, keys, &what, debug_console),
         "find.toggle-case" | "find.toggle-words" | "find.toggle-regex" if in_popup => {
             h.search_in_files(" = ");
             let option = match b.command.as_str() {
@@ -2622,6 +2660,63 @@ impl H<'_> {
         self.invoke("debug.state", json!(null))
     }
 
+    /// Waits (at most about 20 s) for a debug state that `f` accepts.
+    fn wait_debug(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+        let mut last = Value::Null;
+        for _ in 0..2000 {
+            support::tick(self.cx);
+            last = self.debug();
+            if f(&last) {
+                return last;
+            }
+        }
+        panic!("timed out waiting for {what}: {last:#}");
+    }
+
+    /// Debugs a.py with a scripted adapter that stops at `line` (then
+    /// `after`, if any) and waits for the stop; the editor gets the focus
+    /// back.
+    fn start_debug(&mut self, line: u32, after: Option<Vec<Value>>) {
+        let file = self.root.join("a.py");
+        let mut script = support::debug_start(&self.root, None);
+        script.extend(support::debug_stop(&file, line, "breakpoint"));
+        script.extend(after.unwrap_or_default());
+        support::push_debug_script(script);
+        self.invoke("debug.debug", json!(null));
+        self.wait_debug("the stop", |s| {
+            s["tool_window"]["tabs"][0]["state"] == json!("suspended")
+                && s["execution_point"]["line"] == json!(line)
+        });
+        self.focus_editor();
+    }
+
+    /// The Debug tool window, or its Console, gets the focus.
+    fn focus_debug(&mut self, console: bool) {
+        if console {
+            self.invoke("debug.select-content", json!({"content": "console"}));
+        }
+        let view = self.workbench(|w, _| w.debugger_view().clone());
+        let handle = self.cx.update(|cx| {
+            let tool_window = view.read(cx).tool_window().clone();
+            if console {
+                tool_window.read(cx).content_focus(cx)
+            } else {
+                tool_window.focus_handle(cx)
+            }
+        });
+        self.focus(handle);
+    }
+
+    fn debug_focused(&mut self) -> bool {
+        let view = self.workbench(|w, _| w.debugger_view().clone());
+        let tool_window = self.cx.update(|cx| view.read(cx).tool_window().clone());
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                tool_window.focus_handle(cx).contains_focused(window, cx)
+            })
+            .unwrap()
+    }
+
     fn breakpoints_dialog(&mut self) -> Option<gpui::AnyWindowHandle> {
         self.cx
             .update(|cx| ui::dialog_window::find(debugger_ui::breakpoints::dialog::CONTEXT, cx))
@@ -2781,6 +2876,123 @@ fn check_breakpoints(h: &mut H, command: &str, keys: &str, what: &str, context: 
         }
     }
     h.clear_breakpoints();
+}
+
+/// The debug session commands with keys (the breakpoint ones are checked
+/// by [`check_breakpoints`]).
+const SESSION_COMMANDS: [&str; 13] = [
+    "debug.debug",
+    "debug.current-file",
+    "debug.resume",
+    "debug.step-over",
+    "debug.step-into",
+    "debug.step-into-my-code",
+    "debug.step-out",
+    "debug.run-to-cursor",
+    "debug.force-run-to-cursor",
+    "debug.show-execution-point",
+    "debug.rerun",
+    "debug.stop",
+    "debug.close-tab",
+];
+
+/// The session keys with a scripted adapter, in `a.py` (`a = 1`, an empty
+/// second line): a session suspended on line 1; a key resumes, steps or
+/// runs to line 2, stops or closes the session.
+fn check_debug_session(h: &mut H, command: &str, keys: &str, what: &str, console: bool) {
+    let a = h.root.join("a.py");
+    let request = |c: &str| -> Option<&'static str> {
+        Some(match c {
+            "debug.step-over" => "next",
+            "debug.step-into" | "debug.step-into-my-code" => "stepIn",
+            "debug.step-out" => "stepOut",
+            "debug.resume" | "debug.run-to-cursor" | "debug.force-run-to-cursor" => "continue",
+            _ => return None,
+        })
+    };
+    let tabs = |s: &Value| s["tool_window"]["tabs"].as_array().map_or(0, Vec::len);
+    match command {
+        "debug.debug" | "debug.current-file" => {
+            let mut script = support::debug_start(&h.root, Some(support::quick_program()));
+            script.extend(support::debug_end(0));
+            support::push_debug_script(script);
+            h.press(keys);
+            let s = h.wait_debug("the session to end", |s| {
+                s["tool_window"]["tabs"][0]["exit_code"] == json!(0)
+                    && s["tool_window"]["tabs"][0]["state"] == json!("ended")
+            });
+            assert_eq!(s["tool_window"]["tabs"][0]["title"], json!("a"), "{what}");
+            assert_eq!(s["visible"], json!(true), "{what}");
+            // Debug Context Configuration selects the file's configuration.
+            let selected = h.run()["configurations"]["selected"].clone();
+            if command == "debug.current-file" {
+                assert_eq!(selected["name"], json!("a"), "{what}");
+            } else {
+                assert!(selected.is_null(), "{what}: {selected}");
+            }
+        }
+        c if request(c).is_some() => {
+            let mut after = support::debug_answer(request(c).unwrap());
+            after.extend(support::debug_stop(&a, 2, "step"));
+            h.start_debug(1, Some(after));
+            if c.contains("run-to-cursor") {
+                h.set_editor(
+                    "a = 1
+|",
+                );
+            }
+            h.press(keys);
+            h.wait_debug("the next stop", |s| {
+                s["execution_point"]["line"] == json!(2)
+                    && s["tool_window"]["tabs"][0]["state"] == json!("suspended")
+            });
+        }
+        "debug.show-execution-point" => {
+            h.start_debug(1, None);
+            h.invoke("tabs.select", json!({"index": 1}));
+            assert!(
+                h.state()["editor"]["path"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("b.py")
+            );
+            h.focus_editor();
+            h.press(keys);
+            let path = h.state()["editor"]["path"].as_str().unwrap().to_owned();
+            assert!(path.ends_with("a.py"), "{what}: {path}");
+        }
+        "debug.rerun" => {
+            h.start_debug(1, None);
+            let first = h.debug()["tool_window"]["tabs"][0]["session"].clone();
+            let mut script = support::debug_start(&h.root, None);
+            script.extend(support::debug_stop(&a, 1, "breakpoint"));
+            support::push_debug_script(script);
+            h.focus_debug(console);
+            h.press(keys);
+            let s = h.wait_debug("the session again", |s| {
+                s["tool_window"]["tabs"][0]["session"] != first
+                    && s["tool_window"]["tabs"][0]["state"] == json!("suspended")
+            });
+            assert_eq!(tabs(&s), 1, "{what}: in the same tab");
+        }
+        "debug.stop" => {
+            h.start_debug(1, None);
+            h.focus_debug(console);
+            h.press(keys);
+            h.wait_debug("the session to end", |s| {
+                s["tool_window"]["tabs"][0]["state"] == json!("ended")
+            });
+        }
+        "debug.close-tab" => {
+            h.start_debug(1, None);
+            h.focus_debug(console);
+            h.press(keys);
+            let s = h.debug();
+            assert_eq!(tabs(&s), 0, "{what}");
+            assert_eq!(s["registered"], json!(false), "{what}");
+        }
+        _ => panic!("{what}: no check"),
+    }
 }
 
 fn check_branches(h: &mut H, command: &str, keys: &str, what: &str) {

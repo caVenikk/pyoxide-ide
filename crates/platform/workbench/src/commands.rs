@@ -10,6 +10,9 @@ ui::ui_commands! {
     /// Show, focus or hide the Run tool window.
     ToggleRun => "workbench.toggle-run", "Run",
         "Shows and focuses the Run tool window; hides it when it has the focus.";
+    /// Show, focus or hide the Debug tool window.
+    ToggleDebug => "workbench.toggle-debug", "Debug",
+        "Shows and focuses the Debug tool window; hides it when it has the focus.";
     /// Show and focus a tool window.
     ActivateToolWindow { id: String } => "workbench.activate-tool-window", "Activate Tool Window",
         "Shows a tool window by id (as `workbench.state` lists them) in its area, in place of the one there, and moves the focus into it.",
