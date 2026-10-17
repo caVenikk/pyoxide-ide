@@ -24,7 +24,9 @@ pub mod new_branch;
 pub mod status_colors;
 pub mod widget;
 
-pub use marker_popup::{MarkerPopup, PopupAction, PopupLine, popup_lines, render_popup};
+pub use marker_popup::{
+    MarkerPopup, PopupAction, PopupText, doc_highlights, popup_text, render_popup,
+};
 pub use markers::{Computed, LineStatus, LineStatusEvent, Part};
 pub use status_colors::{FileColors, OpenDocument, entry_role, status_role};
 
@@ -88,7 +90,7 @@ ui::ui_commands! {
         r#"{"name": "feat/x"}"#;
     /// Restore a deleted branch.
     RestoreBranch { name: String, oid: String } => "git.restore-branch", "Restore Branch",
-        "Creates a deleted branch again at its commit (the Restore link of the Deleted branch balloon).",
+        "Creates a deleted branch again at its commit (the Restore link of the Deleted Branch balloon).",
         r#"{"name": "feat/x", "oid": "0123456789abcdef0123456789abcdef01234567"}"#;
     /// Create Git Repository….
     Init { path: Option<String> } => "git.init", "Create Git Repository\u{2026}",

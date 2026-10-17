@@ -36,7 +36,7 @@ const MARKER_HOVER_EXTRA: f32 = 3.0;
 const DELETED_HALF: f32 = 5.0;
 /// Full-line backgrounds start this far left of the gutter's right edge
 /// (`getWhitespaceSeparatorOffset() + 1`).
-const BACKGROUND_INTO_GUTTER: f32 = 2.0;
+pub(crate) const BACKGROUND_INTO_GUTTER: f32 = 2.0;
 /// Room after an after-line text for the reference's drop-down triangle.
 const AFTER_TEXT_ICON: f32 = 16.0;
 

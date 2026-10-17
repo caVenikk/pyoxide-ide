@@ -154,10 +154,18 @@ brightness (`Darcula` for dark, `Default` for light) when it is among the inputs
    scheme: the option of a parent scheme does not change a child's `TEXT`. The
    report lists such a background as `BACKGROUND` (scheme color). An empty
    value or one that is not a colour changes nothing.
-6. **Derived values.** A role no source supplies takes the value of its
+6. **Defaults of the reference.** A role whose key the reference reads with a
+   colour of its own for themes that do not set it takes that colour and is
+   listed as an approximation: `ui.marker-popup-border` is `#4b4b4b` in a dark
+   theme and `#cecece` in a light one (`LineStatusMarkerPopupPanel`);
+   `ui.notification-text` is `#bbbbbb` in a dark theme (the `Darcula` base of a
+   theme without a parent) and black in a light one; `ui.notification-border`
+   is `#565a5c` (dark) or `#b2b2b2` (light) at 80 % opacity
+   (`NotificationsManagerImpl.BORDER_COLOR`).
+7. **Derived values.** A role no source supplies takes the value of its
    fallback role (tables below) when that role was imported or derived itself,
    and is listed as an approximation.
-7. **Base theme.** Whatever is still missing comes from `pyoxide-dark` or
+8. **Base theme.** Whatever is still missing comes from `pyoxide-dark` or
    `pyoxide-light` (chosen by `dark`; a scheme alone is dark when its editor
    background is dark, else by the name of its base scheme) and is listed in
    the report as taken from the base theme. A text role that a scheme defines
@@ -376,8 +384,6 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.tree-indent-guide` | `ui.divider` |
 | `ui.list-button-hover` | `ui.hover` |
 | `ui.list-button-separator` | `ui.pressed` |
-| `ui.notification-border` | `ui.popup-border` |
-| `ui.notification-text` | `ui.text` |
 | `ui.notification-link` | `ui.text-link` |
 | `ui.notification-icon-hover` | `ui.hover` |
 | `ui.notification-more` | `ui.notification` |

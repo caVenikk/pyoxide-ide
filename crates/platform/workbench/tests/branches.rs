@@ -116,6 +116,17 @@ impl H<'_> {
             .clone()
     }
 
+    /// The newest balloon with this content.
+    fn balloon(&mut self, text: &str) -> Value {
+        self.invoke("workbench.state", Value::Null)["notifications"]["balloons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["content"] == text)
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
     fn wait_balloon(&mut self, text: &str) {
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(30) {
@@ -226,6 +237,11 @@ fn the_widget_follows_branch_commands(cx: &mut TestAppContext) {
     h.invoke("git.checkout", json!({ "ref": "main" }));
     h.wait_widget("main");
     h.wait_balloon("Checked out main");
+    // The name in the editor font (`<code>`).
+    assert_eq!(
+        h.balloon("Checked out main")["emphasis"],
+        json!([{ "text": "main", "kind": "code" }])
+    );
     std::fs::write(h.root.join("a.py"), "one\n2\n3\n4\n5\n").unwrap();
     h.invoke("git.checkout", json!({ "ref": "other" }));
     let vcs = h.wait("Git Checkout Problem", |v| {
@@ -258,7 +274,14 @@ fn the_widget_follows_branch_commands(cx: &mut TestAppContext) {
     h.wait_balloon("Branch other was renamed to renamed");
     let oid = git(&h.root, &["rev-parse", "feat/x"]);
     h.invoke("git.delete-branch", json!({ "name": "feat/x" }));
-    h.wait_balloon("Deleted branch feat/x");
+    h.wait_balloon("Deleted Branch: feat/x");
+    let balloon = h.balloon("Deleted Branch: feat/x");
+    assert_eq!(balloon["title"], "");
+    assert_eq!(
+        balloon["emphasis"],
+        json!([{ "text": "Deleted Branch:", "kind": "bold" }])
+    );
+    assert_eq!(balloon["actions"], json!(["Restore"]));
     assert!(
         git(&h.root, &["branch", "--list", "feat/x"]).is_empty(),
         "deleted"

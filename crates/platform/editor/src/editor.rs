@@ -389,6 +389,8 @@ pub struct Editor {
     /// The decoration whose clickable after-line text the mouse is over
     /// (drawn as a link).
     pub(crate) hovered_after: Option<DecorationId>,
+    /// A changed range's highlights ([`Editor::set_diff_highlights`]).
+    pub(crate) diff_highlights: Option<crate::DiffHighlights>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -485,6 +487,7 @@ impl Editor {
             gutter_hover_icon: None,
             hovered_change: None,
             hovered_after: None,
+            diff_highlights: None,
             _subscriptions: subscriptions,
         }
     }
@@ -1219,6 +1222,15 @@ impl Editor {
             "hovered": self.hovered().map(point),
             "decorations": self.decorations_json(),
             "gutter_hover": self.gutter_hover,
+            "diff_highlights": self.diff_highlights.as_ref().map(|d| json!({
+                "lines": [d.lines.start, d.lines.end],
+                "line_background": d.line_background.is_some(),
+                "words": d.words.iter().map(|(r, _)| json!({
+                    "start": point(r.start),
+                    "end": point(r.end),
+                    "text": self.buffer.slice(r.clone()),
+                })).collect::<Vec<_>>(),
+            })),
         })
     }
 
@@ -1302,6 +1314,7 @@ impl Editor {
         self.decorations.edited(applied);
         self.decoration_hover_reset();
         self.link_highlight = None;
+        self.diff_highlights = None;
         // Indices of marks may have changed.
         self.stripe_hover = None;
         self.pressed_stripe = None;
@@ -1353,6 +1366,7 @@ impl Editor {
         self.decorations.text_replaced(&self.buffer);
         self.decoration_hover_reset();
         self.link_highlight = None;
+        self.diff_highlights = None;
         self.stripe_hover = None;
         self.pressed_stripe = None;
         if let Some(h) = &mut self.highlighter {

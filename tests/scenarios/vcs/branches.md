@@ -30,7 +30,7 @@
   changes.
 - Step 5: the widget shows a warning icon and the tag name (or an 8
   character hash for a revision); the tooltip says HEAD is detached.
-- Step 6: the widget follows; "Deleted branch feat/y" with Restore.
+- Step 6: the widget follows; "**Deleted Branch:** feat/y" (bold title with the colon) with Restore.
 - Step 7: "Specify name for the new branch", "Branch name … already
   exists", "HEAD is a reserved keyword".
 

@@ -388,6 +388,10 @@ pub(crate) struct Prepaint {
     decorations: DecorationPaint,
     /// The decorations' error stripe marks as painted.
     decoration_spans: Vec<(Bounds<Pixels>, Hsla)>,
+    /// A changed range's line backgrounds and the bars of its empty
+    /// words ([`crate::DiffHighlights`]).
+    diff_lines: Vec<(Bounds<Pixels>, Hsla)>,
+    diff_bars: Vec<(Bounds<Pixels>, Hsla)>,
     colors: Colors,
 }
 
@@ -1067,6 +1071,8 @@ impl Element for EditorElement {
         let mut line_after_end: Vec<(usize, Look)> = Vec::new();
         // The link highlight's parts: (line, char columns).
         let mut link_highlight_cols: Vec<(usize, Range<usize>)> = Vec::new();
+        // Empty words of the diff highlights: (line, char column, colour).
+        let mut empty_words: Vec<(usize, usize, Hsla)> = Vec::new();
         let mut line = first;
         let mut row = first_row;
         let mut skip = first_sub;
@@ -1111,6 +1117,19 @@ impl Element for EditorElement {
                 line_after_end.push((line, look));
             }
             let line_end = line_start + len;
+            if let Some(d) = &editor.diff_highlights {
+                for (cols, color) in d.words_of_line(line_start, line_end) {
+                    if cols.is_empty() {
+                        empty_words.push((line, cols.start, color));
+                    } else {
+                        let style = InlineStyle {
+                            background: Some(color),
+                            ..InlineStyle::default()
+                        };
+                        styles.push((cols, style));
+                    }
+                }
+            }
             let marked = editor.marked.as_ref().and_then(|r| {
                 (r.start < line_end.max(line_start + 1) && r.end > line_start)
                     .then(|| r.start.max(line_start) - line_start..r.end.min(line_end) - line_start)
@@ -1236,6 +1255,38 @@ impl Element for EditorElement {
             })
             .collect();
         let visible_rows = first_row..row;
+        // A changed range's highlights: its lines from the gutter's edge
+        // (as full-line decorations) and the bars of its empty words.
+        let mut diff_lines = Vec::new();
+        if let Some(d) = &editor.diff_highlights
+            && let Some(color) = d.line_background
+        {
+            for line in d.lines.start.max(visible.start)..d.lines.end.min(visible.end) {
+                for l in rows_of(line) {
+                    diff_lines.push((
+                        Bounds::from_corners(
+                            point(text_x - px(gutter::BACKGROUND_INTO_GUTTER), top_of(l.row)),
+                            point(bounds.right(), top_of(l.row) + lh),
+                        ),
+                        color,
+                    ));
+                }
+            }
+        }
+        let diff_bars: Vec<(Bounds<Pixels>, Hsla)> = empty_words
+            .into_iter()
+            .filter_map(|(line, col, color)| {
+                let l = layout_row(&lines, line, col, false)?;
+                let x = line_x(l, col) - px(crate::diff_highlights::EMPTY_WORD_LEFT);
+                Some((
+                    Bounds::new(
+                        point(x, top_of(l.row)),
+                        size(px(crate::diff_highlights::EMPTY_WORD_WIDTH), lh),
+                    ),
+                    color,
+                ))
+            })
+            .collect();
 
         // Selections: from row to row, up to the right edge on rows the
         // selection goes on from (a line break or a soft wrap), from the
@@ -1725,6 +1776,8 @@ impl Element for EditorElement {
             wrap_signs,
             decorations: decoration_paint,
             decoration_spans,
+            diff_lines,
+            diff_bars,
             colors,
         }
     }
@@ -1772,6 +1825,9 @@ impl Element for EditorElement {
             for r in &p.current_lines {
                 window.paint_quad(fill(*r, p.colors.current_line));
             }
+            for (r, c) in &p.diff_lines {
+                window.paint_quad(fill(*r, *c));
+            }
             gutter::paint_backgrounds(&p.decorations, window);
             for (shaped, origin) in &p.numbers {
                 let _ = shaped.paint(*origin, lh, window, cx);
@@ -1808,6 +1864,9 @@ impl Element for EditorElement {
                     if let Some(bg) = a.look.bg {
                         window.paint_quad(fill(a.cell, bg));
                     }
+                }
+                for (r, c) in &p.diff_bars {
+                    window.paint_quad(fill(*r, *c));
                 }
                 let in_selection = p.colors.search_current_background.is_some();
                 if !in_selection {
