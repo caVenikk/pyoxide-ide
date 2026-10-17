@@ -1016,10 +1016,9 @@ impl Element for EditorElement {
                 || e.center_caret
                 || e.caret_view_y.is_some();
             let rows = e.display_rows();
-            let max_y = if console {
-                (lh * rows as f32 - bounds.size.height).max(px(0.0))
-            } else {
-                lh * rows.saturating_sub(1) as f32
+            let max_y = match e.lines_after_end() {
+                Some(extra) => (lh * (rows + extra) as f32 - bounds.size.height).max(px(0.0)),
+                None => lh * rows.saturating_sub(1) as f32,
             };
             if std::mem::take(&mut e.scroll_to_end) {
                 e.scroll.y = max_y;
@@ -1536,6 +1535,7 @@ impl Element for EditorElement {
         // console).
         let current_lines = if !single_line
             && !console
+            && editor.caret_row_shown
             && editor.selections.iter().all(|s| s.is_empty())
         {
             caret_rows
@@ -1609,10 +1609,9 @@ impl Element for EditorElement {
 
         // Vertical scrollbar when the text is taller than the view; the view
         // can scroll until the last row is at the top.
-        let content = if console {
-            (lh * total_rows as f32).max(bounds.size.height)
-        } else {
-            lh * (total_rows.saturating_sub(1)) as f32 + bounds.size.height
+        let content = match editor.lines_after_end() {
+            Some(extra) => (lh * (total_rows + extra) as f32).max(bounds.size.height),
+            None => lh * (total_rows.saturating_sub(1)) as f32 + bounds.size.height,
         };
         let strip_x = if mirrored {
             bounds.left()

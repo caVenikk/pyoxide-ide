@@ -397,6 +397,11 @@ pub struct Editor {
     /// The gutter at the right and the scrollbar at the left
     /// ([`Editor::set_mirrored`]).
     pub(crate) mirrored: bool,
+    /// The caret's row is highlighted ([`Editor::set_caret_row_shown`]).
+    pub(crate) caret_row_shown: bool,
+    /// Rows of room below the last one instead of a view's height
+    /// ([`Editor::set_room_after_end`]).
+    pub(crate) room_after_end: Option<usize>,
     /// Backgrounds of char ranges ([`Editor::set_range_backgrounds`]),
     /// moved through edits.
     pub(crate) range_backgrounds: Vec<crate::side_by_side::RangeBackground>,
@@ -498,6 +503,8 @@ impl Editor {
             hovered_after: None,
             diff_highlights: None,
             mirrored: false,
+            caret_row_shown: true,
+            room_after_end: None,
             range_backgrounds: Vec::new(),
             _subscriptions: subscriptions,
         }
@@ -2822,10 +2829,9 @@ impl Editor {
     pub(crate) fn max_scroll_y_for(&self, view_height: Pixels) -> Pixels {
         let line_height = self.row_height();
         let rows = self.display_rows();
-        if self.console {
-            (line_height * rows as f32 - view_height).max(px(0.0))
-        } else {
-            line_height * rows.saturating_sub(1) as f32
+        match self.lines_after_end() {
+            Some(extra) => (line_height * (rows + extra) as f32 - view_height).max(px(0.0)),
+            None => line_height * rows.saturating_sub(1) as f32,
         }
     }
 

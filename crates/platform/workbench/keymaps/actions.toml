@@ -270,8 +270,10 @@ context = "Editor"
 id = "EditSource"
 text = "Jump to Source"
 groups = ["Main Menu > View"]
-command = "find-in-files.edit-source"
-context = "FindInFiles > Editor"
+commands = [
+  { command = "find-in-files.edit-source", context = "FindInFiles > Editor" },
+  { command = "diff.jump-to-source", context = "Diff" },
+]
 
 [[action]]
 id = "EditorToggleUseSoftWraps"
@@ -832,6 +834,49 @@ text = "Rollback Lines"
 groups = ["Other"]
 command = "vcs.rollback-lines"
 context = "Editor"
+
+# The diff viewer (#171).
+[[action]]
+id = "NextDiff"
+text = "Next Difference"
+groups = ["Other"]
+command = "diff.next"
+context = "Diff"
+
+[[action]]
+id = "PreviousDiff"
+text = "Previous Difference"
+groups = ["Other"]
+command = "diff.previous"
+context = "Diff"
+
+[[action]]
+id = "Diff.NextChange"
+text = "Compare Next File"
+groups = ["Other"]
+command = "diff.next-file"
+context = "Diff"
+
+[[action]]
+id = "Diff.PrevChange"
+text = "Compare Previous File"
+groups = ["Other"]
+command = "diff.previous-file"
+context = "Diff"
+
+[[action]]
+id = "Diff.FocusOppositePane"
+text = "Select Opposite Diff Pane"
+groups = ["Other"]
+command = "diff.focus-opposite"
+context = "Diff"
+
+[[action]]
+id = "Diff.ShowSettingsPopup"
+text = "Show Diff Settings Popup…"
+groups = ["Other"]
+command = "diff.settings"
+context = "Diff"
 
 [[action]]
 id = "NewElement"

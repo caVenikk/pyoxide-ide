@@ -59,6 +59,35 @@ impl Editor {
         self.mirrored
     }
 
+    /// Highlights the caret's row or not (the reference's diff editors do
+    /// not, `DiffUtil.setEditorCodeStyle`).
+    pub fn set_caret_row_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.caret_row_shown != shown {
+            self.caret_row_shown = shown;
+            cx.notify();
+        }
+    }
+
+    /// The text scrolls until its last row is `rows` rows above the view's
+    /// bottom (the reference's additional lines, without its page at the
+    /// bottom); `None`: until the last row is at the view's top.
+    pub fn set_room_after_end(&mut self, rows: Option<usize>, cx: &mut Context<Self>) {
+        if self.room_after_end != rows {
+            self.room_after_end = rows;
+            cx.notify();
+        }
+    }
+
+    /// Rows of room after the last one: a console has none, an editor
+    /// with [`Self::set_room_after_end`] its own.
+    pub(crate) fn lines_after_end(&self) -> Option<usize> {
+        if self.console {
+            Some(0)
+        } else {
+            self.room_after_end
+        }
+    }
+
     /// Replaces the char range backgrounds (sorted by start or not).
     pub fn set_range_backgrounds(&mut self, ranges: Vec<RangeBackground>, cx: &mut Context<Self>) {
         let len = self.buffer.len_chars();
