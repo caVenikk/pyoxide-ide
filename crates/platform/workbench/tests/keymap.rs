@@ -943,6 +943,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(h.debug()["visible"], json!(false), "{what}");
         }
         c if SESSION_COMMANDS.contains(&c) => check_debug_session(h, c, keys, &what, debug_console),
+        c if VIEW_COMMANDS.contains(&c) => {
+            check_debug_views(h, c, keys, &what, b.context.as_deref())
+        }
         "find.toggle-case" | "find.toggle-words" | "find.toggle-regex" if in_popup => {
             h.search_in_files(" = ");
             let option = match b.command.as_str() {
@@ -3166,6 +3169,123 @@ fn check_debug_session(h: &mut H, command: &str, keys: &str, what: &str, console
             assert_eq!(s["registered"], json!(false), "{what}");
         }
         _ => panic!("{what}: no check"),
+    }
+}
+
+/// The keys of Threads & Variables (#166).
+const VIEW_COMMANDS: [&str; 6] = [
+    "debug.previous-frame",
+    "debug.next-frame",
+    "debug.variables.up",
+    "debug.variables.down",
+    "debug.variables.left",
+    "debug.variables.right",
+];
+
+/// The keys of the frames list and the variables view with a scripted
+/// adapter: a stop in `a.py` with two frames whose first frame has a
+/// Locals scope (`a = 1`, `b = [1]`).
+fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: Option<&str>) {
+    let a = h.root.join("a.py");
+    let frame = |id: i64, name: &str, line: u32| json!({"id": id, "name": name, "line": line, "column": 1, "source": {"path": a}});
+    let script = vec![
+        json!({"ignore": ["setBreakpoints", "setExceptionBreakpoints", "source"]}),
+        json!({"expect": "initialize"}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true}}),
+        json!({"expect": "launch"}),
+        json!({"event": "initialized"}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "launch"}),
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1}}),
+        json!({"expect": "threads"}),
+        json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": {"stackFrames": [frame(101, "f", 2), frame(102, "<module>", 1)],
+            "totalFrames": 2}}),
+        json!({"expect": "scopes", "arguments": {"frameId": 101}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0},
+            {"name": "b", "value": "[1]", "type": "list", "variablesReference": 6}]}}),
+    ];
+    support::push_debug_script(script);
+    h.invoke("debug.debug", json!(null));
+    let variables = |s: &Value| s["tool_window"]["tabs"][0]["variables"].clone();
+    h.wait_debug("the stop and its values", |s| {
+        variables(s)["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
+    });
+    let view = h.workbench(|w, _| w.debugger_view().clone());
+    let tool_window = h.cx.update(|cx| view.read(cx).tool_window().clone());
+    let selected_frame =
+        |h: &mut H| h.debug()["tool_window"]["tabs"][0]["frames_view"]["selected"].clone();
+    let selected = |h: &mut H| variables(&h.debug())["selected"].clone();
+    match command {
+        "debug.previous-frame" | "debug.next-frame" => {
+            if context == Some("DebugFrames") {
+                let focus =
+                    h.cx.update(|cx| tool_window.read(cx).frames_focus().clone());
+                h.focus(focus);
+            } else {
+                h.focus_editor();
+            }
+            if command == "debug.previous-frame" {
+                h.invoke("debug.select-frame", json!({"index": 1}));
+                h.press(keys);
+                assert_eq!(selected_frame(h), json!(0), "{what}");
+            } else {
+                h.press(keys);
+                assert_eq!(selected_frame(h), json!(1), "{what}");
+                // The editor shows the frame's line.
+                assert_eq!(h.debug()["execution_point"]["line"], json!(1), "{what}");
+            }
+        }
+        _ => {
+            let focus = h.cx.update(|cx| {
+                tool_window
+                    .read(cx)
+                    .selected_variables()
+                    .unwrap()
+                    .focus_handle(cx)
+            });
+            h.focus(focus);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "a"]}));
+            match command {
+                "debug.variables.down" => {
+                    h.press(keys);
+                    assert_eq!(selected(h), json!(["Locals", "b"]), "{what}");
+                }
+                "debug.variables.up" => {
+                    h.press(keys);
+                    assert_eq!(selected(h), json!(["Locals"]), "{what}");
+                }
+                "debug.variables.left" => {
+                    // To the parent, then the parent collapses.
+                    h.press(keys);
+                    assert_eq!(selected(h), json!(["Locals"]), "{what}");
+                    h.press(keys);
+                    let rows = variables(&h.debug())["rows"].clone();
+                    assert_eq!(rows.as_array().map(Vec::len), Some(1), "{what}: {rows}");
+                }
+                "debug.variables.right" => {
+                    h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+                    h.press(keys);
+                    let rows = variables(&h.debug())["rows"].clone();
+                    let b = rows
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|r| r["name"] == json!("b"))
+                        .unwrap();
+                    assert_eq!(b["expanded"], json!(true), "{what}: {rows}");
+                }
+                _ => panic!("{what}: no check"),
+            }
+        }
     }
 }
 

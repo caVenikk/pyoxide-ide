@@ -252,10 +252,8 @@ impl DebuggerView {
             return;
         };
         let (snapshot, was) = self.tool_window.update(cx, |w, cx| {
-            let tab = &mut w.tabs[index];
-            let snapshot = tab.session.snapshot();
-            let was = std::mem::replace(&mut tab.snapshot, snapshot.clone()).phase;
-            cx.notify();
+            let snapshot = w.tabs[index].session.snapshot();
+            let was = w.update_snapshot(index, snapshot.clone(), cx);
             (snapshot, was)
         });
         // A new stop: its tab is selected, the editor shows the line and
@@ -598,6 +596,73 @@ impl DebuggerView {
             .map(|t| t.console.clone());
         if let Some(console) = console {
             console.update(cx, |c, cx| c.type_text(&a.text, cx));
+        }
+    }
+
+    // ---- frames and variables ------------------------------------------------
+
+    /// The selected tab's session when it is suspended.
+    fn suspended_session(&self, cx: &gpui::App) -> Option<Session> {
+        self.tool_window
+            .read(cx)
+            .selected_session()
+            .filter(|s| s.phase() == Phase::Suspended)
+    }
+
+    pub(crate) fn show_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tool_window
+            .update(cx, |w, cx| w.show_threads(window, cx));
+    }
+
+    pub(crate) fn select_thread(&mut self, a: &SelectThread, cx: &mut Context<Self>) {
+        if let Some(session) = self.suspended_session(cx) {
+            session.select_thread(a.id);
+        }
+    }
+
+    /// Selects a frame of the selected thread: the editor shows its line
+    /// (the session's change does), the variables view its values.
+    pub(crate) fn select_frame(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(session) = self.suspended_session(cx) else {
+            return;
+        };
+        if let Some(frame) = session.snapshot().frames.get(index) {
+            session.select_frame(frame.id);
+            self.tool_window.update(cx, |w, _| {
+                w.frames_scroll
+                    .scroll_to_item(index, gpui::ScrollStrategy::Top)
+            });
+        }
+    }
+
+    /// Previous Frame and Next Frame.
+    pub(crate) fn step_frame(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(session) = self.suspended_session(cx) else {
+            return;
+        };
+        if let Some(index) = crate::frames::frame_in_direction(&session.snapshot(), delta) {
+            self.select_frame(index, cx);
+        }
+    }
+
+    pub(crate) fn close_frames_hint(&mut self, cx: &mut Context<Self>) {
+        self.tool_window.update(cx, |w, cx| {
+            w.frames_hint_closed = true;
+            cx.notify();
+        });
+    }
+
+    /// Runs `f` on the selected tab's variables view.
+    pub(crate) fn with_variables(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(
+            &mut crate::variables::VariablesView,
+            &mut Context<crate::variables::VariablesView>,
+        ),
+    ) {
+        if let Some(variables) = self.tool_window.read(cx).selected_variables() {
+            variables.update(cx, f);
         }
     }
 

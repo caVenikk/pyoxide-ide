@@ -111,11 +111,54 @@ action_icons![
     "layout",
 ];
 
+/// The frames and variables views (`platform/icons/src/expui/debugger`):
+/// a frame (`AllIcons.Debugger.Frame`), the current thread
+/// (`ThreadCurrent`), values (`Db_primitive`, `Db_array`, `Value`), the
+/// Special Variables and Return Values groups (`SpecialVar`,
+/// `WatchLastReturnValue`), watches (`Watch`, `AddToWatch`) and the
+/// evaluate field's result (`EvaluationResult`).
+pub const FRAME: IconName = IconName("values/frame");
+pub const THREAD_CURRENT: IconName = IconName("values/threadCurrent");
+pub const PRIMITIVE: IconName = IconName("values/dbPrimitive");
+pub const ARRAY: IconName = IconName("values/dbArray");
+pub const OBJECT: IconName = IconName("values/value");
+pub const SPECIAL_VARIABLES: IconName = IconName("values/specialVar");
+pub const RETURN_VALUES: IconName = IconName("values/watchLastReturnValue");
+pub const WATCH: IconName = IconName("values/watch");
+pub const ADD_TO_WATCHES: IconName = IconName("values/addToWatch");
+pub const EVALUATION_RESULT: IconName = IconName("values/evaluationResult");
+
+macro_rules! value_icons {
+    ($($name:literal),* $(,)?) => {
+        const VALUE_ICONS: &[IconSvg] = &[
+            $(IconSvg {
+                name: concat!("values/", $name),
+                light: include_bytes!(concat!("../assets/icons/values/", $name, ".svg")),
+                dark: Some(include_bytes!(concat!("../assets/icons/values/", $name, "_dark.svg"))),
+            },)*
+        ];
+    };
+}
+
+value_icons![
+    "frame",
+    "threadCurrent",
+    "dbPrimitive",
+    "dbArray",
+    "value",
+    "specialVar",
+    "watchLastReturnValue",
+    "watch",
+    "addToWatch",
+    "evaluationResult",
+];
+
 /// Registers the icons (the platform's light-only breakpoint icon gets its
 /// dark variant).
 pub fn register(cx: &mut gpui::App) {
     ui::icons::register(cx, ICONS);
     ui::icons::register(cx, ACTION_ICONS);
+    ui::icons::register(cx, VALUE_ICONS);
 }
 
 #[cfg(test)]
@@ -151,6 +194,37 @@ mod tests {
             FORCE_RUN_TO_CURSOR,
             SHOW_EXECUTION_POINT,
             LAYOUT,
+        ] {
+            assert!(names.contains(&icon.0), "{}", icon.0);
+        }
+    }
+
+    #[test]
+    fn every_value_icon_rasterizes_in_both_variants() {
+        for icon in VALUE_ICONS {
+            assert!(
+                ui::icons::rasterize(icon.light, 32).is_some(),
+                "{}",
+                icon.name
+            );
+            assert!(
+                ui::icons::rasterize(icon.dark.unwrap(), 32).is_some(),
+                "{}",
+                icon.name
+            );
+        }
+        let names: Vec<&str> = VALUE_ICONS.iter().map(|i| i.name).collect();
+        for icon in [
+            FRAME,
+            THREAD_CURRENT,
+            PRIMITIVE,
+            ARRAY,
+            OBJECT,
+            SPECIAL_VARIABLES,
+            RETURN_VALUES,
+            WATCH,
+            ADD_TO_WATCHES,
+            EVALUATION_RESULT,
         ] {
             assert!(names.contains(&icon.0), "{}", icon.0);
         }

@@ -227,6 +227,18 @@ name = "Editor"
 "ctrl-alt-f9" = "debug.force-run-to-cursor"
 "alt-f10" = "debug.show-execution-point"
 
+# Threads & Variables (#166): Previous and Next Frame from anywhere while
+# debugging (`PreviousOccurence`, `NextOccurence` over the frames list,
+# `XFramesView.addFramesNavigationAd`), in the main window's context so
+# that the Run console's links (a deeper context) keep the keys. In the
+# frames list Up and Down select frames; in the variables view they move,
+# Left and Right collapse and expand.
+[[context]]
+name = "Workbench"
+[context.bindings]
+"ctrl-alt-up" = "debug.previous-frame"
+"ctrl-alt-down" = "debug.next-frame"
+
 # Branches (#28): New Branch (`Git.CreateNewBranch`) and the Branches
 # popup (`Git.Branches`). In the popup Up and Down move, Left and Right
 # collapse and expand (Right opens a branch's actions), Enter chooses,
@@ -588,6 +600,20 @@ name = "DebugConsole > Editor"
 "ctrl-f2" = "debug.stop"
 "ctrl-f4" = "debug.close-tab"
 "escape" = "workbench.focus-editor"
+
+[[context]]
+name = "DebugFrames"
+[context.bindings]
+"up" = "debug.previous-frame"
+"down" = "debug.next-frame"
+
+[[context]]
+name = "DebugVariables"
+[context.bindings]
+"up" = "debug.variables.up"
+"down" = "debug.variables.down"
+"left" = "debug.variables.left"
+"right" = "debug.variables.right"
 
 # The Run console: Close Tab and Send EOF take the keys of Close and
 # Duplicate Line; Escape leaves it.

@@ -158,7 +158,24 @@ impl Workbench {
                     line: line.saturating_sub(1) as usize,
                     column: 0,
                 };
+                // A frame chosen in the frames list or the variables view
+                // shows its line and the focus stays there
+                // (`XDebuggerUtilImpl.createEditor` focuses the editor only
+                // from another editor); a stop brings the focus to the
+                // editor.
+                let views = self.debugger.read(cx).tool_window().clone();
+                let keep = views
+                    .read(cx)
+                    .frames_or_variables_focused(window, cx)
+                    .then(|| window.focused(cx))
+                    .flatten();
+                let open = self.tabs.iter().any(|t| t.path == *path);
                 self.open_file_at(path.clone(), point, None, window, cx);
+                match keep {
+                    Some(focus) if open => window.focus(&focus),
+                    Some(focus) => self.focus_after_open = Some((path.clone(), focus)),
+                    None => {}
+                }
             }
             DebuggerViewEvent::ShowToolWindow { activate } => {
                 if *activate {

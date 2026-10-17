@@ -131,9 +131,14 @@ impl H<'_> {
 
 /// A project with main.py and a virtual environment made by [`python`].
 fn project() -> (tempfile::TempDir, PathBuf) {
+    project_with(MAIN)
+}
+
+/// A project whose main.py is `text`.
+fn project_with(text: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
-    std::fs::write(root.join("main.py"), MAIN).unwrap();
+    std::fs::write(root.join("main.py"), text).unwrap();
     let made = std::process::Command::new(python())
         .args(["-m", "venv", "--without-pip", ".venv"])
         .current_dir(&root)
@@ -162,6 +167,187 @@ fn open<'a>(cx: &'a mut TestAppContext, root: &Path) -> H<'a> {
     h.wait("the project's debugger", |s| s["loaded"] == json!(true));
     h.invoke("project.open-file", json!({"path": "main.py"}));
     h
+}
+
+/// The program of the frames and variables test: a stop in `describe`
+/// (line 4) called from the module (line 11).
+const VARIABLES: &str = r#"def describe(items):
+    summary = {"count": len(items), "sum": 0}
+    for value in items:
+        summary["sum"] += value
+    return summary
+
+
+numbers = [1, 2, 3, 4]
+big = list(range(1000))
+text = "x" * 10000
+print(describe(numbers))
+"#;
+
+impl H<'_> {
+    /// The Threads & Variables tab of the first session.
+    fn tab(&mut self) -> Value {
+        self.debug()["tool_window"]["tabs"][0].clone()
+    }
+
+    /// Waits for the variables view to show every row it is loading.
+    fn variables(&mut self) -> Vec<Value> {
+        let s = self.wait("the variables", |s| {
+            let rows = &s["tool_window"]["tabs"][0]["variables"]["rows"];
+            rows.as_array()
+                .is_some_and(|r| !r.is_empty() && r.iter().all(|r| r["kind"] != json!("loading")))
+        });
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    /// The texts of the variables view's rows at a depth.
+    fn variable_texts(&mut self, depth: u64) -> Vec<String> {
+        self.variables()
+            .iter()
+            .filter(|r| r["depth"] == json!(depth))
+            .map(|r| r["text"].as_str().unwrap().to_owned())
+            .collect()
+    }
+}
+
+/// Threads & Variables at a stop: the thread combo, the frames (the
+/// library's frames marked), the values of the selected frame with their
+/// types and sizes; a node's children load when it is expanded, a large
+/// list in pages; another frame shows its own values; a step marks the
+/// values that changed.
+#[gpui::test]
+#[ignore = "needs Python and the debugpy helper (scripts/fetch-debugpy.py)"]
+fn frames_and_variables_at_a_stop(cx: &mut TestAppContext) {
+    let (_dir, root) = project_with(VARIABLES);
+    let mut h = open(cx, &root);
+    h.invoke(
+        "debug.toggle-breakpoint",
+        json!({"file": "main.py", "line": 4}),
+    );
+    h.invoke("debug.debug", json!(null));
+    h.wait_line(4);
+    let tab = h.tab();
+    assert_eq!(tab["content"], json!("threads-variables"), "{tab:#}");
+    let frames = &tab["frames_view"];
+    assert_eq!(frames["thread"], json!("MainThread"), "{frames:#}");
+    assert_eq!(frames["selected"], json!(0), "{frames:#}");
+    let rows = frames["rows"].as_array().unwrap();
+    assert_eq!(
+        rows[0]["text"],
+        json!("describe, main.py:4:1"),
+        "{frames:#}"
+    );
+    assert_eq!(rows[0]["library"], json!(false));
+    assert_eq!(
+        rows[1]["text"],
+        json!("<module>, main.py:11:1"),
+        "{frames:#}"
+    );
+    assert!(
+        rows[2..].iter().all(|r| r["library"] == json!(true)),
+        "the interpreter's frames are library frames: {frames:#}"
+    );
+    // The locals of describe, by name, with types and sizes.
+    let texts = h.variable_texts(0);
+    assert_eq!(
+        texts,
+        [
+            "items = {list: 4} [1, 2, 3, 4]",
+            "summary = {dict: 2} {'count': 4, 'sum': 0}",
+            "value = {int} 1",
+        ],
+        "{texts:?}"
+    );
+    // A list's items, its len() and its special variables, in this order.
+    h.invoke(
+        "debug.variables.expand",
+        json!({"path": ["items"], "expanded": true}),
+    );
+    let texts = h.variable_texts(1);
+    assert_eq!(
+        texts,
+        [
+            "0 = {int} 1",
+            "1 = {int} 2",
+            "2 = {int} 3",
+            "3 = {int} 4",
+            "len() = {int} 4",
+            "Special Variables",
+        ],
+        "{texts:?}"
+    );
+    // The caller's frame: its values; the editor shows its line.
+    h.invoke("debug.next-frame", json!(null));
+    let s = h.wait("the caller's frame", |s| {
+        s["tool_window"]["tabs"][0]["frames_view"]["selected"] == json!(1)
+    });
+    assert_eq!(s["execution_point"]["line"], json!(11), "{s:#}");
+    let texts = h.variable_texts(0);
+    assert!(
+        texts.contains(&"numbers = {list: 4} [1, 2, 3, 4]".to_owned()),
+        "{texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.starts_with("big = {list: 1000} [0, 1, 2")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t.starts_with("text = {str} 'xxx")),
+        "{texts:?}"
+    );
+    // A large list: the first hundred items, then the rest on demand.
+    h.invoke(
+        "debug.variables.expand",
+        json!({"path": ["big"], "expanded": true}),
+    );
+    let texts = h.variable_texts(1);
+    assert_eq!(texts[0], "000 = {int} 0", "{texts:?}");
+    assert_eq!(texts[99], "099 = {int} 99", "{texts:?}");
+    assert_eq!(
+        texts[100], "... (900 more items. Double-click to see)",
+        "{texts:?}"
+    );
+    let more = h
+        .variables()
+        .iter()
+        .find(|r| r["kind"] == json!("more"))
+        .unwrap()["path"]
+        .clone();
+    h.invoke("debug.variables.expand", json!({"path": more}));
+    let texts = h.variable_texts(1);
+    assert_eq!(texts[999], "999 = {int} 999", "{texts:?}");
+    assert_eq!(texts[1000], "len() = {int} 1000", "{texts:?}");
+    // Back to the top frame, then a step: the sum changed.
+    h.invoke("debug.previous-frame", json!(null));
+    h.wait("the top frame", |s| {
+        s["tool_window"]["tabs"][0]["frames_view"]["selected"] == json!(0)
+    });
+    h.variables();
+    h.step("debug.step-over");
+    h.wait_line(3);
+    let rows = h.variables();
+    let summary = rows.iter().find(|r| r["name"] == json!("summary")).unwrap();
+    assert_eq!(
+        summary["text"],
+        json!("summary = {dict: 2} {'count': 4, 'sum': 1}")
+    );
+    assert_eq!(summary["changed"], json!(true), "{rows:#?}");
+    let value = rows.iter().find(|r| r["name"] == json!("value")).unwrap();
+    assert_eq!(value["changed"], json!(false), "{rows:#?}");
+    // The expanded list stays expanded.
+    assert!(
+        rows.iter().any(|r| r["path"] == json!(["items", "0"])),
+        "{rows:#?}"
+    );
+    h.invoke("run.stop", json!(null));
+    h.wait("the end", |s| {
+        s["tool_window"]["tabs"][0]["state"] == json!("ended")
+    });
 }
 
 #[cfg(unix)]

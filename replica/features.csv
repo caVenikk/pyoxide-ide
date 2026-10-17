@@ -82,13 +82,13 @@ Semantic highlighting,python-intel,could,yes,no,Community
 Run configurations,run-debug,must,yes,partial,"Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75"
 Debug the current file and run configurations (debugpy over DAP),run-debug,must,yes,yes,"Community (pydevd; debugpy through a separate plugin in the reference); debugpy 1.8.21 shipped with the app, ADR 0015 (#90, #165)"
 "Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog)",run-debug,must,yes,yes,"Community; Debug buttons of #74 enabled, shared Stop / Rerun, Is Running dialog (#165)"
-"Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin)",run-debug,must,yes,partial,Community; Console through DAP runInTerminal like the Run console (#165); Threads & Variables is a plain frame list until #166
+"Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin)",run-debug,must,yes,partial,Community; Console through DAP runInTerminal like the Run console (#165); Threads & Variables with frames and variables (#166); no evaluate field yet
 "Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun)",run-debug,must,yes,yes,Community; keys of the macOS and Windows keymaps (#165); debug actions not yet on the Keymap page
 "Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,yes,"Community; stoppable lines as the reference, hover icon, state icons, follow edits (#164)"
 "Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,partial,"Community; condition, popup, dialog (#164); no completion in the condition, Mute shown per project"
 Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,partial,Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200)
-Frames list and thread chooser (library frames folded),run-debug,must,yes,no,Community (#90)
-"Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,no,Community (#90)
+Frames list and thread chooser (library frames folded),run-debug,must,yes,yes,"Community; thread combo, library frames on the non-project tint, frame up / down from anywhere (#166)"
+"Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,partial,"Community; lazy children, Special Variables, Return Values, sizes, changed values (#166); no Set Value / Copy Value yet"
 Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
 Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,partial,Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check
 "Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community

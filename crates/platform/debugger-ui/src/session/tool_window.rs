@@ -3,29 +3,47 @@
 //! toolbar before its tabs (Rerun, Stop | Resume, Pause, Step Over, Step
 //! Into, Step Into My Code, Step Out | View Breakpoints, Mute | More), the
 //! "Threads & Variables" and "Console" tabs and the layout button at the
-//! right, then the selected tab's content.
+//! right, then the selected tab's content: Threads & Variables (the
+//! frames view, [`crate::frames`], and the variables view,
+//! [`crate::variables`]) or the Console.
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use console::LinkTarget;
 use console_ui::{ConsoleEvent, ConsoleView};
-use debugger::{DebugRequest, Phase, Session, SessionId, SessionSnapshot};
+use debugger::{DebugAdapterProvider, DebugRequest, Phase, Session, SessionId, SessionSnapshot};
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, Pixels, Point,
-    Render, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, SharedString,
+    Subscription, Task, UniformListScrollHandle, Window, canvas, div, prelude::*, px, relative,
 };
 use process::ExitStatus;
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
+use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
 use super::commands::*;
 use crate::breakpoints::commands::{MuteBreakpoints, ViewBreakpoints};
+use crate::frames::frame_text;
 use crate::icons;
+use crate::variables::VariablesView;
+
+/// How long the frames of a stop stay after the program moved on
+/// (`XDebugView`'s clear alarm).
+const CLEAR_DELAY: Duration = Duration::from_millis(100);
+/// The share of the width the frames take (the reference's splitter
+/// proportion in Threads & Variables).
+const SPLIT: f32 = 0.35;
+/// The width of the divider's handle.
+const SPLIT_HANDLE: f32 = 6.0;
 
 /// Size of the toolbar's buttons and of their icons.
 const BUTTON: f32 = 24.0;
@@ -87,9 +105,18 @@ pub(crate) struct SessionTab {
     /// compare it).
     pub key: Option<String>,
     pub console: Entity<ConsoleView>,
+    /// The variables of the selected frame.
+    pub variables: Entity<VariablesView>,
     pub content: Content,
     /// The session as it was last shown.
     pub snapshot: SessionSnapshot,
+    /// The last stop, shown for a moment after the program moved on.
+    pub frozen: Option<SessionSnapshot>,
+    /// The session's generation and the number of frames shown when more
+    /// were asked for (all frames of a stop are loaded, a page at a time,
+    /// as the reference's frames list computes them).
+    pub frames_asked: Option<(u64, usize)>,
+    pub _unfreeze: Option<Task<()>>,
     /// The program's exit, as its console printed it.
     pub exit: Option<ExitStatus>,
     /// The console shows the program's output.
@@ -103,6 +130,12 @@ pub(crate) struct SessionTab {
 impl SessionTab {
     pub fn is_alive(&self) -> bool {
         self.snapshot.phase != Phase::Ended
+    }
+
+    /// The session as the frames view shows it: the last stop for a
+    /// moment after the program moved on.
+    pub(crate) fn shown_frames(&self) -> SessionSnapshot {
+        self.frozen.clone().unwrap_or_else(|| self.snapshot.clone())
     }
 }
 
@@ -123,8 +156,24 @@ pub struct DebugToolWindow {
     /// The toolbar's More button where it was last laid out: its menu
     /// opens below it.
     more_anchor: Rc<Cell<Bounds<Pixels>>>,
-    focus: FocusHandle,
+    pub(crate) focus: FocusHandle,
     next_id: u64,
+    /// The frames list's focus (its key context) and scroll.
+    pub(crate) frames_focus: FocusHandle,
+    pub(crate) frames_scroll: UniformListScrollHandle,
+    /// The hint below the frames was closed.
+    pub(crate) frames_hint_closed: bool,
+    /// The project root: frames of other files are library frames.
+    pub(crate) root: Option<PathBuf>,
+    /// How the product shows its values.
+    pub(crate) provider: Option<Arc<dyn DebugAdapterProvider>>,
+    /// The frames' share of the width, and where Threads & Variables was
+    /// laid out.
+    pub(crate) split: f32,
+    pub(crate) split_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) dragging_split: bool,
+    /// The open list of threads.
+    pub(crate) threads_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
 }
 
 impl EventEmitter<DebugToolWindowEvent> for DebugToolWindow {}
@@ -138,7 +187,117 @@ impl DebugToolWindow {
             more_anchor: Rc::default(),
             focus: cx.focus_handle(),
             next_id: 0,
+            frames_focus: cx.focus_handle(),
+            frames_scroll: UniformListScrollHandle::new(),
+            frames_hint_closed: false,
+            root: None,
+            provider: None,
+            split: SPLIT,
+            split_bounds: Rc::default(),
+            dragging_split: false,
+            threads_menu: None,
         }
+    }
+
+    /// The tab's session changed: its snapshot, the frames (the last stop
+    /// stays for a moment after the program moved on) and the variables.
+    pub(crate) fn update_snapshot(
+        &mut self,
+        index: usize,
+        snapshot: SessionSnapshot,
+        cx: &mut Context<Self>,
+    ) -> Phase {
+        let Some(tab) = self.tabs.get_mut(index) else {
+            return snapshot.phase;
+        };
+        let old = std::mem::replace(&mut tab.snapshot, snapshot.clone());
+        if snapshot.phase == Phase::Suspended {
+            tab.frozen = None;
+            tab._unfreeze = None;
+            // The rest of the selected thread's frames.
+            let loaded = snapshot.frames.len();
+            let more = snapshot.frames_total.is_none_or(|total| loaded < total);
+            let asked = Some((snapshot.generation, loaded));
+            if loaded > 0 && more && tab.frames_asked != asked {
+                tab.frames_asked = asked;
+                drop(tab.session.load_more_frames());
+            }
+        } else if old.phase == Phase::Suspended {
+            tab.frozen = Some(old.clone());
+            let id = tab.id;
+            tab._unfreeze = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(CLEAR_DELAY).await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(i) = this.index_of(id) {
+                        this.tabs[i].frozen = None;
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+        tab.variables.update(cx, |v, cx| v.follow(&snapshot, cx));
+        cx.notify();
+        old.phase
+    }
+
+    /// The selected tab's variables view.
+    pub fn selected_variables(&self) -> Option<Entity<VariablesView>> {
+        self.selected_tab().map(|t| t.variables.clone())
+    }
+
+    /// The focus of the frames list.
+    pub fn frames_focus(&self) -> &FocusHandle {
+        &self.frames_focus
+    }
+
+    /// The frames list or the variables view has the focus: a frame chosen
+    /// there shows its line without moving the focus to the editor.
+    pub fn frames_or_variables_focused(&self, window: &Window, cx: &App) -> bool {
+        self.frames_focus.contains_focused(window, cx)
+            || self
+                .selected_variables()
+                .is_some_and(|v| v.focus_handle(cx).contains_focused(window, cx))
+    }
+
+    /// Opens the list of the selected session's threads below the combo.
+    pub(crate) fn show_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.selected_tab() else {
+            return;
+        };
+        let s = &tab.snapshot;
+        if s.phase != Phase::Suspended || s.threads.is_empty() {
+            return;
+        }
+        let selected = s
+            .threads
+            .iter()
+            .position(|t| Some(t.id) == s.selected_thread);
+        let items: Vec<MenuItem> = s
+            .threads
+            .iter()
+            .map(|t| {
+                MenuItem::action(t.name.clone(), SelectThread { id: t.id })
+                    .icon(crate::icons::THREAD_CURRENT)
+            })
+            .collect();
+        let bounds = self.split_bounds.get();
+        let position = bounds.origin + gpui::point(px(4.0), px(30.0));
+        let menu = ContextMenu::popup(
+            items,
+            PopupOptions {
+                selected,
+                min_width: Some(f32::from(bounds.size.width * self.split) - 8.0),
+                ..PopupOptions::default()
+            },
+            window,
+            cx,
+        );
+        let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &gpui::DismissEvent, _, cx| {
+            this.threads_menu = None;
+            cx.notify();
+        });
+        self.threads_menu = Some((menu, position, dismissed));
+        cx.notify();
     }
 
     /// Where the More menu opens: below the toolbar's More button, `None`
@@ -251,15 +410,24 @@ impl DebugToolWindow {
             }
         });
         self.next_id += 1;
+        let provider = self.provider.clone();
+        let variables = {
+            let session = session.clone();
+            cx.new(|cx| VariablesView::new(session, provider, cx))
+        };
         self.tabs.push(SessionTab {
             id: self.next_id,
             title: session.name().to_owned(),
             snapshot: session.snapshot(),
+            frozen: None,
+            frames_asked: None,
+            _unfreeze: None,
             session,
             request,
             icon,
             key,
             console,
+            variables,
             content: Content::Console,
             exit: None,
             attached: false,
@@ -281,11 +449,19 @@ impl DebugToolWindow {
         request: DebugRequest,
         cx: &mut Context<Self>,
     ) {
+        let provider = self.provider.clone();
         let Some(tab) = self.tabs.get_mut(index) else {
             return;
         };
         tab.title = session.name().to_owned();
         tab.snapshot = session.snapshot();
+        tab.frozen = None;
+        tab.frames_asked = None;
+        tab._unfreeze = None;
+        tab.variables = {
+            let session = session.clone();
+            cx.new(|cx| VariablesView::new(session, provider, cx))
+        };
         tab.session = session;
         tab.request = request;
         tab.content = Content::Console;
@@ -356,6 +532,8 @@ impl DebugToolWindow {
                     "exit_code": t.exit.map(|e| e.code),
                     "toolbar": toolbar_state(s.phase),
                     "frames": s.frames.iter().map(frame_text).collect::<Vec<_>>(),
+                    "frames_view": self.frames_json(i),
+                    "variables": t.variables.read(cx).state_json(),
                     "selected": self.selected() == Some(i),
                     "console": t.console.read(cx).state_json(cx),
                 })
@@ -721,117 +899,170 @@ impl DebugToolWindow {
             .into_any_element()
     }
 
-    /// Threads & Variables: the selected thread's frames and a pane for
-    /// the variables. A plain list until the frames and variables views
-    /// come (#166).
-    fn render_threads_variables(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let tab = &self.tabs[index];
+    /// Threads & Variables (`XDebugSessionTabNewUI`): the frames at the
+    /// left (`XFramesView`, a 0.35 share of the width, the splitter's
+    /// proportion), the variables at the right; the divider between them
+    /// can be dragged.
+    fn render_threads_variables(
+        &self,
+        index: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let frames = self.render_frames(index, window, cx);
+        let variables = self.tabs[index].variables.clone();
         let theme = cx.theme();
-        let muted = theme.color(UiRole::TextMuted);
-        let s = &tab.snapshot;
-        let message = |text: &'static str| {
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(muted)
-                .child(text)
-                .into_any_element()
-        };
-        let frames: AnyElement = match s.phase {
-            Phase::Suspended if !s.frames.is_empty() => {
-                let selection = theme.color(UiRole::SelectionInactive);
-                let thread = s
-                    .threads
-                    .iter()
-                    .find(|t| Some(t.id) == s.selected_thread)
-                    .map(|t| t.name.clone())
-                    .unwrap_or_default();
-                div()
-                    .id("debug-frames")
-                    .debug_selector(|| "debug-frames".into())
-                    .flex()
-                    .flex_col()
-                    .size_full()
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .h(px(28.0))
-                            .px(px(10.0))
-                            .flex()
-                            .items_center()
-                            .child(thread),
-                    )
-                    .children(s.frames.iter().map(|f| {
-                        let selected = s.selected_frame == Some(f.id);
-                        div()
-                            .h(px(24.0))
-                            .px(px(10.0))
-                            .flex()
-                            .items_center()
-                            .whitespace_nowrap()
-                            .when(selected, |d| d.bg(selection))
-                            .child(frame_text(f))
-                    }))
-                    .into_any_element()
-            }
-            Phase::Suspended => message("Collecting data\u{2026}"),
-            Phase::Running | Phase::Starting => message("The application is running"),
-            Phase::Stopping | Phase::Ended => message("Frames are not available"),
-        };
-        let variables = match s.phase {
-            Phase::Suspended => message("Variables are not available"),
-            _ => message("The application is running"),
-        };
-        let variables = if s.phase == Phase::Suspended {
-            variables
-        } else {
-            div().flex_1().into_any_element()
-        };
+        let border = theme.color(UiRole::Border);
+        let split = self.split;
+        let bounds = self.split_bounds.clone();
         div()
             .id("debug-threads-variables")
             .debug_selector(|| "debug-threads-variables".into())
+            .relative()
             .flex()
             .flex_row()
             .flex_1()
             .min_h(px(0.0))
             .border_t_1()
-            .border_color(theme.color(UiRole::Border))
+            .border_color(border)
+            .child(
+                canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .w(px(380.0))
+                    .flex_none()
+                    .w(relative(split))
                     .h_full()
-                    .border_r_1()
-                    .border_color(theme.color(UiRole::Border))
                     .child(frames),
             )
-            .child(div().flex().flex_1().h_full().child(variables))
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h_full()
+                    .bg(border)
+                    .child(
+                        div()
+                            .id("debug-threads-variables-divider")
+                            .debug_selector(|| "debug-threads-variables-divider".into())
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(-(SPLIT_HANDLE - 1.0) / 2.0))
+                            .w(px(SPLIT_HANDLE))
+                            .child(
+                                canvas(
+                                    |bounds, window, _| {
+                                        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+                                    },
+                                    |_, hitbox, window, _| {
+                                        ui::pointer::request(
+                                            CursorStyle::ResizeLeftRight,
+                                            &hitbox,
+                                            window,
+                                        )
+                                    },
+                                )
+                                .size_full(),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                                    this.dragging_split = true;
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            )
+            .when(self.dragging_split, |d| {
+                d.child(
+                    canvas(
+                        |_, _, _| {},
+                        |_, _, window, _| {
+                            ui::pointer::request_window(CursorStyle::ResizeLeftRight, window)
+                        },
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .child(self.render_evaluate_hint(cx))
+                    .child(div().flex_1().min_h(px(0.0)).child(variables)),
+            )
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                if !this.dragging_split {
+                    return;
+                }
+                if !e.dragging() {
+                    this.dragging_split = false;
+                    return;
+                }
+                let b = this.split_bounds.get();
+                if b.size.width > px(0.0) {
+                    let x = (e.position.x - b.origin.x) / b.size.width;
+                    this.split = x.clamp(0.1, 0.9);
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, _| this.dragging_split = false),
+            )
+            .into_any_element()
+    }
+
+    /// The evaluate field's place above the variables, with its hint
+    /// (`debugger.evaluate.expression.or.add.a.watch.hint`), Add to
+    /// Watches and the history's chevron at the right.
+    fn render_evaluate_hint(&self, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        div()
+            .id("debug-evaluate")
+            .debug_selector(|| "debug-evaluate".into())
+            .flex_none()
+            .h(px(30.0))
+            .pl(px(8.0))
+            .pr(px(6.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .border_b_1()
+            .border_color(theme.color(UiRole::Border))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .font_family(theme.mono_family())
+                    .text_color(theme.color(UiRole::TextMuted))
+                    .child(EVALUATE_HINT),
+            )
+            .child(Icon::new(icons::ADD_TO_WATCHES).size(px(16.0)))
+            .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
             .into_any_element()
     }
 }
 
-/// A frame as the frames list shows it (`describe, main.py:7`).
-fn frame_text(frame: &debugger::StackFrame) -> String {
-    let file = frame
-        .source
-        .as_ref()
-        .and_then(|s| {
-            s.path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .or_else(|| s.name.clone())
-        })
-        .unwrap_or_default();
-    if file.is_empty() {
-        frame.name.clone()
-    } else {
-        format!("{}, {file}:{}", frame.name, frame.line)
-    }
-}
+/// The evaluate field's hint, with the keys of Evaluate (Enter) and Add to
+/// Watches (`XDebuggerBundle`).
+const EVALUATE_HINT: &str =
+    "Evaluate expression (\u{23ce}) or add a watch (\u{21e7}\u{2318}\u{23ce})";
 
 /// Which toolbar actions are enabled in a session's phase.
 pub(crate) fn toolbar_state(phase: Phase) -> Json {
@@ -857,7 +1088,7 @@ impl Render for DebugToolWindow {
             Some(index) => {
                 let toolbar = self.render_toolbar(index, window, cx);
                 let content = match self.tabs[index].content {
-                    Content::ThreadsVariables => self.render_threads_variables(index, cx),
+                    Content::ThreadsVariables => self.render_threads_variables(index, window, cx),
                     Content::Console => div()
                         .id("debug-console")
                         .debug_selector(|| "debug-console".into())
@@ -886,5 +1117,10 @@ impl Render for DebugToolWindow {
             .size_full()
             .child(header)
             .child(body)
+            .children(
+                self.threads_menu
+                    .as_ref()
+                    .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window)),
+            )
     }
 }
