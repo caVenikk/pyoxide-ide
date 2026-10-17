@@ -64,14 +64,16 @@ pub(crate) fn show(editor: &Entity<Editor>, point: Option<&ExecutionPoint>, cx: 
         Some(line) => {
             let last = e.buffer().len_lines().saturating_sub(1);
             let line = line.min(last);
-            // Frames other than the top one are selected with the frames
-            // view (#166), which brings `NOT_TOP_FRAME_ATTRIBUTES`.
+            let role = if point.is_some_and(|p| p.top) {
+                UiRole::ExecutionPoint
+            } else {
+                UiRole::ExecutionPointNotTop
+            };
             e.set_decorations(
                 GROUP,
                 vec![(
                     line..line + 1,
-                    Decoration::default()
-                        .background(UiRole::ExecutionPoint, layer::EXECUTION_POINT),
+                    Decoration::default().background(role, layer::EXECUTION_POINT),
                 )],
                 cx,
             );

@@ -18,7 +18,7 @@ use debugger_ui::session::tool_window::DebugToolWindow;
 use debugger_ui::{DebugRequest, DebuggerView, DebuggerViewEvent};
 use editor::Editor;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement,
     Subscription, Window, point,
 };
 use run_config::RunConfiguration;
@@ -158,7 +158,21 @@ impl Workbench {
                     line: line.saturating_sub(1) as usize,
                     column: 0,
                 };
+                // The editor takes the focus only from another editor
+                // (`XDebuggerUtilImpl.createEditor`): a frame chosen in the
+                // frames list, or the console, keeps it.
+                let editor_focused = self
+                    .tabs
+                    .iter()
+                    .any(|t| t.editor.focus_handle(cx).contains_focused(window, cx));
+                let keep = window.focused(cx).filter(|_| !editor_focused);
+                let open = self.tabs.iter().any(|t| t.path == *path);
                 self.open_file_at(path.clone(), point, None, window, cx);
+                match keep {
+                    Some(focus) if open => window.focus(&focus),
+                    Some(focus) => self.focus_after_open = Some((path.clone(), focus)),
+                    None => {}
+                }
             }
             DebuggerViewEvent::ShowToolWindow { activate } => {
                 if *activate {

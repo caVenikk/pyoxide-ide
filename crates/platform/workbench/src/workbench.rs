@@ -243,6 +243,9 @@ pub struct Workbench {
     return_focus: Option<FocusHandle>,
     /// A file being opened goes to this point once it is loaded.
     pending_go_to: Option<(PathBuf, text::Point)>,
+    /// A file being opened gives the focus back to this element once it
+    /// is loaded (the debugger shows a line without taking the focus).
+    pub(crate) focus_after_open: Option<(PathBuf, FocusHandle)>,
     /// Files shown in editors and files edited, most recent first (the
     /// Recently Viewed and Recently Changed scopes of Find in Files).
     recently_viewed: Vec<PathBuf>,
@@ -446,6 +449,7 @@ impl Workbench {
             recent_files,
             return_focus: None,
             pending_go_to: None,
+            focus_after_open: None,
             recently_viewed: Vec::new(),
             recently_changed: Vec::new(),
             run_window,
@@ -1004,6 +1008,10 @@ impl Workbench {
         self.vcs_tab_opened(&path, &editor, window, cx);
         self.debug_tab_opened(&editor, window, cx);
         self.diff_tab_opened(&path, &editor, cx);
+        let focus_back = self
+            .focus_after_open
+            .take_if(|(p, _)| *p == path)
+            .map(|(_, f)| f);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             content: TabContent::File { path, editor, find },
@@ -1011,6 +1019,9 @@ impl Workbench {
         });
         self.message = None;
         self.activate(index, window, cx);
+        if let Some(focus) = focus_back {
+            window.focus(&focus);
+        }
     }
 
     fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {

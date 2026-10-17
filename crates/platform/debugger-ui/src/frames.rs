@@ -7,11 +7,12 @@
 //! (`XFramesView.addFramesNavigationAd`).
 
 use std::path::Path;
+use std::rc::Rc;
 
 use debugger::{FramePresentation, Phase, SessionSnapshot, StackFrame};
 use gpui::{
-    AnyElement, App, ClickEvent, Context, MouseButton, MouseDownEvent, SharedString, Window, div,
-    prelude::*, px,
+    AnyElement, ClickEvent, Context, MouseButton, MouseDownEvent, SharedString, Window, div,
+    prelude::*, px, uniform_list,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
@@ -20,7 +21,9 @@ use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
 use crate::icons;
-use crate::session::commands::{CloseFramesHint, NextFrame, PreviousFrame, SelectFrame, ShowThreads};
+use crate::session::commands::{
+    CloseFramesHint, NextFrame, PreviousFrame, SelectFrame, ShowThreads,
+};
 use crate::session::tool_window::DebugToolWindow;
 
 /// The key context of the frames list (its keys: `workbench/keymaps`).
@@ -48,7 +51,12 @@ pub fn frame_text(frame: &StackFrame) -> String {
     if file.is_empty() {
         frame.name.clone()
     } else {
-        format!("{}, {file}:{}:{}", frame.name, frame.line, frame.column.max(1))
+        format!(
+            "{}, {file}:{}:{}",
+            frame.name,
+            frame.line,
+            frame.column.max(1)
+        )
     }
 }
 
@@ -80,6 +88,16 @@ impl DebugToolWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // The keys that work from anywhere: those of the tool window (the
+        // frames list's own Up and Down do not count).
+        let hint_keys = if self.frames_hint_closed {
+            None
+        } else {
+            let focus = self.focus.clone();
+            let previous = ui::keys::shortcut_in_view(&PreviousFrame, &focus, window, cx);
+            let next = ui::keys::shortcut_in_view(&NextFrame, &focus, window, cx);
+            Some((previous, next))
+        };
         let tab = &self.tabs[index];
         let s = tab.shown_frames();
         let theme = cx.theme();
@@ -92,25 +110,27 @@ impl DebugToolWindow {
                     .map(|t| t.name.clone())
             })
             .flatten();
-        let combo = div()
-            .id("debug-threads")
-            .debug_selector(|| "debug-threads".into())
-            .flex_none()
-            .h(px(COMBO))
-            .pl(px(8.0))
-            .pr(px(6.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .border_b_1()
-            .border_color(theme.color(UiRole::Border))
-            .when_some(thread, |d, name| {
-                d.child(Icon::new(icons::THREAD_CURRENT).size(px(16.0)))
-                    .child(div().flex_1().whitespace_nowrap().child(name))
-                    .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ShowThreads), cx))
-            });
+        // The combo shows while a thread is shown (`XFramesView`: hidden
+        // without an active execution stack).
+        let combo = thread.map(|name| {
+            div()
+                .id("debug-threads")
+                .debug_selector(|| "debug-threads".into())
+                .flex_none()
+                .h(px(COMBO))
+                .pl(px(8.0))
+                .pr(px(6.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .border_b_1()
+                .border_color(theme.color(UiRole::Border))
+                .child(Icon::new(icons::THREAD_CURRENT).size(px(16.0)))
+                .child(div().flex_1().whitespace_nowrap().child(name))
+                .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(ShowThreads), cx))
+        });
         let selected = selected_index(&s);
         let root = self.root.clone();
         let selection = if focused {
@@ -122,47 +142,63 @@ impl DebugToolWindow {
         let row_h = theme.metric(Metric::RowHeight);
         let radius = theme.metric(Metric::CornerRadius);
         let list: AnyElement = if s.phase == Phase::Suspended && !s.frames.is_empty() {
-            div()
-                .id("debug-frames")
-                .debug_selector(|| "debug-frames".into())
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h(px(0.0))
-                .py(px(2.0))
-                .overflow_y_scroll()
-                .children(s.frames.iter().enumerate().map(|(i, f)| {
-                    let library = is_library(f, root.as_deref());
-                    div()
-                        .id(("debug-frame", i))
-                        .debug_selector(move || format!("debug-frame-{i}"))
-                        .flex_none()
-                        .h(row_h)
-                        .w_full()
-                        .when(library, |d| d.bg(library_bg))
-                        .px(px(4.0))
-                        .child(
-                            div()
-                                .size_full()
-                                .px(px(4.0))
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .rounded(radius)
-                                .when(selected == Some(i), |d| d.bg(selection))
-                                .child(Icon::new(icons::FRAME).size(px(16.0)))
-                                .child(div().whitespace_nowrap().child(frame_text(f))),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                                window.focus(&this.frames_focus);
-                                window.dispatch_action(Box::new(SelectFrame { index: i }), cx);
-                            }),
-                        )
-                }))
-                .into_any_element()
+            // The frames with what a row needs, for the virtual list.
+            let rows: Rc<Vec<(String, bool)>> = Rc::new(
+                s.frames
+                    .iter()
+                    .map(|f| (frame_text(f), is_library(f, root.as_deref())))
+                    .collect(),
+            );
+            let count = rows.len();
+            uniform_list(
+                "debug-frames",
+                count,
+                cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
+                    range
+                        .filter_map(|i| {
+                            let (text, library) = rows.get(i)?.clone();
+                            Some(
+                                div()
+                                    .id(("debug-frame", i))
+                                    .debug_selector(move || format!("debug-frame-{i}"))
+                                    .h(row_h)
+                                    .w_full()
+                                    .when(library, |d| d.bg(library_bg))
+                                    .px(px(4.0))
+                                    .child(
+                                        div()
+                                            .size_full()
+                                            .px(px(4.0))
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .rounded(radius)
+                                            .when(selected == Some(i), |d| d.bg(selection))
+                                            .child(Icon::new(icons::FRAME).size(px(16.0)))
+                                            .child(div().whitespace_nowrap().child(text)),
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                            window.focus(&this.frames_focus);
+                                            window.dispatch_action(
+                                                Box::new(SelectFrame { index: i }),
+                                                cx,
+                                            );
+                                        }),
+                                    ),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .debug_selector(|| "debug-frames".into())
+            .track_scroll(self.frames_scroll.clone())
+            .flex_1()
+            .min_h(px(0.0))
+            .py(px(2.0))
+            .into_any_element()
         } else {
             let text = if s.phase == Phase::Suspended && s.frames.is_empty() {
                 ""
@@ -178,12 +214,7 @@ impl DebugToolWindow {
                 .child(text)
                 .into_any_element()
         };
-        let hint = (!self.frames_hint_closed).then(|| {
-            let previous = ui::keys::shortcut_in(&PreviousFrame, &self.frames_focus, window);
-            let next = ui::keys::shortcut_in(&NextFrame, &self.frames_focus, window);
-            (previous, next)
-        });
-        let hint = match hint {
+        let hint = match hint_keys {
             Some((Some(previous), Some(next))) => Some(
                 div()
                     .id("debug-frames-hint")
@@ -233,7 +264,7 @@ impl DebugToolWindow {
             .flex()
             .flex_col()
             .size_full()
-            .child(combo)
+            .children(combo)
             .child(list)
             .children(hint)
             .into_any_element()
@@ -266,9 +297,6 @@ pub(crate) fn frame_in_direction(snapshot: &SessionSnapshot, delta: isize) -> Op
     let next = (current + delta).clamp(0, snapshot.frames.len() as isize - 1) as usize;
     (next as isize != current).then_some(next)
 }
-
-#[allow(dead_code)]
-fn unused(_: &App) {}
 
 #[cfg(test)]
 mod tests {
