@@ -40,9 +40,9 @@ pub const BUTTON_HEIGHT: f32 = 28.0;
 pub const CLASSIC_BUTTON_HEIGHT: f32 = 24.0;
 /// The bottom bar's line and the space above and below its buttons.
 const BAR_PADDING: f32 = 1.0 + 2.0 * 11.0;
-/// The space above and below the buttons of a compact bar (a dialog built
-/// with the Kotlin UI DSL): 10.5 each, no line.
-const COMPACT_BAR_PADDING: f32 = 2.0 * 10.5;
+/// The space above and below the buttons of a bar without the line (a
+/// dialog built with the Kotlin UI DSL): 10.5 each.
+const UNLINED_BAR_PADDING: f32 = 2.0 * 10.5;
 /// Size of the round help button.
 pub const HELP_BUTTON: f32 = 22.0;
 /// Space between a group header's title and its line
@@ -65,10 +65,10 @@ pub fn bar_height(cx: &App) -> f32 {
     button_height(cx) + BAR_PADDING
 }
 
-/// The height of the compact bar ([`BottomBar::compact`]): the same
-/// buttons, a little less space around them and no line.
-pub fn compact_bar_height(cx: &App) -> f32 {
-    button_height(cx) + COMPACT_BAR_PADDING
+/// The height of a bottom bar without the line above it
+/// ([`BottomBar::separator`]): a little less space around the buttons.
+pub fn unlined_bar_height(cx: &App) -> f32 {
+    button_height(cx) + UNLINED_BAR_PADDING
 }
 
 /// The corner radius of fields and buttons.
@@ -537,7 +537,6 @@ pub struct BottomBar {
     items: Vec<BarItem>,
     order: ButtonOrder,
     separator: bool,
-    compact: bool,
 }
 
 impl Default for BottomBar {
@@ -554,21 +553,14 @@ impl BottomBar {
             items: Vec::new(),
             order: ButtonOrder::native(),
             separator: true,
-            compact: false,
         }
     }
 
     /// Whether the line above the bar is drawn (on by default; dialogs
-    /// built with the Kotlin UI DSL have none).
+    /// built with the Kotlin UI DSL have none, and a bar without it is
+    /// lower: [`unlined_bar_height`]).
     pub fn separator(mut self, separator: bool) -> Self {
         self.separator = separator;
-        self
-    }
-
-    /// The bar of the Kotlin UI DSL dialogs: a lower bar
-    /// ([`compact_bar_height`]).
-    pub fn compact(mut self, compact: bool) -> Self {
-        self.compact = compact;
         self
     }
 
@@ -654,10 +646,10 @@ impl BottomBar {
             .flex_none()
             .flex_row()
             .items_center()
-            .h(px(if self.compact {
-                compact_bar_height(cx)
-            } else {
+            .h(px(if self.separator {
                 bar_height(cx)
+            } else {
+                unlined_bar_height(cx)
             }))
             .pl(px(BAR_INSET))
             .pr(px(BAR_INSET))

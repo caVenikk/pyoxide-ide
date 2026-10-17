@@ -13,7 +13,7 @@ use gpui::{App, Global};
 pub const BUSY_TOOLTIP: &str = "An interpreter is being configured.";
 
 #[derive(Default)]
-pub(crate) struct Configuring(Vec<PathBuf>, Vec<(PathBuf, &'static str)>);
+pub(crate) struct Configuring(Vec<PathBuf>, Vec<(PathBuf, String)>);
 
 impl Global for Configuring {}
 
@@ -42,7 +42,7 @@ pub(crate) fn end(root: &Path, cx: &mut App) {
 }
 
 /// The text of the work going on for `root` ("Creating uv environment").
-pub(crate) fn set_progress(root: &Path, text: Option<&'static str>, cx: &mut App) {
+pub(crate) fn set_progress(root: &Path, text: Option<String>, cx: &mut App) {
     let configuring = cx.default_global::<Configuring>();
     configuring.1.retain(|(r, _)| r != root);
     if let Some(text) = text {
@@ -51,10 +51,10 @@ pub(crate) fn set_progress(root: &Path, text: Option<&'static str>, cx: &mut App
 }
 
 /// What [`set_progress`] said for `root`, while it is configured.
-pub(crate) fn progress(root: &Path, cx: &App) -> Option<&'static str> {
+pub(crate) fn progress(root: &Path, cx: &App) -> Option<String> {
     cx.try_global::<Configuring>()?
         .1
         .iter()
         .find(|(r, _)| r == root)
-        .map(|(_, text)| *text)
+        .map(|(_, text)| text.clone())
 }

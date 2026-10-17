@@ -204,6 +204,7 @@ pub(super) fn init(cx: &mut App) {
     ui::command::register(cx, super::create::COMMANDS);
     ui::command::register(cx, super::add_dialog::COMMANDS);
     ui::command::register(cx, super::add_dialog::DIALOG_COMMANDS);
+    super::list_dialog::init(cx);
     cx.on_action(add_interpreter);
     // "Add Local Interpreter…": over the Settings window of an open
     // Interpreter page (the new interpreter is selected there until
@@ -298,7 +299,26 @@ fn add_interpreter(action: &AddInterpreter, cx: &mut App) {
     request.inherit_site_packages = action.inherit_site_packages.unwrap_or(false);
     request.available_to_all = action.available_to_all.unwrap_or(false);
     request.override_existing = action.override_existing.unwrap_or(false);
+    request.install_python = action
+        .install_python
+        .clone()
+        .filter(|v| !v.trim().is_empty());
     add_and_report(request, select, cx);
+}
+
+/// The active main window, its project and the project's interpreter (the
+/// Python Interpreters dialog without an Interpreter page).
+pub(super) fn active_project(
+    cx: &App,
+) -> Option<(AnyWindowHandle, Option<PathBuf>, Option<PathBuf>)> {
+    let (window, widget) = target(cx)?;
+    let widget = widget.read(cx);
+    let selected = widget
+        .state
+        .as_ref()
+        .and_then(|s| s.selected.as_ref())
+        .map(|s| s.python.clone());
+    Some((window, widget.root.clone(), selected))
 }
 
 /// Adds the interpreter `request` asks for (`create::add`); a failure
@@ -589,6 +609,7 @@ impl InterpreterWidget {
             "progress": self.root.as_deref().and_then(|r| super::configuring::progress(r, cx)),
             "list": list_json(cx),
             "add-dialog": super::add_dialog::state_json(cx),
+            "interpreters-dialog": super::list_dialog::state_json(cx),
         })
     }
 }

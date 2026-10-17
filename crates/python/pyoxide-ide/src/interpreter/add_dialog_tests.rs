@@ -15,13 +15,17 @@ use super::{configuring, list, table};
 
 /// The fake machine: `python3.12` and `python3.7` on its `PATH` (the
 /// first makes environments with `-m venv`), a uv that makes
-/// environments, lists Python 3.14 and 3.13 and logs its arguments.
+/// environments, lists Python 3.14 and 3.13 (none installed), can
+/// download CPython 3.14.0, 3.13.5 and 3.12.7, installs 3.13.5 (which
+/// makes environments too) and logs its arguments.
 struct FakeMachine {
     bin: PathBuf,
     python312: PathBuf,
     python37: PathBuf,
     uv: PathBuf,
     log: PathBuf,
+    /// Where `uv python install 3.13.5` puts that Python.
+    installed313: PathBuf,
 }
 
 /// A probe answer: `prefix` is the folder above the script's own folder,
@@ -64,15 +68,26 @@ fn fake_machine(f: &Fixture) -> FakeMachine {
     base_python(&python312, (3, 12, 7), &template312);
     let python37 = bin.join("python3.7");
     base_python(&python37, (3, 7, 9), &template312);
+    // The CPython 3.13.5 uv installs: makes environments with `-m venv`.
+    let download313 = templates.join("download313/bin/python3.13");
+    base_python(&download313, (3, 13, 5), &template313);
+    let installed313 = f.base.join("uv-python/cpython-3.13.5/bin/python3.13");
     let uv = f.base.join("machine/tools/uv");
     let log = f.base.join("machine/uv.log");
     let list = r#"[{"key": "cpython-3.14.0-macos-aarch64-none", "version": "3.14.0", "path": null}, {"key": "cpython-3.13.5-macos-aarch64-none", "version": "3.13.5", "path": null}, {"key": "cpython-3.13.1-macos-aarch64-none", "version": "3.13.1", "path": null}]"#;
+    let downloads = r#"[{"key": "cpython-3.14.0-macos-aarch64-none", "version": "3.14.0", "path": null, "implementation": "cpython", "variant": "default"}, {"key": "cpython-3.14.0+freethreaded-macos-aarch64-none", "version": "3.14.0", "path": null, "implementation": "cpython", "variant": "freethreaded"}, {"key": "cpython-3.13.5-macos-aarch64-none", "version": "3.13.5", "path": null, "implementation": "cpython", "variant": "default"}, {"key": "cpython-3.13.1-macos-aarch64-none", "version": "3.13.1", "path": null, "implementation": "cpython", "variant": "default"}, {"key": "cpython-3.12.7-macos-aarch64-none", "version": "3.12.7", "path": null, "implementation": "cpython", "variant": "default"}, {"key": "pypy-3.11.13-macos-aarch64-none", "version": "3.11.13", "path": null, "implementation": "pypy", "variant": "default"}]"#;
+    let python = format!(
+        "    case \"$2\" in\n      list)\n        case \" $* \" in\n          *' --only-downloads '*) echo '{downloads}' ;;\n          *) echo '{list}' ;;\n        esac ;;\n      dir) echo \"{dir}\" ;;\n      install)\n        mkdir -p \"{installed_dir}\"\n        cp \"{download}\" \"{installed}\" ;;\n      find)\n        if [ -f \"{installed}\" ]; then echo \"{installed}\"; else echo 'error: No interpreter found' >&2; exit 2; fi ;;\n    esac ;;\n",
+        dir = f.base.join("uv-python").display(),
+        installed_dir = installed313.parent().unwrap().display(),
+        installed = installed313.display(),
+        download = download313.display(),
+    );
     script(
         &uv,
         &format!(
-            "echo \"$@\" >> \"{log}\"\ncase \"$1\" in\n  --version) echo 'uv 0.9.2 (test)' ;;\n  python)\n    case \"$2\" in\n      list) echo '{list}' ;;\n      dir) echo \"{dir}\" ;;\n    esac ;;\n  venv)\n    for last; do :; done\n    mkdir -p \"$last/bin\"\n    printf 'uv = 0.9.2\\nversion_info = 3.13.5\\n' > \"$last/pyvenv.cfg\"\n    cp \"{template}\" \"$last/bin/python\" ;;\nesac",
+            "echo \"$@\" >> \"{log}\"\ncase \"$1\" in\n  --version) echo 'uv 0.9.2 (test)' ;;\n  python)\n{python}  venv)\n    for last; do :; done\n    mkdir -p \"$last/bin\"\n    printf 'uv = 0.9.2\\nversion_info = 3.13.5\\n' > \"$last/pyvenv.cfg\"\n    cp \"{template}\" \"$last/bin/python\" ;;\nesac",
             log = log.display(),
-            dir = f.base.join("uv-python").display(),
             template = template313.display(),
         ),
     );
@@ -82,6 +97,7 @@ fn fake_machine(f: &Fixture) -> FakeMachine {
         python37,
         uv,
         log,
+        installed313,
     }
 }
 
@@ -149,13 +165,20 @@ fn every_field_is_validated_as_the_reference_does(cx: &mut TestAppContext) {
 
     // Generate new / Virtualenv (S7_2): the newest installation as the
     // base, the project's `.venv` as the location, which holds Python.
+    // After the installations, the Pythons uv can download of the
+    // versions none of them has (I3_1).
     assert_eq!(d["title"], json!("Add Python Interpreter"), "{d}");
     assert_eq!(d["environment"], json!("generate-new"));
     assert_eq!(d["type"], json!("virtualenv"));
     assert_eq!(d["types"], json!(["Virtualenv", "uv"]));
     assert_eq!(
         texts(&d["base-python"]["items"]),
-        [path(&m.python312), path(&m.python37)]
+        [
+            path(&m.python312),
+            path(&m.python37),
+            "download:3.14.0".to_owned(),
+            "download:3.13.5".to_owned()
+        ]
     );
     assert_eq!(d["base-python"]["selected"]["text"], json!("Python 3.12"));
     assert_eq!(
@@ -337,6 +360,35 @@ fn every_field_is_validated_as_the_reference_does(cx: &mut TestAppContext) {
         json!(["Default", "3.14", "3.13"])
     );
     assert_eq!(d["python-version"]["selected"], json!("Default"));
+    // None of them is on the machine: uv downloads the one chosen.
+    assert_eq!(d["python-version"]["download"], json!(["3.14", "3.13"]));
+    invoke(
+        cx,
+        &f,
+        "python.interpreter.add-dialog.open-list",
+        json!({"list": "python-version"}),
+    );
+    let d = dialog(cx, &f);
+    let rows: Vec<(String, Json)> = d["menu"]["levels"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| {
+            (
+                i["label"].as_str().unwrap().to_owned(),
+                i["secondary"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("Default".to_owned(), Json::Null),
+            ("3.14".to_owned(), json!(" download and install")),
+            ("3.13".to_owned(), json!(" download and install")),
+        ]
+    );
+    invoke(cx, &f, "menu.cancel", Json::Null);
     assert_eq!(
         d["location"]["alert"],
         json!({"kind": "error", "text": "Environment at \".venv\" already exists", "links": ["Override existing environment", "Select existing interpreter"]})
@@ -461,6 +513,12 @@ fn uv_environments_are_made_as_the_reference_makes_them(cx: &mut TestAppContext)
         log.contains(&format!("venv --python 3.13 {}", path(&location))),
         "{log}"
     );
+    // 3.13 is not on the machine: installed first, the environment names
+    // the version.
+    let install = log.lines().position(|l| l == "python install 3.13");
+    let venv = log.lines().position(|l| l.starts_with("venv "));
+    assert!(install.is_some() && install < venv, "{log}");
+    assert!(!log.contains("python find"), "{log}");
     assert!(log.lines().any(|l| l.starts_with("sync")), "{log}");
     assert!(!log.lines().any(|l| l.starts_with("init")), "{log}");
 
@@ -486,6 +544,87 @@ fn uv_environments_are_made_as_the_reference_makes_them(cx: &mut TestAppContext)
         "{log}"
     );
     assert!(!log.lines().any(|l| l.starts_with("sync")), "{log}");
+    settle(cx);
+}
+
+/// A Python to download as the base of a new virtual environment (I3_1):
+/// OK installs it with `uv python install`, finds it with `uv python
+/// find` and makes the environment with its `venv` module.
+#[gpui::test]
+fn a_python_to_download_is_installed_before_its_environment(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    let m = fake_machine(&f);
+    use_machine(cx, &f, &m, true);
+    invoke(cx, &f, "settings.open", json!({"page": PAGE}));
+    invoke(cx, &f, "python.interpreter.add-local", Json::Null);
+    let d = wait_checked(cx, &f);
+    // uv's CPython downloads, the newest of each version, no free-threaded
+    // or PyPy builds.
+    assert_eq!(
+        d["downloads"]["versions"],
+        json!(["3.14.0", "3.13.5", "3.12.7"]),
+        "{d}"
+    );
+    let row = &d["base-python"]["items"][3];
+    assert_eq!(row["path"], json!("download:3.13.5"), "{d}");
+    assert_eq!(row["text"], json!("Python 3.13.5"));
+    assert_eq!(row["detail"], json!(" download and install"));
+    assert_eq!(row["origin"], json!("download"));
+    assert_eq!(row["icon"], json!("interpreter/download"));
+    // The list shows them with the download icon, fully opaque.
+    invoke(
+        cx,
+        &f,
+        "python.interpreter.add-dialog.open-list",
+        json!({"list": "base-python"}),
+    );
+    let d = dialog(cx, &f);
+    let items = d["menu"]["levels"][0]["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 4, "{d}");
+    assert_eq!(items[2]["label"], json!("Python 3.14.0"));
+    assert_eq!(items[2]["secondary"], json!(" download and install"));
+    assert!(
+        items[2]["icon_alpha"].as_f64().is_none_or(|a| a == 1.0),
+        "{d}"
+    );
+    invoke(cx, &f, "menu.cancel", Json::Null);
+    // A version not offered is refused.
+    set(cx, &f, "base-python", "download:3.9.1");
+    let d = dialog(cx, &f);
+    assert_eq!(
+        d["base-python"]["selected"]["path"],
+        json!(path(&m.python312)),
+        "{d}"
+    );
+
+    set(cx, &f, "base-python", "download:3.13.5");
+    let location = f.base.join("envs/downloaded");
+    set(cx, &f, "location", &path(&location));
+    let d = wait_checked(cx, &f);
+    assert_eq!(
+        d["base-python"]["selected"]["path"],
+        json!("download:3.13.5")
+    );
+    assert_eq!(d["base-python"]["notice"], Json::Null, "{d}");
+    assert_eq!(d["ok-enabled"], json!(true), "{d}");
+    invoke(cx, &f, "python.interpreter.add-dialog.ok", Json::Null);
+    let python = py_env::paths::venv_python(&location);
+    wait_for(cx, "the environment of the downloaded Python", |cx| {
+        page(cx, &f)["selected"]["path"] == json!(path(&python))
+            && !cx.update(|cx| configuring::is_configuring(&f.root, cx))
+    });
+    let log = std::fs::read_to_string(&m.log).unwrap();
+    let install = log.lines().position(|l| l == "python install 3.13.5");
+    let find = log
+        .lines()
+        .position(|l| l == "python find --managed-python --no-project 3.13.5");
+    assert!(install.is_some() && install < find, "{log}");
+    let entry = cx.update(|cx| list::table(cx).find_python(&python).cloned().unwrap());
+    assert_eq!(entry.flavor, table::Flavor::Venv);
+    assert_eq!(entry.version.as_deref(), Some("3.13.5"));
+    // The installed Python is the base remembered for the next one.
+    let preferred = cx.update(|cx| list::table(cx).preferred.base_python.clone());
+    assert_eq!(preferred.as_deref(), Some(m.installed313.as_path()));
     settle(cx);
 }
 

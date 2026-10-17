@@ -32,7 +32,8 @@ use ui::theme::ThemeExt;
 
 use super::add_dialog::AddLocalInterpreter;
 use super::configuring::{self, BUSY_TOOLTIP};
-use super::{Choice, FoundInterpreter, Group, ProjectInterpreters, list};
+use super::list_dialog::ShowAllInterpreters;
+use super::{Choice, FoundInterpreter, Group, ProjectInterpreters, list, table};
 
 /// The page's id.
 pub const PAGE: &str = "python.interpreter";
@@ -139,6 +140,51 @@ pub(crate) fn select_draft(root: &Path, python: &Path, cx: &mut App) {
                 page.rescan(cx);
                 cx.notify();
             }
+        });
+    }
+}
+
+/// The project of an open Interpreter page, its Settings window and the
+/// interpreter its combo shows: "Show All…" opens the Python Interpreters
+/// dialog over the window with that interpreter selected.
+pub(crate) fn show_all_target(cx: &App) -> Option<(PathBuf, AnyWindowHandle, Option<PathBuf>)> {
+    live_pages(cx).into_iter().find_map(|p| {
+        let p = p.read(cx);
+        let selected = match p.selection() {
+            Some(Choice::Python(python)) => Some(python),
+            _ => None,
+        };
+        Some((p.root.clone()?, p.window, selected))
+    })
+}
+
+/// The Python Interpreters dialog of the project at `root` closed
+/// (`onShowAllInterpretersDialogClosed`): with OK the combo selects its
+/// interpreter (until Apply); otherwise it keeps its own, or shows "<No
+/// interpreter>" when that one was removed. The list is read again.
+pub(crate) fn interpreters_dialog_closed(
+    root: &Path,
+    selected: Option<PathBuf>,
+    removed: &[PathBuf],
+    cx: &mut App,
+) {
+    for page in live_pages(cx) {
+        page.update(cx, |page, cx| {
+            if page.root.as_deref() != Some(root) {
+                return;
+            }
+            match &selected {
+                Some(python) => page.draft = Some(Choice::Python(python.clone())),
+                None => {
+                    if let Some(Choice::Python(python)) = page.selection()
+                        && removed.iter().any(|r| table::same_path(r, &python))
+                    {
+                        page.draft = Some(Choice::None);
+                    }
+                }
+            }
+            page.rescan(cx);
+            cx.notify();
         });
     }
 }
@@ -359,9 +405,9 @@ impl InterpreterPage {
                             .secondary(detail(&found))
                         }
                         Row::Separator => MenuItem::separator(),
-                        // The Python Interpreters dialog comes with the
-                        // list of interpreters (#75, stage 3).
-                        Row::ShowAll => MenuItem::unavailable(SHOW_ALL),
+                        // The selection stays; the dialog opens after the
+                        // list closed.
+                        Row::ShowAll => MenuItem::action(SHOW_ALL, ShowAllInterpreters),
                     })
                     .collect();
                 (items, selected)

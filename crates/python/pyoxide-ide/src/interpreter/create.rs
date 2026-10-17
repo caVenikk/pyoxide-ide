@@ -41,9 +41,10 @@ ui::ui_commands! {
         inherit_site_packages: Option<bool>,
         available_to_all: Option<bool>,
         override_existing: Option<bool>,
+        install_python: Option<String>,
         select: Option<String>
     } => "python.interpreter.add", "Add Python Interpreter",
-        "Adds an interpreter to the application's list of interpreters, as OK in the Add Python Interpreter dialog does, off the UI thread while the project is marked as being configured. `kind`: `virtualenv` (a new virtual environment at `location`, default the suggested one, made from the interpreter at `base_python`; `inherit_site_packages`, `available_to_all`), `uv` (a new uv environment at `location` with the Python `python_version` (`3.13`, default uv's) and the uv at `uv_path` or the one found; `override_existing` replaces an environment that is there), `existing-python` (an interpreter, or the environment folder holding it, at `python`) or `existing-uv` (a uv environment at `python`). An interpreter already listed is reused; a new or found environment is associated with the project. `select`: `now` makes it the project's interpreter (the status bar's way), `draft` selects it in the Interpreter page until Apply (the default while that page is open). Relative paths are resolved against the project (`project`, else the active window's).",
+        "Adds an interpreter to the application's list of interpreters, as OK in the Add Python Interpreter dialog does, off the UI thread while the project is marked as being configured. `kind`: `virtualenv` (a new virtual environment at `location`, default the suggested one, made from the interpreter at `base_python`; `inherit_site_packages`, `available_to_all`), `uv` (a new uv environment at `location` with the Python `python_version` (`3.13`, default uv's) and the uv at `uv_path` or the one found; `override_existing` replaces an environment that is there), `existing-python` (an interpreter, or the environment folder holding it, at `python`) or `existing-uv` (a uv environment at `python`). `install_python` (`3.13.5`, `3.13`) first downloads and installs that Python with `uv python install` (a new virtual environment is then based on it). An interpreter already listed is reused; a new or found environment is associated with the project. `select`: `now` makes it the project's interpreter (the status bar's way), `draft` selects it in the Interpreter page until Apply (the default while that page is open). Relative paths are resolved against the project (`project`, else the active window's).",
         r#"{"kind": "uv", "location": ".venv", "python_version": "3.13"}"#;
 }
 
@@ -63,6 +64,12 @@ const UV_NO_ENVIRONMENT: &str = "Failed to initialize uv environment";
 pub const CREATING_VENV: &str = "Creating virtual environment";
 pub const CREATING_UV: &str = "Creating uv environment";
 pub const CONFIGURING_UV: &str = "Configuring uv environment";
+
+/// The progress text of a Python being installed (`python.sdk.installing`
+/// of the installer: "Installing {0}" with the Python's name).
+pub fn installing(version: &str) -> String {
+    format!("Installing Python {version}")
+}
 
 /// `python.add.sdk.already.contains.python.with.version`.
 pub fn already_contains(level: &str) -> String {
@@ -140,6 +147,8 @@ pub(crate) enum Select {
     Now,
     /// In the Interpreter page's combo, until Apply.
     Draft,
+    /// In the open Python Interpreters dialog (its Add button).
+    Dialog,
 }
 
 impl Select {
@@ -172,6 +181,9 @@ pub(crate) struct Request {
     pub available_to_all: bool,
     /// Replace the uv environment at the location.
     pub override_existing: bool,
+    /// The Python uv downloads and installs first (`3.13.5`; a new
+    /// virtual environment is based on it, a new uv environment uses it).
+    pub install_python: Option<String>,
 }
 
 impl Request {
@@ -187,6 +199,7 @@ impl Request {
             inherit_site_packages: false,
             available_to_all: false,
             override_existing: false,
+            install_python: None,
         }
     }
 }
@@ -529,6 +542,27 @@ pub(crate) async fn create_uv(
     Ok(Created { entry, warning })
 }
 
+/// Downloads and installs the Python `version` with uv (`uv python
+/// install`) and, when `find`, finds its executable (`uv python find`).
+pub(crate) async fn install_python(
+    uv: Option<PathBuf>,
+    version: &str,
+    find: bool,
+    ctx: &RunContext,
+) -> Result<Option<PathBuf>, String> {
+    let (uv, _) = uv_that_runs(uv, ctx).await?;
+    uv.python_install(&[version.to_owned()], false, ctx)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !find {
+        return Ok(None);
+    }
+    uv.python_find(version, ctx)
+        .await
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 /// Adds the interpreter `request` asks for: the project is marked as
 /// being configured meanwhile; the entry goes into the list, and is
 /// selected as `select` says. Resolves to the new interpreter's name and
@@ -542,43 +576,71 @@ pub(crate) fn add(
     if !configuring::begin(&root, cx) {
         return Task::ready(Err(configuring::BUSY_TOOLTIP.to_owned()));
     }
-    configuring::set_progress(&root, Some(request.kind.progress()), cx);
-    let table = list::table(cx);
     let kind = request.kind;
-    let base = request.python.clone();
-    let work = runtime::spawn(cx, move |token| {
-        let ctx = RunContext::default().with_cancel(token);
-        async move {
-            let existing = || {
-                request
-                    .python
-                    .clone()
-                    .ok_or("name the interpreter or environment with `python`")
-            };
-            let plain = |entry: Entry| Created {
-                entry,
-                warning: None,
-            };
-            match request.kind {
-                Kind::Virtualenv => create_virtualenv(request, table, ctx).await,
-                Kind::Uv => create_uv(request, table, ctx).await,
-                Kind::ExistingPython => {
-                    let python = existing()?;
-                    existing_python(request.root, python, table, ctx)
-                        .await
-                        .map(plain)
-                }
-                Kind::ExistingUv => {
-                    let python = existing()?;
-                    existing_uv(request.root, python, request.uv, ctx)
-                        .await
-                        .map(plain)
-                }
-            }
-        }
-    });
+    let first = match &request.install_python {
+        Some(version) => installing(version),
+        None => kind.progress().to_owned(),
+    };
+    configuring::set_progress(&root, Some(first), cx);
     cx.spawn(async move |cx| {
         let result = async {
+            let mut request = request;
+            // A Python to download first: a new virtual environment is
+            // based on it (`installBaseSdk`).
+            if let Some(version) = request.install_python.take() {
+                let uv = request.uv.clone();
+                let install = cx
+                    .update(|cx| {
+                        runtime::spawn(cx, move |token| async move {
+                            let ctx = RunContext::default().with_cancel(token);
+                            // A new uv environment names the version.
+                            install_python(uv, &version, kind == Kind::Virtualenv, &ctx).await
+                        })
+                    })
+                    .map_err(|e| e.to_string())?;
+                if let Some(python) = install.await? {
+                    request.python = Some(python);
+                }
+                cx.update(|cx| configuring::set_progress(&root, Some(kind.progress().into()), cx))
+                    .map_err(|e| e.to_string())?;
+            }
+            let base = request.python.clone();
+            let table = cx.update(|cx| list::table(cx)).map_err(|e| e.to_string())?;
+            let work = cx
+                .update(|cx| {
+                    runtime::spawn(cx, move |token| {
+                        let ctx = RunContext::default().with_cancel(token);
+                        async move {
+                            let existing = || {
+                                request
+                                    .python
+                                    .clone()
+                                    .ok_or("name the interpreter or environment with `python`")
+                            };
+                            let plain = |entry: Entry| Created {
+                                entry,
+                                warning: None,
+                            };
+                            match request.kind {
+                                Kind::Virtualenv => create_virtualenv(request, table, ctx).await,
+                                Kind::Uv => create_uv(request, table, ctx).await,
+                                Kind::ExistingPython => {
+                                    let python = existing()?;
+                                    existing_python(request.root, python, table, ctx)
+                                        .await
+                                        .map(plain)
+                                }
+                                Kind::ExistingUv => {
+                                    let python = existing()?;
+                                    existing_uv(request.root, python, request.uv, ctx)
+                                        .await
+                                        .map(plain)
+                                }
+                            }
+                        }
+                    })
+                })
+                .map_err(|e| e.to_string())?;
             let Created { entry, warning } = work.await?;
             let python = entry.python.clone();
             let mut changes = vec![Change::Add(entry)];
@@ -604,6 +666,7 @@ pub(crate) fn add(
             cx.update(|cx| match select {
                 Select::Now => super::choose(&root, Choice::Python(python), cx).detach(),
                 Select::Draft => super::page::select_draft(&root, &python, cx),
+                Select::Dialog => super::list_dialog::select_new(&root, &name, cx),
             })
             .map_err(|e| e.to_string())?;
             Ok((name, warning))

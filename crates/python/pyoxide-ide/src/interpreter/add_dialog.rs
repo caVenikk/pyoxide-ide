@@ -175,7 +175,12 @@ const ERROR_RING: f32 = 2.0;
 /// Icons of the dialog (New UI icons of the platform).
 const CHECKMARK_ICON: IconName = IconName("interpreter/greenCheckmark");
 const EXTERNAL_LINK_ICON: IconName = IconName("interpreter/externalLink");
-pub(super) const ICONS: [IconSvg; 2] = [
+pub(super) const ICONS: [IconSvg; 3] = [
+    IconSvg {
+        name: candidates::DOWNLOAD_ICON.0,
+        light: include_bytes!("../../assets/icons/download.svg"),
+        dark: Some(include_bytes!("../../assets/icons/download_dark.svg")),
+    },
     IconSvg {
         name: CHECKMARK_ICON.0,
         light: include_bytes!("../../assets/icons/greenCheckmark.svg"),
@@ -412,8 +417,12 @@ pub(crate) struct AddDialog {
     venv_location: PathField<LocationCheck>,
     uv_location: PathField<LocationCheck>,
     uv: PathField<UvCheck>,
+    /// The Pythons uv can download (empty until read, or without uv).
+    downloads: Vec<Candidate>,
+    /// uv is being asked for them.
+    downloads_loading: bool,
     /// uv's Python versions (`None` while read).
-    versions: Option<Vec<(u32, u32)>>,
+    versions: Option<Vec<py_env::uv::MinorVersion>>,
     version: Option<(u32, u32)>,
     inherit: bool,
     all_projects: bool,
@@ -427,6 +436,7 @@ pub(crate) struct AddDialog {
     label_width: std::cell::Cell<f32>,
     /// Background work; dropping it cancels it.
     found_task: Task<()>,
+    downloads_task: Task<()>,
     versions_task: Task<()>,
     probe_task: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -492,6 +502,8 @@ impl AddDialog {
                 check: Check::Running,
                 task: Task::ready(()),
             },
+            downloads: Vec::new(),
+            downloads_loading: false,
             versions: None,
             version: None,
             inherit: false,
@@ -502,6 +514,7 @@ impl AddDialog {
             anchors: Rc::default(),
             label_width: std::cell::Cell::new(LABEL_WIDTH),
             found_task: Task::ready(()),
+            downloads_task: Task::ready(()),
             versions_task: Task::ready(()),
             probe_task: Task::ready(()),
             _subscriptions: subscriptions,
@@ -525,6 +538,7 @@ impl AddDialog {
             let _ = this.update(cx, |this, cx| {
                 this.machine = Some(machine.clone());
                 this.autodetect_uv(cx);
+                this.load_downloads(cx);
             });
             let found = {
                 let root = root.clone();
@@ -566,6 +580,34 @@ impl AddDialog {
         });
     }
 
+    /// The Pythons uv can download (`getInstallableInterpreters`), with the
+    /// uv found on the machine.
+    fn load_downloads(&mut self, cx: &mut Context<Self>) {
+        let Some(uv) = self.machine.as_ref().and_then(|m| m.tools.uv.clone()) else {
+            return;
+        };
+        self.downloads_loading = true;
+        let work = runtime::spawn(cx, move |token| async move {
+            let ctx = py_env::RunContext::default().with_cancel(token);
+            py_env::Uv::new(uv, py_env::UvConfig::default())
+                .python_downloads(&ctx)
+                .await
+                .map(|list| candidates::installable(&list))
+                .unwrap_or_default()
+        });
+        self.downloads_task = cx.spawn(async move |this, cx| {
+            let downloads = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.downloads = downloads;
+                this.downloads_loading = false;
+                if this.found.is_some() {
+                    this.select_defaults(cx);
+                }
+                cx.notify();
+            });
+        });
+    }
+
     /// The defaults of the interpreter combos once their lists are read:
     /// the remembered base (else the first), the first existing one.
     fn select_defaults(&mut self, cx: &App) {
@@ -584,7 +626,11 @@ impl AddDialog {
     }
 
     fn base_list(&self) -> Vec<Candidate> {
-        candidates::base_list(self.found.as_deref().unwrap_or_default(), &self.manual)
+        candidates::base_list(
+            self.found.as_deref().unwrap_or_default(),
+            &self.manual,
+            &self.downloads,
+        )
     }
 
     fn existing_list(&self) -> Vec<Candidate> {
@@ -941,7 +987,17 @@ impl AddDialog {
                 (Method::Existing, "uv") => self.existing_type = ExistingType::Uv,
                 _ => return Err(format!("no type `{value}` here")),
             },
-            F_BASE => self.choose_path(ListId::Base, self.resolve(value), cx),
+            F_BASE => match candidates::Candidate::download_key(value) {
+                // A Python to download: chosen as it is listed.
+                Some(_) => {
+                    let key = PathBuf::from(value);
+                    if !self.base_list().iter().any(|c| c.python == key) {
+                        return Err(format!("no Python `{value}` to download"));
+                    }
+                    self.base.selected = Some(key);
+                }
+                None => self.choose_path(ListId::Base, self.resolve(value), cx),
+            },
             F_PYTHON => self.choose_path(ListId::Python, self.resolve(value), cx),
             F_UV_ENV => self.choose_path(ListId::UvEnv, self.resolve(value), cx),
             F_LOCATION => {
@@ -1139,7 +1195,11 @@ impl AddDialog {
         let mut r = match (self.method, self.new_type, self.existing_type) {
             (Method::New, NewType::Virtualenv, _) => {
                 let mut r = Request::new(Kind::Virtualenv, self.root.clone());
-                r.python = Some(self.selected(ListId::Base)?.python);
+                let base = self.selected(ListId::Base)?;
+                match base.install_version() {
+                    Some(version) => r.install_python = Some(version.to_owned()),
+                    None => r.python = Some(base.python),
+                }
                 r.location = path_of(&self.venv_location);
                 r.inherit_site_packages = self.inherit;
                 r.available_to_all = self.all_projects;
@@ -1151,6 +1211,11 @@ impl AddDialog {
                 let mut r = Request::new(Kind::Uv, self.root.clone());
                 r.location = path_of(&self.uv_location);
                 r.python_version = self.version.map(|(a, b)| format!("{a}.{b}"));
+                // A version none of whose interpreters is on the machine is
+                // downloaded first.
+                if self.version_to_download() {
+                    r.install_python = r.python_version.clone();
+                }
                 r.override_existing = self.override_existing;
                 r.uv = uv_path;
                 r
@@ -1195,7 +1260,10 @@ impl AddDialog {
         {
             cx.set_global(OpenDialog(None));
         }
+        // From its own handlers the window is being updated: it removes
+        // itself.
         ui::dialog_window::close(window.window_handle(), cx);
+        window.remove_window();
     }
 
     fn browse(&mut self, field: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1249,9 +1317,14 @@ impl AddDialog {
                     return;
                 }
                 std::iter::once(MenuItem::action(DEFAULT_VERSION, set("default".into())))
-                    .chain(self.versions.iter().flatten().map(|(a, b)| {
-                        let v = format!("{a}.{b}");
-                        MenuItem::action(v.clone(), set(v))
+                    .chain(self.versions.iter().flatten().map(|m| {
+                        let v = format!("{}.{}", m.major, m.minor);
+                        let item = MenuItem::action(v.clone(), set(v));
+                        if m.installed {
+                            item
+                        } else {
+                            item.small_secondary(format!(" {}", candidates::DOWNLOAD_AND_INSTALL))
+                        }
                     }))
                     .collect()
             }
@@ -1270,7 +1343,7 @@ impl AddDialog {
                         MenuItem::action(text, set(c.python.display().to_string()))
                             .icon(icon)
                             .icon_alpha(alpha)
-                            .secondary(detail)
+                            .small_secondary(detail)
                     })
                     .collect()
             }
@@ -1288,10 +1361,12 @@ impl AddDialog {
             .unwrap_or_default();
         let at = point(combo.left() - px(LIST_LEFT), combo.bottom() + px(LIST_DROP));
         let width = f32::from(combo.size.width) + LIST_GROW;
+        // The versions to download are wider than their combo.
+        let grows = list == ListId::Version && self.versions.iter().flatten().any(|m| !m.installed);
         let options = PopupOptions {
             speed_search: true,
             min_width: Some(width),
-            max_width: Some(width),
+            max_width: (!grows).then_some(width),
             row_height: Some(match list {
                 ListId::Version => VERSION_ROW,
                 ListId::Type => TYPE_ROW,
@@ -1414,6 +1489,7 @@ impl AddDialog {
                     Origin::Configured { .. } => "configured",
                     Origin::Found => "found",
                     Origin::Manual => "manual",
+                    Origin::Installable => "download",
                 },
             })
         };
@@ -1492,6 +1568,10 @@ impl AddDialog {
             "problems": self.problems(),
             "list": self.menu.as_ref().map(|(l, _)| l.id()),
             "menu": self.menu.as_ref().map(|(_, m)| m.menu.read(cx).state_json()),
+            "downloads": {
+                "loading": self.downloads_loading,
+                "versions": self.downloads.iter().filter_map(|c| c.install_version()).collect::<Vec<_>>(),
+            },
         });
         let fields = state.as_object_mut().expect("an object");
         match (self.method, self.new_type, self.existing_type) {
@@ -1510,8 +1590,9 @@ impl AddDialog {
                     json!({
                         "loading": self.versions.is_none(),
                         "items": std::iter::once(DEFAULT_VERSION.to_owned())
-                            .chain(self.versions.iter().flatten().map(|(a, b)| format!("{a}.{b}")))
+                            .chain(self.versions.iter().flatten().map(|m| format!("{}.{}", m.major, m.minor)))
                             .collect::<Vec<_>>(),
+                        "download": self.versions.iter().flatten().filter(|m| !m.installed).map(|m| format!("{}.{}", m.major, m.minor)).collect::<Vec<_>>(),
                         "selected": self.version_text(),
                     }),
                 );
@@ -1542,6 +1623,18 @@ impl AddDialog {
             Method::New => [VIRTUALENV, UV],
             Method::Existing => [PYTHON, UV],
         }
+    }
+
+    /// The version chosen has no interpreter on the machine: uv downloads
+    /// one.
+    fn version_to_download(&self) -> bool {
+        let Some((major, minor)) = self.version else {
+            return false;
+        };
+        self.versions
+            .iter()
+            .flatten()
+            .any(|m| (m.major, m.minor) == (major, minor) && !m.installed)
     }
 
     fn version_text(&self) -> String {

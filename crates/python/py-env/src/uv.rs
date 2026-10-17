@@ -414,13 +414,41 @@ impl Uv {
         request: Option<&str>,
         cwd: Option<&Path>,
         ctx: &RunContext,
-    ) -> Result<Vec<(u32, u32)>> {
+    ) -> Result<Vec<MinorVersion>> {
         let mut a = args(["python", "list", "--output-format", "json"]);
         if let Some(request) = request.filter(|r| !r.trim().is_empty()) {
             a.push(request.into());
         }
         let done = self.query(a, cwd, ctx, QUICK).await?;
         Ok(minor_versions(&parse_python_list(&done.stdout)?))
+    }
+
+    /// The interpreters uv can download for this machine, installed or not
+    /// (`uv python list --only-downloads`).
+    pub async fn python_downloads(&self, ctx: &RunContext) -> Result<Vec<UvPython>> {
+        let a = args([
+            "python",
+            "list",
+            "--only-downloads",
+            "--output-format",
+            "json",
+        ]);
+        let done = self.query(a, None, ctx, QUICK).await?;
+        parse_python_list(&done.stdout)
+    }
+
+    /// The executable of an interpreter uv installed that matches
+    /// `request` (`3.13.5`): `uv python find --managed-python --no-project`.
+    pub async fn python_find(&self, request: &str, ctx: &RunContext) -> Result<PathBuf> {
+        let mut a = args(["python", "find", "--managed-python", "--no-project"]);
+        a.push(request.into());
+        let done = self.query(a, None, ctx, QUICK).await?;
+        done.stdout
+            .lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| EnvError::parse("`uv python find` printed nothing"))
     }
 
     /// uv's directory of managed interpreters.
@@ -603,25 +631,80 @@ pub(crate) fn venv_args(req: &VenvRequest) -> Vec<OsString> {
     a
 }
 
+/// A `major.minor` Python version uv knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MinorVersion {
+    pub major: u32,
+    pub minor: u32,
+    /// One of its interpreters is on the machine; else uv downloads one.
+    pub installed: bool,
+}
+
+/// `3.13.5` as numbers; `None` for anything but a final release.
+fn release(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let micro = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((major, minor, micro))
+}
+
+/// The default build (not free-threaded, not a debug one).
+fn default_variant(p: &UvPython) -> bool {
+    p.variant.is_empty() || p.variant == "default"
+}
+
 /// The `major.minor` versions of final releases among `list`, each once,
-/// newest first (`UvLowLevel.listSupportedPythonVersions` takes the
-/// `X.Y.Z-` keys of `uv python list`: no pre-releases, no free-threaded
-/// builds).
-pub fn minor_versions(list: &[UvPython]) -> Vec<(u32, u32)> {
-    let mut out: Vec<(u32, u32)> = list
-        .iter()
-        .filter(|p| p.variant.is_empty() || p.variant == "default")
-        .filter_map(|p| {
-            let mut parts = p.version.split('.');
-            let major = parts.next()?.parse().ok()?;
-            let minor = parts.next()?.parse().ok()?;
-            let _micro: u32 = parts.next()?.parse().ok()?;
-            parts.next().is_none().then_some((major, minor))
-        })
-        .collect();
-    out.sort_by(|a, b| b.cmp(a));
-    out.dedup();
+/// newest first, installed when one of its interpreters is
+/// (`UvLowLevel.listSupportedPythonVersions` takes the `X.Y.Z-` keys of
+/// `uv python list`: no pre-releases, no free-threaded builds).
+pub fn minor_versions(list: &[UvPython]) -> Vec<MinorVersion> {
+    let mut out: Vec<MinorVersion> = Vec::new();
+    for p in list.iter().filter(|p| default_variant(p)) {
+        let Some((major, minor, _)) = release(&p.version) else {
+            continue;
+        };
+        match out
+            .iter_mut()
+            .find(|v| (v.major, v.minor) == (major, minor))
+        {
+            Some(v) => v.installed |= p.installed(),
+            None => out.push(MinorVersion {
+                major,
+                minor,
+                installed: p.installed(),
+            }),
+        }
+    }
+    out.sort_by_key(|v| std::cmp::Reverse((v.major, v.minor)));
     out
+}
+
+/// The CPython releases among uv's downloads (`list`) worth offering: the
+/// newest final release of each `major.minor` from `oldest` on, newest
+/// first (`3.14.6`, `3.13.14`, …).
+pub fn downloadable_releases(list: &[UvPython], oldest: (u32, u32)) -> Vec<String> {
+    let mut newest: Vec<(u32, u32, u32)> = Vec::new();
+    for p in list
+        .iter()
+        .filter(|p| default_variant(p) && p.implementation.eq_ignore_ascii_case("cpython"))
+    {
+        let Some(v) = release(&p.version) else {
+            continue;
+        };
+        if (v.0, v.1) < oldest {
+            continue;
+        }
+        match newest.iter_mut().find(|n| (n.0, n.1) == (v.0, v.1)) {
+            Some(n) => *n = (*n).max(v),
+            None => newest.push(v),
+        }
+    }
+    newest.sort_by(|a, b| b.cmp(a));
+    newest
+        .into_iter()
+        .map(|(a, b, c)| format!("{a}.{b}.{c}"))
+        .collect()
 }
 
 pub(crate) fn init_args(req: &InitRequest) -> Vec<OsString> {
@@ -1001,30 +1084,68 @@ mod tests {
         );
     }
 
-    #[test]
-    fn minor_versions_of_final_releases_newest_first() {
-        let python = |version: &str, variant: &str| UvPython {
-            key: format!("cpython-{version}-macos"),
+    fn uv_python(implementation: &str, version: &str, variant: &str, path: bool) -> UvPython {
+        UvPython {
+            key: format!("{implementation}-{version}-macos"),
             version: version.into(),
-            path: None,
+            path: path.then(|| PathBuf::from(format!("/uv/{version}/bin/python3"))),
             symlink: None,
             url: None,
-            implementation: "cpython".into(),
+            implementation: implementation.into(),
             variant: variant.into(),
             arch: "aarch64".into(),
             os: "macos".into(),
-        };
+        }
+    }
+
+    #[test]
+    fn minor_versions_of_final_releases_newest_first() {
+        let python =
+            |version: &str, variant: &str, path: bool| uv_python("cpython", version, variant, path);
         let list = [
-            python("3.15.0a1", "default"),
-            python("3.14.0", "default"),
-            python("3.14.0", "freethreaded"),
-            python("3.12.13", "default"),
-            python("3.13.14", "default"),
-            python("3.13.12", ""),
-            python("3.11.13", "default"),
+            python("3.15.0a1", "default", false),
+            python("3.14.0", "default", false),
+            python("3.14.0", "freethreaded", true),
+            python("3.12.13", "default", false),
+            python("3.13.14", "default", false),
+            python("3.13.12", "", true),
+            python("3.11.13", "default", false),
         ];
-        assert_eq!(minor_versions(&list), [(3, 14), (3, 13), (3, 12), (3, 11)]);
+        let versions: Vec<_> = minor_versions(&list)
+            .iter()
+            .map(|v| (v.major, v.minor, v.installed))
+            .collect();
+        // Installed: one of its default builds is.
+        assert_eq!(
+            versions,
+            [
+                (3, 14, false),
+                (3, 13, true),
+                (3, 12, false),
+                (3, 11, false)
+            ]
+        );
         assert!(minor_versions(&[]).is_empty());
+    }
+
+    #[test]
+    fn downloadable_releases_are_the_newest_cpython_of_each_minor_version() {
+        let list = [
+            uv_python("cpython", "3.15.0b3", "default", false),
+            uv_python("cpython", "3.14.6", "default", false),
+            uv_python("cpython", "3.14.6", "freethreaded", false),
+            uv_python("cpython", "3.13.13", "default", false),
+            uv_python("cpython", "3.13.14", "default", false),
+            uv_python("cpython", "3.12.13", "default", true),
+            uv_python("cpython", "3.7.9", "default", false),
+            uv_python("pypy", "3.11.15", "default", false),
+            uv_python("graalpy", "3.12.0", "default", false),
+        ];
+        assert_eq!(
+            downloadable_releases(&list, (3, 8)),
+            ["3.14.6", "3.13.14", "3.12.13"]
+        );
+        assert!(downloadable_releases(&list, (3, 15)).is_empty());
     }
 
     #[test]

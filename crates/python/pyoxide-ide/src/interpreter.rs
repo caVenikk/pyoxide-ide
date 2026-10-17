@@ -31,6 +31,9 @@ mod candidates;
 mod configuring;
 mod create;
 mod list;
+mod list_dialog;
+#[cfg(test)]
+mod list_dialog_tests;
 pub mod page;
 #[cfg(test)]
 mod page_tests;
@@ -191,6 +194,7 @@ fn find_configured(
 pub fn init(cx: &mut App) {
     ui::icons::register(cx, &page::ICONS);
     ui::icons::register(cx, &add_dialog::ICONS);
+    ui::icons::register(cx, &list_dialog::ICONS);
     widget::init(cx);
     list::ensure_loaded(cx);
 }

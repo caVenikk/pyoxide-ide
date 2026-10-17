@@ -25,9 +25,16 @@ pub(crate) const UV_ICON: ui::icons::IconName = ui::icons::IconName("python/uv")
 /// (`IconLoader.getTransparentIcon`).
 pub(crate) const FOUND_ICON_ALPHA: f32 = 0.5;
 
-/// Grey texts of a found interpreter (`sdk.rendering.detected.grey.text.*`).
+/// The download icon of a Python uv can install (`AllIcons.Actions.Download`).
+pub(crate) const DOWNLOAD_ICON: ui::icons::IconName = ui::icons::IconName("interpreter/download");
+
+/// Grey texts of a found interpreter (`sdk.rendering.detected.grey.text.*`)
+/// and of one to download (`sdk.rendering.installable.grey.text`).
 const SYSTEM: &str = "system";
 const VIRTUAL_ENVIRONMENT: &str = "virtual environment";
+pub(crate) const DOWNLOAD_AND_INSTALL: &str = "download and install";
+/// The key of a Python to download among the interpreters' paths.
+const DOWNLOAD_PREFIX: &str = "download:";
 
 /// Where an interpreter of the lists comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +49,9 @@ pub(crate) enum Origin {
     Found,
     /// Chosen with the Browse button (`ManuallyAddedSelectableInterpreter`).
     Manual,
+    /// A Python uv can download and install (`InstallableSelectableInterpreter`):
+    /// its `python` is a key ([`Candidate::installable`]), not a file.
+    Installable,
 }
 
 /// An interpreter of the dialog's lists.
@@ -86,6 +96,31 @@ impl Candidate {
         }
     }
 
+    /// A Python uv can download and install (`3.13.14`), keyed by its
+    /// version (`download:3.13.14`).
+    pub fn installable(version: &str) -> Self {
+        Self {
+            python: PathBuf::from(format!("{DOWNLOAD_PREFIX}{version}")),
+            version: Some(version.to_owned()),
+            origin: Origin::Installable,
+            base: true,
+            tool: Some("uv"),
+        }
+    }
+
+    /// The version of a key of a Python to download (`download:3.13.14`).
+    pub fn download_key(text: &str) -> Option<&str> {
+        text.strip_prefix(DOWNLOAD_PREFIX)
+    }
+
+    /// The Python to download and install first, for one to download.
+    pub fn install_version(&self) -> Option<&str> {
+        match self.origin {
+            Origin::Installable => self.version.as_deref(),
+            _ => None,
+        }
+    }
+
     /// An interpreter of the list of configured ones.
     pub fn of_entry(entry: &Entry) -> Self {
         Self {
@@ -120,8 +155,16 @@ impl Candidate {
     /// The row's text: the main part and the grey part after it
     /// (`customizeForPythonInterpreter`): `Python 3.14` and
     /// ` (~/path/python) system` for a found one, `Python 3.13.14` and
-    /// ` ~/path/python` for a configured one.
+    /// ` ~/path/python` for a configured one, `Python 3.13.14` and
+    /// ` download and install` for one to download.
     pub fn text(&self) -> (String, String) {
+        if self.origin == Origin::Installable {
+            let version = self.version.as_deref().unwrap_or_default();
+            return (
+                format!("Python {version}"),
+                format!(" {DOWNLOAD_AND_INSTALL}"),
+            );
+        }
         let path = project::display_path(&self.python);
         match &self.origin {
             Origin::Configured { name, .. } => {
@@ -131,7 +174,7 @@ impl Candidate {
                 };
                 (title, format!(" {path}"))
             }
-            Origin::Found | Origin::Manual => {
+            Origin::Found | Origin::Manual | Origin::Installable => {
                 let level = self.language_level().unwrap_or_default();
                 let tool = self.tool.unwrap_or(if self.base {
                     SYSTEM
@@ -147,6 +190,7 @@ impl Candidate {
     pub fn icon(&self) -> (ui::icons::IconName, f32) {
         match self.origin {
             Origin::Configured { .. } => (PYTHON_ICON, 1.0),
+            Origin::Installable => (DOWNLOAD_ICON, 1.0),
             Origin::Found | Origin::Manual => match self.tool {
                 Some("uv") => (UV_ICON, FOUND_ICON_ALPHA),
                 _ => (PYTHON_ICON, FOUND_ICON_ALPHA),
@@ -202,12 +246,32 @@ fn dedup_by_path(list: Vec<Candidate>) -> Vec<Candidate> {
 }
 
 /// The Base Python list (`baseInterpreters`): the ones chosen with Browse
-/// that are installations, then the installations found, newest first.
-pub(crate) fn base_list(found: &[Candidate], manual: &[Candidate]) -> Vec<Candidate> {
+/// that are installations, then the installations found, newest first,
+/// then the Pythons uv can download (`installable`, newest first) of the
+/// versions none of the installations found has.
+pub(crate) fn base_list(
+    found: &[Candidate],
+    manual: &[Candidate],
+    installable: &[Candidate],
+) -> Vec<Candidate> {
     let mut detected: Vec<Candidate> = found.iter().filter(|c| c.base).cloned().collect();
     sort(&mut detected);
+    let levels: Vec<String> = detected.iter().filter_map(|c| c.language_level()).collect();
+    let missing = installable
+        .iter()
+        .filter(|c| c.language_level().is_none_or(|l| !levels.contains(&l)))
+        .cloned();
     let manual = manual.iter().filter(|c| c.base).cloned();
-    dedup_by_path(manual.chain(detected).collect())
+    dedup_by_path(manual.chain(detected).chain(missing).collect())
+}
+
+/// The Pythons uv can download for a new environment, newest first
+/// (`getInstallableInterpreters`).
+pub(crate) fn installable(downloads: &[py_env::uv::UvPython]) -> Vec<Candidate> {
+    py_env::uv::downloadable_releases(downloads, py_env::interpreter::OLDEST_FOR_NEW_ENVIRONMENTS)
+        .iter()
+        .map(|v| Candidate::installable(v))
+        .collect()
 }
 
 /// The base selected when the dialog opens: the one the last environment
@@ -486,16 +550,35 @@ mod tests {
                 ..found("/m/env/bin/python", "3.10.4", false)
             },
         ];
-        let list = base_list(&detected, &manual);
+        // uv's downloads of the versions not found (3.14 and 3.12 are).
+        let downloads: Vec<_> = ["3.14.6", "3.13.14", "3.12.13", "3.10.20"]
+            .iter()
+            .map(|v| Candidate::installable(v))
+            .collect();
+        let list = base_list(&detected, &manual, &downloads);
         assert_eq!(
             paths(&list),
             [
                 "/m/python3.10",
                 "/b/python3.14",
                 "/uv/python3.14",
-                "/a/python3.12"
+                "/a/python3.12",
+                "download:3.13.14",
+                "download:3.10.20",
             ]
         );
+        // `customizeForPythonInterpreter` of an installable one.
+        assert_eq!(
+            list[4].text(),
+            (
+                "Python 3.13.14".to_owned(),
+                " download and install".to_owned()
+            )
+        );
+        assert_eq!(list[4].icon(), (DOWNLOAD_ICON, 1.0));
+        assert_eq!(list[4].install_version(), Some("3.13.14"));
+        assert_eq!(Candidate::download_key("download:3.13.14"), Some("3.13.14"));
+        assert_eq!(list[0].install_version(), None);
         assert_eq!(default_base(&list, None), Some(0));
         assert_eq!(
             default_base(&list, Some(Path::new("/a/python3.12"))),

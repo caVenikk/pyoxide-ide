@@ -258,9 +258,86 @@ pub(crate) async fn probe_with(
     })
 }
 
+/// Prints the folders an interpreter imports from (the reference's
+/// `helpers/syspath.py`): `sys.path` without the current folder, then the
+/// roots of packages installed in editable mode (PEP 660), which import
+/// hooks find instead of `sys.path`.
+pub(crate) const SYS_PATH_SCRIPT: &str = r#"import os, sys
+cwd = os.getcwd()
+for root in sys.path:
+    if root and root != os.curdir and root != cwd:
+        print(root)
+try:
+    import json
+    from importlib.metadata import distributions
+    from urllib.parse import urlsplit
+    from urllib.request import url2pathname
+except ImportError:
+    distributions = list
+for dist in distributions():
+    url = None
+    try:
+        if dist.origin.dir_info.editable:
+            url = dist.origin.url
+    except AttributeError:
+        try:
+            data = json.loads(dist.read_text('direct_url.json') or '{}')
+            if data.get('dir_info', {}).get('editable'):
+                url = data.get('url')
+        except Exception:
+            pass
+    if url:
+        parts = urlsplit(url)
+        if parts.scheme == 'file' and parts.netloc in ('', 'localhost'):
+            print(url2pathname(parts.path))
+"#;
+
+/// The folders `python` imports from, in its order, each once: the
+/// interpreter's paths (`Interpreter Paths` of the reference). Folders and
+/// archives that do not exist are left out.
+pub async fn sys_path(python: &Path, timeout: Duration, ctx: &RunContext) -> Result<Vec<PathBuf>> {
+    let spec = Spec::new(python).args(["-c", SYS_PATH_SCRIPT]);
+    let done = run("python", spec, ctx, timeout).await?;
+    if !done.success() {
+        return Err(EnvError::from_failure("python", done.code, &done.stderr));
+    }
+    Ok(parse_sys_path(&done.stdout)
+        .into_iter()
+        .filter(|p| p.exists())
+        .collect())
+}
+
+/// The lines [`SYS_PATH_SCRIPT`] printed: paths, each once.
+pub fn parse_sys_path(stdout: &str) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for line in stdout.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+        let path = PathBuf::from(line);
+        if !out.contains(&path) {
+            out.push(path);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sys_path_lines_are_paths_each_once() {
+        let out = "/usr/lib/python313.zip\n/usr/lib/python3.13\n\n/work/.venv/lib/python3.13/site-packages\n/work/src\n/work/src\n";
+        assert_eq!(
+            parse_sys_path(out),
+            [
+                "/usr/lib/python313.zip",
+                "/usr/lib/python3.13",
+                "/work/.venv/lib/python3.13/site-packages",
+                "/work/src",
+            ]
+            .map(PathBuf::from)
+        );
+        assert!(parse_sys_path("").is_empty());
+    }
 
     const SAMPLE: &str = r#"{"version": [3, 12, 13, "final", 0], "implementation": "cpython", "prefix": "/work/.venv", "base_prefix": "/opt/py/3.12", "machine": "arm64", "free_threaded": false}"#;
 
