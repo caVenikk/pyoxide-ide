@@ -1,0 +1,4 @@
+# Pyoxide shell integration for zsh: the user's .zprofile (see .zshenv).
+
+__PYOXIDE_ORIGINAL_FILE='.zprofile'
+builtin source "${__PYOXIDE_ZSH_DIR}/source-original.zsh"

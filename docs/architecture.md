@@ -220,8 +220,10 @@ services as watched-file changes (`file-watcher`, issue #36).
 
 ## Terminal, debugger, git and settings (ADR 0014-0018)
 `terminal` exists (#156: sessions, snapshots, input encoding, start rules,
-shell detection, the `ShellCustomizer` hook; the integration scripts and
-the `terminal.*` commands come with their users), and so do
+shell detection, the `ShellCustomizer` hook; #159: the shell integration
+scripts, the workbench's `Product.terminal` hook and the Python product's
+virtual environment activation; the `terminal.*` commands come with their
+users), and so do
 `stream-framing`, `dap-client` and `debugger` (#162) and `py-debug` (#163:
 the helper, launch arguments, stoppable lines, exception breakpoints and
 the provider; the helper is fetched by `scripts/fetch-debugpy.py`); the

@@ -172,6 +172,8 @@ fn environment_and_working_directory() {
             "TERM",
             "COLORTERM",
             "TERMINAL_EMULATOR",
+            "ALACRITTY_WINDOW_ID",
+            "WINDOWID",
             "PYOXIDE_TERMINAL_TEST",
         ],
         TerminalSize::new(200, 24),
@@ -184,6 +186,10 @@ fn environment_and_working_directory() {
     assert!(text.contains("PYOXIDE_TERMINAL_TEST=yes"), "{text}");
     assert!(text.contains("COLORTERM=truecolor"), "{text}");
     assert!(text.contains("TERMINAL_EMULATOR=Pyoxide"), "{text}");
+    // Not Alacritty's window id (`tty` sets it on Unix; the session
+    // removes it).
+    assert!(text.contains("ALACRITTY_WINDOW_ID=<unset>"), "{text}");
+    assert!(text.contains("WINDOWID=<unset>"), "{text}");
     if cfg!(unix) {
         assert!(text.contains("TERM=xterm-256color"), "{text}");
     }

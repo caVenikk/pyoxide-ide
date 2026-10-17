@@ -32,12 +32,15 @@ py-syntax.workspace = true
 run-config.workspace = true
 serde_json.workspace = true
 settings-ui.workspace = true
+terminal.workspace = true
 themes.workspace = true
 ui.workspace = true
 workbench.workspace = true
 
 [dev-dependencies]
 code-intel = { workspace = true, features = ["fake"] }
+# The events of terminal sessions (tests/terminal_venv.rs).
+flume.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 text.workspace = true

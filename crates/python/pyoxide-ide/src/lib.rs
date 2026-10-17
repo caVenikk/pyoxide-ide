@@ -1,13 +1,15 @@
 //! `pyoxide-ide`: the Pyoxide Python IDE. Composes the platform workbench
 //! with what is specific to Python (file type icons, tool windows, the
 //! interpreter widget, running files, the language services, the type
-//! engine widget, packages and source roots in the project tree).
+//! engine widget, packages and source roots in the project tree, the
+//! virtual environment's activation in the terminal).
 
 pub mod interpreter;
 mod new_items;
 pub mod run;
 pub mod services;
 pub mod settings_pages;
+pub mod terminal;
 pub mod type_engine;
 
 use std::path::{Path, PathBuf};
@@ -275,6 +277,7 @@ pub fn product() -> Product {
         tree: tree(),
         // The Python group: Type Engine and Tools > External Tools.
         settings_pages: settings_pages::pages(),
+        terminal: Some(terminal::hook()),
     }
 }
 

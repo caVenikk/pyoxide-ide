@@ -930,6 +930,48 @@ here with: source URL, commit, file(s), license, and what was changed.
   remote environments (Eel), WSL distributions read from the registry, the
   emulator name "Pyoxide".
 
+- crates/platform/terminal/src/integration/ (mod.rs and the scripts in
+  zsh/, bash/, fish/, powershell/)
+  Adapted from IntelliJ Platform Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2), plugins/terminal: the
+  injection of src/org/jetbrains/plugins/terminal/runner/
+  LocalShellIntegrationInjector.java (ZDOTDIR for zsh, --rcfile without
+  --login for bash, --init-command for fish, -File for PowerShell, the
+  login shell and user rcfile variables, FIG_TERM, PROCESS_LAUNCHED_BY_CW
+  and PROCESS_LAUNCHED_BY_Q) and of resources/shell-integrations/: the
+  ZDOTDIR startup files of zsh/zdotdir/ (.zshenv, .zprofile, .zshrc,
+  .zlogin, source-original.zsh: the user's files sourced with the original
+  ZDOTDIR), the startup files of bash/bash-integration.bash, the DEBUG trap
+  that keeps the user's trap and skips PROMPT_COMMAND of
+  bash/command-block-support-reworked.bash, the prompt and PSReadLine hooks
+  of powershell/powershell-integration.ps1 and
+  command-block-support-reworked.ps1, and the sourcing after the user's
+  configuration of fish/fish-integration.fish.
+  Changes: Pyoxide's own scripts that emit standard OSC 7 and OSC 133
+  instead of the reference's OSC 1341 events; the scripts to source are
+  passed in numbered variables with their arguments; /bin/sh of macOS gets
+  ENV (it ignores --rcfile) with a POSIX script that reads the profile
+  files and the user's ENV; no command history, aliases or completion
+  events; written to a cache folder per version of their text.
+
+- crates/python/pyoxide-ide/src/terminal.rs
+  Translated from IntelliJ Community (Apache-2.0),
+  https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
+  (404a109fe630a2b9013f10b71081f87c9dbb32e2): the activation rules of
+  python/terminal/backend/src/com/intellij/python/terminal/
+  PyVirtualEnvTerminalCustomizer.kt (no activation with shell integration
+  off or the setting off, the interpreter of the working directory's
+  module, a script to source per shell, the variables for other shells),
+  the script names of python/python-sdk/src/com/jetbrains/python/sdk/
+  PythonEnvironment.kt, the variable names of python/python-sdk/src/com/
+  jetbrains/python/run/ActivatableScriptExt.kt, and the file, component
+  and option of python/terminal/shared/src/PyVirtualEnvTerminalSettings.kt.
+  Changes: reimplemented in Rust; the variables of an activation are set
+  as the activation script sets them instead of running it; uv's
+  activate.ps1 is found on case-sensitive file systems; conda is not
+  activated yet.
+
 - crates/platform/workbench/src/run/tool_window.rs (the empty state),
   src/run/edit_dialog.rs (the tip shown with nothing selected),
   keymaps/macos.toml and keymaps/default.toml (Choose Run Configuration)

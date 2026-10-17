@@ -274,6 +274,34 @@ pub fn environment(
     env.vars
 }
 
+/// Sets a variable in a list of them ([`environment`]'s): replaced where
+/// it is (names compare case-insensitively on Windows), else added.
+pub fn set_variable(os: Os, env: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let mut list = EnvList {
+        insensitive: os == Os::Windows,
+        vars: std::mem::take(env),
+    };
+    list.set(name, value);
+    *env = list.vars;
+}
+
+/// A variable of a list of them (names compare case-insensitively on
+/// Windows).
+pub fn variable<'a>(os: Os, env: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    env.iter()
+        .rev()
+        .find(|(n, _)| same_name(os == Os::Windows, n, name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn same_name(insensitive: bool, a: &str, b: &str) -> bool {
+    if insensitive {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
 /// Variables in the order they were first set; names compare
 /// case-insensitively on Windows.
 struct EnvList {
@@ -291,18 +319,78 @@ impl EnvList {
 
     fn set(&mut self, name: &str, value: &str) {
         let insensitive = self.insensitive;
-        let existing = self.vars.iter_mut().find(|(n, _)| {
-            if insensitive {
-                n.eq_ignore_ascii_case(name)
-            } else {
-                n == name
-            }
-        });
+        let existing = self
+            .vars
+            .iter_mut()
+            .find(|(n, _)| same_name(insensitive, n, name));
         match existing {
             Some(entry) => entry.1 = value.to_owned(),
             None => self.vars.push((name.to_owned(), value.to_owned())),
         }
     }
+}
+
+/// Variables `alacritty_terminal::tty` gives every shell on Unix
+/// (Alacritty's window id): programs would take the terminal for Alacritty.
+/// Sessions start without them; the reference names its emulator in
+/// [`TERMINAL_EMULATOR_VAR`] only.
+pub const ALACRITTY_VARS: [&str; 2] = ["ALACRITTY_WINDOW_ID", "WINDOWID"];
+
+/// The program that starts the shell without [`ALACRITTY_VARS`] on Unix.
+const ENV_PROGRAM: &str = "/usr/bin/env";
+
+/// The program and the arguments the pseudo-terminal starts for a command
+/// with the session's variables `env`: on Unix through `/usr/bin/env -u`
+/// without [`ALACRITTY_VARS`] (`env` replaces itself with the shell, which
+/// keeps the process id); on Windows the program, quoted when it has
+/// blanks (`tty` quotes only the arguments).
+pub(crate) fn pty_program(
+    command: &ShellCommand,
+    env: &[(String, String)],
+) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        let program = &command.program;
+        let program = if program.contains([' ', '\t']) && !program.starts_with('"') {
+            format!("\"{program}\"")
+        } else {
+            program.clone()
+        };
+        return (program, command.args.clone());
+    }
+    let path = variable(Os::current(), env, "PATH")
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("PATH"));
+    let found = program_exists(&command.program, path.as_deref());
+    pty_program_for(command, Path::new(ENV_PROGRAM).is_file() && found)
+}
+
+/// [`pty_program`] on Unix: through `env` when `through_env` (it exists and
+/// the program was found, so that a missing shell still fails to start
+/// instead of `env` reporting it). A program with `=` would be taken for a
+/// variable by `env`.
+fn pty_program_for(command: &ShellCommand, through_env: bool) -> (String, Vec<String>) {
+    if !through_env || command.program.contains('=') {
+        return (command.program.clone(), command.args.clone());
+    }
+    let mut args: Vec<String> = ALACRITTY_VARS
+        .iter()
+        .flat_map(|name| ["-u".to_owned(), (*name).to_owned()])
+        .collect();
+    args.push(command.program.clone());
+    args.extend(command.args.iter().cloned());
+    (ENV_PROGRAM.to_owned(), args)
+}
+
+/// Whether a program exists: a path with a separator as a file, a name in a
+/// folder of `path`.
+fn program_exists(program: &str, path: Option<&std::ffi::OsStr>) -> bool {
+    if program.is_empty() {
+        return false;
+    }
+    if program.contains(std::path::is_separator) {
+        return Path::new(program).is_file();
+    }
+    path.is_some_and(|p| std::env::split_paths(p).any(|dir| dir.join(program).is_file()))
 }
 
 /// A random id in the form of a UUID (version 4).
@@ -478,5 +566,60 @@ mod tests {
             environment(Os::Linux, &[], &[]),
             environment(Os::Linux, &[], &[])
         );
+    }
+
+    #[test]
+    fn variables_in_a_list() {
+        let mut env = vec![("Path".to_owned(), "a".to_owned())];
+        set_variable(Os::Windows, &mut env, "PATH", "b");
+        assert_eq!(env, [("Path".to_owned(), "b".to_owned())]);
+        assert_eq!(variable(Os::Windows, &env, "path"), Some("b"));
+        assert_eq!(variable(Os::Linux, &env, "PATH"), None);
+        set_variable(Os::Linux, &mut env, "PATH", "c");
+        assert_eq!(env.len(), 2);
+        assert_eq!(variable(Os::Linux, &env, "PATH"), Some("c"));
+    }
+
+    #[test]
+    fn shells_start_without_alacritty_variables() {
+        let cmd = ShellCommand {
+            program: "/bin/zsh".into(),
+            args: vec!["--login".into(), "-i".into()],
+        };
+        let (program, args) = pty_program_for(&cmd, true);
+        assert_eq!(program, ENV_PROGRAM);
+        assert_eq!(
+            args,
+            [
+                "-u",
+                "ALACRITTY_WINDOW_ID",
+                "-u",
+                "WINDOWID",
+                "/bin/zsh",
+                "--login",
+                "-i"
+            ]
+        );
+        // Without env, or for a program env would take for a variable: as
+        // it is.
+        assert_eq!(
+            pty_program_for(&cmd, false),
+            (cmd.program.clone(), cmd.args.clone())
+        );
+        let odd = ShellCommand {
+            program: "/opt/a=b/sh".into(),
+            args: Vec::new(),
+        };
+        assert_eq!(pty_program_for(&odd, true).0, "/opt/a=b/sh");
+
+        let dir = tempfile::tempdir().unwrap();
+        let shell = dir.path().join("myshell");
+        std::fs::write(&shell, "").unwrap();
+        let path = std::env::join_paths([dir.path()]).unwrap();
+        assert!(program_exists("myshell", Some(&path)));
+        assert!(program_exists(&shell.to_string_lossy(), None));
+        assert!(!program_exists("no-such-shell", Some(&path)));
+        assert!(!program_exists("/no/such/shell", Some(&path)));
+        assert!(!program_exists("", Some(&path)));
     }
 }

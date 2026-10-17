@@ -1,0 +1,18 @@
+# Pyoxide shell integration for zsh: the entry point.
+#
+# Pyoxide starts zsh with ZDOTDIR set to the folder of this file, so zsh reads
+# the startup files here instead of the user's. Each of them sources the
+# user's file of the same name (source-original.zsh); .zshrc then restores
+# ZDOTDIR and adds the integration (pyoxide-integration.zsh) after the user's
+# .zshrc. Adapted from the IntelliJ Community terminal plugin (Apache-2.0),
+# see NOTICE.
+#
+# zsh reads, in this order: /etc/zshenv, $ZDOTDIR/.zshenv, /etc/zprofile and
+# $ZDOTDIR/.zprofile (login shells), /etc/zshrc and $ZDOTDIR/.zshrc
+# (interactive shells), /etc/zlogin and $ZDOTDIR/.zlogin (login shells).
+#
+# Safe scripting: `builtin` skips the user's functions and aliases, ${var-}
+# works with `setopt nounset`, "${var}" keeps blanks with `setopt sh_word_split`.
+
+__PYOXIDE_ORIGINAL_FILE='.zshenv'
+builtin source "${__PYOXIDE_ZSH_DIR}/source-original.zsh"

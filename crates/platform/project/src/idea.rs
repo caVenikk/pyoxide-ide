@@ -292,6 +292,32 @@ pub fn read_sdk_table(file: &Path) -> Vec<SdkEntry> {
     out
 }
 
+/// The value of the option `option` of the component `component` in the
+/// file `file` of the reference IDE's project in `root`
+/// (`<component name="…"><option name="…" value="…" /></component>`), for
+/// the one-time import of a product's project setting. `None` when the
+/// file, the component or the option is missing, or the file cannot be
+/// read.
+pub fn component_option(root: &Path, file: &str, component: &str, option: &str) -> Option<String> {
+    let text = std::fs::read_to_string(root.join(IDEA_DIR).join(file)).ok()?;
+    let mut in_component = false;
+    let mut out = None;
+    walk(&text, |path, e| {
+        let name = e.name();
+        if path.names.len() == 1 && name.as_ref() == "component" {
+            in_component = attr(e, "name").as_deref() == Some(component);
+        } else if in_component
+            && path.names.len() == 2
+            && name.as_ref() == "option"
+            && attr(e, "name").as_deref() == Some(option)
+        {
+            out = attr(e, "value");
+        }
+    })
+    .ok()?;
+    out
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Content {
     url: String,
@@ -437,6 +463,39 @@ fn parse_module(text: &str) -> Result<Module, quick_xml::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn component_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let get = || {
+            component_option(
+                root,
+                "python-terminal.xml",
+                "PyVirtualEnvTerminalCustomizer",
+                "virtualEnvActivate",
+            )
+        };
+        assert_eq!(get(), None);
+        std::fs::create_dir(root.join(IDEA_DIR)).unwrap();
+        std::fs::write(
+            root.join(IDEA_DIR).join("python-terminal.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Other">
+    <option name="virtualEnvActivate" value="true" />
+  </component>
+  <component name="PyVirtualEnvTerminalCustomizer">
+    <option name="virtualEnvActivate" value="false" />
+  </component>
+</project>
+"#,
+        )
+        .unwrap();
+        assert_eq!(get().as_deref(), Some("false"));
+        std::fs::write(root.join(IDEA_DIR).join("python-terminal.xml"), "<project").unwrap();
+        assert_eq!(get(), None);
+    }
 
     const MODULES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
