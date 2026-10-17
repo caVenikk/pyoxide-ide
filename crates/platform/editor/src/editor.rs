@@ -644,7 +644,8 @@ impl Editor {
         self.transparent = transparent;
     }
 
-    /// Text shown in the empty one-line field ("Search").
+    /// Text shown in the empty one-line field ("Search") or console-style
+    /// text area ("Commit Message").
     pub fn set_placeholder(&mut self, placeholder: Option<SharedString>) {
         self.placeholder = placeholder;
     }
@@ -656,11 +657,12 @@ impl Editor {
         self.placeholder_unfocused = unfocused;
     }
 
-    /// The placeholder the field shows now: an empty one-line field shows
-    /// it, unless it has the focus and shows it only without.
+    /// The placeholder the field shows now: an empty one-line field or
+    /// console-style text area shows it, unless it has the focus and shows
+    /// it only without.
     pub fn shown_placeholder(&self, focused: bool) -> Option<&SharedString> {
         self.placeholder.as_ref().filter(|_| {
-            self.single_line
+            (self.single_line || self.console)
                 && self.buffer.len_chars() == 0
                 && !(self.placeholder_unfocused && focused)
         })

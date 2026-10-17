@@ -91,6 +91,8 @@ impl Workbench {
             ..VersionControl::default()
         };
         self.vcs_markers_reset(cx);
+        self.vcs_commit_snapshot(cx);
+        self.commit_project_opened(root, cx);
         let root = root.to_owned();
         let look = {
             let root = root.clone();
@@ -109,6 +111,7 @@ impl Workbench {
 
     fn vcs_found(&mut self, project_root: &Path, found: Found, cx: &mut Context<Self>) {
         self.version_control.detected = true;
+        self.vcs_commit_snapshot(cx);
         cx.notify();
         let (repo, exe) = match found {
             Found::Off => {
@@ -140,6 +143,8 @@ impl Workbench {
         };
         let backend = Arc::new(GitRepo::new(repo, exe).with_scope(project_root));
         let service = Arc::new(StatusService::start(backend));
+        self.version_control.service = Some(service.clone());
+        self.vcs_commit_snapshot(cx);
         let updates = service.updates();
         let generation = self.version_control.generation;
         self.version_control._updates = Some(cx.spawn(async move |this, cx| {
@@ -154,6 +159,7 @@ impl Workbench {
                             this.version_control.problem = None;
                             this.vcs_statuses_changed(cx);
                             this.vcs_branch_snapshot(cx);
+                            this.vcs_commit_snapshot(cx);
                         }
                         StatusUpdate::Failed(e) => this.version_control.problem = Some(e.message),
                     }
@@ -312,6 +318,7 @@ impl Workbench {
             "branches_popup": self.vcs_branches_popup_json(cx),
             "branch_dialog": self.vcs_branch_dialog_json(cx),
             "marker_popup": self.vcs_popup_json(cx),
+            "commit": self.vcs_commit_json(cx),
         })
     }
 }

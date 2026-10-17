@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 /// A version of git: `git version 2.39.5 (Apple Git-154)` is 2.39.5,
 /// `git version 2.41.0.windows.1` is 2.41.0.
@@ -140,6 +141,18 @@ impl GitExe {
     }
 }
 
+/// The user's global config file of every call, when set by
+/// [`use_global_config`].
+static GLOBAL_CONFIG: OnceLock<PathBuf> = OnceLock::new();
+
+/// Makes every call of this process take `path` as the user's global
+/// config file and read no system config (`GIT_CONFIG_GLOBAL`,
+/// `GIT_CONFIG_NOSYSTEM`): tests that set or unset the user's identity
+/// leave the person's own configuration alone. The first call wins.
+pub fn use_global_config(path: PathBuf) {
+    let _ = GLOBAL_CONFIG.set(path);
+}
+
 /// What every git call gets: no terminal prompts, machine-readable paths,
 /// no signature lines in logs, messages in English (the reference's
 /// `VcsLocaleHelper`: `LANGUAGE` empty, `LC_ALL=en_US.UTF-8`; a missing
@@ -156,6 +169,10 @@ pub(crate) fn prepare(cmd: &mut Command) {
     .env("LANGUAGE", "")
     .env("LC_ALL", "en_US.UTF-8")
     .stdin(Stdio::null());
+    if let Some(path) = GLOBAL_CONFIG.get() {
+        cmd.env("GIT_CONFIG_GLOBAL", path)
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;

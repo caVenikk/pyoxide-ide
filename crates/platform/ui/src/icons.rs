@@ -71,6 +71,12 @@ impl IconName {
     /// UI's `AllIcons.Actions.Rollback` and `Diff`).
     pub const ROLLBACK: Self = Self("vcs/revert");
     pub const DIFF: Self = Self("vcs/diff");
+    /// The Commit tool window's toolbar: Shelve Silently, View Options and
+    /// the commit message history (the New UI's `Vcs.ShelveSilent`,
+    /// `Actions.Show`, `Vcs.History`).
+    pub const SHELVE: Self = Self("vcs/shelve");
+    pub const SHOW: Self = Self("general/show");
+    pub const HISTORY: Self = Self("general/history");
     /// The VCS widget and the branches of its popup (the New UI's
     /// `AllIcons.General.Vcs`, `Vcs.BranchNode`), a tag
     /// (`DvcsImplIcons.BranchLabel`), the current branch with and without
@@ -230,14 +236,14 @@ platform_icons! {
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down", "general/expandAll", "general/filter",
-        "general/help", "general/hide",
+        "general/help", "general/hide", "general/history",
         "general/inspections/inspectionsOK", "general/left", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
         "general/previewHorizontally", "general/print", "general/projectConfigurable",
         "general/questionDialog", "general/refresh", "general/remove", "general/right",
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
-        "general/settings", "general/settings@20x20", "general/softWrap",
+        "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
         "general/showAsTree", "general/up", "general/vcs",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
@@ -259,7 +265,7 @@ platform_icons! {
         "toolwindows/terminal@20x20", "toolwindows/todo@20x20", "toolwindows/vcs@20x20",
         "vcs/branch", "vcs/branchLabel", "vcs/changesPush@12x12", "vcs/changesUpdate@12x12",
         "vcs/commit", "vcs/currentBranchFavoriteLabel", "vcs/currentBranchLabel", "vcs/diff",
-        "vcs/fetch", "vcs/push", "vcs/revert", "vcs/update", "vcs/vendors/github",
+        "vcs/fetch", "vcs/push", "vcs/revert", "vcs/shelve", "vcs/update", "vcs/vendors/github",
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [

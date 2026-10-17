@@ -10,11 +10,14 @@
 //! - [`widget`]: what the VCS widget of the main toolbar shows.
 //! - [`branches`]: the branches popup of the widget.
 //! - [`new_branch`]: the New Branch, Rename Branch and Checkout dialogs.
+//! - [`commit`]: the Commit tool window, the Rollback Changes and Git User
+//!   Name Is Not Defined dialogs.
 //! - The `vcs.*` commands of the editor ([`COMMANDS`]) and of the popup
 //!   ([`POPUP_COMMANDS`]), the branch commands ([`BRANCH_COMMANDS`]); the
 //!   workbench handles them.
 
 pub mod branches;
+pub mod commit;
 pub mod marker_popup;
 pub mod markers;
 pub mod new_branch;
@@ -104,4 +107,5 @@ pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, branches::COMMANDS);
     ui::command::register(cx, branches::INTERNAL_COMMANDS);
     ui::command::register(cx, new_branch::COMMANDS);
+    commit::init(cx);
 }
