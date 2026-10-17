@@ -12,6 +12,7 @@
 //! - [`DebugAdapterProvider`]: the product hook (the adapter, its launch
 //!   arguments, exception filters, default breakpoints, import types, the
 //!   breakpoint types and their stoppable lines);
+//! - [`values`]: how the variables view shows an adapter's values;
 //! - [`commands`]: the `debug.*` engine commands.
 //!
 //! UI crates depend on this crate, never on `dap-client`
@@ -25,6 +26,7 @@ pub mod idea;
 mod provider;
 mod session;
 pub mod storage;
+pub mod values;
 
 pub use breakpoints::{
     BreakpointId, Breakpoints, ExceptionBreakpoint, LineBreakpoint, SuspendPolicy, Toggled, Watches,
@@ -42,5 +44,5 @@ pub use provider::{
 };
 pub use session::{
     BreakpointStatus, Children, DebugError, FRAME_PAGE, Pending, Phase, STOP_TIMEOUT, Session,
-    SessionId, SessionSnapshot, StopInfo, VARIABLES_PAGE,
+    SessionId, SessionSnapshot, StopInfo,
 };

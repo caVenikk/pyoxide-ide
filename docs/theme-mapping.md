@@ -355,6 +355,7 @@ colours the New UI icons do not use and are listed as unmapped.
 | `ui.documentation-popup` | `DOCUMENTATION_COLOR` (scheme color) | Documentation popup background |
 | `ui.breakpoint` | `BREAKPOINT_ATTRIBUTES` background | Line with a breakpoint |
 | `ui.execution-point` | `EXECUTIONPOINT_ATTRIBUTES` background | Line the debugger stopped on |
+| `ui.execution-point-not-top` | `NOT_TOP_FRAME_ATTRIBUTES` background | Line of a frame the debugger shows other than the one it stopped in |
 | `ui.bookmark` | `Bookmark.iconBackground` (UI theme or scheme color) | Bookmark marker |
 
 ### Version control
@@ -472,6 +473,19 @@ reference's `TerminalColorPalette` does). The reference falls back from
 ANSI keys takes the console's ANSI colours here (listed as derived), where
 the reference would take its parent scheme's terminal colours.
 
+### Debugger
+
+| Pyoxide role | Sources, in order | Used for |
+|---|---|---|
+| `ui.debugger-value-name` | `Debugger.Variables.valueForeground` | Names in the variables view of the debugger |
+| `ui.debugger-type` | `Debugger.Variables.typeForeground` | Types in the variables view of the debugger: {list: 4} |
+| `ui.debugger-changed-value` | `Debugger.Variables.changedValueForeground` | Names of values that changed since the debugger last stopped |
+| `ui.debugger-collecting-data` | `Debugger.Variables.collectingDataForeground` | Collecting data while the debugger loads values |
+| `ui.debugger-evaluating` | `Debugger.Variables.evaluatingExpressionForeground` | Evaluating while the debugger evaluates an expression |
+| `ui.debugger-modifying-value` | `Debugger.Variables.modifyingValueForeground` | Modifying value while the debugger sets a value |
+| `ui.debugger-exception` | `Debugger.Variables.exceptionForeground` | Exceptions in the variables view of the debugger |
+| `ui.debugger-error-message` | `Debugger.Variables.errorMessageForeground` | Error messages in the variables view of the debugger |
+
 Roles without a source are derived, then taken from the base theme.
 
 ### Fallback roles for UI roles
@@ -522,6 +536,11 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.terminal-search-match-text`, `ui.terminal-search-match-current-text` | `ui.terminal-default-foreground` |
 | `ui.terminal-separator` | `ui.divider` |
 | `ui.terminal-error-marker` | `ui.danger` |
+| `ui.execution-point-not-top` | `ui.current-line` |
+| `ui.debugger-value-name` | `ui.text` |
+| `ui.debugger-type`, `ui.debugger-collecting-data`, `ui.debugger-evaluating` | `ui.text-muted` |
+| `ui.debugger-changed-value`, `ui.debugger-modifying-value` | `ui.accent` |
+| `ui.debugger-exception`, `ui.debugger-error-message` | `ui.danger` |
 
 ## Text roles
 

@@ -72,6 +72,10 @@ impl Inner {
         lock(&self.state)
     }
 
+    pub(crate) fn provider(&self) -> &Arc<dyn DebugAdapterProvider> {
+        &self.provider
+    }
+
     pub(crate) fn emit(&self, event: DebuggerEvent) {
         let mut listeners = lock(&self.listeners);
         listeners.retain(|tx| tx.send(event.clone()).is_ok());
