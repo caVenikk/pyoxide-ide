@@ -81,16 +81,139 @@ fn wait(
     panic!("timed out waiting for {what}: {last:#}");
 }
 
-/// Copies of the screen the view made while frames are drawn for `time`.
-fn copies_in(cx: &mut VisualTestContext, view: &Entity<SessionView>, time: Duration) -> u64 {
-    let (_, before) = view.read_with(cx, |v, _| v.counters());
+/// A pause between two frames of the test loop longer than this is a
+/// stall of the machine (a loaded run of the whole workspace): the copies
+/// a frame can show are then too few to tell the frame rate from the
+/// flood's.
+const STALL: Duration = Duration::from_millis(30);
+
+/// How many times a stretch is measured before the machine is too busy
+/// for one without a stall.
+const TRIES: usize = 50;
+
+/// How many times the keys typed into a flood are measured.
+const ATTEMPTS: usize = 5;
+
+/// What the view did while frames were drawn for a while.
+#[derive(Clone, Copy, Debug)]
+struct Stretch {
+    /// Measured, not the time asked for: a frame may take long.
+    elapsed: Duration,
+    /// Copies of the screen the view made.
+    copies: u64,
+    /// Requests of the view to draw the window at once.
+    redraws: u64,
+    /// The longest pause between two frames.
+    longest_pause: Duration,
+    /// Whether the output kept coming from the start to the end: no pause
+    /// in it, no key (a frame or the shell's output late by more than
+    /// [`FLOOD_FRAME`] ends the flood in the view, which then copies and
+    /// draws as for any output).
+    unbroken: bool,
+}
+
+impl Stretch {
+    fn then(self, next: Stretch) -> Stretch {
+        Stretch {
+            elapsed: self.elapsed + next.elapsed,
+            copies: self.copies + next.copies,
+            redraws: self.redraws + next.redraws,
+            longest_pause: self.longest_pause.max(next.longest_pause),
+            unbroken: self.unbroken && next.unbroken,
+        }
+    }
+
+    /// The most copies a flood allows in the time: one per [`FLOOD_FRAME`]
+    /// (the real clock, whatever the frames did), and two at the ends.
+    fn most_in_a_flood(&self) -> u64 {
+        (self.elapsed.as_millis() / FLOOD_FRAME.as_millis()) as u64 + 2
+    }
+}
+
+/// Draws frames for `time` and tells what the view did meanwhile.
+fn draw_frames(
+    cx: &mut VisualTestContext,
+    view: &Entity<SessionView>,
+    redraws: &Cell<u64>,
+    time: Duration,
+) -> Stretch {
+    let (_, copies_before) = view.read_with(cx, |v, _| v.counters());
+    let redraws_before = redraws.get();
+    let busy_before = view.read_with(cx, |v, _| v.busy_since());
     let start = Instant::now();
+    let mut last = start;
+    let mut longest_pause = Duration::ZERO;
     while start.elapsed() < time {
         frame(cx);
+        longest_pause = longest_pause.max(last.elapsed());
+        last = Instant::now();
         std::thread::sleep(Duration::from_millis(2));
     }
-    let (_, after) = view.read_with(cx, |v, _| v.counters());
-    after - before
+    let (_, copies_after) = view.read_with(cx, |v, _| v.counters());
+    let busy_after = view.read_with(cx, |v, _| v.busy_since());
+    Stretch {
+        elapsed: start.elapsed(),
+        copies: copies_after - copies_before,
+        redraws: redraws.get() - redraws_before,
+        longest_pause,
+        // Ending a flood and starting it anew makes a new instant.
+        unbroken: busy_before.is_some() && busy_before == busy_after,
+    }
+}
+
+/// Draws frames until the view takes the output for a flood.
+fn wait_for_flood(cx: &mut VisualTestContext, view: &Entity<SessionView>) {
+    for _ in 0..2000 {
+        frame(cx);
+        let busy = view.read_with(cx, |v, _| v.busy_since());
+        if busy.is_some_and(|since| since.elapsed() >= FLOOD_AFTER) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("timed out waiting for the view to take the output for a flood");
+}
+
+/// Measures until a stretch is one the rates are defined for. A stall of
+/// the machine is not the view's fault: that stretch says nothing about
+/// the rates and is measured again. A stretch that is whole is judged by
+/// the caller, always; one that never is fails the test with what it saw.
+fn undisturbed(
+    what: &str,
+    whole: impl Fn(&Stretch) -> bool,
+    mut measure: impl FnMut() -> Stretch,
+) -> Stretch {
+    let mut last = None;
+    for _ in 0..TRIES {
+        let stretch = measure();
+        if whole(&stretch) {
+            return stretch;
+        }
+        last = Some(stretch);
+    }
+    panic!("no {what} without a stall of the machine in {TRIES} tries, the last: {last:?}");
+}
+
+/// Ten keys, each followed by 100 ms of frames, typed into a flood.
+fn type_in_a_flood(
+    cx: &mut VisualTestContext,
+    view: &Entity<SessionView>,
+    redraws: &Cell<u64>,
+) -> Stretch {
+    wait_for_flood(cx, view);
+    (0..10)
+        .map(|_| {
+            undisturbed(
+                "100 ms of typing",
+                |s| s.longest_pause <= STALL,
+                || {
+                    view.update(cx, |v, cx| v.type_text("x", cx));
+                    draw_frames(cx, view, redraws, Duration::from_millis(100))
+                },
+            )
+        })
+        .reduce(Stretch::then)
+        .unwrap()
 }
 
 /// Counts the view's requests to draw the window now.
@@ -327,27 +450,45 @@ fn the_wheel_scrolls_the_history_or_sends_arrows(cx: &mut TestAppContext) {
 fn a_flood_of_output_is_copied_ten_times_a_second(cx: &mut TestAppContext) {
     let (view, cx) = open(cx, "/usr/bin/yes", &["flood"]);
     wait(cx, &view, "the flood", |s| has_line(s, |l| l == "flood"));
-    // Output that keeps coming slows the copies down (a frame is drawn
-    // about every 2 ms here, so every frame could show a copy).
-    copies_in(cx, &view, FLOOD_AFTER * 2);
     let (redraws, _subscription) = count_redraws(cx, &view);
     let second = Duration::from_secs(1);
-    let copies = copies_in(cx, &view, second);
-    let most = (second.as_millis() / FLOOD_FRAME.as_millis()) as u64 + 2;
+    // Output that keeps coming slows the copies down (a frame is drawn
+    // about every 2 ms here, so every frame could show a copy). A shell
+    // that was not scheduled for a while made no output and its copies
+    // stopped: that second says nothing either.
+    let flood = undisturbed(
+        "second of flood",
+        |s| s.unbroken && s.copies >= 2,
+        || {
+            wait_for_flood(cx, &view);
+            draw_frames(cx, &view, &redraws, second)
+        },
+    );
     assert!(
-        (2..=most).contains(&copies),
-        "{copies} copies in a second of flood"
+        flood.copies <= flood.most_in_a_flood(),
+        "{} copies in {:?} of flood",
+        flood.copies,
+        flood.elapsed
     );
     // A flood's copies wait for the next frame: no window is drawn at once.
-    assert_eq!(redraws.get(), 0, "redraws asked for while flooding");
+    assert_eq!(flood.redraws, 0, "redraws asked for while flooding");
     // A key is echoed without the flood's wait: the copies speed up
-    // (ten keys a second, each followed by copies at the frame rate).
-    let start = Instant::now();
-    let mut copies = 0;
-    while start.elapsed() < second {
-        view.update(cx, |v, cx| v.type_text("x", cx));
-        copies += copies_in(cx, &view, Duration::from_millis(100));
+    // (ten keys a second, each followed by copies at the frame rate). A
+    // shell that was not scheduled made no output to copy but the echoes,
+    // so a second like that is measured again, up to a few times: a view
+    // that copies the echoes at the flood's rate never gets past it.
+    let mut typing = type_in_a_flood(cx, &view, &redraws);
+    for _ in 1..ATTEMPTS {
+        if typing.copies > typing.most_in_a_flood() {
+            break;
+        }
+        typing = type_in_a_flood(cx, &view, &redraws);
     }
-    assert!(copies > most, "{copies} copies in a second of typing");
-    assert!(redraws.get() > 0, "no redraw for the echoes in a flood");
+    assert!(
+        typing.copies > typing.most_in_a_flood(),
+        "{} copies in {:?} of typing",
+        typing.copies,
+        typing.elapsed
+    );
+    assert!(typing.redraws > 0, "no redraw for the echoes in a flood");
 }

@@ -659,6 +659,13 @@ impl SessionView {
         (self.frames, self.snapshots)
     }
 
+    /// Since when output has kept coming (for measurements and tests): a
+    /// pause in it, a key or scrolling ends that, and the next output
+    /// starts it anew. A flood once [`FLOOD_AFTER`] has passed since.
+    pub fn busy_since(&self) -> Option<Instant> {
+        self.busy_since
+    }
+
     /// The view's state as JSON: size, visible lines, cursor, modes,
     /// selection, scrolling, title, working directory and exit.
     pub fn state(&self) -> Value {
