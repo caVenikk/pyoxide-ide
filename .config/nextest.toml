@@ -35,10 +35,11 @@ filter = 'package(workbench) and binary(file_ops) and test(the_file_watcher_does
 retries = { backoff = "fixed", count = 2, delay = "1s" }
 
 # The keymap test presses every binding of both keymaps in one test, so it
-# legitimately runs for minutes on a slow machine: ten periods, not five.
+# legitimately runs for minutes on a slow machine (about ten on the Windows
+# runner, and it grows with every binding): twenty periods, not five.
 [[profile.default.overrides]]
 filter = 'binary(keymap)'
-slow-timeout = { period = "60s", terminate-after = 10, grace-period = "5s" }
+slow-timeout = { period = "60s", terminate-after = 20, grace-period = "5s" }
 
 [profile.ci]
 fail-fast = false
