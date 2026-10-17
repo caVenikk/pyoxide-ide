@@ -64,13 +64,22 @@ Option 2.
   ```
 
   An override replaces the command's bindings of the parent in every
-  context the parent binds it in (the context of the action table below
-  when the parent does not bind it). Arguments are matched when the
-  override names them.
+  context the parent binds it in (globally when the parent does not bind
+  it). Arguments are matched when the override names them. An override
+  can name a `context` (`context = "Editor"`): it then replaces the
+  command's bindings in that context only; the conversion of the
+  reference's XML writes the contexts of the action table. A keystroke an
+  override binds is taken from the parent's other commands in that
+  context, so a keystroke stays bound once per context.
 - **Action table**: `actions.toml` in the workbench maps the reference's
   action ids to Pyoxide commands (with arguments and a context where one
   action is several commands). It is written by hand from the Community
   keymap files; actions Pyoxide does not have are listed as unmapped.
+  An action can have `use-shortcut-of = "<action id>"`: it has the
+  shortcuts of that action unless the keymap lists it itself (the
+  editor's `EditorCopy` uses `$Copy`'s, so a keymap that lists only
+  `$Copy` binds both). Such an action is not shown in the Keymap page's
+  tree, as in the reference.
 - **VS Code keymaps**: the Community files `VSCode.xml` and
   `VSCode OSX.xml` are kept unmodified as data (NOTICE entry) and converted
   through the table when selected: "VSCode" on top of "Windows",
