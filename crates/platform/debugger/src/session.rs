@@ -163,6 +163,10 @@ pub struct SessionSnapshot {
     pub name: String,
     pub watches_key: String,
     pub phase: Phase,
+    /// Grows whenever the adapter's frames and values may have changed (a
+    /// stop, a resume, values invalidated): a frame of another generation
+    /// is another stop, even with the same id.
+    pub generation: u64,
     pub threads: Vec<Thread>,
     pub selected_thread: Option<i64>,
     /// The loaded frames of the selected thread.
@@ -397,6 +401,7 @@ impl Session {
             name: self.inner.name.clone(),
             watches_key: self.inner.watches_key.clone(),
             phase: data.phase,
+            generation: data.generation,
             threads: data.threads.clone(),
             selected_thread: data.selected_thread,
             frames: frames.map(|f| f.frames.clone()).unwrap_or_default(),

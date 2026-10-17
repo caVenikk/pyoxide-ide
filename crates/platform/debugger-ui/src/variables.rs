@@ -69,7 +69,7 @@ pub struct Row {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowKind {
-    Value(ValueRow),
+    Value(Box<ValueRow>),
     Group {
         title: String,
         icon: IconName,
@@ -82,7 +82,9 @@ pub enum RowKind {
         icon: Option<IconName>,
     },
     /// The rest of a large collection, shown on a double-click.
-    More { text: String },
+    More {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -171,6 +173,9 @@ struct TreeState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ShownFrame {
     id: i64,
+    /// The session's generation: the same frame at the next stop is
+    /// another frame here.
+    generation: u64,
     /// Frames of the same function share their state (the reference's
     /// `XStackFrame.getEqualityObject`).
     key: String,
@@ -194,6 +199,9 @@ pub struct VariablesView {
     previous: Option<TreeState>,
     saved: HashMap<String, TreeState>,
     rows: Rc<Vec<Row>>,
+    /// The rows are built again before they are drawn or read: what they
+    /// show changed.
+    dirty: bool,
     /// The rows of the frame shown before, while the new one loads.
     frozen: Option<Rc<Vec<Row>>>,
     _unfreeze: Option<Task<()>>,
@@ -221,6 +229,7 @@ impl VariablesView {
             previous: None,
             saved: HashMap::new(),
             rows: Rc::default(),
+            dirty: true,
             frozen: None,
             _unfreeze: None,
         }
@@ -234,6 +243,7 @@ impl VariablesView {
     /// frame keeps the expanded nodes and the selection of its function.
     pub fn follow(&mut self, snapshot: &SessionSnapshot, cx: &mut Context<Self>) {
         self.phase = snapshot.phase;
+        self.dirty = true;
         let frame = (snapshot.phase == Phase::Suspended)
             .then(|| {
                 let id = snapshot.selected_frame?;
@@ -246,11 +256,13 @@ impl VariablesView {
                     .unwrap_or_default();
                 Some(ShownFrame {
                     id,
+                    generation: snapshot.generation,
                     key: format!("{path}:{}", f.name),
                 })
             })
             .flatten();
-        if frame.as_ref().map(|f| f.id) == self.frame.as_ref().map(|f| f.id) {
+        let shown = |f: &ShownFrame| (f.id, f.generation);
+        if frame.as_ref().map(shown) == self.frame.as_ref().map(shown) {
             cx.notify();
             return;
         }
@@ -288,6 +300,7 @@ impl VariablesView {
         self.loading.clear();
         self.errors.clear();
         self.freeze(cx);
+        self.dirty = true;
         cx.notify();
     }
 
@@ -323,6 +336,7 @@ impl VariablesView {
                     this.state.expanded.insert(first.name.clone());
                 }
                 this.scopes = Some(result.map_err(|e| e.to_string()));
+                this.dirty = true;
                 cx.notify();
             });
         })
@@ -348,6 +362,7 @@ impl VariablesView {
                         this.errors.insert(reference, e.to_string());
                     }
                 }
+                this.dirty = true;
                 cx.notify();
             });
         })
@@ -356,9 +371,13 @@ impl VariablesView {
 
     // ---- rows ------------------------------------------------------------------
 
-    /// Builds the rows from the session's loaded values and loads what an
-    /// expanded node needs.
+    /// Builds the rows from the session's loaded values, when what they
+    /// show changed, and loads what an expanded node needs.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
         let mut b = Builder {
             view: self,
             rows: Vec::new(),
@@ -406,6 +425,7 @@ impl VariablesView {
 
     /// Selects the node at a path of names (`["items", "0"]`).
     pub fn select_names(&mut self, names: &[String], cx: &mut Context<Self>) -> bool {
+        self.rebuild(cx);
         let path = names.join(&SEP.to_string());
         if self.rows.iter().any(|r| r.path == path) {
             self.select(&path, cx);
@@ -421,6 +441,7 @@ impl VariablesView {
         } else {
             self.state.expanded.remove(path);
         }
+        self.dirty = true;
         cx.notify();
     }
 
@@ -431,6 +452,7 @@ impl VariablesView {
         expanded: Option<bool>,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.rebuild(cx);
         let path = names.join(&SEP.to_string());
         let Some(row) = self.rows.iter().find(|r| r.path == path) else {
             return false;
@@ -449,6 +471,7 @@ impl VariablesView {
 
     /// Up and Down: the row above or below the selected one.
     pub fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        self.rebuild(cx);
         let rows = self.rows.clone();
         if rows.is_empty() {
             return;
@@ -463,6 +486,7 @@ impl VariablesView {
     /// Left: collapses the selected node, or selects its parent; Right:
     /// expands it, or selects its first child.
     pub fn left_right(&mut self, right: bool, cx: &mut Context<Self>) {
+        self.rebuild(cx);
         let rows = self.rows.clone();
         let Some(i) = self.selected_index(&rows) else {
             self.move_selection(0, cx);
@@ -470,9 +494,8 @@ impl VariablesView {
         };
         let row = &rows[i];
         if right {
-            if matches!(row.kind, RowKind::More { .. }) {
-                self.set_expanded(&row.path, true, cx);
-            } else if row.expandable() && !row.expanded() {
+            let more = matches!(row.kind, RowKind::More { .. });
+            if more || (row.expandable() && !row.expanded()) {
                 self.set_expanded(&row.path, true, cx);
             } else if row.expanded()
                 && let Some(next) = rows.get(i + 1)
@@ -493,7 +516,7 @@ impl VariablesView {
     pub fn selected_value(&self) -> Option<ValueRow> {
         let selected = self.state.selected.as_deref()?;
         self.rows.iter().find_map(|r| match &r.kind {
-            RowKind::Value(v) if r.path == selected => Some(v.clone()),
+            RowKind::Value(v) if r.path == selected => Some((**v).clone()),
             _ => None,
         })
     }
@@ -566,15 +589,15 @@ impl VariablesView {
             let expanded = row.expanded();
             let path = row.path.clone();
             div()
-                .id(SharedString::from(format!("variables-chevron-{}", row.path)))
+                .id(SharedString::from(format!(
+                    "variables-chevron-{}",
+                    row.path
+                )))
                 .absolute()
                 .left(left)
                 .top((row_h - px(CHEVRON)) / 2.0)
-                .child(Icon::new(if expanded {
-                    IconName::CHEVRON_DOWN
-                } else {
-                    IconName::CHEVRON_RIGHT
-                }))
+                .size(px(CHEVRON))
+                .child(ui::components::tree_arrow(expanded, cx))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     this.set_expanded(&path, !expanded, cx);
@@ -604,7 +627,11 @@ impl VariablesView {
                     .flex_row()
                     .items_center()
                     .child(icon(kind_icon))
-                    .child(div().text_color(theme.color(name_role)).child(v.name.clone()))
+                    .child(
+                        div()
+                            .text_color(theme.color(name_role))
+                            .child(v.name.clone()),
+                    )
                     .child(div().text_color(text).child("\u{a0}=\u{a0}"))
                     .when_some(v.type_text.clone(), |d, t| {
                         d.child(
@@ -697,7 +724,14 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
-    fn message(&mut self, path: &str, depth: usize, text: &str, role: UiRole, icon: Option<IconName>) {
+    fn message(
+        &mut self,
+        path: &str,
+        depth: usize,
+        text: &str,
+        role: UiRole,
+        icon: Option<IconName>,
+    ) {
         self.rows.push(Row {
             path: join(path, &format!("\u{2}{text}")),
             depth,
@@ -722,7 +756,13 @@ impl Builder<'_> {
             return;
         }
         if view.frame.is_none() {
-            self.message("", 0, FRAME_NOT_AVAILABLE, UiRole::Text, Some(IconName::INFO));
+            self.message(
+                "",
+                0,
+                FRAME_NOT_AVAILABLE,
+                UiRole::Text,
+                Some(IconName::INFO),
+            );
             return;
         }
         let scopes = match &view.scopes {
@@ -733,7 +773,13 @@ impl Builder<'_> {
             }
             Some(Err(error)) => {
                 let error = error.clone();
-                self.message("", 0, &error, UiRole::DebuggerErrorMessage, Some(IconName::ERROR));
+                self.message(
+                    "",
+                    0,
+                    &error,
+                    UiRole::DebuggerErrorMessage,
+                    Some(IconName::ERROR),
+                );
                 return;
             }
             Some(Ok(scopes)) => scopes.clone(),
@@ -769,7 +815,13 @@ impl Builder<'_> {
         let Some(children) = view.session.loaded_children(reference) else {
             if let Some(error) = view.errors.get(&reference) {
                 let error = error.clone();
-                self.message(path, depth, &error, UiRole::DebuggerErrorMessage, Some(IconName::ERROR));
+                self.message(
+                    path,
+                    depth,
+                    &error,
+                    UiRole::DebuggerErrorMessage,
+                    Some(IconName::ERROR),
+                );
             } else {
                 if root {
                     self.complete = false;
@@ -777,7 +829,13 @@ impl Builder<'_> {
                 if !view.loading.contains(&reference) {
                     self.wanted.push(reference);
                 }
-                self.message(path, depth, COLLECTING_DATA, UiRole::DebuggerCollectingData, None);
+                self.message(
+                    path,
+                    depth,
+                    COLLECTING_DATA,
+                    UiRole::DebuggerCollectingData,
+                    None,
+                );
             }
             return;
         };
@@ -791,7 +849,15 @@ impl Builder<'_> {
             };
             match node.role {
                 ValueRole::Value(kind) => {
-                    self.value(variable, children.shape(i), &node.name, kind, reference, path, depth);
+                    self.value(
+                        variable,
+                        children.shape(i),
+                        &node.name,
+                        kind,
+                        reference,
+                        path,
+                        depth,
+                    );
                 }
                 ValueRole::Group { title, icon } => groups.push((variable.clone(), title, icon)),
                 ValueRole::ReturnValue { group } => {
@@ -898,16 +964,19 @@ impl Builder<'_> {
         let view = self.view;
         let path = join(parent_path, name);
         let shown = value_text(&variable.value);
-        let changed = view.previous.as_ref().is_some_and(|p| match p.values.get(&path) {
-            Some(old) => *old != shown,
-            None => parent_path.is_empty() || p.expanded.contains(parent_path),
-        });
+        let changed = view
+            .previous
+            .as_ref()
+            .is_some_and(|p| match p.values.get(&path) {
+                Some(old) => *old != shown,
+                None => parent_path.is_empty() || p.expanded.contains(parent_path),
+            });
         self.values.insert(path.clone(), shown);
         let expanded = variable.reference > 0 && view.state.expanded.contains(&path);
         self.rows.push(Row {
             path: path.clone(),
             depth,
-            kind: RowKind::Value(ValueRow {
+            kind: RowKind::Value(Box::new(ValueRow {
                 name: name.to_owned(),
                 type_text: type_text(variable.type_name.as_deref(), shape),
                 shape: shape.map(str::to_owned),
@@ -916,7 +985,7 @@ impl Builder<'_> {
                 changed,
                 parent,
                 variable: variable.clone(),
-            }),
+            })),
         });
         if expanded {
             self.children(variable.reference, &path, depth + 1, false);

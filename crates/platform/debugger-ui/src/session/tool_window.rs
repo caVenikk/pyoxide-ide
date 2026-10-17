@@ -15,14 +15,12 @@ use std::time::Duration;
 
 use console::LinkTarget;
 use console_ui::{ConsoleEvent, ConsoleView};
-use debugger::{
-    DebugAdapterProvider, DebugRequest, Phase, Session, SessionId, SessionSnapshot,
-};
+use debugger::{DebugAdapterProvider, DebugRequest, Phase, Session, SessionId, SessionSnapshot};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Render, SharedString, Subscription, Task, Window, canvas, div,
-    prelude::*, px, relative,
+    MouseUpEvent, Pixels, Point, Render, SharedString, Subscription, Task, UniformListScrollHandle,
+    Window, canvas, div, prelude::*, px, relative,
 };
 use process::ExitStatus;
 use serde_json::{Value as Json, json};
@@ -112,6 +110,10 @@ pub(crate) struct SessionTab {
     pub snapshot: SessionSnapshot,
     /// The last stop, shown for a moment after the program moved on.
     pub frozen: Option<SessionSnapshot>,
+    /// The session's generation and the number of frames shown when more
+    /// were asked for (all frames of a stop are loaded, a page at a time,
+    /// as the reference's frames list computes them).
+    pub frames_asked: Option<(u64, usize)>,
     pub _unfreeze: Option<Task<()>>,
     /// The program's exit, as its console printed it.
     pub exit: Option<ExitStatus>,
@@ -131,9 +133,7 @@ impl SessionTab {
     /// The session as the frames view shows it: the last stop for a
     /// moment after the program moved on.
     pub(crate) fn shown_frames(&self) -> SessionSnapshot {
-        self.frozen
-            .clone()
-            .unwrap_or_else(|| self.snapshot.clone())
+        self.frozen.clone().unwrap_or_else(|| self.snapshot.clone())
     }
 }
 
@@ -154,10 +154,11 @@ pub struct DebugToolWindow {
     /// The toolbar's More button where it was last laid out: its menu
     /// opens below it.
     more_anchor: Rc<Cell<Bounds<Pixels>>>,
-    focus: FocusHandle,
+    pub(crate) focus: FocusHandle,
     next_id: u64,
-    /// The frames list's focus (its key context).
+    /// The frames list's focus (its key context) and scroll.
     pub(crate) frames_focus: FocusHandle,
+    pub(crate) frames_scroll: UniformListScrollHandle,
     /// The hint below the frames was closed.
     pub(crate) frames_hint_closed: bool,
     /// The project root: frames of other files are library frames.
@@ -185,6 +186,7 @@ impl DebugToolWindow {
             focus: cx.focus_handle(),
             next_id: 0,
             frames_focus: cx.focus_handle(),
+            frames_scroll: UniformListScrollHandle::new(),
             frames_hint_closed: false,
             root: None,
             provider: None,
@@ -210,6 +212,14 @@ impl DebugToolWindow {
         if snapshot.phase == Phase::Suspended {
             tab.frozen = None;
             tab._unfreeze = None;
+            // The rest of the selected thread's frames.
+            let loaded = snapshot.frames.len();
+            let more = snapshot.frames_total.is_none_or(|total| loaded < total);
+            let asked = Some((snapshot.generation, loaded));
+            if loaded > 0 && more && tab.frames_asked != asked {
+                tab.frames_asked = asked;
+                drop(tab.session.load_more_frames());
+            }
         } else if old.phase == Phase::Suspended {
             tab.frozen = Some(old.clone());
             let id = tab.id;
@@ -223,8 +233,7 @@ impl DebugToolWindow {
                 });
             }));
         }
-        tab.variables
-            .update(cx, |v, cx| v.follow(&snapshot, cx));
+        tab.variables.update(cx, |v, cx| v.follow(&snapshot, cx));
         cx.notify();
         old.phase
     }
@@ -232,6 +241,11 @@ impl DebugToolWindow {
     /// The selected tab's variables view.
     pub fn selected_variables(&self) -> Option<Entity<VariablesView>> {
         self.selected_tab().map(|t| t.variables.clone())
+    }
+
+    /// The focus of the frames list.
+    pub fn frames_focus(&self) -> &FocusHandle {
+        &self.frames_focus
     }
 
     /// Opens the list of the selected session's threads below the combo.
@@ -243,7 +257,10 @@ impl DebugToolWindow {
         if s.phase != Phase::Suspended || s.threads.is_empty() {
             return;
         }
-        let selected = s.threads.iter().position(|t| Some(t.id) == s.selected_thread);
+        let selected = s
+            .threads
+            .iter()
+            .position(|t| Some(t.id) == s.selected_thread);
         let items: Vec<MenuItem> = s
             .threads
             .iter()
@@ -264,14 +281,10 @@ impl DebugToolWindow {
             window,
             cx,
         );
-        let dismissed = cx.subscribe_in(
-            &menu,
-            window,
-            |this, _, _: &gpui::DismissEvent, _, cx| {
-                this.threads_menu = None;
-                cx.notify();
-            },
-        );
+        let dismissed = cx.subscribe_in(&menu, window, |this, _, _: &gpui::DismissEvent, _, cx| {
+            this.threads_menu = None;
+            cx.notify();
+        });
         self.threads_menu = Some((menu, position, dismissed));
         cx.notify();
     }
@@ -396,6 +409,7 @@ impl DebugToolWindow {
             title: session.name().to_owned(),
             snapshot: session.snapshot(),
             frozen: None,
+            frames_asked: None,
             _unfreeze: None,
             session,
             request,
@@ -431,6 +445,7 @@ impl DebugToolWindow {
         tab.title = session.name().to_owned();
         tab.snapshot = session.snapshot();
         tab.frozen = None;
+        tab.frames_asked = None;
         tab._unfreeze = None;
         tab.variables = {
             let session = session.clone();
@@ -964,7 +979,8 @@ impl DebugToolWindow {
     }
 
     /// The evaluate field's place above the variables, with its hint
-    /// (`debugger.evaluate.expression.or.add.a.watch.hint`).
+    /// (`debugger.evaluate.expression.or.add.a.watch.hint`), Add to
+    /// Watches and the history's chevron at the right.
     fn render_evaluate_hint(&self, cx: &App) -> AnyElement {
         let theme = cx.theme();
         div()
@@ -972,23 +988,34 @@ impl DebugToolWindow {
             .debug_selector(|| "debug-evaluate".into())
             .flex_none()
             .h(px(30.0))
-            .px(px(8.0))
+            .pl(px(8.0))
+            .pr(px(6.0))
             .flex()
+            .flex_row()
             .items_center()
+            .gap(px(6.0))
             .border_b_1()
             .border_color(theme.color(UiRole::Border))
-            .font_family(theme.mono_family())
-            .text_color(theme.color(UiRole::TextMuted))
-            .whitespace_nowrap()
-            .overflow_hidden()
-            .child(EVALUATE_HINT)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .font_family(theme.mono_family())
+                    .text_color(theme.color(UiRole::TextMuted))
+                    .child(EVALUATE_HINT),
+            )
+            .child(Icon::new(icons::ADD_TO_WATCHES).size(px(16.0)))
+            .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
             .into_any_element()
     }
 }
 
 /// The evaluate field's hint, with the keys of Evaluate (Enter) and Add to
 /// Watches (`XDebuggerBundle`).
-const EVALUATE_HINT: &str = "Evaluate expression (\u{23ce}) or add a watch (\u{21e7}\u{2318}\u{23ce})";
+const EVALUATE_HINT: &str =
+    "Evaluate expression (\u{23ce}) or add a watch (\u{21e7}\u{2318}\u{23ce})";
 
 /// Which toolbar actions are enabled in a session's phase.
 pub(crate) fn toolbar_state(phase: Phase) -> Json {

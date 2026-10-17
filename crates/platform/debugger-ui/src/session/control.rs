@@ -628,6 +628,10 @@ impl DebuggerView {
         };
         if let Some(frame) = session.snapshot().frames.get(index) {
             session.select_frame(frame.id);
+            self.tool_window.update(cx, |w, _| {
+                w.frames_scroll
+                    .scroll_to_item(index, gpui::ScrollStrategy::Top)
+            });
         }
     }
 
@@ -652,7 +656,10 @@ impl DebuggerView {
     pub(crate) fn with_variables(
         &mut self,
         cx: &mut Context<Self>,
-        f: impl FnOnce(&mut crate::variables::VariablesView, &mut Context<crate::variables::VariablesView>),
+        f: impl FnOnce(
+            &mut crate::variables::VariablesView,
+            &mut Context<crate::variables::VariablesView>,
+        ),
     ) {
         if let Some(variables) = self.tool_window.read(cx).selected_variables() {
             variables.update(cx, f);

@@ -96,25 +96,30 @@ fn remaining(range: &str) -> Option<usize> {
 
 /// One Python expression for the sizes of several values: a tuple with the
 /// length of each value that has one (`__len__` on its type, not a string
-/// or bytes), `None` for the others.
+/// or bytes), `None` for the others, as a string (debugpy shows at most
+/// about 60 items of a tuple, all of a string).
 pub(crate) fn sizes_expression(expressions: &[&str]) -> Option<String> {
     if expressions.is_empty() {
         return None;
     }
-    let mut out = String::from("(");
+    let mut out = String::from("str((");
     for e in expressions {
         out.push_str(&format!(
             "len({e}) if hasattr(type({e}), '__len__') and not isinstance({e}, (str, bytes, bytearray)) else None, "
         ));
     }
-    out.push(')');
+    out.push_str("))");
     Some(out)
 }
 
-/// The sizes in the value of [`sizes_expression`]: `(4, None, 2)`.
+/// The sizes in the value of [`sizes_expression`]: `'(4, None, 2)'`.
 pub(crate) fn parse_sizes(value: &str, count: usize) -> Vec<Option<String>> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix('\'')
+        .and_then(|v| v.strip_suffix('\''))
+        .unwrap_or(value);
     let inner = value
-        .trim()
         .strip_prefix('(')
         .and_then(|v| v.strip_suffix(')'))
         .unwrap_or_default();
@@ -186,10 +191,14 @@ mod tests {
     #[test]
     fn sizes_are_asked_for_in_one_tuple() {
         let e = sizes_expression(&["items", "d['a']"]).unwrap();
-        assert!(e.starts_with("(len(items) if hasattr(type(items), '__len__')"));
+        assert!(e.starts_with("str((len(items) if hasattr(type(items), '__len__')"));
         assert!(e.contains("len(d['a']) if"));
-        assert!(e.ends_with(", )"));
+        assert!(e.ends_with(", ))"));
         assert_eq!(sizes_expression(&[]), None);
+        assert_eq!(
+            parse_sizes("'(1000, None)'", 2),
+            vec![Some("1000".into()), None]
+        );
         assert_eq!(
             parse_sizes("(1000, None)", 2),
             vec![Some("1000".into()), None]

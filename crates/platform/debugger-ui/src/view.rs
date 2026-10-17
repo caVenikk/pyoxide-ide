@@ -906,33 +906,39 @@ fn forward_frame_actions<E: InteractiveElement>(el: E, view: Entity<DebuggerView
     let el =
         el.on_action(move |a: &SelectThread, _, cx| v.update(cx, |v, cx| v.select_thread(a, cx)));
     let v = view.clone();
-    let el = el.on_action(move |a: &SelectFrame, _, cx| {
-        v.update(cx, |v, cx| v.select_frame(a.index, cx))
-    });
+    let el = el
+        .on_action(move |a: &SelectFrame, _, cx| v.update(cx, |v, cx| v.select_frame(a.index, cx)));
     let v = view.clone();
     let el =
         el.on_action(move |_: &PreviousFrame, _, cx| v.update(cx, |v, cx| v.step_frame(-1, cx)));
     let v = view.clone();
     let el = el.on_action(move |_: &NextFrame, _, cx| v.update(cx, |v, cx| v.step_frame(1, cx)));
     let v = view.clone();
-    let el = el.on_action(move |_: &CloseFramesHint, _, cx| {
-        v.update(cx, |v, cx| v.close_frames_hint(cx))
-    });
+    let el = el
+        .on_action(move |_: &CloseFramesHint, _, cx| v.update(cx, |v, cx| v.close_frames_hint(cx)));
     let v = view.clone();
     let el = el.on_action(move |_: &VariablesUp, _, cx| {
-        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.move_selection(-1, cx)))
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| t.move_selection(-1, cx))
+        })
     });
     let v = view.clone();
     let el = el.on_action(move |_: &VariablesDown, _, cx| {
-        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.move_selection(1, cx)))
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| t.move_selection(1, cx))
+        })
     });
     let v = view.clone();
     let el = el.on_action(move |_: &VariablesLeft, _, cx| {
-        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.left_right(false, cx)))
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| t.left_right(false, cx))
+        })
     });
     let v = view.clone();
     let el = el.on_action(move |_: &VariablesRight, _, cx| {
-        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.left_right(true, cx)))
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| t.left_right(true, cx))
+        })
     });
     let v = view.clone();
     let el = el.on_action(move |a: &SelectVariable, _, cx| {
