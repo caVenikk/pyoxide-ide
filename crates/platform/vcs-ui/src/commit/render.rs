@@ -600,13 +600,13 @@ impl CommitView {
                 )
                 .into_any_element();
         }
-        let rows = self.tree.rows();
+        // The rows of this frame, made once for the visible range.
+        let rows = std::rc::Rc::new(self.tree.rows());
         let count = rows.len();
         let list = uniform_list(
             "commit-rows",
             count,
             cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                let rows = this.tree.rows();
                 range
                     .filter_map(|ix| rows.get(ix).map(|r| this.render_row(r, ix, focused, cx)))
                     .collect::<Vec<_>>()
@@ -733,15 +733,19 @@ impl CommitView {
     ) -> impl IntoElement {
         let theme = cx.theme();
         let hover = theme.color(UiRole::Hover);
+        // The first button keeps its width; the second gives way (its
+        // text cut with an ellipsis) so that the gear stays in a narrow
+        // tool window.
+        let first = id == "commit-button";
         div()
             .id(id)
             .debug_selector(move || id.into())
             .flex()
-            .flex_none()
+            .when(first, |d| d.flex_none().min_w(px(72.0)))
+            .when(!first, |d| d.flex_shrink().min_w(px(0.0)).overflow_hidden())
             .items_center()
             .justify_center()
             .h(px(COMMIT_BUTTON))
-            .min_w(px(72.0))
             .px(px(14.0))
             .rounded(ui::form::field_radius(cx))
             .whitespace_nowrap()
@@ -758,7 +762,13 @@ impl CommitView {
             .when(!enabled, |d| {
                 d.text_color(theme.color(UiRole::TextDisabled))
             })
-            .child(label)
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(label),
+            )
             .when(enabled, |d| {
                 d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
             })

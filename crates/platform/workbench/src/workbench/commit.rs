@@ -640,6 +640,9 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         let Some(repo) = self.git_repo() else {
+            self.commit_ui
+                .view
+                .update(cx, |v, cx| v.commit_failed(None, cx));
             return;
         };
         let work =

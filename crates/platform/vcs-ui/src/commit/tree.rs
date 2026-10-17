@@ -9,7 +9,7 @@
 //! that appears later is included while every other change is;
 //! unversioned files are included only by hand.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use vcs::{Change, FileStatus};
@@ -91,6 +91,8 @@ pub struct ChangesTree {
     lead: Option<Row>,
     /// Where a Shift+click range starts.
     anchor: Option<Row>,
+    /// Each listed file's group and place in it.
+    index: HashMap<PathBuf, (Group, usize)>,
 }
 
 impl Default for ChangesTree {
@@ -107,6 +109,7 @@ impl Default for ChangesTree {
             selected: HashSet::new(),
             lead: None,
             anchor: None,
+            index: HashMap::new(),
         }
     }
 }
@@ -159,6 +162,17 @@ impl ChangesTree {
         changes.sort_by(|a, b| by_name(&a.path, &b.path));
         let mut unversioned = unversioned;
         unversioned.sort_by(|a, b| by_name(a, b));
+        self.index = changes
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.path.clone(), (Group::Changes, i)))
+            .chain(
+                unversioned
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (p.clone(), (Group::Unversioned, i))),
+            )
+            .collect();
         self.changes = changes;
         self.unversioned = unversioned;
         let rows: HashSet<Row> = self.rows().into_iter().collect();
@@ -178,17 +192,14 @@ impl ChangesTree {
 
     /// The group a file is in.
     pub fn group_of(&self, path: &Path) -> Option<Group> {
-        if self.changes.iter().any(|c| c.path == path) {
-            Some(Group::Changes)
-        } else if self.unversioned.iter().any(|p| p == path) {
-            Some(Group::Unversioned)
-        } else {
-            None
-        }
+        self.index.get(path).map(|(g, _)| *g)
     }
 
     pub fn change(&self, path: &Path) -> Option<&Change> {
-        self.changes.iter().find(|c| c.path == path)
+        match self.index.get(path) {
+            Some((Group::Changes, i)) => self.changes.get(*i),
+            _ => None,
+        }
     }
 
     /// The files of a group.
@@ -483,7 +494,8 @@ pub fn origin_text(change: &Change, root: &Path) -> Option<String> {
 }
 
 /// A file's folder as the tree shows it (`VcsPresentablePath`): relative to
-/// the work tree's root with `/`, the root as its name.
+/// the work tree's root with the system's separators, the root as its
+/// name.
 pub fn parent_text(path: &Path, root: &Path) -> String {
     let Some(parent) = path.parent() else {
         return String::new();
@@ -497,7 +509,7 @@ pub fn parent_text(path: &Path, root: &Path) -> String {
             .components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect::<Vec<_>>()
-            .join("/"),
+            .join(std::path::MAIN_SEPARATOR_STR),
         Err(_) => parent.display().to_string(),
     }
 }
@@ -648,12 +660,12 @@ mod tests {
         };
         assert_eq!(
             origin_text(&moved, &root()).as_deref(),
-            Some("- moved from docs/old")
+            Some(format!("- moved from docs{}old", std::path::MAIN_SEPARATOR).as_str())
         );
         assert_eq!(parent_text(&root().join("main.py"), &root()), "demo");
         assert_eq!(
             parent_text(&root().join(".idea/inspectionProfiles/a.xml"), &root()),
-            ".idea/inspectionProfiles"
+            format!(".idea{}inspectionProfiles", std::path::MAIN_SEPARATOR)
         );
         assert_eq!(file_count(1), "1 file");
         assert_eq!(file_count(7), "7 files");
