@@ -1,0 +1,19 @@
+[package]
+name = "console-ui"
+description = "The console view of Pyoxide IDE on GPUI, shared by the Run and Debug tool windows: a process's output in a read-only editor with colours and links, typed input sent to its standard input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+console.workspace = true
+editor.workspace = true
+flume.workspace = true
+futures.workspace = true
+gpui.workspace = true
+process.workspace = true
+serde_json.workspace = true
+text.workspace = true
+themes.workspace = true
+ui.workspace = true

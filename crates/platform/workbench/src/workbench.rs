@@ -348,6 +348,7 @@ impl Workbench {
         let mut tool_windows =
             tool_window_areas::default_tool_windows(&product, &run_window, &notifications_window);
         let commit_ui = commit::CommitUi::new(file_types.clone(), &mut tool_windows, window, cx);
+        Self::register_debug_tool_window(&mut tool_windows, &debugger, cx);
         // Names are coloured by their version control status (#169).
         let version_control = version_control::VersionControl::default();
         let colors = version_control.markers.colors.clone();
@@ -2416,7 +2417,7 @@ impl Render for Workbench {
         root = project_panel::forward_actions(root, self.panel.clone());
         root = self.vcs_actions(root, cx);
         root = self.branch_actions(root, cx);
-        root = self.debug_actions(root);
+        root = self.debug_actions(root, cx);
         root = self.commit_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);

@@ -15,11 +15,16 @@
 //! A configuration's row selects it on a click and opens its submenu while
 //! it is selected (Run, Debug, "Configuration", Edit Configurations…, Save
 //! Configuration for a temporary one, Delete, Pin or Unpin); its buttons
-//! run it, stop it while it runs, and debug it (not yet).
+//! run it, stop it while it runs, debug it, and resume or pause it and stop
+//! it while it is debugged (Resume or Pause then takes Run's place,
+//! `filterOutRunIfDebugResumeIsPresent`).
 
 use run_config::{ConfigKey, RECENT_COUNT, RunConfiguration, RunConfigurations, Types};
 use ui::icons::IconName;
 use ui::menu::{InlineButton, MenuItem};
+
+use debugger_ui::icons as debug_icons;
+use debugger_ui::session::commands::{DebugConfiguration, DebugFile, Pause, Resume, StopSession};
 
 use super::commands::*;
 use super::widget::TEMPORARY_ICON_ALPHA;
@@ -178,9 +183,14 @@ pub struct MenuState<'a> {
     pub expanded: bool,
     /// The Run tab whose process runs a configuration.
     pub running: &'a dyn Fn(&ConfigKey) -> Option<usize>,
-    /// The file in the editor (its name), whether it can run, and the tab
-    /// that runs it.
-    pub current_file: Option<(String, bool, Option<usize>)>,
+    /// The Debug tool window's tab of a configuration's debug session and
+    /// whether it is suspended.
+    pub debugging: &'a dyn Fn(&ConfigKey) -> Option<(usize, bool)>,
+    /// The product can debug a configuration.
+    pub debuggable: &'a dyn Fn(&RunConfiguration) -> bool,
+    /// The file in the editor (its name), whether it can run, the Run tab
+    /// that runs it and the Debug tool window's tab that debugs it.
+    pub current_file: Option<(String, bool, Option<usize>, Option<usize>)>,
 }
 
 fn select_action(c: &RunConfiguration) -> SelectConfiguration {
@@ -191,7 +201,7 @@ fn select_action(c: &RunConfiguration) -> SelectConfiguration {
 }
 
 /// A configuration's submenu (`SelectConfigAction.getDefaultChildren`).
-fn config_submenu(c: &RunConfiguration, pinned: bool) -> Vec<MenuItem> {
+fn config_submenu(c: &RunConfiguration, pinned: bool, debuggable: bool) -> Vec<MenuItem> {
     let name = Some(c.name.clone());
     let ty = Some(c.type_id.clone());
     let mut items = vec![
@@ -204,7 +214,15 @@ fn config_submenu(c: &RunConfiguration, pinned: bool) -> Vec<MenuItem> {
         )
         .icon(IconName::RUN)
         .enabled(!c.is_unsupported()),
-        MenuItem::unavailable("Debug").icon(IconName::DEBUG),
+        MenuItem::action(
+            "Debug",
+            DebugConfiguration {
+                name: name.clone(),
+                r#type: ty.clone(),
+            },
+        )
+        .icon(IconName::DEBUG)
+        .enabled(!c.is_unsupported() && debuggable),
         MenuItem::header(CONFIGURATION),
         MenuItem::action(
             "Edit Configurations\u{2026}",
@@ -253,7 +271,8 @@ fn config_item(
         .map(IconName)
         .unwrap_or(IconName::FILE_UNKNOWN);
     let pinned = state.list.pinned.contains(&key);
-    let mut item = MenuItem::submenu(c.name.clone(), config_submenu(c, pinned))
+    let debuggable = (state.debuggable)(c);
+    let mut item = MenuItem::submenu(c.name.clone(), config_submenu(c, pinned, debuggable))
         .perform(select_action(c))
         .icon(icon)
         .description(types.name_of(c).to_owned())
@@ -267,21 +286,26 @@ fn config_item(
         item = item.secondary(folder.to_owned());
     }
     if !c.is_unsupported() {
+        let parallel = types.allows_parallel(c);
         let running = (state.running)(&key);
-        let rerun = running.is_some() && !types.allows_parallel(c);
-        let (run_icon, run_text) = if rerun {
-            (IconName::RERUN, format!("Rerun '{}'", c.name))
-        } else {
-            (IconName::RUN, format!("Run '{}'", c.name))
-        };
-        item = item.inline(InlineButton::new(
-            run_icon,
-            run_text,
-            LaunchConfiguration {
-                name: Some(c.name.clone()),
-                r#type: Some(c.type_id.clone()),
-            },
-        ));
+        let debugging = (state.debugging)(&key);
+        // Run, Stop, Resume or Pause, Debug, Stop (`createRunConfigurationWithInlines`);
+        // Resume or Pause hides Run.
+        if debugging.is_none() {
+            let (run_icon, run_text) = if running.is_some() && !parallel {
+                (IconName::RERUN, format!("Rerun '{}'", c.name))
+            } else {
+                (IconName::RUN, format!("Run '{}'", c.name))
+            };
+            item = item.inline(InlineButton::new(
+                run_icon,
+                run_text,
+                LaunchConfiguration {
+                    name: Some(c.name.clone()),
+                    r#type: Some(c.type_id.clone()),
+                },
+            ));
+        }
         if let Some(tab) = running {
             item = item.inline(InlineButton::new(
                 IconName::STOP,
@@ -289,10 +313,47 @@ fn config_item(
                 Stop { tab: Some(tab) },
             ));
         }
-        item = item.inline(InlineButton::disabled(
-            IconName::DEBUG,
-            format!("Debug '{}'", c.name),
-        ));
+        if let Some((tab, suspended)) = debugging {
+            item = item.inline(if suspended {
+                InlineButton::new(
+                    debug_icons::RESUME,
+                    format!("Resume '{}'", c.name),
+                    Resume { index: Some(tab) },
+                )
+            } else {
+                InlineButton::new(
+                    debug_icons::PAUSE,
+                    format!("Pause '{}'", c.name),
+                    Pause { index: Some(tab) },
+                )
+            });
+        }
+        // A configuration that cannot be debugged has no Debug button.
+        if debuggable {
+            let (debug_icon, debug_text) = if debugging.is_some() && !parallel {
+                (
+                    debug_icons::RERUN_DEBUG,
+                    format!("Restart Debug '{}'", c.name),
+                )
+            } else {
+                (IconName::DEBUG, format!("Debug '{}'", c.name))
+            };
+            item = item.inline(InlineButton::new(
+                debug_icon,
+                debug_text,
+                DebugConfiguration {
+                    name: Some(c.name.clone()),
+                    r#type: Some(c.type_id.clone()),
+                },
+            ));
+        }
+        if let Some((tab, _)) = debugging {
+            item = item.inline(InlineButton::new(
+                IconName::STOP,
+                format!("Stop '{}'", c.name),
+                StopSession { index: Some(tab) },
+            ));
+        }
     }
     item
 }
@@ -369,16 +430,19 @@ pub fn menu(state: &MenuState<'_>) -> (Vec<MenuItem>, Option<usize>) {
 /// the file in the editor. Without a file it only selects (no buttons, no
 /// submenu), as the toolbar's buttons are disabled then.
 fn current_file_item(state: &MenuState<'_>) -> MenuItem {
-    let Some((name, runnable, running)) = &state.current_file else {
+    let Some((name, runnable, running, debugging)) = &state.current_file else {
         return MenuItem::action("Current File", SelectCurrentFile);
     };
-    let (runnable, running) = (*runnable, *running);
+    let (runnable, running, debugging) = (*runnable, *running, *debugging);
     let run_text = format!("Run '{name}'");
+    let debug_text = format!("Debug '{name}'");
     let sub = vec![
         MenuItem::action(run_text.clone(), RunFile)
             .icon(IconName::RUN)
             .enabled(runnable),
-        MenuItem::unavailable("Debug").icon(IconName::DEBUG),
+        MenuItem::action(debug_text.clone(), DebugFile)
+            .icon(IconName::DEBUG)
+            .enabled(runnable),
         MenuItem::separator(),
         MenuItem::unavailable("Run with Parameters\u{2026}"),
     ];
@@ -393,7 +457,17 @@ fn current_file_item(state: &MenuState<'_>) -> MenuItem {
             Stop { tab: Some(tab) },
         ));
     }
-    item.inline(InlineButton::disabled(IconName::DEBUG, "Debug"))
+    if runnable {
+        item = item.inline(InlineButton::new(IconName::DEBUG, debug_text, DebugFile));
+    }
+    if let Some(tab) = debugging {
+        item = item.inline(InlineButton::new(
+            IconName::STOP,
+            "Stop",
+            StopSession { index: Some(tab) },
+        ));
+    }
+    item
 }
 
 /// The longest configuration name the run widget shows uncut.
@@ -585,13 +659,17 @@ mod tests {
         list.add(tests);
         list.selected = Some(key("python", "scratch"));
         let running = |k: &ConfigKey| (k.name == "api").then_some(0);
+        let debugging = |_: &ConfigKey| None;
+        let debuggable = |c: &RunConfiguration| c.type_id == "python";
         let types = types();
         let state = MenuState {
             list: &list,
             types: &types,
             expanded: false,
             running: &running,
-            current_file: Some(("main.py".into(), true, None)),
+            debugging: &debugging,
+            debuggable: &debuggable,
+            current_file: Some(("main.py".into(), true, None, None)),
         };
         let (items, preselect) = menu(&state);
         let labels: Vec<String> = items
@@ -659,6 +737,54 @@ mod tests {
         assert!(extra.inline.is_empty());
     }
 
+    /// While a configuration is debugged its row offers Stop, Resume or
+    /// Pause, Restart Debug and Stop, without Run; Current File gets Debug
+    /// and the session's Stop.
+    #[test]
+    fn a_debugged_configuration_has_resume_and_restart_debug() {
+        let list = list(&[("python", "api", None), ("python", "web", None)]);
+        let types = types();
+        let running = |_: &ConfigKey| None;
+        let debugging = |k: &ConfigKey| match k.name.as_str() {
+            "api" => Some((0, true)),
+            "web" => Some((1, false)),
+            _ => None,
+        };
+        let debuggable = |_: &RunConfiguration| true;
+        let state = MenuState {
+            list: &list,
+            types: &types,
+            expanded: false,
+            running: &running,
+            debugging: &debugging,
+            debuggable: &debuggable,
+            current_file: Some(("main.py".into(), true, None, Some(2))),
+        };
+        let (items, _) = menu(&state);
+        let inline = |label: &str| -> Vec<String> {
+            let item = items
+                .iter()
+                .find(|i| i.label().is_some_and(|l| l.as_ref() == label))
+                .unwrap();
+            let MenuItem::Submenu { extra, .. } = item else {
+                panic!("a submenu row");
+            };
+            extra.inline.iter().map(|b| b.tooltip.to_string()).collect()
+        };
+        assert_eq!(
+            inline("api"),
+            ["Resume 'api'", "Restart Debug 'api'", "Stop 'api'"]
+        );
+        assert_eq!(
+            inline("web"),
+            ["Pause 'web'", "Restart Debug 'web'", "Stop 'web'"]
+        );
+        assert_eq!(
+            inline("Current File"),
+            ["Run 'main.py'", "Debug 'main.py'", "Stop"]
+        );
+    }
+
     /// Without a file in the editor Current File only selects: no buttons,
     /// no submenu (#135).
     #[test]
@@ -666,11 +792,15 @@ mod tests {
         let list = list(&[("python", "api", None)]);
         let types = types();
         let running = |_: &ConfigKey| None;
+        let debugging = |_: &ConfigKey| None;
+        let debuggable = |_: &RunConfiguration| true;
         let state = MenuState {
             list: &list,
             types: &types,
             expanded: false,
             running: &running,
+            debugging: &debugging,
+            debuggable: &debuggable,
             current_file: None,
         };
         let (items, _) = menu(&state);

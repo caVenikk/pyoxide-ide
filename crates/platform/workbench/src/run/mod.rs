@@ -10,7 +10,6 @@
 
 pub mod commands;
 pub mod configurations;
-pub mod console_view;
 pub mod dropdown;
 pub mod edit_dialog;
 pub mod tool_window;
@@ -25,7 +24,7 @@ use run_config::{RunConfiguration, TypeInfo};
 use ui::icons::IconName;
 
 pub use configurations::{RunConfigs, RunConfigsEvent};
-pub use console_view::{ConsoleEvent, ConsoleView};
+pub use console_ui::{ConsoleEvent, ConsoleView};
 pub use tool_window::{RunTab, RunToolWindow, RunToolWindowEvent, TabStatus};
 
 /// Registers the run commands.

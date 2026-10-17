@@ -4,7 +4,7 @@
 
 use std::sync::RwLock;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpoint,
@@ -13,6 +13,7 @@ use debugger::{
 };
 use py_run::PythonRun;
 use py_run::config::{LaunchContext, PythonOptions};
+use run_config::RunConfiguration;
 
 use crate::breakpoints;
 use crate::helper::Helper;
@@ -28,6 +29,9 @@ pub struct DebugTarget {
     /// The interpreter's version when the product knows it (`3.13.1`,
     /// `3.14` from `pyvenv.cfg`); otherwise the interpreter is asked.
     pub version: Option<String>,
+    /// "Redirect input from": the file the program's standard input comes
+    /// from.
+    pub input_file: Option<PathBuf>,
 }
 
 /// The product's part of a debug start: the run of a request with the
@@ -57,6 +61,7 @@ pub fn configuration_target(
     Ok(DebugTarget {
         run: launch.run,
         version,
+        input_file: launch.input_file,
     })
 }
 
@@ -126,6 +131,7 @@ impl DebugAdapterProvider for PythonDebugProvider {
             adapter_id: ADAPTER_ID.to_owned(),
             kind: LaunchKind::Launch,
             arguments: launch::launch_arguments(&target.run, &config.name, just_my_code, &options),
+            input_file: target.input_file,
         })
     }
 
@@ -153,11 +159,25 @@ impl DebugAdapterProvider for PythonDebugProvider {
         }
     }
 
-    /// debugpy 1.8.21 cannot switch "just my code" during a session
-    /// (pydevd's `setDebuggerProperty` takes no `justMyCode`), so Step
-    /// Into My Code is a plain Step Into for now.
+    /// Python configurations; other types have no debugger yet.
+    fn can_debug(&self, configuration: &RunConfiguration) -> bool {
+        configuration.type_id == py_run::config::TYPE_ID
+    }
+
+    /// debugpy 1.8.21 cannot switch "just my code" through the protocol
+    /// (pydevd's `setDebuggerProperty` takes no `justMyCode`), but its
+    /// `stepIn` steps into the program's own code while pydevd's library
+    /// filter is on (`CMD_STEP_INTO_MY_CODE`, what the reference's Step
+    /// Into My Code sends to pydevd). The filter is turned on in the
+    /// debugger of the program for the one step and off at the next stop.
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
-        None
+        Some(launch::step_into_my_code())
+    }
+
+    /// The reference's balloon title of a failed connection
+    /// (`PyDebugProcess`).
+    fn connection_failed_title(&self) -> Option<String> {
+        Some("Connection to Python debugger failed".to_owned())
     }
 
     fn line_breakpoint_type(&self) -> Option<LineBreakpointType> {
@@ -201,10 +221,7 @@ mod tests {
     }
 
     fn request(root: &Path, config: RunConfiguration) -> DebugRequest {
-        DebugRequest {
-            root: root.to_owned(),
-            configuration: config,
-        }
+        DebugRequest::new(root, config)
     }
 
     fn python_config(root: &Path, script: &str) -> RunConfiguration {
@@ -328,7 +345,20 @@ mod tests {
             types.configuration_types,
             [("PythonConfigurationType".to_owned(), "python".to_owned())]
         );
-        assert_eq!(provider.step_into_my_code(), None);
+        let step = provider.step_into_my_code().unwrap();
+        assert_eq!(step.before.0, "evaluate");
+        // The filter is on for the step, then back to what it was.
+        let before = step.before.1["expression"].as_str().unwrap();
+        assert!(before.contains("get_use_libraries_filter()"), "{before}");
+        assert!(
+            before.contains("set_use_libraries_filter(True)"),
+            "{before}"
+        );
+        let after = step.after.1["expression"].as_str().unwrap();
+        assert!(
+            after.contains("set_use_libraries_filter(vars(d).pop("),
+            "{after}"
+        );
         assert_eq!(provider.line_breakpoint_type().unwrap().id, "python-line");
         assert!(
             provider

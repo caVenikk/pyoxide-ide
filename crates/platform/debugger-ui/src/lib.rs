@@ -14,17 +14,23 @@
 pub mod breakpoints;
 mod hook;
 pub mod icons;
+pub mod session;
 mod view;
 
 pub use breakpoints::commands::{
     AddExceptionBreakpoint, EditBreakpoint, MuteBreakpoints, ToggleBreakpoint,
     ToggleBreakpointEnabled, ToggleTemporaryBreakpoint, ViewBreakpoints,
 };
-pub use hook::DebugHook;
+pub use hook::{DebugHook, Resolve};
+pub use session::{Content, DebugToolWindow};
 pub use view::{DebuggerView, DebuggerViewEvent, Highlighters, forward_actions};
+
+/// Re-exported for the window's debug runs: the request and the session.
+pub use debugger::{DebugRequest, Phase, Session};
 
 /// Registers the icons and the commands.
 pub fn init(cx: &mut gpui::App) {
     icons::register(cx);
     breakpoints::commands::register(cx);
+    ui::command::register(cx, session::commands::COMMANDS);
 }

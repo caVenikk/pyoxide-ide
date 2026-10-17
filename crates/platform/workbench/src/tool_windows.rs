@@ -36,6 +36,8 @@ impl ToolWindow {
     pub const Project: ToolWindow = ToolWindow("project");
     /// The Run tool window (bottom area).
     pub const Run: ToolWindow = ToolWindow("run");
+    /// The Debug tool window (bottom area).
+    pub const Debug: ToolWindow = ToolWindow("debug");
 
     pub fn id(self) -> &'static str {
         self.0

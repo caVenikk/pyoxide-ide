@@ -209,6 +209,24 @@ name = "Editor"
 [context.bindings]
 "ctrl-shift-f8" = "debug.edit-breakpoint"
 
+# Debugging (#165): Debug, the Debug tool window, Resume, the steps, Run
+# to Cursor and Show Execution Point (`Debug`, `ActivateDebugToolWindow`,
+# `Resume`, `StepOver`, `StepInto`, `StepIntoMyCode`, `StepOut`,
+# `RunToCursor`, `ForceRunToCursor`, `ShowExecutionPoint`). Debug Context
+# Configuration (`DebugClass`) and Pause have no key in this keymap.
+[[context]]
+[context.bindings]
+"shift-f9" = "debug.debug"
+"alt-5" = "workbench.toggle-debug"
+"f9" = "debug.resume"
+"f8" = "debug.step-over"
+"f7" = "debug.step-into"
+"alt-shift-f7" = "debug.step-into-my-code"
+"shift-f8" = "debug.step-out"
+"alt-f9" = "debug.run-to-cursor"
+"ctrl-alt-f9" = "debug.force-run-to-cursor"
+"alt-f10" = "debug.show-execution-point"
+
 # Branches (#28): New Branch (`Git.CreateNewBranch`) and the Branches
 # popup (`Git.Branches`). In the popup Up and Down move, Left and Right
 # collapse and expand (Right opens a branch's actions), Enter chooses,
@@ -521,6 +539,24 @@ name = "RunToolWindow"
 "ctrl-alt-down" = "run.console.next-link"
 "escape" = "workbench.focus-editor"
 "shift-escape" = "workbench.hide-tool-window"
+
+# The Debug tool window and its Console: Rerun, Stop and Close Tab of the
+# session; Escape goes to the editor, Shift+Escape hides the tool window.
+[[context]]
+name = "DebugToolWindow"
+[context.bindings]
+"ctrl-f5" = "debug.rerun"
+"ctrl-f2" = "debug.stop"
+"ctrl-f4" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+[[context]]
+name = "DebugConsole > Editor"
+[context.bindings]
+"ctrl-f2" = "debug.stop"
+"ctrl-f4" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
 
 # The Run console: Close Tab and Send EOF take the keys of Close and
 # Duplicate Line; Escape leaves it.

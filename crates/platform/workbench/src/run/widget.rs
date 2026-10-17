@@ -1,7 +1,9 @@
 //! The run widget of the main toolbar (New UI `RunToolbarMainActionGroup`):
 //! the configuration selector ("Current File"), Run, Debug, Stop and More
 //! Actions, with the states of `ExecutorAction`, `StopAction` and
-//! `RunWidgetButtonLook`.
+//! `RunWidgetButtonLook`. While the selected configuration is debugged,
+//! Resume or Pause takes Run's place (`ConfigurationXDebuggerResumeAction`,
+//! `filterOutRunIfDebugResumeIsPresent`).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -18,6 +20,7 @@ use ui::theme::ThemeExt;
 use super::commands::*;
 use crate::chrome::{toolbar_widget, toolbar_widget_chrome, widget_text};
 use crate::main_toolbar::{Cut, Fitted, Measure, Measured};
+use debugger_ui::session::commands::{Debug, Pause, Resume};
 
 /// Opacity of a temporary configuration's icon
 /// (`ProgramRunnerUtil.getTemporaryIcon`).
@@ -48,10 +51,22 @@ pub struct WidgetState {
     pub file_running: bool,
     /// A launch of what Run runs is being prepared: a spinner.
     pub launching: bool,
-    /// Titles of the running processes (the Stop button).
+    /// Titles of the running processes and debug sessions (the Stop
+    /// button).
     pub running: Vec<String>,
-    /// Shortcuts of Run and Stop where the focus is.
+    /// The product can debug what Debug debugs.
+    pub debuggable: bool,
+    /// What Debug debugs is being debugged: Debug shows Rerun on green.
+    pub debug_running: bool,
+    /// A debug run of it is being prepared: a spinner.
+    pub debug_launching: bool,
+    /// The selected configuration's debug session: its tab in the Debug
+    /// tool window and whether it is suspended (Resume, else Pause, in
+    /// Run's place).
+    pub debug_session: Option<(usize, bool)>,
+    /// Shortcuts of Run, Debug and Stop where the focus is.
     pub run_keys: Option<SharedString>,
+    pub debug_keys: Option<SharedString>,
     pub stop_keys: Option<SharedString>,
 }
 
@@ -84,6 +99,50 @@ impl WidgetState {
             None => matches!(self.file, Some((_, true))),
         };
         runnable && !self.launching
+    }
+
+    /// Debug is enabled.
+    pub fn can_debug(&self) -> bool {
+        let runnable = match &self.configuration {
+            Some(config) => config.supported,
+            None => matches!(self.file, Some((_, true))),
+        };
+        self.debuggable && runnable && !self.debug_launching
+    }
+
+    /// Debug's tooltip (`ExecutorAction` with the Debug executor): "Restart
+    /// Debug" while the configuration is debugged; the current file keeps
+    /// its name.
+    pub fn debug_tooltip(&self) -> String {
+        if let Some(config) = &self.configuration {
+            return if !config.supported || !self.debuggable {
+                format!(
+                    "'{}' cannot be debugged: its type is not supported yet",
+                    config.name
+                )
+            } else if self.debug_running {
+                format!("Restart Debug '{}'", config.name)
+            } else {
+                format!("Debug '{}'", config.name)
+            };
+        }
+        match &self.file {
+            Some((name, true)) => format!("Debug '{name}'"),
+            Some((_, false)) => "The file in the editor is not runnable".to_owned(),
+            None => "Cannot run the current file: the editor is not in focus".to_owned(),
+        }
+    }
+
+    /// The Resume or Pause button in Run's place: its tooltip
+    /// (`description.text.resume`, `description.text.pause`).
+    pub fn resume_tooltip(&self) -> Option<String> {
+        let (_, suspended) = self.debug_session?;
+        let name = &self.configuration.as_ref()?.name;
+        Some(if suspended {
+            format!("Resume '{name}'")
+        } else {
+            format!("Pause '{name}'")
+        })
     }
 
     /// The selector's text: the configuration's name cut in the middle,
@@ -140,7 +199,16 @@ impl WidgetState {
             "run_tooltip": self.run_tooltip(),
             "run_icon": if self.file_running { "rerun" } else { "run" },
             "launching": self.launching,
-            "debug_enabled": false,
+            "run_visible": self.debug_session.is_none(),
+            "debug_enabled": self.can_debug(),
+            "debug_tooltip": self.debug_tooltip(),
+            "debug_icon": if self.debug_running { "rerun" } else { "debug" },
+            "debug_launching": self.debug_launching,
+            "resume": self.debug_session.map(|(tab, suspended)| serde_json::json!({
+                "action": if suspended { "resume" } else { "pause" },
+                "tooltip": self.resume_tooltip(),
+                "tab": tab,
+            })),
             "stop_visible": !self.running.is_empty(),
             "stop_tooltip": self.stop_tooltip(),
             "stop_count": self.running.len(),
@@ -315,25 +383,64 @@ pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl 
     } else {
         inactive(IconName::RUN_STROKE, cx)
     };
-    let run = button(
-        "run",
-        run_icon,
-        state
-            .file_running
-            .then(|| theme.color(UiRole::RunWidgetRunning)),
-        state.can_run(),
-        Some((state.run_tooltip(), state.run_keys.clone())),
-        Box::new(Run),
-        cx,
-    );
-    // Debugging arrives with the debugger.
+    let run = match state.debug_session {
+        // Resume or Pause of the configuration's debug session.
+        Some((tab, suspended)) => {
+            let (name, action): (IconName, Box<dyn gpui::Action>) = if suspended {
+                (
+                    debugger_ui::icons::RESUME_STROKE,
+                    Box::new(Resume { index: Some(tab) }),
+                )
+            } else {
+                (
+                    debugger_ui::icons::PAUSE,
+                    Box::new(Pause { index: Some(tab) }),
+                )
+            };
+            let icon = Icon::new(name)
+                .size(px(16.0))
+                .tint(theme.color(UiRole::Text))
+                .into_any_element();
+            button(
+                "run-resume",
+                icon,
+                None,
+                true,
+                state.resume_tooltip().map(|t| (t, None)),
+                action,
+                cx,
+            )
+        }
+        None => button(
+            "run",
+            run_icon,
+            state
+                .file_running
+                .then(|| theme.color(UiRole::RunWidgetRunning)),
+            state.can_run(),
+            Some((state.run_tooltip(), state.run_keys.clone())),
+            Box::new(Run),
+            cx,
+        ),
+    };
+    let debug_icon = if state.debug_launching {
+        spinner("debug-launching", cx).into_any_element()
+    } else if state.debug_running {
+        icon(debugger_ui::icons::RERUN_DEBUG_STROKE)
+    } else if state.can_debug() {
+        icon(IconName::DEBUG)
+    } else {
+        inactive(IconName::DEBUG_STROKE, cx)
+    };
     let debug = button(
         "debug",
-        inactive(IconName::DEBUG_STROKE, cx),
-        None,
-        false,
-        Some(("Debug".to_owned(), None)),
-        Box::new(Run),
+        debug_icon,
+        state
+            .debug_running
+            .then(|| theme.color(UiRole::RunWidgetRunning)),
+        state.can_debug(),
+        Some((state.debug_tooltip(), state.debug_keys.clone())),
+        Box::new(Debug),
         cx,
     );
     // Hidden while nothing runs; an empty slot after More keeps the

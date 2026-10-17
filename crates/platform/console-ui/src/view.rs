@@ -1,6 +1,6 @@
-//! The console of a Run tab: the `console` crate's text model shown in a
-//! read-only editor (ADR 0007), as the reference IDE's `ConsoleViewImpl`
-//! shows its document.
+//! The console of a Run tab or of a debug session: the `console` crate's
+//! text model shown in a read-only editor (ADR 0007), as the reference
+//! IDE's `ConsoleViewImpl` shows its document.
 //!
 //! The model is fed off the UI thread (link filters may look at the file
 //! system); the view copies what changed into its editor at most once per
@@ -208,9 +208,12 @@ pub enum ConsoleEvent {
     OpenLink(LinkTarget),
 }
 
-/// A Run tab's console.
+/// The console of a Run tab or of a debug session.
 pub struct ConsoleView {
     editor: Entity<Editor>,
+    /// The key context around the editor (`RunConsole`, `DebugConsole`):
+    /// the keys of its tool window.
+    key_context: &'static str,
     model: Arc<Mutex<console::Console>>,
     /// New output waits for the view (set by the feeding thread).
     dirty: Arc<AtomicBool>,
@@ -259,6 +262,7 @@ impl ConsoleView {
             ];
         Self {
             editor,
+            key_context: "RunConsole",
             model: Arc::new(Mutex::new(console::Console::new())),
             dirty: Arc::new(AtomicBool::new(false)),
             decor,
@@ -273,6 +277,11 @@ impl ConsoleView {
 
     pub fn editor(&self) -> &Entity<Editor> {
         &self.editor
+    }
+
+    /// The key context around the editor (`RunConsole` by default).
+    pub fn set_key_context(&mut self, context: &'static str) {
+        self.key_context = context;
     }
 
     /// The text model, shared with the thread that feeds it.
@@ -619,7 +628,7 @@ impl Focusable for ConsoleView {
 impl Render for ConsoleView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .key_context("RunConsole")
+            .key_context(self.key_context)
             .size_full()
             .child(self.editor.clone())
     }

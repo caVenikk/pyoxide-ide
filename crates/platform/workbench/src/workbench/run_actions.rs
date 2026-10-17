@@ -28,6 +28,10 @@ use crate::run::{LaunchKey, RunConfigs, RunRequest, RunToolWindowEvent};
 pub(super) enum PendingDialog {
     /// "Process 'x' Is Running": Stop and Rerun the tab.
     Rerun(usize),
+    /// "Process 'x' Is Running" before a launch: Stop and Rerun stops what
+    /// runs the same configuration (a run or a debug session), then
+    /// launches it.
+    StopAndLaunch(super::debug::Launch),
     /// Closing a tab whose process runs: Terminate or Disconnect.
     CloseRunning(usize),
     /// A dialog about a file changed on disk (`file_sync`).
@@ -86,7 +90,7 @@ impl Workbench {
     /// The file Run runs and whether the product can run it: the active
     /// editor's file (Pyoxide shows one editor at a time, so it is the
     /// reference's single visible editor even without the focus).
-    fn current_run_file(&self, cx: &App) -> Option<(PathBuf, bool)> {
+    pub(super) fn current_run_file(&self, cx: &App) -> Option<(PathBuf, bool)> {
         let file = self.active_file(cx)?;
         let runnable = self
             .product
@@ -97,7 +101,7 @@ impl Workbench {
     }
 
     /// The project's run configurations.
-    fn run_configs(&self, cx: &App) -> Entity<RunConfigs> {
+    pub(super) fn run_configs(&self, cx: &App) -> Entity<RunConfigs> {
         self.run_window.read(cx).configs().clone()
     }
 
@@ -120,6 +124,25 @@ impl Workbench {
             Some(c) => Some(LaunchKey::Configuration(c.key())),
             None => path.clone().map(LaunchKey::File),
         };
+        let debugger = self.debugger.read(cx);
+        let sessions = debugger.tool_window().read(cx);
+        let tag = key.as_ref().map(super::debug::launch_tag);
+        let debug_tab = tag.as_deref().and_then(|t| sessions.alive_with_key(t));
+        let debuggable = match selected {
+            Some(c) => debugger.can_debug(c),
+            None => self.product.debug.is_some(),
+        };
+        let mut running: Vec<String> = run
+            .alive_tabs()
+            .into_iter()
+            .map(|i| run.tabs()[i].title().to_owned())
+            .collect();
+        running.extend(
+            sessions
+                .alive_tabs()
+                .into_iter()
+                .filter_map(|i| sessions.title(i).map(str::to_owned)),
+        );
         WidgetState {
             configuration: selected.map(|c| SelectedConfig {
                 name: c.name.clone(),
@@ -136,12 +159,21 @@ impl Workbench {
             }),
             file_running: key.as_ref().is_some_and(|k| run.running(k).is_some()),
             launching: key.as_ref().is_some_and(|k| run.is_launching_key(k)),
-            running: run
-                .alive_tabs()
-                .into_iter()
-                .map(|i| run.tabs()[i].title().to_owned())
-                .collect(),
+            running,
+            debuggable,
+            debug_running: debug_tab.is_some(),
+            debug_launching: tag.as_deref().is_some_and(|t| debugger.is_starting_key(t)),
+            debug_session: debug_tab.filter(|_| selected.is_some()).map(|tab| {
+                let suspended = sessions.phase(tab) == Some(debugger_ui::Phase::Suspended);
+                (tab, suspended)
+            }),
             run_keys: ui::keys::shortcut_in(&Run, &self.focus, window).map(Into::into),
+            debug_keys: ui::keys::shortcut_in(
+                &debugger_ui::session::commands::Debug,
+                &self.focus,
+                window,
+            )
+            .map(Into::into),
             stop_keys: ui::keys::shortcut_in(&Stop { tab: None }, &self.focus, window)
                 .map(Into::into),
         }
@@ -247,6 +279,13 @@ impl Workbench {
         if run.is_launching_key(&key) {
             return;
         }
+        // Debugged: the session is stopped first, after asking.
+        if !parallel && self.debug_tab_of(&key, cx).is_some() {
+            let launch = super::debug::Launch::Run { request };
+            self.confirm_stop_and_launch(launch, window, cx);
+            return;
+        }
+        let run = self.run_window.read(cx);
         if let Some(tab) = run.running(&key).filter(|_| !parallel) {
             if self.run_settings.confirm_rerun {
                 let name = run.tabs()[tab].title().to_owned();
@@ -277,7 +316,17 @@ impl Workbench {
             }
             return;
         }
-        if let LaunchKey::Configuration(key) = &key {
+        self.launch_now(request, window, cx);
+    }
+
+    /// Starts a run with nothing to stop first.
+    pub(super) fn launch_now(
+        &mut self,
+        request: RunRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let LaunchKey::Configuration(key) = &request.launch_key() {
             self.run_configs(cx).update(cx, |c, cx| c.started(key, cx));
         }
         let saved = self.save_all_tasks(cx);
@@ -338,20 +387,43 @@ impl Workbench {
         self.run_current(window, cx);
     }
 
-    /// Stop: a given tab, the selected tab when the Run tool window has the
-    /// focus, the only running process, or a choice of them.
+    /// Stop (`StopAction`, shared by runs and debug sessions): a given tab,
+    /// the selected tab when the Run or Debug tool window has the focus,
+    /// the only running process or session, or a choice of them.
     pub(super) fn run_stop(&mut self, action: &Stop, window: &mut Window, cx: &mut Context<Self>) {
         let run = self.run_window.read(cx);
         let alive = run.alive_tabs();
+        let sessions = self.debugger.read(cx).tool_window().read(cx);
+        let debugged = sessions.alive_tabs();
+        let focused = self.focused_tool_window(window, cx);
+        if action.tab.is_none() && focused == Some(ToolWindow::Debug) {
+            let session = sessions
+                .selected()
+                .filter(|s| debugged.contains(s))
+                .or_else(|| (debugged.len() == 1).then(|| debugged[0]));
+            if let Some(index) = session {
+                self.debugger
+                    .update(cx, |v, cx| v.stop_session(Some(index), cx));
+            }
+            cx.notify();
+            return;
+        }
         let tab = match action.tab {
             Some(tab) => Some(tab),
-            None if self.focused_tool_window(window, cx) == Some(ToolWindow::Run) => run
+            None if focused == Some(ToolWindow::Run) => run
                 .selected()
                 .filter(|s| alive.contains(s))
                 .or_else(|| (alive.len() == 1).then(|| alive[0])),
-            None => match alive.as_slice() {
-                [] => None,
-                [one] => Some(*one),
+            None => match (alive.as_slice(), debugged.as_slice()) {
+                ([], []) => None,
+                ([one], []) => Some(*one),
+                ([], [one]) => {
+                    let one = *one;
+                    self.debugger
+                        .update(cx, |v, cx| v.stop_session(Some(one), cx));
+                    cx.notify();
+                    return;
+                }
                 _ => {
                     self.open_stop_popup(window, cx);
                     return;
@@ -364,25 +436,32 @@ impl Workbench {
         cx.notify();
     }
 
-    /// The Stop button's popup for several processes
+    /// The Stop button's popup for several processes and debug sessions
     /// (`RunToolbarPopup.createStopPopup`).
     fn open_stop_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use debugger_ui::session::commands::StopSession;
         let run = self.run_window.read(cx);
         let alive = run.alive_tabs();
+        let stop = |title: &str| format!("Stop \u{2018}{title}\u{2019}");
         let mut items: Vec<MenuItem> = alive
             .iter()
-            .map(|&i| {
-                MenuItem::action(
-                    format!("Stop \u{2018}{}\u{2019}", run.tabs()[i].title()),
-                    Stop { tab: Some(i) },
-                )
-            })
+            .map(|&i| MenuItem::action(stop(run.tabs()[i].title()), Stop { tab: Some(i) }))
             .collect();
+        let sessions = self.debugger.read(cx).tool_window().read(cx);
+        let debugged = sessions.alive_tabs();
+        items.extend(debugged.iter().map(|&i| {
+            MenuItem::action(
+                stop(sessions.title(i).unwrap_or_default()),
+                StopSession { index: Some(i) },
+            )
+        }));
+        let count = alive.len() + debugged.len();
+        let keys = ui::keys::shortcut_in(&Stop { tab: None }, &self.focus, window);
         items.push(MenuItem::separator());
-        items.push(MenuItem::action(
-            format!("Stop All {}", alive.len()),
-            StopAll,
-        ));
+        items.push(
+            MenuItem::action(format!("Stop All {count}"), StopAll)
+                .shortcut(keys.unwrap_or_default()),
+        );
         let anchor = self.run_anchors.stop.get();
         let position = if anchor.size.width > px(0.0) {
             anchor.bottom_left()
@@ -400,9 +479,23 @@ impl Workbench {
                 w.stop(tab, cx);
             }
         });
+        let debugged = self.debugger.read(cx).tool_window().read(cx).alive_tabs();
+        self.debugger.update(cx, |v, cx| {
+            for index in debugged {
+                v.stop_session(Some(index), cx);
+            }
+        });
     }
 
+    /// Rerun (`Rerun`, shared with Debug): the selected tab of the Run
+    /// tool window, or of the Debug tool window when it has the focus.
     pub(super) fn run_rerun(&mut self, _: &Rerun, window: &mut Window, cx: &mut Context<Self>) {
+        if self.focused_tool_window(window, cx) == Some(ToolWindow::Debug) {
+            self.debugger
+                .update(cx, |v, cx| v.rerun_session(None, window, cx));
+            cx.notify();
+            return;
+        }
         let Some(tab) = self.run_window.read(cx).selected() else {
             return;
         };
@@ -531,18 +624,31 @@ impl Workbench {
             let list = configs.list();
             let running =
                 |k: &run_config::ConfigKey| run.running(&LaunchKey::Configuration(k.clone()));
+            let debugger = self.debugger.read(cx);
+            let sessions = debugger.tool_window().read(cx);
+            let debugging = |k: &run_config::ConfigKey| {
+                let tab = self.debug_tab_of(&LaunchKey::Configuration(k.clone()), cx)?;
+                Some((
+                    tab,
+                    sessions.phase(tab) == Some(debugger_ui::Phase::Suspended),
+                ))
+            };
+            let debuggable = |c: &run_config::RunConfiguration| debugger.can_debug(c);
             let current_file = current.map(|(file, runnable)| {
                 let name = file
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                (name, runnable, run.running_file(&file))
+                let debugging = self.debug_file_running(&file, cx);
+                (name, runnable, run.running_file(&file), debugging)
             });
             let state = dropdown::MenuState {
                 list,
                 types: configs.types(),
                 expanded: list.all_expanded,
                 running: &running,
+                debugging: &debugging,
+                debuggable: &debuggable,
                 current_file,
             };
             dropdown::menu(&state)
@@ -576,7 +682,7 @@ impl Workbench {
 
     /// The configuration a command names: by name (and type), or the
     /// selected one.
-    fn named_configuration(
+    pub(super) fn named_configuration(
         &self,
         name: Option<&str>,
         type_id: Option<&str>,
@@ -759,11 +865,17 @@ impl Workbench {
             themed_title: true,
             ..ui::dialog_window::DialogOptions::default()
         };
+        let hook = self.product.debug.clone();
+        let debuggable: edit_dialog::Debuggable =
+            std::rc::Rc::new(move |c: &run_config::RunConfiguration| {
+                hook.as_ref().is_some_and(|h| h.provider.can_debug(c))
+            });
         let mut built = None;
         let handle = ui::dialog_window::open(window, options, cx, |window, cx| {
             let dialog = cx.new(|cx| {
                 EditDialog::new(configs, select, window, cx)
                     .with_run_button(action.run_button.unwrap_or(true))
+                    .with_debug(debuggable)
             });
             built = Some(dialog.clone());
             dialog
@@ -778,6 +890,14 @@ impl Workbench {
                 EditDialogEvent::Closed => this.close_edit_dialog(cx),
                 EditDialogEvent::Run(key) => {
                     let action = LaunchConfiguration {
+                        name: Some(key.name.clone()),
+                        r#type: Some(key.type_id.clone()),
+                    };
+                    this.close_edit_dialog(cx);
+                    window.dispatch_action(Box::new(action), cx);
+                }
+                EditDialogEvent::Debug(key) => {
+                    let action = debugger_ui::session::commands::DebugConfiguration {
                         name: Some(key.name.clone()),
                         r#type: Some(key.type_id.clone()),
                     };
@@ -928,7 +1048,12 @@ impl Workbench {
 
     /// Follows a console link: a file opens at its line, a URL in the
     /// browser.
-    fn open_link(&mut self, target: &LinkTarget, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_link(
+        &mut self,
+        target: &LinkTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match target {
             LinkTarget::File { path, line, column } => match line {
                 Some(line) => {
@@ -1036,6 +1161,12 @@ impl Workbench {
                 }
                 self.rerun_tab(tab, window, cx);
             }
+            (PendingDialog::StopAndLaunch(launch), Some("stop-and-rerun")) => {
+                if checked {
+                    self.run_settings.confirm_rerun = false;
+                }
+                self.stop_and_launch(launch, window, cx);
+            }
             (PendingDialog::DeleteConfiguration(key), Some("yes")) => {
                 if checked {
                     self.run_settings.confirm_delete = false;
@@ -1079,6 +1210,7 @@ impl Workbench {
     /// Stops every process before the application quits.
     pub(super) fn kill_runs(&mut self, cx: &mut Context<Self>) -> Task<()> {
         self.run_window.update(cx, |w, _| w.kill_all());
+        self.kill_debug_sessions(cx);
         Task::ready(())
     }
 }
