@@ -540,6 +540,19 @@ fn run_commands_and_shot(
                     Ok(Err(e)) => eprintln!("PYOXIDE_RUN {id}: {e:?}"),
                     Err(e) => eprintln!("PYOXIDE_RUN {id}: {e}"),
                 }
+                // Dialogs and popups open over the window draw what the
+                // command changed too: the next command may need their
+                // layout (a list opens under the combo it measured).
+                let mut parent: gpui::AnyWindowHandle = window.into();
+                while let Some(child) = cx
+                    .update(|cx| ui::dialog_window::child_of(parent, cx))
+                    .ok()
+                    .flatten()
+                {
+                    let _ = cx
+                        .update_window(child, |_, window, _| crate::shot::request_display(window));
+                    parent = child;
+                }
                 cx.background_executor()
                     .timer(Duration::from_millis(200))
                     .await;

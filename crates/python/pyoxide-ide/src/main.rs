@@ -10,6 +10,8 @@ fn main() {
     // with `--pyoxide-send-ctrl-c <pid>` it only sends Ctrl+C and exits.
     process::run_interrupt_helper_if_requested();
     process::set_interrupt_helper(process::InterruptHelper::current_exe());
+    // The configured Python interpreters live in the configuration folder.
+    pyoxide_ide::interpreter::keep_in_config_dir();
     let paths = std::env::args_os().skip(1).map(Into::into).collect();
     workbench::run(pyoxide_ide::product(), paths);
 }

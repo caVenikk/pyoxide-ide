@@ -54,8 +54,10 @@ struct Provider;
 
 impl TerminalProvider for Provider {
     fn customizers(&self, project_root: Option<&Path>, cx: &App) -> Vec<Arc<dyn ShellCustomizer>> {
-        let chosen = project_root.and_then(|root| interpreter::chosen(root, cx));
-        vec![Arc::new(VirtualEnvCustomizer { chosen })]
+        let choice = project_root
+            .map(|root| interpreter::ProjectChoice::of(root, cx))
+            .unwrap_or_default();
+        vec![Arc::new(VirtualEnvCustomizer { choice })]
     }
 }
 
@@ -64,8 +66,9 @@ impl TerminalProvider for Provider {
 #[derive(Debug, Clone, Default)]
 pub struct VirtualEnvCustomizer {
     /// The interpreter chosen in this session, if any (the interpreter
-    /// widget); else the project's as stored or found.
-    pub chosen: Option<PathBuf>,
+    /// widget), and the configured interpreters; else the project's as
+    /// stored or found.
+    choice: interpreter::ProjectChoice,
 }
 
 impl ShellCustomizer for VirtualEnvCustomizer {
@@ -81,7 +84,7 @@ impl ShellCustomizer for VirtualEnvCustomizer {
         if !inside(context.working_directory, root) || !activate_virtualenv(root) {
             return Customization::default();
         }
-        let Some(python) = interpreter::project_python(root, self.chosen.as_deref()) else {
+        let Some(python) = interpreter::project_python(root, &self.choice) else {
             return Customization::default();
         };
         activation(

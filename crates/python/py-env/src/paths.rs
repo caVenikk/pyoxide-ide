@@ -88,16 +88,18 @@ fn executable_names(name: &str) -> Vec<OsString> {
     vec![OsString::from(name)]
 }
 
+/// A file that may be run: on Unix one with an execute bit.
 #[cfg(unix)]
-pub(crate) fn is_executable(p: &Path) -> bool {
+pub fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p)
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
 }
 
+/// A file that may be run: on Unix one with an execute bit.
 #[cfg(not(unix))]
-pub(crate) fn is_executable(p: &Path) -> bool {
+pub fn is_executable(p: &Path) -> bool {
     std::fs::metadata(p).map(|m| m.is_file()).unwrap_or(false)
 }
 

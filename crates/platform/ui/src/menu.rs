@@ -230,6 +230,10 @@ pub struct RowExtra {
     /// Grey text right after the label (`secondaryLabel`,
     /// `MenuItem.acceleratorForeground`).
     pub secondary: Option<SharedString>,
+    /// The secondary text is appended to the label in a smaller font, with
+    /// no gap (`GRAYED_SMALL_ATTRIBUTES` of a `SimpleColoredComponent`, the
+    /// interpreter lists of the Add Python Interpreter dialog).
+    pub secondary_small: bool,
     /// Opacity of the icon (a temporary run configuration's is 0.45).
     pub icon_alpha: Option<f32>,
     /// Buttons at the end of the row (`ActionUtil.INLINE_ACTIONS`).
@@ -251,6 +255,7 @@ impl Clone for RowExtra {
     fn clone(&self) -> Self {
         Self {
             secondary: self.secondary.clone(),
+            secondary_small: self.secondary_small,
             icon_alpha: self.icon_alpha,
             inline: self.inline.clone(),
             hidden: self.hidden,
@@ -474,6 +479,16 @@ impl MenuItem {
         self
     }
 
+    /// Grey text appended to the label in a smaller font, with no gap
+    /// ([`RowExtra::secondary_small`]).
+    pub fn small_secondary(mut self, text: impl Into<SharedString>) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.secondary = Some(text.into());
+            extra.secondary_small = true;
+        }
+        self
+    }
+
     /// The icon's opacity.
     pub fn icon_alpha(mut self, alpha: f32) -> Self {
         if let Some(extra) = self.extra_mut() {
@@ -639,6 +654,9 @@ pub struct PopupOptions {
     /// 310 to 500).
     pub min_width: Option<f32>,
     pub max_width: Option<f32>,
+    /// The rows' height where the theme's row height is not the popup's
+    /// (the lists of a combo box in a dialog).
+    pub row_height: Option<f32>,
     /// The popup is the content of a window of its own
     /// ([`crate::dialog_window::open_popup`]): the window draws the shadow,
     /// and a chosen action is handed over as a [`ChosenEvent`] for the
@@ -682,6 +700,7 @@ pub struct ContextMenu {
     matcher: Option<Matcher>,
     min_width: Option<f32>,
     max_width: Option<f32>,
+    row_height: Option<f32>,
     own_window: bool,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
@@ -772,6 +791,7 @@ impl ContextMenu {
                 matcher: None,
                 min_width: options.min_width,
                 max_width: options.max_width,
+                row_height: options.row_height,
                 own_window: options.own_window,
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
@@ -1443,6 +1463,7 @@ impl ContextMenu {
                 let inner_selector = format!("menu-row:{label}");
                 let extra = item.extra();
                 let secondary = extra.and_then(|e| e.secondary.clone());
+                let secondary_small = extra.is_some_and(|e| e.secondary_small);
                 let shortcut = extra.and_then(|e| e.shortcut.clone());
                 let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
                 let bold = extra.is_some_and(|e| e.bold);
@@ -1558,7 +1579,8 @@ impl ContextMenu {
                                     .children(secondary.map(|text| {
                                         div()
                                             .flex_none()
-                                            .pl(px(SECONDARY_GAP))
+                                            .when(!secondary_small, |d| d.pl(px(SECONDARY_GAP)))
+                                            .when(secondary_small, |d| d.text_size(small))
                                             .whitespace_nowrap()
                                             .text_color(muted)
                                             .child(text)
@@ -1760,7 +1782,9 @@ impl ContextMenu {
     /// Height of an item row: a list row of the theme, and in popup menus
     /// the selection's outer insets.
     fn item_height(&self, cx: &App) -> f32 {
-        f32::from(cx.theme().metric(Metric::RowHeight)) + 2.0 * self.metrics.selection_y
+        self.row_height
+            .unwrap_or_else(|| f32::from(cx.theme().metric(Metric::RowHeight)))
+            + 2.0 * self.metrics.selection_y
     }
 }
 

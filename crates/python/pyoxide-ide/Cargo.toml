@@ -21,6 +21,7 @@ code-intel.workspace = true
 code-intel-ui.workspace = true
 debugger.workspace = true
 dirs = "7"
+dunce = "1"
 editor.workspace = true
 gpui.workspace = true
 lsp-client.workspace = true
@@ -33,9 +34,13 @@ py-run.workspace = true
 py-syntax.workspace = true
 run-config.workspace = true
 serde_json.workspace = true
+settings.workspace = true
 settings-ui.workspace = true
 terminal.workspace = true
+text.workspace = true
 themes.workspace = true
+tokio.workspace = true
+toml_edit = "0.25"
 ui.workspace = true
 workbench.workspace = true
 
@@ -45,7 +50,6 @@ code-intel = { workspace = true, features = ["fake"] }
 flume.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 tempfile = "3"
-text.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

@@ -1,23 +1,44 @@
-//! The project's Python interpreter: the one runs use, and the interpreter
+//! The project's Python interpreter: the one runs use, the interpreter
 //! widget in the status bar with its popup (the reference IDE's
-//! `PySdkStatusBar` and `PySdkPopupFactory`, PyCharm 2026.2).
+//! `PySdkStatusBar` and `PySdkPopupFactory`, PyCharm 2026.2), the
+//! application's list of configured interpreters ([`table`], the
+//! reference's SDK table) and the Settings page Python > Interpreter
+//! ([`page`]).
 //!
-//! The interpreters offered are the environments found in the project
-//! (`py_env::venv::project_environments`): no machine-wide discovery, and
-//! no table of configured interpreters yet. They are named as the
-//! reference names an interpreter it sets up for a folder: by the
-//! environment's path (`~/work/demo/.venv`, shown as `.venv [3.13.1]`).
-//! The project's environment (`UV_PROJECT_ENVIRONMENT`, `.venv`, `venv`)
-//! is the default, as the reference picks it when a folder opens; a choice
-//! is kept in the personal project state (`.oxide/workspace.toml`, ADR
-//! 0009) with the path relative to the project when it is inside it. The
-//! reference's own interpreter of the project (`.idea` and its SDK table)
-//! is imported there once, with its SDK name (`uv (demo) [3.13.1]`).
+//! The interpreters offered for a project are the environments found in
+//! it (`py_env::venv::project_environments`) and the configured ones not
+//! associated with another project. An environment is named as the
+//! reference names an interpreter it sets up for a folder: by its path
+//! (`~/work/demo/.venv`, shown as `.venv [3.13.1]`); a configured one by
+//! its name in the list. The project's environment (`UV_PROJECT_ENVIRONMENT`,
+//! `.venv`, `venv`) is the default, as the reference picks it when a folder
+//! opens; a choice (or "No interpreter") is kept in the personal project
+//! state (`.oxide/workspace.toml`, ADR 0009) with the path relative to the
+//! project when it is inside it, and an environment of the project that is
+//! chosen joins the list. The reference's own interpreter of the project
+//! (`.idea` and its SDK table) is imported there once, with its SDK name
+//! (`uv (demo) [3.13.1]`).
 //!
-//! Everything that reads files runs on the background executor. Versions
+//! Everything that reads files runs on the background executor, what
+//! starts processes on the interpreter runtime ([`runtime`]). Versions
 //! come from `pyvenv.cfg`; only when it holds an incomplete one (uv may
 //! write `3.14`) is the interpreter asked, in the background.
 
+mod add_dialog;
+#[cfg(all(test, unix))]
+mod add_dialog_tests;
+mod candidates;
+mod configuring;
+mod create;
+mod list;
+mod list_dialog;
+#[cfg(test)]
+mod list_dialog_tests;
+pub mod page;
+#[cfg(test)]
+mod page_tests;
+mod runtime;
+pub mod table;
 mod widget;
 
 use std::collections::HashMap;
@@ -29,7 +50,11 @@ use py_env::InterpreterKind;
 use py_env::venv::{EnvDir, EnvLayout};
 use serde_json::{Value as Json, json};
 
+pub use create::AddInterpreter;
+pub use list::keep_in_config_dir;
 pub use widget::{COMMANDS, ChooseInterpreter, InterpreterState, SelectInterpreter};
+
+use table::{Change, Entry, Flavor, Table};
 
 /// The interpreter chosen for a project.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,8 +82,9 @@ pub struct SelectedInterpreter {
 pub fn for_project(root: &Path, cx: &App) -> Task<Option<SelectedInterpreter>> {
     let root = root.to_owned();
     let chosen = chosen(&root, cx);
+    let table = list::table(cx);
     cx.background_spawn(async move {
-        let found = scan(&root, chosen.as_deref());
+        let found = scan(&root, chosen.as_ref(), &table);
         found.selected.map(|s| s.to_selected(&root))
     })
 }
@@ -74,10 +100,11 @@ pub struct ConfiguredInterpreter {
 /// The interpreter a run configuration runs with, looked up off the UI
 /// thread: the project's (`None`), or the configured one as the reference
 /// resolves it (`AbstractPythonRunConfiguration.getSdk`): by name among
-/// the project's interpreters and then in the reference's SDK table, else
-/// by path. A configured interpreter that is not found falls back to the
-/// project's; the second value then names the one that was not found (its
-/// SDK name, else its path).
+/// the project's interpreters, in the list of configured interpreters and
+/// then in the reference's SDK table, else by path. A configured
+/// interpreter that is not found falls back to the project's; the second
+/// value then names the one that was not found (its SDK name, else its
+/// path).
 pub fn for_run(
     root: &Path,
     configured: Option<ConfiguredInterpreter>,
@@ -85,13 +112,15 @@ pub fn for_run(
 ) -> Task<(Option<SelectedInterpreter>, Option<String>)> {
     let root = root.to_owned();
     let chosen = chosen(&root, cx);
+    let table = list::table(cx);
     cx.background_spawn(async move {
-        let found = scan(&root, chosen.as_deref());
+        let found = scan(&root, chosen.as_ref(), &table);
         let project = || found.selected.as_ref().map(|s| s.to_selected(&root));
         let Some(configured) = configured else {
             return (project(), None);
         };
-        if let Some(selected) = find_configured(&root, &found, &configured, &pycharm_config_dirs())
+        if let Some(selected) =
+            find_configured(&root, &found, &configured, &table, &pycharm_config_dirs())
         {
             return (Some(selected), None);
         }
@@ -108,13 +137,14 @@ pub fn for_run(
     })
 }
 
-/// A configured interpreter among the project's (by name), in the
-/// reference's SDK table of the configuration directories (by name), or
-/// by path.
+/// A configured interpreter among the project's (by name), in the list of
+/// configured interpreters and the reference's SDK table of the
+/// configuration directories (by name), or by path.
 fn find_configured(
     root: &Path,
     found: &ProjectInterpreters,
     configured: &ConfiguredInterpreter,
+    table: &Table,
     config_dirs: &[PathBuf],
 ) -> Option<SelectedInterpreter> {
     let by_path = |python: &Path| -> SelectedInterpreter {
@@ -128,7 +158,7 @@ fn find_configured(
             None => found
                 .found
                 .iter()
-                .find(|f| same_dir(&f.python, python))
+                .find(|f| table::same_path(&f.python, python))
                 .cloned()
                 .unwrap_or_else(|| FoundInterpreter::bare(python)),
         };
@@ -137,6 +167,9 @@ fn find_configured(
     if !configured.name.is_empty() {
         if let Some(item) = found.found.iter().find(|f| f.name == configured.name) {
             return Some(item.to_selected(root));
+        }
+        if let Some(entry) = table.find(&configured.name).filter(|e| e.python.is_file()) {
+            return Some(FoundInterpreter::from_entry(entry).to_selected(root));
         }
         let home = config_dirs.iter().find_map(|dir| {
             project::idea::read_sdk_table(&dir.join("options").join("jdk.table.xml"))
@@ -156,10 +189,14 @@ fn find_configured(
         .map(by_path)
 }
 
-/// Registers the interpreter widget's icons and commands (the product's
-/// `init`).
+/// Registers the interpreter widget's icons and commands and starts
+/// reading the list of configured interpreters (the product's `init`).
 pub fn init(cx: &mut App) {
+    ui::icons::register(cx, &page::ICONS);
+    ui::icons::register(cx, &add_dialog::ICONS);
+    ui::icons::register(cx, &list_dialog::ICONS);
     widget::init(cx);
+    list::ensure_loaded(cx);
 }
 
 /// The interpreter widget of the status bar.
@@ -167,31 +204,91 @@ pub fn status_widget() -> workbench::StatusWidget {
     widget::status_widget()
 }
 
+/// Settings > Python > Interpreter.
+pub fn page_spec() -> settings_ui::PageSpec {
+    page::spec()
+}
+
 // ---- choices ------------------------------------------------------------------
 
 /// Table and key of the choice in the personal project state.
 const STATE_TABLE: &str = "python";
 const STATE_KEY: &str = "interpreter";
+/// The value kept for "No interpreter" (an empty value means the
+/// project's default environment).
+const NONE_VALUE: &str = "none";
+
+/// What a project's interpreter is set to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Choice {
+    /// "No interpreter", chosen.
+    None,
+    /// An interpreter (or the environment folder holding it).
+    Python(PathBuf),
+}
 
 /// Choices made in this session, by project root: they count at once,
 /// while the personal project state is written in the background.
 #[derive(Default)]
-struct Chosen(HashMap<PathBuf, PathBuf>);
+struct Chosen(HashMap<PathBuf, Choice>);
 
 impl Global for Chosen {}
 
 /// The interpreter chosen for the project at `root` in this session.
-pub(crate) fn chosen(root: &Path, cx: &App) -> Option<PathBuf> {
+pub(crate) fn chosen(root: &Path, cx: &App) -> Option<Choice> {
     cx.try_global::<Chosen>()
         .and_then(|c| c.0.get(root).cloned())
 }
 
-fn set_chosen(root: &Path, python: Option<PathBuf>, cx: &mut App) {
+fn set_chosen(root: &Path, choice: Option<Choice>, cx: &mut App) {
     let chosen = cx.default_global::<Chosen>();
-    match python {
-        Some(python) => chosen.0.insert(root.to_owned(), python),
+    match choice {
+        Some(choice) => chosen.0.insert(root.to_owned(), choice),
         None => chosen.0.remove(root),
     };
+}
+
+/// Makes `choice` the interpreter of the project at `root` (the widget's
+/// popup, Apply on the Interpreter page): it counts at once (a run started
+/// now uses it) and is kept in the personal project state; an environment
+/// of the project that is not in the list of configured interpreters yet
+/// joins it, associated with the project. The listeners hear of it once it
+/// is stored. Resolves to the project's interpreters after the change.
+pub(crate) fn choose(root: &Path, choice: Choice, cx: &mut App) -> Task<ProjectInterpreters> {
+    let root = root.to_owned();
+    set_chosen(&root, Some(choice.clone()), cx);
+    let table = list::table(cx);
+    let work = cx.background_spawn({
+        let root = root.clone();
+        async move {
+            let state = scan(&root, Some(&choice), &table);
+            let stored = match (&choice, &state.selected) {
+                (Choice::None, _) => Some(Choice::None),
+                (Choice::Python(_), Some(selected)) if state.chosen => {
+                    Some(Choice::Python(selected.python.clone()))
+                }
+                _ => None,
+            };
+            if let Some(stored) = &stored
+                && let Err(e) = store_choice(&root, stored)
+            {
+                eprintln!("interpreter: {e}");
+            }
+            (state, stored)
+        }
+    });
+    cx.spawn(async move |cx| {
+        let (state, stored) = work.await;
+        let _ = cx.update(|cx| {
+            set_chosen(&root, stored, cx);
+            if let Some(selected) = state.selected.as_ref().filter(|s| !s.configured) {
+                list::change(vec![Change::Add(selected.entry(&root))], cx).detach();
+            }
+            // The language services follow the new interpreter.
+            changed(&root, cx);
+        });
+        state
+    })
 }
 
 /// Called with the project root after its interpreter was chosen.
@@ -232,11 +329,15 @@ fn resolve(root: &Path, path: &str) -> PathBuf {
     }
 }
 
-/// Keeps the choice in the personal project state: relative to the
-/// project with `/` separators when it is inside it.
-fn store_choice(root: &Path, python: &Path) -> Result<bool, project::StoreError> {
-    let value = project::store::relative_to(root, python)
-        .unwrap_or_else(|| python.to_string_lossy().into_owned());
+/// Keeps the choice in the personal project state: an interpreter
+/// relative to the project with `/` separators when it is inside it,
+/// "No interpreter" as `none`.
+fn store_choice(root: &Path, choice: &Choice) -> Result<bool, project::StoreError> {
+    let value = match choice {
+        Choice::None => NONE_VALUE.to_owned(),
+        Choice::Python(python) => project::store::relative_to(root, python)
+            .unwrap_or_else(|| python.to_string_lossy().into_owned()),
+    };
     project::workspace::save_value(root, STATE_TABLE, STATE_KEY, Some(&value))
 }
 
@@ -265,6 +366,8 @@ pub struct FoundInterpreter {
     pub name: String,
     /// The name is a path (`~/…`), shortened to its last part.
     path_derived: bool,
+    /// In the list of configured interpreters.
+    pub configured: bool,
 }
 
 /// Widget text and popup rows fit these lengths (`shortName`, `longName`).
@@ -287,6 +390,7 @@ impl FoundInterpreter {
             uv: env.is_uv(),
             name: sdk_name(env),
             path_derived: true,
+            configured: false,
         }
     }
 
@@ -300,7 +404,75 @@ impl FoundInterpreter {
             uv: false,
             name: project::display_path(python),
             path_derived: true,
+            configured: false,
         }
+    }
+
+    /// A configured interpreter: its name in the list, its flavour, its
+    /// version as kept (asked from the interpreter when the list has none).
+    fn from_entry(entry: &Entry) -> Self {
+        let env = py_env::venv::inspect_python(&entry.python);
+        let kind = match entry.flavor {
+            Flavor::Venv | Flavor::Uv => InterpreterKind::Venv,
+            Flavor::Conda => InterpreterKind::Conda,
+            Flavor::Poetry => InterpreterKind::Poetry,
+            Flavor::Pyenv => InterpreterKind::Pyenv,
+            Flavor::System => InterpreterKind::System,
+        };
+        let version = entry.version.clone().or_else(|| {
+            full_version(
+                env.as_ref().and_then(|e| e.version.as_deref()),
+                &entry.python,
+            )
+        });
+        Self {
+            python: entry.python.clone(),
+            dir: env
+                .map(|e| e.dir)
+                .unwrap_or_else(|| env_dir_of(&entry.python)),
+            kind,
+            version,
+            uv: entry.flavor == Flavor::Uv,
+            name: entry.name.clone(),
+            path_derived: looks_like_path(&entry.name),
+            configured: true,
+        }
+    }
+
+    /// Takes the name of the list's entry for the same interpreter.
+    fn apply_entry(&mut self, entry: &Entry) {
+        self.name = entry.name.clone();
+        // A uv entry stays uv's when its `pyvenv.cfg` does not say so.
+        self.uv |= entry.flavor == Flavor::Uv;
+        self.path_derived = looks_like_path(&entry.name);
+        self.configured = true;
+    }
+
+    /// The flavour by kind.
+    fn flavor(&self) -> Flavor {
+        match self.kind {
+            _ if self.uv => Flavor::Uv,
+            InterpreterKind::Venv => Flavor::Venv,
+            InterpreterKind::Conda => Flavor::Conda,
+            InterpreterKind::Poetry => Flavor::Poetry,
+            InterpreterKind::Pyenv => Flavor::Pyenv,
+            InterpreterKind::System | InterpreterKind::Uv => Flavor::System,
+        }
+    }
+
+    /// Its entry in the list of configured interpreters: an environment is
+    /// associated with the project at `root`.
+    fn entry(&self, root: &Path) -> Entry {
+        let flavor = self.flavor();
+        let mut entry = Entry::new(self.name.clone(), self.python.clone(), flavor);
+        entry.version = self.version.clone();
+        if flavor != Flavor::System {
+            entry.associated_project = Some(root.to_owned());
+        }
+        if flavor == Flavor::Uv {
+            entry.working_dir = Some(root.to_owned());
+        }
+        entry
     }
 
     fn group(&self) -> Group {
@@ -370,8 +542,18 @@ impl FoundInterpreter {
             "kind": self.kind.as_str(),
             "version": self.version,
             "uv": self.uv,
+            "configured": self.configured,
         })
     }
+}
+
+/// A name that is a path (`~/proj/.venv`, `/usr/bin/python3`, `C:\…`): the
+/// widget shortens it to its last part.
+fn looks_like_path(name: &str) -> bool {
+    name.starts_with(['~', '/', '\\'])
+        || (name.len() > 2
+            && name.as_bytes()[1] == b':'
+            && name.as_bytes()[0].is_ascii_alphabetic())
 }
 
 /// The version shown after the name (`3.14.6`): the one the files tell
@@ -563,25 +745,55 @@ impl ProjectInterpreters {
     }
 }
 
-/// The executable of the interpreter of the project at `root`, as
-/// [`for_project`] selects it with `chosen` ([`chosen`] on the UI thread).
-/// Blocking.
-pub(crate) fn project_python(root: &Path, chosen: Option<&Path>) -> Option<PathBuf> {
-    scan(root, chosen).selected.map(|s| s.python)
+/// What the terminal needs to find the project's interpreter off the UI
+/// thread: the choice made in this session and the list of configured
+/// interpreters.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProjectChoice {
+    chosen: Option<Choice>,
+    table: std::sync::Arc<Table>,
 }
 
-/// The project's interpreters and the selected one: `chosen` (or the
-/// choice kept in the personal project state) when it still exists, else
-/// the project's environment. Blocking.
-fn scan(root: &Path, chosen: Option<&Path>) -> ProjectInterpreters {
-    scan_with(root, chosen, pycharm_config_dirs)
+impl ProjectChoice {
+    /// The choice for the project at `root`, read on the UI thread.
+    pub(crate) fn of(root: &Path, cx: &App) -> Self {
+        Self {
+            chosen: chosen(root, cx),
+            table: list::table(cx),
+        }
+    }
+}
+
+/// The executable of the interpreter of the project at `root`, as
+/// [`for_project`] selects it with `choice`. Blocking.
+pub(crate) fn project_python(root: &Path, choice: &ProjectChoice) -> Option<PathBuf> {
+    scan(root, choice.chosen.as_ref(), &choice.table)
+        .selected
+        .map(|s| s.python)
+}
+
+/// The project's interpreters (its environments and the configured ones
+/// `table` offers it) and the selected one: `chosen` (or the choice kept
+/// in the personal project state) when it still exists, else the
+/// project's environment. Blocking.
+fn scan(root: &Path, chosen: Option<&Choice>, table: &Table) -> ProjectInterpreters {
+    scan_with(root, chosen, table, pycharm_config_dirs)
+}
+
+/// The entry of the list for an interpreter of the folder `dir`.
+fn entry_of<'a>(table: &'a Table, python: &Path, dir: &Path) -> Option<&'a Entry> {
+    table
+        .entries
+        .iter()
+        .find(|e| table::same_path(&e.python, python) || same_dir(&env_dir_of(&e.python), dir))
 }
 
 /// [`scan`] with the reference IDE's configuration directories (newest
 /// first) for the one-time import of its interpreter.
 fn scan_with(
     root: &Path,
-    chosen: Option<&Path>,
+    chosen: Option<&Choice>,
+    table: &Table,
     config_dirs: impl FnOnce() -> Vec<PathBuf>,
 ) -> ProjectInterpreters {
     let uv_env = std::env::var_os("UV_PROJECT_ENVIRONMENT")
@@ -596,39 +808,71 @@ fn scan_with(
     {
         state = imported;
     }
+    // The configured interpreters offered for the project whose
+    // executable exists (`isSdkSeemsValid`).
+    let offered: Vec<&Entry> = table
+        .offered_for(Some(root))
+        .filter(|e| e.python.is_file())
+        .collect();
     let mut found: Vec<FoundInterpreter> = Vec::new();
     for env in &envs {
         let mut item = FoundInterpreter::from_env(env);
-        state.apply_name(&mut item);
-        item.name = unique_name(&item.name, &found);
+        match entry_of(table, &env.python, &env.dir) {
+            Some(entry) => item.apply_entry(entry),
+            None => {
+                state.apply_name(&mut item);
+                item.name = unique_name(&item.name, &found, &offered);
+            }
+        }
         found.push(item);
     }
-    let chosen = chosen.map(Path::to_path_buf).or(state.interpreter.clone());
-    let chosen = chosen.as_deref();
-    let pick = chosen.and_then(|path| {
-        let env = if path.is_dir() {
-            py_env::venv::inspect(path)
-        } else {
-            py_env::venv::inspect_python(path)
-        };
-        match env {
-            Some(env) => Some(
-                found
-                    .iter()
-                    .find(|f| same_dir(&f.dir, &env.dir))
-                    .cloned()
-                    .unwrap_or_else(|| FoundInterpreter::from_env(&env)),
-            ),
-            None if path.is_file() => Some(
-                found
-                    .iter()
-                    .find(|f| same_dir(&f.python, path))
-                    .cloned()
-                    .unwrap_or_else(|| FoundInterpreter::bare(path)),
-            ),
-            None => None,
+    for entry in &offered {
+        if !found
+            .iter()
+            .any(|f| f.name == entry.name || table::same_path(&f.python, &entry.python))
+        {
+            found.push(FoundInterpreter::from_entry(entry));
         }
-    });
+    }
+    let chosen = chosen.cloned().or(state.interpreter.clone());
+    let pick = match &chosen {
+        Some(Choice::None) => {
+            return ProjectInterpreters {
+                found,
+                selected: None,
+                chosen: true,
+            };
+        }
+        Some(Choice::Python(path)) => {
+            let env = if path.is_dir() {
+                py_env::venv::inspect(path)
+            } else {
+                py_env::venv::inspect_python(path)
+            };
+            let entry = |item: FoundInterpreter| match entry_of(table, &item.python, &item.dir) {
+                Some(entry) if !item.configured => FoundInterpreter::from_entry(entry),
+                _ => item,
+            };
+            match env {
+                Some(env) => Some(
+                    found
+                        .iter()
+                        .find(|f| same_dir(&f.dir, &env.dir))
+                        .cloned()
+                        .unwrap_or_else(|| entry(FoundInterpreter::from_env(&env))),
+                ),
+                None if path.is_file() => Some(
+                    found
+                        .iter()
+                        .find(|f| table::same_path(&f.python, path))
+                        .cloned()
+                        .unwrap_or_else(|| entry(FoundInterpreter::bare(path))),
+                ),
+                None => None,
+            }
+        }
+        None => None,
+    };
     let chosen = pick.is_some();
     let selected = pick.or_else(|| {
         let dir = py_env::project::find_project_venv(root, uv_env.as_deref())?;
@@ -638,8 +882,10 @@ fn scan_with(
         && !found.iter().any(|f| f == selected)
     {
         let mut item = selected.clone();
-        state.apply_name(&mut item);
-        item.name = unique_name(&item.name, &found);
+        if !item.configured {
+            state.apply_name(&mut item);
+            item.name = unique_name(&item.name, &found, &offered);
+        }
         found.push(item);
     }
     let selected = selected.and_then(|s| found.iter().find(|f| f.python == s.python).cloned());
@@ -650,8 +896,10 @@ fn scan_with(
     }
 }
 
+/// `p` with links resolved and, on Windows, without the `\\?\` prefix
+/// `std::fs::canonicalize` adds.
 fn canonical(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_owned())
+    dunce::canonicalize(p).unwrap_or_else(|_| p.to_owned())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -680,7 +928,7 @@ const PYTHON_SDK: &str = "Python SDK";
 /// What the personal project state holds about the interpreter.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Stored {
-    interpreter: Option<PathBuf>,
+    interpreter: Option<Choice>,
     sdk_name: Option<String>,
     sdk_home: Option<PathBuf>,
 }
@@ -694,7 +942,10 @@ impl Stored {
                 .filter(|v| !v.is_empty())
         };
         Self {
-            interpreter: value(STATE_KEY).map(|p| resolve(root, &p)),
+            interpreter: value(STATE_KEY).map(|p| match p.as_str() {
+                NONE_VALUE => Choice::None,
+                _ => Choice::Python(resolve(root, &p)),
+            }),
             sdk_name: value(SDK_NAME_KEY),
             sdk_home: value(SDK_HOME_KEY).map(|p| resolve(root, &p)),
         }
@@ -705,7 +956,7 @@ impl Stored {
         let (Some(name), Some(home)) = (&self.sdk_name, &self.sdk_home) else {
             return;
         };
-        if same_dir(&item.python, home) || same_dir(&item.dir, &env_dir_of(home)) {
+        if table::same_path(&item.python, home) || same_dir(&item.dir, &env_dir_of(home)) {
             item.name = name.clone();
             item.path_derived = false;
         }
@@ -747,7 +998,7 @@ fn import_idea_sdk(root: &Path, envs: &[EnvDir], config_dirs: &[PathBuf]) -> Opt
         eprintln!("interpreter: {e}");
     }
     Some(Stored {
-        interpreter: Some(python),
+        interpreter: Some(Choice::Python(python)),
         sdk_name: Some(sdk.name),
         sdk_home: Some(home),
     })
@@ -781,17 +1032,12 @@ fn pycharm_config_dirs() -> Vec<PathBuf> {
     found.into_iter().map(|(_, p)| p).collect()
 }
 
-/// `name`, or `name (2)`, `name (3)`, … when taken
-/// (`SdkConfigurationUtil.createUniqueSdkName`).
-fn unique_name(name: &str, taken: &[FoundInterpreter]) -> String {
-    let free = |n: &str| !taken.iter().any(|f| f.name == n);
-    if free(name) {
-        return name.to_owned();
-    }
-    (2..)
-        .map(|i| format!("{name} ({i})"))
-        .find(|n| free(n))
-        .expect("a free name")
+/// `name`, or `name (2)`, `name (3)`, … when an interpreter found or
+/// configured has it (`SdkConfigurationUtil.createUniqueSdkName`).
+fn unique_name(name: &str, found: &[FoundInterpreter], configured: &[&Entry]) -> String {
+    table::unique_name(name, |n| {
+        found.iter().any(|f| f.name == n) || configured.iter().any(|e| e.name == n)
+    })
 }
 
 #[cfg(test)]
@@ -808,14 +1054,15 @@ mod tests {
 
     fn project(name: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap().join(name);
+        let root = dunce::canonicalize(dir.path()).unwrap().join(name);
         std::fs::create_dir_all(&root).unwrap();
         (dir, root)
     }
 
     /// No configuration directories of the reference IDE.
     fn scan(root: &Path, chosen: Option<&Path>) -> ProjectInterpreters {
-        scan_with(root, chosen, Vec::new)
+        let chosen = chosen.map(|p| Choice::Python(p.to_owned()));
+        scan_with(root, chosen.as_ref(), &Table::default(), Vec::new)
     }
 
     #[test]
@@ -913,7 +1160,7 @@ mod tests {
         let (_dir, root) = project("demo");
         venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.1\n");
         let plain = venv(&root.join("venv"), "version = 3.12.13\n");
-        assert!(store_choice(&root, &plain).unwrap());
+        assert!(store_choice(&root, &Choice::Python(plain.clone())).unwrap());
         let text = std::fs::read_to_string(project::workspace::workspace_file(&root)).unwrap();
         let rel = if cfg!(windows) {
             "venv/Scripts/python.exe"
@@ -935,7 +1182,7 @@ mod tests {
         // and listed with the project's own.
         let (_other, elsewhere) = project("tools");
         let outside = venv(&elsewhere.join("env"), "version = 3.10.0\n");
-        store_choice(&root, &outside).unwrap();
+        store_choice(&root, &Choice::Python(outside.clone())).unwrap();
         let found = scan(&root, None);
         let selected = found.selected.clone().unwrap();
         assert_eq!(selected.python, outside);
@@ -1000,7 +1247,7 @@ mod tests {
         );
         std::fs::write(&home, "").unwrap();
         let dirs = || vec![newer.clone(), older.clone()];
-        let found = scan_with(&root, None, dirs);
+        let found = scan_with(&root, None, &Table::default(), dirs);
         assert!(found.chosen);
         let selected = found.selected.clone().unwrap();
         assert_eq!(selected.python, uv);
@@ -1023,8 +1270,8 @@ mod tests {
         }
         // Once: the stored choice counts from now on, and the name stays
         // with its interpreter when another one is chosen.
-        store_choice(&root, &plain).unwrap();
-        let found = scan_with(&root, None, || panic!("not read again"));
+        store_choice(&root, &Choice::Python(plain.clone())).unwrap();
+        let found = scan_with(&root, None, &Table::default(), || panic!("not read again"));
         assert_eq!(found.selected.unwrap().python, plain);
         assert!(
             found
@@ -1041,13 +1288,13 @@ mod tests {
         let config = dir.path().join("PyCharm2026.2");
         sdk_table(&config, &[("other", Path::new("/nowhere/bin/python"))]);
         // No `.idea`.
-        let found = scan_with(&root, None, || vec![config.clone()]);
+        let found = scan_with(&root, None, &Table::default(), || vec![config.clone()]);
         assert!(!found.chosen);
         // An SDK the table does not have, then one whose interpreter is gone.
         idea_project_sdk(&root, "uv (demo)");
-        assert!(!scan_with(&root, None, || vec![config.clone()]).chosen);
+        assert!(!scan_with(&root, None, &Table::default(), || vec![config.clone()]).chosen);
         idea_project_sdk(&root, "other");
-        assert!(!scan_with(&root, None, || vec![config.clone()]).chosen);
+        assert!(!scan_with(&root, None, &Table::default(), || vec![config.clone()]).chosen);
         assert!(!root.join(".oxide").exists());
     }
 
@@ -1110,6 +1357,64 @@ mod tests {
         );
     }
 
+    /// The configured interpreters join the project's environments: an
+    /// environment of the list keeps its name there, one associated with
+    /// another project or whose executable is gone is not offered, and
+    /// "No interpreter" is a choice of its own.
+    #[test]
+    fn configured_interpreters_join_the_project_environments() {
+        let (dir, root) = project("demo");
+        let uv = venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.14\n");
+        let base = dunce::canonicalize(dir.path()).unwrap();
+        let shared = venv(&base.join("envs/shared"), "version = 3.12.1\n");
+        let other = venv(&base.join("other/.venv"), "version = 3.11.1\n");
+        let mut table = Table::default();
+        let add = |table: &mut Table, mut entry: Entry, project: Option<&Path>| {
+            entry.associated_project = project.map(Path::to_path_buf);
+            table.apply(&Change::Add(entry)).unwrap();
+        };
+        add(
+            &mut table,
+            Entry::new("uv (demo)", &uv, Flavor::Uv),
+            Some(&root),
+        );
+        add(
+            &mut table,
+            Entry::new("shared", &shared, Flavor::Venv),
+            None,
+        );
+        add(
+            &mut table,
+            Entry::new("other", &other, Flavor::Venv),
+            Some(&base.join("other")),
+        );
+        add(
+            &mut table,
+            Entry::new("gone", base.join("gone/bin/python"), Flavor::System),
+            None,
+        );
+        let found = scan_with(&root, None, &table, Vec::new);
+        let names: Vec<_> = found.found.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["uv (demo)", "shared"]);
+        assert!(found.found.iter().all(|f| f.configured));
+        // The project's environment, by its name in the list.
+        let selected = found.selected.unwrap();
+        assert_eq!(selected.python, uv);
+        assert_eq!(selected.short_name(), "uv (demo) [3.13.14]");
+        assert!(!found.chosen);
+        // A configured interpreter outside the project can be chosen.
+        let chosen = Choice::Python(shared.clone());
+        let found = scan_with(&root, Some(&chosen), &table, Vec::new);
+        assert_eq!(found.selected.unwrap().name, "shared");
+        // "No interpreter", chosen now or kept.
+        let found = scan_with(&root, Some(&Choice::None), &table, Vec::new);
+        assert!(found.chosen && found.selected.is_none());
+        store_choice(&root, &Choice::None).unwrap();
+        let found = scan_with(&root, None, &table, Vec::new);
+        assert!(found.chosen && found.selected.is_none());
+        assert_eq!(found.found.len(), 2);
+    }
+
     /// A run configuration's interpreter: by the reference's name among
     /// the project's interpreters, then in the reference's SDK table, then
     /// by path; nothing when none resolves.
@@ -1127,6 +1432,13 @@ mod tests {
         let config = dir.path().join("PyCharm2026.2");
         sdk_table(&config, &[("uv (demo)", &uv)]);
         let configs = [config];
+        // A configured interpreter of another project.
+        let (_other, elsewhere) = project("tools");
+        let tools = venv(&elsewhere.join("env"), "version = 3.10.0\n");
+        let mut table = Table::default();
+        let mut entry = Entry::new("tools env", &tools, Flavor::Venv);
+        entry.associated_project = Some(elsewhere.clone());
+        table.apply(&Change::Add(entry)).unwrap();
         let by = |name: &str, path: Option<&Path>| {
             find_configured(
                 &root,
@@ -1135,9 +1447,14 @@ mod tests {
                     name: name.into(),
                     path: path.map(Path::to_path_buf),
                 },
+                &table,
                 &configs,
             )
         };
+        // By its name in the list, wherever it belongs.
+        let s = by("tools env", None).unwrap();
+        assert_eq!(s.python, tools);
+        assert_eq!(s.name, "tools env");
         // A name of the project's interpreters (path-derived here).
         let name = found
             .found

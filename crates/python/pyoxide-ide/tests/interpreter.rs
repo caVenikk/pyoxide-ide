@@ -227,9 +227,9 @@ fn the_popup_lists_the_project_environments_and_chooses_by_keys(cx: &mut TestApp
             "---".into(),
             long(&root, ".venv", "3.13.1"),
             "---".into(),
-            "(Add New Interpreter)".into(),
+            "Add New Interpreter".into(),
             "---".into(),
-            "(Interpreter Settings…)".into(),
+            "Interpreter Settings…".into(),
             "(Manage Packages…)".into(),
         ]
     );
@@ -332,8 +332,28 @@ fn the_popup_opens_and_chooses_by_clicks(cx: &mut TestAppContext) {
     assert_eq!(for_project(cx, &root).unwrap().python, plain);
     // A disabled row does nothing.
     click(cx, window, "status-interpreter");
-    click(cx, window, "menu-item:Interpreter Settings…");
+    click(cx, window, "menu-item:Manage Packages…");
     assert!(state(cx, window)["popup"].is_object());
+    // "Interpreter Settings…" opens Settings on Python > Interpreter.
+    click(cx, window, "menu-item:Interpreter Settings…");
+    assert_eq!(state(cx, window)["popup"], Value::Null);
+    let settings = invoke(cx, window, "settings.state", Value::Null);
+    assert_eq!(settings["open"], json!(true), "{settings}");
+    assert_eq!(
+        settings["breadcrumbs"],
+        json!(["Python", "Interpreter"]),
+        "{settings}"
+    );
+    assert_eq!(
+        settings["fields"]["selected"]["path"],
+        json!(plain.display().to_string()),
+        "{settings}"
+    );
+    cx.update(|cx| {
+        if let Some(handle) = settings_ui::find(cx) {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+    });
 }
 
 #[gpui::test]
@@ -385,13 +405,14 @@ fn a_project_without_an_environment(cx: &mut TestAppContext) {
     assert_eq!(
         labels(&popup),
         [
-            "(Add New Interpreter)",
+            "Add New Interpreter",
             "---",
-            "(Interpreter Settings…)",
+            "Interpreter Settings…",
             "(Manage Packages…)",
         ]
     );
-    assert_eq!(popup["levels"][0]["selected"], Value::Null);
+    // No interpreter to preselect: the first row that can be chosen.
+    assert_eq!(popup["levels"][0]["selected"], json!(0));
     // An environment chosen by path through the command.
     let python = venv(&root.join("env"), "version = 3.11.2\n");
     press(cx, window, "escape");

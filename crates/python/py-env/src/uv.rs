@@ -113,6 +113,13 @@ pub struct InitRequest {
     /// Let uv run `git init`. Off by default: version control is the IDE's decision.
     #[serde(default)]
     pub vcs: bool,
+    /// Do not look for a project or workspace around the folder
+    /// (`--no-project`), as an interpreter set up for a folder does.
+    #[serde(default)]
+    pub no_project: bool,
+    /// Where uv runs; `path` may then be empty (the folder itself).
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -131,6 +138,14 @@ pub struct VenvRequest {
     pub system_site_packages: bool,
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Let `clear` remove a folder that is not a virtual environment
+    /// (`--force`).
+    #[serde(default)]
+    pub force: bool,
+    /// Where uv runs: it reads `.python-version` and `requires-python`
+    /// of the project there.
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -155,6 +170,10 @@ pub struct SyncRequest {
     pub locked: bool,
     #[serde(default)]
     pub python: Option<String>,
+    /// The environment to sync instead of the project's default one
+    /// (`UV_PROJECT_ENVIRONMENT`, and `VIRTUAL_ENV` for it).
+    #[serde(default)]
+    pub environment: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -316,6 +335,7 @@ impl Uv {
         &self,
         args: Vec<OsString>,
         cwd: Option<&Path>,
+        environment: Option<&Path>,
         ctx: &RunContext,
         timeout: Duration,
     ) -> Result<(Finished, String)> {
@@ -323,6 +343,11 @@ impl Uv {
         spec.forward_stdout = true;
         if let Some(cwd) = cwd {
             spec = spec.cwd(cwd);
+        }
+        if let Some(env) = environment {
+            spec = spec
+                .env("UV_PROJECT_ENVIRONMENT", env)
+                .env("VIRTUAL_ENV", env);
         }
         let command = spec.display();
         run_ok("uv", spec, ctx, timeout).await.map(|f| (f, command))
@@ -351,7 +376,7 @@ impl Uv {
         timeout: Duration,
     ) -> Result<Outcome> {
         let started = Instant::now();
-        let (done, command) = self.exec(args, cwd, ctx, timeout).await?;
+        let (done, command) = self.exec(args, cwd, None, ctx, timeout).await?;
         Ok(Outcome::new(command, &done.stdout, &done.stderr, started))
     }
 
@@ -379,6 +404,51 @@ impl Uv {
         }
         let done = self.query(a, None, ctx, QUICK).await?;
         parse_python_list(&done.stdout)
+    }
+
+    /// The Python versions (`3.14`, `3.13`, …) uv can create an
+    /// environment with, installed or downloadable, newest first; `request`
+    /// narrows them (`>=3.11`, the project's `requires-python`).
+    pub async fn python_versions(
+        &self,
+        request: Option<&str>,
+        cwd: Option<&Path>,
+        ctx: &RunContext,
+    ) -> Result<Vec<MinorVersion>> {
+        let mut a = args(["python", "list", "--output-format", "json"]);
+        if let Some(request) = request.filter(|r| !r.trim().is_empty()) {
+            a.push(request.into());
+        }
+        let done = self.query(a, cwd, ctx, QUICK).await?;
+        Ok(minor_versions(&parse_python_list(&done.stdout)?))
+    }
+
+    /// The interpreters uv can download for this machine, installed or not
+    /// (`uv python list --only-downloads`).
+    pub async fn python_downloads(&self, ctx: &RunContext) -> Result<Vec<UvPython>> {
+        let a = args([
+            "python",
+            "list",
+            "--only-downloads",
+            "--output-format",
+            "json",
+        ]);
+        let done = self.query(a, None, ctx, QUICK).await?;
+        parse_python_list(&done.stdout)
+    }
+
+    /// The executable of an interpreter uv installed that matches
+    /// `request` (`3.13.5`): `uv python find --managed-python --no-project`.
+    pub async fn python_find(&self, request: &str, ctx: &RunContext) -> Result<PathBuf> {
+        let mut a = args(["python", "find", "--managed-python", "--no-project"]);
+        a.push(request.into());
+        let done = self.query(a, None, ctx, QUICK).await?;
+        done.stdout
+            .lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| EnvError::parse("`uv python find` printed nothing"))
     }
 
     /// uv's directory of managed interpreters.
@@ -411,19 +481,34 @@ impl Uv {
 
     /// `uv venv`
     pub async fn venv(&self, req: &VenvRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(venv_args(req), None, ctx, Duration::from_secs(10 * 60))
-            .await
+        self.change(
+            venv_args(req),
+            req.cwd.as_deref(),
+            ctx,
+            Duration::from_secs(10 * 60),
+        )
+        .await
     }
 
     /// `uv init`
     pub async fn init(&self, req: &InitRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(init_args(req), None, ctx, SHORT).await
+        self.change(init_args(req), req.cwd.as_deref(), ctx, SHORT)
+            .await
     }
 
     /// `uv sync`
     pub async fn sync(&self, req: &SyncRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(sync_args(req), Some(&req.project), ctx, LONG)
-            .await
+        let started = Instant::now();
+        let (done, command) = self
+            .exec(
+                sync_args(req),
+                Some(&req.project),
+                req.environment.as_deref(),
+                ctx,
+                LONG,
+            )
+            .await?;
+        Ok(Outcome::new(command, &done.stdout, &done.stderr, started))
     }
 
     /// `uv lock`
@@ -539,8 +624,87 @@ pub(crate) fn venv_args(req: &VenvRequest) -> Vec<OsString> {
     if req.system_site_packages {
         a.push("--system-site-packages".into());
     }
+    if req.force {
+        a.push("--force".into());
+    }
     a.push(req.path.clone().into());
     a
+}
+
+/// A `major.minor` Python version uv knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MinorVersion {
+    pub major: u32,
+    pub minor: u32,
+    /// One of its interpreters is on the machine; else uv downloads one.
+    pub installed: bool,
+}
+
+/// `3.13.5` as numbers; `None` for anything but a final release.
+fn release(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let micro = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((major, minor, micro))
+}
+
+/// The default build (not free-threaded, not a debug one).
+fn default_variant(p: &UvPython) -> bool {
+    p.variant.is_empty() || p.variant == "default"
+}
+
+/// The `major.minor` versions of final releases among `list`, each once,
+/// newest first, installed when one of its interpreters is
+/// (`UvLowLevel.listSupportedPythonVersions` takes the `X.Y.Z-` keys of
+/// `uv python list`: no pre-releases, no free-threaded builds).
+pub fn minor_versions(list: &[UvPython]) -> Vec<MinorVersion> {
+    let mut out: Vec<MinorVersion> = Vec::new();
+    for p in list.iter().filter(|p| default_variant(p)) {
+        let Some((major, minor, _)) = release(&p.version) else {
+            continue;
+        };
+        match out
+            .iter_mut()
+            .find(|v| (v.major, v.minor) == (major, minor))
+        {
+            Some(v) => v.installed |= p.installed(),
+            None => out.push(MinorVersion {
+                major,
+                minor,
+                installed: p.installed(),
+            }),
+        }
+    }
+    out.sort_by_key(|v| std::cmp::Reverse((v.major, v.minor)));
+    out
+}
+
+/// The CPython releases among uv's downloads (`list`) worth offering: the
+/// newest final release of each `major.minor` from `oldest` on, newest
+/// first (`3.14.6`, `3.13.14`, …).
+pub fn downloadable_releases(list: &[UvPython], oldest: (u32, u32)) -> Vec<String> {
+    let mut newest: Vec<(u32, u32, u32)> = Vec::new();
+    for p in list
+        .iter()
+        .filter(|p| default_variant(p) && p.implementation.eq_ignore_ascii_case("cpython"))
+    {
+        let Some(v) = release(&p.version) else {
+            continue;
+        };
+        if (v.0, v.1) < oldest {
+            continue;
+        }
+        match newest.iter_mut().find(|n| (n.0, n.1) == (v.0, v.1)) {
+            Some(n) => *n = (*n).max(v),
+            None => newest.push(v),
+        }
+    }
+    newest.sort_by(|a, b| b.cmp(a));
+    newest
+        .into_iter()
+        .map(|(a, b, c)| format!("{a}.{b}.{c}"))
+        .collect()
 }
 
 pub(crate) fn init_args(req: &InitRequest) -> Vec<OsString> {
@@ -565,7 +729,12 @@ pub(crate) fn init_args(req: &InitRequest) -> Vec<OsString> {
         a.push("--vcs".into());
         a.push("none".into());
     }
-    a.push(req.path.clone().into());
+    if req.no_project {
+        a.push("--no-project".into());
+    }
+    if !req.path.as_os_str().is_empty() {
+        a.push(req.path.clone().into());
+    }
     a
 }
 
@@ -894,6 +1063,89 @@ mod tests {
             ..VenvRequest::default()
         };
         assert_eq!(strs(venv_args(&plain)), ["venv", "/p/v"]);
+        // The reference's retry after a failed `uv venv` of a folder.
+        let forced = VenvRequest {
+            path: "/p/.venv".into(),
+            clear: true,
+            force: true,
+            system_site_packages: true,
+            cwd: Some("/p".into()),
+            ..VenvRequest::default()
+        };
+        assert_eq!(
+            strs(venv_args(&forced)),
+            [
+                "venv",
+                "--clear",
+                "--system-site-packages",
+                "--force",
+                "/p/.venv"
+            ]
+        );
+    }
+
+    fn uv_python(implementation: &str, version: &str, variant: &str, path: bool) -> UvPython {
+        UvPython {
+            key: format!("{implementation}-{version}-macos"),
+            version: version.into(),
+            path: path.then(|| PathBuf::from(format!("/uv/{version}/bin/python3"))),
+            symlink: None,
+            url: None,
+            implementation: implementation.into(),
+            variant: variant.into(),
+            arch: "aarch64".into(),
+            os: "macos".into(),
+        }
+    }
+
+    #[test]
+    fn minor_versions_of_final_releases_newest_first() {
+        let python =
+            |version: &str, variant: &str, path: bool| uv_python("cpython", version, variant, path);
+        let list = [
+            python("3.15.0a1", "default", false),
+            python("3.14.0", "default", false),
+            python("3.14.0", "freethreaded", true),
+            python("3.12.13", "default", false),
+            python("3.13.14", "default", false),
+            python("3.13.12", "", true),
+            python("3.11.13", "default", false),
+        ];
+        let versions: Vec<_> = minor_versions(&list)
+            .iter()
+            .map(|v| (v.major, v.minor, v.installed))
+            .collect();
+        // Installed: one of its default builds is.
+        assert_eq!(
+            versions,
+            [
+                (3, 14, false),
+                (3, 13, true),
+                (3, 12, false),
+                (3, 11, false)
+            ]
+        );
+        assert!(minor_versions(&[]).is_empty());
+    }
+
+    #[test]
+    fn downloadable_releases_are_the_newest_cpython_of_each_minor_version() {
+        let list = [
+            uv_python("cpython", "3.15.0b3", "default", false),
+            uv_python("cpython", "3.14.6", "default", false),
+            uv_python("cpython", "3.14.6", "freethreaded", false),
+            uv_python("cpython", "3.13.13", "default", false),
+            uv_python("cpython", "3.13.14", "default", false),
+            uv_python("cpython", "3.12.13", "default", true),
+            uv_python("cpython", "3.7.9", "default", false),
+            uv_python("pypy", "3.11.15", "default", false),
+            uv_python("graalpy", "3.12.0", "default", false),
+        ];
+        assert_eq!(
+            downloadable_releases(&list, (3, 8)),
+            ["3.14.6", "3.13.14", "3.12.13"]
+        );
+        assert!(downloadable_releases(&list, (3, 15)).is_empty());
     }
 
     #[test]
@@ -928,6 +1180,30 @@ mod tests {
             ..InitRequest::default()
         };
         assert_eq!(strs(init_args(&with_vcs)), ["init", "--script", "p"]);
+        // An interpreter set up for a folder without `pyproject.toml`
+        // (`UvLowLevel.initializeEnvironment`): in the folder itself.
+        let bare = InitRequest {
+            name: Some("demo".into()),
+            kind: InitKind::Bare,
+            python: Some("3.13".into()),
+            no_project: true,
+            cwd: Some("/w/demo".into()),
+            ..InitRequest::default()
+        };
+        assert_eq!(
+            strs(init_args(&bare)),
+            [
+                "init",
+                "--name",
+                "demo",
+                "--python",
+                "3.13",
+                "--bare",
+                "--vcs",
+                "none",
+                "--no-project"
+            ]
+        );
     }
 
     #[test]
