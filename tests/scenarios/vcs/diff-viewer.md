@@ -10,12 +10,17 @@
 6. Open the diff of a file whose change is only line endings on Windows.
 
 ## Expected
-- Step 1: an editor tab "Commit: <file>"; side by side: the committed
-  version on the left (titled with the short hash, read-only), "Your
-  version" on the right (editable); changed lines highlighted with word
-  highlights; unchanged fragments collapsed with 4 lines of context; a
-  count "{n} differences".
-- Step 2: the caret moves to the next, next and previous difference.
+- Step 1: a preview editor tab "Commit: <file>" (grey title); side by
+  side: the committed version on the left (a lock, the short hash and
+  the path in grey, read-only, its line numbers next to the divider),
+  "Current version" with the file's check box on the right (editable);
+  changed lines highlighted with word highlights, the divider joining
+  them; a count "{n} differences" and "2/3 files" with arrows in the
+  toolbar. (Unchanged fragments collapsed with 4 lines of context come
+  with folding, #32.)
+- Step 2: the caret moves to the next, next and previous difference;
+  at the last one F7 shows "Press again to go to the next file", and a
+  second F7 opens the next file's diff.
 - Step 3: the right side edits the file; the gutter markers and the
   Commit tree follow.
 - Step 4: the next file's diff opens.
@@ -25,7 +30,9 @@
 
 ## Commands
 `vcs.show-diff {"path": ...}`, `diff.next`, `diff.previous`,
-`diff.next-file`, `diff.previous-file`, `workbench.state` (active tab).
+`diff.next-file`, `diff.previous-file`, `diff.focus-opposite`,
+`diff.jump-to-source`, `diff.set-ignore-policy`, `workbench.state`
+(`tabs`, `diff`).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/comparing-file-versions.html;

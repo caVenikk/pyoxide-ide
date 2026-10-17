@@ -628,8 +628,11 @@ impl Workbench {
     }
 
     /// The path shown in the middle of the toolbar: relative to the project,
-    /// then the full path in brackets.
+    /// then the full path in brackets; a view's title (`Commit: main.py`).
     pub fn title_path(&self, cx: &App) -> Option<String> {
+        if let Some(view) = self.active.and_then(|i| self.tabs[i].view()) {
+            return Some(view.title(cx).to_string());
+        }
         let path = self.active_editor()?.read(cx).path()?.clone();
         let full = path.display().to_string();
         let relative = self
@@ -1749,9 +1752,14 @@ impl Workbench {
         );
         // The active file's path, centred in the toolbar while it fits.
         let file_widget = self.title_path(cx).map(|text| {
+            let view_icon = self
+                .active
+                .and_then(|i| self.tabs[i].view())
+                .map(|v| v.icon(cx));
             let icon = self
                 .active_editor()
                 .and_then(|e| e.read(cx).path().map(|p| self.file_types.icon(p)))
+                .or(view_icon)
                 .unwrap_or(IconName::FILE_UNKNOWN);
             let text = measure.text(&text, FontWeight::NORMAL, Cut::End);
             Widget::text(chrome::file_path_widget_chrome(), text, move |text| {

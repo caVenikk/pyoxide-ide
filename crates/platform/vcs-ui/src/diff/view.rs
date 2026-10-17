@@ -22,7 +22,7 @@ use gpui::{
 use serde_json::{Value as Json, json};
 use text::{Buffer, Selection, SelectionSet};
 use themes::UiRole;
-use ui::components::{Tooltip, checkbox, small_icon_button};
+use ui::components::{Tooltip, checkbox, icon_button};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt as _;
@@ -38,13 +38,36 @@ use super::{
 
 /// The decorations' group in both editors.
 const GROUP: &str = "diff";
+/// Rows of room below the last one (`EditorSettings`' additional lines).
+const ROOM_AFTER_END: usize = 5;
 /// Edits of the current text are compared again after this long.
 const REDIFF_DELAY: Duration = Duration::from_millis(50);
-/// Height of the toolbar row and of the titles row, and the room at
-/// their sides.
-const TOOLBAR_HEIGHT: f32 = 32.0;
-const TITLE_HEIGHT: f32 = 24.0;
-const ROW_INSET: f32 = 8.0;
+/// The toolbar (`DiffRequestProcessor`'s, measured on the reference): its
+/// height and the room at its ends; the New UI's buttons of 26 px with
+/// icons of 16; the separators, 1 px with room at both sides; the gap
+/// between the count of differences and the viewer's modes, whose
+/// segments are 50 x 24, and the gap after them.
+const TOOLBAR_HEIGHT: f32 = 34.0;
+const TOOLBAR_LEFT: f32 = 4.5;
+const TOOLBAR_RIGHT: f32 = 5.5;
+const BUTTON: f32 = 26.0;
+const ICON: f32 = 16.0;
+const SEPARATOR_ROOM: f32 = 3.5;
+const SEPARATOR_HEIGHT: f32 = 17.0;
+const FILES_GAP: f32 = 1.5;
+const STATUS_GAP: f32 = 15.0;
+const MODE_SIZE: (f32, f32) = (50.0, 24.0);
+const MODE_GAP: f32 = 8.0;
+/// The titles (`DiffContentPanel`): their height above a border of 1 px;
+/// the lock's room at the left; the gap between a revision and its path
+/// (`ipadx` 8 and the label's own); the right title's check box where the
+/// reference has the gutter's check boxes, and the gap after it.
+const TITLE_HEIGHT: f32 = 19.0;
+const TITLE_LEFT: f32 = 2.5;
+const LOCK_ROOM: f32 = 16.5;
+const PATH_GAP: f32 = 9.0;
+const CHECKBOX_LEFT: f32 = 30.0;
+const CHECKBOX_GAP: f32 = 12.5;
 
 /// The title of a side (`DiffEditorTitleDetails`): a revision or a name,
 /// then the file's path in grey.
@@ -151,6 +174,14 @@ impl DiffView {
             e.set_mirrored(true, cx);
             e
         });
+        // The reference's diff editors: no caret row, no page below the
+        // text (`DiffUtil.createEditor`).
+        for e in [&left, &right] {
+            e.update(cx, |e, cx| {
+                e.set_caret_row_shown(false, cx);
+                e.set_room_after_end(Some(ROOM_AFTER_END), cx);
+            });
+        }
         right.update(cx, |e, cx| {
             e.set_soft_wraps(false, cx);
             e.set_mirrored(false, cx);
@@ -695,14 +726,17 @@ impl DiffView {
     // ---- drawing --------------------------------------------------------------
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (muted, link, separator, pressed, radius) = {
+        let (muted, link, separator, pressed, mode_border, radius, background) = {
             let theme = cx.theme();
             (
                 theme.color(UiRole::TextMuted),
                 theme.color(UiRole::TextLink),
                 theme.color(UiRole::Divider),
                 theme.color(UiRole::Pressed),
+                theme.color(UiRole::BorderInput),
                 theme.metric(themes::Metric::CornerRadius),
+                // A panel above the editors (`Panel.background`).
+                theme.color(UiRole::Surface),
             )
         };
         let shortcut = |action: &dyn gpui::Action| {
@@ -722,8 +756,9 @@ impl DiffView {
                       keys: Option<SharedString>,
                       cx: &mut Context<Self>,
                       on: fn(&mut Self, &mut Window, &mut Context<Self>)| {
-            small_icon_button(id, icon, enabled, cx)
+            icon_button(id, icon, px(BUTTON), px(ICON), false, cx)
                 .debug_selector(move || format!("diff-{id}"))
+                .when(!enabled, |b| b.opacity(ui::components::DISABLED_ALPHA))
                 .tooltip(Tooltip::text(tooltip, keys))
                 .when(enabled, |b| {
                     b.on_click(
@@ -734,12 +769,12 @@ impl DiffView {
         let vertical_separator = || {
             div()
                 .flex_none()
-                .mx(px(4.0))
+                .mx(px(SEPARATOR_ROOM))
                 .w(px(1.0))
-                .h(px(16.0))
+                .h(px(SEPARATOR_HEIGHT))
                 .bg(separator)
         };
-        let mut left = div().flex().flex_row().items_center().gap(px(2.0));
+        let mut left = div().flex().flex_row().items_center();
         left = left
             .child(button(
                 "previous",
@@ -784,7 +819,7 @@ impl DiffView {
                 .child(
                     div()
                         .debug_selector(|| "diff-files".into())
-                        .px(px(2.0))
+                        .px(px(FILES_GAP))
                         .whitespace_nowrap()
                         .text_color(link)
                         .child(files),
@@ -800,6 +835,8 @@ impl DiffView {
                 ));
         }
         let status = model::status_text(self.changes.len());
+        // The viewer's modes (`DiffToolChooser`): side by side is the one
+        // there is.
         let mode = |id: &'static str, icon: IconName, selected: bool, tooltip: &'static str| {
             div()
                 .id(id)
@@ -808,29 +845,38 @@ impl DiffView {
                 .flex_none()
                 .items_center()
                 .justify_center()
-                .size(px(ui::components::SMALL_BUTTON))
+                .w(px(MODE_SIZE.0))
+                .h(px(MODE_SIZE.1))
                 .rounded(radius)
-                .when(selected, |d| d.bg(pressed))
+                .when(selected, |d| {
+                    d.bg(pressed).border_1().border_color(mode_border)
+                })
                 .when(!selected, |d| d.opacity(ui::components::DISABLED_ALPHA))
                 .tooltip(Tooltip::text(tooltip, None))
-                .child(Icon::new(icon).size(px(ui::components::SMALL_ICON)))
+                .child(Icon::new(icon).size(px(ICON)))
         };
-        let gear = small_icon_button("settings", IconName::SETTINGS_SMALL, true, cx)
-            .debug_selector(|| "diff-settings".into())
-            .tooltip(Tooltip::text("Show Diff Settings", None))
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                this.show_settings(&ShowSettings, window, cx)
-            }));
+        let gear = icon_button(
+            "settings",
+            IconName::SETTINGS_SMALL,
+            px(BUTTON),
+            px(ICON),
+            false,
+            cx,
+        )
+        .debug_selector(|| "diff-settings".into())
+        .tooltip(Tooltip::text("Show Diff Settings", None))
+        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+            this.show_settings(&ShowSettings, window, cx)
+        }));
         let gear_bounds = self.gear_bounds_tracker();
         let right = div()
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.0))
             .child(
                 div()
                     .debug_selector(|| "diff-status".into())
-                    .mr(px(6.0))
+                    .mr(px(STATUS_GAP))
                     .whitespace_nowrap()
                     .text_color(muted)
                     .child(status),
@@ -847,7 +893,7 @@ impl DiffView {
                 false,
                 "Unified viewer",
             ))
-            .child(div().w(px(6.0)))
+            .child(div().w(px(MODE_GAP)))
             .child(div().relative().child(gear).child(gear_bounds));
         div()
             .flex()
@@ -856,7 +902,9 @@ impl DiffView {
             .items_center()
             .justify_between()
             .h(px(TOOLBAR_HEIGHT))
-            .px(px(ROW_INSET))
+            .pl(px(TOOLBAR_LEFT))
+            .pr(px(TOOLBAR_RIGHT))
+            .bg(background)
             .child(left)
             .child(right)
     }
@@ -885,22 +933,33 @@ impl DiffView {
             .flex_1()
             .min_w(px(0.0))
             .items_center()
-            .gap(px(4.0))
-            .px(px(ROW_INSET))
+            .pl(px(TITLE_LEFT))
+            .pr(px(TITLE_LEFT))
             .overflow_hidden()
             .whitespace_nowrap();
         if title.read_only {
-            row = row.child(Icon::new(IconName::LOCKED).size(px(14.0)));
+            row = row.child(
+                div()
+                    .flex_none()
+                    .w(px(LOCK_ROOM))
+                    .child(Icon::new(IconName::LOCKED).size(px(ICON))),
+            );
         }
         if side == Side::Right
             && let Some(included) = request.included
         {
             row = row.child(
-                checkbox("diff-included", included, cx)
-                    .debug_selector(|| "diff-included".into())
-                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                        cx.emit(DiffEvent::SetIncluded(!included))
-                    })),
+                div()
+                    .flex_none()
+                    .pl(px(CHECKBOX_LEFT - TITLE_LEFT))
+                    .pr(px(CHECKBOX_GAP))
+                    .child(
+                        checkbox("diff-included", included, cx)
+                            .debug_selector(|| "diff-included".into())
+                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                cx.emit(DiffEvent::SetIncluded(!included))
+                            })),
+                    ),
             );
         }
         row = row.child(div().flex_none().child(title.label.clone()));
@@ -908,7 +967,7 @@ impl DiffView {
             row = row.child(
                 div()
                     .id(("diff-title-path", side as usize))
-                    .ml(px(4.0))
+                    .ml(px(PATH_GAP))
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .text_color(muted)
@@ -921,7 +980,8 @@ impl DiffView {
         row.into_any_element()
     }
 
-    /// The hint over the current side's caret.
+    /// The hint under the current side's caret (`DiffUtil.showSuccessPopup`
+    /// at the editor's best popup location).
     fn render_hint(&self, cx: &App) -> Option<AnyElement> {
         let text = self.hint()?;
         let theme = cx.theme();
@@ -929,7 +989,7 @@ impl DiffView {
         Some(
             deferred(
                 anchored()
-                    .position(point(caret.left(), caret.top() - px(30.0)))
+                    .position(point(caret.left(), caret.bottom() + px(2.0)))
                     .child(
                         div()
                             .debug_selector(|| "diff-hint".into())
@@ -1042,10 +1102,11 @@ impl Render for DiffView {
                 cx.on_next_frame(window, |_, _, cx| cx.notify());
             }
         }
-        let (background, family, size) = {
+        let (background, border, family, size) = {
             let theme = cx.theme();
             (
                 theme.color(UiRole::EditorBackground),
+                theme.color(UiRole::Border),
                 theme.ui_family(),
                 theme.ui_size(),
             )
@@ -1055,7 +1116,9 @@ impl Render for DiffView {
             .flex()
             .flex_row()
             .flex_none()
-            .h(px(TITLE_HEIGHT))
+            .h(px(TITLE_HEIGHT + 1.0))
+            .border_b_1()
+            .border_color(border)
             .child(self.render_title(Side::Left, cx))
             .child(div().flex_none().w(px(divider::WIDTH)))
             .child(self.render_title(Side::Right, cx));
