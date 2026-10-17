@@ -14,6 +14,20 @@ pub enum ThemeKind {
     Light,
 }
 
+/// The look of the controls whose drawing differs between the reference's
+/// New UI themes and the classic ones (themes not based on a New UI theme,
+/// such as most theme plugins): the size of check boxes, the height of
+/// dialog buttons and the shape of tree arrows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Controls {
+    /// Check boxes of 16, buttons 28 high, chevrons.
+    #[default]
+    New,
+    /// Check boxes of 14, buttons 24 high, filled triangles.
+    Classic,
+}
+
 /// Line decoration under text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -361,6 +375,7 @@ pub struct Theme {
     pub kind: ThemeKind,
     pub author: Option<String>,
     pub description: Option<String>,
+    pub controls: Controls,
     pub ui: UiColors,
     pub text: TextStyles,
     pub fonts: Fonts,
@@ -387,6 +402,7 @@ impl Theme {
                 description: self.description.clone(),
                 extends: None,
                 scheme_only: false,
+                controls: (self.controls != Controls::New).then_some(self.controls),
             },
             palette: BTreeMap::new(),
             ui: self
@@ -434,6 +450,10 @@ pub struct ThemeHeader {
     /// only, and its UI colours are those of its base theme.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub scheme_only: bool,
+    /// The look of the controls; inherited from `extends`, `new` when no
+    /// file of the chain sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controls: Option<Controls>,
 }
 
 /// A theme as written in a TOML file: sparse, with optional `extends` and

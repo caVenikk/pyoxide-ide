@@ -317,7 +317,7 @@ impl Render for BreakpointPopup {
             .flex_none()
             .items_center()
             .justify_center()
-            .h(px(ui::form::BUTTON_HEIGHT))
+            .h(px(ui::form::button_height(cx)))
             .min_w(px(ui::form::BUTTON_WIDTH))
             .px(px(14.0))
             .rounded(ui::form::field_radius(cx))

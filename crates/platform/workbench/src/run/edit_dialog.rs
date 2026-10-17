@@ -146,8 +146,7 @@ const LABEL_WIDTH: f32 = 153.0;
 const FIELD: f32 = ui::form::FIELD_HEIGHT;
 const FIELD_GAP: f32 = ui::form::ROW_GAP;
 const CHOICE_WIDTH: f32 = 87.0;
-/// The Run split button: its height and the space after it.
-const BUTTON_HEIGHT: f32 = ui::form::BUTTON_HEIGHT;
+/// The space after the Run split button (as high as the dialog's buttons).
 const RUN_GAP: f32 = 19.0;
 /// Where Run goes on macOS: before Cancel (`EditConfigurationsDialog`).
 const RUN_MAC_ORDER: i32 = -100;
@@ -1441,6 +1440,8 @@ struct Colors {
     surface: gpui::Hsla,
     raised: gpui::Hsla,
     text: gpui::Hsla,
+    /// Text of the configuration tree's rows.
+    tree: gpui::Hsla,
     muted: gpui::Hsla,
     border: gpui::Hsla,
     input: gpui::Hsla,
@@ -1462,6 +1463,7 @@ impl Colors {
             surface: theme.color(UiRole::Surface),
             raised: theme.color(UiRole::SurfaceRaised),
             text: theme.color(UiRole::Text),
+            tree: theme.color(UiRole::TreeText),
             muted: theme.color(UiRole::TextMuted),
             border: theme.color(UiRole::Border),
             input: theme.color(UiRole::BorderInput),
@@ -1581,105 +1583,101 @@ impl EditDialog {
             control: px(16.0),
         };
         let guide_color = cx.theme().color(UiRole::TreeIndentGuide);
-        let rows: Vec<AnyElement> =
-            nodes
-                .iter()
-                .enumerate()
-                .map(|(i, (node, depth))| {
-                    let selected = self.selected.as_ref() == Some(node);
-                    let (icon, label, alpha, note) = match node {
-                        Node::Type(t) => {
-                            let icon = self
-                                .types
-                                .get(t)
-                                .map(|i| IconName(i.icon))
-                                .unwrap_or(IconName::FILE_UNKNOWN);
-                            (icon, self.type_name(t), 1.0, None)
-                        }
-                        Node::Folder(_, f) => (IconName::FOLDER, f.clone(), 1.0, None),
-                        Node::Config(k) => {
-                            let c = self.list.get(k);
-                            let icon = c
-                                .and_then(|c| self.types.icon_of(c))
-                                .map(IconName)
-                                .unwrap_or(IconName::FILE_UNKNOWN);
-                            let alpha = if c.is_some_and(|c| c.temporary) {
-                                TEMPORARY_ICON_ALPHA
-                            } else {
-                                1.0
-                            };
-                            let note = c
-                                .filter(|c| c.is_unsupported())
-                                .map(|_| super::dropdown::NOT_SUPPORTED);
-                            (icon, k.name.clone(), alpha, note)
-                        }
-                    };
-                    let parent = Self::is_parent(node);
-                    let expanded = !self.collapsed.contains(node);
-                    let bold = matches!(node, Node::Type(_));
-                    let toggle = node.clone();
-                    let node = node.clone();
-                    let selector = format!("run-dialog-node:{label}");
-                    div()
-                        .id(("run-dialog-node", i))
-                        .debug_selector(move || selector.clone())
-                        .flex()
-                        .flex_none()
-                        .flex_row()
-                        .items_center()
-                        .h(px(ROW))
-                        .mx(px(TREE_MARGIN))
-                        .pl(px(INDENT * *depth as f32))
-                        .rounded(c.radius)
-                        .when(selected, |d| d.bg(c.selection))
-                        .when(selected && !tree_focused, |d| d.opacity(0.9))
-                        .children(guides.row(*depth, parent && expanded, px(ROW), guide_color))
-                        .child(
-                            div()
-                                .id(("run-dialog-chevron", i))
-                                .flex_none()
-                                .w(px(16.0))
-                                .when(parent, |d| {
-                                    d.child(Icon::new(if expanded {
-                                        IconName::CHEVRON_DOWN
-                                    } else {
-                                        IconName::CHEVRON_RIGHT
-                                    }))
-                                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+        let rows: Vec<AnyElement> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, (node, depth))| {
+                let selected = self.selected.as_ref() == Some(node);
+                let (icon, label, alpha, note) = match node {
+                    Node::Type(t) => {
+                        let icon = self
+                            .types
+                            .get(t)
+                            .map(|i| IconName(i.icon))
+                            .unwrap_or(IconName::FILE_UNKNOWN);
+                        (icon, self.type_name(t), 1.0, None)
+                    }
+                    Node::Folder(_, f) => (IconName::FOLDER, f.clone(), 1.0, None),
+                    Node::Config(k) => {
+                        let c = self.list.get(k);
+                        let icon = c
+                            .and_then(|c| self.types.icon_of(c))
+                            .map(IconName)
+                            .unwrap_or(IconName::FILE_UNKNOWN);
+                        let alpha = if c.is_some_and(|c| c.temporary) {
+                            TEMPORARY_ICON_ALPHA
+                        } else {
+                            1.0
+                        };
+                        let note = c
+                            .filter(|c| c.is_unsupported())
+                            .map(|_| super::dropdown::NOT_SUPPORTED);
+                        (icon, k.name.clone(), alpha, note)
+                    }
+                };
+                let parent = Self::is_parent(node);
+                let expanded = !self.collapsed.contains(node);
+                let bold = matches!(node, Node::Type(_));
+                let toggle = node.clone();
+                let node = node.clone();
+                let selector = format!("run-dialog-node:{label}");
+                div()
+                    .id(("run-dialog-node", i))
+                    .debug_selector(move || selector.clone())
+                    .flex()
+                    .flex_none()
+                    .flex_row()
+                    .items_center()
+                    .h(px(ROW))
+                    .mx(px(TREE_MARGIN))
+                    .pl(px(INDENT * *depth as f32))
+                    .rounded(c.radius)
+                    .when(selected, |d| d.bg(c.selection))
+                    .when(selected && !tree_focused, |d| d.opacity(0.9))
+                    .children(guides.row(*depth, parent && expanded, px(ROW), guide_color))
+                    .child(
+                        div()
+                            .id(("run-dialog-chevron", i))
+                            .flex_none()
+                            .w(px(16.0))
+                            .when(parent, |d| {
+                                d.child(ui::components::tree_arrow(expanded, cx)).on_click(
+                                    cx.listener(move |this, _: &ClickEvent, _, cx| {
                                         cx.stop_propagation();
                                         this.toggle_node(toggle.clone(), cx);
-                                    }))
-                                }),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .ml(px(5.0))
-                                .when(alpha < 1.0, |d| d.opacity(alpha))
-                                .child(Icon::new(icon)),
-                        )
-                        .child(
-                            div()
-                                .ml(px(3.0))
-                                .whitespace_nowrap()
-                                .text_color(c.text)
-                                .when(bold, |d| d.font_weight(FontWeight::SEMIBOLD))
-                                .child(label),
-                        )
-                        .children(note.map(|n| {
-                            div()
-                                .ml(px(6.0))
-                                .whitespace_nowrap()
-                                .text_color(c.muted)
-                                .child(n)
-                        }))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            window.focus(&this.tree_focus);
-                            this.select_node(Some(node.clone()), window, cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect();
+                                    }),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .ml(px(5.0))
+                            .when(alpha < 1.0, |d| d.opacity(alpha))
+                            .child(Icon::new(icon)),
+                    )
+                    .child(
+                        div()
+                            .ml(px(3.0))
+                            .whitespace_nowrap()
+                            .text_color(c.tree)
+                            .when(bold, |d| d.font_weight(FontWeight::SEMIBOLD))
+                            .child(label),
+                    )
+                    .children(note.map(|n| {
+                        div()
+                            .ml(px(6.0))
+                            .whitespace_nowrap()
+                            .text_color(c.muted)
+                            .child(n)
+                    }))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        window.focus(&this.tree_focus);
+                        this.select_node(Some(node.clone()), window, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
         let tree = div()
             .id("run-dialog-tree")
             .debug_selector(|| "run-dialog-tree".into())
@@ -2349,6 +2347,7 @@ impl EditDialog {
         let can_run = self
             .selected_config()
             .is_some_and(|config| !config.is_unsupported());
+        let button_height = ui::form::button_height(cx);
         // The Run split button (`DialogWrapper` with the executors).
         let run = div()
             .id("run-dialog-run")
@@ -2358,7 +2357,7 @@ impl EditDialog {
             .flex_none()
             .flex_row()
             .items_center()
-            .h(px(BUTTON_HEIGHT))
+            .h(px(button_height))
             .rounded(c.field_radius)
             .border_1()
             .border_color(c.input)
@@ -2382,7 +2381,7 @@ impl EditDialog {
                 div()
                     .flex_none()
                     .w(px(1.0))
-                    .h(px(BUTTON_HEIGHT - 10.0))
+                    .h(px(button_height - 10.0))
                     .bg(c.input),
             )
             .child(

@@ -680,18 +680,12 @@ impl KeymapPage {
             theme.color(UiRole::SelectionInactive)
         };
         let key = row.key.clone();
-        let (arrow, icon, label, caps): (Option<IconName>, Option<IconName>, String, _) =
+        // A group's arrow: whether it is open.
+        let (arrow, icon, label, caps): (Option<bool>, Option<IconName>, String, _) =
             match &row.kind {
-                RowKind::Group { name, open } => (
-                    Some(if *open {
-                        IconName::CHEVRON_DOWN
-                    } else {
-                        IconName::CHEVRON_RIGHT
-                    }),
-                    Some(IconName::FOLDER),
-                    name.clone(),
-                    None,
-                ),
+                RowKind::Group { name, open } => {
+                    (Some(*open), Some(IconName::FOLDER), name.clone(), None)
+                }
                 RowKind::Action(a) => (
                     None,
                     None,
@@ -713,14 +707,16 @@ impl KeymapPage {
             .items_center()
             .pl(px(ROW_LEFT + INDENT * row.depth as f32))
             .when(selected, |d| d.bg(selection))
-            .when(selected && focused, |d| {
-                d.text_color(theme.color(UiRole::SelectionText))
+            .text_color(if selected && focused {
+                theme.color(UiRole::SelectionText)
+            } else {
+                theme.color(UiRole::TreeText)
             })
             .child(
                 div()
                     .flex_none()
                     .w(px(ARROW))
-                    .children(arrow.map(|a| Icon::new(a).size(px(ARROW)))),
+                    .children(arrow.map(|open| ui::components::tree_arrow(open, cx))),
             )
             .child(
                 div()

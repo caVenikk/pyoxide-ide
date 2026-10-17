@@ -8,7 +8,7 @@ use gpui::{
     IntoElement, PathBuilder, Render, SharedString, Stateful, Window, canvas, div, point,
     prelude::*, px,
 };
-use themes::{Metric, UiRole};
+use themes::{Controls, Metric, UiRole};
 
 use crate::icons::{Icon, IconName};
 use crate::theme::ThemeExt;
@@ -158,42 +158,151 @@ pub fn popup_shadow() -> Vec<BoxShadow> {
     }]
 }
 
-/// Size of a check box.
+/// Size of a check box with the New UI's controls (the box of the 24 px
+/// check box icons of the New UI themes); classic controls have
+/// [`CLASSIC_CHECKBOX`].
 pub const CHECKBOX: f32 = 16.0;
+/// Size of a check box with classic controls (the 14 px box of the
+/// Darcula check box icons).
+pub const CLASSIC_CHECKBOX: f32 = 14.0;
 
-/// A check box: a rounded square with the input outline, filled with the
-/// accent colour and a check mark while it is on. The caller adds the click
-/// handler (usually on the check box and its label together).
+/// The size of a check box with the theme's controls.
+pub fn checkbox_size(cx: &App) -> f32 {
+    match cx.theme().controls() {
+        Controls::New => CHECKBOX,
+        Controls::Classic => CLASSIC_CHECKBOX,
+    }
+}
+
+/// A check box as the reference draws its check box icons: a rounded
+/// square with an outline and a fill, a check mark while it is on, in the
+/// theme's check box colours (`checkbox-*`, the `Checkbox.*` keys of the
+/// icon palette); 16 px with round strokes for the New UI's controls, 14 px
+/// for classic ones. The caller adds the click handler (usually on the
+/// check box and its label together).
 pub fn checkbox(id: impl Into<ElementId>, checked: bool, cx: &App) -> Stateful<Div> {
+    checkbox_with(id, checked, true, cx)
+}
+
+/// A check box that may be disabled ([`checkbox`]).
+pub fn checkbox_with(
+    id: impl Into<ElementId>,
+    checked: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
     let theme = cx.theme();
-    let mark = theme.color(UiRole::OnAccent);
+    let (background, border, mark) = match (checked, enabled) {
+        (_, false) => (
+            UiRole::CheckboxBackgroundDisabled,
+            UiRole::CheckboxBorderDisabled,
+            UiRole::CheckboxCheckDisabled,
+        ),
+        (true, true) => (
+            UiRole::CheckboxBackgroundSelected,
+            UiRole::CheckboxBorderSelected,
+            UiRole::CheckboxCheck,
+        ),
+        (false, true) => (
+            UiRole::CheckboxBackground,
+            UiRole::CheckboxBorder,
+            UiRole::CheckboxCheck,
+        ),
+    };
+    let mark = theme.color(mark);
+    let classic = theme.controls() == Controls::Classic;
+    // The check mark's points and width in the box: the New UI's
+    // `M8 12.5L11 15.5L16.5 9` (width 2, round) in its 24 px icon, and the
+    // middle line of the Darcula mark in its 19 px icon, each less the
+    // box's place in the icon.
+    let (size, radius, points, width) = if classic {
+        (
+            CLASSIC_CHECKBOX,
+            2.0,
+            [(3.1, 7.0), (5.6, 10.3), (10.4, 3.3)],
+            1.75,
+        )
+    } else {
+        (CHECKBOX, 3.0, [(4.0, 8.5), (7.0, 11.5), (12.5, 5.0)], 2.0)
+    };
     div()
         .id(id)
         .flex_none()
-        .size(px(CHECKBOX))
-        .rounded(theme.metric(Metric::CornerRadiusSmall))
+        .size(px(size))
+        .rounded(px(radius))
+        .bg(theme.color(background))
+        .border_1()
+        .border_color(theme.color(border))
         .when(checked, |d| {
-            d.bg(theme.color(UiRole::Accent)).child(
+            d.child(
                 canvas(
                     |_, _, _| (),
                     move |bounds, _, window, _| {
-                        let o = bounds.origin;
-                        let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
-                        let mut path = PathBuilder::stroke(px(1.75));
-                        path.move_to(at(4.0, 8.0));
-                        path.line_to(at(7.0, 11.0));
-                        path.line_to(at(12.0, 5.0));
+                        // The canvas fills the box inside its outline.
+                        let o = bounds.origin - point(px(1.0), px(1.0));
+                        let at = |(x, y): (f32, f32)| point(o.x + px(x), o.y + px(y));
+                        let mut path = PathBuilder::stroke(px(width));
+                        path.move_to(at(points[0]));
+                        path.line_to(at(points[1]));
+                        path.line_to(at(points[2]));
                         if let Ok(path) = path.build() {
                             window.paint_path(path, mark);
+                        }
+                        // Round caps and join.
+                        for p in points {
+                            let r = width / 2.0;
+                            let dot = gpui::Bounds::new(
+                                at((p.0 - r, p.1 - r)),
+                                gpui::size(px(width), px(width)),
+                            );
+                            window.paint_quad(gpui::fill(dot, mark).corner_radii(px(r)));
                         }
                     },
                 )
                 .size_full(),
             )
         })
-        .when(!checked, |d| {
-            d.border_1().border_color(theme.color(UiRole::BorderInput))
-        })
+}
+
+/// The expand arrow of a tree row or a collapsible group in a 16 px slot:
+/// the New UI's chevrons, or filled triangles in the theme's grey icon
+/// colour for classic controls (as the reference shows its trees with
+/// classic theme plugins).
+pub fn tree_arrow(expanded: bool, cx: &App) -> gpui::AnyElement {
+    let theme = cx.theme();
+    if theme.controls() == Controls::New {
+        let icon = if expanded {
+            IconName::CHEVRON_DOWN
+        } else {
+            IconName::CHEVRON_RIGHT
+        };
+        return Icon::new(icon).into_any_element();
+    }
+    let color = theme.color(UiRole::IconGrayStroke);
+    // A triangle 7 across its base and 4.75 high, centred in the slot.
+    let points: [(f32, f32); 3] = if expanded {
+        [(4.5, 5.6), (11.5, 5.6), (8.0, 10.35)]
+    } else {
+        [(5.6, 4.5), (5.6, 11.5), (10.35, 8.0)]
+    };
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let o = bounds.origin;
+            let at = |(x, y): (f32, f32)| point(o.x + px(x), o.y + px(y));
+            let mut path = PathBuilder::fill();
+            path.move_to(at(points[0]));
+            path.line_to(at(points[1]));
+            path.line_to(at(points[2]));
+            path.close();
+            if let Ok(path) = path.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .flex_none()
+    .size(px(16.0))
+    .into_any_element()
 }
 
 /// Size of the loading indicator.

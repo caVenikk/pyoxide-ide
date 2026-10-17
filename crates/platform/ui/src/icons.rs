@@ -197,6 +197,9 @@ impl IconName {
     pub const EXPAND: Self = Self("inline/expand");
     pub const INLINE_SETTINGS: Self = Self("inline/inlineSettings");
     pub const HELP: Self = Self("general/help");
+    /// The circled "?" after an option with a help tooltip
+    /// (`AllIcons.General.ContextHelp`, `ContextHelpLabel`).
+    pub const CONTEXT_HELP: Self = Self("general/questionMark");
     // The Settings window: Back and Forward of its banner, the mark of
     // pages with project settings.
     pub const BACK: Self = Self("general/left");
@@ -249,7 +252,7 @@ platform_icons! {
         "general/inspections/inspectionsOK", "general/left", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
         "general/previewHorizontally", "general/print", "general/projectConfigurable",
-        "general/questionDialog", "general/refresh", "general/remove", "general/right",
+        "general/questionDialog", "general/questionMark", "general/refresh", "general/remove", "general/right",
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
@@ -287,8 +290,9 @@ platform_icons! {
 }
 
 /// A rasterized icon: name, dark variant, size in device pixels, tint
-/// (RGBA), opacity (0-255).
-type ImageKey = (&'static str, bool, u32, Option<u32>, u8);
+/// (RGBA), opacity (0-255), the theme's icon colours
+/// ([`crate::theme::IconColors::key`]).
+type ImageKey = (&'static str, bool, u32, Option<u32>, u8, u64);
 
 /// Registered icons and the rasterized images.
 #[derive(Default)]
@@ -353,11 +357,22 @@ pub fn image_with_opacity(
     cx: &App,
 ) -> Option<Arc<RenderImage>> {
     let icons = cx.try_global::<Icons>()?;
-    let dark = cx.theme().is_dark();
+    let theme = cx.theme();
+    let dark = theme.is_dark();
     let pixels = (f32::from(size) * window.scale_factor()).round().max(1.0) as u32;
     let tint = tint.map(rgba8);
     let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let key = (name.0, dark, pixels, tint.map(u32::from_be_bytes), alpha);
+    // A tint replaces every colour: the theme's icon colours do not matter.
+    let colors = theme.icon_colors();
+    let palette = if tint.is_some() { 0 } else { colors.key };
+    let key = (
+        name.0,
+        dark,
+        pixels,
+        tint.map(u32::from_be_bytes),
+        alpha,
+        palette,
+    );
     if let Some(image) = icons.images.borrow().get(&key) {
         return image.clone();
     }
@@ -369,6 +384,7 @@ pub fn image_with_opacity(
     };
     let image = match tint {
         Some(tint) => rasterize_tinted(svg, pixels, tint),
+        None if palette != 0 => rasterize(&recolor(svg, &colors.pairs), pixels),
         None => rasterize(svg, pixels),
     }
     .map(|image| fade(image, alpha))
@@ -394,6 +410,52 @@ fn fade(image: RenderImage, alpha: u8) -> RenderImage {
         Some(buffer) => RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)]),
         None => image,
     }
+}
+
+/// The SVG with the theme's icon colours: every `#RRGGBB` (any case) that
+/// is the first colour of a pair becomes the second (`#rrggbb`, or
+/// `rgba(...)` when it is not opaque), as the reference patches the
+/// `fill` and `stroke` of its icons (`UiThemePaletteScopeManager`).
+pub fn recolor(svg: &[u8], pairs: &[([u8; 3], [u8; 4])]) -> Vec<u8> {
+    fn hex(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+    let mut out = Vec::with_capacity(svg.len() + 16);
+    let mut i = 0;
+    while i < svg.len() {
+        let rgb = (svg[i] == b'#' && i + 7 <= svg.len())
+            .then(|| {
+                let digits = &svg[i + 1..i + 7];
+                let next_is_hex = svg.get(i + 7).copied().and_then(hex).is_some();
+                let mut rgb = [0u8; 3];
+                for (n, pair) in digits.chunks(2).enumerate() {
+                    rgb[n] = hex(pair[0])? * 16 + hex(pair[1])?;
+                }
+                (!next_is_hex).then_some(rgb)
+            })
+            .flatten();
+        match rgb.and_then(|rgb| pairs.iter().find(|(from, _)| *from == rgb)) {
+            Some((_, [r, g, b, a])) => {
+                let text = if *a == u8::MAX {
+                    format!("#{r:02x}{g:02x}{b:02x}")
+                } else {
+                    format!("rgba({r},{g},{b},{:.3})", f32::from(*a) / 255.0)
+                };
+                out.extend_from_slice(text.as_bytes());
+                i += 7;
+            }
+            None => {
+                out.push(svg[i]);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// A colour as 8-bit RGBA.
@@ -525,6 +587,24 @@ mod tests {
         assert_eq!(&bytes[..4], &[0x5b, 0x4d, 0xd6, 0xff]);
         assert_eq!(bytes[7], 0);
         assert_eq!(rgba8(gpui::white()), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn the_theme_recolours_the_palette_colours_of_an_icon() {
+        let svg = br##"<svg><path fill="#57965C" stroke="#253627"/><path fill="#57965c80"/><rect fill="#CED0D6"/></svg>"##;
+        let pairs = [
+            ([0x57, 0x96, 0x5C], [0xA6, 0xE2, 0x2E, 0xFF]),
+            ([0x25, 0x36, 0x27], [0x27, 0x28, 0x22, 0x80]),
+        ];
+        let out = String::from_utf8(recolor(svg, &pairs)).unwrap();
+        assert_eq!(
+            out,
+            r##"<svg><path fill="#a6e22e" stroke="rgba(39,40,34,0.502)"/><path fill="#57965c80"/><rect fill="#CED0D6"/></svg>"##
+        );
+        // The recoloured icon still renders.
+        let svg = br##"<svg width="2" height="2" viewBox="0 0 2 2" xmlns="http://www.w3.org/2000/svg"><rect width="2" height="2" fill="#57965C"/></svg>"##;
+        let image = rasterize(&recolor(svg, &pairs), 2).unwrap();
+        assert_eq!(&image.as_bytes(0).unwrap()[..4], &[0x2E, 0xE2, 0xA6, 0xFF]);
     }
 
     #[test]

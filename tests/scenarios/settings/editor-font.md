@@ -14,7 +14,9 @@
 ## Expected
 - Step 2: Font, Size and Line height on two rows (`Size:` `13.0`,
   `Line height:` `1.2` with the bundled themes), Enable ligatures with its
-  help icon, "Restore defaults" drawn disabled while the font is
+  circled "?" help icon, under it the comment "See line height and
+  ligatures also in Reader mode" (the link selects the Reader mode page
+  where one is registered), "Restore defaults" drawn disabled while the font is
   JetBrains Mono at 13 with line height 1.2 and no ligatures, the
   collapsed Typography Settings (Fallback font: `<None>` with its comment),
   and on the right the editable preview with "Enter any text to preview"

@@ -11,6 +11,9 @@ pub enum KeySource {
     UiTheme,
     /// Other sections of a `.theme.json` (icons, ...).
     UiThemeSection,
+    /// The icon colour palette of a `.theme.json` (`icons` >
+    /// `ColorPalette`).
+    IconPalette,
     /// `<colors>` of a colour scheme.
     SchemeColor,
     /// `<attributes>` of a colour scheme.
@@ -24,6 +27,7 @@ impl KeySource {
         match self {
             KeySource::UiTheme => "ui",
             KeySource::UiThemeSection => "theme section",
+            KeySource::IconPalette => "icon palette",
             KeySource::SchemeColor => "scheme color",
             KeySource::SchemeAttribute => "scheme attribute",
             KeySource::SchemeOption => "scheme option",

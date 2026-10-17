@@ -173,6 +173,10 @@ fn merge_chain(chain: &[&ThemeFile]) -> Result<Theme, ThemeError> {
         metrics.extend(file.metrics.iter().map(|(k, v)| (*k, *v)));
     }
     let kind = chain.iter().find_map(|f| f.theme.kind);
+    let controls = chain
+        .iter()
+        .find_map(|f| f.theme.controls)
+        .unwrap_or_default();
 
     let mut missing: Vec<String> = Vec::new();
     if kind.is_none() {
@@ -225,6 +229,7 @@ fn merge_chain(chain: &[&ThemeFile]) -> Result<Theme, ThemeError> {
         kind: kind.unwrap_or(ThemeKind::Dark),
         author: leaf.theme.author.clone(),
         description: leaf.theme.description.clone(),
+        controls,
         ui: colors,
         text,
         fonts: font.complete().expect("checked by `missing`"),

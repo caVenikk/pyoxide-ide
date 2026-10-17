@@ -97,7 +97,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Keymap import | must | reference keymap XML with its parent chain, Import Keymap… on the Keymap page (#40) |
 | ⬜ | Code style import | should |  |
 | 🟡 | Editor colour scheme import (.icls) | must | themes crate: schemes with parents and baseAttributes, report; no settings UI yet |
-| 🟡 | UI theme import (.theme.json) | must | themes crate: theme.json and plugin jars (data files only), report; no settings UI yet |
+| 🟡 | UI theme import (.theme.json) | must | themes crate: theme.json and plugin jars (data files only), report; icon colour palette, run widget, tree, check box and button colours and sizes from the theme (#222, #225) |
 | ✅ | Import data sources and passwords from PyCharm (own) | should | own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data |
 
 ## python-intel

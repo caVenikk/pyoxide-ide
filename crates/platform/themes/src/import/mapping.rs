@@ -27,9 +27,14 @@ pub(crate) enum Src {
     Effect(&'static str),
     /// `ERROR_STRIPE_COLOR` of a scheme attribute.
     Stripe(&'static str),
+    /// A key of the icon colour palette of a UI theme (`icons` >
+    /// `ColorPalette`): `Green.Stroke`, `Checkbox.Background.Selected`, ...
+    /// A dark theme may also write it with `.Dark` appended, and a theme
+    /// may name the colour the key stands for in the icons (`#CED0D6`).
+    Palette(&'static str),
 }
 
-use Src::{Bg, Color, Effect, Fg, Key, Stripe, Ui};
+use Src::{Bg, Color, Effect, Fg, Key, Palette, Stripe, Ui};
 
 pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
     use UiRole::*;
@@ -181,11 +186,44 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         NonProjectFile => &[Ui("FileColor.Yellow")],
         RunWidgetRunning => &[Ui("RunWidget.runningBackground")],
         RunWidgetStop => &[Ui("RunWidget.stopBackground")],
+        RunWidgetIcon => &[Ui("RunWidget.iconColor")],
+        RunWidgetRunIcon => &[Ui("RunWidget.runIconColor")],
+        RunWidgetRunningIcon => &[Ui("RunWidget.runningIconColor")],
         DragAndDropBorder => &[Ui("DragAndDrop.borderColor")],
         DragAndDropRow => &[Ui("DragAndDrop.rowBackground")],
+        TreeText => &[Ui("Tree.foreground")],
         TreeIndentGuide => &[Ui("Tree.hash")],
         ListButtonHover => &[Ui("List.Button.hoverBackground")],
         ListButtonSeparator => &[Ui("List.Button.separatorColor")],
+        CheckboxBackground => &[Palette("Checkbox.Background.Default")],
+        CheckboxBorder => &[Palette("Checkbox.Border.Default")],
+        CheckboxBackgroundSelected => &[Palette("Checkbox.Background.Selected")],
+        CheckboxBorderSelected => &[Palette("Checkbox.Border.Selected")],
+        CheckboxCheck => &[Palette("Checkbox.Foreground.Selected")],
+        CheckboxBackgroundDisabled => &[Palette("Checkbox.Background.Disabled")],
+        CheckboxBorderDisabled => &[Palette("Checkbox.Border.Disabled")],
+        CheckboxCheckDisabled => &[Palette("Checkbox.Foreground.Disabled")],
+        IconGrayFill => &[Palette("Gray.Fill")],
+        IconGraySecondaryStroke => &[Palette("Gray.SecondaryStroke")],
+        IconGrayStroke => &[Palette("Gray.Stroke")],
+        IconBlueFill => &[Palette("Blue.Fill")],
+        IconBlueSolid => &[Palette("Blue.Solid")],
+        IconBlueStroke => &[Palette("Blue.Stroke")],
+        IconGreenFill => &[Palette("Green.Fill")],
+        IconGreenSolid => &[Palette("Green.Solid")],
+        IconGreenStroke => &[Palette("Green.Stroke")],
+        IconRedFill => &[Palette("Red.Fill")],
+        IconRedSolid => &[Palette("Red.Solid")],
+        IconRedStroke => &[Palette("Red.Stroke")],
+        IconYellowFill => &[Palette("Yellow.Fill")],
+        IconYellowSolid => &[Palette("Yellow.Solid")],
+        IconYellowStroke => &[Palette("Yellow.Stroke")],
+        IconOrangeFill => &[Palette("Orange.Fill")],
+        IconOrangeStroke => &[Palette("Orange.Stroke")],
+        IconPurpleFill => &[Palette("Purple.Fill")],
+        IconPurpleStroke => &[Palette("Purple.Stroke")],
+        IconTealFill => &[Palette("Teal.Fill")],
+        IconTealStroke => &[Palette("Teal.Stroke")],
         PopupBorder => &[Ui("Popup.borderColor"), Ui("Menu.borderColor")],
 
         EditorBackground => &[Bg("TEXT"), Ui("Editor.background")],
@@ -417,6 +455,8 @@ pub(crate) struct KnownKeys {
     pub wildcard_properties: HashSet<&'static str>,
     pub colors: HashSet<&'static str>,
     pub attributes: HashSet<&'static str>,
+    /// Keys of the icon colour palette.
+    pub palette: HashSet<&'static str>,
 }
 
 pub(crate) fn known_keys() -> &'static KnownKeys {
@@ -427,6 +467,7 @@ pub(crate) fn known_keys() -> &'static KnownKeys {
             wildcard_properties: HashSet::new(),
             colors: HashSet::new(),
             attributes: HashSet::new(),
+            palette: HashSet::new(),
         };
         for &role in UiRole::ALL {
             for src in ui_sources(role) {
@@ -443,6 +484,9 @@ pub(crate) fn known_keys() -> &'static KnownKeys {
                     }
                     Fg(key) | Bg(key) | Effect(key) | Stripe(key) => {
                         keys.attributes.insert(key);
+                    }
+                    Palette(key) => {
+                        keys.palette.insert(key);
                     }
                 }
             }
@@ -512,7 +556,13 @@ mod tests {
             }
         };
         let keys = known_keys();
-        for key in keys.ui.iter().chain(&keys.colors).chain(&keys.attributes) {
+        for key in keys
+            .ui
+            .iter()
+            .chain(&keys.colors)
+            .chain(&keys.attributes)
+            .chain(&keys.palette)
+        {
             need(format!("`{key}`"));
         }
         for role in UiRole::ALL {

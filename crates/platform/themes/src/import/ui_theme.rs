@@ -19,7 +19,11 @@ pub struct UiThemeData {
     /// `ui` flattened to leaf keys (`Button.default.foreground`); wildcard
     /// groups appear as `*.background`.
     pub ui: BTreeMap<String, Value>,
-    /// Other top-level sections (icons, ...) with the number of leaves in each.
+    /// `icons` > `ColorPalette`: a palette key (`Green.Stroke`, `#CED0D6`)
+    /// to a colour text or a name of `colors`.
+    pub icon_palette: BTreeMap<String, String>,
+    /// Other top-level sections (icons, ...) with the number of leaves in
+    /// each; the icon colour palette is not counted.
     pub other: BTreeMap<String, usize>,
     pub origin: String,
     /// Path inside the archive or directory, `/`-separated.
@@ -68,10 +72,21 @@ impl UiThemeData {
             editor_scheme: text_of("editorScheme"),
             palette: BTreeMap::new(),
             ui: BTreeMap::new(),
+            icon_palette: BTreeMap::new(),
             other: BTreeMap::new(),
             origin: origin.to_owned(),
             entry_path: entry_path.to_owned(),
         };
+        if let Some(Value::Object(palette)) =
+            root.get("icons").and_then(|icons| icons.get(ICON_PALETTE))
+        {
+            for (key, value) in palette {
+                if let Some(text) = value.as_str() {
+                    data.icon_palette
+                        .insert(key.clone(), text.trim().to_owned());
+                }
+            }
+        }
         if let Some(Value::Object(colors)) = root.get("colors") {
             for (name, value) in colors {
                 if let Some(text) = value.as_str() {
@@ -89,12 +104,25 @@ impl UiThemeData {
                 continue;
             }
             let mut leaves = BTreeMap::new();
-            flatten(key, value, &mut leaves);
+            match (key.as_str(), value) {
+                ("icons", Value::Object(icons)) => {
+                    for (inner, value) in icons.iter().filter(|(k, _)| *k != ICON_PALETTE) {
+                        flatten(&format!("icons.{inner}"), value, &mut leaves);
+                    }
+                    if leaves.is_empty() {
+                        continue;
+                    }
+                }
+                _ => flatten(key, value, &mut leaves),
+            }
             data.other.insert(key.clone(), leaves.len().max(1));
         }
         Ok(data)
     }
 }
+
+/// The section of `icons` with the icon colour palette.
+const ICON_PALETTE: &str = "ColorPalette";
 
 fn file_stem(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -127,7 +155,7 @@ mod tests {
             "Button": { "default": { "foreground": "fg" }, "arc": "8" },
             "Tree.rowHeight": 22
         },
-        "icons": { "ColorPalette": { "a": "#000000", "b": "#ffffff" } },
+        "icons": { "ColorPalette": { "a": "#000000", "b": "fg" }, "/x.svg": "/y.svg" },
         "UIDesigner": { "x": 1 }
     }"##;
 
@@ -147,8 +175,18 @@ mod tests {
         );
         assert_eq!(t.ui["Button.default.foreground"], Value::from("fg"));
         assert_eq!(t.ui["Tree.rowHeight"], Value::from(22));
-        assert_eq!(t.other["icons"], 2);
+        // The icon colour palette is read; the icon paths stay unmapped.
+        assert_eq!(t.icon_palette["a"], "#000000");
+        assert_eq!(t.icon_palette["b"], "fg");
+        assert_eq!(t.other["icons"], 1);
         assert_eq!(t.other["UIDesigner"], 1);
+        let only_palette = UiThemeData::parse(
+            r##"{"ui": {}, "icons": {"ColorPalette": {"Gray.Fill": "#000000"}}}"##,
+            "x",
+            "x",
+        )
+        .unwrap();
+        assert!(!only_palette.other.contains_key("icons"));
     }
 
     #[test]

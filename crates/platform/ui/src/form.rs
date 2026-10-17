@@ -28,13 +28,18 @@ pub const ROW_GAP: f32 = 12.0;
 pub const CHECK_GAP: f32 = 6.0;
 /// Size of a radio button.
 pub const RADIO: f32 = 16.0;
-/// The buttons of the bottom bar: narrowest width, height, the space
-/// between two of them and the bar's height and side insets.
+/// The buttons of the bottom bar: narrowest width, the space between two
+/// of them and the bar's side insets; their height is the theme's
+/// ([`button_height`]).
 pub const BUTTON_WIDTH: f32 = 71.0;
-pub const BUTTON_HEIGHT: f32 = 27.0;
 pub const BUTTON_GAP: f32 = 13.0;
-pub const BAR_HEIGHT: f32 = BUTTON_HEIGHT + 25.0;
 pub const BAR_INSET: f32 = 15.0;
+/// Height of a button with the New UI's controls and with classic ones
+/// (`Button.minimumSize` 72×28 of the New UI themes, 72×24 by default).
+pub const BUTTON_HEIGHT: f32 = 28.0;
+pub const CLASSIC_BUTTON_HEIGHT: f32 = 24.0;
+/// The bottom bar's line and the space above and below its buttons.
+const BAR_PADDING: f32 = 1.0 + 2.0 * 11.0;
 /// Size of the round help button.
 pub const HELP_BUTTON: f32 = 22.0;
 /// Space between a group header's title and its line
@@ -42,6 +47,20 @@ pub const HELP_BUTTON: f32 = 22.0;
 const GROUP_LINE_GAP: f32 = 6.0;
 /// The largest a list popup opens before it fits its rows.
 const POPUP_MAX: (f32, f32) = (640.0, 900.0);
+
+/// The height of a dialog button with the theme's controls.
+pub fn button_height(cx: &App) -> f32 {
+    match cx.theme().controls() {
+        themes::Controls::New => BUTTON_HEIGHT,
+        themes::Controls::Classic => CLASSIC_BUTTON_HEIGHT,
+    }
+}
+
+/// The height of a dialog's bottom bar: its buttons, 11 above and below
+/// them, the line above.
+pub fn bar_height(cx: &App) -> f32 {
+    button_height(cx) + BAR_PADDING
+}
 
 /// The corner radius of fields and buttons.
 pub fn field_radius(cx: &App) -> Pixels {
@@ -435,7 +454,7 @@ impl BarButton {
             .flex_none()
             .items_center()
             .justify_center()
-            .h(px(BUTTON_HEIGHT))
+            .h(px(button_height(cx)))
             .min_w(px(BUTTON_WIDTH))
             .px(px(14.0))
             .rounded(field_radius(cx))
@@ -608,7 +627,7 @@ impl BottomBar {
             .flex_none()
             .flex_row()
             .items_center()
-            .h(px(BAR_HEIGHT))
+            .h(px(bar_height(cx)))
             .pl(px(BAR_INSET))
             .pr(px(BAR_INSET))
             .border_t_1()
@@ -653,13 +672,35 @@ impl MenuPopup {
         cx: &mut Context<T>,
         on_close: impl Fn(&mut T, &mut Context<T>) + 'static,
     ) -> Option<Self> {
+        let options = PopupOptions {
+            title,
+            ..PopupOptions::default()
+        };
+        Self::open_with(
+            items, options, position, focus, activate, window, cx, on_close,
+        )
+    }
+
+    /// [`Self::open`] with the popup's options (the list of a combo box
+    /// with rows of its own: [`PopupOptions::edge_to_edge`]); speed search
+    /// is on and the popup has a window of its own.
+    #[allow(clippy::too_many_arguments)] // the parts of a popup the owner chooses
+    pub fn open_with<T: 'static>(
+        items: Vec<MenuItem>,
+        options: PopupOptions,
+        position: Point<Pixels>,
+        focus: &FocusHandle,
+        activate: bool,
+        window: &mut Window,
+        cx: &mut Context<T>,
+        on_close: impl Fn(&mut T, &mut Context<T>) + 'static,
+    ) -> Option<Self> {
         let mut items = items;
         crate::menu::fill_shortcuts(&mut items, focus, window);
         let options = PopupOptions {
-            title,
             speed_search: true,
             own_window: true,
-            ..PopupOptions::default()
+            ..options
         };
         let mut built = None;
         let popup = crate::dialog_window::open_popup(
@@ -719,6 +760,22 @@ mod tests {
                 ButtonRole::Apply,
                 Box::new(Store),
             ))
+    }
+
+    #[gpui::test]
+    fn buttons_are_as_high_as_the_themes_controls(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::theme::init(cx, themes::ThemeKind::Dark);
+            assert_eq!(button_height(cx), BUTTON_HEIGHT);
+            assert_eq!(bar_height(cx), 28.0 + 23.0);
+            assert_eq!(crate::components::checkbox_size(cx), 16.0);
+            let mut classic = themes::builtin::dark();
+            classic.controls = themes::Controls::Classic;
+            crate::theme::set(cx, classic);
+            assert_eq!(button_height(cx), CLASSIC_BUTTON_HEIGHT);
+            assert_eq!(bar_height(cx), 24.0 + 23.0);
+            assert_eq!(crate::components::checkbox_size(cx), 14.0);
+        });
     }
 
     /// macOS: `Cancel | Apply | OK`; Windows and Linux: `OK | Cancel |

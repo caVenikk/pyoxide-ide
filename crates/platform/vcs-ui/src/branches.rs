@@ -1271,17 +1271,12 @@ impl BranchesPopup {
                 id,
                 ..
             } => {
-                let chevron = if *expanded {
-                    IconName::CHEVRON_DOWN
-                } else {
-                    IconName::CHEVRON_RIGHT
-                };
                 content = content
                     .child(
                         div()
                             .flex_none()
                             .w(px(CHEVRON))
-                            .child(Icon::new(chevron).size(px(ICON))),
+                            .child(ui::components::tree_arrow(*expanded, cx)),
                     )
                     .when(!id.path.is_empty(), |d| {
                         d.child(

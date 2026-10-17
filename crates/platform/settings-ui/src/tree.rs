@@ -340,7 +340,7 @@ impl SettingsWindow {
         } else {
             UiRole::SelectionInactive
         });
-        let text = theme.color(UiRole::Text);
+        let text = theme.color(UiRole::TreeText);
         let selected_text = theme.color(UiRole::SelectionText);
         let modified = theme.color(UiRole::TextLink);
         let error = theme.color(UiRole::Danger);
@@ -379,17 +379,11 @@ impl SettingsWindow {
                     .flex_none()
                     .w(px(ARROW))
                     .when(parent, |d| {
-                        d.child(Icon::new(if expanded {
-                            IconName::CHEVRON_DOWN
-                        } else {
-                            IconName::CHEVRON_RIGHT
-                        }))
-                        .on_click(cx.listener(
-                            move |this, _: &ClickEvent, _, cx| {
+                        d.child(ui::components::tree_arrow(expanded, cx))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 this.toggle(i, cx);
-                            },
-                        ))
+                            }))
                     }),
             )
             .child(
@@ -520,7 +514,7 @@ impl SettingsWindow {
                 .items_center()
                 .pl(px(ROW_LEFT + ARROW + ARROW_GAP))
                 .bg(theme.color(UiRole::SurfaceAlt))
-                .text_color(theme.color(UiRole::Text))
+                .text_color(theme.color(UiRole::TreeText))
                 .font_weight(FontWeight::BOLD)
                 .whitespace_nowrap()
                 .overflow_hidden()

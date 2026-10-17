@@ -7,7 +7,7 @@ use gpui::{
     App, Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Global, Hsla, Pixels, Rgba,
     SharedString, px,
 };
-use themes::{Metric, TextRole, TextStyle, ThemeKind, UiRole};
+use themes::{Controls, Metric, TextRole, TextStyle, ThemeKind, UiRole};
 
 /// The resolved theme of the application.
 pub struct Theme {
@@ -21,9 +21,34 @@ pub struct Theme {
     colors: Vec<Hsla>,
     ui_family: SharedString,
     mono_family: SharedString,
+    icon_colors: IconColors,
 }
 
 impl Global for Theme {}
+
+/// The icon colours a theme replaces ([`themes::Theme::icon_recolors`]):
+/// pairs of the colour in the icons (RGB) and the theme's (RGBA), with a
+/// key that tells two sets apart (rasterized icons are cached by it).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IconColors {
+    pub pairs: Vec<([u8; 3], [u8; 4])>,
+    pub key: u64,
+}
+
+impl IconColors {
+    fn of(theme: &themes::Theme) -> Self {
+        use std::hash::{Hash, Hasher};
+        let pairs: Vec<([u8; 3], [u8; 4])> = theme
+            .icon_recolors()
+            .into_iter()
+            .map(|(from, to)| ([from.r, from.g, from.b], [to.r, to.g, to.b, to.a]))
+            .collect();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        pairs.hash(&mut hasher);
+        let key = if pairs.is_empty() { 0 } else { hasher.finish() };
+        Self { pairs, key }
+    }
+}
 
 /// The editor font chosen in the settings (Editor > Font) over the theme's;
 /// what is not chosen stays the theme's.
@@ -124,6 +149,7 @@ impl Theme {
         let colors = UiRole::ALL.iter().map(|&r| color(inner.ui[r])).collect();
         let ui_family = crate::fonts::pick_family(&inner.fonts.ui_family, available).into();
         let mono_family = crate::fonts::pick_family(&inner.fonts.editor_family, available).into();
+        let icon_colors = IconColors::of(&inner);
         Self {
             inner,
             base,
@@ -132,6 +158,7 @@ impl Theme {
             colors,
             ui_family,
             mono_family,
+            icon_colors,
         }
     }
 
@@ -145,6 +172,16 @@ impl Theme {
 
     pub fn is_dark(&self) -> bool {
         self.inner.kind == ThemeKind::Dark
+    }
+
+    /// The look of the controls (check boxes, dialog buttons, tree arrows).
+    pub fn controls(&self) -> Controls {
+        self.inner.controls
+    }
+
+    /// The icon colours this theme replaces.
+    pub fn icon_colors(&self) -> &IconColors {
+        &self.icon_colors
     }
 
     /// Colour of a UI role.
