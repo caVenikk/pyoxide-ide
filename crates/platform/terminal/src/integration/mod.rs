@@ -528,7 +528,10 @@ mod tests {
         assert_eq!(out.command.program, cmd.program);
         assert_eq!(
             out.command.args[0],
-            format!("--init-command=source '{}'", script.replace('\'', "\\'"))
+            format!(
+                "--init-command=source '{}'",
+                script.replace('\\', "\\\\").replace('\'', "\\'")
+            )
         );
         assert_eq!(out.command.args[1..], ["--login", "-i"]);
         assert_eq!(fish_quote(r"C:\a b\x'y"), r"'C:\\a b\\x\'y'");

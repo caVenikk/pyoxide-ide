@@ -381,13 +381,13 @@ fn pty_program_for(command: &ShellCommand, through_env: bool) -> (String, Vec<St
     (ENV_PROGRAM.to_owned(), args)
 }
 
-/// Whether a program exists: a path with `/` as a file, a name in a folder
-/// of `path`.
+/// Whether a program exists: a path with a separator as a file, a name in a
+/// folder of `path`.
 fn program_exists(program: &str, path: Option<&std::ffi::OsStr>) -> bool {
     if program.is_empty() {
         return false;
     }
-    if program.contains('/') {
+    if program.contains(std::path::is_separator) {
         return Path::new(program).is_file();
     }
     path.is_some_and(|p| std::env::split_paths(p).any(|dir| dir.join(program).is_file()))
