@@ -426,7 +426,10 @@ pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl 
     let debug_icon = if state.debug_launching {
         spinner("debug-launching", cx).into_any_element()
     } else if state.debug_running {
-        icon(debugger_ui::icons::RERUN_DEBUG_STROKE, UiRole::RunWidgetRunningIcon)
+        icon(
+            debugger_ui::icons::RERUN_DEBUG_STROKE,
+            UiRole::RunWidgetRunningIcon,
+        )
     } else if state.can_debug() {
         icon(IconName::DEBUG_STROKE, UiRole::RunWidgetRunIcon)
     } else {
