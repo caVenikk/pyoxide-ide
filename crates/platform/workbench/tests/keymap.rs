@@ -3136,11 +3136,17 @@ fn with_remote(h: &mut H) {
             .current_dir(&h.root)
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {args:?}");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     let remote = h.root.join(".git/test-remote.git");
     if !remote.exists() {
-        let path = remote.display().to_string();
+        // Without the verbatim prefix of Windows' `canonicalize`: git reads
+        // `\\?\C:\...` as a host name.
+        let path = run_config::paths::simplified(&remote.display().to_string());
         git(h, &["init", "-q", "--bare", &path]);
         git(h, &["remote", "add", "origin", &path]);
     }

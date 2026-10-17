@@ -89,8 +89,22 @@ impl Remotes {
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
         let ours = base.join("ours");
         let theirs = base.join("theirs");
-        git(&base, &["clone", "-q", "remote.git", "ours"]);
-        git(&base, &["clone", "-q", "remote.git", "theirs"]);
+        // The pin goes into the clone command: the checkout itself must not
+        // convert line endings (Git for Windows defaults to `autocrlf=true`,
+        // and `configure` below would come after the files are written).
+        for name in ["ours", "theirs"] {
+            git(
+                &base,
+                &[
+                    "clone",
+                    "-q",
+                    "-c",
+                    "core.autocrlf=false",
+                    "remote.git",
+                    name,
+                ],
+            );
+        }
         configure(&ours);
         configure(&theirs);
         Self {

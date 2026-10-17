@@ -75,12 +75,17 @@ fn repos() -> Repos {
     identity(&root);
     commit(&root, "a.py", "1\n2\n3\n", "first");
     commit(&root, "b.py", "b\n", "second");
-    git(
-        &root,
-        &["remote", "add", "origin", remote.to_str().unwrap()],
-    );
+    // git reads a verbatim `\\?\C:\...` URL (what `canonicalize` returns on
+    // Windows) as a host name.
+    let url = run_config::paths::simplified(remote.to_str().unwrap());
+    git(&root, &["remote", "add", "origin", &url]);
     git(&root, &["push", "-q", "-u", "origin", "main"]);
-    git(&base, &["clone", "-q", remote.to_str().unwrap(), "other"]);
+    // The pin is part of the clone: the checkout must not convert line
+    // endings (Git for Windows defaults to `autocrlf=true`).
+    git(
+        &base,
+        &["clone", "-q", "-c", "core.autocrlf=false", &url, "other"],
+    );
     identity(&other);
     Repos {
         _dir: dir,
