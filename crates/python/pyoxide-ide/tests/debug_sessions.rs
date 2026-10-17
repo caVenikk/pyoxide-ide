@@ -286,3 +286,108 @@ fn stop_rerun_and_close_leave_no_process(cx: &mut TestAppContext) {
             .is_none_or(|l| l.iter().all(|x| x["state"] == json!("ended")))
     });
 }
+
+/// A FastAPI application started by `main.py` with uvicorn's reloader:
+/// the server runs in a subprocess, which the debugger attaches to. A
+/// breakpoint in an `async def` endpoint stops the session in the Debug
+/// tool window when the endpoint is called; Stop ends the server too.
+/// The project's environment is made with `uv` (fastapi, uvicorn).
+#[gpui::test]
+#[ignore = "needs uv (fastapi, uvicorn from its cache or the network) and the debugpy helper"]
+fn a_breakpoint_in_a_web_app_with_a_reloader(cx: &mut TestAppContext) {
+    use std::io::{Read, Write};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::write(
+        root.join("api.py"),
+        "import os\n\nfrom fastapi import FastAPI\n\napp = FastAPI()\n\n\n@app.get(\"/hello\")\nasync def hello():\n    pid = os.getpid()\n    return {\"pid\": pid}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("main.py"),
+        format!(
+            "import uvicorn\n\nif __name__ == \"__main__\":\n    uvicorn.run(\"api:app\", port={port}, reload=True)\n"
+        ),
+    )
+    .unwrap();
+    let venv = root.join(".venv");
+    for args in [
+        vec!["venv", "--quiet", ".venv"],
+        vec!["pip", "install", "--quiet", "fastapi", "uvicorn"],
+    ] {
+        let status = std::process::Command::new("uv")
+            .args(&args)
+            .current_dir(&root)
+            .env("VIRTUAL_ENV", &venv)
+            .status()
+            .expect("uv runs");
+        assert!(status.success(), "uv {args:?}");
+    }
+
+    let mut h = open(cx, &root);
+    h.invoke(
+        "debug.toggle-breakpoint",
+        json!({"file": "api.py", "line": 10}),
+    );
+    h.invoke("debug.debug", json!(null));
+    let (tx, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for _ in 0..600 {
+            if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                stream
+                    .write_all(
+                        b"GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                let _ = tx.send(response);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let s = h.wait("a stop in the endpoint", |s| {
+        s["tool_window"]["tabs"][0]["state"] == json!("suspended")
+            && s["execution_point"]["file"] == json!("api.py")
+            && s["execution_point"]["line"] == json!(10)
+    });
+    assert!(
+        s["sessions"][0]["subprocesses"].as_u64().unwrap_or(0) >= 1,
+        "{s:#}"
+    );
+    assert!(
+        h.top_frame().starts_with("hello, api.py:10"),
+        "{}",
+        h.top_frame()
+    );
+    h.invoke("debug.resume", json!(null));
+    let response = answer.recv_timeout(Duration::from_secs(60)).unwrap();
+    let body = response.split_once("\r\n\r\n").unwrap().1;
+    let server: Value = serde_json::from_str(body).unwrap();
+    let server = server["pid"].as_u64().unwrap();
+    h.invoke("run.stop", json!(null));
+    h.wait("the end", |s| {
+        s["tool_window"]["tabs"][0]["state"] == json!("ended")
+    });
+    #[cfg(unix)]
+    {
+        let mut gone = false;
+        for _ in 0..500 {
+            if !alive(server) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(gone, "the server {server} is gone");
+    }
+    #[cfg(not(unix))]
+    let _ = server;
+}
