@@ -51,6 +51,51 @@ fn yes() -> bool {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct FetchArgs {
+    #[serde(default)]
+    path: Option<String>,
+    /// One remote; every remote when missing.
+    #[serde(default)]
+    remote: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PushArgs {
+    #[serde(default)]
+    path: Option<String>,
+    /// The local branch; the current one when missing.
+    #[serde(default)]
+    branch: Option<String>,
+    /// `origin/main`; the branch's default target when missing.
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    set_upstream: Option<bool>,
+    /// `none`, `with_lease` or `force`.
+    #[serde(default)]
+    force: Option<String>,
+    /// `all` or `current_branch`.
+    #[serde(default)]
+    tags: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateArgs {
+    #[serde(default)]
+    path: Option<String>,
+    /// `merge` (the default) or `rebase`.
+    #[serde(default)]
+    method: Option<String>,
+    /// A remote branch to pull from (`origin/main`); the tracked branch
+    /// when missing.
+    #[serde(default)]
+    from: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RenameArgs {
     #[serde(default)]
     path: Option<String>,
@@ -141,6 +186,139 @@ pub fn register(registry: &mut Registry) {
         },
         |a: PathArgs| off_thread(move || init(a)),
     ));
+    registry.register(typed(
+        CommandMeta {
+            id: "git.fetch",
+            title: "Git Fetch",
+            summary: "Fetches every remote (or one) with --prune and returns each remote's error and pruned references.",
+            args_example: r#"{"path": ".", "remote": "origin"}"#,
+        },
+        |a: FetchArgs| off_thread(move || fetch(a)),
+    ));
+    registry.register(typed(
+        CommandMeta {
+            id: "git.push",
+            title: "Git Push",
+            summary: "Pushes a local branch (the current one by default) to its default target or to target (origin/main); force with_lease or force, tags all or current_branch, set_upstream. Returns the outcome and the balloon's text.",
+            args_example: r#"{"path": ".", "target": "origin/main", "set_upstream": false}"#,
+        },
+        |a: PushArgs| off_thread(move || push(a)),
+    ));
+    registry.register(typed(
+        CommandMeta {
+            id: "git.update",
+            title: "Git Update Project",
+            summary: "Fetches the tracked remote of the current branch (or pulls from `from`) and merges or rebases the incoming commits, with local changes stashed around it; conflicts leave the repository as it is.",
+            args_example: r#"{"path": ".", "method": "rebase"}"#,
+        },
+        |a: UpdateArgs| off_thread(move || update(a)),
+    ));
+}
+
+/// `origin/feat/x` as its remote and branch, by the repository's remotes.
+pub fn split_remote_branch(repo: &GitRepo, name: &str) -> Option<(String, String)> {
+    repo.remote_names()
+        .into_iter()
+        .filter_map(|r| {
+            name.strip_prefix(&r)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .map(|rest| (r.clone(), rest.to_owned()))
+        })
+        .max_by_key(|(r, _)| r.len())
+}
+
+fn fetch(args: FetchArgs) -> Result<Json, CommandError> {
+    let (_, repo) = open(&PathArgs { path: args.path })?;
+    let c = Cancel::new();
+    let result = match args.remote {
+        Some(remote) => crate::FetchResult {
+            remotes: vec![repo.fetch(&remote, None, &c).map_err(failed)?],
+        },
+        None => repo.fetch_all(&c).map_err(failed)?,
+    };
+    Ok(json!({
+        "success": result.is_success(),
+        "message": result.message(),
+        "remotes": result.remotes,
+    }))
+}
+
+fn push(args: PushArgs) -> Result<Json, CommandError> {
+    let (_, repo) = open(&PathArgs { path: args.path })?;
+    let c = Cancel::new();
+    let source = match args.branch {
+        Some(b) => b,
+        None => repo
+            .info()
+            .map_err(failed)?
+            .head
+            .branch()
+            .map(str::to_owned)
+            .ok_or_else(|| CommandError::new("git.detached", "HEAD is not on a branch"))?,
+    };
+    let target = match &args.target {
+        Some(t) => {
+            let (remote, branch) = split_remote_branch(&repo, t).ok_or_else(|| {
+                CommandError::new("git.invalid_target", format!("No remote in {t}"))
+            })?;
+            repo.push_target(&remote, &branch, &c).map_err(failed)?
+        }
+        None => repo
+            .default_push_target(&source, &c)
+            .map_err(failed)?
+            .ok_or_else(|| CommandError::new("git.no_remote", "The repository has no remotes"))?,
+    };
+    let force = match args.force.as_deref() {
+        None => vcs::ForceMode::None,
+        Some(f) => vcs::ForceMode::from_id(f)
+            .ok_or_else(|| CommandError::new("git.invalid_force", format!("Unknown force {f}")))?,
+    };
+    let tags =
+        match args.tags.as_deref() {
+            None => None,
+            Some(t) => Some(vcs::TagMode::from_id(t).ok_or_else(|| {
+                CommandError::new("git.invalid_tags", format!("Unknown tags {t}"))
+            })?),
+        };
+    let spec = vcs::PushSpec {
+        source,
+        set_upstream: args.set_upstream.unwrap_or(target.new),
+        target,
+        force,
+        tags,
+    };
+    let result = repo.push(&spec, &c).map_err(failed)?;
+    Ok(json!({
+        "outcome": result.outcome,
+        "description": result.description(),
+        "tags": result.tags,
+        "target": result.target,
+    }))
+}
+
+fn update(args: UpdateArgs) -> Result<Json, CommandError> {
+    let (_, repo) = open(&PathArgs { path: args.path })?;
+    let method = match args.method.as_deref() {
+        None => vcs::UpdateMethod::Merge,
+        Some(m) => vcs::UpdateMethod::from_id(m).ok_or_else(|| {
+            CommandError::new("git.invalid_method", format!("Unknown method {m}"))
+        })?,
+    };
+    let from =
+        match &args.from {
+            Some(f) => Some(split_remote_branch(&repo, f).ok_or_else(|| {
+                CommandError::new("git.invalid_target", format!("No remote in {f}"))
+            })?),
+            None => None,
+        };
+    let result = repo
+        .update(
+            method,
+            from.as_ref().map(|(r, b)| (r.as_str(), b.as_str())),
+            &Cancel::new(),
+        )
+        .map_err(failed)?;
+    Ok(serde_json::to_value(result).unwrap_or(Json::Null))
 }
 
 /// The JSON of a checkout's failure.
@@ -304,11 +482,14 @@ mod tests {
                 "git.branches",
                 "git.checkout",
                 "git.delete-branch",
+                "git.fetch",
                 "git.init",
                 "git.new-branch",
+                "git.push",
                 "git.rename-branch",
                 "git.state",
-                "git.status"
+                "git.status",
+                "git.update"
             ]
         );
     }

@@ -43,6 +43,7 @@ mod debug;
 mod file_events;
 mod file_sync;
 mod history;
+mod remote;
 mod run_actions;
 mod tool_window_areas;
 mod version_control;
@@ -217,6 +218,8 @@ pub struct Workbench {
     version_control: version_control::VersionControl,
     /// The VCS widget's popups and dialogs.
     branch_ui: branches::BranchUi,
+    /// Push, Update Project and the VCS Operations popup.
+    remote_ui: remote::RemoteUi,
     /// Breakpoints and the debugger (`debug.rs`).
     debugger: Entity<debugger_ui::DebuggerView>,
     /// The Commit tool window and its dialogs.
@@ -395,6 +398,7 @@ impl Workbench {
             notifications,
             version_control,
             branch_ui: Default::default(),
+            remote_ui: Default::default(),
             debugger,
             commit_ui,
             _subscriptions: subscriptions,
@@ -2417,6 +2421,7 @@ impl Render for Workbench {
         root = project_panel::forward_actions(root, self.panel.clone());
         root = self.vcs_actions(root, cx);
         root = self.branch_actions(root, cx);
+        root = self.remote_actions(root, cx);
         root = self.debug_actions(root, cx);
         root = self.commit_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
@@ -2467,6 +2472,7 @@ impl Render for Workbench {
             .children(self.render_run_menu(window))
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_commit_overlays())
+            .children(self.render_remote_overlays(window))
             .children(self.render_switch_popup(window))
             .children(ui::dialog_window::blocker(window, cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))

@@ -41,7 +41,7 @@ use ui::theme::ThemeExt;
 use vcs::{Branch, BranchKind};
 
 use crate::widget::in_out_tooltip;
-use crate::{Checkout, DeleteBranch, NewBranch, RenameBranch};
+use crate::{Checkout, DeleteBranch, NewBranch, Pull, RenameBranch, UpdateBranch, VcsPush};
 
 ui::ui_commands! {
     COMMANDS, scope = "BranchesPopup";
@@ -586,14 +586,16 @@ fn quoted(name: &str) -> String {
     format!("'{name}'")
 }
 
-/// The actions of a branch: Checkout, New Branch from '…'…, Update,
-/// Push…, Rename…, Delete (`Git.Branch`); Update and Push… come with the
-/// update and push commands (`update` and `push`, `None` while there are
-/// none).
+/// The actions of a branch: Checkout, New Branch from '…'…, then for a
+/// local branch Update, Push…, Rename…, Delete, for a remote branch Pull
+/// into '{current}' Using Rebase and Using Merge (`Git.Branch`); Update,
+/// Push… and the pulls need the update and push commands (`update` and
+/// `push` false while there are none), the pulls a current branch.
 pub fn branch_actions(
     branch: &Branch,
-    update: Option<Box<dyn Action>>,
-    push: Option<Box<dyn Action>>,
+    update: bool,
+    push: bool,
+    current: Option<&str>,
 ) -> Vec<MenuItem> {
     let name = branch.name.clone();
     let checkout = MenuItem::action(
@@ -613,29 +615,43 @@ pub fn branch_actions(
         },
     );
     let mut items = vec![checkout, new_branch];
+    if branch.kind == BranchKind::Remote
+        && update
+        && let Some(current) = current
+    {
+        items.push(MenuItem::separator());
+        for (label, method) in [("Rebase", "rebase"), ("Merge", "merge")] {
+            items.push(MenuItem::action(
+                format!("Pull into {} Using {label}", quoted(current)),
+                Pull {
+                    from: name.clone(),
+                    method: method.to_owned(),
+                },
+            ));
+        }
+    }
     if branch.kind == BranchKind::Local {
         items.push(MenuItem::separator());
-        items.push(match update {
-            Some(a) if branch.tracking.is_some() => MenuItem::Action {
-                label: "Update".into(),
-                icon: None,
-                action: Some(a),
-                enabled: true,
-                description: None,
-                extra: Default::default(),
-            },
-            _ => MenuItem::unavailable("Update"),
+        items.push(if update {
+            MenuItem::action("Update", UpdateBranch { name: name.clone() })
+                .enabled(branch.tracking.is_some())
+        } else {
+            MenuItem::unavailable("Update")
         });
-        items.push(match push {
-            Some(a) => MenuItem::Action {
-                label: "Push\u{2026}".into(),
-                icon: None,
-                action: Some(a),
-                enabled: true,
-                description: None,
-                extra: Default::default(),
-            },
-            None => MenuItem::unavailable("Push\u{2026}"),
+        items.push(if push {
+            MenuItem::action(
+                "Push\u{2026}",
+                VcsPush {
+                    branch: Some(name.clone()),
+                    target: None,
+                    force: None,
+                    tags: None,
+                    set_upstream: None,
+                    dialog: None,
+                },
+            )
+        } else {
+            MenuItem::unavailable("Push\u{2026}")
         });
         items.push(MenuItem::separator());
         items.push(MenuItem::action(
@@ -867,10 +883,17 @@ impl BranchesPopup {
             return;
         };
         let branch = self.data.branches[index].clone();
+        let current = self
+            .data
+            .branches
+            .iter()
+            .find(|b| b.current && b.kind == BranchKind::Local)
+            .map(|b| b.name.clone());
         let items = branch_actions(
             &branch,
-            self.update.as_ref().map(|a| a.boxed_clone()),
-            self.push.as_ref().map(|a| a.boxed_clone()),
+            self.update.is_some(),
+            self.push.is_some(),
+            current.as_deref(),
         );
         window.focus(&self.focus);
         let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
@@ -1087,6 +1110,7 @@ impl BranchesPopup {
                         "kind": "action",
                         "text": self.actions[*a].label,
                         "enabled": self.actions[*a].action.is_some(),
+                        "shortcut": self.actions[*a].shortcut.as_ref().map(|s| s.to_string()),
                     }),
                     RowKind::Separator => json!({ "kind": "separator" }),
                     RowKind::Node {
@@ -1127,6 +1151,7 @@ impl BranchesPopup {
             "search": self.filter,
             "placeholder": PLACEHOLDER,
             "loaded": self.data.loaded,
+            "fetch": self.fetch.is_some(),
             "rows": rows,
             "submenu": submenu,
         })
@@ -1774,7 +1799,7 @@ mod tests {
     fn the_actions_of_a_branch() {
         let d = data();
         let labels = |b: &Branch| -> Vec<String> {
-            branch_actions(b, None, None)
+            branch_actions(b, false, false, Some("main"))
                 .iter()
                 .map(|i| i.label().map_or("--".to_owned(), |l| l.to_string()))
                 .collect()
@@ -1795,6 +1820,22 @@ mod tests {
         assert_eq!(
             labels(&d.branches[5]),
             vec!["Checkout", "New Branch from 'origin/main'\u{2026}"]
+        );
+        // With the remote commands: the pulls into the current branch.
+        let items = branch_actions(&d.branches[5], true, true, Some("main"));
+        let labels: Vec<String> = items
+            .iter()
+            .map(|i| i.label().map_or("--".to_owned(), |l| l.to_string()))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Checkout",
+                "New Branch from 'origin/main'\u{2026}",
+                "--",
+                "Pull into 'main' Using Rebase",
+                "Pull into 'main' Using Merge"
+            ]
         );
     }
 }

@@ -39,7 +39,7 @@ use vcs_ui::new_branch::{BranchDialog, BranchDialogEvent, DialogKind};
 use vcs_ui::widget::{WidgetState, presentation};
 use vcs_ui::{
     Checkout, CheckoutRevision, DeleteBranch, Init, NewBranch, RenameBranch, RestoreBranch,
-    ShowBranches,
+    ShowBranches, UpdateBranch,
 };
 
 use super::Workbench;
@@ -229,7 +229,7 @@ impl Workbench {
 
     // ---- popups -------------------------------------------------------------
 
-    fn close_branch_popups(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_branch_popups(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(open) = self.branch_ui.popup.take()
             && let Some(focus) = open.return_focus
         {
@@ -281,7 +281,7 @@ impl Workbench {
 
     /// A top action of the popup that comes with another feature: shown
     /// disabled until its command is there.
-    fn optional_action(id: &str, cx: &App) -> Option<Box<dyn Action>> {
+    pub(super) fn optional_action(id: &str, cx: &App) -> Option<Box<dyn Action>> {
         ui::command::list(cx)
             .iter()
             .any(|c| c.meta.id == id)
@@ -374,7 +374,10 @@ impl Workbench {
             .is_some_and(|s| s.info.head.oid().is_none());
         let setup = PopupSetup {
             actions: self.top_actions(fresh, window, cx),
-            update: None,
+            // A flag: the branch's Update carries its name.
+            update: Some(Box::new(UpdateBranch {
+                name: String::new(),
+            })),
             push: Self::optional_action("vcs.push", cx),
             fetch: Self::optional_action("git.fetch", cx),
             options: self.branch_ui.options,
@@ -539,20 +542,20 @@ impl Workbench {
     // ---- commands -------------------------------------------------------------
 
     /// A balloon without a title; `html` as [`Notification::html`] reads it.
-    fn info_balloon(&mut self, html: String, cx: &mut Context<Self>) {
+    pub(super) fn info_balloon(&mut self, html: String, cx: &mut Context<Self>) {
         self.notify(
             Notification::html(NotificationKind::Information, "", &html),
             cx,
         );
     }
 
-    fn error_balloon(&mut self, title: String, text: String, cx: &mut Context<Self>) {
+    pub(super) fn error_balloon(&mut self, title: String, text: String, cx: &mut Context<Self>) {
         self.notify(Notification::new(NotificationKind::Error, title, text), cx);
     }
 
     /// Runs `f` with the repository off the UI thread, then `then` with its
     /// result in the window.
-    fn with_repo<T: Send + 'static>(
+    pub(super) fn with_repo<T: Send + 'static>(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -571,7 +574,7 @@ impl Workbench {
         .detach();
     }
 
-    fn current_branch(&self) -> Option<String> {
+    pub(super) fn current_branch(&self) -> Option<String> {
         self.version_control
             .snapshot
             .as_ref()

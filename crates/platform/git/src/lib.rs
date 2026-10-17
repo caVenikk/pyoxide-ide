@@ -19,9 +19,11 @@
 //! - [`commit`]: commit and amend (`commit --only`), the last commit, the
 //!   user's identity, rollback, Add to VCS, commit hooks.
 //! - [`idea`]: the reference IDE's `.idea/vcs.xml` mapping.
+//! - [`remote`]: fetch, push with its results and the commits it sends,
+//!   Update Project (merge or rebase with the local changes stashed).
 //! - [`commands::register`]: `git.status`, `git.branches`, `git.state`,
 //!   `git.checkout`, `git.new-branch`, `git.rename-branch`,
-//!   `git.delete-branch`, `git.init`.
+//!   `git.delete-branch`, `git.init`, `git.fetch`, `git.push`, `git.update`.
 
 mod backend;
 pub mod branches;
@@ -30,6 +32,7 @@ pub mod commit;
 mod exe;
 pub mod idea;
 mod parse;
+pub mod remote;
 mod repo;
 mod runner;
 mod service;
@@ -42,6 +45,7 @@ pub use backend::{GitRepo, MAX_PATHSPECS};
 pub use branches::{CheckedOut, Checkout, CheckoutError, CheckoutMode};
 pub use commit::{Committed, Identity};
 pub use exe::{GitExe, LookupError, Version, use_global_config};
+pub use remote::{FetchResult, RemoteFetch, UpdateResult};
 pub use repo::{Config, Repository, watched_in_git_dir};
 pub use runner::{Access, Output, Runner, error_text};
 pub use service::{DEBOUNCE, StatusService, StatusUpdate};
