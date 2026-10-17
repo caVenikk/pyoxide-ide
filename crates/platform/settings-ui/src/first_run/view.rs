@@ -11,8 +11,8 @@
 //! - Choose Theme and Choose Keymap: a line, the title (the label font
 //!   plus 7, 18 above and 17 below) with Dark and Light at the right of
 //!   Choose Theme, the cards side by side 9 apart (the chosen one twice as
-//!   wide, a 2 px accent outline, 1 px in the accent under the mouse,
-//!   else 1 px in the border colour, corners of 10), a line and the
+//!   wide, a 2 px blue outline, 1 px in blue under the mouse, else 1 px
+//!   in the border colour, corners of 10), a line and the
 //!   buttons (Back, Continue) in a bar 57 high, 20 from the right edge.
 //!
 //! A theme's card shows a few lines of code in its colours (the reference
@@ -92,6 +92,10 @@ const HEADER_PLUS: f32 = 7.0;
 /// `OnboardingDialogButtons.BUTTON_HOVER_BORDER_COLOR`.
 const HOVER_BORDER_LIGHT: u32 = 0xa8adbd;
 const HOVER_BORDER_DARK: u32 = 0x6f737a;
+/// `RoundedPanel.SELECTED_BORDER_COLOR` and `BORDER_COLOR`.
+const CARD_SELECTED: u32 = 0x3574f0;
+const CARD_BORDER_LIGHT: u32 = 0xd3d5db;
+const CARD_BORDER_DARK: u32 = 0x43454a;
 /// `KeymapPane.KEY_BACKGROUND`.
 const KEY_LIGHT: u32 = 0xdfe1e5;
 const KEY_DARK: u32 = 0x4e5157;
@@ -929,12 +933,17 @@ impl FirstRunWindow {
     }
 
     /// A card's outline over its content, in a 2 px band
-    /// (`RoundedBorder`): 2 px in the accent colour when chosen, 1 px in
-    /// it under the mouse, else 1 px in the border colour, a pixel in.
+    /// (`RoundedBorder`): 2 px in the selection colour when chosen, 1 px
+    /// in it under the mouse, else 1 px in the border colour, a pixel in
+    /// (`RoundedPanel`: fixed colours, whatever the theme).
     fn outline(chosen: bool, hovered: bool, cx: &App) -> gpui::Div {
-        let theme = cx.theme();
-        let accent = theme.color(UiRole::Accent);
-        let border = theme.color(UiRole::Border);
+        let accent: Hsla = rgb(CARD_SELECTED).into();
+        let border: Hsla = rgb(if cx.theme().is_dark() {
+            CARD_BORDER_DARK
+        } else {
+            CARD_BORDER_LIGHT
+        })
+        .into();
         let ring = div().absolute().rounded(px(CARD_RADIUS));
         match (chosen, hovered) {
             (true, _) => ring.inset_0().border_2().border_color(accent),
