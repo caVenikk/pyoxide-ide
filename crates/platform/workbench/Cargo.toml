@@ -24,6 +24,7 @@ name-match.workspace = true
 process.workspace = true
 project.workspace = true
 project-search.workspace = true
+quick-xml.workspace = true
 settings.workspace = true
 settings-ui.workspace = true
 regex.workspace = true

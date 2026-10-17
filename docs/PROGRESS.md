@@ -2,19 +2,19 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 40%** `████████░░░░░░░░░░░░`
+**Overall parity: 42%** `████████░░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
 | database | 71% `███████░░░` | 15 | 6 | 6 |
 | db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
 | editor | 62% `██████░░░░` | 5 | 6 | 3 |
-| settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
+| settings-import | 55% `█████░░░░░` | 1 | 2 | 1 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 20% `██░░░░░░░░` | 2 | 4 | 20 |
 | terminal | 12% `█░░░░░░░░░` | 0 | 4 | 17 |
 | vcs | 21% `██░░░░░░░░` | 3 | 2 | 20 |
-| settings | 41% `████░░░░░░` | 5 | 3 | 10 |
+| settings | 53% `█████░░░░░` | 7 | 3 | 8 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -94,7 +94,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 
 | | Feature | Priority | Notes |
 |---|---|---|---|
-| ⬜ | Keymap import | must | reference keymap XML with its parent chain (#40); choice and switching: area settings |
+| ✅ | Keymap import | must | reference keymap XML with its parent chain, Import Keymap… on the Keymap page (#40) |
 | ⬜ | Code style import | should |  |
 | 🟡 | Editor colour scheme import (.icls) | must | themes crate: schemes with parents and baseAttributes, report; no settings UI yet |
 | 🟡 | UI theme import (.theme.json) | must | themes crate: theme.json and plugin jars (data files only), report; no settings UI yet |
@@ -222,8 +222,8 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet |
 | 🟡 | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153) |
 | ✅ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
-| ⬜ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40) |
-| ⬜ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |
+| ✅ | Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap) | must | Community; ADR 0018; VS Code keymaps from Community data, Settings, gear menu, Quick Switch Scheme (#40); no Zed keymap (no permissive source) |
+| ✅ | Keymap page with a read-only actions tree and search by name and by shortcut | must | Community (#40) |
 | ✅ | Editor > Font page | must | Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants |
 | 🟡 | Editor > General page (soft wraps) | must | Community; Soft Wraps group only (#154) |
 | ⬜ | Python > Interpreter page (combo, Show All, add / remove / rename) | must | Community (#75) |

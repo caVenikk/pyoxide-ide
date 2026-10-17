@@ -1,9 +1,10 @@
 //! The workbench's application settings (ADR 0017): the sections it reads
 //! from the store, the pages it adds to the Settings window, the command
 //! that opens the window from a main window, the main toolbar's gear menu
-//! and the theme switchers of a main window (the Theme popup, from the
-//! gear menu and Quick Switch Scheme).
+//! and the switchers of a main window (the Theme and Keymap popups, from
+//! the gear menu and Quick Switch Scheme).
 
+mod keymap;
 mod system;
 
 use std::cell::Cell;
@@ -22,6 +23,7 @@ use ui::icons::IconName;
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::notification::Notification;
 
+use crate::keymap::active::{self as keymaps, SwitchKeymap};
 use crate::workbench::Workbench;
 
 /// The gear's tooltip (`settings.entry.point.tooltip`).
@@ -40,6 +42,8 @@ pub use ::settings::{SaveSettings, SyncSettings};
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
 /// Id of the Editor group.
 pub const EDITOR: &str = "editor";
+/// Id of the Keymap page.
+pub const KEYMAP_PAGE: &str = keymap::ID;
 
 /// The platform's pages, in the reference's places (`PlatformExtensions.xml`
 /// group weights).
@@ -99,6 +103,16 @@ fn pages() -> Vec<PageSpec> {
             description: None,
             create: Some(settings_ui::page::create(font::FontPage::new)),
         },
+        PageSpec {
+            id: keymap::ID,
+            parent: None,
+            title: keymap::TITLE,
+            weight: keymap::WEIGHT,
+            scope: Scope::Application,
+            search_terms: keymap::search_terms(),
+            description: None,
+            create: Some(settings_ui::page::create(keymap::KeymapPage::new)),
+        },
     ]
 }
 
@@ -122,8 +136,9 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
         <::settings::SoftWrapSettings as ::settings::Section>::KEY,
         |cx| cx.defer(crate::editor_settings::follow),
     );
-    // Theme imports report in a main window.
+    // Theme and keymap imports report in a main window.
     theme_switch::set_notify(cx, Rc::new(notify_main_window));
+    keymaps::set_notify(cx, Rc::new(notify_main_window));
 }
 
 /// Shows a balloon in the active main window (the one under an active
@@ -244,18 +259,40 @@ impl Workbench {
         }
     }
 
+    /// `settings.switch-keymap`: a keymap by name at once; without one,
+    /// the Keymap popup (`QuickChangeKeymapAction`) with the current
+    /// keymap selected.
+    pub(crate) fn switch_keymap(
+        &mut self,
+        a: &SwitchKeymap,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match &a.name {
+            Some(name) => {
+                if let Err(e) = keymaps::switch(name, cx) {
+                    self.show_notice(e.into(), cx);
+                }
+            }
+            None => {
+                let (items, selected) = keymaps::popup_items(cx);
+                self.open_switch_popup(keymaps::KEYMAP, items, selected, window, cx);
+            }
+        }
+    }
+
     /// `settings.quick-switch`: the Switch popup (`QuickChangeSchemesAction`,
-    /// the `ChangeScheme` group): Theme opens the Theme popup.
+    /// the `ChangeScheme` group): Theme and Keymap open their popups.
     pub(crate) fn quick_switch(
         &mut self,
         _: &QuickSwitch,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let items = vec![MenuItem::action(
-            theme_switch::THEME,
-            SwitchTheme { id: None },
-        )];
+        let items = vec![
+            MenuItem::action(theme_switch::THEME, SwitchTheme { id: None }),
+            MenuItem::action(keymaps::KEYMAP, SwitchKeymap { name: None }),
+        ];
         self.open_switch_popup(theme_switch::SWITCH, items, None, window, cx);
     }
 
@@ -333,8 +370,8 @@ pub(crate) struct Gear {
 /// The gear's menu, in the reference's order (`SettingsEntryPointAction`
 /// with `SettingsEntryPointGroup`: update actions, Run Anything…,
 /// Settings…, Plugins…, Theme…, Keymap…, View Mode…, Customize Main
-/// Toolbar). Only what Pyoxide has is listed; the keymap switcher joins
-/// with its page. Theme… opens the Theme popup.
+/// Toolbar). Only what Pyoxide has is listed. Theme… and Keymap… open
+/// their popups.
 pub fn gear_menu() -> Vec<MenuItem> {
     vec![
         MenuItem::action(
@@ -346,5 +383,6 @@ pub fn gear_menu() -> Vec<MenuItem> {
         ),
         MenuItem::separator(),
         MenuItem::action(theme_switch::THEME_IN_GEAR, SwitchTheme { id: None }),
+        MenuItem::action(keymaps::KEYMAP_IN_GEAR, SwitchKeymap { name: None }),
     ]
 }

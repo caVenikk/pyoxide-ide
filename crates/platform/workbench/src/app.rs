@@ -302,12 +302,23 @@ pub fn init(cx: &mut App, product: &Product) {
     // Any key ends a double tap of a modifier in progress.
     cx.intercept_keystrokes(|event, _, cx| crate::keymap::key_pressed(&event.keystroke, cx))
         .detach();
-    for error in crate::keymap::bind(cx, &crate::keymap::Keymap::platform_default()) {
-        eprintln!("keymap: {error}");
+    // The platform's keymap; the stored one replaces it once the settings
+    // are read. The menus show the shortcuts of the keymap in use.
+    crate::keymap::active::init(cx);
+    let name = product.name;
+    let menus = move |cx: &mut App| cx.set_menus(app_menus(name));
+    menus(cx);
+    crate::keymap::active::set_menus(cx, Rc::new(menus));
+    if let Some(init) = product.init {
+        init(cx);
     }
-    cx.set_menus(vec![
+}
+
+/// The application menus (macOS menu bar).
+fn app_menus(name: &'static str) -> Vec<Menu> {
+    vec![
         Menu {
-            name: product.name.into(),
+            name: name.into(),
             items: vec![
                 MenuItem::action(
                     "Settings\u{2026}",
@@ -319,7 +330,7 @@ pub fn init(cx: &mut App, product: &Product) {
                 MenuItem::separator(),
                 MenuItem::action("Project", ToggleProject),
                 MenuItem::separator(),
-                MenuItem::action(format!("Quit {}", product.name), Quit),
+                MenuItem::action(format!("Quit {name}"), Quit),
             ],
         },
         Menu {
@@ -332,10 +343,7 @@ pub fn init(cx: &mut App, product: &Product) {
                 )],
             })],
         },
-    ]);
-    if let Some(init) = product.init {
-        init(cx);
-    }
+    ]
 }
 
 /// Window options of the main window: the content extends under a
@@ -406,6 +414,8 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // The imported themes and the theme stored, or the one
         // `PYOXIDE_THEME` asks for in this run.
         settings_ui::theme_switch::load(cx, ::settings::themes_dir(), env::theme_override());
+        // The imported keymaps and the keymap stored.
+        crate::keymap::active::load(cx, ::settings::keymaps_dir());
         if let Some(dir) = ::settings::config_dir() {
             settings_ui::window_state::load(cx, dir.join(settings_ui::window_state::FILE));
         }

@@ -658,6 +658,7 @@ impl Workbench {
             "theme": cx.theme().id(),
             "vcs": self.vcs_state_json(cx),
             "switch_popup": self.switch_popup_json(cx),
+            "keymap": crate::keymap::active::state_json(cx),
         })
     }
 
@@ -2304,6 +2305,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::switch_theme))
+            .on_action(cx.listener(Self::switch_keymap))
             .on_action(cx.listener(Self::quick_switch))
             .on_action(cx.listener(Self::open_folder_action))
             .on_action(cx.listener(Self::open_file_action))

@@ -620,10 +620,11 @@ fn the_gear_menu_opens_settings(cx: &mut TestAppContext) {
     let menu = h.invoke("run.state", json!(null))["menu"].clone();
     let items = &menu["levels"][0]["items"];
     assert_eq!(items[0]["label"], json!("Settings\u{2026}"), "{menu}");
-    // A line, then Theme… (tests/appearance.rs).
+    // A line, then Theme… and Keymap… (tests/appearance.rs, keymaps.rs).
     assert_eq!(items[1]["separator"], json!(true), "{menu}");
     assert_eq!(items[2]["label"], json!("Theme\u{2026}"), "{menu}");
-    assert_eq!(items.as_array().unwrap().len(), 3, "{menu}");
+    assert_eq!(items[3]["label"], json!("Keymap\u{2026}"), "{menu}");
+    assert_eq!(items.as_array().unwrap().len(), 4, "{menu}");
     h.invoke("menu.down", json!(null));
     h.invoke("menu.confirm", json!(null));
     assert_eq!(h.state()["open"], json!(true));

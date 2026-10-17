@@ -17,6 +17,7 @@
 mod appearance;
 mod editor;
 mod files;
+mod keymap;
 mod store;
 mod terminal;
 
@@ -25,6 +26,7 @@ use std::path::PathBuf;
 pub use appearance::{AppearanceSettings, themes_dir};
 pub use editor::{DEFAULT_SOFT_WRAP_FILES, EditorFontSettings, SoftWrapSettings};
 pub use files::{SaveSettings, SyncSettings};
+pub use keymap::{KeymapSettings, keymaps_dir};
 pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
 pub use terminal::TerminalSettings;
 

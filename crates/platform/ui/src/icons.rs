@@ -127,6 +127,7 @@ impl IconName {
     pub const FILTER: Self = Self("general/filter");
     pub const CHECKED: Self = Self("actions/checked");
     pub const IN_SELECTION: Self = Self("actions/inSelection");
+    pub const SHORTCUT_FILTER: Self = Self("actions/shortcutFilter");
     pub const MATCH_CASE: Self = Self("inline/matchCase");
     pub const WORDS: Self = Self("inline/exactWords");
     pub const REGEX: Self = Self("inline/regex");
@@ -216,7 +217,8 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
-        "actions/checked", "actions/inSelection", "actions/newFolder", "actions/stopAndRestart",
+        "actions/checked", "actions/inSelection", "actions/newFolder", "actions/shortcutFilter",
+        "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/css", "fileTypes/csv",
         "fileTypes/docker", "fileTypes/dockerCompose", "fileTypes/dockerIgnore",

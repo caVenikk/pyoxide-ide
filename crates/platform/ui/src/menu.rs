@@ -171,6 +171,8 @@ const NEXT_STEP_GAP: f32 = 20.0;
 /// Tooltip of the button that opens a row's submenu in a list popup
 /// (`inline.actions.more.actions.text`).
 pub const MORE_ACTIONS: &str = "More Actions";
+/// The indent of a level of a row's label (`SchemesCombo`).
+const INDENT: f32 = 10.0;
 /// The gap before a secondary text (`emptyLeft(6)`) and before a shortcut.
 const SECONDARY_GAP: f32 = 6.0;
 const SHORTCUT_GAP: f32 = 18.0;
@@ -212,6 +214,11 @@ pub struct RowExtra {
     /// The shortcut at the end of the row; filled from the keymap when the
     /// menu opens (`KeymapUtil.getShortcutText`).
     pub shortcut: Option<SharedString>,
+    /// A bold label (the predefined schemes of a schemes combo box).
+    pub bold: bool,
+    /// Levels the label is indented by (`SchemesCombo` indents a custom
+    /// scheme under its parent).
+    pub indent: u8,
 }
 
 impl Clone for RowExtra {
@@ -222,6 +229,8 @@ impl Clone for RowExtra {
             inline: self.inline.clone(),
             hidden: self.hidden,
             shortcut: self.shortcut.clone(),
+            bold: self.bold,
+            indent: self.indent,
         }
     }
 }
@@ -459,6 +468,22 @@ impl MenuItem {
     pub fn hidden(mut self, hidden: bool) -> Self {
         if let Some(extra) = self.extra_mut() {
             extra.hidden = hidden;
+        }
+        self
+    }
+
+    /// A bold label.
+    pub fn bold(mut self, bold: bool) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.bold = bold;
+        }
+        self
+    }
+
+    /// Indents the label by `levels`.
+    pub fn indent(mut self, levels: u8) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.indent = levels;
         }
         self
     }
@@ -1246,6 +1271,12 @@ impl ContextMenu {
                             }),
                         };
                         if let Some(extra) = item.extra() {
+                            if extra.bold {
+                                row["bold"] = json!(true);
+                            }
+                            if extra.indent > 0 {
+                                row["indent"] = json!(extra.indent);
+                            }
                             if let Some(text) = &extra.secondary {
                                 row["secondary"] = json!(text.as_ref());
                             }
@@ -1383,6 +1414,8 @@ impl ContextMenu {
                 let secondary = extra.and_then(|e| e.secondary.clone());
                 let shortcut = extra.and_then(|e| e.shortcut.clone());
                 let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
+                let bold = extra.is_some_and(|e| e.bold);
+                let indent = extra.map_or(0, |e| e.indent);
                 let more = !self.submenu_on_hover && item.is_final_group();
                 let buttons = extra.map_or(0, |e| e.inline.len()) + usize::from(more);
                 let arrow = item.has_submenu() && !more;
@@ -1483,7 +1516,14 @@ impl ContextMenu {
                                     .flex_row()
                                     .items_center()
                                     .overflow_hidden()
-                                    .child(div().flex_none().whitespace_nowrap().child(label))
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .whitespace_nowrap()
+                                            .pl(px(INDENT * f32::from(indent)))
+                                            .when(bold, |d| d.font_weight(FontWeight::BOLD))
+                                            .child(label),
+                                    )
                                     .children(secondary.map(|text| {
                                         div()
                                             .flex_none()
