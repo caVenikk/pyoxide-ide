@@ -143,6 +143,62 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
         (TerminalBrightMagenta, TerminalBackground, Need::Text),
         (TerminalBrightCyan, TerminalBackground, Need::Text),
         (TerminalBrightWhite, TerminalBackground, Need::Text),
+        (
+            TerminalDefaultForeground,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (TerminalAnsiBlack, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiRed, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiGreen, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiYellow, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiBlue, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiMagenta, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiCyan, TerminalDefaultBackground, Need::Text),
+        (TerminalAnsiWhite, TerminalDefaultBackground, Need::Text),
+        (
+            TerminalAnsiBrightBlack,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (TerminalAnsiBrightRed, TerminalDefaultBackground, Need::Text),
+        (
+            TerminalAnsiBrightGreen,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (
+            TerminalAnsiBrightYellow,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (
+            TerminalAnsiBrightBlue,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (
+            TerminalAnsiBrightMagenta,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (
+            TerminalAnsiBrightCyan,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (
+            TerminalAnsiBrightWhite,
+            TerminalDefaultBackground,
+            Need::Text,
+        ),
+        (TerminalSearchMatchText, TerminalSearchMatch, Need::Text),
+        (
+            TerminalSearchMatchCurrentText,
+            TerminalSearchMatchCurrent,
+            Need::Text,
+        ),
+        (TerminalErrorMarker, TerminalDefaultBackground, Need::Ui),
     ]
 };
 
@@ -225,6 +281,9 @@ fn backdrop_of(theme: &Theme, bg: UiRole) -> Rgba {
         | UiRole::DiffChanged
         | UiRole::DiffConflict
         | UiRole::Gutter => theme.ui[UiRole::EditorBackground],
+        UiRole::TerminalSearchMatch | UiRole::TerminalSearchMatchCurrent => {
+            theme.ui[UiRole::TerminalDefaultBackground]
+        }
         _ => theme.ui[UiRole::Surface],
     }
 }
@@ -235,4 +294,90 @@ pub fn failures(theme: &Theme) -> Vec<PairResult> {
         .into_iter()
         .filter(|r| !r.passed())
         .collect()
+}
+
+/// The terminal's minimum contrast ratio by default (the reference's
+/// "Minimum contrast ratio", `TerminalContrastRatio.DEFAULT_VALUE`).
+pub const TERMINAL_MIN_CONTRAST: f64 = 4.5;
+
+/// A text colour with at least `ratio` against `bg`, as close to `fg` as
+/// the search finds: `fg` itself when it already has the contrast, else
+/// `fg` darkened or lightened in steps of 10% of each channel's distance
+/// to black or white, in the direction of its own luminance first. Alpha
+/// is ignored. Adapted from the reference terminal's
+/// `TerminalUiUtils.ensureContrastRatio` (IntelliJ Community, Apache-2.0,
+/// see NOTICE), itself after xterm.js.
+pub fn ensure_contrast(fg: Rgba, bg: Rgba, ratio: f64) -> Rgba {
+    let fg = Rgba::rgb(fg.r, fg.g, fg.b);
+    let bg = Rgba::rgb(bg.r, bg.g, bg.b);
+    let contrast = |c: Rgba| contrast_ratio(c, bg, bg);
+    if contrast(fg) >= ratio {
+        return fg;
+    }
+    type Search = fn(Rgba, Rgba, f64) -> Rgba;
+    let (first, second): (Search, Search) = if fg.luminance() < bg.luminance() {
+        (reduce_luminance, increase_luminance)
+    } else {
+        (increase_luminance, reduce_luminance)
+    };
+    let a = first(fg, bg, ratio);
+    let a_ratio = contrast(a);
+    if a_ratio >= ratio {
+        return a;
+    }
+    let b = second(fg, bg, ratio);
+    if a_ratio > contrast(b) { a } else { b }
+}
+
+/// Darker than `fg` until the contrast with `bg` is reached (or black).
+fn reduce_luminance(fg: Rgba, bg: Rgba, ratio: f64) -> Rgba {
+    let mut c = fg;
+    while contrast_ratio(c, bg, bg) < ratio && (c.r > 0 || c.g > 0 || c.b > 0) {
+        let step = |v: u8| v - (f64::from(v) * 0.1).ceil() as u8;
+        c = Rgba::rgb(step(c.r), step(c.g), step(c.b));
+    }
+    c
+}
+
+/// Lighter than `fg` until the contrast with `bg` is reached (or white).
+fn increase_luminance(fg: Rgba, bg: Rgba, ratio: f64) -> Rgba {
+    let mut c = fg;
+    while contrast_ratio(c, bg, bg) < ratio && (c.r < 255 || c.g < 255 || c.b < 255) {
+        let step = |v: u8| v + (f64::from(255 - v) * 0.1).ceil() as u8;
+        c = Rgba::rgb(step(c.r), step(c.g), step(c.b));
+    }
+    c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_contrast_keeps_readable_colours_and_moves_others() {
+        let black = Rgba::rgb(0, 0, 0);
+        let white = Rgba::rgb(255, 255, 255);
+        let grey = Rgba::rgb(0x80, 0x80, 0x80);
+        // Already enough: unchanged.
+        assert_eq!(ensure_contrast(white, black, 4.5), white);
+        // Dark grey on black: lightened until it reads.
+        let dark = Rgba::rgb(0x30, 0x30, 0x30);
+        let lighter = ensure_contrast(dark, black, 4.5);
+        assert!(lighter.luminance() > dark.luminance());
+        assert!(contrast_ratio(lighter, black, black) >= 4.5);
+        // Light grey on white: darkened.
+        let light = Rgba::rgb(0xd0, 0xd0, 0xd0);
+        let darker = ensure_contrast(light, white, 4.5);
+        assert!(darker.luminance() < light.luminance());
+        assert!(contrast_ratio(darker, white, white) >= 4.5);
+        // Mid grey on mid grey: the better of both directions.
+        let c = ensure_contrast(grey, grey, 4.5);
+        assert!(contrast_ratio(c, grey, grey) > 2.0);
+        // Ratio 1 never changes anything; alpha is dropped.
+        assert_eq!(ensure_contrast(grey, grey, 1.0), grey);
+        assert_eq!(
+            ensure_contrast(Rgba::new(255, 255, 255, 10), black, 4.5),
+            white
+        );
+    }
 }

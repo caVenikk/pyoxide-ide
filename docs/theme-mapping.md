@@ -12,9 +12,9 @@ a key or a role is missing from this file.
 
 A theme assigns a value to every role of three kinds, plus fonts:
 
-- **UI roles** (`ui.*`, 173 of them): flat colours of the interface, the
-  editor chrome, controls, icons, version control, diagnostics and the
-  terminal.
+- **UI roles** (`ui.*`, 213 of them): flat colours of the interface, the
+  editor chrome, controls, icons, version control, diagnostics, the Run
+  console and the terminal.
 - **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
   Each has text attributes: foreground `fg`, background `bg`, `bold`, `italic`,
   `underline` (`single`, `double`, `wavy`, `dotted`, `dashed`, `thick`) with
@@ -403,24 +403,74 @@ colours the New UI icons do not use and are listed as unmapped.
 
 | Pyoxide role | Sources, in order | Used for |
 |---|---|---|
-| `ui.terminal-background` | `CONSOLE_BACKGROUND_KEY` (scheme color) | Terminal and console background |
-| `ui.terminal-foreground` | `CONSOLE_NORMAL_OUTPUT` foreground | Terminal default text |
-| `ui.terminal-black` | `CONSOLE_BLACK_OUTPUT` foreground | ANSI colour 0 |
-| `ui.terminal-red` | `CONSOLE_RED_OUTPUT` foreground | ANSI colour 1 |
-| `ui.terminal-green` | `CONSOLE_GREEN_OUTPUT` foreground | ANSI colour 2 |
-| `ui.terminal-yellow` | `CONSOLE_YELLOW_OUTPUT` foreground | ANSI colour 3 |
-| `ui.terminal-blue` | `CONSOLE_BLUE_OUTPUT` foreground | ANSI colour 4 |
-| `ui.terminal-magenta` | `CONSOLE_MAGENTA_OUTPUT` foreground | ANSI colour 5 |
-| `ui.terminal-cyan` | `CONSOLE_CYAN_OUTPUT` foreground | ANSI colour 6 |
-| `ui.terminal-white` | `CONSOLE_GRAY_OUTPUT` foreground | ANSI colour 7 |
-| `ui.terminal-bright-black` | `CONSOLE_DARKGRAY_OUTPUT` foreground | ANSI colour 8 |
-| `ui.terminal-bright-red` | `CONSOLE_RED_BRIGHT_OUTPUT` foreground | ANSI colour 9 |
-| `ui.terminal-bright-green` | `CONSOLE_GREEN_BRIGHT_OUTPUT` foreground | ANSI colour 10 |
-| `ui.terminal-bright-yellow` | `CONSOLE_YELLOW_BRIGHT_OUTPUT` foreground | ANSI colour 11 |
-| `ui.terminal-bright-blue` | `CONSOLE_BLUE_BRIGHT_OUTPUT` foreground | ANSI colour 12 |
-| `ui.terminal-bright-magenta` | `CONSOLE_MAGENTA_BRIGHT_OUTPUT` foreground | ANSI colour 13 |
-| `ui.terminal-bright-cyan` | `CONSOLE_CYAN_BRIGHT_OUTPUT` foreground | ANSI colour 14 |
-| `ui.terminal-bright-white` | `CONSOLE_WHITE_OUTPUT` foreground | ANSI colour 15 |
+| `ui.terminal-background` | `CONSOLE_BACKGROUND_KEY` (scheme color) | Run console background |
+| `ui.terminal-foreground` | `CONSOLE_NORMAL_OUTPUT` foreground | Run console default text |
+| `ui.terminal-black` | `CONSOLE_BLACK_OUTPUT` foreground | ANSI colour 0 in the Run console |
+| `ui.terminal-red` | `CONSOLE_RED_OUTPUT` foreground | ANSI colour 1 in the Run console |
+| `ui.terminal-green` | `CONSOLE_GREEN_OUTPUT` foreground | ANSI colour 2 in the Run console |
+| `ui.terminal-yellow` | `CONSOLE_YELLOW_OUTPUT` foreground | ANSI colour 3 in the Run console |
+| `ui.terminal-blue` | `CONSOLE_BLUE_OUTPUT` foreground | ANSI colour 4 in the Run console |
+| `ui.terminal-magenta` | `CONSOLE_MAGENTA_OUTPUT` foreground | ANSI colour 5 in the Run console |
+| `ui.terminal-cyan` | `CONSOLE_CYAN_OUTPUT` foreground | ANSI colour 6 in the Run console |
+| `ui.terminal-white` | `CONSOLE_GRAY_OUTPUT` foreground | ANSI colour 7 in the Run console |
+| `ui.terminal-bright-black` | `CONSOLE_DARKGRAY_OUTPUT` foreground | ANSI colour 8 in the Run console |
+| `ui.terminal-bright-red` | `CONSOLE_RED_BRIGHT_OUTPUT` foreground | ANSI colour 9 in the Run console |
+| `ui.terminal-bright-green` | `CONSOLE_GREEN_BRIGHT_OUTPUT` foreground | ANSI colour 10 in the Run console |
+| `ui.terminal-bright-yellow` | `CONSOLE_YELLOW_BRIGHT_OUTPUT` foreground | ANSI colour 11 in the Run console |
+| `ui.terminal-bright-blue` | `CONSOLE_BLUE_BRIGHT_OUTPUT` foreground | ANSI colour 12 in the Run console |
+| `ui.terminal-bright-magenta` | `CONSOLE_MAGENTA_BRIGHT_OUTPUT` foreground | ANSI colour 13 in the Run console |
+| `ui.terminal-bright-cyan` | `CONSOLE_CYAN_BRIGHT_OUTPUT` foreground | ANSI colour 14 in the Run console |
+| `ui.terminal-bright-white` | `CONSOLE_WHITE_OUTPUT` foreground | ANSI colour 15 in the Run console |
+| `ui.terminal-default-background` | `BLOCK_TERMINAL_DEFAULT_BACKGROUND` (scheme color) | Terminal tool window background |
+| `ui.terminal-default-foreground` | `BLOCK_TERMINAL_DEFAULT_FOREGROUND` (scheme color) | Terminal tool window default text |
+| `ui.terminal-ansi-black` | `BLOCK_TERMINAL_BLACK` foreground, `BLOCK_TERMINAL_BLACK` background | Text of ANSI colour 0 in the terminal |
+| `ui.terminal-ansi-red` | `BLOCK_TERMINAL_RED` foreground, `BLOCK_TERMINAL_RED` background | Text of ANSI colour 1 in the terminal |
+| `ui.terminal-ansi-green` | `BLOCK_TERMINAL_GREEN` foreground, `BLOCK_TERMINAL_GREEN` background | Text of ANSI colour 2 in the terminal |
+| `ui.terminal-ansi-yellow` | `BLOCK_TERMINAL_YELLOW` foreground, `BLOCK_TERMINAL_YELLOW` background | Text of ANSI colour 3 in the terminal |
+| `ui.terminal-ansi-blue` | `BLOCK_TERMINAL_BLUE` foreground, `BLOCK_TERMINAL_BLUE` background | Text of ANSI colour 4 in the terminal |
+| `ui.terminal-ansi-magenta` | `BLOCK_TERMINAL_MAGENTA` foreground, `BLOCK_TERMINAL_MAGENTA` background | Text of ANSI colour 5 in the terminal |
+| `ui.terminal-ansi-cyan` | `BLOCK_TERMINAL_CYAN` foreground, `BLOCK_TERMINAL_CYAN` background | Text of ANSI colour 6 in the terminal |
+| `ui.terminal-ansi-white` | `BLOCK_TERMINAL_WHITE` foreground, `BLOCK_TERMINAL_WHITE` background | Text of ANSI colour 7 in the terminal |
+| `ui.terminal-ansi-bright-black` | `BLOCK_TERMINAL_BLACK_BRIGHT` foreground, `BLOCK_TERMINAL_BLACK_BRIGHT` background | Text of ANSI colour 8 in the terminal |
+| `ui.terminal-ansi-bright-red` | `BLOCK_TERMINAL_RED_BRIGHT` foreground, `BLOCK_TERMINAL_RED_BRIGHT` background | Text of ANSI colour 9 in the terminal |
+| `ui.terminal-ansi-bright-green` | `BLOCK_TERMINAL_GREEN_BRIGHT` foreground, `BLOCK_TERMINAL_GREEN_BRIGHT` background | Text of ANSI colour 10 in the terminal |
+| `ui.terminal-ansi-bright-yellow` | `BLOCK_TERMINAL_YELLOW_BRIGHT` foreground, `BLOCK_TERMINAL_YELLOW_BRIGHT` background | Text of ANSI colour 11 in the terminal |
+| `ui.terminal-ansi-bright-blue` | `BLOCK_TERMINAL_BLUE_BRIGHT` foreground, `BLOCK_TERMINAL_BLUE_BRIGHT` background | Text of ANSI colour 12 in the terminal |
+| `ui.terminal-ansi-bright-magenta` | `BLOCK_TERMINAL_MAGENTA_BRIGHT` foreground, `BLOCK_TERMINAL_MAGENTA_BRIGHT` background | Text of ANSI colour 13 in the terminal |
+| `ui.terminal-ansi-bright-cyan` | `BLOCK_TERMINAL_CYAN_BRIGHT` foreground, `BLOCK_TERMINAL_CYAN_BRIGHT` background | Text of ANSI colour 14 in the terminal |
+| `ui.terminal-ansi-bright-white` | `BLOCK_TERMINAL_WHITE_BRIGHT` foreground, `BLOCK_TERMINAL_WHITE_BRIGHT` background | Text of ANSI colour 15 in the terminal |
+| `ui.terminal-ansi-black-background` | `BLOCK_TERMINAL_BLACK` background, `BLOCK_TERMINAL_BLACK` foreground | Cell background of ANSI colour 0 in the terminal |
+| `ui.terminal-ansi-red-background` | `BLOCK_TERMINAL_RED` background, `BLOCK_TERMINAL_RED` foreground | Cell background of ANSI colour 1 in the terminal |
+| `ui.terminal-ansi-green-background` | `BLOCK_TERMINAL_GREEN` background, `BLOCK_TERMINAL_GREEN` foreground | Cell background of ANSI colour 2 in the terminal |
+| `ui.terminal-ansi-yellow-background` | `BLOCK_TERMINAL_YELLOW` background, `BLOCK_TERMINAL_YELLOW` foreground | Cell background of ANSI colour 3 in the terminal |
+| `ui.terminal-ansi-blue-background` | `BLOCK_TERMINAL_BLUE` background, `BLOCK_TERMINAL_BLUE` foreground | Cell background of ANSI colour 4 in the terminal |
+| `ui.terminal-ansi-magenta-background` | `BLOCK_TERMINAL_MAGENTA` background, `BLOCK_TERMINAL_MAGENTA` foreground | Cell background of ANSI colour 5 in the terminal |
+| `ui.terminal-ansi-cyan-background` | `BLOCK_TERMINAL_CYAN` background, `BLOCK_TERMINAL_CYAN` foreground | Cell background of ANSI colour 6 in the terminal |
+| `ui.terminal-ansi-white-background` | `BLOCK_TERMINAL_WHITE` background, `BLOCK_TERMINAL_WHITE` foreground | Cell background of ANSI colour 7 in the terminal |
+| `ui.terminal-ansi-bright-black-background` | `BLOCK_TERMINAL_BLACK_BRIGHT` background, `BLOCK_TERMINAL_BLACK_BRIGHT` foreground | Cell background of ANSI colour 8 in the terminal |
+| `ui.terminal-ansi-bright-red-background` | `BLOCK_TERMINAL_RED_BRIGHT` background, `BLOCK_TERMINAL_RED_BRIGHT` foreground | Cell background of ANSI colour 9 in the terminal |
+| `ui.terminal-ansi-bright-green-background` | `BLOCK_TERMINAL_GREEN_BRIGHT` background, `BLOCK_TERMINAL_GREEN_BRIGHT` foreground | Cell background of ANSI colour 10 in the terminal |
+| `ui.terminal-ansi-bright-yellow-background` | `BLOCK_TERMINAL_YELLOW_BRIGHT` background, `BLOCK_TERMINAL_YELLOW_BRIGHT` foreground | Cell background of ANSI colour 11 in the terminal |
+| `ui.terminal-ansi-bright-blue-background` | `BLOCK_TERMINAL_BLUE_BRIGHT` background, `BLOCK_TERMINAL_BLUE_BRIGHT` foreground | Cell background of ANSI colour 12 in the terminal |
+| `ui.terminal-ansi-bright-magenta-background` | `BLOCK_TERMINAL_MAGENTA_BRIGHT` background, `BLOCK_TERMINAL_MAGENTA_BRIGHT` foreground | Cell background of ANSI colour 13 in the terminal |
+| `ui.terminal-ansi-bright-cyan-background` | `BLOCK_TERMINAL_CYAN_BRIGHT` background, `BLOCK_TERMINAL_CYAN_BRIGHT` foreground | Cell background of ANSI colour 14 in the terminal |
+| `ui.terminal-ansi-bright-white-background` | `BLOCK_TERMINAL_WHITE_BRIGHT` background, `BLOCK_TERMINAL_WHITE_BRIGHT` foreground | Cell background of ANSI colour 15 in the terminal |
+| `ui.terminal-search-match` | `BLOCK_TERMINAL_SEARCH_ENTRY` background | Background of search matches in the terminal |
+| `ui.terminal-search-match-text` | `BLOCK_TERMINAL_SEARCH_ENTRY` foreground | Text of search matches in the terminal |
+| `ui.terminal-search-match-current` | `BLOCK_TERMINAL_CURRENT_SEARCH_ENTRY` background | Background of the current search match in the terminal |
+| `ui.terminal-search-match-current-text` | `BLOCK_TERMINAL_CURRENT_SEARCH_ENTRY` foreground | Text of the current search match in the terminal |
+| `ui.terminal-separator` | `BLOCK_TERMINAL_PROMPT_SEPARATOR_COLOR` (scheme color) | Line between the commands of the terminal |
+| `ui.terminal-error-marker` | `BLOCK_TERMINAL_ERROR_BLOCK_STROKE_COLOR` (scheme color) | Marker beside a terminal command that failed |
+
+The `terminal-*` roles without `ansi`, `default`, `search`, `separator` or
+`error` colour the Run console (`CONSOLE_*`); the others colour the
+Terminal tool window, which has separate text and cell background colours
+for each ANSI colour (`BLOCK_TERMINAL_*` attributes: foreground for text,
+background for cells, each standing in for the other when missing, as the
+reference's `TerminalColorPalette` does). The reference falls back from
+`BLOCK_TERMINAL_DEFAULT_*` to the console colours; a scheme without the
+ANSI keys takes the console's ANSI colours here (listed as derived), where
+the reference would take its parent scheme's terminal colours.
 
 Roles without a source are derived, then taken from the base theme.
 
@@ -463,6 +513,15 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.notification-icon-hover` | `ui.hover` |
 | `ui.notification-more` | `ui.notification` |
 | `ui.notification-more-text` | `ui.text-muted` |
+| `ui.terminal-default-background` | `ui.terminal-background` |
+| `ui.terminal-default-foreground` | `ui.terminal-foreground` |
+| `ui.terminal-ansi-<colour>` (16 roles) | `ui.terminal-<colour>` |
+| `ui.terminal-ansi-<colour>-background` (16 roles) | `ui.terminal-ansi-<colour>` |
+| `ui.terminal-search-match` | `ui.search-match` |
+| `ui.terminal-search-match-current` | `ui.search-match-active` |
+| `ui.terminal-search-match-text`, `ui.terminal-search-match-current-text` | `ui.terminal-default-foreground` |
+| `ui.terminal-separator` | `ui.divider` |
+| `ui.terminal-error-marker` | `ui.danger` |
 
 ## Text roles
 
@@ -751,7 +810,9 @@ by the Python product and use `syntax.dunder`, `syntax.constant-builtin`,
   and animation settings of Swing components: only the numbers listed under
   Metrics.
 - Language specific attributes of other languages (`JAVA.*`, `GO.*`, ...),
-  `CUSTOM_*`, `BLOCK_TERMINAL_*`, `JUPYTER.*`, `RAINBOW_*`, and every other key
+  `CUSTOM_*`, `JUPYTER.*`, `RAINBOW_*`, the `BLOCK_TERMINAL_*` keys of the
+  former block terminal (block backgrounds, the command and the generate
+  command prompt) and every other key
   not listed above. They are counted by the first part of their name in the
   report (`unmapped by group`).
 - `SELECTION_FOREGROUND`: Pyoxide keeps the syntax colours on selected text.

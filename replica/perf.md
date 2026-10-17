@@ -237,6 +237,79 @@ prints the numbers in the log. The machine was busy with other builds
 | 2026-10-16 | mac-1 | emulator alone | 66-81 MiB/s | `alacritty_terminal` 0.26.0 with the OSC pre-scan |
 | 2026-10-16 | mac-1 | through the PTY, snapshots per frame | 20-25 MiB/s | macOS openpty; without snapshots 36 MiB/s |
 | 2026-10-16 | mac-1 | a snapshot during the flood (lock wait and copy) | 0.26-6 ms | 0.2 ms without output; 5 ms before the reader released the lock fairly |
+| 2026-10-16 | mac-1 | emulator alone (rerun, load average 5-15) | 168 MiB/s | release build |
+| 2026-10-16 | mac-1 | through the PTY, snapshots per frame (rerun) | 42 MiB/s | a snapshot of 120x40 in 0.22 ms |
+
+### Terminal view (headless)
+`cargo test --release -p terminal-ui --test perf -- --ignored --nocapture --test-threads=1`,
+no window: the work of a frame before painting (the snapshot and the plan of
+backgrounds, text runs and the cursor), `cat` of a 16 MiB file of 85-byte
+lines with SGR colours through the pseudo-terminal with a snapshot and a plan
+per 16.7 ms frame, and a key written to `cat` to the snapshot that shows its
+echo (three runs, release build, load average 4-15). `bench_flood_frame_work`:
+`cat` of 128 MiB while a loop draws 60 frames a second and, when the screen
+changed, takes it and plans a frame; "in the frame" copies the screen there
+under the terminal's lock, "on a thread" takes the copies a background
+thread made at the view's rates (one per frame, one per 100 ms after 200 ms
+of output), as the view does since 2026-10-17. Frame work is the frame
+thread's time for the copy (or taking it) and the plan.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | plan of a 120x40 frame | 90-93 us | a busy listing: 679 text runs, 76 background quads |
+| 2026-10-16 | mac-1 | plan of a 240x70 frame | 260-297 us | 2333 text runs, 258 background quads |
+| 2026-10-16 | mac-1 | `cat` 16 MiB, snapshot and plan per frame | 124-151 MiB/s | snapshot 0.14-0.22 ms, plan 0.05 ms per frame |
+| 2026-10-16 | mac-1 | key to snapshot through the PTY | p50 0.06-0.10 ms, p99 0.13-0.15 ms | 200 keys |
+| 2026-10-17 | mac-1 | flood of 128 MiB, copy in the frame | 112-153 MiB/s; frame work p50 0.08-0.14 ms, p99 0.42-0.61 ms | 50-68 frames with a new screen; load average 7 |
+| 2026-10-17 | mac-1 | flood of 128 MiB, copy on a thread | 111-136 MiB/s; frame work p50 0.05-0.06 ms, p99 0.07-0.12 ms | 19-21 frames with a new screen (ten a second once flooding); load average 7 |
+| 2026-10-17 | mac-1 | `cat` 16 MiB, snapshot and plan per frame (rerun) | 97.5 MiB/s | snapshot 0.14 ms, plan 0.06 ms per frame; load average 10 |
+| 2026-10-17 | mac-1 | plan of a 120x40 / 240x70 frame (rerun) | 82 us / 291 us | |
+| 2026-10-17 | mac-1 | key to snapshot through the PTY (rerun) | p50 0.02 ms, p99 0.04 ms | 200 keys |
+
+### Terminal view (window)
+`PYOXIDE_BENCH=terminal-typing|terminal-flood:64|terminal-scroll`, and the
+editor's `PYOXIDE_BENCH=typing` at line 50,000 of a 150,000-line file with and
+without `PYOXIDE_BENCH_FLOOD=1` (a terminal printing a 4 MiB file again and
+again in the development terminal), release build, display frames, 600 keys
+(three runs of 200, one every 50-67 ms). Key to frame is the time from the
+key to the end of the first frame that shows it. These runs are of the view
+that copied the screen in the frame on the UI thread, at most once per
+16 ms, and redrew the window on every copy; other builds were running (load
+averages per row). The flood's time to the last line was not recorded (the
+measurement looked for the last line below the shell's prompt).
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-16 | mac-1 | terminal: key to frame of the echo | p50 22.4 ms, p90 29.5 ms, p99 34.3 ms, max 45.7 ms | 12 of 600 keys without a frame of their own; frame work p50 1.9 ms; load average 6 |
+| 2026-10-16 | mac-1 | terminal: `cat` of 64 MiB, frames meanwhile | 85 frames, frame work p50 2.2 ms, p90 12.3 ms, p99 28.8 ms | load average 42; RSS 149 MB |
+| 2026-10-16 | mac-1 | terminal: wheel over 2 MiB of scrollback | frame work p50 1.6 ms, p99 2.6 ms; gaps p50 16.7 ms, p99 18.2 ms, none over 1.5x the median | 361 frames; load average 41 |
+| 2026-10-16 | mac-1 | editor typing, no terminal | key to frame p50 3.9 ms, p99 6.7 ms, max 12.3 ms | key handling p50 0.1 ms; load average 39 |
+| 2026-10-16 | mac-1 | editor typing while a terminal floods | key to frame p50 6.1 ms, p99 28.0 ms, max 75.9 ms | key handling p50 2.4 ms, p99 13.5 ms (GPUI draws the window the terminal marked before it dispatches a key); load average 21 |
+
+Rerun of the same commands on 2026-10-17, each a single run of 600 keys or
+one flood, with timing probes that split the key's way into the shell's echo,
+the wakeup to the copy and the copy to the end of the frame that shows it.
+"Copy in the frame" is the view of the rows above; "copy on a thread" copies
+the screen on a background thread (one per 16 ms, one per 100 ms after output
+kept coming for 200 ms) and still drew the window at every key; "final" does
+not draw the window at a key but when the echo's copy lands (the next frame
+while flooding), so the frame shown at the next refresh is the one with the
+echo. Load average is the one-minute value at the start of the run; the
+machine ran other builds.
+
+| date | machine | metric | value | notes |
+|---|---|---|---|---|
+| 2026-10-17 | mac-1 | terminal: key to frame of the echo, copy in the frame | p50 20.8 ms, p90 27.4 ms, p99 33.0 ms, max 36.6 ms | 12 of 600 keys showed no frame of their own: the bench pressed Enter right after key 50 (it waits one interval since); wakeup to copy p50 17.1 ms; load average 2.7 |
+| 2026-10-17 | mac-1 | terminal: key to frame of the echo, copy on a thread | p50 20.6 ms, p90 27.6 ms, p99 33.6 ms, max 35.1 ms | the same 12 keys (the bench); copy to the end of the frame p50 17.3 ms: the window drawn at the key was shown at the refresh before the echo was back, and the echo waited for the next one; load average 3.2 |
+| 2026-10-17 | mac-1 | terminal: key to frame of the echo, final | p50 2.85 ms, p90 4.15 ms, p99 5.49 ms, max 6.2 ms | every key has a frame; echo p50 0.08 ms, copy to the end of the frame p50 1.05 ms; editor without a terminal in the same run set: p50 3.94 ms; load average 4.9 |
+| 2026-10-17 | mac-1 | terminal: `cat` of 64 MiB, copy in the frame | 132 MiB/s, 17 frames, frame work p50 1.13 ms, p99 4.93 ms | load average 2.4 |
+| 2026-10-17 | mac-1 | terminal: `cat` of 64 MiB, copy on a thread | 105 MiB/s, 16 frames (15 copies), frame work p50 1.05 ms, p99 5.43 ms | load average 3.4 |
+| 2026-10-17 | mac-1 | terminal: `cat` of 64 MiB, final | 69.7 MiB/s, 19 frames (18 copies), frame work p50 1.35 ms, p99 2.91 ms; RSS 163 MB | budget: >= 50 MiB/s and ten repaints a second; load average 4.6; the rate varies between runs with the load |
+| 2026-10-17 | mac-1 | terminal: wheel over 2 MiB of scrollback, copy in the frame | frame work p50 0.80 ms, p99 0.97 ms; gaps p50 16.67 ms, p99 17.91 ms, none over 1.5x the median | 361 frames; load average 2.4 |
+| 2026-10-17 | mac-1 | terminal: wheel over 2 MiB of scrollback, final | frame work p50 1.13 ms, p99 1.27 ms; gaps p50 16.68 ms, p99 17.65 ms, none over 1.5x the median | 361 frames; load average 5.5 |
+| 2026-10-17 | mac-1 | editor typing, no terminal | key to frame p50 3.79 ms, p99 6.25 ms (copy in the frame); p50 3.94 ms, p99 6.58 ms (final) | load average 2.4 and 5.5 |
+| 2026-10-17 | mac-1 | editor typing while a terminal floods, copy in the frame | key to frame p50 4.18 ms, p99 7.02 ms, max 7.84 ms | key handling p50 1.5 ms (the window the terminal marked is drawn before the key is dispatched); load average 2.8 |
+| 2026-10-17 | mac-1 | editor typing while a terminal floods, final | key to frame p50 4.24 ms, p99 7.20 ms, max 8.57 ms | p99 0.62 ms above typing without a terminal (budget: 2 ms); key handling p50 0.14 ms; load average 5.3 |
 
 ### Git status and line ranges
 Engine measurements (ADR 0016 budgets), release builds, git 2.56.0, other

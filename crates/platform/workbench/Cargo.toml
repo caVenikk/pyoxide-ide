@@ -28,6 +28,7 @@ project-search.workspace = true
 quick-xml.workspace = true
 settings.workspace = true
 settings-ui.workspace = true
+terminal-ui.workspace = true
 regex.workspace = true
 run-config.workspace = true
 search.workspace = true

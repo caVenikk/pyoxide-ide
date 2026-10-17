@@ -107,14 +107,14 @@ Test runner (pytest),run-debug,should,yes,no,
 "Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,no,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89)"
 "Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,partial,"Community; default shell per OS, login and interactive options, environment (#89)"
 "VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,partial,Community; candidate alacritty_terminal (#89)
-"Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,no,Community (#89)
+"Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,partial,"Community (#89); the grid view paints with the theme's terminal colours and minimum contrast (#157); used once the Terminal tool window hosts it (#158)"
 "Terminal tabs (new, close with confirmation, rename, unique names, close on exit)",terminal,must,yes,no,Community (#89)
-"Select, copy, paste, select all and clear in the terminal",terminal,must,yes,no,Community (#89)
+"Select, copy, paste, select all and clear in the terminal",terminal,must,yes,partial,"Community (#89); mouse selection by character, word, line and rectangle, copy, paste, select all and clear in the grid view (#157); used once the Terminal tool window hosts it (#158)"
 "Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell",terminal,must,yes,partial,"Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); used once the Terminal tool window starts sessions through workbench::terminal::plan"
 Virtual environment activation and start directory in the terminal,terminal,must,yes,partial,"Community; project venv / uv activated through its activate script or env merge, [python.terminal] activate-virtualenv imported from .idea (#159); start directory and conda later"
 "Links in terminal output (URLs, file paths with line:column, Python tracebacks)",terminal,must,yes,no,Community (#89)
 Find in terminal output,terminal,must,yes,no,Community (#89)
-"Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,no,Community (#89)
+"Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,partial,"Community (#89); keys, Option as Meta, bracketed paste and mouse reporting with Shift selecting in the grid view (#157); Override IDE shortcuts and allowed actions with the Terminal settings page"
 Terminal tabs restored on project open,terminal,should,yes,no,Community
 New Predefined Session popup (detected shells),terminal,should,yes,no,Community
 Open In > Terminal,terminal,should,yes,no,Community

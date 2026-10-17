@@ -102,7 +102,9 @@ Frames follow the display's refresh (GPUI's display link). After a
 keystroke the main window draws at once instead (macOS: the layer's display
 callback), so the typed text is ready for the next refresh rather than the
 one after; at 60 Hz this takes keystroke-to-frame p99 from about 19.5 ms to
-about 6 ms (replica/perf.md).
+about 6 ms (replica/perf.md). Text typed into a terminal is drawn when its
+echo is back from the shell instead (ADR 0014): one such frame is shown per
+refresh, and a frame drawn before the echo would hold it back a refresh.
 
 ### Highlighting
 Highlighting has two layers, as in the reference IDE, whose colours come

@@ -13,6 +13,10 @@ projects and machines (macOS and Windows) and then enforced in CI.
 | Completion popup after the language server answers | <= 100 ms; the UI never waits for the server |
 | Git status of a 10 000-file repository after a watcher batch (after the 300 ms debounce, off the UI thread) | <= 150 ms |
 | Change markers (line ranges) of a 10 000-line file after the last keystroke | <= 50 ms |
+| Terminal: key to the frame that shows its echo | p50 and p99 within one frame (16.7 ms) of the editor's keystroke to paint; every key gets a frame |
+| Editor typing while a terminal prints without pause | p99 within 2 ms of typing without it; the UI thread never waits for the terminal's lock |
+| Terminal output: `cat` of 64 MiB in the Terminal | >= 50 MiB/s, at most ten repaints a second while output floods |
+| Terminal scrolling through the history | no frame gap over 1.5x the median |
 
 ## Measuring
 Record baseline and current numbers in `replica/perf.md` (method, machine, OS,

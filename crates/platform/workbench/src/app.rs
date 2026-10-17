@@ -151,6 +151,8 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::recent_files::init(cx);
     crate::navigation::init(cx);
     crate::run::init(cx);
+    terminal_ui::init(cx);
+    crate::workbench::terminal_dev::init(cx);
     code_intel_ui::init(cx);
     vcs_ui::init(cx);
     debugger_ui::init(cx);
@@ -432,9 +434,22 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // draws at once instead: the typed text is then ready for the next
         // refresh rather than the one after (ADR 0007, replica/perf.md).
         // Only real windows (the test platform has no native window).
+        // Text typed into a terminal is drawn when its echo is back from
+        // the shell (the session view's `Redraw`): a frame drawn before it
+        // would take the next refresh, and the echo would wait for the one
+        // after (Core Animation shows one such frame per refresh).
         crate::shot::set_native_windows();
-        cx.observe_keystrokes(|_, window, _| crate::shot::request_display(window))
-            .detach();
+        cx.observe_keystrokes(|event, window, _| {
+            let into_terminal = event.action.is_none()
+                && event
+                    .context_stack
+                    .iter()
+                    .any(|c| c.contains(terminal_ui::KEY_CONTEXT));
+            if !into_terminal {
+                crate::shot::request_display(window)
+            }
+        })
+        .detach();
         // `PYOXIDE_NATIVE_POINTER=0` leaves the pointer to GPUI alone
         // (diagnostics, see ui::pointer).
         if std::env::var_os("PYOXIDE_NATIVE_POINTER").is_none_or(|v| v != "0") {

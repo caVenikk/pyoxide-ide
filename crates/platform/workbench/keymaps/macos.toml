@@ -788,3 +788,19 @@ name = "BreakpointsTree"
 "enter" = "breakpoints-dialog.go-to-source"
 "f4" = "breakpoints-dialog.go-to-source"
 "cmd-down" = "breakpoints-dialog.go-to-source"
+
+# A focused terminal (the reference's `Terminal.*` actions): Copy only
+# with a selection (without one the key goes on), Paste (bracketed when
+# the program asked for it), Select All, Clear Terminal (the prompt line
+# stays), Line Up and Down, Page Up and Down.
+[[context]]
+name = "Terminal"
+[context.bindings]
+"cmd-c" = "terminal.copy"
+"cmd-v" = "terminal.paste"
+"cmd-a" = "terminal.select-all"
+"cmd-k" = "terminal.clear"
+"cmd-up" = "terminal.line-up"
+"cmd-down" = "terminal.line-down"
+"shift-pageup" = "terminal.page-up"
+"shift-pagedown" = "terminal.page-down"

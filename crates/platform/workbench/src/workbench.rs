@@ -45,6 +45,7 @@ mod file_sync;
 mod history;
 mod remote;
 mod run_actions;
+pub(crate) mod terminal_dev;
 mod tool_window_areas;
 mod version_control;
 
@@ -2306,6 +2307,7 @@ impl Render for Workbench {
             .on_action(crate::simulate::simulate_mouse)
             .on_action(cx.listener(Self::toggle_project))
             .on_action(cx.listener(Self::toggle_run))
+            .on_action(cx.listener(Self::open_dev_terminal))
             .on_action(cx.listener(Self::activate_tool_window_action))
             .on_action(cx.listener(Self::toggle_tool_window_action))
             .on_action(cx.listener(Self::focus_editor))

@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 47%** `█████████░░░░░░░░░░░`
+**Overall parity: 48%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -12,7 +12,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | settings-import | 55% `█████░░░░░` | 1 | 2 | 1 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 37% `████░░░░░░` | 5 | 5 | 16 |
-| terminal | 12% `█░░░░░░░░░` | 0 | 4 | 17 |
+| terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
 | vcs | 40% `████░░░░░░` | 6 | 3 | 16 |
 | settings | 53% `█████░░░░░` | 7 | 3 | 8 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -164,14 +164,14 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Terminal tool window (Alt+F12, stripe button, Hide) | must | Community (Reworked engine, the 2026.2 default); ADR 0014 (#89) |
 | 🟡 | Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows) | must | Community; default shell per OS, login and interactive options, environment (#89) |
 | 🟡 | VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback) | must | Community; candidate alacritty_terminal (#89) |
-| ⬜ | Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast) | must | Community (#89) |
+| 🟡 | Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast) | must | Community (#89); the grid view paints with the theme's terminal colours and minimum contrast (#157); used once the Terminal tool window hosts it (#158) |
 | ⬜ | Terminal tabs (new, close with confirmation, rename, unique names, close on exit) | must | Community (#89) |
-| ⬜ | Select, copy, paste, select all and clear in the terminal | must | Community (#89) |
+| 🟡 | Select, copy, paste, select all and clear in the terminal | must | Community (#89); mouse selection by character, word, line and rectangle, copy, paste, select all and clear in the grid view (#157); used once the Terminal tool window hosts it (#158) |
 | 🟡 | Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell | must | Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); used once the Terminal tool window starts sessions through workbench::terminal::plan |
 | 🟡 | Virtual environment activation and start directory in the terminal | must | Community; project venv / uv activated through its activate script or env merge, [python.terminal] activate-virtualenv imported from .idea (#159); start directory and conda later |
 | ⬜ | Links in terminal output (URLs, file paths with line:column, Python tracebacks) | must | Community (#89) |
 | ⬜ | Find in terminal output | must | Community (#89) |
-| ⬜ | Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta) | must | Community (#89) |
+| 🟡 | Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta) | must | Community (#89); keys, Option as Meta, bracketed paste and mouse reporting with Shift selecting in the grid view (#157); Override IDE shortcuts and allowed actions with the Terminal settings page |
 | ⬜ | Terminal tabs restored on project open | should | Community |
 | ⬜ | New Predefined Session popup (detected shells) | should | Community |
 | ⬜ | Open In > Terminal | should | Community |
