@@ -169,7 +169,7 @@ impl Workbench {
                     .frames_or_variables_focused(window, cx)
                     .then(|| window.focused(cx))
                     .flatten();
-                let open = self.tabs.iter().any(|t| t.path == *path);
+                let open = self.tabs.iter().any(|t| t.path() == Some(path));
                 self.open_file_at(path.clone(), point, None, window, cx);
                 match keep {
                     Some(focus) if open => window.focus(&focus),
