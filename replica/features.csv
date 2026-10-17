@@ -55,7 +55,7 @@ Live templates,editor,should,yes,no,
 Keymap import,settings-import,must,yes,yes,"reference keymap XML with its parent chain, Import Keymap… on the Keymap page (#40)"
 Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
-UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
+UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; icon colour palette, run widget, tree, check box and button colours and sizes from the theme (#222, #225)"
 Import data sources and passwords from PyCharm,settings-import,should,no,yes,own feature; verified with the macOS keychain; KeePass and Windows DPAPI paths tested on synthetic data
 Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters, the Python > Interpreter page and Add Python Interpreter: area settings (#75)"
 "Language services over LSP (start, stop, restart, status widget)",python-intel,must,yes,yes,Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85)
