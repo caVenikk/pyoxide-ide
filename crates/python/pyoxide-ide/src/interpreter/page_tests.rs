@@ -243,6 +243,23 @@ fn the_page_lists_the_interpreters_and_applies_a_choice(cx: &mut TestAppContext)
     let menu = &p["menu"]["levels"][0];
     assert_eq!(menu["selected"], json!(4), "{p}");
     assert_eq!(menu["items"][0]["label"], json!(NO_INTERPRETER));
+    // Under the combo and as wide as it: long paths are cut.
+    let settings = cx.update(|cx| settings_ui::find(cx)).unwrap();
+    let vcx = &mut gpui::VisualTestContext::from_window(settings.into(), cx);
+    let combo = vcx.debug_bounds("interpreter:combo").unwrap();
+    let list = vcx.debug_bounds("menu-level-0").unwrap();
+    assert!(
+        (list.left() - combo.left()).abs() <= gpui::px(1.0),
+        "{list:?} {combo:?}"
+    );
+    assert!(
+        list.top() >= combo.bottom() - gpui::px(1.0),
+        "{list:?} {combo:?}"
+    );
+    assert!(
+        list.size.width <= combo.size.width + gpui::px(1.0),
+        "{list:?} {combo:?}"
+    );
     edit(cx, &f, "list", json!("add"));
     let p = page(cx, &f);
     assert_eq!(p["list"], json!("add"));

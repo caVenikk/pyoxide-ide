@@ -375,7 +375,10 @@ impl InterpreterPage {
             PopupOptions {
                 speed_search: true,
                 selected,
+                // The combo's list is as wide as the combo: long paths are
+                // cut (`ComboBox` popups).
                 min_width: (list == List::Interpreters).then(|| f32::from(bounds.size.width)),
+                max_width: (list == List::Interpreters).then(|| f32::from(bounds.size.width)),
                 ..PopupOptions::default()
             },
             window,

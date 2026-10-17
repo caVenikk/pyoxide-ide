@@ -557,11 +557,21 @@ pub fn unique_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
         .expect("a free name")
 }
 
+/// Two paths name the same file or folder: equal, or equal once their
+/// parent folders are resolved. The last part is not followed: the
+/// interpreter of a virtual environment is a link to its base
+/// interpreter, and two environments made from one base are not the same
+/// interpreter.
 pub fn same_path(a: &Path, b: &Path) -> bool {
-    a == b
-        || std::fs::canonicalize(a)
+    if a == b {
+        return true;
+    }
+    match (a.parent(), b.parent(), a.file_name(), b.file_name()) {
+        (Some(pa), Some(pb), Some(na), Some(nb)) if na == nb => std::fs::canonicalize(pa)
             .ok()
-            .is_some_and(|a| std::fs::canonicalize(b).is_ok_and(|b| a == b))
+            .is_some_and(|pa| std::fs::canonicalize(pb).is_ok_and(|pb| pa == pb)),
+        _ => false,
+    }
 }
 
 // ---- the reference IDE's interpreters ---------------------------------------------
@@ -906,6 +916,36 @@ mod tests {
         let none = root.join("none").join(FILE);
         assert_eq!(load_or_import(&none, &[]).unwrap(), Table::default());
         assert!(!none.exists());
+    }
+
+    /// Environments made from one base interpreter link to it: they are
+    /// still different interpreters.
+    #[cfg(unix)]
+    #[test]
+    fn environments_of_one_base_are_different_interpreters() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let base = root.join("base/python3.13");
+        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+        std::fs::write(&base, "").unwrap();
+        let link = |env: &str| {
+            let python = root.join(env).join("bin/python");
+            std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&base, &python).unwrap();
+            python
+        };
+        let (a, b) = (link("a"), link("b"));
+        assert!(!same_path(&a, &b));
+        assert!(same_path(&a, &root.join("b/../a/bin/python")));
+        let mut table = Table::default();
+        table
+            .apply(&Change::Add(Entry::new("a", &a, Flavor::Venv)))
+            .unwrap();
+        table
+            .apply(&Change::Add(Entry::new("b", &b, Flavor::Venv)))
+            .unwrap();
+        assert_eq!(table.entries.len(), 2);
+        assert_eq!(table.find_python(&b).unwrap().name, "b");
     }
 
     #[test]

@@ -164,11 +164,14 @@ pub(crate) async fn existing_uv(
     uv.version(&ctx).await.map_err(|_| NO_UV.to_owned())?;
     let env = py_env::venv::inspect_python(&python);
     let mut entry = entry_for(&root, &python, env.as_ref(), Flavor::Uv);
-    if entry.version.is_none() {
-        entry.version = py_env::interpreter::probe(&python, "uv", PROBE_TIMEOUT, &ctx)
-            .await
-            .ok()
-            .map(|p| p.version);
+    // uv may write an incomplete version (`3.14`): ask the interpreter.
+    if entry
+        .version
+        .as_deref()
+        .is_none_or(|v| v.split('.').count() < 3)
+        && let Ok(probed) = py_env::interpreter::probe(&python, "uv", PROBE_TIMEOUT, &ctx).await
+    {
+        entry.version = Some(probed.version);
     }
     entry.uv = Some(uv.program().to_owned());
     entry.working_dir = Some(root);

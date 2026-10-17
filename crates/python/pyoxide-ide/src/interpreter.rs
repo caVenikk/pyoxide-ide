@@ -151,7 +151,7 @@ fn find_configured(
             None => found
                 .found
                 .iter()
-                .find(|f| same_dir(&f.python, python))
+                .find(|f| table::same_path(&f.python, python))
                 .cloned()
                 .unwrap_or_else(|| FoundInterpreter::bare(python)),
         };
@@ -774,7 +774,7 @@ fn entry_of<'a>(table: &'a Table, python: &Path, dir: &Path) -> Option<&'a Entry
     table
         .entries
         .iter()
-        .find(|e| same_dir(&e.python, python) || same_dir(&env_dir_of(&e.python), dir))
+        .find(|e| table::same_path(&e.python, python) || same_dir(&env_dir_of(&e.python), dir))
 }
 
 /// [`scan`] with the reference IDE's configuration directories (newest
@@ -818,7 +818,7 @@ fn scan_with(
     for entry in &offered {
         if !found
             .iter()
-            .any(|f| f.name == entry.name || same_dir(&f.python, &entry.python))
+            .any(|f| f.name == entry.name || table::same_path(&f.python, &entry.python))
         {
             found.push(FoundInterpreter::from_entry(entry));
         }
@@ -853,7 +853,7 @@ fn scan_with(
                 None if path.is_file() => Some(
                     found
                         .iter()
-                        .find(|f| same_dir(&f.python, path))
+                        .find(|f| table::same_path(&f.python, path))
                         .cloned()
                         .unwrap_or_else(|| entry(FoundInterpreter::bare(path))),
                 ),
@@ -943,7 +943,7 @@ impl Stored {
         let (Some(name), Some(home)) = (&self.sdk_name, &self.sdk_home) else {
             return;
         };
-        if same_dir(&item.python, home) || same_dir(&item.dir, &env_dir_of(home)) {
+        if table::same_path(&item.python, home) || same_dir(&item.dir, &env_dir_of(home)) {
             item.name = name.clone();
             item.path_derived = false;
         }
