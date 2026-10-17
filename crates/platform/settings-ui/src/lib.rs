@@ -14,8 +14,12 @@
 //!   theme switchers with their preview, and theme import; [`pages`] holds
 //!   the pages that only edit sections of the store (Appearance, Editor >
 //!   General and Editor > Font).
+//! - [`first_run`]: the window of the first start, with the one-time
+//!   import of the reference IDE's settings and the theme and keymap
+//!   choices.
 
 pub mod commands;
+pub mod first_run;
 mod history;
 pub mod leave;
 pub mod page;
@@ -48,6 +52,7 @@ pub fn init(cx: &mut App) {
     ui::command::register(cx, commands::THEME_COMMANDS);
     theme_switch::init(cx);
     pages::font::init(cx);
+    first_run::init(cx);
     ui::command::register_query(
         cx,
         "settings.state",

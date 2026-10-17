@@ -804,3 +804,11 @@ name = "Terminal"
 "cmd-down" = "terminal.line-down"
 "shift-pageup" = "terminal.page-up"
 "shift-pagedown" = "terminal.page-down"
+
+# The first-run window (`OnboardingDialog`, a `DialogWrapper`): Enter is
+# its default button (Continue), Escape closes it.
+[[context]]
+name = "FirstRun"
+[context.bindings]
+"enter" = "first-run.continue"
+"escape" = "first-run.cancel"

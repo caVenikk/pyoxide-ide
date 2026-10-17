@@ -399,6 +399,52 @@ pub fn import(path: PathBuf, cx: &mut App) {
     .detach();
 }
 
+/// Adds imported theme files to the catalog without switching or a
+/// balloon; returns the ids of the themes and of the schemes added, and
+/// logs what each import could not map.
+pub fn add_imported(
+    files: Vec<themes::catalog::ImportedFile>,
+    cx: &mut App,
+) -> (Vec<String>, Vec<String>) {
+    let mut themes = Vec::new();
+    let mut schemes = Vec::new();
+    let mut reports = Vec::new();
+    for file in files {
+        let scheme_only = file.file.theme.scheme_only;
+        match state(cx).catalog.add(file.file, Some(file.path)) {
+            Ok(id) if scheme_only => schemes.push(id),
+            Ok(id) => themes.push(id),
+            Err(e) => eprintln!("themes: {e}"),
+        }
+        reports.push(file.report);
+    }
+    log_reports(&reports);
+    (themes, schemes)
+}
+
+/// Makes `theme` the theme with `scheme` as its editor colour scheme
+/// (`None`: its own) and stores both.
+pub fn set_theme_and_scheme(theme: &str, scheme: Option<&str>, cx: &mut App) -> Result<(), String> {
+    if !state(cx).catalog.is_theme(theme) {
+        return Err(format!("unknown theme `{theme}`"));
+    }
+    if let Some(scheme) = scheme
+        && state(cx).catalog.get(scheme).is_none()
+    {
+        return Err(format!("unknown editor color scheme `{scheme}`"));
+    }
+    state(cx).pinned = None;
+    store::set(
+        cx,
+        &AppearanceSettings {
+            theme: Some(theme.to_owned()),
+            editor_scheme: scheme.filter(|s| *s != theme).map(str::to_owned),
+        },
+    );
+    apply(cx);
+    Ok(())
+}
+
 fn imported(
     result: Result<Vec<themes::catalog::ImportedFile>, themes::import::ImportError>,
     cx: &mut App,

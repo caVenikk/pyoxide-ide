@@ -231,6 +231,11 @@ pub struct Workbench {
 impl EventEmitter<WorkbenchEvent> for Workbench {}
 
 impl Workbench {
+    /// The product's name (window titles).
+    pub(crate) fn product_name(&self) -> &'static str {
+        self.product.name
+    }
+
     pub fn new(product: Rc<Product>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus);
@@ -2315,6 +2320,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::locate_file))
             .on_action(cx.listener(Self::set_theme))
             .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::import_reference_settings))
             .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))

@@ -569,6 +569,58 @@ pub fn import_path(path: &Path, context: &[PathBuf]) -> Result<Vec<Imported>, Im
     Ok(imported)
 }
 
+/// Imports the UI theme at `entry` of the plugin archive `archive` (the
+/// file a plugin descriptor's `themeProvider` names) with its parents and
+/// its editor colour scheme; `context` archives and files supply parents
+/// and schemes it names.
+pub fn import_plugin_theme(
+    archive: &Path,
+    entry: &str,
+    context: &[PathBuf],
+) -> Result<Imported, ImportError> {
+    let mut library = Library::new();
+    for extra in context.iter().filter(|c| c.as_path() != archive) {
+        // A broken context archive only costs its parents.
+        if let Err(e) = library.add_path(extra, false) {
+            library.note_skipped(&extra.display().to_string(), &e.to_string());
+        }
+    }
+    library.add_path(archive, false)?;
+    let wanted = archive::normalize(entry).unwrap_or_else(|| entry.to_owned());
+    let container = archive.display().to_string();
+    let find = |library: &Library| {
+        library
+            .themes
+            .iter()
+            .position(|t| t.data.entry_path == wanted && container_of(&t.data.origin) == container)
+    };
+    let index = match find(&library) {
+        Some(index) => index,
+        None => {
+            archive::add_theme_entry(&mut library, archive, &wanted, false)?;
+            find(&library).ok_or_else(|| ImportError::Empty(format!("{container}!{wanted}")))?
+        }
+    };
+    Ok(library.import_ui_theme(&library.themes[index].data))
+}
+
+/// Imports the editor colour scheme named `name` from `sources` (scheme
+/// files, plugin archives, folders), with the parents they hold.
+pub fn import_scheme_named(name: &str, sources: &[PathBuf]) -> Result<Imported, ImportError> {
+    let mut library = Library::new();
+    for source in sources {
+        if let Err(e) = library.add_path(source, false) {
+            library.note_skipped(&source.display().to_string(), &e.to_string());
+        }
+    }
+    let scheme = library
+        .schemes
+        .iter()
+        .find(|s| s.data.name == name && !s.data.additional)
+        .ok_or_else(|| ImportError::Empty(format!("colour scheme `{name}`")))?;
+    Ok(library.import_scheme(&scheme.data))
+}
+
 fn looks_like_path(reference: &str) -> bool {
     let lower = reference.to_ascii_lowercase();
     reference.contains('/')

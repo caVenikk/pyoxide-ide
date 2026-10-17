@@ -3,8 +3,10 @@
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
 
+/// An element of an XML file: its name, attributes in order, child
+/// elements and text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Element {
+pub struct Element {
     pub name: String,
     pub attrs: Vec<(String, String)>,
     pub children: Vec<Element>,

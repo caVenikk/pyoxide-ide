@@ -82,6 +82,9 @@ pub struct OpenRequest {
     pub filter: Option<String>,
     /// Give the window the focus (off in the background).
     pub activate: bool,
+    /// Modal to the window it opens over (from the first-run window, as
+    /// the reference's welcome screen opens it); else non-modal.
+    pub modal: bool,
 }
 
 /// The window's title for a project name.
@@ -156,8 +159,8 @@ fn open_new(
         min_size: Some(size(px(WIDTH), px(HEIGHT))),
         activate: request.activate,
         themed_title: true,
-        modal: false,
-        key: Some(DIALOG_KEY.into()),
+        modal: request.modal,
+        key: (!request.modal).then(|| DIALOG_KEY.into()),
     };
     ui::dialog_window::open(parent, options, cx, |window, cx| {
         cx.new(|cx| SettingsWindow::new(request, window, cx))

@@ -4,6 +4,7 @@
 //! and the switchers of a main window (the Theme and Keymap popups, from
 //! the gear menu and Quick Switch Scheme).
 
+mod first_run;
 mod keymap;
 mod system;
 
@@ -139,11 +140,17 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
     // Theme and keymap imports report in a main window.
     theme_switch::set_notify(cx, Rc::new(notify_main_window));
     keymaps::set_notify(cx, Rc::new(notify_main_window));
+    first_run::init(cx);
+}
+
+/// How the first-run window opens for a product (`settings_ui::first_run`).
+pub fn first_run_start(title: &str) -> settings_ui::first_run::Start {
+    first_run::start(title)
 }
 
 /// Shows a balloon in the active main window (the one under an active
 /// Settings window), else in the first.
-fn notify_main_window(notification: Notification, cx: &mut App) {
+pub(crate) fn notify_main_window(notification: Notification, cx: &mut App) {
     let active = cx.active_window();
     let target = active
         .and_then(|w| w.downcast::<Workbench>())
@@ -197,6 +204,7 @@ impl Workbench {
             page: a.page.clone(),
             filter: a.filter.clone(),
             activate: !crate::env::background(),
+            modal: false,
         };
         if settings_ui::open(window, request, cx).is_none() {
             self.show_notice("The Settings window could not open".into(), cx);

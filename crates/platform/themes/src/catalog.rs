@@ -16,7 +16,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::builtin;
-use crate::import::{ImportError, ImportReport, SourceKind, import_path};
+use crate::import::{
+    ImportError, ImportReport, Imported, SourceKind, import_path, import_plugin_theme,
+    import_scheme_named,
+};
 use crate::model::{Theme, ThemeFile, ThemeKind};
 use crate::registry::{Registry, ThemeError};
 use crate::roles::UiRole;
@@ -261,7 +264,38 @@ pub struct ImportedFile {
 /// marked as a scheme only; an id of a built-in theme gets `-imported`
 /// appended. Reads and writes files: call it off the UI thread.
 pub fn import_into(path: &Path, dir: &Path) -> Result<Vec<ImportedFile>, ImportError> {
-    let imported = import_path(path, &[])?;
+    write_imported(import_path(path, &[])?, dir)
+}
+
+/// Imports the UI theme at `entry` of a plugin archive
+/// ([`import_plugin_theme`]) and writes it as `<dir>/<id>.toml`, as
+/// [`import_into`] does. Reads and writes files: call it off the UI thread.
+pub fn import_plugin_theme_into(
+    archive: &Path,
+    entry: &str,
+    context: &[PathBuf],
+    dir: &Path,
+) -> Result<ImportedFile, ImportError> {
+    let imported = import_plugin_theme(archive, entry, context)?;
+    let mut files = write_imported(vec![imported], dir)?;
+    Ok(files.remove(0))
+}
+
+/// Imports the editor colour scheme named `name` from `sources`
+/// ([`import_scheme_named`]) and writes it as a scheme only, as
+/// [`import_into`] does. Reads and writes files: call it off the UI thread.
+pub fn import_scheme_into(
+    name: &str,
+    sources: &[PathBuf],
+    dir: &Path,
+) -> Result<ImportedFile, ImportError> {
+    let imported = import_scheme_named(name, sources)?;
+    let mut files = write_imported(vec![imported], dir)?;
+    Ok(files.remove(0))
+}
+
+/// Writes each import as `<dir>/<id>.toml` (see [`import_into`]).
+fn write_imported(imported: Vec<Imported>, dir: &Path) -> Result<Vec<ImportedFile>, ImportError> {
     let builtin: HashSet<String> = builtin::files().into_iter().map(|f| f.theme.id).collect();
     let mut taken: HashSet<String> = HashSet::new();
     let io = |path: &Path, source| ImportError::Io {

@@ -1,7 +1,9 @@
-//! PyCharm: project data sources and the passwords the IDE saved for them.
+//! PyCharm: project data sources and the passwords the IDE saved for them,
+//! and the application options of its configuration folders.
 
 pub mod datasources;
 pub mod jdbc;
+pub mod options;
 pub mod passwords;
 
 pub use datasources::{ImportedDataSource, load_project, parse_data_sources};

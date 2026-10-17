@@ -577,14 +577,20 @@ fn imported(result: Result<Imported, String>, cx: &mut App) {
             return;
         }
     };
+    if let Some(name) = add_imported(&imported, cx) {
+        report(import_notification(&name, &imported), cx);
+    }
+}
+
+/// Adds the keymaps an import wrote ([`import_into`]) and switches to the
+/// last of them, without a balloon; returns its name.
+pub fn add_imported(imported: &Imported, cx: &mut App) -> Option<String> {
     for keymap in &imported.keymaps {
         let custom = &mut state(cx).custom;
         custom.retain(|k| k.name != keymap.name);
         custom.push(keymap.clone());
     }
-    let Some(name) = imported.keymaps.last().map(|k| k.name.clone()) else {
-        return;
-    };
+    let name = imported.keymaps.last().map(|k| k.name.clone())?;
     // The keymap's bindings changed even when its name did not.
     if active_name(cx) == name {
         state(cx).active.clear();
@@ -592,8 +598,8 @@ fn imported(result: Result<Imported, String>, cx: &mut App) {
     if let Err(e) = switch(&name, cx) {
         eprintln!("keymaps: {e}");
     }
-    report(import_notification(&name, &imported), cx);
     cx.refresh_windows();
+    Some(name)
 }
 
 /// The balloon of a finished import.

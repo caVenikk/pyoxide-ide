@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 50%** `██████████░░░░░░░░░░`
+**Overall parity: 51%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | run-debug | 37% `████░░░░░░` | 5 | 5 | 16 |
 | terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
 | vcs | 40% `████░░░░░░` | 6 | 3 | 16 |
-| settings | 72% `███████░░░` | 10 | 3 | 5 |
+| settings | 79% `████████░░` | 12 | 2 | 4 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
@@ -218,7 +218,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | | Feature | Priority | Notes |
 |---|---|---|---|
 | ✅ | Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S) | must | Community; ADR 0017 (#92) |
-| 🟡 | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); reads the reference's XML data files once (#92, #40) |
+| ✅ | Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave) | must | own store (settings.toml); the reference's data files are snapshotted at import and each feature picks its values up once (`[import.applied]`) (#92, #40, #155) |
 | ✅ | Appearance page: theme choice with live switch, Custom themes and Import Theme… | must | Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet |
 | 🟡 | Theme quick switch with preview (gear > Theme, Quick Switch Scheme) | must | Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153) |
 | ✅ | System Settings page (autosave and sync of external changes) | must | Community; defaults in code today (#92) |
@@ -233,7 +233,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Search highlight on settings pages (spotlight) | should | Community |
 | ⬜ | Keymap editing (custom keymaps, edit shortcuts) | should | Community |
 | ⬜ | Editor > File Types page | should | Community; associations from #121 |
-| ⬜ | First-run window (import, choose theme, choose keymap) | should | Community (#40) |
+| ✅ | First-run window (import, choose theme, choose keymap) | should | Community; import from the newest reference config, Skip Import, Choose Theme / Keymap, report balloon (#155); theme cards show code instead of pictures |
 | ⬜ | Appearance options beyond the theme (zoom, UI font, UI options) | could | Community |
 
 ## docker
