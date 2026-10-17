@@ -408,6 +408,37 @@ fn a_new_branch_and_a_force_push(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn commit_and_push_opens_the_push_dialog(cx: &mut TestAppContext) {
+    let repos = repos();
+    std::fs::write(repos.root.join("a.py"), "1\n2\n3\n4\n").unwrap();
+    let mut h = open(cx, &repos.root);
+    h.wait("the change", |v| {
+        v["commit"]["rows"].as_array().is_some_and(|r| r.len() >= 2)
+    });
+
+    // Commit and Push… commits, then runs `vcs.push`.
+    h.invoke("vcs.commit", Value::Null);
+    h.invoke("vcs.commit.push", json!({ "message": "Commit then push" }));
+    let vcs = h.wait("the Push dialog with the new commit", |v| {
+        let d = &v["remote"]["push_dialog"];
+        d["loading"] == false
+            && d["rows"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|r| r["text"] == "Commit then push"))
+    });
+    assert_eq!(
+        vcs["remote"]["push_dialog"]["title"],
+        "Push Commits to demo"
+    );
+    h.invoke("push-dialog.push", Value::Null);
+    h.wait_balloon("information: Pushed 1 commit to origin/main | ");
+    assert_eq!(
+        git(&repos.remote, &["log", "-1", "--format=%s", "main"]),
+        "Commit then push"
+    );
+}
+
+#[gpui::test]
 fn update_project_with_local_changes(cx: &mut TestAppContext) {
     let repos = repos();
     let mut h = open(cx, &repos.root);

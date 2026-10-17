@@ -1182,7 +1182,8 @@ mod tests {
         assert_eq!(
             menus,
             [
-                "File", "Edit", "View", "Navigate", "Code", "Refactor", "Run", "Window", "Help"
+                "File", "Edit", "View", "Navigate", "Code", "Refactor", "Run", "Git", "Window",
+                "Help"
             ]
         );
         // Editor Actions by action id.
