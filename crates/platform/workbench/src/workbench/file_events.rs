@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use code_intel_ui::code_intel::{FileChange, FileChangeKind};
-use gpui::{Context, Focusable as _, Window};
+use gpui::{Context, Window};
 use project::fs_ops::FsChange;
 
 use super::Workbench;
@@ -88,10 +88,11 @@ impl Workbench {
             }
         }
         for index in 0..self.tabs.len() {
-            if let Some(new) = moved(&self.tabs[index].path, from, to) {
+            if let Some(new) = self.tabs[index].path().and_then(|p| moved(p, from, to)) {
                 self.retarget_tab(index, new, window, cx);
             }
         }
+        self.diff_files_moved(from, to, cx);
     }
 
     /// A tab shows its file under a new path: the title, the file type
@@ -103,8 +104,16 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let old = std::mem::replace(&mut self.tabs[index].path, path.clone());
-        let editor = self.tabs[index].editor.clone();
+        let super::TabContent::File {
+            path: tab_path,
+            editor,
+            ..
+        } = &mut self.tabs[index].content
+        else {
+            return;
+        };
+        let old = std::mem::replace(tab_path, path.clone());
+        let editor = editor.clone();
         let old_type = self.file_types.for_path(&old).map(|t| t.name);
         let file_type = self.file_types.for_path(&path).cloned();
         let type_changed = old_type != file_type.as_ref().map(|t| t.name);
@@ -141,7 +150,11 @@ impl Workbench {
     fn files_removed(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         self.recently_viewed.retain(|p| !p.starts_with(path));
         self.recently_changed.retain(|p| !p.starts_with(path));
-        while let Some(index) = self.tabs.iter().position(|t| t.path.starts_with(path)) {
+        while let Some(index) = self
+            .tabs
+            .iter()
+            .position(|t| t.path().is_some_and(|p| p.starts_with(path)))
+        {
             self.discard_tab(index, window, cx);
         }
         self.navigation.history.remove(path);
@@ -151,13 +164,15 @@ impl Workbench {
     /// only if it was in that editor.
     fn discard_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.tabs[index]
-            .editor
             .focus_handle(cx)
             .contains_focused(window, cx);
         let tab = self.tabs.remove(index);
-        self.sync_tab_closed(&tab.path, cx);
-        if let Some(view) = &self.code_intel {
-            view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
+        if let Some(path) = tab.path() {
+            self.sync_tab_closed(path, cx);
+            if let Some(view) = &self.code_intel {
+                view.update(cx, |v, cx| v.editor_closed(path, cx));
+            }
+            self.diff_file_tab_closed(path, cx);
         }
         self.active = match self.active {
             _ if self.tabs.is_empty() => None,
@@ -167,7 +182,7 @@ impl Workbench {
         };
         if focused {
             match self.active {
-                Some(a) => window.focus(&self.tabs[a].editor.focus_handle(cx)),
+                Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
                 None => window.focus(&self.focus),
             }
         }

@@ -14,12 +14,14 @@
 //!   Name Is Not Defined dialogs.
 //! - [`push`]: the Push dialog; [`update`]: the Update Project dialog;
 //!   [`operations`]: the VCS Operations popup.
+//! - [`diff`]: the side-by-side diff viewer of an editor tab.
 //! - The `vcs.*` commands of the editor ([`COMMANDS`]) and of the popup
 //!   ([`POPUP_COMMANDS`]), the branch commands ([`BRANCH_COMMANDS`]) and
 //!   the remote ones ([`REMOTE_COMMANDS`]); the workbench handles them.
 
 pub mod branches;
 pub mod commit;
+pub mod diff;
 pub mod marker_popup;
 pub mod markers;
 pub mod new_branch;
@@ -152,4 +154,5 @@ pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, REMOTE_COMMANDS);
     ui::command::register(cx, push::COMMANDS);
     ui::command::register(cx, update::COMMANDS);
+    diff::init(cx);
 }

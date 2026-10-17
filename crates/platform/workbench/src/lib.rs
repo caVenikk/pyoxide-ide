@@ -30,6 +30,7 @@ pub mod search_everywhere;
 pub mod settings;
 mod shot;
 pub mod simulate;
+pub mod tab_view;
 pub mod terminal;
 pub mod tool_windows;
 pub mod workbench;

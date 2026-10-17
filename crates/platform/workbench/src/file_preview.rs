@@ -188,7 +188,7 @@ impl FilePreview {
             let mut e = Editor::new(Buffer::new(""), window, cx);
             e.buffer_mut().set_read_only(true);
             e.set_viewer(!options.editable);
-            e.set_soft_wraps(settings(cx).soft_wraps, cx);
+            e.set_soft_wraps(options.soft_wrap_button && settings(cx).soft_wraps, cx);
             e
         });
         let subscriptions = [
@@ -199,7 +199,7 @@ impl FilePreview {
             }),
             // The choice made in one preview applies to all.
             cx.observe_global::<Store>(|this, cx| {
-                let on = settings(cx).soft_wraps;
+                let on = this.options.soft_wrap_button && settings(cx).soft_wraps;
                 this.editor.update(cx, |e, cx| e.set_soft_wraps(on, cx));
                 cx.notify();
             }),
@@ -298,6 +298,18 @@ impl FilePreview {
     /// open, else the file read in the background. A file that cannot be
     /// read shows the empty text.
     pub fn show_file(&mut self, path: PathBuf, cx: &mut Context<Self>) -> bool {
+        let tab = self.tab_editor(&path, cx);
+        self.show_file_of_tab(path, tab, cx)
+    }
+
+    /// [`Self::show_file`] with the editor of the file's tab given (the
+    /// owner is the main window, which cannot be read while it updates).
+    pub fn show_file_of_tab(
+        &mut self,
+        path: PathBuf,
+        tab: Option<Entity<Editor>>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.path.as_ref() == Some(&path) && !self.empty {
             self.task = None;
             return true;
@@ -305,7 +317,7 @@ impl FilePreview {
         // Another file: the one shown so far is saved.
         self.save(cx);
         self.linked = None;
-        if let Some(tab) = self.tab_editor(&path, cx) {
+        if let Some(tab) = tab {
             let buffer = tab.read(cx).buffer().clone();
             self.load(path.clone(), buffer, cx);
             if self.options.editable {
@@ -632,6 +644,14 @@ impl FilePreview {
         self.path = None;
         self.reset_editor(cx);
         Some(document)
+    }
+
+    /// The tab of `path` closed (its text written): the preview edits the
+    /// file's document of its own again.
+    pub fn tab_closed(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if self.path.as_deref() == Some(path) && self.linked.take().is_some() {
+            self.editor.update(cx, |e, _| e.buffer_mut().mark_saved());
+        }
     }
 
     /// A tab opened `path`: when the preview edits it, the two views are

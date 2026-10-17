@@ -244,6 +244,9 @@ pub enum EditorEvent {
         id: DecorationId,
         position: gpui::Point<Pixels>,
     },
+    /// The view scrolled: by the wheel, the scrollbar, or to bring the
+    /// caret into view (not by [`Editor::set_scroll_position`]).
+    Scrolled,
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -391,6 +394,12 @@ pub struct Editor {
     pub(crate) hovered_after: Option<DecorationId>,
     /// A changed range's highlights ([`Editor::set_diff_highlights`]).
     pub(crate) diff_highlights: Option<crate::DiffHighlights>,
+    /// The gutter at the right and the scrollbar at the left
+    /// ([`Editor::set_mirrored`]).
+    pub(crate) mirrored: bool,
+    /// Backgrounds of char ranges ([`Editor::set_range_backgrounds`]),
+    /// moved through edits.
+    pub(crate) range_backgrounds: Vec<crate::side_by_side::RangeBackground>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -488,6 +497,8 @@ impl Editor {
             hovered_change: None,
             hovered_after: None,
             diff_highlights: None,
+            mirrored: false,
+            range_backgrounds: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -948,10 +959,9 @@ impl Editor {
     /// gutter and the error stripe), for placing popups.
     pub fn text_area_bounds(&self) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
-        let right = layout.stripe.map_or(layout.bounds.right(), |s| s.left());
         Some(Bounds::from_corners(
             point(layout.text_x, layout.bounds.top()),
-            point(right, layout.bounds.bottom()),
+            point(layout.text_end, layout.bounds.bottom()),
         ))
     }
 
@@ -1312,6 +1322,7 @@ impl Editor {
     fn text_edited(&mut self, applied: &[AppliedEdit]) {
         self.diagnostics.edited(applied);
         self.decorations.edited(applied);
+        self.range_backgrounds_edited(applied);
         self.decoration_hover_reset();
         self.link_highlight = None;
         self.diff_highlights = None;
@@ -1364,6 +1375,7 @@ impl Editor {
         // decorations stay at their lines.
         self.diagnostics.clear();
         self.decorations.text_replaced(&self.buffer);
+        self.range_backgrounds.clear();
         self.decoration_hover_reset();
         self.link_highlight = None;
         self.diff_highlights = None;
@@ -2786,9 +2798,13 @@ impl Editor {
     pub(crate) fn scroll_by(&mut self, delta: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         self.hide_read_only_hint(cx);
         let max_y = self.max_scroll_y();
+        let before = self.scroll;
         self.scroll.y = (self.scroll.y + delta.y).clamp(px(0.0), max_y);
         if self.soft_wrap.is_none() {
             self.scroll.x = (self.scroll.x + delta.x).max(px(0.0));
+        }
+        if self.scroll != before {
+            cx.emit(EditorEvent::Scrolled);
         }
         cx.notify();
     }
@@ -2814,7 +2830,11 @@ impl Editor {
     }
 
     pub(crate) fn set_scroll_y(&mut self, y: Pixels, cx: &mut Context<Self>) {
+        let before = self.scroll.y;
         self.scroll.y = y.clamp(px(0.0), self.max_scroll_y());
+        if self.scroll.y != before {
+            cx.emit(EditorEvent::Scrolled);
+        }
         cx.notify();
     }
 }

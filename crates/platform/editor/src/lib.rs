@@ -17,6 +17,7 @@ mod gutter;
 pub mod highlight;
 mod input;
 mod inspection;
+pub mod side_by_side;
 mod soft_wrap;
 mod viewer;
 mod wrap;
@@ -34,6 +35,7 @@ pub use editor::{
 pub use element::LONG_LINE;
 pub use find::FindBar;
 pub use highlight::{Highlighter, InlineStyle, Job, JobResult, Span, SyntaxHighlighter};
+pub use side_by_side::RangeBackground;
 pub use viewer::READ_ONLY_HINT;
 pub use wrap::{WrapCondition, WrapRule};
 
