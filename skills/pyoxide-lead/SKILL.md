@@ -22,6 +22,7 @@ The lead is the session that plans, delegates and reviews; sub-agents implement 
 
 ## Merging
 - Bookkeeping in the PR branch: a `replica/features.csv` row (`clone` yes / partial) + `python3 scripts/progress.py`, commit `docs(progress): ... (#N)`.
+- Third-party notices: a PR that copies or adapts open-source code adds its own file `notices/<area>-<name>.md` (one per entry, checked by `python3 scripts/notice.py --check` in CI); the root `NOTICE` is not edited. A branch that still edits the root `NOTICE` moves its entry into such a file when it rebases.
 - When main moved: rebase (or merge main into a branch others build on); after conflicts run clippy and `cargo nextest run --workspace` (plus `cargo test --doc --workspace`) before pushing. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
 - Merge through auto-merge after review: `gh pr ready <n>` (if draft), `gh pr merge <n> --auto --squash --subject "<title> (#n)" --body "... Closes #N"`. Do not poll CI; disable auto-merge (`--disable-auto`) before pushing further changes. Squash merge, never a `Co-Authored-By` line. Pull requests from forks are merged only with a maintainer's explicit OK.
 - Clean up after the merge: once the PR is merged and the maintainer has tried the build (see "Builds for the maintainer"), remove the agent's worktree and its branch (`git worktree remove --force <path>`, `git branch -D <branch>`; a squash-merged branch is not seen as merged). Each worktree holds a 10-27 GB `target/`; keep only work in progress.

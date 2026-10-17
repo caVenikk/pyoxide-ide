@@ -12,8 +12,11 @@ resources of PyCharm or any JetBrains plugin. Allowed sources are listed in
 to confirm this. When unsure, ask in the issue first.
 
 Code adapted from open-source projects (for example IntelliJ Community,
-Apache-2.0) is welcome with a [NOTICE](NOTICE) entry: source URL, commit, files,
-license, changes.
+Apache-2.0) is welcome with an entry in [notices/](notices/): a new file
+`notices/<area>-<name>.md` (copy the format of the others) with source URL,
+commit, files, license, changes. One file per entry keeps pull requests from
+conflicting on [NOTICE](NOTICE), which only points there (ADR 0019).
+`python3 scripts/notice.py --check` validates the entries.
 
 ## 2. Setup
 

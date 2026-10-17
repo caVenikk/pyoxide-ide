@@ -16,7 +16,7 @@ description: >-
 
 - Scope by **feature area** (db, editor, python-intel, run-debug, vcs, db-gui, docker, settings-import), not "all of PyCharm". Platform is desktop.
 - Screens = windows/tool windows/dialogs/popups; flows = IDE workflows; "data model" = project model, run configurations, settings, connection profiles.
-- Sources per PYOXIDE.md: public docs, open-source Community code (read only; copy needs NOTICE), screenshots and recordings from a maintainer's own licensed copy, settings exports. **Never** open Pro jars/bytecode or any binary; the "no decompiling" rule above is absolute.
+- Sources per PYOXIDE.md: public docs, open-source Community code (read only; a copy needs a `notices/` entry), screenshots and recordings from a maintainer's own licensed copy, settings exports. **Never** open Pro jars/bytecode or any binary; the "no decompiling" rule above is absolute.
 - `features.csv`: use `area` for the feature area; `original` = how PyCharm behaves, `clone` = Pyoxide status. Mark Pro-only vs Community in `notes`.
 - Write observed behaviour as scenario files in `tests/scenarios/<area>/<name>.md` (steps, expected result) so `replica-test` can run them later.
 - Size it in agent-hours per area, not weeks.

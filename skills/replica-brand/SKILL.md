@@ -16,7 +16,7 @@ description: >-
 
 - Name is decided: **Pyoxide IDE**. Skip name generation; still run the trademark/domain/handle checks for it and for crate names.
 - Palette/logo/voice: produce a short brand note and our own logo brief; nothing resembling JetBrains/PyCharm marks.
-- The sweep is the main use: `python3 sweep.py . --avoid "PyCharm,JetBrains,IntelliJ" --config replica/brand.json`. Pyoxide patch: `--allow <glob>` (also `"allow": [...]` in the config) lists files where mentioning the original is intentional (NOTICE, README non-affiliation line, docs/clean-room.md, skills/). Anything else blocks a release. `target/` is skipped.
+- The sweep is the main use: `python3 sweep.py . --avoid "PyCharm,JetBrains,IntelliJ" --config replica/brand.json`. Pyoxide patch: `--allow <glob>` (also `"allow": [...]` in the config) lists files where mentioning the original is intentional (NOTICE, notices/, README non-affiliation line, docs/clean-room.md, skills/). Anything else blocks a release. `target/` is skipped.
 
 Nothing launches under the original's identity. This skill is the line
 between "a clone" and "your app".

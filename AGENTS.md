@@ -45,8 +45,12 @@ Rules for AI agents and human contributors. Read this file, then
   agent control channel call the same functions).
 - Integration tests that need external services are `#[ignore]` and documented.
 - Windows, macOS and Linux must keep building; gate platform-specific code with `cfg`.
-- Commits: conventional style (`feat(db-core): ...`). Keep a `NOTICE` entry for
-  anything copied or closely adapted from open-source code.
+- Commits: conventional style (`feat(db-core): ...`).
+- Third-party notices: for anything copied or closely adapted from open-source
+  code add a file `notices/<area>-<name>.md`, one file per entry (source URL,
+  commit, files, license, changes; copy the format of the others). Never edit
+  the root `NOTICE` or an entry another change added (ADR 0019).
+  `python3 scripts/notice.py --check` validates them; CI runs it.
 - Changes land through pull requests: one branch per issue, CI green on all
   three platforms, squash merge with `Closes #N`. Work-in-progress commits stay
   in the branch.
@@ -57,7 +61,7 @@ Rules for AI agents and human contributors. Read this file, then
   attached to the issue.
 
 ## Skills (development method)
-`skills/` holds the Replica skill pack (MIT, modified, see [NOTICE](NOTICE)).
+`skills/` holds the Replica skill pack (MIT, modified, see [notices/](notices/)).
 Install locally for Claude Code with `mkdir -p .claude && cp -r skills .claude/skills`
 (`skills/` is the source of truth; `.claude/` is git-ignored). Read
 `skills/PYOXIDE.md` first. Per feature area the loop is

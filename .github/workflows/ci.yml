@@ -68,6 +68,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/progress.py --check
       - run: python3 scripts/check-layers.py
+      # notices/ holds the third-party notices, one file per entry (ADR 0019).
+      - run: python3 scripts/notice.py --check
 
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.
