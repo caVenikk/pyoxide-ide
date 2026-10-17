@@ -135,8 +135,10 @@ pub(super) async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
         let mut column = start_column;
         for (i, c) in text.iter().enumerate() {
             // A new line every 50 keys: `cat` prints it, the echo starts
-            // over at the left.
+            // over at the left. The last key's echo is drawn first (Enter
+            // right after it would come back with it in one copy).
             if i % 50 == 0 && i > 0 {
+                sleep(cx, KEY_INTERVAL).await;
                 dispatch("enter", cx);
                 column = 0;
                 sleep(cx, Duration::from_millis(100)).await;
@@ -181,6 +183,7 @@ pub(super) async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
                 }
             }
         }
+        sleep(cx, KEY_INTERVAL).await;
         dispatch("enter", cx);
         sleep(cx, Duration::from_secs(2)).await;
     }

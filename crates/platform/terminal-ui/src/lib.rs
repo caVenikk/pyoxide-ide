@@ -4,8 +4,9 @@
 //!   view: keys, typed and composed text, pastes, mouse selection and
 //!   reporting, wheel and scrollbar, resizes, and the Terminal commands.
 //!   It copies the screen on a background thread, at most once per
-//!   [`FRAME`] and once per [`FLOOD_FRAME`] while output floods, and
-//!   repaints at the start of the next display frame.
+//!   [`FRAME`], and asks its owner to draw the copy at once
+//!   ([`SessionViewEvent::Redraw`]); while output floods, once per
+//!   [`FLOOD_FRAME`], repainted at the start of the next display frame.
 //! - [`TerminalElement`]: the grid element that paints the view's snapshot
 //!   ([`plan`] works out a frame without the toolkit: cell backgrounds,
 //!   text runs at their columns, the cursor).

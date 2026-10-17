@@ -76,9 +76,13 @@ Selection and search use the crate's `Selection` and regex search. A
 snapshot of the visible cells, the cursor, the modes, the selection and the
 matches is copied under the lock on a background thread, at most once per
 frame and ten times a second while output floods, and the UI thread paints
-from the last copy at the start of the next frame; it never waits for the
-lock while the reader parses. Types of the crate do not leave the
-`terminal` crate.
+from the last copy; it never waits for the lock while the reader parses.
+A copy is drawn at once (the session view asks its owner to draw the
+window, as a keystroke in the editor does, ADR 0007); a key typed into the
+terminal does not draw the window itself, so the frame shown at the next
+refresh is the one with the echo. While output floods a copy waits for the
+start of the next frame. Types of the crate do not leave the `terminal`
+crate.
 Scrollback: 10 000 lines by default (the reference keeps 1024 KB of output;
 the crate counts lines), measured against the idle memory budget.
 

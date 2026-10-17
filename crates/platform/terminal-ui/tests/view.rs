@@ -1,12 +1,15 @@
 //! The session view in a headless window with a real pseudo-terminal:
 //! typed and composed text, keys, resizing, mouse selection, mouse
 //! reporting with Shift selecting instead, the wheel on the main and the
-//! alternate screen, and the slower copies of a flood of output. `cat`
+//! alternate screen, the copies drawn at once (the owner asked to redraw)
+//! and the slower copies of a flood of output. `cat`
 //! stands in for a shell: it echoes what it gets
 //! through the terminal's line discipline (control characters as `^X`),
 //! so what the view sent can be read off the screen.
 #![cfg(unix)]
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -16,7 +19,7 @@ use gpui::{
 use serde_json::Value;
 use terminal::start::{Os, environment};
 use terminal::{SessionOptions, ShellCommand, TerminalSize};
-use terminal_ui::{FLOOD_AFTER, FLOOD_FRAME, SessionView};
+use terminal_ui::{FLOOD_AFTER, FLOOD_FRAME, SessionView, SessionViewEvent};
 
 fn options(program: &str, args: &[&str]) -> SessionOptions {
     SessionOptions {
@@ -90,6 +93,23 @@ fn copies_in(cx: &mut VisualTestContext, view: &Entity<SessionView>, time: Durat
     after - before
 }
 
+/// Counts the view's requests to draw the window now.
+fn count_redraws(
+    cx: &mut VisualTestContext,
+    view: &Entity<SessionView>,
+) -> (Rc<Cell<u64>>, gpui::Subscription) {
+    let count = Rc::new(Cell::new(0));
+    let counter = count.clone();
+    let subscription = cx.update(|_, cx| {
+        cx.subscribe(view, move |_, event, _| {
+            if *event == SessionViewEvent::Redraw {
+                counter.set(counter.get() + 1);
+            }
+        })
+    });
+    (count, subscription)
+}
+
 fn has_line(s: &Value, f: impl Fn(&str) -> bool) -> bool {
     s["lines"]
         .as_array()
@@ -148,8 +168,11 @@ fn click(cx: &mut VisualTestContext, at: Point<Pixels>, count: usize, modifiers:
 #[gpui::test]
 fn typed_text_keys_and_resizing_reach_the_session(cx: &mut TestAppContext) {
     let (view, cx) = open(cx, "/bin/cat", &[]);
+    let (redraws, _subscription) = count_redraws(cx, &view);
     cx.simulate_input("hello");
     wait(cx, &view, "the echo", |s| has_line(s, |l| l == "hello"));
+    // The echo's copy asks the owner to draw it at once.
+    assert!(redraws.get() >= 1, "no redraw for the echo");
     // Enter: `cat` prints the line again.
     cx.simulate_keystrokes("enter");
     let s = wait(cx, &view, "the line printed", |s| {
@@ -307,6 +330,7 @@ fn a_flood_of_output_is_copied_ten_times_a_second(cx: &mut TestAppContext) {
     // Output that keeps coming slows the copies down (a frame is drawn
     // about every 2 ms here, so every frame could show a copy).
     copies_in(cx, &view, FLOOD_AFTER * 2);
+    let (redraws, _subscription) = count_redraws(cx, &view);
     let second = Duration::from_secs(1);
     let copies = copies_in(cx, &view, second);
     let most = (second.as_millis() / FLOOD_FRAME.as_millis()) as u64 + 2;
@@ -314,6 +338,8 @@ fn a_flood_of_output_is_copied_ten_times_a_second(cx: &mut TestAppContext) {
         (2..=most).contains(&copies),
         "{copies} copies in a second of flood"
     );
+    // A flood's copies wait for the next frame: no window is drawn at once.
+    assert_eq!(redraws.get(), 0, "redraws asked for while flooding");
     // A key is echoed without the flood's wait: the copies speed up
     // (ten keys a second, each followed by copies at the frame rate).
     let start = Instant::now();
@@ -323,4 +349,5 @@ fn a_flood_of_output_is_copied_ten_times_a_second(cx: &mut TestAppContext) {
         copies += copies_in(cx, &view, Duration::from_millis(100));
     }
     assert!(copies > most, "{copies} copies in a second of typing");
+    assert!(redraws.get() > 0, "no redraw for the echoes in a flood");
 }

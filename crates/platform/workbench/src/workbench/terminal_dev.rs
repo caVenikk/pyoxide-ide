@@ -5,9 +5,9 @@
 
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, div, px,
+    ParentElement as _, Render, Styled as _, Subscription, Window, div, px,
 };
-use terminal_ui::{SessionView, StartRequest};
+use terminal_ui::{SessionView, SessionViewEvent, StartRequest};
 use themes::Metric;
 use ui::icons::IconName;
 use ui::theme::ThemeExt;
@@ -30,6 +30,7 @@ ui::ui_commands! {
 /// The Terminal tool window's title and one session.
 pub struct DevTerminal {
     session: Entity<SessionView>,
+    _redraw: Subscription,
 }
 
 impl Focusable for DevTerminal {
@@ -103,8 +104,15 @@ impl Workbench {
                     ..StartRequest::default()
                 };
                 let session = cx.new(|cx| SessionView::local(&request, window, cx));
-                let view = cx.new(|_| DevTerminal {
+                let view = cx.new(|cx| DevTerminal {
                     session: session.clone(),
+                    // The echo of a key is drawn at once, as typed text in
+                    // the editor is (`app.rs`, `observe_keystrokes`).
+                    _redraw: cx.subscribe_in(&session, window, |_, _, event, window, _| {
+                        if *event == SessionViewEvent::Redraw {
+                            crate::shot::draw_now(window);
+                        }
+                    }),
                 });
                 self.register_tool_window(
                     ToolWindowSpec {

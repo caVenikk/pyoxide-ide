@@ -1,8 +1,9 @@
 //! The session view: one terminal session in a focusable view. After the
 //! session says the screen changed it copies the screen on a background
-//! thread, at most once per frame (ten times a second while output
-//! floods), and repaints at the start of the next frame; it passes keys,
-//! typed and composed text, pastes, mouse
+//! thread, at most once per frame, and asks its owner to draw the copy at
+//! once ([`SessionViewEvent::Redraw`]); while output floods it copies ten
+//! times a second and repaints at the start of the next frame. It passes
+//! keys, typed and composed text, pastes, mouse
 //! reports and resizes to the session, selects text with the mouse
 //! (drag, double click for a word, triple click for a line, Alt or
 //! Shift+Alt drag for a rectangle, Shift+click to extend), scrolls the
@@ -88,6 +89,11 @@ impl Default for TerminalOptions {
 /// What the view tells its owner (the Terminal tool window).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionViewEvent {
+    /// A new copy of the screen is ready (output that does not flood, such
+    /// as the echo of a key): the owner draws the window now rather than at
+    /// the next display refresh, as after a keystroke in the editor
+    /// (the workbench's `draw_now`). The view is already notified.
+    Redraw,
     TitleChanged(Option<String>),
     WorkingDirectoryChanged(PathBuf),
     Bell,
@@ -501,7 +507,9 @@ impl SessionView {
         }));
     }
 
-    /// A background copy is done: show it at the next frame.
+    /// A background copy is done: drawn at once (the owner draws the window
+    /// on [`SessionViewEvent::Redraw`]), or while output floods at the start
+    /// of the next frame.
     fn copied(
         &mut self,
         snapshot: Snapshot,
@@ -520,13 +528,22 @@ impl SessionView {
         self.snapshots += 1;
         self.shown_times = (woke, Some(Instant::now()));
         self.unshown = true;
-        self.repaint_next_frame(cx);
+        if self.flooding() {
+            self.repaint_next_frame(cx);
+        } else {
+            // An echo waiting for the next refresh would be a frame late:
+            // the display refresh that follows a key has usually passed by
+            // the time the echo is back from the PTY.
+            cx.notify();
+            cx.emit(SessionViewEvent::Redraw);
+        }
     }
 
-    /// Repaints the view at the start of the next display frame. Notifying
-    /// now would mark the window for drawing until then, and GPUI draws a
-    /// marked window before it dispatches a key: a key typed in the editor
-    /// meanwhile would wait for a frame of the whole window first.
+    /// Repaints the view at the start of the next display frame (while
+    /// output floods). Notifying now would mark the window for drawing
+    /// until then, and GPUI draws a marked window before it dispatches a
+    /// key: a key typed in the editor meanwhile would wait for a frame of
+    /// the whole window first.
     fn repaint_next_frame(&mut self, cx: &mut Context<Self>) {
         if self.frame_requested {
             return;
