@@ -170,6 +170,10 @@ pub struct SyncRequest {
     pub locked: bool,
     #[serde(default)]
     pub python: Option<String>,
+    /// The environment to sync instead of the project's default one
+    /// (`UV_PROJECT_ENVIRONMENT`, and `VIRTUAL_ENV` for it).
+    #[serde(default)]
+    pub environment: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -331,6 +335,7 @@ impl Uv {
         &self,
         args: Vec<OsString>,
         cwd: Option<&Path>,
+        environment: Option<&Path>,
         ctx: &RunContext,
         timeout: Duration,
     ) -> Result<(Finished, String)> {
@@ -338,6 +343,11 @@ impl Uv {
         spec.forward_stdout = true;
         if let Some(cwd) = cwd {
             spec = spec.cwd(cwd);
+        }
+        if let Some(env) = environment {
+            spec = spec
+                .env("UV_PROJECT_ENVIRONMENT", env)
+                .env("VIRTUAL_ENV", env);
         }
         let command = spec.display();
         run_ok("uv", spec, ctx, timeout).await.map(|f| (f, command))
@@ -366,7 +376,7 @@ impl Uv {
         timeout: Duration,
     ) -> Result<Outcome> {
         let started = Instant::now();
-        let (done, command) = self.exec(args, cwd, ctx, timeout).await?;
+        let (done, command) = self.exec(args, cwd, None, ctx, timeout).await?;
         Ok(Outcome::new(command, &done.stdout, &done.stderr, started))
     }
 
@@ -460,8 +470,17 @@ impl Uv {
 
     /// `uv sync`
     pub async fn sync(&self, req: &SyncRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(sync_args(req), Some(&req.project), ctx, LONG)
-            .await
+        let started = Instant::now();
+        let (done, command) = self
+            .exec(
+                sync_args(req),
+                Some(&req.project),
+                req.environment.as_deref(),
+                ctx,
+                LONG,
+            )
+            .await?;
+        Ok(Outcome::new(command, &done.stdout, &done.stderr, started))
     }
 
     /// `uv lock`

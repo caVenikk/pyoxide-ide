@@ -473,6 +473,7 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
                 frozen,
                 locked,
                 python,
+                environment: None,
             };
             let done = ops::sync(&svc, req, &ctx).await?;
             emit(json, &done, || render::changed(&done));

@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, DismissEvent, Entity,
-    FocusHandle, Global, IntoElement, Pixels, Render, SharedString, Subscription, Task, WeakEntity,
-    Window, canvas, div, prelude::*, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, ClickEvent, Context, DismissEvent,
+    Entity, FocusHandle, Global, IntoElement, Pixels, Render, SharedString, Subscription, Task,
+    WeakEntity, Window, canvas, div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use settings_ui::commands::EditField;
@@ -30,6 +30,7 @@ use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
+use super::add_dialog::AddLocalInterpreter;
 use super::configuring::{self, BUSY_TOOLTIP};
 use super::{Choice, FoundInterpreter, Group, ProjectInterpreters, list};
 
@@ -119,6 +120,15 @@ pub(crate) fn open_project(cx: &App) -> Option<PathBuf> {
         .find_map(|p| p.read(cx).root.clone())
 }
 
+/// The project of an open Interpreter page and the Settings window it is
+/// in: the Add Python Interpreter dialog opens over it.
+pub(crate) fn open_page_window(cx: &App) -> Option<(PathBuf, AnyWindowHandle)> {
+    live_pages(cx).into_iter().find_map(|p| {
+        let p = p.read(cx);
+        Some((p.root.clone()?, p.window))
+    })
+}
+
 /// Selects a new interpreter in the open pages of the project at `root`
 /// (`select: "draft"`): the page reads the list again and shows it.
 pub(crate) fn select_draft(root: &Path, python: &Path, cx: &mut App) {
@@ -200,6 +210,8 @@ fn detail(found: &FoundInterpreter) -> String {
 /// Python > Interpreter.
 pub struct InterpreterPage {
     root: Option<PathBuf>,
+    /// The Settings window the page is in.
+    window: AnyWindowHandle,
     /// The project's interpreters; `None` while they are read.
     state: Option<ProjectInterpreters>,
     /// The combo's selection, not applied yet.
@@ -216,7 +228,7 @@ pub struct InterpreterPage {
 }
 
 impl InterpreterPage {
-    pub fn new(context: &PageContext, _: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(context: &PageContext, window: &mut Window, cx: &mut Context<Self>) -> Self {
         list::ensure_loaded(cx);
         let root = context.project.clone();
         let configuring = root
@@ -247,6 +259,7 @@ impl InterpreterPage {
         pages.0.push(weak);
         let mut this = Self {
             root,
+            window: window.window_handle(),
             state: None,
             draft: None,
             configuring,
@@ -353,9 +366,10 @@ impl InterpreterPage {
                     .collect();
                 (items, selected)
             }
-            // The Add Python Interpreter dialog (#75, stage 2).
+            // `python.sdk.action.add.local.interpreter.text`; SSH, Docker
+            // and Docker Compose are not offered.
             List::Add => (
-                vec![MenuItem::unavailable(ADD_LOCAL).icon(HOME_FOLDER_ICON)],
+                vec![MenuItem::action(ADD_LOCAL, AddLocalInterpreter).icon(HOME_FOLDER_ICON)],
                 None,
             ),
         }

@@ -639,6 +639,9 @@ pub struct PopupOptions {
     /// 310 to 500).
     pub min_width: Option<f32>,
     pub max_width: Option<f32>,
+    /// The rows' height where the theme's row height is not the popup's
+    /// (the lists of a combo box in a dialog).
+    pub row_height: Option<f32>,
     /// The popup is the content of a window of its own
     /// ([`crate::dialog_window::open_popup`]): the window draws the shadow,
     /// and a chosen action is handed over as a [`ChosenEvent`] for the
@@ -682,6 +685,7 @@ pub struct ContextMenu {
     matcher: Option<Matcher>,
     min_width: Option<f32>,
     max_width: Option<f32>,
+    row_height: Option<f32>,
     own_window: bool,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
@@ -772,6 +776,7 @@ impl ContextMenu {
                 matcher: None,
                 min_width: options.min_width,
                 max_width: options.max_width,
+                row_height: options.row_height,
                 own_window: options.own_window,
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
@@ -1760,7 +1765,9 @@ impl ContextMenu {
     /// Height of an item row: a list row of the theme, and in popup menus
     /// the selection's outer insets.
     fn item_height(&self, cx: &App) -> f32 {
-        f32::from(cx.theme().metric(Metric::RowHeight)) + 2.0 * self.metrics.selection_y
+        self.row_height
+            .unwrap_or_else(|| f32::from(cx.theme().metric(Metric::RowHeight)))
+            + 2.0 * self.metrics.selection_y
     }
 }
 

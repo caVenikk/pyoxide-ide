@@ -24,6 +24,10 @@
 //! come from `pyvenv.cfg`; only when it holds an incomplete one (uv may
 //! write `3.14`) is the interpreter asked, in the background.
 
+mod add_dialog;
+#[cfg(all(test, unix))]
+mod add_dialog_tests;
+mod candidates;
 mod configuring;
 mod create;
 mod list;
@@ -186,6 +190,7 @@ fn find_configured(
 /// reading the list of configured interpreters (the product's `init`).
 pub fn init(cx: &mut App) {
     ui::icons::register(cx, &page::ICONS);
+    ui::icons::register(cx, &add_dialog::ICONS);
     widget::init(cx);
     list::ensure_loaded(cx);
 }
@@ -433,6 +438,8 @@ impl FoundInterpreter {
     /// Takes the name of the list's entry for the same interpreter.
     fn apply_entry(&mut self, entry: &Entry) {
         self.name = entry.name.clone();
+        // A uv entry stays uv's when its `pyvenv.cfg` does not say so.
+        self.uv |= entry.flavor == Flavor::Uv;
         self.path_derived = looks_like_path(&entry.name);
         self.configured = true;
     }

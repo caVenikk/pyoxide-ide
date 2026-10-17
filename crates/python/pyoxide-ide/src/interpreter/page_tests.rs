@@ -12,7 +12,7 @@ use workbench::Workbench;
 use super::page::{NO_INTERPRETER, PAGE, SHOW_ALL};
 use super::{configuring, list, table};
 
-fn venv(dir: &Path, cfg: &str) -> PathBuf {
+pub(super) fn venv(dir: &Path, cfg: &str) -> PathBuf {
     let python = py_env::paths::venv_python(dir);
     std::fs::create_dir_all(python.parent().unwrap()).unwrap();
     std::fs::write(&python, "").unwrap();
@@ -20,21 +20,21 @@ fn venv(dir: &Path, cfg: &str) -> PathBuf {
     python
 }
 
-struct Fixture {
+pub(super) struct Fixture {
     _dir: tempfile::TempDir,
     #[cfg(unix)]
-    base: PathBuf,
-    root: PathBuf,
-    uv: PathBuf,
-    plain: PathBuf,
-    file: PathBuf,
-    window: WindowHandle<Workbench>,
+    pub base: PathBuf,
+    pub root: PathBuf,
+    pub uv: PathBuf,
+    pub plain: PathBuf,
+    pub file: PathBuf,
+    pub window: WindowHandle<Workbench>,
 }
 
 /// A uv project `demo` (`.venv` by uv, a plain `venv`), and a list of
 /// configured interpreters: an installation for every project, an
 /// environment of another project and one of `demo` kept outside it.
-fn fixture(cx: &mut TestAppContext) -> Fixture {
+pub(super) fn fixture(cx: &mut TestAppContext) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let base = std::fs::canonicalize(dir.path()).unwrap();
     let root = base.join("demo");
@@ -108,7 +108,7 @@ fn fixture(cx: &mut TestAppContext) -> Fixture {
     f
 }
 
-fn settle(cx: &mut TestAppContext) {
+pub(super) fn settle(cx: &mut TestAppContext) {
     cx.run_until_parked();
     for handle in cx.update(|cx| cx.windows()) {
         let _ = cx.update_window(handle, |_, window, cx| window.draw(cx).clear());
@@ -116,7 +116,7 @@ fn settle(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-fn invoke(cx: &mut TestAppContext, f: &Fixture, id: &str, args: Json) -> Json {
+pub(super) fn invoke(cx: &mut TestAppContext, f: &Fixture, id: &str, args: Json) -> Json {
     let shown = args.to_string();
     let out = cx
         .update_window(f.window.into(), |_, window, cx| {
@@ -128,11 +128,11 @@ fn invoke(cx: &mut TestAppContext, f: &Fixture, id: &str, args: Json) -> Json {
     out
 }
 
-fn page(cx: &mut TestAppContext, f: &Fixture) -> Json {
+pub(super) fn page(cx: &mut TestAppContext, f: &Fixture) -> Json {
     invoke(cx, f, "settings.state", Json::Null)["fields"].clone()
 }
 
-fn edit(cx: &mut TestAppContext, f: &Fixture, field: &str, value: Json) {
+pub(super) fn edit(cx: &mut TestAppContext, f: &Fixture, field: &str, value: Json) {
     invoke(
         cx,
         f,
@@ -157,7 +157,7 @@ fn rows(page: &Json) -> Vec<String> {
 
 /// Waits for work on the interpreter runtime (real threads).
 #[cfg(unix)]
-fn wait_for(
+pub(super) fn wait_for(
     cx: &mut TestAppContext,
     what: &str,
     mut done: impl FnMut(&mut TestAppContext) -> bool,
@@ -172,7 +172,7 @@ fn wait_for(
     panic!("timed out waiting for {what}");
 }
 
-fn workspace(root: &Path) -> String {
+pub(super) fn workspace(root: &Path) -> String {
     std::fs::read_to_string(project::workspace::workspace_file(root)).unwrap_or_default()
 }
 
@@ -365,7 +365,7 @@ fn the_page_is_disabled_while_an_interpreter_is_configured(cx: &mut TestAppConte
 /// A fake interpreter and a fake uv: shell scripts answering the probe
 /// and `uv --version`.
 #[cfg(unix)]
-fn script(path: &Path, body: &str) {
+pub(super) fn script(path: &Path, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();

@@ -1,8 +1,10 @@
 - crates/python/pyoxide-ide/src/interpreter/ (table.rs, list.rs,
-  configuring.rs, create.rs, page.rs, widget.rs), crates/python/py-env/src/
-  uv.rs, venv.rs, ops.rs, interpreter.rs, crates/platform/project/src/
-  idea.rs (the SDK's own data), crates/python/pyoxide-ide/assets/icons/
-  homeFolder.svg, moveUp.svg, show.svg (with their `_dark.svg` variants)
+  configuring.rs, create.rs, candidates.rs, add_dialog.rs, page.rs,
+  widget.rs), crates/python/py-env/src/uv.rs, venv.rs, ops.rs,
+  interpreter.rs, crates/platform/project/src/idea.rs (the SDK's own data),
+  crates/python/pyoxide-ide/assets/icons/homeFolder.svg, moveUp.svg,
+  show.svg, greenCheckmark.svg, externalLink.svg (with their `_dark.svg`
+  variants)
   Closely adapted from IntelliJ Platform Community (Apache-2.0),
   https://github.com/JetBrains/intellij-community @ pycharm/2026.2.3
   (404a109fe630a2b9013f10b71081f87c9dbb32e2): the Interpreter page of
@@ -21,10 +23,20 @@
   uv/impl/UvLowLevel.kt (init --bare --no-project, venv --clear with the
   --force retry, the Python versions of `uv python list`) and UvExt.kt;
   the location check of python/src/com/jetbrains/python/sdk/add/v2/
-  FileSystem.kt (validateVenv); the status bar popup's rows of
+  FileSystem.kt (validateVenv); the Add Python Interpreter dialog of
+  python/src/com/jetbrains/python/sdk/add/v2/
+  PythonAddLocalInterpreterDialog.kt, PythonAddCustomInterpreter.kt,
+  CustomNewEnvironmentCreator.kt, venv/EnvironmentCreatorVenv.kt,
+  venv/PythonExistingEnvironmentSelector.kt, uv/EnvironmentCreatorUv.kt,
+  uv/UvExistingEnvironmentSelector.kt, ValidatedPathField.kt,
+  venvExistenceValidationAlert.kt, sortForExistingEnvironment.kt and
+  uiUtils.kt (rows, which manager is preselected, the interpreter lists
+  and their order, how a row is drawn, the path checks, the alerts and
+  their links); the status bar popup's rows of
   PySdkPopupFactory.kt; strings of PyBundle.properties, IdeBundle.properties
   and IdeCoreBundle.properties. Icons: platform/icons/src/expui/nodes/
-  homeFolder.svg, expui/general/moveUp.svg and show.svg (unchanged copies,
+  homeFolder.svg, expui/general/moveUp.svg, show.svg and
+  greenCheckmark.svg, expui/ide/externalLink.svg (unchanged copies,
   renamed by dropping their folders). Changes: reimplemented in Rust with
   GPUI; the list of interpreters is kept in Pyoxide's interpreters.toml
   instead of the SDK table and imported from it once; a virtual

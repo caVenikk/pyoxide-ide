@@ -26,6 +26,7 @@ use ui::notification::{Notification, NotificationKind};
 use ui::theme::ThemeExt;
 use workbench::{StatusWidget, Workbench, WorkbenchEvent};
 
+use super::add_dialog::AddLocalInterpreter;
 use super::create::{AddInterpreter, Kind, Request, Select};
 use super::{Choice, FoundInterpreter, Group, ProjectInterpreters};
 
@@ -201,7 +202,30 @@ pub(super) fn init(cx: &mut App) {
     ui::icons::register(cx, &icons());
     ui::command::register(cx, COMMANDS);
     ui::command::register(cx, super::create::COMMANDS);
+    ui::command::register(cx, super::add_dialog::COMMANDS);
+    ui::command::register(cx, super::add_dialog::DIALOG_COMMANDS);
     cx.on_action(add_interpreter);
+    // "Add Local Interpreter…": over the Settings window of an open
+    // Interpreter page (the new interpreter is selected there until
+    // Apply), else over the main window (the status bar's way: it becomes
+    // the project's at once).
+    cx.on_action(|_: &AddLocalInterpreter, cx| {
+        if let Some((root, settings)) = super::page::open_page_window(cx) {
+            if let Some(main) = main_window_of(&root, cx) {
+                super::add_dialog::save_all(main, cx);
+            }
+            super::add_dialog::open_later(settings, root, Select::Draft, cx);
+            return;
+        }
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        let Some(root) = widget.read(cx).root.clone() else {
+            return;
+        };
+        super::add_dialog::save_all(window, cx);
+        super::add_dialog::open_later(window, root, Select::Now, cx);
+    });
     cx.on_action(|_: &ChooseInterpreter, cx| {
         let Some((window, widget)) = target(cx) else {
             return;
@@ -262,19 +286,49 @@ fn add_interpreter(action: &AddInterpreter, cx: &mut App) {
         }
     };
     let resolve = |path: &Option<String>| path.as_deref().map(|p| super::resolve(&root, p));
-    let request = Request {
-        kind,
-        root: root.clone(),
-        python: resolve(&action.python),
-        uv: resolve(&action.uv_path),
+    let mut request = Request::new(kind, root.clone());
+    // The base of a new virtual environment, else the interpreter chosen.
+    request.python = match kind {
+        Kind::Virtualenv => resolve(&action.base_python).or_else(|| resolve(&action.python)),
+        _ => resolve(&action.python),
     };
+    request.uv = resolve(&action.uv_path);
+    request.location = resolve(&action.location);
+    request.python_version = action.python_version.clone();
+    request.inherit_site_packages = action.inherit_site_packages.unwrap_or(false);
+    request.available_to_all = action.available_to_all.unwrap_or(false);
+    request.override_existing = action.override_existing.unwrap_or(false);
+    add_and_report(request, select, cx);
+}
+
+/// Adds the interpreter `request` asks for (`create::add`); a failure
+/// shows a balloon in the project's main window, and so does a problem
+/// that did not stop it (`uv sync` failed).
+pub(super) fn add_and_report(request: Request, select: Select, cx: &mut App) {
+    let root = request.root.clone();
     let added = super::create::add(request, select, cx);
     cx.spawn(async move |cx| {
-        if let Err(e) = added.await {
-            let _ = cx.update(|cx| notify_failure(&root, &e, cx));
+        let message = match added.await {
+            Ok((_, warning)) => warning,
+            Err(e) => Some(e),
+        };
+        if let Some(message) = message {
+            let _ = cx.update(|cx| notify_failure(&root, &message, cx));
         }
     })
     .detach();
+}
+
+/// The main window of the project at `root`.
+pub(super) fn main_window_of(root: &Path, cx: &App) -> Option<AnyWindowHandle> {
+    cx.try_global::<Widgets>()?
+        .0
+        .iter()
+        .find(|(_, v)| {
+            v.upgrade()
+                .is_some_and(|v| v.read(cx).root.as_deref() == Some(root))
+        })
+        .map(|(w, _)| *w)
 }
 
 /// A balloon in the main window of the project at `root`
@@ -532,7 +586,9 @@ impl InterpreterWidget {
                 .root
                 .as_deref()
                 .is_some_and(|r| super::configuring::is_configuring(r, cx)),
+            "progress": self.root.as_deref().and_then(|r| super::configuring::progress(r, cx)),
             "list": list_json(cx),
+            "add-dialog": super::add_dialog::state_json(cx),
         })
     }
 }
@@ -589,10 +645,12 @@ fn popup_items(state: &ProjectInterpreters, configuring: bool) -> (Vec<MenuItem>
     if !items.is_empty() {
         items.push(MenuItem::separator());
     }
-    // The rows of the "Add Interpreter" popup of the Interpreter page; the
-    // Add Python Interpreter dialog comes in #75's second stage.
-    let add =
-        vec![MenuItem::unavailable(super::page::ADD_LOCAL).icon(super::page::HOME_FOLDER_ICON)];
+    // The rows of the "Add Interpreter" popup of the Interpreter page.
+    let add = vec![
+        MenuItem::action(super::page::ADD_LOCAL, AddLocalInterpreter)
+            .icon(super::page::HOME_FOLDER_ICON)
+            .enabled(!configuring),
+    ];
     items.push(MenuItem::submenu(ADD_NEW_INTERPRETER, add).enabled(!configuring));
     items.push(MenuItem::separator());
     items.push(MenuItem::action(
@@ -612,10 +670,28 @@ impl Render for InterpreterWidget {
             return div().into_any_element();
         };
         let hover = cx.theme().color(UiRole::Hover);
+        let muted = cx.theme().color(UiRole::TextMuted);
         let bounds = self.bounds.clone();
         let overlay = self.menu.as_ref().map(|(menu, _)| {
             ui::menu::overlay_at(menu, self.bounds.get().origin, Corner::BottomLeft, window)
         });
+        // The work of an interpreter being added, as the reference's
+        // background progress of the status bar says it.
+        let progress = self
+            .root
+            .as_deref()
+            .and_then(|r| super::configuring::progress(r, cx))
+            .map(|text| {
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(4.0))
+                    .mr(px(6.0))
+                    .text_color(muted)
+                    .child(ui::components::spinner("status-interpreter-progress", cx))
+                    .child(text)
+            });
         div()
             .id("status-interpreter")
             .debug_selector(|| "status-interpreter".into())
@@ -630,6 +706,7 @@ impl Render for InterpreterWidget {
             .rounded(px(4.0))
             .whitespace_nowrap()
             .hover(move |s| s.bg(hover))
+            .children(progress)
             .children(icon.map(Icon::new))
             .child(text)
             .when_some(tooltip, |d, tooltip| {

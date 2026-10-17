@@ -30,8 +30,14 @@
   version 3.13" with the link "Select existing interpreter" (it switches
   to Select existing with that interpreter); a folder without one: "The
   specified folder already exists". OK is disabled in both.
-- Step 7: the "Path to uv:" field gives way to "No uv executable found"
-  with the links "Install uv" and "Select path".
+- Step 7: a warning row "No uv executable found" with the links "Install
+  uv" and "Select path" stands above the empty "Path to uv:" field; OK is
+  disabled. With uv found the field shows its path and a green check.
+- Steps 2 and 6, uv: the project's `.venv` as the location gives the
+  alert "Environment at ".venv" already exists" with "Override existing
+  environment" (it turns into the warning "Existing environment at
+  ".venv" will be overridden" and enables OK) and "Select existing
+  interpreter".
 
 ## Commands
 `settings.open {"page": "python.interpreter"}`, `settings.edit {"field":
@@ -40,7 +46,18 @@
 {"kind": "existing-python", "python": ".venv"}`, `python.interpreter.add
 {"kind": "existing-uv", "python": ".venv", "uv_path": "/path/to/uv",
 "select": "now"}`, `python.interpreter.select {"name": ...}`,
-`settings.apply`, `settings.state`, `python.interpreter.state`.
+`settings.apply`, `settings.state`, `python.interpreter.state` (its
+`add-dialog` is the open dialog). The dialog: `python.interpreter.add-local`,
+`python.interpreter.add-dialog.set {"field": "type", "value": "uv"}`
+(fields `environment`, `type`, `base-python`, `python`, `uv-environment`,
+`location`, `uv-path`, `python-version`, `inherit-site-packages`,
+`available-to-all`), `python.interpreter.add-dialog.open-list {"list":
+"type"}`, `python.interpreter.add-dialog.override`,
+`python.interpreter.add-dialog.select-existing`,
+`python.interpreter.add-dialog.ok`, `python.interpreter.add-dialog.cancel`;
+without it `python.interpreter.add {"kind": "uv", "location": ".venv",
+"python_version": "3.13"}` or `{"kind": "virtualenv", "base_python":
+"/usr/bin/python3", "location": "/path/to/env"}`.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/configuring-python-interpreter.html,
@@ -48,6 +65,7 @@ https://www.jetbrains.com/help/pycharm/creating-virtual-environment.html;
 IntelliJ Community (Apache-2.0) at `pycharm/2026.2.3`:
 `PyActiveSdkConfigurable`, `PythonAddCustomInterpreter`,
 `FileSystem.validateVenv` (step 6), `sdk.create.custom.venv.missing.text`
-(step 7; the longer "Make sure uv is installed and added to PATH." text is
+and `ValidatedPathField.validatablePathField` (step 7; the longer "Make
+sure uv is installed and added to PATH." text and the hidden field are
 for remote targets). The page and dialog layouts are to verify against a
 reference screenshot.
