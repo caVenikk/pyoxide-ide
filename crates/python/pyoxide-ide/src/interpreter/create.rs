@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn entries_are_named_and_associated_as_the_reference_does() {
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let python = venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.14\n");
         let env = py_env::venv::inspect_python(&python).unwrap();
         let entry = entry_for(&root, &python, Some(&env), Flavor::Uv);
@@ -720,7 +720,7 @@ mod tests {
     #[test]
     fn a_listed_interpreter_is_reused() {
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let python = venv(&root.join("env"), "version = 3.12.1\n");
         let mut table = Table::default();
         table

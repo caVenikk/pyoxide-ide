@@ -70,8 +70,10 @@ impl Project {
     }
 }
 
-/// A path for display, with the home directory as `~`.
+/// A path for display, with the home directory as `~`. A Windows path made
+/// by `canonicalize` (`\\?\C:\x`) is shown as `C:\x`.
 pub fn display_path(path: &Path) -> String {
+    let path = dunce::simplified(path);
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
     if let Some(home) = home.map(PathBuf::from)
         && let Ok(rest) = path.strip_prefix(&home)
@@ -99,5 +101,16 @@ mod tests {
             Some(Path::new("src/a.py"))
         );
         assert_eq!(p.relative(Path::new("/elsewhere")), None);
+    }
+
+    /// `canonicalize` gives `\\?\C:\x` on Windows; users see `C:\x`.
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_path_is_shown_without_its_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\Z:\a\b")), r"Z:\a\b");
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\srv\share\a")),
+            r"\\srv\share\a"
+        );
     }
 }

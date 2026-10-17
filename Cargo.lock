@@ -5270,6 +5270,7 @@ dependencies = [
 name = "project"
 version = "0.0.1"
 dependencies = [
+ "dunce",
  "quick-xml 0.42.0",
  "tempfile",
  "text",
@@ -5442,6 +5443,7 @@ dependencies = [
  "code-intel-ui",
  "debugger",
  "dirs 7.0.0",
+ "dunce",
  "editor",
  "flume",
  "gpui",

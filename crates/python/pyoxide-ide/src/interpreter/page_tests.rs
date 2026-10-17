@@ -36,7 +36,7 @@ pub(super) struct Fixture {
 /// environment of another project and one of `demo` kept outside it.
 pub(super) fn fixture(cx: &mut TestAppContext) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let base = dunce::canonicalize(dir.path()).unwrap();
     let root = base.join("demo");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
@@ -190,22 +190,23 @@ fn the_page_lists_the_interpreters_and_applies_a_choice(cx: &mut TestAppContext)
     let name = |dir: &str| project::display_path(&f.root.join(dir));
     // "<No interpreter>", the virtual environments, a separator, the
     // others (uv's environment among them), a separator, "Show All…"; the
-    // other project's environment is not offered.
-    assert_eq!(
-        rows(&p),
-        [
-            NO_INTERPRETER.to_owned(),
-            name("venv"),
-            "mine".into(),
-            "-".into(),
-            name(".venv"),
-            "Python 3.14".into(),
-            "-".into(),
-            SHOW_ALL.into(),
-        ],
-        "{p}"
-    );
-    let uv_row = &p["items"][4];
+    // other project's environment is not offered. A group is by name, and
+    // the names of the project's environments start with `~` when the
+    // folder is under the home folder.
+    let sorted = |mut names: [String; 2]| {
+        names.sort();
+        names
+    };
+    let virtual_envs = sorted([name("venv"), "mine".into()]);
+    let others = sorted([name(".venv"), "Python 3.14".into()]);
+    let uv_at = 4 + others.iter().position(|n| *n == name(".venv")).unwrap();
+    let mut expected = vec![NO_INTERPRETER.to_owned()];
+    expected.extend(virtual_envs);
+    expected.push("-".into());
+    expected.extend(others);
+    expected.extend(["-".to_owned(), SHOW_ALL.to_owned()]);
+    assert_eq!(rows(&p), expected, "{p}");
+    let uv_row = &p["items"][uv_at];
     assert_eq!(uv_row["version"], json!("3.13.1"));
     assert_eq!(uv_row["path"], json!(f.uv.display().to_string()));
     assert_eq!(uv_row["icon"], json!("python/uv"));
@@ -241,7 +242,7 @@ fn the_page_lists_the_interpreters_and_applies_a_choice(cx: &mut TestAppContext)
     let p = page(cx, &f);
     assert_eq!(p["list"], json!("interpreters"));
     let menu = &p["menu"]["levels"][0];
-    assert_eq!(menu["selected"], json!(4), "{p}");
+    assert_eq!(menu["selected"], json!(uv_at), "{p}");
     assert_eq!(menu["items"][0]["label"], json!(NO_INTERPRETER));
     // Under the combo and as wide as it: long paths are cut.
     let settings = cx.update(|cx| settings_ui::find(cx)).unwrap();
@@ -303,12 +304,11 @@ fn the_page_lists_the_interpreters_and_applies_a_choice(cx: &mut TestAppContext)
         entry["associated-project"],
         json!(f.root.display().to_string())
     );
-    let text = std::fs::read_to_string(&f.file).unwrap();
-    assert!(
-        text.contains(&format!("name = {:?}", name("venv"))),
-        "{text}"
-    );
-    assert!(text.contains("name = \"other env\""), "{text}");
+    // In the file (read back: a name with backslashes is written as a
+    // literal string).
+    let saved = table::Table::load(&f.file).unwrap();
+    assert!(saved.find(&name("venv")).is_some(), "{saved:?}");
+    assert!(saved.find("other env").is_some(), "{saved:?}");
 
     // "<No interpreter>" is a choice of its own and survives.
     edit(cx, &f, "interpreter", Json::Null);

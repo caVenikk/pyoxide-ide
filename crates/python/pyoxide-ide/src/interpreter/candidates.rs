@@ -674,19 +674,22 @@ mod tests {
 
     #[test]
     fn the_suggested_location() {
-        let root = Path::new("/w/demo");
-        assert_eq!(suggested_location(root, None), root.join(".venv"));
+        // Absolute on every platform (`/w` alone has no drive on Windows).
+        let drive = if cfg!(windows) { "C:" } else { "" };
+        let abs = |p: &str| PathBuf::from(format!("{drive}{p}"));
+        let root = abs("/w/demo");
+        assert_eq!(suggested_location(&root, None), root.join(".venv"));
         assert_eq!(
-            suggested_location(root, Some(Path::new("envs/main"))),
+            suggested_location(&root, Some(Path::new("envs/main"))),
             root.join("envs/main")
         );
         assert_eq!(
-            suggested_location(root, Some(Path::new("/w/demo/env"))),
-            PathBuf::from("/w/demo/env")
+            suggested_location(&root, Some(&abs("/w/demo/env"))),
+            abs("/w/demo/env")
         );
         assert_eq!(
-            suggested_location(root, Some(Path::new("/home/u/.venvs"))),
-            PathBuf::from("/home/u/.venvs/demo")
+            suggested_location(&root, Some(&abs("/home/u/.venvs"))),
+            abs("/home/u/.venvs/demo")
         );
     }
 

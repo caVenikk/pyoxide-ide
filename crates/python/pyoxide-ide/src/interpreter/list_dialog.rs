@@ -384,7 +384,7 @@ fn close_window(window: &mut Window, cx: &mut App) {
 
 /// `StringUtil.naturalCompare`, the order of the list: runs of digits by
 /// their value, the rest without case, then by case.
-fn natural_cmp(a: &str, b: &str) -> Ordering {
+pub(super) fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
     loop {
         match (x.peek().copied(), y.peek().copied()) {

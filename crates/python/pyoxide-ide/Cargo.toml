@@ -21,6 +21,7 @@ code-intel.workspace = true
 code-intel-ui.workspace = true
 debugger.workspace = true
 dirs = "7"
+dunce = "1"
 editor.workspace = true
 gpui.workspace = true
 lsp-client.workspace = true

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use gpui::{AnyWindowHandle, TestAppContext};
 use serde_json::{Value as Json, json};
 
-use super::list_dialog::{InterpretersDialog, RenameDialog};
+use super::list_dialog::{InterpretersDialog, RenameDialog, natural_cmp};
 use super::page::{NO_INTERPRETER, PAGE, SHOW_ALL};
 use super::page_tests::{Fixture, fixture, invoke, page, settle};
 use super::{list, table};
@@ -37,6 +37,17 @@ fn path(p: &Path) -> String {
 /// The name the reference gives an environment of the project.
 fn env_name(f: &Fixture, dir: &str) -> String {
     project::display_path(&f.root.join(dir))
+}
+
+/// The row `name` of the dialog's list.
+fn row(d: &Json, name: &str) -> Json {
+    d["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == json!(name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no row {name}: {d}"))
 }
 
 fn select(cx: &mut TestAppContext, f: &Fixture, name: &str) {
@@ -97,20 +108,21 @@ fn the_list_its_details_and_apply(cx: &mut TestAppContext) {
     let d = open_from_page(cx, &f);
     assert_eq!(d["title"], json!("Python Interpreters"), "{d}");
     assert_eq!(d["origin"], json!("page"));
-    // The configured interpreters and the project's environments by name;
-    // the other project's environment is hidden.
-    assert_eq!(
-        names(&d),
-        [
-            env_name(&f, ".venv"),
-            env_name(&f, "venv"),
-            "mine".into(),
-            "Python 3.14".into()
-        ]
-    );
-    assert_eq!(d["items"][0]["configured"], json!(false));
-    assert_eq!(d["items"][0]["icon"], json!("python/uv"));
-    assert_eq!(d["items"][2]["configured"], json!(true));
+    // The configured interpreters and the project's environments by name
+    // (the names of environments in the home folder start with `~`); the
+    // other project's environment is hidden.
+    let uv_name = env_name(&f, ".venv");
+    let mut expected = vec![
+        uv_name.clone(),
+        env_name(&f, "venv"),
+        "mine".to_owned(),
+        "Python 3.14".to_owned(),
+    ];
+    expected.sort_by(|a, b| natural_cmp(a, b));
+    assert_eq!(names(&d), expected);
+    assert_eq!(row(&d, &uv_name)["configured"], json!(false));
+    assert_eq!(row(&d, &uv_name)["icon"], json!("python/uv"));
+    assert_eq!(row(&d, "mine")["configured"], json!(true));
     // The page's interpreter is selected: a uv environment has no
     // association rows.
     assert_eq!(d["selected"], json!(env_name(&f, ".venv")));
@@ -145,7 +157,7 @@ fn the_list_its_details_and_apply(cx: &mut TestAppContext) {
     assert_eq!(d["toolbar"][3]["on"], json!(true));
     assert_eq!(d["modified"], json!(false));
     // The empty "Python 3.14" is an interpreter whose file exists.
-    assert_eq!(d["items"][3]["invalid"], json!(false));
+    assert_eq!(row(&d, "Python 3.14")["invalid"], json!(false));
 
     // The filter off: the other project's environment, its association
     // fixed until "Remove association".
@@ -198,13 +210,20 @@ fn the_list_its_details_and_apply(cx: &mut TestAppContext) {
     let d = dialog(cx, &f);
     assert_eq!(d["details"]["association"]["checked"], json!(false));
     assert_eq!(d["details"]["path"], json!(path(&moved)));
-    // Remove "Python 3.14": the next row is selected; nothing changes
-    // before Apply.
+    // Remove "Python 3.14": the next row is selected (the last one when it
+    // was the last); nothing changes before Apply.
+    let before = names(&d);
+    let at = before.iter().position(|n| n == "Python 3.14").unwrap();
     select(cx, &f, "Python 3.14");
     invoke(cx, &f, "python.interpreters.dialog.remove", Json::Null);
     let d = dialog(cx, &f);
-    assert!(!names(&d).contains(&"Python 3.14".to_owned()), "{d}");
-    assert_eq!(d["selected"], json!("other env"));
+    let rest = names(&d);
+    assert!(!rest.contains(&"Python 3.14".to_owned()), "{d}");
+    assert_eq!(rest.len(), before.len() - 1);
+    assert_eq!(
+        d["selected"],
+        json!(rest.get(at).unwrap_or_else(|| rest.last().unwrap()))
+    );
     assert!(cx.update(|cx| list::table(cx).find("Python 3.14").is_some()));
 
     invoke(cx, &f, "python.interpreters.dialog.apply", Json::Null);
@@ -342,21 +361,31 @@ fn keys_of_the_list(cx: &mut TestAppContext) {
     let d = dialog(cx, &f);
     assert_eq!(d["origin"], json!("window"), "{d}");
     assert_eq!(d["selected"], json!(env_name(&f, ".venv")));
+    let order = names(&d);
     let window = window_of::<InterpretersDialog>(cx);
-    cx.simulate_keystrokes(window, "down down");
+    // Down moves to the next row, the plain environment follows uv's; Up
+    // goes back and Down again.
+    cx.simulate_keystrokes(window, "down");
     settle(cx);
-    assert_eq!(dialog(cx, &f)["selected"], json!("mine"));
-    cx.simulate_keystrokes(window, "up");
+    assert_eq!(dialog(cx, &f)["selected"], json!(env_name(&f, "venv")));
+    cx.simulate_keystrokes(window, "up down");
     settle(cx);
     assert_eq!(dialog(cx, &f)["selected"], json!(env_name(&f, "venv")));
     cx.simulate_keystrokes(window, "delete");
     settle(cx);
     let d = dialog(cx, &f);
     assert_eq!(d["removed"], json!([env_name(&f, "venv")]), "{d}");
-    assert_eq!(d["selected"], json!("mine"));
+    // The row that takes its place is selected.
+    let at = order
+        .iter()
+        .position(|n| *n == env_name(&f, "venv"))
+        .unwrap();
+    let rest = names(&d);
+    let selected = rest.get(at).unwrap_or_else(|| rest.last().unwrap()).clone();
+    assert_eq!(d["selected"], json!(selected));
     cx.simulate_keystrokes(window, "shift-f6");
     settle(cx);
-    assert_eq!(dialog(cx, &f)["rename"]["text"], json!("mine"));
+    assert_eq!(dialog(cx, &f)["rename"]["text"], json!(selected));
     // Escape closes the Rename dialog, then the dialog.
     let rename = window_of::<RenameDialog>(cx);
     cx.simulate_keystrokes(rename, "escape");
