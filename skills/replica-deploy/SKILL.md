@@ -14,7 +14,7 @@ description: >-
 
 ## Pyoxide override (read first; see `../PYOXIDE.md`)
 
-- Read as **release**. Preflight: fmt, clippy, tests on 3 OSes, parity must-haves done, brand sweep clean, `cargo about`/`cargo deny` licence report matches NOTICE, no secrets, reference screenshots not in the repo.
+- Read as **release**. Preflight: fmt, clippy, tests on 3 OSes, parity must-haves done, brand sweep clean, `cargo about`/`cargo deny` licence report matches the assembled NOTICE (`python3 scripts/notice.py --out <file>`), no secrets, reference screenshots not in the repo.
 - Packaging: Windows (MSI/portable zip), macOS (universal DMG, notarization), Linux (AppImage/deb/rpm), via CI (cargo-dist or cargo-packager). Checksums (SHA256SUMS), changelog, GitHub Release, optional docs site on GitHub Pages.
 - Signing keys, notarization credentials and tokens are **the maintainers' to enter**; Claude writes the workflow and the instructions, never types or stores secrets.
 - Skip Step 5 (mobile) and Stripe/domain-email parts. Auto-update is a later milestone.

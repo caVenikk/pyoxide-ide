@@ -3,8 +3,9 @@
 Allowed sources:
 1. Public documentation, specifications and protocols (LSP, DAP, Oracle data
    dictionary docs, Docker Engine API, Python docs).
-2. Open-source code under compatible licenses (Apache-2.0, MIT, BSD), with an
-   entry in `NOTICE` for anything copied or closely adapted.
+2. Open-source code under compatible licenses (Apache-2.0, MIT, BSD), with a
+   file in `notices/` for anything copied or closely adapted (one file per
+   entry, see ADR 0019).
 3. **Observed behaviour** of tools a contributor is licensed to use: run a
    scenario, record inputs and outputs, write them as tests under
    `tests/scenarios/`. Never copy text, icons, layout assets or strings.
@@ -35,7 +36,7 @@ details, so its users keep their habits: layout, metrics, fonts, behaviour and
 keyboard. Look and metrics are reproduced from observation of a licensed copy.
 Icons, themes, metric constants and UI strings may be taken from the
 open-source IntelliJ Platform Community code base (Apache-2.0), with a
-`NOTICE` entry naming the source, commit and files. Assets, strings and code of
-proprietary products and plugins (for example the database tools) are never
+`notices/` entry naming the source, commit and files. Assets, strings and code
+of proprietary products and plugins (for example the database tools) are never
 copied; their look is rebuilt from observation with original assets. Logos and
 product names of the reference products never appear in the UI.

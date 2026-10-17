@@ -14,7 +14,7 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 
 ## Reference and clean-room
 - Reference behaviour = PyCharm 2026.2.3. IntelliJ Community at tag `pycharm/2026.2.3` (Apache-2.0): `gh api 'repos/JetBrains/intellij-community/contents/<path>?ref=pycharm/2026.2.3' -H 'Accept: application/vnd.github.raw'`, or `git -C <checkout> show pycharm/2026.2.3:<path>` in a local (sparse) clone, e.g. in the git-ignored `.claude/ic`. Read from the tag, not from a working tree that may be on master; never check anything out in a shared checkout.
-- Copying or translating Apache-2.0 Community code, strings, metrics and icons is allowed, with a `NOTICE` entry (source, tag/commit, files, what changed). Closed-source plugins (Docker, pre-commit, database tools, AI…): no code or assets, draw/write our own from observation.
+- Copying or translating Apache-2.0 Community code, strings, metrics and icons is allowed, with a new file `notices/<area>-<name>.md` (source, tag/commit, files, what changed; one file per entry, copy the format of the others; never edit the root `NOTICE`; `python3 scripts/notice.py --check`). Closed-source plugins (Docker, pre-commit, database tools, AI…): no code or assets, draw/write our own from observation.
 - Never open PyCharm.app or any JetBrains binary/jar (plugin jars only to extract data files like `plugin.xml` / `*.theme.json`, never `.class`). Never read Zed sources (GPL).
 - Derive behaviour from the reference, not from other editors. What the sources cannot settle goes under "needs a reference screenshot" in your report.
 

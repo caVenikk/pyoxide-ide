@@ -18,7 +18,7 @@ as is (rules, formats, scripts).
 1. Public documentation, specifications, protocols (LSP, DAP, Oracle docs, ...).
 2. Open-source code under compatible licenses, e.g. PyCharm/IntelliJ Community
    (Apache-2.0): reading for understanding is fine; copying or closely adapting
-   code requires a `NOTICE` entry (source, commit, files, license, changes).
+   code requires its own file in `notices/` (source, commit, files, license, changes; ADR 0019).
 3. Observed behaviour of a maintainer's own licensed copy of PyCharm: screenshots and
    scenario recordings (input -> output) written to `replica/screens/` and
    `tests/scenarios/`. Reference screenshots are copyrighted material:
@@ -31,7 +31,7 @@ as is (rules, formats, scripts).
 The goal is a UI that matches PyCharm's current UI closely, down to small
 details (see `docs/clean-room.md`, "Visual fidelity"): reproduce layout and
 metrics from observation; Community-edition assets (Apache-2.0) only with a
-NOTICE entry; never proprietary assets, logos or product names.
+`notices/` entry; never proprietary assets, logos or product names.
 
 ## Forbidden (hard)
 Decompiling, disassembling or reading bytecode/binaries/jars of PyCharm or any
