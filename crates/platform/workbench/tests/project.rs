@@ -464,7 +464,9 @@ fn dragging_the_splitter_resizes_the_project_tool_window(cx: &mut TestAppContext
     vcx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
     vcx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
     vcx.run_until_parked();
-    assert_eq!(width(cx), 120.0);
+    // The main splitter's minimum (`crate::layout`).
+    let min = invoke(cx, window, "workbench.layout", json!(null))["min"].clone();
+    assert_eq!(json!(width(cx)), min);
 }
 
 #[gpui::test]

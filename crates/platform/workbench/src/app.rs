@@ -115,8 +115,6 @@ pub struct Product {
 
 /// Default size of the main window's content.
 pub const WINDOW_SIZE: (f32, f32) = (1280.0, 800.0);
-/// Smallest size the main window can be resized to.
-pub const WINDOW_MIN_SIZE: (f32, f32) = (640.0, 400.0);
 /// Position of the macOS window buttons inside the main toolbar.
 pub const TRAFFIC_LIGHTS: (f32, f32) = (14.0, 13.0);
 
@@ -173,6 +171,20 @@ pub fn init(cx: &mut App, product: &Product) {
         cx,
         "vcs.state",
         Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).state(cx)["vcs"].clone())),
+    );
+    ui::command::register_query(
+        cx,
+        "workbench.layout",
+        Rc::new(|_, window, cx| {
+            let workbench = workbench(window)?;
+            let viewport = window.viewport_size();
+            let mut layout = workbench.read(cx).main_layout(window, cx).to_json();
+            layout["window"] = serde_json::json!({
+                "width": f32::from(viewport.width),
+                "height": f32::from(viewport.height),
+            });
+            Ok(layout)
+        }),
     );
     ui::command::register_query(
         cx,
@@ -316,10 +328,9 @@ pub fn init(cx: &mut App, product: &Product) {
 pub fn window_options(cx: &App, product: &Product) -> WindowOptions {
     let (width, height) = env::window_size().unwrap_or(WINDOW_SIZE);
     let content = size(px(width), px(height));
-    let min_size = size(
-        px(WINDOW_MIN_SIZE.0.min(width)),
-        px(WINDOW_MIN_SIZE.1.min(height)),
-    );
+    // Smaller still when `PYOXIDE_WINDOW_SIZE` asks for it.
+    let min = crate::layout::window_min_size(cx);
+    let min_size = size(min.width.min(content.width), min.height.min(content.height));
     let mut bounds = Bounds::centered(None, content, cx);
     // A fractional origin makes macOS round the frame and the content size.
     bounds.origin = bounds.origin.map(|v| v.floor());

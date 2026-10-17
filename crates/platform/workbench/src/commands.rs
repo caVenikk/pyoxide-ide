@@ -33,6 +33,9 @@ ui::ui_commands! {
     /// Describe the window.
     State => "workbench.state", "Workbench State",
         "Returns the state of the main window as JSON (project, tree, tabs, active editor).";
+    /// Describe the sizes of the main window's areas.
+    Layout => "workbench.layout", "Workbench Layout",
+        "Returns the sizes of the main window's areas for its current size as JSON (window, pane, left, editor, right, row, bottom, minimum island, gap).";
     /// Open a folder as the project.
     OpenFolder { path: Option<String> } => "project.open-folder", "Open Folder…",
         "Opens a folder as the project; without a path a folder chooser is shown.",

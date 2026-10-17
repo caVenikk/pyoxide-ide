@@ -157,7 +157,10 @@ Platform (`crates/platform/`, language-agnostic):
   area, status bar; the tool window registry `tool_windows` puts each tool
   window in the left, bottom or right area, one shown per area with a size
   per area, and other crates register their views through
-  `ToolWindowView`), a movable and resizable popup frame, the Find in Files
+  `ToolWindowView`; `layout` fits the areas and the editor to the window's
+  size: the editor gives way first, then the areas, down to a common
+  minimum, as the reference's tool window pane splitters do), a movable
+  and resizable popup frame, the Find in Files
   and Replace in Files popup, Search Everywhere and Go to File with one
   file preview component (`file_preview`: editable in Find in Files,
   read-only in Search Everywhere, with the Soft-Wrap button), Recent
