@@ -333,7 +333,7 @@ fn a_theme_chosen_in_the_popup_stays(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_gear_menu_and_quick_switch_open_the_theme_popup(cx: &mut TestAppContext) {
     let mut h = open(cx);
-    // Gear: Settings…, a line, Theme….
+    // Gear: Settings…, a line, Theme…, Keymap….
     let main = h.window;
     let mut vcx = VisualTestContext::from_window(main.into(), h.cx);
     let gear = vcx.debug_bounds("toolbar-settings").expect("the gear");
@@ -342,7 +342,7 @@ fn the_gear_menu_and_quick_switch_open_the_theme_popup(cx: &mut TestAppContext) 
     let menu = h.invoke("run.state", json!(null))["menu"].clone();
     assert_eq!(
         labels(&menu["levels"][0]),
-        ["Settings\u{2026}", "-", "Theme\u{2026}"],
+        ["Settings\u{2026}", "-", "Theme\u{2026}", "Keymap\u{2026}"],
         "{menu}"
     );
     h.invoke("menu.down", json!(null));
@@ -351,11 +351,12 @@ fn the_gear_menu_and_quick_switch_open_the_theme_popup(cx: &mut TestAppContext) 
     assert_eq!(h.popup()["title"], json!("Theme"));
     h.invoke("menu.cancel", json!(null));
     assert!(h.popup().is_null());
-    // Quick Switch Scheme: Switch with Theme, which opens the same list.
+    // Quick Switch Scheme: Switch with Theme, which opens the same list,
+    // and Keymap.
     h.invoke("settings.quick-switch", json!(null));
     let popup = h.popup();
     assert_eq!(popup["title"], json!("Switch"), "{popup}");
-    assert_eq!(labels(&popup["levels"][0]), ["Theme"], "{popup}");
+    assert_eq!(labels(&popup["levels"][0]), ["Theme", "Keymap"], "{popup}");
     h.invoke("menu.confirm", json!(null));
     let popup = h.popup();
     assert_eq!(popup["title"], json!("Theme"), "{popup}");

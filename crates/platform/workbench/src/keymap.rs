@@ -16,8 +16,18 @@
 //! ([`gesture`]), bound everywhere; `button4` and `button5` are the mouse's
 //! back and forward buttons (the reference keymaps' names), bound
 //! everywhere in the window.
+//!
+//! Besides the two base keymaps there are derived ones (ADR 0018,
+//! [`derived`]): the reference's VS Code keymaps and custom keymaps
+//! imported from the reference ([`reference`]), converted through the
+//! action table ([`actions`]). [`active`] keeps the keymap in use and
+//! switches it.
 
+pub mod actions;
+pub mod active;
+pub mod derived;
 mod gesture;
+pub mod reference;
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -35,6 +45,13 @@ pub use gesture::{DoubleTap, ModifierKey, double_tap_text, parse_double_tap};
 pub const MACOS: &str = include_str!("../keymaps/macos.toml");
 /// The default keymap of Windows and Linux.
 pub const DEFAULT: &str = include_str!("../keymaps/default.toml");
+
+/// The names of the predefined keymaps, as the reference shows them
+/// (`DefaultKeymap.getKeymapPresentableName`).
+pub const MACOS_NAME: &str = "macOS";
+pub const WINDOWS_NAME: &str = "Windows";
+pub const VSCODE_NAME: &str = "VSCode";
+pub const VSCODE_MACOS_NAME: &str = "VSCode (macOS)";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

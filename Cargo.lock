@@ -9035,6 +9035,7 @@ dependencies = [
  "process",
  "project",
  "project-search",
+ "quick-xml 0.42.0",
  "raw-window-handle",
  "regex",
  "run-config",
