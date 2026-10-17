@@ -315,7 +315,8 @@ impl DiffView {
             }
             EditorEvent::Scrolled => self.scrolled(side, cx),
             EditorEvent::SelectionsChanged => {
-                if self.file_jump.take().is_some() {
+                let moved = self.file_jump.take().is_some();
+                if moved {
                     cx.notify();
                 }
             }

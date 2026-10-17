@@ -265,7 +265,7 @@ impl Workbench {
         if !save {
             editor.update(cx, |e, _| e.buffer_mut().mark_saved());
         }
-        if let Some(index) = self.file_tab(&path) {
+        if let Some(index) = self.file_tab(path) {
             self.close_tab(index, window, cx);
         }
     }
