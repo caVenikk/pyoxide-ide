@@ -76,10 +76,10 @@ ui::ui_commands! {
         r#"{"name": "VSCode"}"#;
     /// The next card.
     SelectNext => "first-run.select-next", "Next Card",
-        "Chooses the card right of the chosen one on Choose Theme or Choose Keymap (Right, Down).";
+        "Chooses the card right of the chosen one on Choose Theme or Choose Keymap.";
     /// The card before.
     SelectPrevious => "first-run.select-previous", "Previous Card",
-        "Chooses the card left of the chosen one on Choose Theme or Choose Keymap (Left, Up).";
+        "Chooses the card left of the chosen one on Choose Theme or Choose Keymap.";
 }
 
 ui::ui_commands! {
@@ -125,6 +125,8 @@ struct Hooks {
     notify: Option<Notify>,
     /// The balloon of an import made before a main window was open.
     pending: Option<Notification>,
+    /// Where to look for the reference's folders instead (tests).
+    reference_root: Option<Option<PathBuf>>,
 }
 
 impl Global for Hooks {}
@@ -171,6 +173,12 @@ pub fn set_notify(cx: &mut App, notify: Notify) {
     hooks(cx).notify = Some(notify);
 }
 
+/// Looks for the reference's configuration folders in `root` from now on
+/// (`None`: nowhere), whatever [`Start::reference_root`] says (tests).
+pub fn set_reference_root(cx: &mut App, root: Option<PathBuf>) {
+    hooks(cx).reference_root = Some(root);
+}
+
 /// The balloon of an import made before the main window opened; the
 /// caller shows it there.
 pub fn take_report(cx: &mut App) -> Option<Notification> {
@@ -196,7 +204,10 @@ pub struct Start {
 
 /// Looks for the reference's configuration folders off the UI thread.
 fn find(start: &Start, cx: &mut App) -> gpui::Task<Found> {
-    let root = start.reference_root.clone();
+    let root = match hooks(cx).reference_root.clone() {
+        Some(root) => root,
+        None => start.reference_root.clone(),
+    };
     cx.background_executor().spawn(async move {
         match root {
             Some(root) => options::find_config_folders(&root, SystemTime::now()),

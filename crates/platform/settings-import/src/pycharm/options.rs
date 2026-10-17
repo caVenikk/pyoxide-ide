@@ -16,8 +16,10 @@
 //!   (`GeneralSettings`);
 //! - `options/filetypes.xml`: file name associations (`FileTypeManager`);
 //! - `META-INF/plugin.xml` of the plugins in the plugin folder: which
-//!   archive holds a theme `laf.xml` names by id (`<themeProvider id path>`).
-//!   Only that entry is read; nothing else of a plugin is opened.
+//!   archive holds a theme `laf.xml` names by id (`<themeProvider id path>`)
+//!   and which bring colour schemes (`<bundledColorScheme path>`). Only
+//!   that entry is read here; the theme importer opens the theme and scheme
+//!   files it names, nothing else of a plugin.
 //!
 //! The reference's files are only read, never written. Everything here is
 //! blocking file system access: run it off the UI thread.
@@ -108,10 +110,12 @@ pub fn config_root() -> Option<PathBuf> {
 
 /// The plugin folder of a configuration folder named `name` under `root`
 /// (`PathManager.getDefaultPluginPathFor`): `plugins` inside it on macOS
-/// and Windows, `$XDG_DATA_HOME/JetBrains/<name>` on Linux.
+/// and Windows, `$XDG_DATA_HOME/JetBrains/<name>` on Linux; a `plugins`
+/// folder inside it wins everywhere (a copied configuration).
 pub fn plugins_dir(root: &Path, name: &str) -> PathBuf {
-    if cfg!(any(target_os = "macos", windows)) {
-        return root.join(name).join("plugins");
+    let inside = root.join(name).join("plugins");
+    if cfg!(any(target_os = "macos", windows)) || inside.is_dir() {
+        return inside;
     }
     match dirs::data_dir() {
         Some(data) => data.join("JetBrains").join(name),

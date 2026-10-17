@@ -9097,6 +9097,7 @@ dependencies = [
  "ui",
  "vcs",
  "vcs-ui",
+ "zip",
 ]
 
 [[package]]

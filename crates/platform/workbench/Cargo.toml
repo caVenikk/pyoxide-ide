@@ -59,6 +59,8 @@ gpui = { workspace = true, features = ["test-support"] }
 # The list type of GPUI's `ExternalPaths` (tests/drop.rs).
 smallvec = "1"
 tempfile = "3"
+# Theme plugins of the reference in tests/first_run.rs.
+zip.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

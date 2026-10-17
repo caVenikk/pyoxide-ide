@@ -66,15 +66,21 @@ pub fn debug_cursor() -> bool {
 /// (`settings_exist` false) unless the run is driven by `PYOXIDE_RUN`,
 /// `PYOXIDE_SHOT` or `PYOXIDE_BENCH`.
 pub fn first_run(settings_exist: bool) -> bool {
-    match std::env::var("PYOXIDE_FIRST_RUN").as_deref() {
-        Ok("1") => true,
-        Ok("0") => false,
-        _ => {
-            let scripted = ["PYOXIDE_RUN", "PYOXIDE_SHOT", "PYOXIDE_BENCH"]
-                .iter()
-                .any(|v| std::env::var_os(v).is_some());
-            !settings_exist && !scripted
-        }
+    let scripted = ["PYOXIDE_RUN", "PYOXIDE_SHOT", "PYOXIDE_BENCH"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some());
+    first_run_for(
+        std::env::var("PYOXIDE_FIRST_RUN").ok().as_deref(),
+        scripted,
+        settings_exist,
+    )
+}
+
+fn first_run_for(asked: Option<&str>, scripted: bool, settings_exist: bool) -> bool {
+    match asked {
+        Some("1") => true,
+        Some("0") => false,
+        _ => !settings_exist && !scripted,
     }
 }
 
@@ -217,7 +223,7 @@ pub fn marker(text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_window_size;
+    use super::{first_run_for, parse_window_size};
 
     #[test]
     fn window_sizes() {
@@ -226,5 +232,14 @@ mod tests {
         assert_eq!(parse_window_size("900"), None);
         assert_eq!(parse_window_size("0x700"), None);
         assert_eq!(parse_window_size("wide x 700"), None);
+    }
+
+    #[test]
+    fn the_first_run_window_comes_once_and_not_in_scripted_runs() {
+        assert!(first_run_for(None, false, false));
+        assert!(!first_run_for(None, false, true));
+        assert!(!first_run_for(None, true, false));
+        assert!(first_run_for(Some("1"), true, true));
+        assert!(!first_run_for(Some("0"), false, false));
     }
 }
