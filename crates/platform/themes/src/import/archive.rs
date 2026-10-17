@@ -155,7 +155,20 @@ pub(crate) fn add_archive(
         library.add_text(kind, &text, &origin, &entry, primary);
     }
 
-    // Colour schemes that the themes of this archive point at by path.
+    add_scheme_references(&mut zip, library, first_theme, &mut summary, primary);
+    Ok(summary)
+}
+
+/// Adds the colour schemes that the themes of `library` from `first_theme`
+/// on point at by path inside the archive.
+fn add_scheme_references<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    library: &mut Library,
+    first_theme: usize,
+    summary: &mut ArchiveSummary,
+    primary: bool,
+) {
+    let display = summary.path.clone();
     let references = library.unresolved_scheme_references(first_theme);
     for reference in references {
         let Some(entry) = normalize(&reference) else {
@@ -167,14 +180,56 @@ pub(crate) fn add_archive(
         let Some(index) = zip.index_for_name(&entry) else {
             continue;
         };
-        let Some(text) = read_entry(&mut zip, index, &entry, &display, library) else {
+        let Some(text) = read_entry(zip, index, &entry, &display, library) else {
             continue;
         };
         summary.read.push(entry.clone());
         let origin = format!("{display}!{entry}");
         library.add_text(DataKind::Scheme, &text, &origin, &entry, primary);
     }
-    Ok(summary)
+}
+
+/// Adds the UI theme `entry` of an archive, the file a plugin descriptor's
+/// `themeProvider` names, with the scheme it points at, when the archive's
+/// own reading left it out (a theme file outside a `themes` folder). Only
+/// a `.json` entry outside `META-INF` is opened.
+pub(crate) fn add_theme_entry(
+    library: &mut Library,
+    path: &Path,
+    entry: &str,
+    primary: bool,
+) -> Result<(), ImportError> {
+    let display = path.display().to_string();
+    let Some(entry) = normalize(entry).filter(|e| {
+        let lower = e.to_ascii_lowercase();
+        lower.ends_with(".json") && !lower.starts_with("meta-inf/")
+    }) else {
+        return Err(ImportError::Empty(format!("{display}!{entry}")));
+    };
+    let file = File::open(path).map_err(|source| ImportError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    let mut zip = ZipArchive::new(BufReader::new(file)).map_err(|e| ImportError::Archive {
+        origin: display.clone(),
+        message: e.to_string(),
+    })?;
+    let mut summary = ArchiveSummary {
+        path: display.clone(),
+        entries: zip.len(),
+        ..ArchiveSummary::default()
+    };
+    let index = zip
+        .index_for_name(&entry)
+        .ok_or_else(|| ImportError::Empty(format!("{display}!{entry}")))?;
+    let first_theme = library.theme_count();
+    let text = read_entry(&mut zip, index, &entry, &display, library)
+        .ok_or_else(|| ImportError::Empty(format!("{display}!{entry}")))?;
+    summary.read.push(entry.clone());
+    let origin = format!("{display}!{entry}");
+    library.add_text(DataKind::UiTheme, &text, &origin, &entry, primary);
+    add_scheme_references(&mut zip, library, first_theme, &mut summary, primary);
+    Ok(())
 }
 
 fn read_entry<R: Read + std::io::Seek>(

@@ -2421,6 +2421,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "vcs.commit.run"
         | "vcs.commit.toggle-amend"
         | "vcs.commit.options" => check_commit(h, &b.command, keys, &what),
+        "first-run.continue" | "first-run.cancel" => check_first_run(h, &b.command, keys, &what),
         c if c.starts_with("commit-tree.")
             || c.starts_with("commit-options.")
             || c.starts_with("rollback-dialog.")
@@ -2943,6 +2944,30 @@ impl H<'_> {
             })
             .collect()
     }
+}
+
+/// The first-run window over the main window (`settings.import-reference`)
+/// with nothing to import: it opens on Choose Theme.
+fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
+    h.cx.update(|cx| settings_ui::first_run::set_reference_root(cx, None));
+    h.invoke("settings.import-reference", json!(null));
+    let dialog =
+        h.cx.update(|cx| ui::dialog_window::child_of(h.window.into(), cx))
+            .expect("the first-run window");
+    let state = |h: &mut H| h.invoke("first-run.state", json!(null));
+    assert_eq!(state(h)["page"], json!("theme"), "{what}");
+    h.dispatched.borrow_mut().clear();
+    h.cx.simulate_keystrokes(dialog, keys);
+    h.draw();
+    if command == "first-run.continue" {
+        assert_eq!(state(h)["page"], json!("keymap"), "{what}");
+        // Escape closes the window again.
+        h.cx.simulate_keystrokes(dialog, "escape");
+        h.draw();
+    }
+    let open =
+        h.cx.update(|cx| ui::dialog_window::child_of(h.window.into(), cx));
+    assert!(open.is_none(), "{what}: the window closes");
 }
 
 /// The breakpoint keys in `a.py` (`a = 1`, `b = 2`, the caret on line 2).

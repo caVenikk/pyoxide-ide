@@ -136,8 +136,14 @@ Storage option 2, window option 2, a `settings-ui` crate.
   newest reference configuration folder found ("Import from …" or "Skip
   Import"), then theme and keymap choices with the imported ones
   preselected. The decision is recorded in `[import]` of `settings.toml`
-  (the reference's folder name, or `skipped`) and never asked again;
-  `settings.import-reference` repeats it on request.
+  (source, version, time and snapshot, or `skipped`) and never asked
+  again; `settings.import-reference` repeats it on request.
+- The import keeps a snapshot of the reference's data files in the
+  configuration folder (`imported/<source>-<version>/`; never
+  `security.xml`, password stores or token files). A feature built after
+  the import takes its keys from the snapshot once, at its first start,
+  and is listed in `[import.applied]`; values changed later are never
+  overwritten.
 - Read once, data files only: `laf.xml` and `colors.scheme.xml` (+ the
   named `colors/*.icls`) for the theme and scheme, `keymap.xml` (+ the
   active `keymaps/*.xml`), `editor-font.xml`, `editor.xml` (soft wraps),

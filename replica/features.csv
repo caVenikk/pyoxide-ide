@@ -151,7 +151,7 @@ Cherry-pick and interactive rebase,vcs,could,yes,no,Community
 "Compare with branch, worktrees and tags UI",vcs,could,yes,no,Community
 Clone and share on a hosting service,vcs,could,yes,no,Community
 "Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S)",settings,must,yes,yes,Community; ADR 0017 (#92)
-"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,partial,"own store (settings.toml); reads the reference's XML data files once (#92, #40)"
+"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,yes,"own store (settings.toml); the reference's data files are snapshotted at import and each feature picks its values up once (`[import.applied]`) (#92, #40, #155)"
 "Appearance page: theme choice with live switch, Custom themes and Import Theme…",settings,must,yes,yes,"Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet"
 "Theme quick switch with preview (gear > Theme, Quick Switch Scheme)",settings,must,yes,partial,"Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153)"
 System Settings page (autosave and sync of external changes),settings,must,yes,yes,Community; defaults in code today (#92)
@@ -166,7 +166,7 @@ Python > Type Engine and Python > Tools > External Tools pages,settings,must,yes
 Search highlight on settings pages (spotlight),settings,should,yes,no,Community
 "Keymap editing (custom keymaps, edit shortcuts)",settings,should,yes,no,Community
 Editor > File Types page,settings,should,yes,no,Community; associations from #121
-"First-run window (import, choose theme, choose keymap)",settings,should,yes,no,Community (#40)
+"First-run window (import, choose theme, choose keymap)",settings,should,yes,yes,"Community; import from the newest reference config, Skip Import, Choose Theme / Keymap, report balloon (#155); theme cards show code instead of pictures"
 "Appearance options beyond the theme (zoom, UI font, UI options)",settings,could,yes,no,Community
 Docker containers and images,docker,should,yes,no,
 Command registry and palette,platform,must,no,partial,registry and JSON channel; no palette yet
