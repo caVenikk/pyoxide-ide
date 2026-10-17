@@ -439,6 +439,10 @@ impl InterpreterPage {
                 // cut (`ComboBox` popups).
                 min_width: (list == List::Interpreters).then(|| f32::from(bounds.size.width)),
                 max_width: (list == List::Interpreters).then(|| f32::from(bounds.size.width)),
+                // The interpreters are drawn by a renderer of their own
+                // (icon, name and grey details): the selection runs from
+                // edge to edge.
+                edge_to_edge: list == List::Interpreters,
                 ..PopupOptions::default()
             },
             window,

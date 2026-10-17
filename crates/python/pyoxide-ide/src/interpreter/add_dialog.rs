@@ -1372,6 +1372,11 @@ impl AddDialog {
                 ListId::Type => TYPE_ROW,
                 _ => LIST_ROW,
             }),
+            // The rows of the types (`PythonEnvironmentComboBoxRenderer`)
+            // and of the interpreters (`PythonSdkComboBoxListCellRenderer`)
+            // are drawn by renderers of their own: the selection runs from
+            // edge to edge. The versions are plain text (`I3_2`).
+            edge_to_edge: list != ListId::Version,
             ..PopupOptions::default()
         };
         let focus = self.focus.clone();
