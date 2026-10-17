@@ -559,7 +559,7 @@ fn the_keymap_page_searches_by_name_and_by_shortcut(cx: &mut TestAppContext) {
     assert_eq!(
         main,
         [
-            "File", "Edit", "View", "Navigate", "Code", "Refactor", "Run", "Window", "Help"
+            "File", "Edit", "View", "Navigate", "Code", "Refactor", "Run", "Git", "Window", "Help"
         ]
     );
 }

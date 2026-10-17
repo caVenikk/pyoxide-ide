@@ -17,16 +17,23 @@
 //!   Commit tool window asks of a backend.
 //! - [`Backend`]: what a version control backend (`git`) offers; UI crates
 //!   depend on this trait, never on the backend.
+//! - [`remote`]: pushes, their targets and results, update methods and the
+//!   commits a push sends.
 
 mod backend;
 mod branch;
 pub mod branch_name;
 mod commit;
 mod ranges;
+pub mod remote;
 mod status;
 
 pub use backend::{Backend, Cancel, Snapshot, VcsError, VcsErrorKind};
 pub use branch::{Branch, BranchKind, Head, Remote, RepoInfo, RepoState, Tracking};
 pub use commit::{CommitRequest, LastCommit, RollbackKind, rollback_kind};
 pub use ranges::{LineRanges, Range, RangeKind, split_lines};
+pub use remote::{
+    CommitFile, ForceMode, OutgoingCommit, PushOutcome, PushResult, PushSpec, PushTarget, TagMode,
+    UpdateMethod,
+};
 pub use status::{Change, FileStatus, StatusMap};

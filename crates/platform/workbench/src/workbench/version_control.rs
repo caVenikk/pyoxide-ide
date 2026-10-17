@@ -319,6 +319,7 @@ impl Workbench {
             "branch_dialog": self.vcs_branch_dialog_json(cx),
             "marker_popup": self.vcs_popup_json(cx),
             "commit": self.vcs_commit_json(cx),
+            "remote": self.vcs_remote_json(cx),
         })
     }
 }

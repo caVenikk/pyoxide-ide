@@ -12,16 +12,21 @@
 //! - [`new_branch`]: the New Branch, Rename Branch and Checkout dialogs.
 //! - [`commit`]: the Commit tool window, the Rollback Changes and Git User
 //!   Name Is Not Defined dialogs.
+//! - [`push`]: the Push dialog; [`update`]: the Update Project dialog;
+//!   [`operations`]: the VCS Operations popup.
 //! - The `vcs.*` commands of the editor ([`COMMANDS`]) and of the popup
-//!   ([`POPUP_COMMANDS`]), the branch commands ([`BRANCH_COMMANDS`]); the
-//!   workbench handles them.
+//!   ([`POPUP_COMMANDS`]), the branch commands ([`BRANCH_COMMANDS`]) and
+//!   the remote ones ([`REMOTE_COMMANDS`]); the workbench handles them.
 
 pub mod branches;
 pub mod commit;
 pub mod marker_popup;
 pub mod markers;
 pub mod new_branch;
+pub mod operations;
+pub mod push;
 pub mod status_colors;
+pub mod update;
 pub mod widget;
 
 pub use marker_popup::{
@@ -101,6 +106,40 @@ ui::ui_commands! {
         "Returns the project's version control as JSON: the repository and its statuses, the VCS widget (text, icon, tooltip, arrows), the open branches popup (search, rows) and dialog.";
 }
 
+ui::ui_commands! {
+    REMOTE_COMMANDS, scope = "Workbench";
+    /// Push….
+    VcsPush {
+        branch: Option<String>,
+        target: Option<String>,
+        force: Option<String>,
+        tags: Option<String>,
+        set_upstream: Option<bool>,
+        dialog: Option<bool>,
+    } => "vcs.push", "Push\u{2026}",
+        "Opens the Push dialog for the current branch (or `branch`); with dialog false pushes at once to `target` (origin/main) or the default target, force none, with_lease or force, tags all or current_branch.",
+        r#"{"branch": "main", "dialog": false}"#;
+    /// Update Project….
+    UpdateProject { method: Option<String>, dialog: Option<bool> } => "vcs.update-project", "Update Project\u{2026}",
+        "Fetches the tracked branch of the current branch and merges or rebases the incoming commits (local changes stashed around it); the Update Project dialog asks for the method unless Don't show again was chosen or a method is given.",
+        r#"{"method": "rebase"}"#;
+    /// Fetch.
+    Fetch { remote: Option<String> } => "git.fetch", "Fetch",
+        "Fetches every remote of the repository (or one), pruning the remote branches that are gone.",
+        r#"{"remote": "origin"}"#;
+    /// A branch's Update.
+    UpdateBranch { name: String } => "git.update-branch", "Update",
+        "Updates a local branch from its tracked branch: the current branch as Update Project does with the chosen method, another one by a fast-forward fetch.",
+        r#"{"name": "main"}"#;
+    /// Pull into the current branch.
+    Pull { from: String, method: String } => "git.pull", "Pull",
+        "Pulls a remote branch into the current branch using merge or rebase (Pull into '…' Using Merge of a remote branch).",
+        r#"{"from": "origin/main", "method": "rebase"}"#;
+    /// VCS Operations.
+    ShowOperations => "vcs.operations-popup", "VCS Operations Popup\u{2026}",
+        "Opens the VCS Operations popup: commit, rollback, branches, push and the other version control actions.";
+}
+
 /// Registers the commands.
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, COMMANDS);
@@ -110,4 +149,7 @@ pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, branches::INTERNAL_COMMANDS);
     ui::command::register(cx, new_branch::COMMANDS);
     commit::init(cx);
+    ui::command::register(cx, REMOTE_COMMANDS);
+    ui::command::register(cx, push::COMMANDS);
+    ui::command::register(cx, update::COMMANDS);
 }

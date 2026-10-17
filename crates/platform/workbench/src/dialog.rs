@@ -94,6 +94,14 @@ impl Dialog {
         self
     }
 
+    /// Makes the button `id` the default one instead of the rightmost.
+    pub fn with_default(mut self, id: &str) -> Self {
+        if let Some(i) = self.buttons.iter().position(|b| b.id == id) {
+            self.default = i;
+        }
+        self
+    }
+
     /// Adds a check box, off.
     pub fn with_option(mut self, label: impl Into<SharedString>) -> Self {
         self.option = Some((label.into(), false));
@@ -197,7 +205,9 @@ impl Render for Dialog {
                 .items_center()
                 .gap(px(6.0))
                 .child(checkbox("dialog-option-box", on, cx))
-                .child(label)
+                // A long label wraps, the box centred beside it (Swing's
+                // check box with an HTML text).
+                .child(div().flex_1().min_w(px(0.0)).child(label))
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                     this.toggle_option(&ToggleOption, window, cx)
                 }))
