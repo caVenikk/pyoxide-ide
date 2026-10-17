@@ -27,6 +27,7 @@ project.workspace = true
 project-search.workspace = true
 quick-xml.workspace = true
 settings.workspace = true
+settings-import.workspace = true
 settings-ui.workspace = true
 terminal-ui.workspace = true
 regex.workspace = true

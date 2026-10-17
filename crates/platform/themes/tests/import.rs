@@ -1179,3 +1179,40 @@ fn the_deprecated_background_colour_without_text_and_across_parents() {
         .expect("a note on the black text");
     assert_eq!(note.level, Level::Info);
 }
+
+#[test]
+fn a_plugin_theme_is_imported_by_its_entry_with_its_scheme() {
+    let dir = tempfile::tempdir().unwrap();
+    let jar = dir.path().join("fixture-plugin.jar");
+    // A theme a descriptor names outside a `themes` folder is read too.
+    let outside = std::fs::read_to_string(fixtures().join("plugin/themes/Nightfall.theme.json"))
+        .unwrap()
+        .replace("\"Nightfall\",", "\"Outside\",");
+    build_jar(&jar, &[("Outside.json", &outside)]);
+    let item =
+        themes::import::import_plugin_theme(&jar, "/themes/Nightfall.theme.json", &[]).unwrap();
+    assert_eq!(item.report.name, "Nightfall");
+    assert!(
+        item.report
+            .sources
+            .iter()
+            .any(|s| s.ends_with("!themes/Nightfall.xml")),
+        "{:?}",
+        item.report.sources
+    );
+    let outside = themes::import::import_plugin_theme(&jar, "Outside.json", &[]).unwrap();
+    assert_eq!(outside.report.name, "Outside");
+    assert!(themes::import::import_plugin_theme(&jar, "/themes/Missing.json", &[]).is_err());
+    let target = dir.path().join("themes");
+    let file =
+        themes::catalog::import_plugin_theme_into(&jar, "themes/Dusk.theme.json", &[], &target)
+            .unwrap();
+    assert!(file.path.is_file());
+    assert!(!file.file.theme.scheme_only);
+    // A scheme by its name, from the archive.
+    let scheme =
+        themes::catalog::import_scheme_into("Nightfall", std::slice::from_ref(&jar), &target)
+            .unwrap();
+    assert!(scheme.file.theme.scheme_only);
+    assert!(themes::catalog::import_scheme_into("Nope", &[jar], &target).is_err());
+}

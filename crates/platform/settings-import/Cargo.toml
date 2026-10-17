@@ -1,6 +1,6 @@
 [package]
 name = "settings-import"
-description = "Import of settings from other IDEs into Pyoxide IDE (PyCharm data sources and their passwords)"
+description = "Import of settings from other IDEs into Pyoxide IDE (PyCharm data sources and their passwords, the reference's application options)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ quick-xml.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 dirs = "7"
+# Theme plugins: only `META-INF/plugin.xml` is read (ADR 0017); zip only
+# selects the flate2 API, this picks its pure Rust backend.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

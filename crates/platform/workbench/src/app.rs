@@ -403,14 +403,17 @@ pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Work
 }
 
 /// Runs the application with the main window until it quits; `paths`
-/// are opened in it.
+/// are opened in it. At the first start the first-run window comes before
+/// the main window (`settings_ui::first_run`, see [`env::first_run`]).
 pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     env::mark_main();
     let product = Rc::new(product);
     Application::new().run(move |cx| {
         init(cx, &product);
         // Settings that last across sessions (tests keep the defaults).
-        if let Some(file) = ::settings::settings_file() {
+        let file = ::settings::settings_file();
+        let settings_exist = file.as_ref().is_some_and(|f| f.exists());
+        if let Some(file) = file {
             settings_ui::store::load(cx, file);
         }
         // The imported themes and the theme stored, or the one
@@ -455,32 +458,6 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         if std::env::var_os("PYOXIDE_NATIVE_POINTER").is_none_or(|v| v != "0") {
             ui::pointer::enable_native();
         }
-        let window = open_main_window(cx, product.clone());
-        // The project folder is watched for changes made outside.
-        let _ = window.update(cx, |workbench, _, _| {
-            let sync = crate::SyncSettings {
-                watch: true,
-                ..workbench.sync_settings()
-            };
-            workbench.set_sync_settings(sync);
-        });
-        // A folder opens as the project, files open in tabs.
-        for path in paths {
-            let _ = window.update(cx, |workbench, window, cx| {
-                if path.is_dir() {
-                    workbench.open_folder(path, window, cx)
-                } else {
-                    let path = std::fs::canonicalize(&path).unwrap_or(path);
-                    workbench.open_file(path, window, cx)
-                }
-            });
-        }
-        cx.on_window_closed(|cx| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
         let commands = match env::run_commands() {
             Some(Ok(commands)) => commands,
             Some(Err(e)) => {
@@ -492,14 +469,164 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         // The completion measurement takes its own picture (of its popup).
         let shot =
             env::shot_path().filter(|_| !matches!(env::bench(), Some(env::Bench::Completion(_))));
-        if !commands.is_empty() || shot.is_some() {
-            run_commands_and_shot(window, commands, shot, cx);
+        if !env::first_run(settings_exist) {
+            open_main(product.clone(), paths, commands, shot, cx);
+            return;
         }
-        crate::bench::start(window, cx);
-        if !env::background() {
-            cx.activate(true);
+        let scripted = !commands.is_empty() || shot.is_some();
+        let start = crate::settings::first_run_start(product.name);
+        let main = product.clone();
+        settings_ui::first_run::open(start, cx, move |cx| {
+            open_main(main, paths, Vec::new(), None, cx)
+        });
+        if scripted {
+            run_first_run_script(commands, shot, cx);
         }
     });
+}
+
+/// Opens the main window with `paths`, quits with its last window, runs
+/// `PYOXIDE_RUN` and `PYOXIDE_SHOT` there, and shows the balloon of an
+/// import the first-run window made.
+fn open_main(
+    product: Rc<Product>,
+    paths: Vec<std::path::PathBuf>,
+    commands: Vec<(String, serde_json::Value)>,
+    shot: Option<std::path::PathBuf>,
+    cx: &mut App,
+) {
+    let window = open_main_window(cx, product);
+    // The project folder is watched for changes made outside.
+    let _ = window.update(cx, |workbench, _, _| {
+        let sync = crate::SyncSettings {
+            watch: true,
+            ..workbench.sync_settings()
+        };
+        workbench.set_sync_settings(sync);
+    });
+    // A folder opens as the project, files open in tabs.
+    for path in paths {
+        let _ = window.update(cx, |workbench, window, cx| {
+            if path.is_dir() {
+                workbench.open_folder(path, window, cx)
+            } else {
+                let path = std::fs::canonicalize(&path).unwrap_or(path);
+                workbench.open_file(path, window, cx)
+            }
+        });
+    }
+    if let Some(report) = settings_ui::first_run::take_report(cx) {
+        let _ = window.update(cx, |workbench, _, cx| workbench.notify(report, cx));
+    }
+    cx.on_window_closed(|cx| {
+        if cx.windows().is_empty() {
+            cx.quit();
+        }
+    })
+    .detach();
+    if !commands.is_empty() || shot.is_some() {
+        run_commands_and_shot(window, commands, shot, cx);
+    }
+    crate::bench::start(window, cx);
+    if !env::background() {
+        cx.activate(true);
+    }
+}
+
+/// `PYOXIDE_RUN` and `PYOXIDE_SHOT` of a run that shows the first-run
+/// window: the commands run in it; the picture is of it while it is open
+/// (its popup next to it, `<name>-popup.png`), else of the main window
+/// that followed it. Then the application quits.
+fn run_first_run_script(
+    commands: Vec<(String, serde_json::Value)>,
+    shot: Option<std::path::PathBuf>,
+    cx: &mut App,
+) {
+    fn first_run_window(cx: &App) -> Option<gpui::AnyWindowHandle> {
+        cx.windows().into_iter().find(|w| {
+            w.downcast::<settings_ui::first_run::FirstRunWindow>()
+                .is_some()
+        })
+    }
+    cx.spawn(async move |cx| {
+        let executor = cx.background_executor().clone();
+        let pause = move |ms| executor.timer(Duration::from_millis(ms));
+        pause(1200).await;
+        for (id, args) in commands {
+            let target = cx
+                .update(|cx| {
+                    first_run_window(cx).or_else(|| {
+                        cx.windows()
+                            .iter()
+                            .find_map(|w| w.downcast::<Workbench>().map(Into::into))
+                    })
+                })
+                .ok()
+                .flatten();
+            let Some(target) = target else {
+                break;
+            };
+            let result = cx.update_window(target, |_, window, cx| {
+                window.draw(cx).clear();
+                ui::command::invoke(&id, args, window, cx)
+            });
+            match result {
+                Ok(Ok(value)) if !value.is_null() => env::marker(&format!("run {id} {value}")),
+                Ok(Ok(_)) => env::marker(&format!("run {id}")),
+                Ok(Err(e)) => eprintln!("PYOXIDE_RUN {id}: {e:?}"),
+                Err(e) => eprintln!("PYOXIDE_RUN {id}: {e}"),
+            }
+            pause(400).await;
+        }
+        if let Some(path) = shot {
+            pause(600).await;
+            let target = cx
+                .update(|cx| {
+                    first_run_window(cx).or_else(|| {
+                        cx.windows()
+                            .iter()
+                            .find_map(|w| w.downcast::<Workbench>().map(Into::into))
+                    })
+                })
+                .ok()
+                .flatten();
+            if let Some(target) = target {
+                let _ =
+                    cx.update_window(target, |_, window, _| crate::shot::request_display(window));
+                pause(300).await;
+                let _ = cx.update_window(target, |_, window, _| save_shot(window, &path));
+                let child = cx
+                    .update(|cx| ui::dialog_window::child_of(target, cx))
+                    .ok()
+                    .flatten();
+                if let Some(child) = child {
+                    let stem = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let child_path = path.with_file_name(format!("{stem}-popup.png"));
+                    let _ = cx
+                        .update_window(child, |_, window, _| crate::shot::request_display(window));
+                    pause(300).await;
+                    let _ = cx.update_window(child, |_, window, _| save_shot(window, &child_path));
+                }
+            }
+        }
+        let _ = cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
+/// Saves a window's picture and prints its marker.
+fn save_shot(window: &gpui::Window, path: &std::path::Path) {
+    match crate::shot::save(window, path) {
+        Ok((w, h)) => env::marker(&format!(
+            "shot {} {w}x{h} scale {}",
+            path.display(),
+            window.scale_factor()
+        )),
+        Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
+    }
 }
 
 /// `PYOXIDE_RUN` and `PYOXIDE_SHOT`: wait until the window is on screen and

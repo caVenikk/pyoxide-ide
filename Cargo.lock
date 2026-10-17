@@ -6575,6 +6575,7 @@ dependencies = [
  "base64 0.23.1",
  "cbc 0.2.1",
  "dirs 7.0.0",
+ "flate2",
  "keepass",
  "quick-xml 0.42.0",
  "secrets",
@@ -6582,6 +6583,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]
@@ -6593,6 +6595,7 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "settings-import",
  "tempfile",
  "text",
  "themes",
@@ -9082,6 +9085,7 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "settings-import",
  "settings-ui",
  "smallvec",
  "tempfile",

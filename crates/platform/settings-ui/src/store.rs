@@ -56,6 +56,14 @@ pub fn load(cx: &mut App, file: PathBuf) {
     }
 }
 
+/// The settings file the store reads and saves (`None` before [`load`]).
+pub fn file(cx: &App) -> Option<PathBuf> {
+    cx.try_global::<AppSettings>()?
+        .store
+        .file()
+        .map(|f| f.to_path_buf())
+}
+
 /// The section as stored (its defaults without a store).
 pub fn get<T: Section>(cx: &App) -> T {
     cx.try_global::<AppSettings>()

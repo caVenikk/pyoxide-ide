@@ -23,6 +23,8 @@
 //! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |
 //! | `PYOXIDE_NATIVE_POINTER=0` | do not set the pointer shape on every mouse move (leave it to GPUI) |
 //! | `PYOXIDE_CONFIG_DIR=<dir>` | keep the application settings (`settings.toml`) and other settings that last across sessions (`find.toml`, `settings-window.toml`) in this folder instead of the user's configuration folder |
+//! | `PYOXIDE_FIRST_RUN=1` | show the first-run window before the main window even when the settings exist (`0`: never); unset, it shows at a first start (no `settings.toml`) except in runs with `PYOXIDE_RUN`, `PYOXIDE_SHOT` or `PYOXIDE_BENCH`. Commands and the picture of such a run go to the first-run window while it is open |
+//! | `PYOXIDE_REFERENCE_CONFIG=<dir>` | look for the reference IDE's configuration folders (`PyCharm2026.2`, ...) in this folder instead of the platform's (`JetBrains` in the user's configuration folder) |
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -57,6 +59,31 @@ pub fn theme_override() -> Option<String> {
 pub fn debug_cursor() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("PYOXIDE_DEBUG_CURSOR").is_some_and(|v| v == "1"))
+}
+
+/// Whether the first-run window shows before the main window
+/// (`PYOXIDE_FIRST_RUN`): `1` always, `0` never; unset at a first start
+/// (`settings_exist` false) unless the run is driven by `PYOXIDE_RUN`,
+/// `PYOXIDE_SHOT` or `PYOXIDE_BENCH`.
+pub fn first_run(settings_exist: bool) -> bool {
+    match std::env::var("PYOXIDE_FIRST_RUN").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => {
+            let scripted = ["PYOXIDE_RUN", "PYOXIDE_SHOT", "PYOXIDE_BENCH"]
+                .iter()
+                .any(|v| std::env::var_os(v).is_some());
+            !settings_exist && !scripted
+        }
+    }
+}
+
+/// `PYOXIDE_REFERENCE_CONFIG`: the folder of the reference IDE's
+/// configuration folders to look in instead of the platform's.
+pub fn reference_config_root() -> Option<std::path::PathBuf> {
+    std::env::var_os("PYOXIDE_REFERENCE_CONFIG")
+        .filter(|v| !v.is_empty())
+        .map(Into::into)
 }
 
 /// `PYOXIDE_SHOT`: where to save a screenshot of the main window.

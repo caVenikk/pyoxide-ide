@@ -537,6 +537,8 @@ pub struct BottomBar {
     items: Vec<BarItem>,
     order: ButtonOrder,
     separator: bool,
+    height: Option<f32>,
+    inset: f32,
 }
 
 impl Default for BottomBar {
@@ -553,6 +555,8 @@ impl BottomBar {
             items: Vec::new(),
             order: ButtonOrder::native(),
             separator: true,
+            height: None,
+            inset: BAR_INSET,
         }
     }
 
@@ -561,6 +565,15 @@ impl BottomBar {
     /// lower: [`unlined_bar_height`]).
     pub fn separator(mut self, separator: bool) -> Self {
         self.separator = separator;
+        self
+    }
+
+    /// The bar's height and the space at its sides, when the dialog's are
+    /// not [`bar_height`] and [`BAR_INSET`] (the first-run window's 57 and
+    /// 20, `WizardPagePane`).
+    pub fn metrics(mut self, height: f32, inset: f32) -> Self {
+        self.height = Some(height);
+        self.inset = inset;
         self
     }
 
@@ -646,13 +659,15 @@ impl BottomBar {
             .flex_none()
             .flex_row()
             .items_center()
-            .h(px(if self.separator {
-                bar_height(cx)
-            } else {
-                unlined_bar_height(cx)
-            }))
-            .pl(px(BAR_INSET))
-            .pr(px(BAR_INSET))
+            .h(px(self.height.unwrap_or_else(|| {
+                if self.separator {
+                    bar_height(cx)
+                } else {
+                    unlined_bar_height(cx)
+                }
+            })))
+            .pl(px(self.inset))
+            .pr(px(self.inset))
             .when(self.separator, |d| {
                 d.border_t_1()
                     .border_color(cx.theme().color(UiRole::Border))
