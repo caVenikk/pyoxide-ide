@@ -129,7 +129,9 @@ impl H<'_> {
             .collect()
     }
 
-    /// The keys of the binding of `action` that wins in the main window.
+    /// The keys of the binding of `action` that wins in the main window, as
+    /// `Keystroke::unparse` writes them: the platform's name of the Super key
+    /// (`cmd`, `super`, `win`), so compare with `canonical_keys`.
     fn shortcut_of(&mut self, action: Box<dyn Action>) -> Option<String> {
         self.cx
             .update_window(self.window.into(), |_, window, _| {
@@ -359,8 +361,8 @@ fn switching_the_keymap_changes_the_keystrokes(cx: &mut TestAppContext) {
         filter: None,
     };
     assert_eq!(
-        h.shortcut_of(Box::new(open_settings.clone())).as_deref(),
-        Some(settings_keys(other))
+        h.shortcut_of(Box::new(open_settings.clone())),
+        Some(canonical_keys(settings_keys(other)))
     );
     // Back: the platform's keymap again, not written to the settings.
     h.invoke("settings.switch-keymap", json!({"name": default}));
@@ -372,8 +374,8 @@ fn switching_the_keymap_changes_the_keystrokes(cx: &mut TestAppContext) {
     assert!(h.settings_open());
     h.close_settings();
     assert_eq!(
-        h.shortcut_of(Box::new(open_settings)).as_deref(),
-        Some(settings_keys(default))
+        h.shortcut_of(Box::new(open_settings)),
+        Some(canonical_keys(settings_keys(default)))
     );
     // An unknown keymap is refused and changes nothing.
     h.invoke("settings.switch-keymap", json!({"name": "Nope"}));
