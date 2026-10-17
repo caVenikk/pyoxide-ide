@@ -37,6 +37,8 @@ pub mod layer {
     /// The line the debugger stopped on
     /// (`DebuggerColors.EXECUTION_LINE_HIGHLIGHTERLAYER`).
     pub const EXECUTION_POINT: i32 = 5998;
+    /// Changed lines of a diff (`DiffDrawUtil.DEFAULT_LAYER`).
+    pub const DIFF: i32 = 5898;
 }
 
 /// An icon drawn over the line number of a decoration's first line in
@@ -58,12 +60,21 @@ pub const BADGE_OFFSET: (f32, f32) = (7.0, 6.0);
 pub const BADGE_SIZE: f32 = 10.0;
 
 /// A background over the whole width of the text on every row of a
-/// decoration's lines.
+/// decoration's lines; for a decoration between lines, a line two pixels
+/// thick on the boundary (the reference's empty diff range,
+/// `DiffDrawUtil.createLineMarker`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineBackground {
     pub color: UiRole,
     /// See [`layer`].
     pub layer: i32,
+    /// The colour mixed with the editor's background, 60 % of it (the
+    /// reference's "ignored" diff colour of lines whose changed words are
+    /// highlighted, `TextDiffTypeImpl.getIgnoredColor`).
+    pub faded: bool,
+    /// Drawn over the gutter too (the reference's diff highlighters paint
+    /// the line numbers' background, `DiffLineMarkerRenderer`).
+    pub over_gutter: bool,
 }
 
 /// What changed in a decoration's lines, for its change marker.
@@ -172,7 +183,29 @@ impl Decoration {
     }
 
     pub fn background(mut self, color: UiRole, layer: i32) -> Self {
-        self.background = Some(LineBackground { color, layer });
+        self.background = Some(LineBackground {
+            color,
+            layer,
+            faded: false,
+            over_gutter: false,
+        });
+        self
+    }
+
+    /// The background's colour faded (see [`LineBackground::faded`]).
+    pub fn faded(mut self) -> Self {
+        if let Some(bg) = &mut self.background {
+            bg.faded = true;
+        }
+        self
+    }
+
+    /// The background drawn over the gutter too (see
+    /// [`LineBackground::over_gutter`]).
+    pub fn over_gutter(mut self) -> Self {
+        if let Some(bg) = &mut self.background {
+            bg.over_gutter = true;
+        }
         self
     }
 

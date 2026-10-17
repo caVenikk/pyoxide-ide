@@ -14,6 +14,8 @@
 
 mod markers;
 
+pub(super) use markers::base_of;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

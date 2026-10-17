@@ -88,7 +88,9 @@ Platform (`crates/platform/`, language-agnostic):
   VCS widget's text, icon, tooltip and arrows, the branches popup (search,
   top actions, groups Recent, Local, Remote and Tags with prefix
   folders, the actions of a branch) and the New Branch, Rename Branch and
-  Checkout dialogs (`git.*` UI commands the workbench runs through `git`).
+  Checkout dialogs (`git.*` UI commands the workbench runs through `git`);
+  the side-by-side diff viewer of an editor tab (`diff.*` commands; the
+  workbench gives it the base text and the file's document).
 - `run-config`: run configurations without a toolkit (ADR 0012): the
   language-neutral model (common settings, environment variables with
   shared or personal values, options per type), the list with the
@@ -271,7 +273,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `console-ui` | platform | yes | the console view, moved out of `workbench` so that Run and Debug share it; the process feed and a file as standard input | 0015 |
 | `vcs` | platform | no | the version control model and backend trait: file status, changes, the status map, line ranges against the base text (`imara-diff`), branches | 0016 |
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
-| `vcs-ui` | platform | yes | file status colours, change markers and their popup, the VCS widget, branches popup and branch dialogs; later the Commit tool window, changes tree, diff viewer tab, other git dialogs | 0016 |
+| `vcs-ui` | platform | yes | file status colours, change markers and their popup, the VCS widget, branches popup and branch dialogs, the Commit tool window and changes tree, the diff viewer tab; later other dialogs | 0016 |
 | `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
 | `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import, the first-run window and its importers | 0017, 0018 |
 | `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |
@@ -331,11 +333,13 @@ once, before or with its first user:
   the end of a line (inline values), and error-stripe marks in given
   colours. Owned by `editor`; it follows the soft-wrap work in the editor
   element (#119).
-- **Editor tabs that are not editors.** The editor area's tabs hold one
-  `Editor` each, keyed by path; read-only texts reuse that with a title as
-  the path. Needed: a tab kind whose content is any view, with its own
-  title, icon, tooltip and close handling: the diff viewer
-  (`Commit: <file>`), later a terminal moved to the editor.
+- **Editor tabs that are not editors.** An editor area's tab shows a
+  file in its `Editor` (keyed by path; read-only texts reuse that with a
+  title as the path) or any view implementing
+  `workbench::tab_view::TabView`: its title, icon, tooltip, preview state
+  (grey title) and state for `workbench.state`; the workbench handles
+  closing it. The diff viewer is one (`Commit: <file>`); later a terminal
+  moved to the editor.
 - **Non-modal dialog windows.** `ui::dialog_window` is modal only: the
   parent is blocked and its keystrokes dropped. Needed: a non-modal
   option (no blocker, the parent keeps its input, one instance per key

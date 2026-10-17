@@ -352,7 +352,8 @@ impl FindBar {
                 | EditorEvent::GutterHovered { .. }
                 | EditorEvent::GutterClicked { .. }
                 | EditorEvent::ChangeMarkerClicked { .. }
-                | EditorEvent::AfterLineTextClicked { .. } => {}
+                | EditorEvent::AfterLineTextClicked { .. }
+                | EditorEvent::Scrolled => {}
             }),
             cx.on_blur(&history_focus, window, |this, _, cx| {
                 if this.history.take().is_some() {

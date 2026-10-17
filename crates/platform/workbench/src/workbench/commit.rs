@@ -525,25 +525,9 @@ impl Workbench {
         .detach();
     }
 
-    /// The diff of a file when a diff viewer is there (`vcs.show-diff`),
-    /// else the file.
+    /// The diff of a file in the list's preview tab (`vcs.show-diff`).
     fn show_diff(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let has_diff = ui::command::list(cx)
-            .iter()
-            .any(|c| c.meta.id == "vcs.show-diff");
-        let rel = self
-            .version_control
-            .snapshot
-            .as_ref()
-            .map(|s| git::commands::relative_path(&s.info.root, &path));
-        if has_diff
-            && let Some(rel) = rel
-            && let Ok(action) = cx.build_action("vcs.show-diff", Some(json!({ "path": rel })))
-        {
-            window.dispatch_action(action, cx);
-            return;
-        }
-        self.open_file(path, window, cx);
+        self.show_diff_of(path, vcs_ui::diff::ScrollTo::FirstChange, window, cx);
     }
 
     // ---- commit -----------------------------------------------------------------
