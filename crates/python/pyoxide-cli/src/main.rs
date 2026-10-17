@@ -374,6 +374,7 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
                 no_readme: a.no_readme,
                 no_pin_python: a.no_pin_python,
                 vcs: a.vcs,
+                ..InitRequest::default()
             };
             let done = ops::project_init(&svc, req, &ctx).await?;
             emit(json, &done, || render::changed(&done));
@@ -392,6 +393,7 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
                 clear,
                 system_site_packages,
                 prompt: None,
+                ..VenvRequest::default()
             };
             let done = ops::venv_create(&svc, req, &ctx).await?;
             emit(json, &done, || render::venv(&done));

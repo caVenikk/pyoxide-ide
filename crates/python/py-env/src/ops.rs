@@ -2,6 +2,7 @@
 //! directly (with a progress sink); the command registry wraps the same
 //! functions (see [`crate::commands`]).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,13 +14,13 @@ use crate::interpreter::{Interpreter, probe};
 use crate::packages::{Backend, Outcome, Package};
 use crate::paths::{environment_python, venv_python};
 use crate::pip::Pip;
-use crate::process::RunContext;
+use crate::process::{RunContext, Spec, run_ok};
 use crate::project::{ProjectInfo, find_project_root, find_project_venv, load_project_async};
 use crate::search::IndexProject;
 use crate::service::EnvService;
 use crate::uv::{
     AddRequest, InitRequest, LockRequest, PipInstallRequest, RemoveRequest, SyncRequest, Tree,
-    TreeRequest, VenvRequest,
+    TreeRequest, Uv, VenvRequest,
 };
 
 // ---------- arguments and results ----------
@@ -244,9 +245,39 @@ pub async fn venv_create(
     mut req: VenvRequest,
     ctx: &RunContext,
 ) -> Result<VenvCreated> {
-    req.path = absolute(&req.path);
     let uv = svc.require_uv("creating a virtual environment")?;
-    let outcome = uv.venv(&req, ctx).await?;
+    req.path = absolute(&req.path);
+    venv_create_with(Some(uv), req, ctx).await
+}
+
+/// A virtual environment made with uv when there is one (`uv venv`), else
+/// with the `venv` module of the base interpreter that `req.python` names
+/// by path (`python -m venv`): the reference IDE's "Virtualenv"
+/// environment on a machine without uv. `req.path` is absolute.
+pub async fn venv_create_with(
+    uv: Option<&Uv>,
+    req: VenvRequest,
+    ctx: &RunContext,
+) -> Result<VenvCreated> {
+    let outcome = match uv {
+        Some(uv) => uv.venv(&req, ctx).await?,
+        None => {
+            let base = req.python.as_deref().ok_or_else(|| {
+                EnvError::invalid(
+                    "creating a virtual environment without uv needs a base interpreter",
+                )
+            })?;
+            let started = std::time::Instant::now();
+            let mut spec = Spec::new(base).args(module_venv_args(&req));
+            spec.forward_stdout = true;
+            if let Some(cwd) = &req.cwd {
+                spec = spec.cwd(cwd);
+            }
+            let command = spec.display();
+            let done = run_ok("python", spec, ctx, Duration::from_secs(10 * 60)).await?;
+            Outcome::new(command, &done.stdout, &done.stderr, started)
+        }
+    };
     let python = venv_python(&req.path);
     let interpreter = probe(
         &python,
@@ -262,6 +293,27 @@ pub async fn venv_create(
         interpreter,
         outcome,
     })
+}
+
+/// `-m venv …` for a base interpreter: pip is installed unless `seed` is
+/// off (the module's own default).
+pub(crate) fn module_venv_args(req: &VenvRequest) -> Vec<OsString> {
+    let mut a: Vec<OsString> = vec!["-m".into(), "venv".into()];
+    if req.clear {
+        a.push("--clear".into());
+    }
+    if req.system_site_packages {
+        a.push("--system-site-packages".into());
+    }
+    if !req.seed {
+        a.push("--without-pip".into());
+    }
+    if let Some(prompt) = &req.prompt {
+        a.push("--prompt".into());
+        a.push(prompt.into());
+    }
+    a.push(req.path.clone().into());
+    a
 }
 
 /// `env.packages.list`
@@ -444,4 +496,93 @@ pub async fn python_install(
 /// `env.package.search`
 pub async fn package_search(svc: &EnvService, args: SearchArgs) -> Result<IndexProject> {
     svc.index().project(&args.name).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strs(a: Vec<OsString>) -> Vec<String> {
+        a.into_iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_venv_module_without_uv() {
+        let req = VenvRequest {
+            path: "/p/.venv".into(),
+            python: Some("/usr/bin/python3".into()),
+            seed: true,
+            system_site_packages: true,
+            ..VenvRequest::default()
+        };
+        assert_eq!(
+            strs(module_venv_args(&req)),
+            ["-m", "venv", "--system-site-packages", "/p/.venv"]
+        );
+        let bare = VenvRequest {
+            path: "/p/env".into(),
+            clear: true,
+            prompt: Some("demo".into()),
+            ..VenvRequest::default()
+        };
+        assert_eq!(
+            strs(module_venv_args(&bare)),
+            [
+                "-m",
+                "venv",
+                "--clear",
+                "--without-pip",
+                "--prompt",
+                "demo",
+                "/p/env"
+            ]
+        );
+    }
+
+    /// Without uv and a base interpreter there is nothing to create with.
+    #[tokio::test]
+    async fn without_uv_a_base_interpreter_is_needed() {
+        let e = venv_create_with(
+            None,
+            VenvRequest {
+                path: "/nowhere/.venv".into(),
+                ..VenvRequest::default()
+            },
+            &RunContext::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e.kind, ErrorKind::InvalidInput, "{e}");
+    }
+
+    /// A base interpreter's `venv` module; needs `python3` on `PATH`.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "starts the Python interpreter found on PATH"]
+    async fn the_venv_module_creates_an_environment() {
+        let python = crate::paths::find_on_path("python3").expect("python3 on PATH");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("env");
+        let created = venv_create_with(
+            None,
+            VenvRequest {
+                path: path.clone(),
+                python: Some(python.to_string_lossy().into_owned()),
+                seed: true,
+                ..VenvRequest::default()
+            },
+            &RunContext::default(),
+        )
+        .await
+        .unwrap();
+        assert!(created.outcome.command.contains("-m venv"));
+        assert!(path.join("pyvenv.cfg").is_file());
+        assert!(created.python.starts_with(&path));
+        assert!(
+            created.interpreter.is_some(),
+            "the new environment is probed"
+        );
+    }
 }

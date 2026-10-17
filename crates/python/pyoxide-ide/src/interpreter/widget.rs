@@ -6,7 +6,7 @@
 //! only one).
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -16,15 +16,18 @@ use gpui::{
     Styled, Subscription, Task, WeakEntity, Window, canvas, div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
+use settings_ui::commands::OpenSettings;
 use themes::UiRole;
 use ui::command::CommandError;
 use ui::components::Tooltip;
 use ui::icons::{Icon, IconName, IconSvg};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
+use ui::notification::{Notification, NotificationKind};
 use ui::theme::ThemeExt;
 use workbench::{StatusWidget, Workbench, WorkbenchEvent};
 
-use super::{FoundInterpreter, Group, ProjectInterpreters};
+use super::create::{AddInterpreter, Kind, Request, Select};
+use super::{Choice, FoundInterpreter, Group, ProjectInterpreters};
 
 ui::ui_commands! {
     COMMANDS, scope = "Workbench";
@@ -32,20 +35,21 @@ ui::ui_commands! {
     ChooseInterpreter => "python.interpreter.choose", "Switch Python Interpreter",
         "Opens the Python Interpreter popup of the status bar: the project's environments, the current one selected.";
     /// Choose the project's interpreter.
-    SelectInterpreter { path: String } => "python.interpreter.select", "Select Python Interpreter",
-        "Makes an interpreter (or the environment folder holding it) the project's interpreter and keeps the choice in the personal project state; a relative path is resolved against the project.",
+    SelectInterpreter { path: Option<String>, name: Option<String> } => "python.interpreter.select", "Select Python Interpreter",
+        "Makes an interpreter the project's interpreter and keeps the choice in the personal project state: by `path` (an interpreter or the environment folder holding it; a relative path is resolved against the project) or by `name` (as the popup and the list of configured interpreters name it). An environment of the project joins the list of configured interpreters.",
         r#"{"path": ".venv"}"#;
     /// Describe the widget.
     InterpreterState => "python.interpreter.state", "Python Interpreter State",
-        "Returns the interpreter widget's state as JSON: its text and tooltip, the selected interpreter, the project's environments and the open popup.";
+        "Returns the interpreter widget's state as JSON: its text and tooltip, the selected interpreter, the project's interpreters, the open popup, whether an interpreter is being configured, and the application's list of configured interpreters.";
 }
 
 /// Title of the popup (`configurable.PyActiveSdkModuleConfigurable.python.
 /// interpreter.display.name`).
 const POPUP_TITLE: &str = "Python Interpreter";
 /// The widget's text without an interpreter (`noInterpreterMarker`).
-const NO_INTERPRETER: &str = "<No interpreter>";
-/// Rows of the popup that come with the interpreter settings (#75).
+const NO_INTERPRETER: &str = super::page::NO_INTERPRETER;
+/// Rows of the popup (`python.sdk.action.add.new.interpreter.text`,
+/// `python.sdk.popup.interpreter.settings`).
 const ADD_NEW_INTERPRETER: &str = "Add New Interpreter";
 const INTERPRETER_SETTINGS: &str = "Interpreter Settings\u{2026}";
 const MANAGE_PACKAGES: &str = "Manage Packages\u{2026}";
@@ -196,6 +200,8 @@ fn target(cx: &App) -> Option<(AnyWindowHandle, Entity<InterpreterWidget>)> {
 pub(super) fn init(cx: &mut App) {
     ui::icons::register(cx, &icons());
     ui::command::register(cx, COMMANDS);
+    ui::command::register(cx, super::create::COMMANDS);
+    cx.on_action(add_interpreter);
     cx.on_action(|_: &ChooseInterpreter, cx| {
         let Some((window, widget)) = target(cx) else {
             return;
@@ -209,8 +215,12 @@ pub(super) fn init(cx: &mut App) {
     });
     cx.on_action(|action: &SelectInterpreter, cx| {
         if let Some((_, widget)) = target(cx) {
-            let path = action.path.clone();
-            widget.update(cx, |w, cx| w.select(&path, cx));
+            let action = action.clone();
+            widget.update(cx, |w, cx| {
+                if let Err(e) = w.select_by(action.path.as_deref(), action.name.as_deref(), cx) {
+                    eprintln!("python.interpreter.select: {e}");
+                }
+            });
         }
     });
     ui::command::register_query(
@@ -222,6 +232,69 @@ pub(super) fn init(cx: &mut App) {
             Ok(widget.read(cx).state_json(cx))
         }),
     );
+}
+
+/// `python.interpreter.add`: for the project the command names, else the
+/// one of the open Interpreter page (selected there until Apply), else the
+/// active main window's (selected at once). A failure shows a balloon.
+fn add_interpreter(action: &AddInterpreter, cx: &mut App) {
+    let page_root = super::page::open_project(cx);
+    let root = action
+        .project
+        .as_deref()
+        .map(PathBuf::from)
+        .or_else(|| page_root.clone())
+        .or_else(|| target(cx).and_then(|(_, w)| w.read(cx).root.clone()));
+    let Some(root) = root else {
+        eprintln!("python.interpreter.add: no project is open");
+        return;
+    };
+    let select = match action.select.as_deref() {
+        Some(select) => Select::parse(select),
+        None if page_root.as_deref() == Some(root.as_path()) => Ok(Select::Draft),
+        None => Ok(Select::Now),
+    };
+    let (kind, select) = match (Kind::parse(&action.kind), select) {
+        (Ok(kind), Ok(select)) => (kind, select),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("python.interpreter.add: {e}");
+            return;
+        }
+    };
+    let resolve = |path: &Option<String>| path.as_deref().map(|p| super::resolve(&root, p));
+    let request = Request {
+        kind,
+        root: root.clone(),
+        python: resolve(&action.python),
+        uv: resolve(&action.uv_path),
+    };
+    let added = super::create::add(request, select, cx);
+    cx.spawn(async move |cx| {
+        if let Err(e) = added.await {
+            let _ = cx.update(|cx| notify_failure(&root, &e, cx));
+        }
+    })
+    .detach();
+}
+
+/// A balloon in the main window of the project at `root`
+/// (`python.sdk.failed.to.create.interpreter.title`).
+fn notify_failure(root: &Path, message: &str, cx: &mut App) {
+    eprintln!("python.interpreter.add: {message}");
+    let workbench = cx.try_global::<Widgets>().and_then(|w| {
+        w.0.iter().filter_map(|(_, v)| v.upgrade()).find_map(|v| {
+            let v = v.read(cx);
+            (v.root.as_deref() == Some(root)).then(|| v.workbench.clone())
+        })
+    });
+    if let Some(workbench) = workbench {
+        let notification = Notification::new(
+            NotificationKind::Error,
+            super::create::FAILED_TITLE,
+            message.to_owned(),
+        );
+        let _ = workbench.update(cx, |w, cx| w.notify(notification, cx));
+    }
 }
 
 pub(super) fn status_widget() -> StatusWidget {
@@ -242,6 +315,7 @@ pub(super) fn status_widget() -> StatusWidget {
 
 /// The interpreter widget of one main window.
 pub(super) struct InterpreterWidget {
+    workbench: WeakEntity<Workbench>,
     root: Option<PathBuf>,
     /// The file of the active editor: the widget shows while it is a file
     /// of the project (`resolvePythonWidgetContext`: the module of the
@@ -253,13 +327,19 @@ pub(super) struct InterpreterWidget {
     /// Where the widget was drawn (window coordinates), for the popup.
     bounds: Rc<Cell<Bounds<Pixels>>>,
     scan: Task<()>,
-    save: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl InterpreterWidget {
     fn new(workbench: WeakEntity<Workbench>, _: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut subscriptions = Vec::new();
+        let mut subscriptions = vec![
+            // The list of configured interpreters changed, or a project's
+            // interpreter was chosen elsewhere (the Interpreter page): read
+            // again.
+            cx.observe_global::<super::list::Interpreters>(|this, cx| this.rescan(cx)),
+            cx.observe_global::<super::Chosen>(|this, cx| this.rescan(cx)),
+            cx.observe_global::<super::configuring::Configuring>(|_, cx| cx.notify()),
+        ];
         let mut root = None;
         let mut active_file = None;
         if let Some(workbench) = workbench.upgrade() {
@@ -282,13 +362,13 @@ impl InterpreterWidget {
             );
         }
         let mut this = Self {
+            workbench,
             root: None,
             active_file,
             state: None,
             menu: None,
             bounds: Rc::default(),
             scan: Task::ready(()),
-            save: Task::ready(()),
             _subscriptions: subscriptions,
         };
         this.set_root(root, cx);
@@ -309,9 +389,10 @@ impl InterpreterWidget {
             return;
         };
         let chosen = super::chosen(&root, cx);
+        let table = super::list::table(cx);
         let scan = cx.background_spawn({
             let root = root.clone();
-            async move { super::scan(&root, chosen.as_deref()) }
+            async move { super::scan(&root, chosen.as_ref(), &table) }
         });
         self.scan = cx.spawn(async move |this, cx| {
             let state = scan.await;
@@ -334,9 +415,10 @@ impl InterpreterWidget {
             return;
         }
         let chosen = super::chosen(&root, cx);
+        let table = super::list::table(cx);
         let scan = cx.background_spawn({
             let root = root.clone();
-            async move { super::scan(&root, chosen.as_deref()) }
+            async move { super::scan(&root, chosen.as_ref(), &table) }
         });
         self.scan = cx.spawn_in(window, async move |this, cx| {
             let state = scan.await;
@@ -354,7 +436,11 @@ impl InterpreterWidget {
         let Some(state) = &self.state else {
             return;
         };
-        let (items, selected) = popup_items(state);
+        let configuring = self
+            .root
+            .as_deref()
+            .is_some_and(|r| super::configuring::is_configuring(r, cx));
+        let (items, selected) = popup_items(state, configuring);
         let options = PopupOptions {
             title: Some(POPUP_TITLE.into()),
             speed_search: true,
@@ -370,44 +456,40 @@ impl InterpreterWidget {
         cx.notify();
     }
 
-    /// Makes `path` (relative to the project or absolute; an interpreter
-    /// or its environment folder) the project's interpreter and keeps it.
-    fn select(&mut self, path: &str, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else {
-            return;
+    /// Makes an interpreter the project's and keeps it: by `path`
+    /// (relative to the project or absolute; an interpreter or its
+    /// environment folder) or by `name` (among the project's
+    /// interpreters, else in the list of configured ones).
+    fn select_by(
+        &mut self,
+        path: Option<&str>,
+        name: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let root = self.root.clone().ok_or("no project is open")?;
+        let python = match (path, name) {
+            (Some(path), _) => super::resolve(&root, path),
+            (None, Some(name)) => self
+                .state
+                .as_ref()
+                .and_then(|s| s.found.iter().find(|f| f.name == name))
+                .map(|f| f.python.clone())
+                .or_else(|| super::list::table(cx).find(name).map(|e| e.python.clone()))
+                .ok_or_else(|| format!("no interpreter named `{name}`"))?,
+            (None, None) => return Err("name the interpreter with `path` or `name`".into()),
         };
-        let path = super::resolve(&root, path);
-        // Counts at once (a run started now uses it).
-        super::set_chosen(&root, Some(path.clone()), cx);
-        let work = cx.background_spawn({
-            let root = root.clone();
-            async move {
-                let state = super::scan(&root, Some(&path));
-                if state.chosen
-                    && let Some(selected) = &state.selected
-                    && let Err(e) = super::store_choice(&root, &selected.python)
-                {
-                    eprintln!("interpreter: {e}");
-                }
-                state
-            }
-        });
-        self.save = cx.spawn(async move |this, cx| {
-            let state = work.await;
+        let chosen = super::choose(&root, Choice::Python(python), cx);
+        cx.spawn(async move |this, cx| {
+            let state = chosen.await;
             let _ = this.update(cx, |this, cx| {
-                let python = state
-                    .chosen
-                    .then(|| state.selected.as_ref().map(|s| s.python.clone()))
-                    .flatten();
-                super::set_chosen(&root, python, cx);
                 if this.root.as_ref() == Some(&root) {
                     this.state = Some(state);
                     cx.notify();
                 }
             });
-            // The language services follow the new interpreter.
-            let _ = cx.update(|cx| super::changed(&root, cx));
-        });
+        })
+        .detach();
+        Ok(())
     }
 
     /// The active editor shows a file of the project.
@@ -446,16 +528,39 @@ impl InterpreterWidget {
                 .map(|s| s.in_popup_order().into_iter().map(FoundInterpreter::json).collect::<Vec<_>>())
                 .unwrap_or_default(),
             "popup": self.menu.as_ref().map(|(m, _)| m.read(cx).state_json()),
+            "configuring": self
+                .root
+                .as_deref()
+                .is_some_and(|r| super::configuring::is_configuring(r, cx)),
+            "list": list_json(cx),
         })
     }
 }
 
+/// The application's list of configured interpreters as JSON.
+fn list_json(cx: &App) -> Json {
+    let table = super::list::table(cx);
+    json!({
+        "loaded": super::list::is_loaded(cx),
+        "imported": table.imported,
+        "interpreters": table.entries.iter().map(|e| json!({
+            "name": e.name,
+            "python": e.python.display().to_string(),
+            "kind": e.flavor.id(),
+            "version": e.version,
+            "associated-project": e.associated_project.as_ref().map(|p| p.display().to_string()),
+            "uv": e.uv.as_ref().map(|p| p.display().to_string()),
+            "working-dir": e.working_dir.as_ref().map(|p| p.display().to_string()),
+        })).collect::<Vec<_>>(),
+    })
+}
+
 /// The popup's rows (`PySdkPopupFactory.buildInterpreterActionGroup`) and
 /// the current interpreter's row: the interpreters by group with
-/// separators, "Add New Interpreter", a separator, "Interpreter
-/// Settings…" and "Manage Packages…". The last three come with the
-/// interpreter settings and are disabled until then.
-fn popup_items(state: &ProjectInterpreters) -> (Vec<MenuItem>, Option<usize>) {
+/// separators, "Add New Interpreter" (greyed while an interpreter is
+/// being configured), a separator, "Interpreter Settings…" and "Manage
+/// Packages…" (it comes with the packages tool).
+fn popup_items(state: &ProjectInterpreters, configuring: bool) -> (Vec<MenuItem>, Option<usize>) {
     let mut items = Vec::new();
     let mut selected = None;
     let mut group = None;
@@ -472,7 +577,8 @@ fn popup_items(state: &ProjectInterpreters) -> (Vec<MenuItem>, Option<usize>) {
             selected = Some(items.len());
         }
         let action = SelectInterpreter {
-            path: found.python.display().to_string(),
+            path: Some(found.python.display().to_string()),
+            name: None,
         };
         items.push(
             MenuItem::action(found.long_name(), action)
@@ -483,9 +589,19 @@ fn popup_items(state: &ProjectInterpreters) -> (Vec<MenuItem>, Option<usize>) {
     if !items.is_empty() {
         items.push(MenuItem::separator());
     }
-    items.push(MenuItem::submenu(ADD_NEW_INTERPRETER, Vec::new()).enabled(false));
+    // The rows of the "Add Interpreter" popup of the Interpreter page; the
+    // Add Python Interpreter dialog comes in #75's second stage.
+    let add =
+        vec![MenuItem::unavailable(super::page::ADD_LOCAL).icon(super::page::HOME_FOLDER_ICON)];
+    items.push(MenuItem::submenu(ADD_NEW_INTERPRETER, add).enabled(!configuring));
     items.push(MenuItem::separator());
-    items.push(MenuItem::unavailable(INTERPRETER_SETTINGS));
+    items.push(MenuItem::action(
+        INTERPRETER_SETTINGS,
+        OpenSettings {
+            page: Some(super::page::PAGE.to_owned()),
+            filter: None,
+        },
+    ));
     items.push(MenuItem::unavailable(MANAGE_PACKAGES));
     (items, selected)
 }

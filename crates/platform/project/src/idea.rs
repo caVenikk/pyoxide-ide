@@ -212,6 +212,35 @@ pub struct SdkEntry {
     /// The home path (for a Python SDK its interpreter), `$USER_HOME$`
     /// expanded; `None` when it uses another path variable.
     pub home: Option<PathBuf>,
+    /// The attributes of the SDK type's own data (`<additional …/>`), as
+    /// written (paths may hold `$USER_HOME$`, see [`expand_user_home`]).
+    pub additional: Vec<(String, String)>,
+    /// The `<setting name="…" value="…"/>` children of that data.
+    pub settings: Vec<(String, String)>,
+}
+
+impl SdkEntry {
+    /// An attribute of the SDK's own data.
+    pub fn additional(&self, key: &str) -> Option<&str> {
+        self.additional
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// A setting of the SDK's own data.
+    pub fn setting(&self, key: &str) -> Option<&str> {
+        self.settings
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// A path of the IDE's application files: `$USER_HOME$` expanded, `/`
+/// separators; `None` for another path variable.
+pub fn expand_user_home(path: &str) -> Option<PathBuf> {
+    expand_macros(path, Path::new(""), Path::new(""))
 }
 
 /// The SDK of the reference IDE's project in `root`: the first module's
@@ -271,13 +300,31 @@ pub fn read_sdk_table(file: &Path) -> Vec<SdkEntry> {
                 type_id: String::new(),
                 version: None,
                 home: None,
+                additional: Vec::new(),
+                settings: Vec::new(),
             });
             return;
         }
-        if path.names.len() != 3 || path.names[2] != "jdk" {
+        if path.names.len() < 3 || path.names[2] != "jdk" {
             return;
         }
-        let (Some(entry), Some(value)) = (out.last_mut(), attr(e, "value")) else {
+        let Some(entry) = out.last_mut() else {
+            return;
+        };
+        if path.names.len() == 3 && name.as_ref() == "additional" {
+            entry.additional = attrs(e);
+            return;
+        }
+        if path.names.len() == 4 && path.names[3] == "additional" && name.as_ref() == "setting" {
+            if let (Some(key), Some(value)) = (attr(e, "name"), attr(e, "value")) {
+                entry.settings.push((key, value));
+            }
+            return;
+        }
+        if path.names.len() != 3 {
+            return;
+        }
+        let Some(value) = attr(e, "value") else {
             return;
         };
         match name.as_ref() {
@@ -347,6 +394,22 @@ fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
             })
             .flatten()
     })
+}
+
+/// Every attribute of an element, in order.
+fn attrs(e: &BytesStart<'_>) -> Vec<(String, String)> {
+    e.attributes()
+        .flatten()
+        .filter_map(|a| {
+            let key: &str = a.key.as_ref();
+            let key = key.to_owned();
+            let value = a
+                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()?
+                .into_owned();
+            Some((key, value))
+        })
+        .collect()
 }
 
 /// The names of the elements around the current one, the root first.
@@ -736,7 +799,10 @@ mod tests {
       <roots>
         <classPath><root type="composite"><root url="file://$USER_HOME$/x" type="simple" /></root></classPath>
       </roots>
-      <additional UV_WORKING_DIR="$USER_HOME$/work/demo" />
+      <additional IS_UV="true" UV_WORKING_DIR="$USER_HOME$/work/demo" SDK_UUID="1">
+        <setting name="FLAVOR_ID" value="UvSdkFlavor" />
+        <setting name="FLAVOR_DATA" value="{}" />
+      </additional>
     </jdk>
     <jdk version="2">
       <name value="Python 3.12" />
@@ -765,9 +831,27 @@ mod tests {
                 type_id: "Python SDK".into(),
                 version: Some("Python 3.13.14".into()),
                 home: Some(home.join("work/demo/.venv/bin/python")),
+                additional: vec![
+                    ("IS_UV".into(), "true".into()),
+                    ("UV_WORKING_DIR".into(), "$USER_HOME$/work/demo".into()),
+                    ("SDK_UUID".into(), "1".into()),
+                ],
+                settings: vec![
+                    ("FLAVOR_ID".into(), "UvSdkFlavor".into()),
+                    ("FLAVOR_DATA".into(), "{}".into()),
+                ],
             }
         );
+        assert_eq!(table[0].setting("FLAVOR_ID"), Some("UvSdkFlavor"));
+        assert_eq!(
+            table[0]
+                .additional("UV_WORKING_DIR")
+                .and_then(expand_user_home),
+            Some(home.join("work/demo"))
+        );
+        assert_eq!(table[0].additional("ASSOCIATED_PROJECT_PATH"), None);
         assert_eq!(table[1].home, Some(PathBuf::from("/usr/bin/python3.12")));
+        assert!(table[1].additional.is_empty());
         assert_eq!(table[1].version, None);
         assert_eq!(table[2].home, None);
     }

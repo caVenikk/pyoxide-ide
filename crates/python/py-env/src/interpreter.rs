@@ -37,6 +37,30 @@ impl InterpreterKind {
     }
 }
 
+/// The oldest Python that new environments are created with: the
+/// reference IDE refuses older base interpreters
+/// (`sdk.create.custom.venv.unsupported.base.version`).
+pub const OLDEST_FOR_NEW_ENVIRONMENTS: (u32, u32) = (3, 8);
+
+/// Whether an interpreter of this version can be the base of a new
+/// environment ([`OLDEST_FOR_NEW_ENVIRONMENTS`]).
+pub fn supports_new_environments(major: u32, minor: u32) -> bool {
+    (major, minor) >= OLDEST_FOR_NEW_ENVIRONMENTS
+}
+
+/// `(3, 13)` of a version as Python prints it (`3.13.14`, `3.14.0rc1`,
+/// `3.14`).
+pub fn major_minor(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor: String = parts
+        .next()?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    Some((major, minor.parse().ok()?))
+}
+
 /// A probed Python interpreter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interpreter {
@@ -228,6 +252,19 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = r#"{"version": [3, 12, 13, "final", 0], "implementation": "cpython", "prefix": "/work/.venv", "base_prefix": "/opt/py/3.12", "machine": "arm64", "free_threaded": false}"#;
+
+    #[test]
+    fn versions_for_new_environments() {
+        assert_eq!(major_minor("3.13.14"), Some((3, 13)));
+        assert_eq!(major_minor("3.14rc1"), Some((3, 14)));
+        assert_eq!(major_minor("3.14"), Some((3, 14)));
+        assert_eq!(major_minor("3"), None);
+        assert_eq!(major_minor("x.y"), None);
+        assert!(supports_new_environments(3, 8));
+        assert!(supports_new_environments(3, 14));
+        assert!(!supports_new_environments(3, 7));
+        assert!(!supports_new_environments(2, 7));
+    }
 
     #[test]
     fn parses_probe_output() {

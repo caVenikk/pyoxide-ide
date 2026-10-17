@@ -65,8 +65,8 @@ const TYPE_ENGINE_TERMS: &[&str] = &[ENGINE_LABEL, "ty", "Basedpyright"];
 const EXTERNAL_TOOLS_TERMS: &[&str] = &["Ruff", "ty", "Basedpyright", "uvx"];
 
 /// The Python group (`python.group.settings`, weight 1000: the first
-/// top-level row), Type Engine (group weight 190), the Tools group (weight
-/// 72) and External Tools under it.
+/// top-level row), Interpreter (weight 200), Type Engine (group weight
+/// 190), the Tools group (weight 72) and External Tools under it.
 pub fn pages() -> Vec<PageSpec> {
     vec![
         PageSpec {
@@ -74,6 +74,7 @@ pub fn pages() -> Vec<PageSpec> {
             description: Some(PYTHON_DESCRIPTION),
             ..PageSpec::group(PYTHON, None, "Python")
         },
+        crate::interpreter::page_spec(),
         PageSpec {
             id: TYPE_ENGINE,
             parent: Some(PYTHON),

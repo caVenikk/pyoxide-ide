@@ -113,6 +113,13 @@ pub struct InitRequest {
     /// Let uv run `git init`. Off by default: version control is the IDE's decision.
     #[serde(default)]
     pub vcs: bool,
+    /// Do not look for a project or workspace around the folder
+    /// (`--no-project`), as an interpreter set up for a folder does.
+    #[serde(default)]
+    pub no_project: bool,
+    /// Where uv runs; `path` may then be empty (the folder itself).
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -131,6 +138,14 @@ pub struct VenvRequest {
     pub system_site_packages: bool,
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Let `clear` remove a folder that is not a virtual environment
+    /// (`--force`).
+    #[serde(default)]
+    pub force: bool,
+    /// Where uv runs: it reads `.python-version` and `requires-python`
+    /// of the project there.
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -381,6 +396,23 @@ impl Uv {
         parse_python_list(&done.stdout)
     }
 
+    /// The Python versions (`3.14`, `3.13`, …) uv can create an
+    /// environment with, installed or downloadable, newest first; `request`
+    /// narrows them (`>=3.11`, the project's `requires-python`).
+    pub async fn python_versions(
+        &self,
+        request: Option<&str>,
+        cwd: Option<&Path>,
+        ctx: &RunContext,
+    ) -> Result<Vec<(u32, u32)>> {
+        let mut a = args(["python", "list", "--output-format", "json"]);
+        if let Some(request) = request.filter(|r| !r.trim().is_empty()) {
+            a.push(request.into());
+        }
+        let done = self.query(a, cwd, ctx, QUICK).await?;
+        Ok(minor_versions(&parse_python_list(&done.stdout)?))
+    }
+
     /// uv's directory of managed interpreters.
     pub async fn python_dir(&self, ctx: &RunContext) -> Result<PathBuf> {
         let done = self
@@ -411,13 +443,19 @@ impl Uv {
 
     /// `uv venv`
     pub async fn venv(&self, req: &VenvRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(venv_args(req), None, ctx, Duration::from_secs(10 * 60))
-            .await
+        self.change(
+            venv_args(req),
+            req.cwd.as_deref(),
+            ctx,
+            Duration::from_secs(10 * 60),
+        )
+        .await
     }
 
     /// `uv init`
     pub async fn init(&self, req: &InitRequest, ctx: &RunContext) -> Result<Outcome> {
-        self.change(init_args(req), None, ctx, SHORT).await
+        self.change(init_args(req), req.cwd.as_deref(), ctx, SHORT)
+            .await
     }
 
     /// `uv sync`
@@ -539,8 +577,32 @@ pub(crate) fn venv_args(req: &VenvRequest) -> Vec<OsString> {
     if req.system_site_packages {
         a.push("--system-site-packages".into());
     }
+    if req.force {
+        a.push("--force".into());
+    }
     a.push(req.path.clone().into());
     a
+}
+
+/// The `major.minor` versions of final releases among `list`, each once,
+/// newest first (`UvLowLevel.listSupportedPythonVersions` takes the
+/// `X.Y.Z-` keys of `uv python list`: no pre-releases, no free-threaded
+/// builds).
+pub fn minor_versions(list: &[UvPython]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = list
+        .iter()
+        .filter(|p| p.variant.is_empty() || p.variant == "default")
+        .filter_map(|p| {
+            let mut parts = p.version.split('.');
+            let major = parts.next()?.parse().ok()?;
+            let minor = parts.next()?.parse().ok()?;
+            let _micro: u32 = parts.next()?.parse().ok()?;
+            parts.next().is_none().then_some((major, minor))
+        })
+        .collect();
+    out.sort_by(|a, b| b.cmp(a));
+    out.dedup();
+    out
 }
 
 pub(crate) fn init_args(req: &InitRequest) -> Vec<OsString> {
@@ -565,7 +627,12 @@ pub(crate) fn init_args(req: &InitRequest) -> Vec<OsString> {
         a.push("--vcs".into());
         a.push("none".into());
     }
-    a.push(req.path.clone().into());
+    if req.no_project {
+        a.push("--no-project".into());
+    }
+    if !req.path.as_os_str().is_empty() {
+        a.push(req.path.clone().into());
+    }
     a
 }
 
@@ -894,6 +961,51 @@ mod tests {
             ..VenvRequest::default()
         };
         assert_eq!(strs(venv_args(&plain)), ["venv", "/p/v"]);
+        // The reference's retry after a failed `uv venv` of a folder.
+        let forced = VenvRequest {
+            path: "/p/.venv".into(),
+            clear: true,
+            force: true,
+            system_site_packages: true,
+            cwd: Some("/p".into()),
+            ..VenvRequest::default()
+        };
+        assert_eq!(
+            strs(venv_args(&forced)),
+            [
+                "venv",
+                "--clear",
+                "--system-site-packages",
+                "--force",
+                "/p/.venv"
+            ]
+        );
+    }
+
+    #[test]
+    fn minor_versions_of_final_releases_newest_first() {
+        let python = |version: &str, variant: &str| UvPython {
+            key: format!("cpython-{version}-macos"),
+            version: version.into(),
+            path: None,
+            symlink: None,
+            url: None,
+            implementation: "cpython".into(),
+            variant: variant.into(),
+            arch: "aarch64".into(),
+            os: "macos".into(),
+        };
+        let list = [
+            python("3.15.0a1", "default"),
+            python("3.14.0", "default"),
+            python("3.14.0", "freethreaded"),
+            python("3.12.13", "default"),
+            python("3.13.14", "default"),
+            python("3.13.12", ""),
+            python("3.11.13", "default"),
+        ];
+        assert_eq!(minor_versions(&list), [(3, 14), (3, 13), (3, 12), (3, 11)]);
+        assert!(minor_versions(&[]).is_empty());
     }
 
     #[test]
@@ -928,6 +1040,30 @@ mod tests {
             ..InitRequest::default()
         };
         assert_eq!(strs(init_args(&with_vcs)), ["init", "--script", "p"]);
+        // An interpreter set up for a folder without `pyproject.toml`
+        // (`UvLowLevel.initializeEnvironment`): in the folder itself.
+        let bare = InitRequest {
+            name: Some("demo".into()),
+            kind: InitKind::Bare,
+            python: Some("3.13".into()),
+            no_project: true,
+            cwd: Some("/w/demo".into()),
+            ..InitRequest::default()
+        };
+        assert_eq!(
+            strs(init_args(&bare)),
+            [
+                "init",
+                "--name",
+                "demo",
+                "--python",
+                "3.13",
+                "--bare",
+                "--vcs",
+                "none",
+                "--no-project"
+            ]
+        );
     }
 
     #[test]

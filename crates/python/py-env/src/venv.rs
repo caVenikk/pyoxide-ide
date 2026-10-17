@@ -143,6 +143,36 @@ pub fn inspect_python(python: &Path) -> Option<EnvDir> {
     (env.python == python).then_some(env)
 }
 
+/// What is at the location chosen for a new environment
+/// (`FileSystem.validateVenv` of the reference IDE).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Location {
+    /// Nothing there yet: the environment can be created.
+    Free,
+    /// The path is relative.
+    NotAbsolute,
+    /// A folder with an interpreter in it (an environment already).
+    HasPython(EnvDir),
+    /// Something else is there: a folder without an interpreter, or a
+    /// file.
+    Exists,
+}
+
+/// Checks the location of a new environment. Blocking file system access
+/// (no Python is started).
+pub fn check_location(path: &Path) -> Location {
+    if !path.is_absolute() {
+        return Location::NotAbsolute;
+    }
+    if std::fs::symlink_metadata(path).is_err() {
+        return Location::Free;
+    }
+    match inspect(path) {
+        Some(env) => Location::HasPython(env),
+        None => Location::Exists,
+    }
+}
+
 /// The Python version of a conda environment from the record of its
 /// `python` package (`conda-meta/python-3.12.1-h1234_0.json`).
 fn conda_python_version(dir: &Path) -> Option<String> {
@@ -297,5 +327,27 @@ mod tests {
 
         assert_eq!(inspect_python(&uv).map(|e| e.dir), Some(root.join(".venv")));
         assert_eq!(inspect_python(&root.join("main.py")), None);
+    }
+
+    #[test]
+    fn checks_the_location_of_a_new_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(check_location(Path::new(".venv")), Location::NotAbsolute);
+        assert_eq!(check_location(&root.join("new/.venv")), Location::Free);
+        // An environment with the version its `pyvenv.cfg` tells.
+        venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.14\n");
+        match check_location(&root.join(".venv")) {
+            Location::HasPython(env) => {
+                assert_eq!(env.version.as_deref(), Some("3.13.14"));
+                assert!(env.is_uv());
+            }
+            other => panic!("{other:?}"),
+        }
+        // A folder without an interpreter (empty too), and a file.
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        assert_eq!(check_location(&root.join("src")), Location::Exists);
+        std::fs::write(root.join("main.py"), "").unwrap();
+        assert_eq!(check_location(&root.join("main.py")), Location::Exists);
     }
 }
