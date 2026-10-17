@@ -12,7 +12,7 @@ a key or a role is missing from this file.
 
 A theme assigns a value to every role of three kinds, plus fonts:
 
-- **UI roles** (`ui.*`, 213 of them): flat colours of the interface, the
+- **UI roles** (`ui.*`, 222 of them): flat colours of the interface, the
   editor chrome, controls, icons, version control, diagnostics, the Run
   console and the terminal.
 - **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
