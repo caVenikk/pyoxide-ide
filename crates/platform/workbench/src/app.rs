@@ -104,6 +104,10 @@ pub struct Product {
     /// tabs of file types with a language id get code intelligence; without
     /// it they get none.
     pub code_intel: Option<CodeIntelHook>,
+    /// Debugging the product's programs (ADR 0015): the breakpoint types
+    /// and where breakpoints can be put, the debug adapter; without it
+    /// there are no breakpoints.
+    pub debug: Option<debugger_ui::DebugHook>,
     /// The product's rows of *New* in the project tool window, after
     /// *Directory* (Python File, Python Package).
     pub new_items: Vec<project_panel::NewItem>,
@@ -149,6 +153,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::run::init(cx);
     code_intel_ui::init(cx);
     vcs_ui::init(cx);
+    debugger_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
     crate::terminal::init(cx, product.terminal.clone());
@@ -172,6 +177,11 @@ pub fn init(cx: &mut App, product: &Product) {
         cx,
         "workbench.state",
         Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).state(cx))),
+    );
+    ui::command::register_query(
+        cx,
+        "debug.state",
+        Rc::new(|_, window, cx| Ok(workbench(window)?.read(cx).debug_state(cx))),
     );
     ui::command::register_query(
         cx,

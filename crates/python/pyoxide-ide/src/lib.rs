@@ -236,6 +236,18 @@ fn init(cx: &mut gpui::App) {
     type_engine::init(cx);
 }
 
+/// Debugging Python with debugpy (ADR 0015): the Python breakpoint types
+/// and their stoppable lines. Debug sessions are started from the Debug
+/// actions, which resolve a configuration's interpreter themselves; until
+/// then a request is refused.
+fn debug_hook() -> workbench::DebugHook {
+    workbench::DebugHook::new(py_debug::PythonDebugProvider::new(
+        |_: &debugger::DebugRequest| -> Result<py_debug::DebugTarget, String> {
+            Err("The debugger cannot start this configuration yet".to_owned())
+        },
+    ))
+}
+
 /// The Pyoxide product for the workbench.
 pub fn product() -> Product {
     Product {
@@ -273,6 +285,7 @@ pub fn product() -> Product {
         code_intel: Some(workbench::CodeIntelHook::new(
             services::PythonCodeIntel::new(),
         )),
+        debug: Some(debug_hook()),
         new_items: new_items::new_items(),
         tree: tree(),
         // The Python group: Type Engine and Tools > External Tools.

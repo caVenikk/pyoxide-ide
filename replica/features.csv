@@ -84,13 +84,13 @@ Debug the current file and run configurations (debugpy over DAP),run-debug,must,
 "Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog)",run-debug,must,yes,no,Community; Debug buttons of #74 enabled (#90)
 "Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin)",run-debug,must,yes,no,Community; Console through DAP runInTerminal like the Run console (#90)
 "Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun)",run-debug,must,yes,no,Community; keys of the macOS and Windows keymaps (#90)
-"Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,no,Community; stoppable lines as the reference (#90)
-"Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,no,Community (#90)
-Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,no,Community (#90)
+"Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,yes,"Community; stoppable lines as the reference, hover icon, state icons, follow edits (#164)"
+"Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,partial,"Community; condition, popup, dialog (#164); no completion in the condition, Mute shown per project"
+Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,partial,"Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200)"
 Frames list and thread chooser (library frames folded),run-debug,must,yes,no,Community (#90)
 "Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,no,Community (#90)
 Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
-Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,no,"Community; .oxide/workspace.toml, .idea/workspace.xml read once (#90)"
+Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,partial,"Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check"
 "Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community
 Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; watches kept per run configuration
 "Logging breakpoints (log message, stack trace, Evaluate and log)",run-debug,should,yes,no,Community

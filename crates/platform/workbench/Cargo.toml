@@ -12,6 +12,7 @@ chrono.workspace = true
 code-intel-ui.workspace = true
 commands.workspace = true
 console.workspace = true
+debugger-ui.workspace = true
 dirs = "7"
 editor.workspace = true
 file-index.workspace = true
@@ -48,6 +49,8 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 code-intel = { workspace = true, features = ["fake"] }
+dap-client = { workspace = true, features = ["fake"] }
+debugger.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 # The list type of GPUI's `ExternalPaths` (tests/drop.rs).
 smallvec = "1"

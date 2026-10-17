@@ -114,7 +114,11 @@ pub(crate) struct AfterText {
 pub(crate) struct DecorationPaint {
     /// Lines whose number an icon replaces.
     pub hidden_numbers: Vec<usize>,
+    /// Icons with their bounds and opacity (badges too).
     pub icons: Vec<(IconName, Bounds<Pixels>, f32)>,
+    /// The line-number cells with an icon (hand pointer when the owner
+    /// takes clicks there).
+    pub icon_cells: Vec<Bounds<Pixels>>,
     /// Full-line backgrounds, the lowest layer first.
     pub backgrounds: Vec<(Bounds<Pixels>, Hsla)>,
     /// Change markers: rounded bars, the hovered ones last.
@@ -209,6 +213,24 @@ pub(crate) fn prepaint(
             size(icon_size, icon_size),
         )
     };
+    let cell = |row: &LineLayout| {
+        Bounds::from_corners(
+            point(lanes.numbers.0, frame.top_of(row.row)),
+            point(lanes.numbers.1, frame.top_of(row.row) + lh),
+        )
+    };
+    let badge_bounds = |icon: Bounds<Pixels>| {
+        Bounds::new(
+            point(
+                icon.left() + px(crate::decorations::BADGE_OFFSET.0),
+                icon.top() + px(crate::decorations::BADGE_OFFSET.1),
+            ),
+            size(
+                px(crate::decorations::BADGE_SIZE),
+                px(crate::decorations::BADGE_SIZE),
+            ),
+        )
+    };
     for (entry, lines) in decorations.entries().iter().zip(all_lines.iter()) {
         let d = &entry.decoration;
         let last_line = lines.end.max(lines.start + 1) - 1;
@@ -220,7 +242,12 @@ pub(crate) fn prepaint(
             && let Some(row) = frame.rows_of(lines.start).find(|l| l.sub == 0)
         {
             paint.hidden_numbers.push(lines.start);
-            paint.icons.push((icon.icon, icon_bounds(row), 1.0));
+            let bounds = icon_bounds(row);
+            paint.icons.push((icon.icon, bounds, 1.0));
+            if let Some(badge) = icon.badge {
+                paint.icons.push((badge, badge_bounds(bounds), 1.0));
+            }
+            paint.icon_cells.push(cell(row));
         }
         if shown && let Some(bg) = d.background {
             let c = theme.color(bg.color);
@@ -380,6 +407,7 @@ pub(crate) fn prepaint(
     {
         paint.hidden_numbers.push(line);
         paint.icons.push((icon, icon_bounds(row), HOVER_ICON_ALPHA));
+        paint.icon_cells.push(cell(row));
     }
     paint.backgrounds = in_layer_order(backgrounds);
     changes.sort_by_key(|(hovered, _, _)| *hovered);
@@ -394,15 +422,28 @@ fn in_layer_order<T>(mut backgrounds: Vec<(i32, Bounds<Pixels>, T)>) -> Vec<(Bou
     backgrounds.into_iter().map(|(_, b, c)| (b, c)).collect()
 }
 
-/// Hitboxes with the hand pointer: the change markers and the clickable
-/// after-line texts.
+/// Hitboxes with the hand pointer: the change markers, the clickable
+/// after-line texts and, when the owner takes clicks on the line numbers,
+/// the line-number cells with an icon (the reference's gutter gives icons
+/// with a click action the hand).
 pub(crate) fn insert_hitboxes(
     paint: &mut DecorationPaint,
     geometry: &DecorationGeometry,
     bounds: Bounds<Pixels>,
+    line_number_clicks: bool,
     window: &mut Window,
 ) {
     let lanes = geometry.lanes;
+    if line_number_clicks {
+        for cell in std::mem::take(&mut paint.icon_cells) {
+            let rect = cell.intersect(&bounds);
+            if rect.size.height > px(0.0) {
+                paint
+                    .hand_hitboxes
+                    .push(window.insert_hitbox(rect, HitboxBehavior::Normal));
+            }
+        }
+    }
     for c in &geometry.changes {
         let rect = Bounds::from_corners(
             point(lanes.markers.0, c.top),

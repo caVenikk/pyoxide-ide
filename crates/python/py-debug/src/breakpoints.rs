@@ -11,7 +11,14 @@
 //! `exceptionOptions`, which the client does not send yet: only "Any
 //! exception" breakpoints reach the adapter.
 
-use debugger::{ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting, SuspendPolicy};
+use std::path::Path;
+
+use debugger::{
+    ExceptionBreakpoint, ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting,
+    ExceptionOption, LineBreakpointType, SuspendPolicy,
+};
+
+use crate::lines::StoppableLines;
 
 /// The reference's type of Python line breakpoints.
 pub const LINE_BREAKPOINT_TYPE: &str = "python-line";
@@ -46,6 +53,139 @@ pub mod filter {
     /// Breaks whenever an exception is raised.
     pub const RAISED: &str = "raised";
 }
+
+/// The reference's titles of the two types (`PyBundle`).
+pub const LINE_BREAKPOINT_TITLE: &str = "Python Line Breakpoint";
+pub const EXCEPTION_BREAKPOINT_TITLE: &str = "Python Exception Breakpoint";
+
+/// Extensions of the files line breakpoints can be put in: the Python file
+/// type's (`PyLineBreakpointType.isSuitableFileType`); stubs are of
+/// another type.
+const PYTHON_EXTENSIONS: &[&str] = &["py", "pyw"];
+
+/// The Python line breakpoint type: it suspends the thread by default and
+/// can suspend all threads instead.
+pub fn line_type() -> LineBreakpointType {
+    LineBreakpointType {
+        id: LINE_BREAKPOINT_TYPE.to_owned(),
+        title: LINE_BREAKPOINT_TITLE.to_owned(),
+        default_suspend: LINE_BREAKPOINT_SUSPEND,
+        suspend_thread: true,
+    }
+}
+
+/// The stoppable lines of a Python file, by line from line 1; `None` for
+/// a file of another type.
+pub fn stoppable_lines(file: &Path, text: &str) -> Option<Vec<bool>> {
+    let python = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| PYTHON_EXTENSIONS.contains(&e));
+    if !python {
+        return None;
+    }
+    let lines = StoppableLines::of(text);
+    Some(
+        (1..=lines.line_count() as u32)
+            .map(|line| lines.contains(line))
+            .collect(),
+    )
+}
+
+/// The Python exception breakpoint type with its activation policy
+/// (`PyExceptionBreakpointPropertiesPanel`).
+pub fn exception_type() -> ExceptionBreakpointType {
+    let option = |key: &str, label: &str| ExceptionOption {
+        key: key.to_owned(),
+        label: label.to_owned(),
+    };
+    ExceptionBreakpointType {
+        id: EXCEPTION_BREAKPOINT_TYPE.to_owned(),
+        title: EXCEPTION_BREAKPOINT_TITLE.to_owned(),
+        any_class: ANY_EXCEPTION.to_owned(),
+        any_name: ANY_EXCEPTION_NAME.to_owned(),
+        options_title: "Activation policy".to_owned(),
+        options: vec![
+            option(property::ON_TERMINATION, "On termination"),
+            option(property::ON_RAISE, "On raise"),
+            option(property::IGNORE_LIBRARIES, "Ignore library files"),
+        ],
+        chooser_title: "Select Exception Class".to_owned(),
+    }
+}
+
+/// The built-in exception classes of Python 3 (the documentation's
+/// "Exception hierarchy"), for the class chooser.
+pub const BUILTIN_EXCEPTIONS: &[&str] = &[
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "BaseException",
+    "BaseExceptionGroup",
+    "BlockingIOError",
+    "BrokenPipeError",
+    "BufferError",
+    "BytesWarning",
+    "ChildProcessError",
+    "ConnectionAbortedError",
+    "ConnectionError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "DeprecationWarning",
+    "EOFError",
+    "EncodingWarning",
+    "Exception",
+    "ExceptionGroup",
+    "FileExistsError",
+    "FileNotFoundError",
+    "FloatingPointError",
+    "FutureWarning",
+    "GeneratorExit",
+    "ImportError",
+    "ImportWarning",
+    "IndentationError",
+    "IndexError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "KeyError",
+    "KeyboardInterrupt",
+    "LookupError",
+    "MemoryError",
+    "ModuleNotFoundError",
+    "NameError",
+    "NotADirectoryError",
+    "NotImplementedError",
+    "OSError",
+    "OverflowError",
+    "PendingDeprecationWarning",
+    "PermissionError",
+    "ProcessLookupError",
+    "PythonFinalizationError",
+    "RecursionError",
+    "ReferenceError",
+    "ResourceWarning",
+    "RuntimeError",
+    "RuntimeWarning",
+    "StopAsyncIteration",
+    "StopIteration",
+    "SyntaxError",
+    "SyntaxWarning",
+    "SystemError",
+    "SystemExit",
+    "TabError",
+    "TimeoutError",
+    "TypeError",
+    "UnboundLocalError",
+    "UnicodeDecodeError",
+    "UnicodeEncodeError",
+    "UnicodeError",
+    "UnicodeTranslateError",
+    "UnicodeWarning",
+    "UserWarning",
+    "ValueError",
+    "Warning",
+    "ZeroDivisionError",
+];
 
 /// The default exception breakpoint of a project ("Any exception", On
 /// termination), as the reference creates it.
@@ -177,6 +317,31 @@ mod tests {
             debugpy().into_iter().filter(|f| f.id == "raised").collect();
         assert!(filters(&[&any], &raised_only).is_empty());
         assert_eq!(ids(&filters(&[&any], &[])), ["uncaught"]);
+    }
+
+    #[test]
+    fn breakpoints_go_in_python_files_on_stoppable_lines() {
+        let text = "x = 1\n\n# note\ny = 2\n";
+        assert_eq!(
+            stoppable_lines(Path::new("main.py"), text),
+            Some(vec![true, false, false, true, false])
+        );
+        assert!(stoppable_lines(Path::new("app.pyw"), text).is_some());
+        assert_eq!(stoppable_lines(Path::new("stubs.pyi"), text), None);
+        assert_eq!(stoppable_lines(Path::new("notes.txt"), text), None);
+        let line = line_type();
+        assert_eq!(line.title, "Python Line Breakpoint");
+        assert_eq!(line.default_suspend, SuspendPolicy::Thread);
+        let exception = exception_type();
+        assert_eq!(exception.title, "Python Exception Breakpoint");
+        assert_eq!(exception.display_name(&any_exception()), "Any exception");
+        let labels: Vec<&str> = exception.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["On termination", "On raise", "Ignore library files"]
+        );
+        assert!(BUILTIN_EXCEPTIONS.windows(2).all(|w| w[0] < w[1]));
+        assert!(BUILTIN_EXCEPTIONS.contains(&"KeyError"));
     }
 
     #[test]

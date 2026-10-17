@@ -1,0 +1,28 @@
+[package]
+name = "debugger-ui"
+description = "Debugger UI of Pyoxide IDE on GPUI: breakpoints in the editor gutter, the breakpoint properties popup, the Breakpoints dialog and the debug.* breakpoint commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+debugger.workspace = true
+editor.workspace = true
+flume.workspace = true
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+text.workspace = true
+themes.workspace = true
+ui.workspace = true
+
+[dev-dependencies]
+dap-client = { workspace = true, features = ["fake"] }
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"
+
+# Metal shaders are compiled at start-up on machines without Xcode
+# (ADR 0007).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

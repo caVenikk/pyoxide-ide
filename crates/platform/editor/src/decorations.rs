@@ -44,8 +44,18 @@ pub mod layer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GutterIcon {
     pub icon: IconName,
+    /// A smaller icon over its lower right part, as the reference layers
+    /// the question badge of a conditional breakpoint (`LayeredIcon` with
+    /// the badge 7 px right and 6 px down); square, drawn
+    /// [`BADGE_SIZE`] px.
+    pub badge: Option<IconName>,
     pub tooltip: Option<SharedString>,
 }
+
+/// Where a gutter icon's badge goes from the icon's top left corner, and
+/// its size.
+pub const BADGE_OFFSET: (f32, f32) = (7.0, 6.0);
+pub const BADGE_SIZE: f32 = 10.0;
 
 /// A background over the whole width of the text on every row of a
 /// decoration's lines.
@@ -145,7 +155,19 @@ pub struct Decoration {
 
 impl Decoration {
     pub fn gutter_icon(mut self, icon: IconName, tooltip: Option<SharedString>) -> Self {
-        self.gutter_icon = Some(GutterIcon { icon, tooltip });
+        self.gutter_icon = Some(GutterIcon {
+            icon,
+            badge: None,
+            tooltip,
+        });
+        self
+    }
+
+    /// Adds a badge to the gutter icon (see [`GutterIcon::badge`]).
+    pub fn badge(mut self, badge: Option<IconName>) -> Self {
+        if let Some(icon) = &mut self.gutter_icon {
+            icon.badge = badge;
+        }
         self
     }
 
@@ -709,6 +731,7 @@ impl Editor {
                         "group": e.group,
                         "lines": [l.start, l.end],
                         "gutter_icon": d.gutter_icon.as_ref().map(|g| g.icon.0),
+                        "badge": d.gutter_icon.as_ref().and_then(|g| g.badge).map(|b| b.0),
                         "background": d.background.map(|b| b.layer),
                         "change": d.change.map(ChangeKind::name),
                         "after_text": d.after_text.as_ref().map(|a| a

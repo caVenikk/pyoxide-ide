@@ -1882,6 +1882,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "debugger-ui"
+version = "0.0.1"
+dependencies = [
+ "dap-client",
+ "debugger",
+ "editor",
+ "flume",
+ "gpui",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "text",
+ "themes",
+ "ui",
+]
+
+[[package]]
 name = "deflate64"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5402,6 +5419,7 @@ version = "0.0.1"
 dependencies = [
  "code-intel",
  "code-intel-ui",
+ "debugger",
  "dirs 7.0.0",
  "editor",
  "flume",
@@ -5409,6 +5427,7 @@ dependencies = [
  "lsp-client",
  "process",
  "project",
+ "py-debug",
  "py-env",
  "py-lsp",
  "py-run",
@@ -9000,6 +9019,9 @@ dependencies = [
  "commands",
  "console",
  "core-graphics 0.24.0",
+ "dap-client",
+ "debugger",
+ "debugger-ui",
  "dirs 7.0.0",
  "editor",
  "file-index",

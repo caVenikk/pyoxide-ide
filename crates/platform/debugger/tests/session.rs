@@ -456,3 +456,79 @@ fn engine_commands() {
     );
     assert!(registry.list().iter().all(|m| m.id.starts_with("debug.")));
 }
+
+/// A product with a line breakpoint type that suspends the thread.
+struct Typed;
+
+impl DebugAdapterProvider for Typed {
+    fn prepare(&self, _: &DebugRequest) -> Result<AdapterLaunch, String> {
+        Err("no adapter".into())
+    }
+
+    fn line_breakpoint_type(&self) -> Option<debugger::LineBreakpointType> {
+        Some(debugger::LineBreakpointType {
+            id: "python-line".into(),
+            title: "Python Line Breakpoint".into(),
+            default_suspend: SuspendPolicy::Thread,
+            suspend_thread: true,
+        })
+    }
+
+    fn stoppable_lines(&self, file: &Path, _: &str) -> Option<Vec<bool>> {
+        (file.extension().is_some_and(|e| e == "py")).then(Vec::new)
+    }
+}
+
+#[test]
+fn new_breakpoints_take_the_types_policy_and_follow_their_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let debugger = Debugger::open(root, Arc::new(Typed));
+    assert!(debugger.provider().line_breakpoint_file(&main));
+    assert!(
+        !debugger
+            .provider()
+            .line_breakpoint_file(&root.join("notes.txt"))
+    );
+    assert_eq!(debugger.default_suspend(), SuspendPolicy::Thread);
+    debugger.toggle_breakpoint(&main, 3, false);
+    assert_eq!(
+        debugger.breakpoints().at(&main, 3).unwrap().suspend,
+        SuspendPolicy::Thread
+    );
+    // Make Default: All, kept with the project.
+    debugger.set_default_suspend(SuspendPolicy::All);
+    debugger.toggle_breakpoint(&main, 5, false);
+    assert_eq!(
+        debugger.breakpoints().at(&main, 5).unwrap().suspend,
+        SuspendPolicy::All
+    );
+    // The editor moved one and deleted the other's line; a third one
+    // lands on a taken line and goes.
+    debugger.toggle_breakpoint(&main, 8, false);
+    let ids: Vec<_> = debugger
+        .breakpoints()
+        .in_file(&main)
+        .iter()
+        .map(|b| b.id)
+        .collect();
+    debugger.set_lines(
+        &main,
+        &[(ids[0], Some(4)), (ids[1], None), (ids[2], Some(4))],
+    );
+    let lines: Vec<u32> = debugger
+        .breakpoints()
+        .in_file(&main)
+        .iter()
+        .map(|b| b.line)
+        .collect();
+    assert_eq!(lines, [4]);
+    debugger.flush();
+    let again = Debugger::open(root, Arc::new(Typed));
+    assert_eq!(again.default_suspend(), SuspendPolicy::All);
+    assert_eq!(
+        again.breakpoints().at(&main, 4).unwrap().suspend,
+        SuspendPolicy::Thread
+    );
+}

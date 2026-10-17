@@ -19,12 +19,14 @@ runtime-shaders = ["gpui/runtime_shaders"]
 [dependencies]
 code-intel.workspace = true
 code-intel-ui.workspace = true
+debugger.workspace = true
 dirs = "7"
 editor.workspace = true
 gpui.workspace = true
 lsp-client.workspace = true
 process.workspace = true
 project.workspace = true
+py-debug.workspace = true
 py-env.workspace = true
 py-lsp.workspace = true
 py-run.workspace = true

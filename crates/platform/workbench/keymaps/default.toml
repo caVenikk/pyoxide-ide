@@ -193,6 +193,22 @@ name = "LineStatusPopup > Editor"
 "ctrl-d" = "vcs.show-diff-lines"
 "escape" = "marker-popup.close"
 
+# Breakpoints (#164): Toggle Line Breakpoint at the caret, Toggle
+# Temporary Line Breakpoint and View Breakpoints; in the editor the same
+# key edits the breakpoint at the caret (`EditBreakpoint`, its properties
+# popup; the dialog when the line has none). Mute Breakpoints and Toggle
+# Breakpoint Enabled have no key.
+[[context]]
+[context.bindings]
+"ctrl-f8" = "debug.toggle-breakpoint"
+"ctrl-alt-shift-f8" = "debug.toggle-temporary-breakpoint"
+"ctrl-shift-f8" = "debug.view-breakpoints"
+
+[[context]]
+name = "Editor"
+[context.bindings]
+"ctrl-shift-f8" = "debug.edit-breakpoint"
+
 # Branches (#28): New Branch (`Git.CreateNewBranch`) and the Branches
 # popup (`Git.Branches`). In the popup Up and Down move, Left and Right
 # collapse and expand (Right opens a branch's actions), Enter chooses,
@@ -552,3 +568,46 @@ name = "SettingsSearch > Editor"
 "up" = "settings.select-previous"
 "down" = "settings.select-next"
 "enter" = "settings.go-to-page"
+
+# The breakpoint properties popup: Escape, Enter and Ctrl+Enter close it
+# (Done), the key of View Breakpoints opens the dialog (More), also in its
+# condition field (`BreakpointEditor`).
+[[context]]
+name = "BreakpointPopup"
+[context.bindings]
+"escape" = "breakpoint-popup.done"
+"enter" = "breakpoint-popup.done"
+"ctrl-enter" = "breakpoint-popup.done"
+"ctrl-shift-f8" = "breakpoint-popup.more"
+
+[[context]]
+name = "BreakpointPopup > Editor"
+[context.bindings]
+"escape" = "breakpoint-popup.done"
+"enter" = "breakpoint-popup.done"
+"ctrl-enter" = "breakpoint-popup.done"
+"ctrl-shift-f8" = "breakpoint-popup.more"
+
+# The Breakpoints dialog: Escape is Done, in its fields too; in its tree
+# Up and Down move, Space turns the selected breakpoint on or off, Delete
+# removes it, Enter and Jump to Source open its line (`BreakpointsDialog`,
+# `CheckboxTree`).
+[[context]]
+name = "BreakpointsDialog"
+[context.bindings]
+"escape" = "breakpoints-dialog.done"
+
+[[context]]
+name = "BreakpointsDialog > Editor"
+[context.bindings]
+"escape" = "breakpoints-dialog.done"
+
+[[context]]
+name = "BreakpointsTree"
+[context.bindings]
+"up" = "breakpoints-dialog.previous"
+"down" = "breakpoints-dialog.next"
+"space" = "breakpoints-dialog.toggle-enabled"
+"delete" = "breakpoints-dialog.remove"
+"enter" = "breakpoints-dialog.go-to-source"
+"f4" = "breakpoints-dialog.go-to-source"

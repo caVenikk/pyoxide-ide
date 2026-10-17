@@ -12,9 +12,9 @@
 
 ## Expected
 - Step 1: the dialog "Breakpoints": on the left a tree with check boxes,
-  groups "Python Line Breakpoints" (both breakpoints) and "Python
-  Exception Breakpoints" ("Any exception"); on the right "Select a
-  breakpoint" until one is selected.
+  groups "Python Line Breakpoint" (both breakpoints) and "Python
+  Exception Breakpoint" ("Any exception"); on the right the first
+  breakpoint's properties ("Select a breakpoint" while none is selected).
 - Step 2: Enabled, Suspend (All / Thread), Condition, Log options,
   "Remove once hit", "Disable until hitting the following breakpoint";
   edits apply to the gutter icon at once.
