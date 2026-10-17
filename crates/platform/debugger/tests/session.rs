@@ -182,7 +182,7 @@ fn a_session_stops_and_shows_frames_variables_and_values() {
             "totalFrames": 2}}),
         json!({"expect": "scopes", "arguments": {"frameId": 100}}),
         json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5, "expensive": false}]}}),
-        json!({"expect": "variables", "arguments": {"variablesReference": 5, "start": 0, "count": 100}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5, "start": "$absent", "count": "$absent"}}),
         json!({"respond": {"variables": [
             {"name": "x", "value": "1", "type": "int", "variablesReference": 0},
             {"name": "items", "value": "[1, 2]", "type": "list", "variablesReference": 6, "indexedVariables": 2}]}}),

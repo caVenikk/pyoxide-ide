@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 52%** `██████████░░░░░░░░░░`
+**Overall parity: 53%** `███████████░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -11,7 +11,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 62% `██████░░░░` | 5 | 6 | 3 |
 | settings-import | 55% `█████░░░░░` | 1 | 2 | 1 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 40% `████░░░░░░` | 6 | 5 | 15 |
+| run-debug | 48% `█████░░░░░` | 7 | 6 | 13 |
 | terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
 | vcs | 46% `█████░░░░░` | 7 | 3 | 15 |
 | settings | 79% `████████░░` | 12 | 2 | 4 |
@@ -134,13 +134,13 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | 🟡 | Run configurations | must | Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75 |
 | ✅ | Debug the current file and run configurations (debugpy over DAP) | must | Community (pydevd; debugpy through a separate plugin in the reference); debugpy 1.8.21 shipped with the app, ADR 0015 (#90, #165) |
 | ✅ | Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog) | must | Community; Debug buttons of #74 enabled, shared Stop / Rerun, Is Running dialog (#165) |
-| 🟡 | Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin) | must | Community; Console through DAP runInTerminal like the Run console (#165); Threads & Variables is a plain frame list until #166 |
+| 🟡 | Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin) | must | Community; Console through DAP runInTerminal like the Run console (#165); Threads & Variables with frames and variables (#166); no evaluate field yet |
 | ✅ | Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun) | must | Community; keys of the macOS and Windows keymaps (#165); debug actions not yet on the Keymap page |
 | ✅ | Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers) | must | Community; stoppable lines as the reference, hover icon, state icons, follow edits (#164) |
 | 🟡 | Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints | must | Community; condition, popup, dialog (#164); no completion in the condition, Mute shown per project |
 | 🟡 | Python exception breakpoints (Any exception on termination / on raise) | must | Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200) |
-| ⬜ | Frames list and thread chooser (library frames folded) | must | Community (#90) |
-| ⬜ | Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value) | must | Community (#90) |
+| ✅ | Frames list and thread chooser (library frames folded) | must | Community; thread combo, library frames on the non-project tint, frame up / down from anywhere (#166) |
+| 🟡 | Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value) | must | Community; lazy children, Special Variables, Return Values, sizes, changed values (#166); no Set Value / Copy Value yet |
 | ⬜ | Execution point and inline values in the editor | must | Community (#90) |
 | 🟡 | Breakpoints saved per project with one-time import from .idea | must | Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check |
 | ⬜ | Evaluate Expression dialog, Quick Evaluate and value tooltip | should | Community |

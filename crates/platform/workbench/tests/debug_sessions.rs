@@ -201,7 +201,7 @@ fn a_session_stops_on_a_line_and_runs_to_the_end(cx: &mut TestAppContext) {
     let tab = &s["tool_window"]["tabs"][0];
     assert_eq!(tab["title"], json!("main"));
     assert_eq!(tab["content"], json!("threads-variables"));
-    assert_eq!(tab["frames"], json!(["<module>, main.py:2"]));
+    assert_eq!(tab["frames"], json!(["<module>, main.py:2:1"]));
     assert_eq!(
         tab["toolbar"],
         json!({"stop": true, "resume": true, "pause": false, "step": true})

@@ -1,20 +1,22 @@
 //! What a product supplies to debug its programs (ADR 0005, 0015): the
 //! adapter and its launch arguments for a run configuration, how its
 //! exception breakpoints map to the adapter's filters, its default
-//! breakpoints, what it imports from the reference, and its breakpoint
-//! types (titles, stoppable lines, exception options).
+//! breakpoints, what it imports from the reference, its breakpoint types
+//! (titles, stoppable lines, exception options) and how its values are
+//! shown.
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use dap_client::Transport;
+use dap_client::{Transport, Variable};
 use process::CommandLine;
 use run_config::RunConfiguration;
 use serde_json::Value;
 
 use crate::breakpoints::{ExceptionBreakpoint, SuspendPolicy};
 use crate::idea::IdeaTypes;
+use crate::values::ValueNode;
 
 pub use dap_client::{ExceptionFilter, ExceptionFilterSetting};
 
@@ -207,6 +209,35 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// breakpoint offers.
     fn exception_classes(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// How the variables view shows a child the adapter reports: its name
+    /// and whether it is a value, a group or more children. Called while
+    /// drawing: no I/O.
+    fn present_value(&self, variable: &Variable) -> ValueNode {
+        ValueNode::plain(variable)
+    }
+
+    /// An expression that evaluates, in a frame, to the sizes of the
+    /// values of `expressions` (the length shown with a container's type,
+    /// `{list: 4}`); `None` when the product shows no sizes.
+    fn sizes_expression(&self, expressions: &[&str]) -> Option<String> {
+        let _ = expressions;
+        None
+    }
+
+    /// The sizes read from the value of [`Self::sizes_expression`], one per
+    /// expression (`None`: the value has no size).
+    fn parse_sizes(&self, value: &str, count: usize) -> Vec<Option<String>> {
+        let _ = value;
+        vec![None; count]
+    }
+
+    /// The variables view shows the children of a frame's first scope at
+    /// its root and leaves the other scopes out (the reference's Python
+    /// frames show their locals); otherwise every scope is a group.
+    fn first_scope_only(&self) -> bool {
+        false
     }
 }
 

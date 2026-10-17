@@ -81,4 +81,44 @@ ui::ui_commands! {
     TypeInput { text: String } => "debug.console.type", "Type into Console",
         "Types text into the selected debug session's Console as the person would; a line break sends the line to the program.",
         r#"{"text": "42\n"}"#;
+    /// The list of threads.
+    ShowThreads => "debug.show-threads", "Threads",
+        "Opens the list of the suspended session's threads below the thread combo of Threads & Variables.";
+    /// Select a thread.
+    SelectThread { id: i64 } => "debug.select-thread", "Select Thread",
+        "Shows the frames of a thread of the suspended session (by its id, as debug.state lists them).",
+        r#"{"id": 1}"#;
+    /// Select a frame.
+    SelectFrame { index: usize } => "debug.select-frame", "Select Frame",
+        "Selects a frame of the selected thread by its zero-based index in the frames list: the editor shows its line, the variables view its values.",
+        r#"{"index": 1}"#;
+    /// The frame above the selected one.
+    PreviousFrame => "debug.previous-frame", "Previous Frame",
+        "Selects the frame above the selected one in the frames list (from anywhere in the window, the reference's Previous Occurrence while debugging).";
+    /// The frame below the selected one.
+    NextFrame => "debug.next-frame", "Next Frame",
+        "Selects the frame below the selected one in the frames list (its caller).";
+    /// Close the hint below the frames.
+    CloseFramesHint => "debug.close-frames-hint", "Close Frames Hint",
+        "Closes the hint about switching frames below the frames list.";
+    /// The row above in the variables view.
+    VariablesUp => "debug.variables.up", "Up",
+        "Selects the row above the selected one in the variables view.";
+    /// The row below in the variables view.
+    VariablesDown => "debug.variables.down", "Down",
+        "Selects the row below the selected one in the variables view.";
+    /// Collapse, or go to the parent.
+    VariablesLeft => "debug.variables.left", "Left",
+        "Collapses the selected node of the variables view, or selects its parent.";
+    /// Expand, or go to the first child.
+    VariablesRight => "debug.variables.right", "Right",
+        "Expands the selected node of the variables view, or selects its first child.";
+    /// Select a node of the variables view.
+    SelectVariable { path: Vec<String> } => "debug.variables.select", "Select Variable",
+        "Selects a node of the variables view by its path of names as shown (a group by its title).",
+        r#"{"path": ["items", "0"]}"#;
+    /// Expand or collapse a node of the variables view.
+    ExpandVariable { path: Vec<String>, expanded: Option<bool> } => "debug.variables.expand", "Expand Variable",
+        "Expands (or with `expanded: false` collapses, without it toggles) a node of the variables view by its path of names; an ellipsis row shows the rest of its collection.",
+        r#"{"path": ["items"], "expanded": true}"#;
 }
