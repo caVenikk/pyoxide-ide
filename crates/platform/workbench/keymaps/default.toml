@@ -229,10 +229,12 @@ name = "Editor"
 
 # Threads & Variables (#166): Previous and Next Frame from anywhere while
 # debugging (`PreviousOccurence`, `NextOccurence` over the frames list,
-# `XFramesView.addFramesNavigationAd`). In the frames list Up and Down
-# select frames; in the variables view they move, Left and Right collapse
-# and expand.
+# `XFramesView.addFramesNavigationAd`), in the main window's context so
+# that the Run console's links (a deeper context) keep the keys. In the
+# frames list Up and Down select frames; in the variables view they move,
+# Left and Right collapse and expand.
 [[context]]
+name = "Workbench"
 [context.bindings]
 "ctrl-alt-up" = "debug.previous-frame"
 "ctrl-alt-down" = "debug.next-frame"

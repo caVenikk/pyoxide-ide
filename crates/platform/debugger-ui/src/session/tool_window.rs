@@ -17,10 +17,10 @@ use console::LinkTarget;
 use console_ui::{ConsoleEvent, ConsoleView};
 use debugger::{DebugAdapterProvider, DebugRequest, Phase, Session, SessionId, SessionSnapshot};
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Render, SharedString, Subscription, Task, UniformListScrollHandle,
-    Window, canvas, div, prelude::*, px, relative,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, HitboxBehavior, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, SharedString,
+    Subscription, Task, UniformListScrollHandle, Window, canvas, div, prelude::*, px, relative,
 };
 use process::ExitStatus;
 use serde_json::{Value as Json, json};
@@ -42,6 +42,8 @@ const CLEAR_DELAY: Duration = Duration::from_millis(100);
 /// The share of the width the frames take (the reference's splitter
 /// proportion in Threads & Variables).
 const SPLIT: f32 = 0.35;
+/// The width of the divider's handle.
+const SPLIT_HANDLE: f32 = 6.0;
 
 /// Size of the toolbar's buttons and of their icons.
 const BUTTON: f32 = 24.0;
@@ -246,6 +248,15 @@ impl DebugToolWindow {
     /// The focus of the frames list.
     pub fn frames_focus(&self) -> &FocusHandle {
         &self.frames_focus
+    }
+
+    /// The frames list or the variables view has the focus: a frame chosen
+    /// there shows its line without moving the focus to the editor.
+    pub fn frames_or_variables_focused(&self, window: &Window, cx: &App) -> bool {
+        self.frames_focus.contains_focused(window, cx)
+            || self
+                .selected_variables()
+                .is_some_and(|v| v.focus_handle(cx).contains_focused(window, cx))
     }
 
     /// Opens the list of the selected session's threads below the combo.
@@ -932,20 +943,56 @@ impl DebugToolWindow {
             )
             .child(
                 div()
-                    .id("debug-threads-variables-divider")
+                    .relative()
                     .flex_none()
                     .w(px(1.0))
                     .h_full()
                     .bg(border)
-                    .cursor_col_resize()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _: &MouseDownEvent, _, cx| {
-                            this.dragging_split = true;
-                            cx.stop_propagation();
-                        }),
+                    .child(
+                        div()
+                            .id("debug-threads-variables-divider")
+                            .debug_selector(|| "debug-threads-variables-divider".into())
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(-(SPLIT_HANDLE - 1.0) / 2.0))
+                            .w(px(SPLIT_HANDLE))
+                            .child(
+                                canvas(
+                                    |bounds, window, _| {
+                                        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+                                    },
+                                    |_, hitbox, window, _| {
+                                        ui::pointer::request(
+                                            CursorStyle::ResizeLeftRight,
+                                            &hitbox,
+                                            window,
+                                        )
+                                    },
+                                )
+                                .size_full(),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                                    this.dragging_split = true;
+                                    cx.stop_propagation();
+                                }),
+                            ),
                     ),
             )
+            .when(self.dragging_split, |d| {
+                d.child(
+                    canvas(
+                        |_, _, _| {},
+                        |_, _, window, _| {
+                            ui::pointer::request_window(CursorStyle::ResizeLeftRight, window)
+                        },
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+            })
             .child(
                 div()
                     .flex()
