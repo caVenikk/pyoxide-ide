@@ -2380,7 +2380,6 @@ impl AddDialog {
     fn render_footer(&self, cx: &App) -> AnyElement {
         BottomBar::new()
             .separator(false)
-            .compact(true)
             .help(ui::form::help_button("add-interpreter-help", None, cx))
             .button(
                 BarButton::new(

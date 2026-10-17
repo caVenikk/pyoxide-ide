@@ -1659,7 +1659,6 @@ impl InterpretersDialog {
 
     fn render_footer(&self, cx: &App) -> AnyElement {
         BottomBar::new()
-            .compact(true)
             .button(BarButton::new(
                 "interpreters-ok",
                 "OK",
@@ -1861,7 +1860,6 @@ impl Render for RenameDialog {
             .h(px(FIELD));
         let footer = BottomBar::new()
             .separator(false)
-            .compact(true)
             .button(
                 BarButton::new(
                     "rename-interpreter-ok",
