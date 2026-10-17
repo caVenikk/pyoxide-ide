@@ -1,15 +1,17 @@
 //! The Python product's debugger hook ([`DebugAdapterProvider`]): a
 //! configuration's run, its interpreter's version check, the helper, the
-//! debugpy adapter and its `launch`, and the Python breakpoint types.
+//! debugpy adapter and its `launch`, the Python breakpoint types and how
+//! Python values are shown.
 
 use std::sync::RwLock;
 
 use std::path::{Path, PathBuf};
 
+use debugger::values::ValueNode;
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpoint,
     ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting, IdeaTypes, LaunchKind,
-    LineBreakpointType, StepIntoMyCode,
+    LineBreakpointType, StepIntoMyCode, Variable,
 };
 use py_run::PythonRun;
 use py_run::config::{LaunchContext, PythonOptions};
@@ -18,6 +20,7 @@ use run_config::RunConfiguration;
 use crate::breakpoints;
 use crate::helper::Helper;
 use crate::launch::{self, DebugOptions};
+use crate::values;
 
 /// The adapter's type at `initialize`.
 pub const ADAPTER_ID: &str = "debugpy";
@@ -213,6 +216,22 @@ impl DebugAdapterProvider for PythonDebugProvider {
             .iter()
             .map(|c| (*c).to_owned())
             .collect()
+    }
+
+    fn present_value(&self, variable: &Variable) -> ValueNode {
+        values::present(variable)
+    }
+
+    fn sizes_expression(&self, expressions: &[&str]) -> Option<String> {
+        values::sizes_expression(expressions)
+    }
+
+    fn parse_sizes(&self, value: &str, count: usize) -> Vec<Option<String>> {
+        values::parse_sizes(value, count)
+    }
+
+    fn first_scope_only(&self) -> bool {
+        true
     }
 }
 

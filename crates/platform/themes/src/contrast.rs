@@ -126,6 +126,12 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
         (GitConflict, SurfaceAlt, Need::Text),
         (GitIgnored, SurfaceAlt, Need::Large),
         (Text, NonProjectFile, Need::Text),
+        (EditorText, ExecutionPointNotTop, Need::Text),
+        (DebuggerValueName, ToolWindow, Need::Text),
+        (DebuggerType, ToolWindow, Need::Large),
+        (DebuggerChangedValue, ToolWindow, Need::Text),
+        (DebuggerCollectingData, ToolWindow, Need::Large),
+        (DebuggerErrorMessage, ToolWindow, Need::Text),
         (TerminalForeground, TerminalBackground, Need::Text),
         (TerminalBlack, TerminalBackground, Need::Text),
         (TerminalRed, TerminalBackground, Need::Text),
@@ -276,6 +282,7 @@ fn backdrop_of(theme: &Theme, bg: UiRole) -> Rgba {
         | UiRole::EditorSelection
         | UiRole::Breakpoint
         | UiRole::ExecutionPoint
+        | UiRole::ExecutionPointNotTop
         | UiRole::DiffAdded
         | UiRole::DiffRemoved
         | UiRole::DiffChanged

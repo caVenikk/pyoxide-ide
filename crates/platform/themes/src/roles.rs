@@ -203,6 +203,7 @@ roles! {
         DocumentationPopup => ("documentation-popup", "Editor", "Documentation popup background"),
         Breakpoint => ("breakpoint", "Editor", "Line with a breakpoint"),
         ExecutionPoint => ("execution-point", "Editor", "Line the debugger stopped on"),
+        ExecutionPointNotTop => ("execution-point-not-top", "Editor", "Line of a frame the debugger shows other than the one it stopped in"),
         Bookmark => ("bookmark", "Editor", "Bookmark marker"),
 
         GutterAdded => ("gutter-added", "Version control", "Gutter marker of added lines"),
@@ -297,6 +298,15 @@ roles! {
         TerminalSearchMatchCurrentText => ("terminal-search-match-current-text", "Terminal", "Text of the current search match in the terminal"),
         TerminalSeparator => ("terminal-separator", "Terminal", "Line between the commands of the terminal"),
         TerminalErrorMarker => ("terminal-error-marker", "Terminal", "Marker beside a terminal command that failed"),
+
+        DebuggerValueName => ("debugger-value-name", "Debugger", "Names in the variables view of the debugger"),
+        DebuggerType => ("debugger-type", "Debugger", "Types in the variables view of the debugger: {list: 4}"),
+        DebuggerChangedValue => ("debugger-changed-value", "Debugger", "Names of values that changed since the debugger last stopped"),
+        DebuggerCollectingData => ("debugger-collecting-data", "Debugger", "Collecting data while the debugger loads values"),
+        DebuggerEvaluating => ("debugger-evaluating", "Debugger", "Evaluating while the debugger evaluates an expression"),
+        DebuggerModifyingValue => ("debugger-modifying-value", "Debugger", "Modifying value while the debugger sets a value"),
+        DebuggerException => ("debugger-exception", "Debugger", "Exceptions in the variables view of the debugger"),
+        DebuggerErrorMessage => ("debugger-error-message", "Debugger", "Error messages in the variables view of the debugger"),
     }
 }
 
@@ -468,6 +478,11 @@ impl UiRole {
             SearchFieldError => Some(Danger),
             SearchOptionSelected => Some(Pressed),
             NonProjectFile => Some(SurfaceAlt),
+            ExecutionPointNotTop => Some(CurrentLine),
+            DebuggerValueName => Some(Text),
+            DebuggerType | DebuggerCollectingData | DebuggerEvaluating => Some(TextMuted),
+            DebuggerChangedValue | DebuggerModifyingValue => Some(Accent),
+            DebuggerException | DebuggerErrorMessage => Some(Danger),
             RunWidgetRunning => Some(Success),
             RunWidgetStop => Some(Danger),
             DragAndDropBorder => Some(Accent),

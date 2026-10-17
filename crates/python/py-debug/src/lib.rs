@@ -13,6 +13,8 @@
 //! - [`breakpoints`]: the Python breakpoint types and the exception
 //!   breakpoint mapping ("On termination" is `uncaught`, "On raise" is
 //!   `raised`);
+//! - how the variables view shows Python values (groups, return values,
+//!   container sizes);
 //! - [`PythonDebugProvider`]: the product's [`debugger::DebugAdapterProvider`],
 //!   given the product's [`RunResolver`] (which interpreter a request runs
 //!   with).
@@ -22,6 +24,7 @@ pub mod helper;
 pub mod launch;
 pub mod lines;
 mod provider;
+mod values;
 
 pub use helper::{DEBUGPY_VERSION, Helper, HelperMissing};
 pub use launch::DebugOptions;

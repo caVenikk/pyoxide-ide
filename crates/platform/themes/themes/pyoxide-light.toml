@@ -176,6 +176,7 @@ completion-match = "$copper-light"
 documentation-popup = "#ffffff"
 breakpoint = "#c62f2f2e"
 execution-point = "#f2c14e66"
+execution-point-not-top = "#f2c14e33"
 bookmark = "$amber"
 
 gutter-added = "#2f8f4e"
@@ -273,6 +274,16 @@ terminal-search-match-current = "#f2a43ea6"
 terminal-search-match-current-text = "$fg"
 terminal-separator = "#e2dfd9"
 terminal-error-marker = "$red"
+
+# The variables view of the debugger (Debugger.Variables.*).
+debugger-value-name = "$copper-light"
+debugger-type = "$fg-muted"
+debugger-changed-value = "$blue"
+debugger-collecting-data = "$fg-muted"
+debugger-evaluating = "$fg-muted"
+debugger-modifying-value = "$blue"
+debugger-exception = "$red"
+debugger-error-message = "$red"
 
 [syntax]
 keyword = { fg = "$copper-soft" }

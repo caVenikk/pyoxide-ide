@@ -46,9 +46,6 @@ use crate::provider::{AdapterLaunch, LaunchKind, StepIntoMyCode};
 
 /// Frames asked for at a time.
 pub const FRAME_PAGE: usize = 20;
-/// Children of a variable asked for at a time (the reference shows 100
-/// children, then "more", `XCompositeNode.MAX_CHILDREN_TO_SHOW`).
-pub const VARIABLES_PAGE: usize = 100;
 /// How long Stop waits for the adapter and the program to end before it
 /// kills them.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -153,8 +150,18 @@ pub struct StopInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Children {
     pub items: Vec<Variable>,
+    /// The sizes of the items that have one (a container's length, shown
+    /// with its type), by item; empty when the product shows none.
+    pub shapes: Vec<Option<String>>,
     /// More children can be loaded ([`Session::children`] again).
     pub more: bool,
+}
+
+impl Children {
+    /// The size of the item at `index`.
+    pub fn shape(&self, index: usize) -> Option<&str> {
+        self.shapes.get(index).and_then(|s| s.as_deref())
+    }
 }
 
 /// What a session shows, copied at one moment.
@@ -202,6 +209,9 @@ struct Data {
     selected_frame: Option<i64>,
     scopes: HashMap<i64, Vec<Scope>>,
     children: HashMap<i64, Children>,
+    /// The frame a scope's, a variable's or a value's children belong to
+    /// (their sizes are evaluated there).
+    reference_frames: HashMap<i64, i64>,
     statuses: HashMap<BreakpointId, BreakpointStatus>,
     /// The breakpoints last sent per file, in the order sent.
     sent: HashMap<PathBuf, Vec<BreakpointId>>,
@@ -328,6 +338,7 @@ impl Session {
                     selected_frame: None,
                     scopes: HashMap::new(),
                     children: HashMap::new(),
+                    reference_frames: HashMap::new(),
                     statuses: HashMap::new(),
                     sent: HashMap::new(),
                     adapter_ids: HashMap::new(),
@@ -821,6 +832,7 @@ impl Session {
             data.frames.clear();
             data.scopes.clear();
             data.children.clear();
+            data.reference_frames.clear();
             data.selected_frame = None;
             if stopped.thread_id.is_some() {
                 data.selected_thread = stopped.thread_id;
@@ -1026,6 +1038,7 @@ impl Session {
             data.frames.clear();
             data.scopes.clear();
             data.children.clear();
+            data.reference_frames.clear();
             data.selected_frame = None;
             (!data.waiting.is_empty()).then(|| data.waiting.remove(0))
         };
@@ -1177,6 +1190,7 @@ impl Session {
                         data.frames.clear();
                         data.scopes.clear();
                         data.children.clear();
+                        data.reference_frames.clear();
                     }
                     (suspended, data.generation)
                 };
@@ -1764,10 +1778,18 @@ impl Session {
             if let (Ok(scopes), Some(inner)) = (result, weak.upgrade()) {
                 let mut data = lock(&inner.data);
                 if data.generation == generation {
+                    for scope in &scopes {
+                        data.reference_frames.insert(scope.reference, frame);
+                    }
                     data.scopes.insert(frame, scopes.clone());
                 }
             }
         })
+    }
+
+    /// The loaded scopes of a frame.
+    pub fn loaded_scopes(&self, frame: i64) -> Option<Vec<Scope>> {
+        lock(&self.inner.data).scopes.get(&frame).cloned()
     }
 
     /// The loaded children of a scope or a variable (`reference`).
@@ -1775,65 +1797,180 @@ impl Session {
         lock(&self.inner.data).children.get(&reference).cloned()
     }
 
-    /// Loads the next page of children of a scope or a variable and
-    /// returns all loaded so far.
+    /// Loads the children of a scope or a variable (all of them: debugpy
+    /// pages large collections with children of its own) with the sizes
+    /// of the containers among them, and returns them; loaded children are
+    /// kept until the program moves on.
     pub fn children(&self, reference: i64) -> Pending<Children> {
         let Some(client) = self.client() else {
             return ready(Err(DebugError::Ended));
         };
-        let (start, generation) = {
+        let generation = {
             let data = lock(&self.inner.data);
-            let loaded = data.children.get(&reference);
-            if let Some(loaded) = loaded
-                && !loaded.more
-            {
+            if let Some(loaded) = data.children.get(&reference) {
                 return ready(Ok(loaded.clone()));
             }
             if data.phase != Phase::Suspended {
                 return ready(Err(DebugError::NotSuspended));
             }
-            (loaded.map_or(0, |c| c.items.len()), data.generation)
+            data.generation
         };
-        let weak = Arc::downgrade(&self.inner);
+        let session = self.clone();
         let (tx, rx) = oneshot::channel();
         client
-            .variables(
-                reference,
-                VariablesFilter::All,
-                Some((start, VARIABLES_PAGE)),
-            )
-            .on_done(move |result| {
-                let result = result.map_err(DebugError::from).map(|items| {
-                    let more = items.len() >= VARIABLES_PAGE;
-                    let Some(inner) = weak.upgrade() else {
-                        return Children { items, more };
-                    };
-                    let mut data = lock(&inner.data);
-                    if data.generation != generation {
-                        return Children { items, more };
-                    }
-                    let entry = data.children.entry(reference).or_default();
-                    if entry.items.len() == start {
-                        entry.items.extend(items);
-                    }
-                    entry.more = more;
-                    entry.clone()
-                });
-                let _ = tx.send(result);
+            .variables(reference, VariablesFilter::All, None)
+            .on_done(move |result| match result {
+                Ok(items) => session.children_loaded(reference, items, generation, tx),
+                Err(error) => {
+                    let _ = tx.send(Err(error.into()));
+                }
             });
         rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed()
+    }
+
+    /// Children came: their sizes are asked for, then they are kept.
+    fn children_loaded(
+        &self,
+        reference: i64,
+        items: Vec<Variable>,
+        generation: u64,
+        tx: oneshot::Sender<Result<Children, DebugError>>,
+    ) {
+        let frame = {
+            let mut data = lock(&self.inner.data);
+            let frame = data.reference_frames.get(&reference).copied();
+            if let (Some(frame), true) = (frame, data.generation == generation) {
+                for item in items.iter().filter(|v| v.reference > 0) {
+                    data.reference_frames.insert(item.reference, frame);
+                }
+            }
+            frame
+        };
+        // Values with children have a size; groups and the like do not.
+        let provider = self.inner.debugger.upgrade().map(|d| d.provider().clone());
+        let sized: Vec<(usize, String)> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.reference > 0)
+            .filter(|(_, v)| {
+                provider.as_ref().is_none_or(|p| {
+                    matches!(p.present_value(v).role, crate::values::ValueRole::Value(_))
+                })
+            })
+            .filter_map(|(i, v)| Some((i, v.evaluate_name.clone()?)))
+            .collect();
+        let weak = Arc::downgrade(&self.inner);
+        let store = move |items: Vec<Variable>, shapes: Vec<Option<String>>| {
+            let children = Children {
+                items,
+                shapes,
+                more: false,
+            };
+            if let Some(inner) = weak.upgrade() {
+                let mut data = lock(&inner.data);
+                if data.generation == generation {
+                    data.children
+                        .entry(reference)
+                        .or_insert_with(|| children.clone());
+                }
+            }
+            let _ = tx.send(Ok(children));
+        };
+        let expressions: Vec<String> = sized.iter().map(|(_, e)| e.clone()).collect();
+        match (frame, sized.is_empty()) {
+            (Some(frame), false) => {
+                let count = items.len();
+                self.sizes_then(frame, &expressions, move |sizes| {
+                    let mut shapes = vec![None; count];
+                    for ((index, _), size) in sized.iter().zip(sizes) {
+                        shapes[*index] = size;
+                    }
+                    store(items, shapes);
+                });
+            }
+            _ => store(items, Vec::new()),
+        }
+    }
+
+    /// The sizes of the values of `expressions` in a frame (the product's
+    /// [`crate::DebugAdapterProvider::sizes_expression`]), one per
+    /// expression; all `None` when the product shows no sizes.
+    pub fn sizes(&self, frame: i64, expressions: Vec<String>) -> Pending<Vec<Option<String>>> {
+        let (tx, rx) = oneshot::channel();
+        self.sizes_then(frame, &expressions, move |sizes| {
+            let _ = tx.send(sizes);
+        });
+        rx.map(|r| Ok(r.unwrap_or_default())).boxed()
+    }
+
+    /// [`Self::sizes`] with a callback (on the reader thread, or at once).
+    fn sizes_then(
+        &self,
+        frame: i64,
+        expressions: &[String],
+        then: impl FnOnce(Vec<Option<String>>) + Send + 'static,
+    ) {
+        let count = expressions.len();
+        let provider = self.inner.debugger.upgrade().map(|d| d.provider().clone());
+        let names: Vec<&str> = expressions.iter().map(String::as_str).collect();
+        let request = match (provider, self.client()) {
+            (Some(provider), Some(client)) => provider
+                .sizes_expression(&names)
+                .map(|expression| (provider, client, expression)),
+            _ => None,
+        };
+        let Some((provider, client, expression)) = request else {
+            then(vec![None; count]);
+            return;
+        };
+        client
+            .evaluate(&expression, Some(frame), EvaluateContext::Watch)
+            .on_done(move |result| {
+                then(match result {
+                    Ok(value) => {
+                        let mut sizes = provider.parse_sizes(&value.value, count);
+                        sizes.resize(count, None);
+                        sizes
+                    }
+                    Err(_) => vec![None; count],
+                })
+            });
     }
 
     /// Evaluates an expression in the selected frame. Dropping the future
     /// cancels the evaluation.
     pub fn evaluate(&self, expression: &str, context: EvaluateContext) -> Pending<Evaluated> {
+        let frame = lock(&self.inner.data).selected_frame;
+        self.evaluate_in(expression, frame, context)
+    }
+
+    /// Evaluates an expression in a frame (globally without one); the
+    /// children of its value belong to the frame. Dropping the future
+    /// cancels the evaluation.
+    pub fn evaluate_in(
+        &self,
+        expression: &str,
+        frame: Option<i64>,
+        context: EvaluateContext,
+    ) -> Pending<Evaluated> {
         let Some(client) = self.client() else {
             return ready(Err(DebugError::Ended));
         };
-        let frame = lock(&self.inner.data).selected_frame;
+        let generation = lock(&self.inner.data).generation;
+        let weak = Arc::downgrade(&self.inner);
         client
             .evaluate(expression, frame, context)
-            .map(|r| r.map_err(DebugError::from))
+            .map(move |result| {
+                if let (Ok(value), Some(inner), Some(frame)) = (&result, weak.upgrade(), frame)
+                    && value.reference > 0
+                {
+                    let mut data = lock(&inner.data);
+                    if data.generation == generation {
+                        data.reference_frames.insert(value.reference, frame);
+                    }
+                }
+                result.map_err(DebugError::from)
+            })
             .boxed()
     }
 
@@ -1935,11 +2072,13 @@ impl Session {
             let items: Vec<Value> = loaded
                 .items
                 .iter()
-                .map(|v| {
+                .enumerate()
+                .map(|(i, v)| {
                     let mut item = serde_json::json!({
                         "name": v.name,
                         "value": v.value,
                         "type": v.type_name,
+                        "shape": loaded.shape(i),
                         "has_children": v.reference > 0,
                     });
                     if let Some(c) = children(data, v.reference, depth + 1) {
