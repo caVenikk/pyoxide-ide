@@ -52,7 +52,7 @@ Navigation history (Back / Forward),editor,must,yes,yes,"places and keys as in t
 Multi-cursor and column selection,editor,should,yes,no,
 Code folding,editor,should,yes,no,
 Live templates,editor,should,yes,no,
-Keymap import,settings-import,must,yes,no,"reference keymap XML with its parent chain (#40); choice and switching: area settings"
+Keymap import,settings-import,must,yes,yes,"reference keymap XML with its parent chain, Import Keymap… on the Keymap page (#40)"
 Code style import,settings-import,should,yes,no,
 Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
 UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; no settings UI yet"
@@ -155,8 +155,8 @@ Clone and share on a hosting service,vcs,could,yes,no,Community
 "Appearance page: theme choice with live switch, Custom themes and Import Theme…",settings,must,yes,yes,"Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet"
 "Theme quick switch with preview (gear > Theme, Quick Switch Scheme)",settings,must,yes,partial,"Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153)"
 System Settings page (autosave and sync of external changes),settings,must,yes,yes,Community; defaults in code today (#92)
-"Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,no,Community; ADR 0018; VS Code keymaps from Community data; no Zed keymap (no permissive source) (#40)
-Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,no,Community (#40)
+"Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,yes,"Community; ADR 0018; VS Code keymaps from Community data, Settings, gear menu, Quick Switch Scheme (#40); no Zed keymap (no permissive source)"
+Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,yes,Community (#40)
 Editor > Font page,settings,must,yes,yes,"Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants"
 Editor > General page (soft wraps),settings,must,yes,partial,"Community; Soft Wraps group only (#154)"
 "Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,no,Community (#75)
