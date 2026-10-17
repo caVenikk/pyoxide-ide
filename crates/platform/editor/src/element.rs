@@ -1654,7 +1654,14 @@ impl Element for EditorElement {
             ),
             HitboxBehavior::Normal,
         );
-        gutter::insert_hitboxes(&mut decoration_paint, &decoration_geometry, bounds, window);
+        let line_number_clicks = self.editor.read(cx).line_number_clicks;
+        gutter::insert_hitboxes(
+            &mut decoration_paint,
+            &decoration_geometry,
+            bounds,
+            line_number_clicks,
+            window,
+        );
         let link_hitboxes = link_rects
             .iter()
             .map(|l| {

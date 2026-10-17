@@ -38,6 +38,7 @@ use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Ta
 use crate::settings::SaveSettings;
 
 mod branches;
+mod debug;
 mod file_events;
 mod file_sync;
 mod history;
@@ -215,6 +216,8 @@ pub struct Workbench {
     version_control: version_control::VersionControl,
     /// The VCS widget's popups and dialogs.
     branch_ui: branches::BranchUi,
+    /// Breakpoints and the debugger (`debug.rs`).
+    debugger: Entity<debugger_ui::DebuggerView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -333,6 +336,9 @@ impl Workbench {
                 this.code_intel_event(event, window, cx)
             }));
         }
+        let (debugger, debug_subscriptions) =
+            Self::new_debugger_view(&product, file_types.clone(), window, cx);
+        subscriptions.extend(debug_subscriptions);
         let notifications = cx.new(|cx| Notifications::new(window, cx));
         let notifications_window =
             cx.new(|cx| NotificationsToolWindow::new(notifications.clone(), cx));
@@ -384,6 +390,7 @@ impl Workbench {
             notifications,
             version_control,
             branch_ui: Default::default(),
+            debugger,
             _subscriptions: subscriptions,
         }
     }
@@ -680,6 +687,7 @@ impl Workbench {
             view.update(cx, |v, cx| v.project_opened(&path, cx));
         }
         self.run_project_opened(&path, cx);
+        self.debug_project_opened(&path, window, cx);
         cx.emit(WorkbenchEvent::ProjectOpened(path));
         cx.notify();
     }
@@ -892,6 +900,7 @@ impl Workbench {
         }
         self.sync_tab_opened(&path, &editor, window, cx);
         self.vcs_tab_opened(&path, &editor, window, cx);
+        self.debug_tab_opened(&editor, window, cx);
         let index = self.tabs.len();
         self.tabs.push(Tab {
             path,
@@ -1057,6 +1066,7 @@ impl Workbench {
         let tab = self.tabs.remove(index);
         self.sync_tab_closed(&tab.path, cx);
         self.vcs_tab_closed(&tab.editor, cx);
+        self.debug_tab_closed(&tab.editor, cx);
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
         }
@@ -2399,7 +2409,9 @@ impl Render for Workbench {
         root = project_panel::forward_actions(root, self.panel.clone());
         root = self.vcs_actions(root, cx);
         root = self.branch_actions(root, cx);
+        root = self.debug_actions(root);
         let marker_popup = self.vcs_render_popup(window, cx);
+        let debug_overlay = self.debug_overlay(window, cx);
         root.flex()
             .flex_col()
             .bg(frame)
@@ -2460,6 +2472,7 @@ impl Render for Workbench {
             })
             .children(self.render_find_hint(window.viewport_size().height, cx))
             .children(marker_popup)
+            .children(debug_overlay)
             .children(
                 self.code_intel
                     .as_ref()

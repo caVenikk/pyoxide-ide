@@ -79,6 +79,7 @@ impl Workbench {
     /// files inside a folder) keep their editors under the new path.
     fn files_moved(&mut self, from: &Path, to: &Path, window: &mut Window, cx: &mut Context<Self>) {
         self.navigation.history.rename(from, to);
+        self.debug_files_moved(from, to, cx);
         for list in [&mut self.recently_viewed, &mut self.recently_changed] {
             for p in list.iter_mut() {
                 if let Some(new) = moved(p, from, to) {

@@ -259,10 +259,17 @@ impl Breakpoints {
                 b.line = b.line + new_count - old_count;
             }
         }
-        // Two on one line: the first one stays.
+        self.dedup_lines();
+        before != self.line
+    }
+
+    /// Two breakpoints on one line: the first one stays. Returns whether
+    /// any went.
+    pub fn dedup_lines(&mut self) -> bool {
+        let count = self.line.len();
         let mut seen = std::collections::HashSet::new();
         self.line.retain(|b| seen.insert((b.file.clone(), b.line)));
-        before != self.line
+        count != self.line.len()
     }
 
     /// A file was renamed or moved: its breakpoints follow.

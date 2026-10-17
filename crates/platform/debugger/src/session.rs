@@ -32,7 +32,7 @@ use futures::future::BoxFuture;
 use process::{CommandLine, ExitStatus, ProcessEvent, ProcessHandle};
 use serde_json::Value;
 
-use crate::breakpoints::{BreakpointId, LineBreakpoint};
+use crate::breakpoints::{BreakpointId, LineBreakpoint, SuspendPolicy};
 use crate::debugger::{DebuggerEvent, Inner as DebuggerInner};
 use crate::provider::{AdapterLaunch, LaunchKind, StepIntoMyCode};
 
@@ -1314,9 +1314,10 @@ impl Session {
 }
 
 /// A line breakpoint as the adapter takes it; `None` for one that is
-/// disabled or does nothing the adapter can do.
+/// disabled or does nothing the adapter can do (a breakpoint that neither
+/// suspends nor logs).
 fn source_breakpoint(b: &LineBreakpoint, log_points: bool) -> Option<SourceBreakpoint> {
-    if !b.enabled {
+    if !b.enabled || (b.suspend == SuspendPolicy::None && !b.logs_only()) {
         return None;
     }
     let mut out = SourceBreakpoint::at(b.line);
@@ -1430,5 +1431,29 @@ impl Handler for SessionHandler {
         if let Some(session) = self.session() {
             session.closed(status);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A breakpoint that neither suspends nor logs does nothing: it is not
+    /// sent (the program runs past it); a logging one is a log point.
+    #[test]
+    fn breakpoints_that_do_nothing_are_not_sent() {
+        let mut b = LineBreakpoint::new("/p/main.py", 3);
+        assert!(source_breakpoint(&b, true).is_some());
+        b.suspend = SuspendPolicy::None;
+        assert!(source_breakpoint(&b, true).is_none());
+        b.log_message = true;
+        let sent = source_breakpoint(&b, true).unwrap();
+        assert_eq!(
+            sent.log_message.as_deref(),
+            Some("Breakpoint reached at main.py:3")
+        );
+        assert!(source_breakpoint(&b, false).is_none());
+        b.enabled = false;
+        assert!(source_breakpoint(&b, true).is_none());
     }
 }

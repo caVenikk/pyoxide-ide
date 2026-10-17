@@ -7,6 +7,7 @@
 //! [debugger]
 //! imported-from-idea = true
 //! muted = false
+//! suspend-defaults = { python-line = "all" }
 //!
 //! [[debugger.line-breakpoints]]
 //! file = "src/main.py"
@@ -51,6 +52,9 @@ pub struct Stored {
     /// defaults apply).
     pub has_exception_breakpoints: bool,
     pub watches: Watches,
+    /// What new breakpoints of a type suspend when Make Default chose
+    /// another policy than the type's, by type id.
+    pub suspend_defaults: BTreeMap<String, SuspendPolicy>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -60,6 +64,8 @@ struct Table {
     imported_from_idea: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     muted: bool,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    suspend_defaults: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     line_breakpoints: Vec<Line>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,6 +174,11 @@ pub fn load(root: &Path) -> Result<Option<Stored>, StoreError> {
         imported: table.imported_from_idea,
         muted: table.muted,
         has_exception_breakpoints: table.exception_breakpoints.is_some(),
+        suspend_defaults: table
+            .suspend_defaults
+            .iter()
+            .filter_map(|(kind, policy)| Some((kind.clone(), SuspendPolicy::parse(policy)?)))
+            .collect(),
         ..Stored::default()
     };
     for line in table.line_breakpoints {
@@ -216,6 +227,11 @@ pub fn save(root: &Path, stored: &Stored) -> Result<bool, StoreError> {
     let table = Table {
         imported_from_idea: stored.imported,
         muted: stored.muted,
+        suspend_defaults: stored
+            .suspend_defaults
+            .iter()
+            .map(|(kind, policy)| (kind.clone(), policy.as_str().to_owned()))
+            .collect(),
         line_breakpoints: b
             .line()
             .iter()
@@ -308,6 +324,9 @@ mod tests {
         stored.breakpoints.add_exception(any);
         stored.watches.add("python", "x", None);
         stored.watches.add("python", "len(items)", None);
+        stored
+            .suspend_defaults
+            .insert("python-line".into(), SuspendPolicy::All);
         assert!(save(root, &stored).unwrap());
 
         let text = std::fs::read_to_string(project::workspace::workspace_file(root)).unwrap();
@@ -326,6 +345,10 @@ mod tests {
         let any = &loaded.breakpoints.exception()[0];
         assert!(any.default && any.flag("notifyOnTerminate"));
         assert_eq!(loaded.watches.get("python"), ["x", "len(items)"]);
+        assert_eq!(
+            loaded.suspend_defaults.get("python-line"),
+            Some(&SuspendPolicy::All)
+        );
 
         // Everything removed: the table goes.
         assert!(save(root, &Stored::default()).unwrap());

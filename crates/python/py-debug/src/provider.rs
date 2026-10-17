@@ -4,9 +4,12 @@
 
 use std::sync::RwLock;
 
+use std::path::Path;
+
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpoint,
-    ExceptionFilter, ExceptionFilterSetting, IdeaTypes, LaunchKind, StepIntoMyCode,
+    ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting, IdeaTypes, LaunchKind,
+    LineBreakpointType, StepIntoMyCode,
 };
 use py_run::PythonRun;
 use py_run::config::{LaunchContext, PythonOptions};
@@ -156,11 +159,30 @@ impl DebugAdapterProvider for PythonDebugProvider {
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
         None
     }
+
+    fn line_breakpoint_type(&self) -> Option<LineBreakpointType> {
+        Some(breakpoints::line_type())
+    }
+
+    fn stoppable_lines(&self, file: &Path, text: &str) -> Option<Vec<bool>> {
+        breakpoints::stoppable_lines(file, text)
+    }
+
+    fn exception_breakpoint_type(&self) -> Option<ExceptionBreakpointType> {
+        Some(breakpoints::exception_type())
+    }
+
+    fn exception_classes(&self) -> Vec<String> {
+        breakpoints::BUILTIN_EXCEPTIONS
+            .iter()
+            .map(|c| (*c).to_owned())
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use run_config::{RunConfiguration, Storage};
     use serde_json::json;
@@ -307,6 +329,21 @@ mod tests {
             [("PythonConfigurationType".to_owned(), "python".to_owned())]
         );
         assert_eq!(provider.step_into_my_code(), None);
+        assert_eq!(provider.line_breakpoint_type().unwrap().id, "python-line");
+        assert!(
+            provider
+                .stoppable_lines(Path::new("a.py"), "x = 1\n")
+                .is_some()
+        );
+        assert_eq!(
+            provider.exception_breakpoint_type().unwrap().id,
+            "python-exception"
+        );
+        assert!(
+            provider
+                .exception_classes()
+                .contains(&"KeyError".to_owned())
+        );
         let any = &defaults[0];
         let filters = provider.exception_filters(
             &[any],

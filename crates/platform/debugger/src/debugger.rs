@@ -13,7 +13,7 @@ use std::thread;
 use serde_json::{Value, json};
 
 use crate::breakpoints::{
-    BreakpointId, Breakpoints, ExceptionBreakpoint, LineBreakpoint, Toggled, Watches,
+    BreakpointId, Breakpoints, ExceptionBreakpoint, LineBreakpoint, SuspendPolicy, Toggled, Watches,
 };
 use crate::provider::{
     DebugAdapterProvider, DebugRequest, ExceptionFilter, ExceptionFilterSetting,
@@ -242,6 +242,11 @@ impl Debugger {
         &self.inner.root
     }
 
+    /// The product's hook (its breakpoint types).
+    pub fn provider(&self) -> &Arc<dyn DebugAdapterProvider> {
+        &self.inner.provider
+    }
+
     /// Events from now on.
     pub fn subscribe(&self) -> flume::Receiver<DebuggerEvent> {
         let (tx, rx) = flume::unbounded();
@@ -292,11 +297,81 @@ impl Debugger {
         f(&mut self.inner.state().stored.breakpoints)
     }
 
-    /// Toggle Line Breakpoint (Temporary with `temporary`).
+    /// Toggle Line Breakpoint (Temporary with `temporary`): a new
+    /// breakpoint suspends what new breakpoints of the line type suspend
+    /// ([`Self::default_suspend`]).
     pub fn toggle_breakpoint(&self, file: &Path, line: u32, temporary: bool) -> Toggled {
-        let toggled = self.edit(|b| b.toggle(file, line, temporary));
+        let suspend = self.default_suspend();
+        let toggled = self.edit(|b| {
+            let toggled = b.toggle(file, line, temporary);
+            if let Toggled::Added(id) = toggled
+                && let Some(added) = b.get_mut(id)
+            {
+                added.suspend = suspend;
+            }
+            toggled
+        });
         self.breakpoints_changed(vec![file.to_owned()], false);
         toggled
+    }
+
+    /// What a new line breakpoint suspends: the policy Make Default chose
+    /// for the product's line type, else the type's default
+    /// (`getBreakpointDefaults(type).getSuspendPolicy()`).
+    pub fn default_suspend(&self) -> SuspendPolicy {
+        let Some(kind) = self.inner.provider.line_breakpoint_type() else {
+            return SuspendPolicy::All;
+        };
+        let state = self.inner.state();
+        state
+            .stored
+            .suspend_defaults
+            .get(&kind.id)
+            .copied()
+            .unwrap_or(kind.default_suspend)
+    }
+
+    /// Make Default: new line breakpoints suspend `policy`.
+    pub fn set_default_suspend(&self, policy: SuspendPolicy) {
+        let Some(kind) = self.inner.provider.line_breakpoint_type() else {
+            return;
+        };
+        {
+            let mut state = self.inner.state();
+            if policy == kind.default_suspend {
+                state.stored.suspend_defaults.remove(&kind.id);
+            } else {
+                state.stored.suspend_defaults.insert(kind.id, policy);
+            }
+        }
+        self.save();
+        self.inner.emit(DebuggerEvent::BreakpointsChanged);
+    }
+
+    /// The editor moved the lines of a file's breakpoints (they follow
+    /// its edits): each to its new line, or removed with `None` (its line
+    /// was deleted). Two on one line: the first one stays.
+    pub fn set_lines(&self, file: &Path, lines: &[(BreakpointId, Option<u32>)]) {
+        let changed = self.edit(|b| {
+            let mut changed = false;
+            for (id, line) in lines {
+                match line {
+                    Some(line) => {
+                        if let Some(bp) = b.get_mut(*id)
+                            && bp.line != (*line).max(1)
+                        {
+                            bp.line = (*line).max(1);
+                            changed = true;
+                        }
+                    }
+                    None => changed |= b.remove(*id),
+                }
+            }
+            changed | b.dedup_lines()
+        });
+        if changed {
+            self.breakpoints_changed(vec![file.to_owned()], false);
+        }
     }
 
     /// Adds a line breakpoint (replacing one on its line).

@@ -278,6 +278,72 @@ pub fn run_hook() -> RunHook {
     RunHook::new(ShellRunner)
 }
 
+/// The debugger of tests: the Python breakpoint types' names, line
+/// breakpoints on the lines of `.py` files that are neither blank nor
+/// comments, no adapter.
+pub struct TestDebug;
+
+impl debugger::DebugAdapterProvider for TestDebug {
+    fn prepare(&self, _: &debugger::DebugRequest) -> Result<debugger::AdapterLaunch, String> {
+        Err("no debug adapter in tests".to_owned())
+    }
+
+    fn default_exception_breakpoints(&self) -> Vec<debugger::ExceptionBreakpoint> {
+        let mut any = debugger::ExceptionBreakpoint::new("python-exception", "BaseException");
+        any.properties
+            .insert("notifyOnTerminate".to_owned(), "true".to_owned());
+        vec![any]
+    }
+
+    fn line_breakpoint_type(&self) -> Option<debugger::LineBreakpointType> {
+        Some(debugger::LineBreakpointType {
+            id: "python-line".to_owned(),
+            title: "Python Line Breakpoint".to_owned(),
+            default_suspend: debugger::SuspendPolicy::Thread,
+            suspend_thread: true,
+        })
+    }
+
+    fn stoppable_lines(&self, file: &Path, text: &str) -> Option<Vec<bool>> {
+        (file.extension().is_some_and(|e| e == "py")).then(|| {
+            text.split('\n')
+                .map(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && !t.starts_with('#')
+                })
+                .collect()
+        })
+    }
+
+    fn exception_breakpoint_type(&self) -> Option<debugger::ExceptionBreakpointType> {
+        let option = |key: &str, label: &str| debugger::ExceptionOption {
+            key: key.to_owned(),
+            label: label.to_owned(),
+        };
+        Some(debugger::ExceptionBreakpointType {
+            id: "python-exception".to_owned(),
+            title: "Python Exception Breakpoint".to_owned(),
+            any_class: "BaseException".to_owned(),
+            any_name: "Any exception".to_owned(),
+            options_title: "Activation policy".to_owned(),
+            options: vec![
+                option("notifyOnTerminate", "On termination"),
+                option("notifyOnlyOnFirst", "On raise"),
+                option("ignoreLibraries", "Ignore library files"),
+            ],
+            chooser_title: "Select Exception Class".to_owned(),
+        })
+    }
+
+    fn exception_classes(&self) -> Vec<String> {
+        ["KeyError", "ValueError"].map(str::to_owned).to_vec()
+    }
+}
+
+pub fn debug_hook() -> workbench::DebugHook {
+    workbench::DebugHook::new(TestDebug)
+}
+
 /// Lets real processes and threads report to the test: the executor may
 /// park while they work.
 pub fn allow_processes(cx: &mut TestAppContext) {

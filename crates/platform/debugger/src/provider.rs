@@ -1,16 +1,17 @@
 //! What a product supplies to debug its programs (ADR 0005, 0015): the
 //! adapter and its launch arguments for a run configuration, how its
 //! exception breakpoints map to the adapter's filters, its default
-//! breakpoints and what it imports from the reference.
+//! breakpoints, what it imports from the reference, and its breakpoint
+//! types (titles, stoppable lines, exception options).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dap_client::Transport;
 use process::CommandLine;
 use run_config::RunConfiguration;
 use serde_json::Value;
 
-use crate::breakpoints::ExceptionBreakpoint;
+use crate::breakpoints::{ExceptionBreakpoint, SuspendPolicy};
 use crate::idea::IdeaTypes;
 
 pub use dap_client::{ExceptionFilter, ExceptionFilterSetting};
@@ -105,5 +106,91 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// Step Into My Code; `None` makes it a plain Step Into.
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
         None
+    }
+
+    /// The product's type of line breakpoints; `None`: none can be set.
+    fn line_breakpoint_type(&self) -> Option<LineBreakpointType> {
+        None
+    }
+
+    /// The lines of a file's text a line breakpoint can be put on
+    /// (`XLineBreakpointType.canPutAt`), by line from line 1; `None` for a
+    /// file of another type. Blocking (one pass over the text): called off
+    /// the UI thread.
+    fn stoppable_lines(&self, file: &Path, text: &str) -> Option<Vec<bool>> {
+        let _ = (file, text);
+        None
+    }
+
+    /// Line breakpoints can be put in a file of this type (its stoppable
+    /// lines are known), going by its path.
+    fn line_breakpoint_file(&self, file: &Path) -> bool {
+        self.stoppable_lines(file, "").is_some()
+    }
+
+    /// The product's type of exception breakpoints.
+    fn exception_breakpoint_type(&self) -> Option<ExceptionBreakpointType> {
+        None
+    }
+
+    /// The exception classes the class chooser of a new exception
+    /// breakpoint offers.
+    fn exception_classes(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// A product's type of line breakpoints, as the reference presents it
+/// (`XLineBreakpointType`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineBreakpointType {
+    /// The type's id in the reference (`python-line`).
+    pub id: String,
+    /// Its group in the Breakpoints dialog (`Python Line Breakpoint`).
+    pub title: String,
+    /// What a new breakpoint suspends unless Make Default chose another
+    /// policy (`getDefaultSuspendPolicy`).
+    pub default_suspend: SuspendPolicy,
+    /// All or Thread can be chosen (`isSuspendThreadSupported`).
+    pub suspend_thread: bool,
+}
+
+/// An option of an exception breakpoint, a check box of its type's panel:
+/// a `true` property while checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExceptionOption {
+    /// The property's name ([`ExceptionBreakpoint::properties`]).
+    pub key: String,
+    pub label: String,
+}
+
+/// A product's type of exception breakpoints (`XBreakpointType`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExceptionBreakpointType {
+    /// [`ExceptionBreakpoint::kind`] (`python-exception`).
+    pub id: String,
+    /// Its group in the Breakpoints dialog (`Python Exception Breakpoint`).
+    pub title: String,
+    /// The class of its default breakpoint and the name it is shown with
+    /// (`BaseException`, "Any exception").
+    pub any_class: String,
+    pub any_name: String,
+    /// The title of the options' group ("Activation policy") and the
+    /// options.
+    pub options_title: String,
+    pub options: Vec<ExceptionOption>,
+    /// The title of the class chooser ("Select Exception Class").
+    pub chooser_title: String,
+}
+
+impl ExceptionBreakpointType {
+    /// A breakpoint's name: the "any exception" name for its class, else
+    /// the class (`getDisplayText`).
+    pub fn display_name<'a>(&'a self, breakpoint: &'a ExceptionBreakpoint) -> &'a str {
+        if breakpoint.class == self.any_class {
+            &self.any_name
+        } else {
+            &breakpoint.class
+        }
     }
 }

@@ -10,7 +10,8 @@
 //! - [`storage`]: the `[debugger]` table of the personal project state;
 //! - [`idea`]: the one-time import from `.idea/workspace.xml`;
 //! - [`DebugAdapterProvider`]: the product hook (the adapter, its launch
-//!   arguments, exception filters, default breakpoints, import types);
+//!   arguments, exception filters, default breakpoints, import types, the
+//!   breakpoint types and their stoppable lines);
 //! - [`commands`]: the `debug.*` engine commands.
 //!
 //! UI crates depend on this crate, never on `dap-client`
@@ -35,8 +36,9 @@ pub use dap_client::{
 pub use debugger::{Debugger, DebuggerEvent};
 pub use idea::IdeaTypes;
 pub use provider::{
-    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionFilter,
-    ExceptionFilterSetting, LaunchKind, StepIntoMyCode,
+    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpointType,
+    ExceptionFilter, ExceptionFilterSetting, ExceptionOption, LaunchKind, LineBreakpointType,
+    StepIntoMyCode,
 };
 pub use session::{
     BreakpointStatus, Children, DebugError, FRAME_PAGE, Pending, Phase, STOP_TIMEOUT, Session,
