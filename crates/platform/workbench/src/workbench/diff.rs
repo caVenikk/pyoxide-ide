@@ -208,9 +208,14 @@ impl Workbench {
             Some(id) => id,
             None => self.new_diff_tab(commit_list, window, cx),
         };
+        let mut previous = None;
         if let Some(t) = self.diff_tabs.tabs.get_mut(&id) {
+            previous = t.files.get(t.index).cloned().filter(|p| *p != path);
             t.files = files;
             t.index = index;
+        }
+        if let Some(previous) = previous {
+            self.diff_forget_document(&previous, cx);
         }
         if let Some(i) = self.view_tab(id) {
             self.activate(i, window, cx);
@@ -283,7 +288,8 @@ impl Workbench {
             return;
         };
         let document = t.document.clone();
-        // The base: the one the file's tab compares with, else read.
+        // The base: read from the repository (cached by blob), else the
+        // one the file's tab compares with (a base set without one).
         let tab_base = self
             .vcs_line_status(&path)
             .and_then(|s| s.read(cx).base().cloned());
@@ -291,9 +297,8 @@ impl Workbench {
         let base_of = snapshot
             .as_deref()
             .and_then(|s| super::version_control::base_of(s, &path));
-        let (base, task) = match (tab_base, base_of, self.git_repo()) {
-            (Some(base), _, _) => (Some(Some(base)), None),
-            (None, Some((_, base_path)), Some(repo)) => {
+        let (base, task) = match (base_of, self.git_repo(), tab_base) {
+            (Some((_, base_path)), Some(repo), _) => {
                 let read = cx.background_spawn(async move {
                     use vcs::Backend as _;
                     repo.base_text(&base_path, &Cancel::new()).ok().flatten()
@@ -304,6 +309,7 @@ impl Workbench {
                 });
                 (None, Some(task))
             }
+            (_, _, Some(base)) => (Some(Some(base)), None),
             // Added, unversioned or not in a repository: nothing on the left.
             _ => (Some(None), None),
         };
@@ -317,7 +323,7 @@ impl Workbench {
         });
         // The document: the file's tab text, or the file read (a deleted
         // file has none).
-        let shown = if path.is_file() {
+        let shown = if !self.diff_deleted(&path) {
             let tab = self.editor_for(&path);
             document.update(cx, |d, cx| d.show_file_of_tab(path.clone(), tab, cx))
         } else {
@@ -370,6 +376,14 @@ impl Workbench {
         };
         l.document = true;
         self.diff_loaded(id, cx);
+    }
+
+    /// The file is deleted in the work tree (its diff has no current text).
+    fn diff_deleted(&self, path: &Path) -> bool {
+        self.version_control
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.status.status(path) == vcs::FileStatus::Deleted)
     }
 
     /// Both sides are read: the diff shows them.
@@ -439,7 +453,7 @@ impl Workbench {
             label: CURRENT_VERSION.into(),
             path: renamed.then(|| rel(path).into()),
             tooltip: renamed.then(|| path.display().to_string().into()),
-            read_only: !path.is_file(),
+            read_only: self.diff_deleted(path),
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));

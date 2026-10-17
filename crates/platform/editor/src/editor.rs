@@ -402,9 +402,6 @@ pub struct Editor {
     /// Rows of room below the last one instead of a view's height
     /// ([`Editor::set_room_after_end`]).
     pub(crate) room_after_end: Option<usize>,
-    /// Backgrounds of char ranges ([`Editor::set_range_backgrounds`]),
-    /// moved through edits.
-    pub(crate) range_backgrounds: Vec<crate::side_by_side::RangeBackground>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -505,7 +502,6 @@ impl Editor {
             mirrored: false,
             caret_row_shown: true,
             room_after_end: None,
-            range_backgrounds: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -1329,7 +1325,6 @@ impl Editor {
     fn text_edited(&mut self, applied: &[AppliedEdit]) {
         self.diagnostics.edited(applied);
         self.decorations.edited(applied);
-        self.range_backgrounds_edited(applied);
         self.decoration_hover_reset();
         self.link_highlight = None;
         self.diff_highlights = None;
@@ -1382,7 +1377,6 @@ impl Editor {
         // decorations stay at their lines.
         self.diagnostics.clear();
         self.decorations.text_replaced(&self.buffer);
-        self.range_backgrounds.clear();
         self.decoration_hover_reset();
         self.link_highlight = None;
         self.diff_highlights = None;

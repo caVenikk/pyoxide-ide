@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use editor::{Decoration, Editor, EditorConfig, EditorEvent, Highlighter, RangeBackground};
+use editor::{Decoration, DiffHighlights, Editor, EditorConfig, EditorEvent, Highlighter};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
@@ -353,10 +353,11 @@ impl DiffView {
     /// Shows computed differences in both editors.
     fn apply(&mut self, changes: Vec<DiffChange>, version: u64, cx: &mut Context<Self>) {
         for side in [Side::Left, Side::Right] {
-            let (lines, ranges) = decorations(&changes, side, self.editor(side).read(cx).buffer());
+            let (lines, ranges) =
+                decorations(&changes, side, self.editor(side).read(cx).buffer(), cx);
             self.editor(side).update(cx, |e, cx| {
                 e.set_decorations(GROUP, lines, cx);
-                e.set_range_backgrounds(ranges, cx);
+                e.set_diff_highlights(ranges, cx);
             });
         }
         self.changes = Rc::new(changes);
@@ -671,7 +672,7 @@ impl DiffView {
                 "lines": e.buffer().len_lines(),
                 "read_only": e.buffer().is_read_only() || e.is_viewer(),
                 "focused_last": self.current == side,
-                "words": e.range_backgrounds().len(),
+                "words": e.diff_highlights().map_or(0, |d| d.words.len()),
             })
         };
         let title = |t: &SideTitle| {
@@ -1013,12 +1014,14 @@ impl DiffView {
 
 /// The decorations of one side: changed lines (faded where their words
 /// are highlighted, a line on the boundary for an empty side) with their
-/// error stripe marks, and the changed words.
+/// error stripe marks, and the changed words (an empty one is a bar).
 fn decorations(
     changes: &[DiffChange],
     side: Side,
     buffer: &Buffer,
-) -> (Vec<(Range<usize>, Decoration)>, Vec<RangeBackground>) {
+    cx: &App,
+) -> (Vec<(Range<usize>, Decoration)>, Option<DiffHighlights>) {
+    let theme = cx.theme();
     let mut lines = Vec::with_capacity(changes.len());
     let mut words = Vec::new();
     let line_count = buffer.len_lines();
@@ -1047,12 +1050,16 @@ fn decorations(
         let start = buffer.line_start(first);
         for w in fragments {
             let wr = side.select(&w.left, &w.right);
-            words.push(RangeBackground::new(
+            words.push((
                 start + wr.start..start + wr.end,
-                change_role(w.kind()),
+                theme.color(change_role(w.kind())),
             ));
         }
     }
+    let words = (!words.is_empty()).then(|| DiffHighlights {
+        words,
+        ..DiffHighlights::default()
+    });
     (lines, words)
 }
 
