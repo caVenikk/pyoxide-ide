@@ -136,7 +136,14 @@ impl H<'_> {
                 return commit;
             }
         }
-        panic!("timed out waiting for {what}: {:#}", self.commit());
+        let state = self.commit();
+        let on_disk = git(&self.root, &["status", "--porcelain", "-uall"]);
+        let store: Vec<_> = std::fs::read_dir(self.root.join(".oxide"))
+            .map(|d| d.flatten().map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        panic!(
+            "timed out waiting for {what}: {state:#}\ngit status:\n{on_disk}\n.oxide: {store:?}"
+        );
     }
 
     /// Waits for a notification whose title is `title`.

@@ -287,10 +287,11 @@ impl Workbench {
     }
 
     /// Writes the draft now (a commit cleared it) and puts messages first
-    /// in the recent ones, the last one given first.
-    fn store_messages(&mut self, messages: Vec<String>, cx: &mut Context<Self>) {
+    /// in the recent ones, the last one given first. The task ends when
+    /// the personal state is written.
+    fn store_messages(&mut self, messages: Vec<String>, cx: &mut Context<Self>) -> Task<()> {
         let Some(root) = self.file_sync_root().map(Path::to_path_buf) else {
-            return;
+            return Task::ready(());
         };
         self.commit_ui._draft_save = None;
         let draft = self.commit_ui.view.read(cx).message_text(cx);
@@ -312,7 +313,6 @@ impl Workbench {
                 let _ = project::workspace::save_list(&root, TABLE, RECENT_KEY, Some(&recent));
             }
         })
-        .detach();
     }
 
     // ---- commands ---------------------------------------------------------------
@@ -785,16 +785,28 @@ impl Workbench {
                         ),
                         cx,
                     );
-                    this.store_messages(before_amend.into_iter().chain([message]).collect(), cx);
+                    let mut stored =
+                        vec![this.store_messages(
+                            before_amend.into_iter().chain([message]).collect(),
+                            cx,
+                        )];
                     if let Some(root) = root {
                         let value = sign_off.then_some("true");
-                        cx.background_spawn(async move {
+                        stored.push(cx.background_spawn(async move {
                             let _ =
                                 project::workspace::save_value(&root, TABLE, SIGN_OFF_KEY, value);
-                        })
-                        .detach();
+                        }));
                     }
                     this.vcs_refresh();
+                    // The personal state is in `.oxide`, whose changes the
+                    // file watcher does not report: the status looks again
+                    // once it is written (a new `.oxide/.gitignore` is an
+                    // unversioned file).
+                    cx.spawn(async move |this, cx| {
+                        futures::future::join_all(stored).await;
+                        let _ = this.update(cx, |this, _| this.vcs_refresh());
+                    })
+                    .detach();
                     if push && let Ok(action) = cx.build_action("vcs.push", None) {
                         window.dispatch_action(action, cx);
                     }
