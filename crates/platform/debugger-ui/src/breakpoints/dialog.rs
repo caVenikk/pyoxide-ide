@@ -55,10 +55,10 @@ const ROW: f32 = 22.0;
 const INDENT: f32 = 19.0;
 /// The detail panel's insets and the gap between its rows.
 const DETAIL_INSET: f32 = 14.0;
-const DETAIL_GAP: f32 = 10.0;
+const DETAIL_GAP: f32 = 7.0;
 /// The source preview's height and the lines it shows around the
 /// breakpoint.
-const PREVIEW_HEIGHT: f32 = 150.0;
+const PREVIEW_HEIGHT: f32 = 130.0;
 /// The empty detail's text (`xbreakpoint.label.empty`).
 const EMPTY: &str = "Select a breakpoint";
 
@@ -152,9 +152,11 @@ impl BreakpointsDialog {
             }),
             // Closed by its title bar: the host forgets it.
             cx.on_release(|this, cx| {
-                if let Some(host) = this.host.upgrade() {
-                    host.update(cx, |h, cx| h.dialog_closed(cx));
-                }
+                // After the update that closed it (the host's, maybe).
+                let host = this.host.clone();
+                cx.defer(move |cx| {
+                    let _ = host.update(cx, |h, cx| h.dialog_closed(cx));
+                });
             }),
         ];
         let tree_focus = cx.focus_handle();
@@ -1160,7 +1162,7 @@ impl BreakpointsDialog {
         let condition = div()
             .flex()
             .flex_col()
-            .gap(px(6.0))
+            .gap(px(4.0))
             .child(
                 check(
                     "breakpoints-condition",

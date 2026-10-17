@@ -38,10 +38,10 @@ const CONTENT_WIDTH: f32 = 400.0;
 const INSET: f32 = 12.0;
 const ROW_GAP: f32 = 10.0;
 /// The pointer at the icon: its width and height.
-const POINTER_W: f32 = 16.0;
-const POINTER_H: f32 = 8.0;
+const POINTER_W: f32 = 12.0;
+const POINTER_H: f32 = 6.0;
 /// From the line's bottom to the pointer's tip.
-const POINTER_GAP: f32 = 1.0;
+const POINTER_GAP: f32 = 2.0;
 
 /// What the popup asks of its host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -560,10 +560,13 @@ impl DebuggerView {
         }
     }
 
-    /// The dialog closed itself.
+    /// A dialog was closed (by its title bar too): forgotten unless another
+    /// one is open by now.
     pub(crate) fn dialog_closed(&mut self, cx: &mut Context<Self>) {
-        self.dialog = None;
-        cx.notify();
+        if self.dialog.as_ref().is_some_and(|d| d.read(cx).is_err()) {
+            self.dialog = None;
+            cx.notify();
+        }
     }
 
     /// Jump to Source: the window opens the file at the line.
