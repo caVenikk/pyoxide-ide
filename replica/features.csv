@@ -90,7 +90,7 @@ Python exception breakpoints (Any exception on termination / on raise),run-debug
 Frames list and thread chooser (library frames folded),run-debug,must,yes,no,Community (#90)
 "Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,no,Community (#90)
 Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
-Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,yes,"Community; .oxide/workspace.toml, .idea/workspace.xml read once (#164)"
+Breakpoints saved per project with one-time import from .idea,run-debug,must,yes,partial,"Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check"
 "Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community
 Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; watches kept per run configuration
 "Logging breakpoints (log message, stack trace, Evaluate and log)",run-debug,should,yes,no,Community

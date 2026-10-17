@@ -11,7 +11,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 62% `██████░░░░` | 5 | 6 | 3 |
 | settings-import | 27% `███░░░░░░░` | 0 | 2 | 2 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 22% `██░░░░░░░░` | 3 | 3 | 20 |
+| run-debug | 20% `██░░░░░░░░` | 2 | 4 | 20 |
 | terminal | 12% `█░░░░░░░░░` | 0 | 4 | 17 |
 | vcs | 21% `██░░░░░░░░` | 3 | 2 | 20 |
 | settings | 41% `████░░░░░░` | 5 | 3 | 10 |
@@ -142,7 +142,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Frames list and thread chooser (library frames folded) | must | Community (#90) |
 | ⬜ | Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value) | must | Community (#90) |
 | ⬜ | Execution point and inline values in the editor | must | Community (#90) |
-| ✅ | Breakpoints saved per project with one-time import from .idea | must | Community; .oxide/workspace.toml, .idea/workspace.xml read once (#164) |
+| 🟡 | Breakpoints saved per project with one-time import from .idea | must | Community; saved in .oxide/workspace.toml (#164); .idea/workspace.xml import to check |
 | ⬜ | Evaluate Expression dialog, Quick Evaluate and value tooltip | should | Community |
 | ⬜ | Watches and the evaluate field in Variables | should | Community; watches kept per run configuration |
 | ⬜ | Logging breakpoints (log message, stack trace, Evaluate and log) | should | Community |
