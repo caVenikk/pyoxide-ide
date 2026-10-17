@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 51%** `██████████░░░░░░░░░░`
+**Overall parity: 52%** `██████████░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 40% `████░░░░░░` | 6 | 5 | 15 |
 | terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
-| vcs | 40% `████░░░░░░` | 6 | 3 | 16 |
+| vcs | 46% `█████░░░░░` | 7 | 3 | 15 |
 | settings | 79% `████████░░` | 12 | 2 | 4 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -193,7 +193,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Commit tool window (changes tree with check boxes, message, Commit, legend, errors) | must | Community; Cmd+K / Ctrl+K, non-modal commit, Amend, options, commit checks (#170); no grouping by directory, Shelve, change lists |
 | ⬜ | Amend and commit options (author, sign-off, hooks) | must | Community (#91) |
 | ✅ | Rollback of files (Rollback Changes dialog) | must | Community (#170) |
-| ⬜ | Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side) | must | Community (#91) |
+| ✅ | Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side) | must | Community; diff tab from the Commit window, marker popup and Project view, word highlights, synced scroll, F7 / Shift+F7, Compare Next / Previous File, Jump to Source, settings popup (#171) |
 | ✅ | VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind) | must | Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28) |
 | 🟡 | Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout) | must | Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch work (#172), favourites not saved |
 | ✅ | Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected) | must | Community; credentials through the user's helper and ssh-agent (#91); push dialog, force-with-lease, Commit and Push (#172) |
