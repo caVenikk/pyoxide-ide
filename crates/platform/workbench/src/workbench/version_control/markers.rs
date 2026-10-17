@@ -64,7 +64,7 @@ pub(in crate::workbench) struct ChangeMarkers {
 type BaseOf = (String, PathBuf);
 
 /// The base of a file. Unversioned, ignored and added files have none.
-fn base_of(snapshot: &Snapshot, path: &Path) -> Option<BaseOf> {
+pub(in crate::workbench) fn base_of(snapshot: &Snapshot, path: &Path) -> Option<BaseOf> {
     if !path.starts_with(&snapshot.info.root) {
         return None;
     }
@@ -123,7 +123,7 @@ impl Workbench {
     ) {
         let m = &mut self.version_control.markers;
         if let Some(t) = m.trackers.remove(&editor.entity_id())
-            && !self.tabs.iter().any(|tab| tab.path == t.path)
+            && !self.tabs.iter().any(|tab| tab.is_file(&t.path))
         {
             m.colors.set_document(&t.path, None);
         }
@@ -166,12 +166,13 @@ impl Workbench {
         let wanted: Vec<(EntityId, PathBuf, bool, Option<BaseOf>)> = self
             .tabs
             .iter()
-            .map(|tab| {
+            .filter_map(|tab| Some((tab.path()?, tab.editor()?)))
+            .map(|(path, editor)| {
                 (
-                    tab.editor.entity_id(),
-                    tab.path.clone(),
-                    tab.editor.read(cx).is_modified(),
-                    base_of(&snapshot, &tab.path),
+                    editor.entity_id(),
+                    path.clone(),
+                    editor.read(cx).is_modified(),
+                    base_of(&snapshot, path),
                 )
             })
             .collect();
@@ -305,8 +306,7 @@ impl Workbench {
             previous_range(s.ranges(), range.line1).is_some(),
             next_range(s.ranges(), range.line1).is_some(),
             true,
-            // Comes with the diff viewer.
-            false,
+            true,
             range.vcs_line1 < range.vcs_line2,
         ];
         let e = editor.read(cx);
@@ -403,7 +403,7 @@ impl Workbench {
                     status.update(cx, |s, cx| s.rollback(&[i], cx));
                 }
             }
-            PopupAction::ShowDiff => {}
+            PopupAction::ShowDiff => self.vcs_show_diff_of_range(&status, &range, window, cx),
             PopupAction::Copy => Self::vcs_copy(&status, &range, cx),
         }
     }
@@ -597,9 +597,45 @@ impl Workbench {
         }
     }
 
-    /// Show Diff for Lines: the diff viewer is not there yet; the popup's
-    /// key takes it, so that it does not duplicate the line.
-    fn vcs_show_diff_lines(&mut self, _: &ShowDiffLines, _: &mut Window, _: &mut Context<Self>) {}
+    /// Show Diff for Lines: the file's diff at the range of the popup or
+    /// at the caret (the reference shows the range alone in a dialog).
+    fn vcs_show_diff_lines(
+        &mut self,
+        _: &ShowDiffLines,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((editor, status)) = self.vcs_active() else {
+            return;
+        };
+        let range = self.vcs_popup_range(&editor, cx).or_else(|| {
+            let s = status.read(cx);
+            let i = range_at_line(s.ranges(), s.caret_line(cx)?)?;
+            s.ranges().get(i).copied()
+        });
+        if let Some(range) = range {
+            self.vcs_show_diff_of_range(&status, &range, window, cx);
+        }
+    }
+
+    /// Opens the diff of a tab's file at a range.
+    fn vcs_show_diff_of_range(
+        &mut self,
+        status: &Entity<LineStatus>,
+        range: &Range,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = status
+            .read(cx)
+            .editor()
+            .and_then(|e| e.read(cx).path().cloned());
+        if let Some(path) = path {
+            self.vcs_close_popup(cx);
+            let line = vcs_ui::diff::ScrollTo::Line(range.line1);
+            self.show_diff_of(path, line, window, cx);
+        }
+    }
 
     fn vcs_copy_change_lines(
         &mut self,

@@ -205,6 +205,11 @@ impl IconName {
     pub const BACK: Self = Self("general/left");
     pub const FORWARD: Self = Self("general/right");
     pub const PROJECT_CONFIGURABLE: Self = Self("general/projectConfigurable");
+    /// Jump to Source in a diff (`AllIcons.Actions.EditSource`).
+    pub const EDIT: Self = Self("general/edit");
+    /// The diff viewer's modes.
+    pub const DIFF_SIDE_BY_SIDE: Self = Self("diff/sideBySide");
+    pub const DIFF_UNIFIED: Self = Self("diff/unified");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -237,6 +242,7 @@ platform_icons! {
         "actions/checked", "actions/inSelection", "actions/newFolder", "actions/shortcutFilter",
         "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
+        "diff/sideBySide", "diff/unified",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/css", "fileTypes/csv",
         "fileTypes/docker", "fileTypes/dockerCompose", "fileTypes/dockerIgnore",
         "fileTypes/editorConfig", "fileTypes/html", "fileTypes/ignored", "fileTypes/image",
@@ -247,7 +253,7 @@ platform_icons! {
         "general/add", "general/chevronDown", "general/chevronLeft", "general/chevronRight",
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down",
-        "general/dropdown", "general/expandAll", "general/filter",
+        "general/dropdown", "general/edit", "general/expandAll", "general/filter",
         "general/help", "general/hide", "general/history",
         "general/inspections/inspectionsOK", "general/left", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",

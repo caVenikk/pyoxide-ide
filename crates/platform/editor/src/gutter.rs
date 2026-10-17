@@ -39,6 +39,22 @@ const DELETED_HALF: f32 = 5.0;
 pub(crate) const BACKGROUND_INTO_GUTTER: f32 = 2.0;
 /// Room after an after-line text for the reference's drop-down triangle.
 const AFTER_TEXT_ICON: f32 = 16.0;
+/// How much of the editor's background a faded background is
+/// (`TextDiffTypeFactory.MIDDLE_COLOR_FACTOR`).
+const FADED_BACKGROUND: f32 = 0.6;
+
+/// `a` mixed with `b`, `factor` of `b` (the reference's `ColorUtil.mix`).
+fn mix(a: Hsla, b: Hsla, factor: f32) -> Hsla {
+    let (a, b) = (gpui::Rgba::from(a), gpui::Rgba::from(b));
+    let m = |x: f32, y: f32| x * (1.0 - factor) + y * factor;
+    gpui::Rgba {
+        r: m(a.r, b.r),
+        g: m(a.g, b.g),
+        b: m(a.b, b.b),
+        a: m(a.a, b.a),
+    }
+    .into()
+}
 
 /// The gutter's lanes in window x, for hit testing.
 #[derive(Clone, Copy, Debug, Default)]
@@ -135,6 +151,11 @@ pub(crate) struct Frame<'a> {
     /// Window x of text column 0 without scrolling (the gutter's right
     /// edge in the reference's terms).
     pub text_x: Pixels,
+    /// The gutter's left edge and width.
+    pub gutter_x: Pixels,
+    pub gutter_width: Pixels,
+    /// The gutter is at the right of the text ([`Editor::set_mirrored`]).
+    pub mirrored: bool,
     pub scroll: gpui::Point<Pixels>,
     pub line_height: Pixels,
     pub char_width: Pixels,
@@ -168,6 +189,18 @@ impl Frame<'_> {
         if !self.gutter {
             return Lanes::default();
         }
+        if self.mirrored {
+            // The markers' lane next to the text, the line numbers at the
+            // right edge.
+            let markers_left = self.gutter_x + px(MARKER_LANE_GAP);
+            return Lanes {
+                numbers: (
+                    markers_left + px(MARKER_LANE),
+                    self.gutter_x + self.gutter_width,
+                ),
+                markers: (markers_left, markers_left + px(MARKER_LANE)),
+            };
+        }
         let markers_left = self.text_x - px(MARKER_LANE + MARKER_LANE_GAP);
         Lanes {
             numbers: (
@@ -175,6 +208,22 @@ impl Frame<'_> {
                 self.numbers_right + px(GAP_AFTER_LINE_NUMBERS),
             ),
             markers: (markers_left, markers_left + px(MARKER_LANE)),
+        }
+    }
+
+    /// Where a full-line background goes across: the text and a little of
+    /// the gutter, or the whole width.
+    fn background_x(&self, over_gutter: bool) -> (Pixels, Pixels) {
+        match (over_gutter, self.mirrored) {
+            (true, _) => (self.bounds.left(), self.bounds.right()),
+            (false, false) => (
+                self.text_x - px(BACKGROUND_INTO_GUTTER),
+                self.bounds.right(),
+            ),
+            (false, true) => (
+                self.bounds.left(),
+                self.gutter_x + px(BACKGROUND_INTO_GUTTER),
+            ),
         }
     }
 }
@@ -250,21 +299,42 @@ pub(crate) fn prepaint(
             paint.icon_cells.push(cell(row));
         }
         if shown && let Some(bg) = d.background {
-            let c = theme.color(bg.color);
+            let mut c = theme.color(bg.color);
+            if bg.faded {
+                c = mix(c, theme.color(UiRole::EditorBackground), FADED_BACKGROUND);
+            }
+            let (x0, x1) = frame.background_x(bg.over_gutter);
             for line in lines.start.max(visible.start)..lines.end.min(visible.end) {
                 for row in frame.rows_of(line) {
                     backgrounds.push((
                         bg.layer,
                         Bounds::from_corners(
-                            point(
-                                frame.text_x - px(BACKGROUND_INTO_GUTTER),
-                                frame.top_of(row.row),
-                            ),
-                            point(frame.bounds.right(), frame.top_of(row.row) + lh),
+                            point(x0, frame.top_of(row.row)),
+                            point(x1, frame.top_of(row.row) + lh),
                         ),
                         c,
                     ));
                 }
+            }
+        }
+        // A background between lines: a line on the boundary, two pixels
+        // thick (inside the view at the text's top).
+        if entry.between
+            && let Some(bg) = d.background
+        {
+            let y = if lines.start >= len_lines {
+                frame.top_of(frame.total_rows)
+            } else {
+                frame.top_of(editor.line_row(lines.start))
+            };
+            let y = if lines.start == 0 { y + px(1.0) } else { y };
+            if y >= frame.bounds.top() - px(2.0) && y <= frame.bounds.bottom() + px(2.0) {
+                let (x0, x1) = frame.background_x(bg.over_gutter);
+                backgrounds.push((
+                    bg.layer,
+                    Bounds::from_corners(point(x0, y - px(1.0)), point(x1, y + px(1.0))),
+                    theme.color(bg.color),
+                ));
             }
         }
         if frame.gutter

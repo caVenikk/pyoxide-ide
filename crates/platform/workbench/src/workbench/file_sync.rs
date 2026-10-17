@@ -365,7 +365,7 @@ impl Workbench {
 
     /// The tab of a file was closed.
     pub(super) fn sync_tab_closed(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if !self.tabs.iter().any(|t| t.path == path) {
+        if !self.tabs.iter().any(|t| t.is_file(path)) {
             self.file_sync.files.remove(path);
             self.watch_folders_of_open_files(cx);
         }
@@ -394,18 +394,22 @@ impl Workbench {
     /// automatically (its file is gone, or changed on disk) asks first.
     /// True when the tab stays for now.
     pub(super) fn sync_close_asks(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
-        let Some(tab) = self.tabs.get(index) else {
+        let Some((path, editor)) = self
+            .tabs
+            .get(index)
+            .and_then(|t| Some((t.path()?, t.editor()?)))
+        else {
             return false;
         };
         let held = self
             .file_sync
             .files
-            .get(&tab.path)
+            .get(path)
             .is_some_and(|s| s.deleted || s.conflict.is_some());
-        if !held || !tab.editor.read(cx).is_modified() {
+        if !held || !editor.read(cx).is_modified() {
             return false;
         }
-        let dialog = SyncDialog::CloseModified(tab.path.clone());
+        let dialog = SyncDialog::CloseModified(path.clone());
         self.queue_sync_dialog(dialog, cx);
         true
     }
@@ -500,7 +504,11 @@ impl Workbench {
     /// when it quits.
     fn save_on_quit(&mut self, cx: &mut Context<Self>) {
         for i in 0..self.tabs.len() {
-            let (path, editor) = (self.tabs[i].path.clone(), self.tabs[i].editor.clone());
+            let (Some(path), Some(editor)) =
+                (self.tabs[i].path().cloned(), self.tabs[i].editor().cloned())
+            else {
+                continue;
+            };
             if !editor.read(cx).is_modified() {
                 continue;
             }
@@ -548,9 +556,8 @@ impl Workbench {
     /// tree lists their folders itself), and the status bar says so.
     pub(super) fn synchronize_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         let open: Vec<PathBuf> = self
-            .tabs
-            .iter()
-            .map(|t| t.path.clone())
+            .tab_paths()
+            .into_iter()
             .filter(|t| paths.iter().any(|p| t.starts_with(p)))
             .collect();
         if !open.is_empty() {
@@ -703,15 +710,16 @@ impl Workbench {
         let checks: Vec<Check> = self
             .tabs
             .iter()
-            .filter(|t| paths.as_ref().is_none_or(|p| p.contains(&t.path)))
-            .filter_map(|t| {
-                let state = self.file_sync.files.get(&t.path)?;
+            .filter_map(|t| Some((t.path()?, t.editor()?)))
+            .filter(|(path, _)| paths.as_ref().is_none_or(|p| p.contains(path)))
+            .filter_map(|(path, editor)| {
+                let state = self.file_sync.files.get(path)?;
                 if state.saving > 0 {
                     return None;
                 }
-                let buffer = t.editor.read(cx).buffer();
+                let buffer = editor.read(cx).buffer();
                 Some(Check {
-                    path: t.path.clone(),
+                    path: path.clone(),
                     epoch: state.epoch,
                     stamp: state.stamp,
                     known: state.known.clone(),
@@ -868,7 +876,7 @@ impl Workbench {
         }
         let path = path.to_owned();
         self.in_window(cx, move |this, window, cx| {
-            if let Some(index) = this.tabs.iter().position(|t| t.path == path) {
+            if let Some(index) = this.file_tab(&path) {
                 this.close_tab(index, window, cx);
             }
         });

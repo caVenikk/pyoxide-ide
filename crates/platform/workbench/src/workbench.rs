@@ -36,10 +36,12 @@ use crate::run::RunToolWindow;
 
 use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Tab as SeTab};
 use crate::settings::SaveSettings;
+use crate::tab_view::AnyTabView;
 
 mod branches;
 mod commit;
 mod debug;
+mod diff;
 mod file_events;
 mod file_sync;
 mod history;
@@ -137,13 +139,67 @@ pub enum WorkbenchEvent {
     ActiveFileChanged(Option<PathBuf>),
 }
 
-/// An open file.
+/// What an editor tab shows.
+enum TabContent {
+    /// A file in its editor, with the editor's find bar (shown while it is
+    /// open).
+    File {
+        path: PathBuf,
+        editor: Entity<Editor>,
+        find: Entity<FindBar>,
+    },
+    /// A view that is no file's editor (a diff, [`crate::tab_view`]).
+    View(Box<dyn AnyTabView>),
+}
+
+/// An editor tab.
 struct Tab {
-    path: PathBuf,
-    editor: Entity<Editor>,
-    /// The editor's find bar (shown while it is open).
-    find: Entity<FindBar>,
-    _subscriptions: [Subscription; 3],
+    content: TabContent,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Tab {
+    /// The file of a file's tab.
+    fn path(&self) -> Option<&PathBuf> {
+        match &self.content {
+            TabContent::File { path, .. } => Some(path),
+            TabContent::View(_) => None,
+        }
+    }
+
+    fn editor(&self) -> Option<&Entity<Editor>> {
+        match &self.content {
+            TabContent::File { editor, .. } => Some(editor),
+            TabContent::View(_) => None,
+        }
+    }
+
+    fn find(&self) -> Option<&Entity<FindBar>> {
+        match &self.content {
+            TabContent::File { find, .. } => Some(find),
+            TabContent::View(_) => None,
+        }
+    }
+
+    fn view(&self) -> Option<&dyn AnyTabView> {
+        match &self.content {
+            TabContent::File { .. } => None,
+            TabContent::View(view) => Some(view.as_ref()),
+        }
+    }
+
+    /// The tab is `path`'s editor.
+    fn is_file(&self, path: &Path) -> bool {
+        self.path().is_some_and(|p| p == path)
+    }
+
+    /// What gets the focus when the tab is selected.
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match &self.content {
+            TabContent::File { editor, .. } => editor.focus_handle(cx),
+            TabContent::View(view) => view.focus_handle(cx),
+        }
+    }
 }
 
 /// The main window: toolbar, stripes, project tool window, editor area,
@@ -225,6 +281,8 @@ pub struct Workbench {
     debugger: Entity<debugger_ui::DebuggerView>,
     /// The Commit tool window and its dialogs.
     commit_ui: commit::CommitUi,
+    /// The diff tabs (`diff.rs`).
+    diff_tabs: diff::DiffTabs,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -402,6 +460,7 @@ impl Workbench {
             remote_ui: Default::default(),
             debugger,
             commit_ui,
+            diff_tabs: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -489,8 +548,10 @@ impl Workbench {
         let path = PathBuf::from(&title);
         let mut buffer = text::Buffer::new(&text);
         buffer.set_read_only(true);
-        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
-            self.tabs[i].editor.update(cx, |e, cx| {
+        if let Some(i) = self.file_tab(&path)
+            && let Some(editor) = self.tabs[i].editor().cloned()
+        {
+            editor.update(cx, |e, cx| {
                 *e.buffer_mut() = buffer;
                 e.buffer_reloaded(cx);
             });
@@ -527,7 +588,7 @@ impl Workbench {
 
     /// The file of the active editor tab.
     pub fn active_file(&self, _: &App) -> Option<PathBuf> {
-        self.active.map(|i| self.tabs[i].path.clone())
+        self.active.and_then(|i| self.tabs[i].path().cloned())
     }
 
     /// The Run tool window.
@@ -584,20 +645,25 @@ impl Workbench {
 
     /// The editor of the active tab.
     pub fn active_editor(&self) -> Option<&Entity<Editor>> {
-        self.active.map(|i| &self.tabs[i].editor)
+        self.active.and_then(|i| self.tabs[i].editor())
     }
 
     /// The find bar of the active tab's editor.
     pub fn active_find_bar(&self) -> Option<&Entity<FindBar>> {
-        self.active.map(|i| &self.tabs[i].find)
+        self.active.and_then(|i| self.tabs[i].find())
     }
 
     /// The editor of the tab of `path`, when the file is open.
     pub fn editor_for(&self, path: &Path) -> Option<Entity<Editor>> {
         self.tabs
             .iter()
-            .find(|t| t.path == path)
-            .map(|t| t.editor.clone())
+            .find(|t| t.is_file(path))
+            .and_then(|t| t.editor().cloned())
+    }
+
+    /// The index of the tab of `path`'s editor.
+    fn file_tab(&self, path: &Path) -> Option<usize> {
+        self.tabs.iter().position(|t| t.is_file(path))
     }
 
     /// The Find in Files popup (drawn while it is open).
@@ -605,9 +671,9 @@ impl Workbench {
         &self.find_in_files
     }
 
-    /// Paths of the open tabs, in order.
+    /// Paths of the open files' tabs, in order.
     pub fn tab_paths(&self) -> Vec<PathBuf> {
-        self.tabs.iter().map(|t| t.path.clone()).collect()
+        self.tabs.iter().filter_map(|t| t.path().cloned()).collect()
     }
 
     /// Background work is still running (reads, writes, tree listings).
@@ -640,17 +706,24 @@ impl Workbench {
             "tool_window_areas": self.tool_windows.areas_json(),
             "title_path": self.title_path(cx),
             "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
-            "tabs": self.tabs.iter().map(|t| {
-                let mut tab = json!({
-                    "path": rel(&t.path),
-                    "modified": t.editor.read(cx).is_modified(),
-                    "deleted": self.is_deleted_on_disk(&t.path),
-                });
-                // Only a coloured tab has the key.
-                if let Some(role) = self.vcs_file_colors().role(&t.path, false) {
-                    tab["color"] = json!(role.name());
+            "tabs": self.tabs.iter().map(|t| match &t.content {
+                TabContent::File { path, editor, .. } => {
+                    let mut tab = json!({
+                        "path": rel(path),
+                        "modified": editor.read(cx).is_modified(),
+                        "deleted": self.is_deleted_on_disk(path),
+                    });
+                    // Only a coloured tab has the key.
+                    if let Some(role) = self.vcs_file_colors().role(path, false) {
+                        tab["color"] = json!(role.name());
+                    }
+                    tab
                 }
-                tab
+                TabContent::View(view) => json!({
+                    "title": view.title(cx).to_string(),
+                    "preview": view.is_preview(cx),
+                    "view": view.state(cx),
+                }),
             }).collect::<Vec<_>>(),
             "active_tab": self.active,
             "navigation": self.navigation.history.state_json(rel),
@@ -668,6 +741,7 @@ impl Workbench {
             "notifications": self.notifications.read(cx).state_json(cx),
             "theme": cx.theme().id(),
             "vcs": self.vcs_state_json(cx),
+            "diff": self.diff_state_json(cx),
             "switch_popup": self.switch_popup_json(cx),
             "keymap": crate::keymap::active::state_json(cx),
         })
@@ -685,6 +759,7 @@ impl Workbench {
         }
         self.save_all(cx);
         self.tabs.clear();
+        self.diff_tabs_cleared(cx);
         self.active = None;
         self.clear_navigation();
         self.tool_windows.show(ToolWindow::Project);
@@ -715,8 +790,13 @@ impl Workbench {
     /// Opens a file in a tab (or selects its tab); reading happens off the
     /// UI thread.
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+        if let Some(i) = self.file_tab(&path) {
             self.activate(i, window, cx);
+            return;
+        }
+        // A diff that edits the file's document: the tab continues with it.
+        if let Some(buffer) = self.diff_document(&path, cx) {
+            self.add_tab(path, buffer, window, cx);
             return;
         }
         self.pending += 1;
@@ -752,10 +832,12 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+        if let Some(i) = self.file_tab(&path)
+            && let Some(editor) = self.tabs[i].editor().cloned()
+        {
             let left = self.current_place(cx);
             self.activate(i, window, cx);
-            self.tabs[i].editor.update(cx, |e, cx| {
+            editor.update(cx, |e, cx| {
                 e.go_to(point.line + 1, Some(point.column + 1), cx)
             });
             if let Some(left) = left {
@@ -855,7 +937,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(i) = self.tabs.iter().position(|t| t.path == path) {
+        if let Some(i) = self.file_tab(&path) {
             self.activate(i, window, cx);
             return;
         }
@@ -913,12 +995,11 @@ impl Workbench {
         self.sync_tab_opened(&path, &editor, window, cx);
         self.vcs_tab_opened(&path, &editor, window, cx);
         self.debug_tab_opened(&editor, window, cx);
+        self.diff_tab_opened(&path, &editor, cx);
         let index = self.tabs.len();
         self.tabs.push(Tab {
-            path,
-            editor,
-            find,
-            _subscriptions: [subscription, find_subscription, observe_find],
+            content: TabContent::File { path, editor, find },
+            _subscriptions: vec![subscription, find_subscription, observe_find],
         });
         self.message = None;
         self.activate(index, window, cx);
@@ -939,9 +1020,10 @@ impl Workbench {
             self.vcs_close_popup(cx);
         }
         self.active = Some(index);
-        let path = self.tabs[index].path.clone();
-        remember_file(&mut self.recently_viewed, &path);
-        window.focus(&self.tabs[index].editor.focus_handle(cx));
+        if let Some(path) = self.tabs[index].path().cloned() {
+            remember_file(&mut self.recently_viewed, &path);
+        }
+        window.focus(&self.tabs[index].focus_handle(cx));
         self.report_active_file(cx);
         cx.notify();
     }
@@ -999,8 +1081,8 @@ impl Workbench {
     /// when the file is written.
     fn save_tab_task(&mut self, index: usize, cx: &mut Context<Self>) -> Option<Task<()>> {
         let tab = self.tabs.get(index)?;
-        let editor = tab.editor.clone();
-        let path = tab.path.clone();
+        let editor = tab.editor()?.clone();
+        let path = tab.path()?.clone();
         if !editor.read(cx).is_modified() {
             return None;
         }
@@ -1064,6 +1146,8 @@ impl Workbench {
         }
         // A file edited in the Find in Files preview without a tab.
         self.find_in_files.update(cx, |p, cx| p.save_preview(cx));
+        // And in a diff.
+        self.diff_save_documents(cx);
     }
 
     /// Closes a tab; a modified file is saved first (no prompt). A modified
@@ -1076,11 +1160,17 @@ impl Workbench {
         self.save_tab(index, cx);
         self.tab_closing(cx);
         let tab = self.tabs.remove(index);
-        self.sync_tab_closed(&tab.path, cx);
-        self.vcs_tab_closed(&tab.editor, cx);
-        self.debug_tab_closed(&tab.editor, cx);
-        if let Some(view) = &self.code_intel {
-            view.update(cx, |v, cx| v.editor_closed(&tab.path, cx));
+        match &tab.content {
+            TabContent::File { path, editor, .. } => {
+                self.sync_tab_closed(path, cx);
+                self.vcs_tab_closed(editor, cx);
+                self.debug_tab_closed(editor, cx);
+                if let Some(view) = &self.code_intel {
+                    view.update(cx, |v, cx| v.editor_closed(path, cx));
+                }
+                self.diff_file_tab_closed(path, cx);
+            }
+            TabContent::View(view) => self.view_tab_closed(view.entity_id(), cx),
         }
         self.active = match self.active {
             _ if self.tabs.is_empty() => None,
@@ -1089,7 +1179,7 @@ impl Workbench {
             other => other,
         };
         match self.active {
-            Some(a) => window.focus(&self.tabs[a].editor.focus_handle(cx)),
+            Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
             None => window.focus(&self.focus),
         }
         self.report_active_file(cx);
@@ -1112,8 +1202,8 @@ impl Workbench {
     }
 
     fn focus_editor(&mut self, _: &FocusEditor, window: &mut Window, cx: &mut Context<Self>) {
-        match self.active_editor() {
-            Some(e) => window.focus(&e.focus_handle(cx)),
+        match self.active {
+            Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
             None => window.focus(&self.focus),
         }
     }
@@ -1219,9 +1309,9 @@ impl Workbench {
             editors: self
                 .tabs
                 .iter()
-                .map(|t| (t.path.clone(), t.editor.clone()))
+                .filter_map(|t| Some((t.path()?.clone(), t.editor()?.clone())))
                 .collect(),
-            current_file: self.active.map(|i| self.tabs[i].path.clone()),
+            current_file: self.active.and_then(|i| self.tabs[i].path().cloned()),
             recently_viewed: self.recently_viewed.clone(),
             recently_changed: self.recently_changed.clone(),
             tree_folder,
@@ -1253,12 +1343,12 @@ impl Workbench {
             self.remember_focus(window, cx);
         }
         let mut viewed = self.recently_viewed.clone();
-        for tab in &self.tabs {
-            if !viewed.contains(&tab.path) {
-                viewed.push(tab.path.clone());
+        for path in self.tab_paths() {
+            if !viewed.contains(&path) {
+                viewed.push(path);
             }
         }
-        let current = self.active.map(|i| self.tabs[i].path.clone());
+        let current = self.active.and_then(|i| self.tabs[i].path().cloned());
         // The current file first.
         if let Some(c) = &current {
             viewed.retain(|p| p != c);
@@ -1296,7 +1386,7 @@ impl Workbench {
                 if *edited {
                     self.recently_changed.retain(|p| p != path);
                 }
-                if let Some(i) = self.tabs.iter().position(|t| &t.path == path) {
+                if let Some(i) = self.file_tab(path) {
                     self.close_tab(i, window, cx);
                     // The popup stays open with the focus.
                     window.focus(&self.recent_files.focus_handle(cx));
@@ -1344,9 +1434,9 @@ impl Workbench {
                 e.buffer().slice(e.selections().primary().range())
             });
         let mut recent = self.recently_viewed.clone();
-        for tab in &self.tabs {
-            if !recent.contains(&tab.path) {
-                recent.push(tab.path.clone());
+        for path in self.tab_paths() {
+            if !recent.contains(&path) {
+                recent.push(path);
             }
         }
         let focus = window.focused(cx);
@@ -1354,8 +1444,9 @@ impl Workbench {
         let overrides = self
             .tabs
             .iter()
-            .filter(|t| t.editor.read(cx).is_modified())
-            .map(|t| (t.path.clone(), t.editor.read(cx).buffer().rope().clone()))
+            .filter_map(|t| Some((t.path()?, t.editor()?)))
+            .filter(|(_, e)| e.read(cx).is_modified())
+            .map(|(p, e)| (p.clone(), e.read(cx).buffer().rope().clone()))
             .collect();
         search_everywhere::OpenContext {
             root: self.project(cx).map(|p| p.root().to_owned()),
@@ -1364,7 +1455,7 @@ impl Workbench {
             overrides,
             selection,
             open_files: self.tab_paths(),
-            current_file: self.active.map(|i| self.tabs[i].path.clone()),
+            current_file: self.active.and_then(|i| self.tabs[i].path().cloned()),
             recent_files: recent,
             actions,
             source_roots: self.project_files.read(cx).source_roots(),
@@ -1873,25 +1964,47 @@ impl Workbench {
         let hover = theme.color(UiRole::TabHover);
         let active_bg = theme.color(UiRole::TabActive);
         let outline = theme.color(UiRole::TabUnderline);
-        // A file gone from disk whose editor keeps its changes; else the
-        // colour of its version control status.
-        let status = self.vcs_file_colors().color(&tab.path, false, cx);
-        let text: Hsla = if self.is_deleted_on_disk(&tab.path) {
-            theme.color(UiRole::Danger)
-        } else if selected {
-            status.unwrap_or(theme.color(UiRole::TabActiveText))
-        } else {
-            status
-                .unwrap_or(theme.color(UiRole::TabInactiveText))
-                .opacity(INACTIVE_TAB_ALPHA)
+        let (title, icon, text, modified, tooltip) = match &tab.content {
+            TabContent::File { path, editor, .. } => {
+                // A file gone from disk whose editor keeps its changes;
+                // else the colour of its version control status.
+                let status = self.vcs_file_colors().color(path, false, cx);
+                let text: Hsla = if self.is_deleted_on_disk(path) {
+                    theme.color(UiRole::Danger)
+                } else if selected {
+                    status.unwrap_or(theme.color(UiRole::TabActiveText))
+                } else {
+                    status
+                        .unwrap_or(theme.color(UiRole::TabInactiveText))
+                        .opacity(INACTIVE_TAB_ALPHA)
+                };
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let modified = editor.read(cx).is_modified();
+                (
+                    SharedString::from(name),
+                    self.file_types.icon(path),
+                    text,
+                    modified,
+                    None,
+                )
+            }
+            // A preview tab's title is grey.
+            TabContent::View(view) => {
+                let text: Hsla = if view.is_preview(cx) {
+                    theme.color(UiRole::TextMuted)
+                } else if selected {
+                    theme.color(UiRole::TabActiveText)
+                } else {
+                    theme
+                        .color(UiRole::TabInactiveText)
+                        .opacity(INACTIVE_TAB_ALPHA)
+                };
+                (view.title(cx), view.icon(cx), text, false, view.tooltip(cx))
+            }
         };
-        let modified = tab.editor.read(cx).is_modified();
-        let name = tab
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let title = name;
         let group: SharedString = format!("tab-{index}").into();
         // A modified file shows a dot where the close button is; hovering
         // the dot shows the close button (as the reference IDE's New UI tabs
@@ -1952,9 +2065,10 @@ impl Workbench {
                 d.border_color(gpui::transparent_black())
                     .hover(move |s| s.bg(hover))
             })
-            .child(Icon::new(self.file_types.icon(&tab.path)))
+            .child(Icon::new(icon))
             .child(div().whitespace_nowrap().text_color(text).child(title))
             .child(close)
+            .when_some(tooltip, |d, t| d.tooltip(Tooltip::text(t, None)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.activate(index, window, cx);
             }));
@@ -2065,12 +2179,14 @@ impl Workbench {
                 )
                 .children(
                     self.tabs[active]
-                        .find
-                        .read(cx)
-                        .is_open()
-                        .then(|| self.tabs[active].find.clone()),
+                        .find()
+                        .filter(|find| find.read(cx).is_open())
+                        .cloned(),
                 )
-                .child(self.editor_container(&self.tabs[active].editor, cx))
+                .child(match &self.tabs[active].content {
+                    TabContent::File { editor, .. } => self.editor_container(editor, cx),
+                    TabContent::View(view) => div().flex_1().min_h(px(0.0)).child(view.view()),
+                })
                 .into_any_element();
         }
         // As the reference IDE's text painter draws them: a 16 px label
@@ -2426,6 +2542,7 @@ impl Render for Workbench {
         root = self.remote_actions(root, cx);
         root = self.debug_actions(root, cx);
         root = self.commit_actions(root, cx);
+        root = self.diff_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);
         root.flex()
