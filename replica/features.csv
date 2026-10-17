@@ -159,9 +159,9 @@ System Settings page (autosave and sync of external changes),settings,must,yes,y
 Keymap page with a read-only actions tree and search by name and by shortcut,settings,must,yes,yes,Community (#40)
 Editor > Font page,settings,must,yes,yes,"Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants"
 Editor > General page (soft wraps),settings,must,yes,partial,Community; Soft Wraps group only (#154)
-"Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,no,Community (#75)
-"Add Python Interpreter dialog (new virtualenv or uv, existing interpreter)",settings,must,yes,no,Community; through py-env (#75)
-Configured interpreters as an application list with one-time import from the reference,settings,must,yes,no,Community; interpreters of the reference that still exist (#75)
+"Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,yes,"Community; combo, Add Interpreter, Show All… dialog with rename / remove / paths, packages panel placeholder (#75)"
+"Add Python Interpreter dialog (new virtualenv or uv, existing interpreter)",settings,must,yes,yes,"Community; Virtualenv and uv, select existing, all validation messages, Pythons to download through uv (#75)"
+Configured interpreters as an application list with one-time import from the reference,settings,must,yes,yes,"Community; interpreters of the reference that still exist (#75); interpreters.toml, imported once from jdk.table.xml (#75)"
 Python > Type Engine and Python > Tools > External Tools pages,settings,must,yes,yes,"Community; project pages, off the UI thread (#154); no Configure dialog or Install / Upgrade yet"
 Search highlight on settings pages (spotlight),settings,should,yes,no,Community
 "Keymap editing (custom keymaps, edit shortcuts)",settings,should,yes,no,Community
