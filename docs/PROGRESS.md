@@ -2,7 +2,7 @@
 
 _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by hand._
 
-**Overall parity: 42%** `████████░░░░░░░░░░░░`
+**Overall parity: 43%** `█████████░░░░░░░░░░░`
 
 | Area | Parity | Done | Partial | Todo |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
 | run-debug | 20% `██░░░░░░░░` | 2 | 4 | 20 |
 | terminal | 12% `█░░░░░░░░░` | 0 | 4 | 17 |
-| vcs | 21% `██░░░░░░░░` | 3 | 2 | 20 |
+| vcs | 32% `███░░░░░░░` | 5 | 2 | 18 |
 | settings | 53% `█████░░░░░` | 7 | 3 | 8 |
 | docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
 | platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
@@ -190,9 +190,9 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ✅ | Git repository detection and git executable lookup | must | Community; the git executable for every operation, ADR 0016 (#91) |
 | ✅ | File status colours in the project tree, editor tabs and file lists (ignored included) | must | Community; tree, tabs, Recent Files and Go to File rows, unsaved edits at once (#169) |
 | 🟡 | Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change) | must | Community; markers within 5 ms of a keystroke, popup with Rollback / Copy / Next / Previous (#169); no Show Diff (no diff viewer yet), no Commit this change |
-| ⬜ | Commit tool window (changes tree with check boxes, message, Commit, legend, errors) | must | Community; Cmd+K / Ctrl+K, non-modal commit (#91) |
+| ✅ | Commit tool window (changes tree with check boxes, message, Commit, legend, errors) | must | Community; Cmd+K / Ctrl+K, non-modal commit, Amend, options, commit checks (#170); no grouping by directory, Shelve, change lists |
 | ⬜ | Amend and commit options (author, sign-off, hooks) | must | Community (#91) |
-| ⬜ | Rollback of files (Rollback Changes dialog) | must | Community (#91) |
+| ✅ | Rollback of files (Rollback Changes dialog) | must | Community (#170) |
 | ⬜ | Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side) | must | Community (#91) |
 | ✅ | VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind) | must | Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28) |
 | 🟡 | Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout) | must | Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch wait for #170 #172, favourites not saved |

@@ -128,9 +128,9 @@ Conda environment activation in the terminal,terminal,could,yes,no,Community
 Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; the git executable for every operation, ADR 0016 (#91)"
 "File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,yes,"Community; tree, tabs, Recent Files and Go to File rows, unsaved edits at once (#169)"
 "Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,partial,"Community; markers within 5 ms of a keystroke, popup with Rollback / Copy / Next / Previous (#169); no Show Diff (no diff viewer yet), no Commit this change"
-"Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,no,"Community; Cmd+K / Ctrl+K, non-modal commit (#91)"
+"Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,yes,"Community; Cmd+K / Ctrl+K, non-modal commit, Amend, options, commit checks (#170); no grouping by directory, Shelve, change lists"
 "Amend and commit options (author, sign-off, hooks)",vcs,must,yes,no,Community (#91)
-Rollback of files (Rollback Changes dialog),vcs,must,yes,no,Community (#91)
+Rollback of files (Rollback Changes dialog),vcs,must,yes,yes,Community (#170)
 "Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,no,Community (#91)
 "VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind)",vcs,must,yes,yes,"Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28)"
 "Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,partial,"Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch wait for #170 #172, favourites not saved"
