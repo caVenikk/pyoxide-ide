@@ -12,8 +12,9 @@ a key or a role is missing from this file.
 
 A theme assigns a value to every role of three kinds, plus fonts:
 
-- **UI roles** (`ui.*`, 121 of them): flat colours of the interface, the
-  editor chrome, version control, diagnostics and the terminal.
+- **UI roles** (`ui.*`, 173 of them): flat colours of the interface, the
+  editor chrome, controls, icons, version control, diagnostics and the
+  terminal.
 - **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
   Each has text attributes: foreground `fg`, background `bg`, `bold`, `italic`,
   `underline` (`single`, `double`, `wavy`, `dotted`, `dashed`, `thick`) with
@@ -23,6 +24,12 @@ A theme assigns a value to every role of three kinds, plus fonts:
   gutter width, paddings, radii, ...).
 - **Fonts** (`font.*`): UI, editor and terminal families (a list, first match
   wins), sizes, editor line spacing and ligatures.
+- **Controls** (`controls` in `[theme]`): `new` (the default) or `classic`,
+  the look of the controls that the reference draws differently for its New
+  UI themes and for classic themes (themes not based on a New UI theme,
+  such as most theme plugins): check boxes of 16 or 14 pixels, dialog
+  buttons 28 or 24 high, chevrons or filled triangles as tree arrows. A file
+  that does not set it takes it from the theme it `extends`.
 
 Themes are TOML files. A file can `extends` another theme and then lists only
 what it changes; colours can refer to entries of a `[palette]` table with
@@ -245,11 +252,78 @@ report says which parent was missing.
 | `ui.non-project-file` | `FileColor.Yellow` | Row background of files outside the project content, such as excluded folders (the reference's "Non-Project Files" file colour) |
 | `ui.run-widget-running` | `RunWidget.runningBackground` | Background of the run widget's Run button while its process runs |
 | `ui.run-widget-stop` | `RunWidget.stopBackground` | Background of the run widget's Stop button |
+| `ui.run-widget-icon` | `RunWidget.iconColor` | Icons of the run widget's buttons other than Run and Debug, such as More Actions |
+| `ui.run-widget-run-icon` | `RunWidget.runIconColor` | Run and Debug icons of the run widget (drawn as outlines in this colour) |
+| `ui.run-widget-running-icon` | `RunWidget.runningIconColor` | Icons on the run widget's coloured buttons (Rerun while a process runs, Stop) |
 | `ui.drag-and-drop-border` | `DragAndDrop.borderColor` | Border of the row that takes dragged files or folders (the reference's drop target rectangle) |
 | `ui.drag-and-drop-row` | `DragAndDrop.rowBackground` | Background of the row that takes dragged files or folders |
+| `ui.tree-text` | `Tree.foreground` | Text of tree rows, such as the pages of the Settings window and the Keymap and Run/Debug Configurations trees |
 | `ui.tree-indent-guide` | `Tree.hash` | Indent guides of trees: the vertical lines below an open folder (the reference's "Show indent guides") |
 | `ui.list-button-hover` | `List.Button.hoverBackground` | Background of a hovered button at the end of a popup row, such as Run in the run widget's dropdown |
 | `ui.list-button-separator` | `List.Button.separatorColor` | Line before the buttons at the end of a popup row |
+
+### Controls
+
+The sources are keys of the icon colour palette (`icons` > `ColorPalette`
+of a UI theme, see "Icon colours" below); the reference draws check boxes
+as icons recoloured by it. A dark theme may write a key with `.Dark`
+appended. A theme that sets none of a role's keys gets the colour of the
+reference's check box icons for the look of its controls (`controls`):
+those of the New UI themes, or the classic ones (`colorPaletteClassic`);
+the report lists them as approximations. Tree arrows are chevron icons
+for New UI controls and filled triangles in `ui.icon-gray-stroke` for
+classic ones (as the reference shows them with classic theme plugins).
+
+| Pyoxide role | Sources, in order | Used for |
+|---|---|---|
+| `ui.checkbox-background` | `Checkbox.Background.Default` (icon palette) | Fill of a check box that is off |
+| `ui.checkbox-border` | `Checkbox.Border.Default` (icon palette) | Outline of a check box that is off |
+| `ui.checkbox-background-selected` | `Checkbox.Background.Selected` (icon palette) | Fill of a check box that is on |
+| `ui.checkbox-border-selected` | `Checkbox.Border.Selected` (icon palette) | Outline of a check box that is on |
+| `ui.checkbox-check` | `Checkbox.Foreground.Selected` (icon palette) | Check mark of a check box that is on |
+| `ui.checkbox-background-disabled` | `Checkbox.Background.Disabled` (icon palette) | Fill of a disabled check box |
+| `ui.checkbox-border-disabled` | `Checkbox.Border.Disabled` (icon palette) | Outline of a disabled check box |
+| `ui.checkbox-check-disabled` | `Checkbox.Foreground.Disabled` (icon palette) | Check mark of a disabled check box |
+
+### Icon colours
+
+The platform icons are the New UI icons; they are drawn with the colours
+of a small palette. A UI theme recolours them with `icons` >
+`ColorPalette`: every place where an icon uses the colour a key stands for
+gets the theme's colour (`UITheme.toColorString`). Here each key is a
+role; the base themes give every role the colour the key stands for, so
+the icons keep their own colours, and a theme whose role differs has
+that colour replaced in every icon. A key is also found when the theme
+writes the colour it stands for instead of its name (`"#CED0D6":
+"icon-default-stroke"` of Islands Dark is `Gray.Stroke`). `Blue.Solid`,
+`Green.Solid` and `Red.Solid` stand for a colour in light themes only.
+
+| Pyoxide role | Sources, in order | Colour it stands for, light / dark |
+|---|---|---|
+| `ui.icon-gray-fill` | `Gray.Fill` (icon palette) | `#EBECF0` / `#43454A` |
+| `ui.icon-gray-secondary-stroke` | `Gray.SecondaryStroke` (icon palette) | `#A8ADBD` / `#6F737A` |
+| `ui.icon-gray-stroke` | `Gray.Stroke` (icon palette) | `#6C707E` / `#CED0D6` |
+| `ui.icon-blue-fill` | `Blue.Fill` (icon palette) | `#EDF3FF` / `#25324D` |
+| `ui.icon-blue-solid` | `Blue.Solid` (icon palette) | `#4682FA` / none |
+| `ui.icon-blue-stroke` | `Blue.Stroke` (icon palette) | `#3574F0` / `#548AF7` |
+| `ui.icon-green-fill` | `Green.Fill` (icon palette) | `#F2FCF3` / `#253627` |
+| `ui.icon-green-solid` | `Green.Solid` (icon palette) | `#55A76A` / none |
+| `ui.icon-green-stroke` | `Green.Stroke` (icon palette) | `#208A3C` / `#57965C` |
+| `ui.icon-red-fill` | `Red.Fill` (icon palette) | `#FFF7F7` / `#402929` |
+| `ui.icon-red-solid` | `Red.Solid` (icon palette) | `#E55765` / none |
+| `ui.icon-red-stroke` | `Red.Stroke` (icon palette) | `#DB3B4B` / `#DB5C5C` |
+| `ui.icon-yellow-fill` | `Yellow.Fill` (icon palette) | `#FFFAEB` / `#3D3223` |
+| `ui.icon-yellow-solid` | `Yellow.Solid` (icon palette) | `#FFAF0F` / `#F2C55C` |
+| `ui.icon-yellow-stroke` | `Yellow.Stroke` (icon palette) | `#C27D04` / `#D6AE58` |
+| `ui.icon-orange-fill` | `Orange.Fill` (icon palette) | `#FFF4EB` / `#45322B` |
+| `ui.icon-orange-stroke` | `Orange.Stroke` (icon palette) | `#E56D17` / `#C77D55` |
+| `ui.icon-purple-fill` | `Purple.Fill` (icon palette) | `#FAF5FF` / `#2F2936` |
+| `ui.icon-purple-stroke` | `Purple.Stroke` (icon palette) | `#834DF0` / `#A571E6` |
+| `ui.icon-teal-fill` | `Teal.Fill` (icon palette) | `#F2FCFC` / `#1D3838` |
+| `ui.icon-teal-stroke` | `Teal.Stroke` (icon palette) | `#039BA1` / `#24A394` |
+
+The palette keys of classic icons (`Actions.*`, `Objects.*`) stand for
+colours the New UI icons do not use and are listed as unmapped.
 
 ### Editor
 
@@ -381,6 +455,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.run-widget-stop` | `ui.danger` |
 | `ui.drag-and-drop-border` | `ui.accent` |
 | `ui.drag-and-drop-row` | `ui.selection` |
+| `ui.tree-text` | `ui.text` |
 | `ui.tree-indent-guide` | `ui.divider` |
 | `ui.list-button-hover` | `ui.hover` |
 | `ui.list-button-separator` | `ui.pressed` |
@@ -670,7 +745,8 @@ by the Python product and use `syntax.dunder`, `syntax.constant-builtin`,
 
 ## Not imported
 
-- Icons and icon colour palettes (`icons`, `iconColorsOnSelection`).
+- Icon replacements by path (`icons` except `ColorPalette`) and the
+  colours of icons on a selected row (`iconColorsOnSelection`).
 - Component sizes and insets, borders, fonts of the UI, gradients, shadows
   and animation settings of Swing components: only the numbers listed under
   Metrics.

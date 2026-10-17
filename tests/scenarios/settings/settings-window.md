@@ -11,6 +11,8 @@
 7. Select two other pages; click Back twice (or Cmd+[ / Ctrl+Alt+Left),
    then Forward.
 8. Scroll the page tree down past the top of a group.
+9. macOS: with Settings open, press Shift+Cmd+4, then Space, and move the
+   pointer over the Settings window; then click the main window.
 
 ## Expected
 - Step 1: one window titled "Settings – <project>" on Appearance (first
@@ -29,6 +31,9 @@
   Back is disabled on the first page, Forward after the last.
 - Step 8: the group of the rows under the top edge stays there as a bold
   header while the rows below belong to it.
+- Step 9: the window capture highlights the Settings window alone (it is a
+  window of its own, not a child of the main window); clicking the main
+  window brings the main window forward with Settings kept above it.
 
 ## Commands
 `settings.open {"page": ...}`, `settings.select {"page": ...}`,

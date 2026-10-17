@@ -17,6 +17,7 @@ pub mod builtin;
 pub mod catalog;
 mod color;
 pub mod contrast;
+pub mod icon_palette;
 pub mod import;
 mod model;
 mod registry;
@@ -26,7 +27,7 @@ mod token_names;
 pub use catalog::{Catalog, CatalogEntry, ThemeGroup};
 pub use color::{ColorParseError, ColorRef, Rgba, contrast_ratio};
 pub use model::{
-    FORMAT_VERSION, FontPatch, Fonts, Metrics, TextStyle, TextStyles, Theme, ThemeFile,
+    Controls, FORMAT_VERSION, FontPatch, Fonts, Metrics, TextStyle, TextStyles, Theme, ThemeFile,
     ThemeHeader, ThemeKind, UiColors, UnderlineStyle,
 };
 pub use registry::{Registry, ThemeError};

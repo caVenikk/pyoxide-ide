@@ -4,16 +4,16 @@
 //! Run console when the page is applied.
 //!
 //! The options on the left: Font, Size and Line height on one row, Enable
-//! ligatures with its help, "Restore defaults" while the font differs from
-//! the defaults, and the collapsible Typography Settings with the fallback
-//! font. On the right an editable preview shows the font the page holds.
-//! The families come from the text system, listed and probed (monospaced,
-//! able to show its own name) on the background executor, monospaced ones
-//! first, as the reference's `FontFamilyCombo`.
+//! ligatures with its help, the comment pointing to Reader mode, "Restore
+//! defaults" while the font differs from the defaults, and the collapsible
+//! Typography Settings with the fallback font. On the right an editable
+//! preview shows the font the page holds. The families come from the text
+//! system, listed and probed (monospaced, able to show its own name) on the
+//! background executor, monospaced ones first, as the reference's
+//! `FontFamilyCombo`.
 //!
-//! Not drawn: the reference's comment pointing to Reader mode, the main
-//! and bold weights, the character variants, the whitespace dots of the
-//! preview and its blinking of changed glyphs.
+//! Not drawn: the main and bold weights, the character variants, the
+//! whitespace dots of the preview and its blinking of changed glyphs.
 
 use std::cell::RefCell;
 use std::ops::Range;
@@ -49,6 +49,13 @@ const LINE_HEIGHT: &str = "Line height:";
 const LIGATURES: &str = "Enable ligatures";
 const LIGATURES_TOOLTIP: &str = "Use several characters as a single ligature. Ligatures enhance code readability. Use the section below to preview the changes";
 const RESTORE: &str = "Restore defaults";
+/// The comment under the ligatures (`comment.use.ligatures.with.reader.
+/// mode`): the text and its link to the Reader mode page.
+const READER_COMMENT: &str = "See line height and ligatures also in ";
+const READER_LINK: &str = "Reader mode";
+/// The Reader mode settings page (`ReaderModeConfigurable`); the link
+/// selects it when it is registered.
+const READER_PAGE: &str = "editor.reader.mode";
 const TYPOGRAPHY: &str = "Typography Settings";
 const FALLBACK: &str = "Fallback font:";
 const FALLBACK_COMMENT: &str = "Used for symbols not supported\nby the main font";
@@ -111,22 +118,30 @@ const KNOWN_MONOSPACED: &[&str] = &[
 
 /// The page's metrics, from the reference (Kotlin UI DSL, `AppFontPanel`):
 /// the options 12 from the page's edge and the top line, rows 24 high and
-/// 12 apart (8 more after Size and after the ligatures), the label column
-/// 37 wide, the font combo 285 wide and the fallback combo 270, the size
-/// fields 43, 17 between Size's field and Line height, groups indented by
-/// 20, the preview's hint 10 from the text with the small font.
+/// 12 apart, the label column 37 wide, the font combo 285 wide and the
+/// fallback combo 270, the size fields 43, 17 between Size's field and Line
+/// height, groups indented by 20, the preview's hint 10 from the text with
+/// the small font. The rows after Size (the ligatures, the Reader mode
+/// comment, Restore defaults, Typography Settings) are as far apart as the
+/// reference draws them (centre to centre about 41, 37, 26 and 51 from
+/// Size on): Size's bottom gap and the check box's insets before the
+/// ligatures, the comment's top gap after them, the Typography group's top
+/// gap before it.
 const PAD: f32 = 12.0;
 const ROW: f32 = 24.0;
 const ROW_GAP: f32 = 12.0;
 const SMALL_GAP: f32 = 8.0;
+const LIGATURES_TOP: f32 = 17.0;
+const READER_TOP: f32 = 15.0;
+const RESTORE_TOP: f32 = 7.0;
 const LABEL_COLUMN: f32 = 37.0;
 const LABEL_GAP: f32 = 6.0;
 const FAMILY_WIDTH: f32 = 285.0;
 const FALLBACK_WIDTH: f32 = 270.0;
 const NUMBER_WIDTH: f32 = 43.0;
 const SIZE_GAP: f32 = 17.0;
-const HELP_GAP: f32 = 8.0;
-const GROUP_TOP: f32 = 20.0;
+const HELP_GAP: f32 = 6.0;
+const GROUP_TOP: f32 = 26.0;
 const GROUP_INDENT: f32 = 20.0;
 const COMMENT_TOP: f32 = 4.0;
 const PREVIEW_LEFT: f32 = 6.0;
@@ -1042,8 +1057,28 @@ impl FontPage {
             .child(
                 div()
                     .id("font-ligatures-help")
-                    .child(Icon::new(IconName::HELP))
+                    .child(Icon::new(IconName::CONTEXT_HELP))
                     .tooltip(Tooltip::text(LIGATURES_TOOLTIP, None)),
+            );
+        let reader_comment = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .text_size(small)
+            .text_color(muted)
+            .debug_selector(|| "font:reader-mode".into())
+            .child(READER_COMMENT)
+            .child(
+                ui::link::link("font-reader-mode", READER_LINK, cx)
+                    .debug_selector(|| "font:reader-mode-link".into())
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(
+                            Box::new(crate::commands::SelectPage {
+                                page: READER_PAGE.to_owned(),
+                            }),
+                            cx,
+                        )
+                    }),
             );
         let restore = if self.restorable(cx) {
             ui::link::link("font-restore", RESTORE, cx)
@@ -1065,11 +1100,7 @@ impl FontPage {
             .items_center()
             .h(px(ROW))
             .pointing_hand()
-            .child(Icon::new(if expanded {
-                IconName::CHEVRON_DOWN
-            } else {
-                IconName::CHEVRON_RIGHT
-            }))
+            .child(ui::components::tree_arrow(expanded, cx))
             .child(div().w(px(4.0)))
             .child(crate::search::label(TYPOGRAPHY, cx))
             .child(div().flex_1().ml(px(6.0)).h(px(1.0)).bg(divider))
@@ -1121,9 +1152,11 @@ impl FontPage {
             .child(family_row)
             .child(div().h(px(ROW_GAP)))
             .child(size_row)
-            .child(div().h(px(ROW_GAP + SMALL_GAP)))
+            .child(div().h(px(LIGATURES_TOP)))
             .child(ligatures_row)
-            .child(div().h(px(ROW_GAP + SMALL_GAP)))
+            .child(div().h(px(READER_TOP)))
+            .child(reader_comment)
+            .child(div().h(px(RESTORE_TOP)))
             .child(div().flex().child(restore))
             .child(div().h(px(GROUP_TOP)))
             .child(typography_header)

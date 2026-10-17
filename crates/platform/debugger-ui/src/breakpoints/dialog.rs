@@ -932,17 +932,12 @@ impl BreakpointsDialog {
                             .flex_none()
                             .w(px(16.0))
                             .when(group, |d| {
-                                d.child(Icon::new(if expanded {
-                                    IconName::CHEVRON_DOWN
-                                } else {
-                                    IconName::CHEVRON_RIGHT
-                                }))
-                                .on_click(cx.listener(
-                                    move |this, _: &ClickEvent, _, cx| {
+                                d.child(ui::components::tree_arrow(expanded, cx)).on_click(
+                                    cx.listener(move |this, _: &ClickEvent, _, cx| {
                                         cx.stop_propagation();
                                         this.toggle_collapsed(key, cx);
-                                    },
-                                ))
+                                    }),
+                                )
                             }),
                     )
                     .child(

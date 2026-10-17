@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use themes::import::{
     ImportError, Imported, KeySource, Level, Library, SourceKind, WarningKind, import_path,
 };
-use themes::{Registry, Rgba, TextRole, TextStyle, ThemeKind, UiRole, UnderlineStyle};
+use themes::{Controls, Registry, Rgba, TextRole, TextStyle, ThemeKind, UiRole, UnderlineStyle};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -565,13 +565,65 @@ fn unmapped_ui_keys_and_sections_are_counted() {
     assert!(find(KeySource::UiTheme, "Quirky.flag").is_some());
     assert!(find(KeySource::UiTheme, "Quirky.list").is_some());
     assert!(find(KeySource::UiTheme, "Quirky.Deep.value").is_some());
-    assert_eq!(find(KeySource::UiThemeSection, "icons").unwrap().count, 2);
+    // Unknown keys of the icon colour palette; the palette is no section.
+    assert!(find(KeySource::IconPalette, "Fixture.a").is_some());
+    assert!(find(KeySource::IconPalette, "Fixture.b").is_some());
+    assert!(find(KeySource::IconPalette, "Green.Stroke").is_none());
+    assert!(find(KeySource::UiThemeSection, "icons").is_none());
     // Keys that the tables know, directly or through a wildcard, are not listed.
     assert!(find(KeySource::UiTheme, "Panel.background").is_none());
     assert!(find(KeySource::UiTheme, "*.background").is_none());
     assert!(find(KeySource::UiTheme, "*.arc").is_none());
     let groups = item.report.unmapped_groups();
     assert_eq!(groups[0], ("Quirky".to_owned(), 3));
+}
+
+#[test]
+fn the_icon_palette_sets_icon_and_check_box_roles() {
+    let items = plugin_imports();
+    let item = by_name(&items, "Nightfall");
+    let t = &item.theme;
+    // A key by name (through `colors`), a key by the colour it stands for
+    // in the icons (`#CED0D6` is `Gray.Stroke` of dark themes), a key
+    // with `.Dark`.
+    assert_eq!(t.ui[UiRole::IconGreenStroke], rgba("#e3702d"));
+    assert_eq!(t.ui[UiRole::IconGrayStroke], rgba("#c0c0c0"));
+    assert_eq!(t.ui[UiRole::CheckboxBackgroundSelected], rgba("#3b3c35"));
+    // The icons are recoloured from the New UI's dark colours.
+    let recolors = t.icon_recolors();
+    assert!(recolors.contains(&(rgba("#57965c"), rgba("#e3702d"))));
+    assert!(recolors.contains(&(rgba("#ced0d6"), rgba("#c0c0c0"))));
+    // Based on a New UI theme: its controls.
+    assert_eq!(t.controls, Controls::New);
+}
+
+#[test]
+fn trees_take_the_tree_foreground() {
+    let items = plugin_imports();
+    let t = &by_name(&items, "Nightfall").theme;
+    assert_eq!(t.ui[UiRole::TreeText], rgba("#c0c1b5"));
+    assert_eq!(t.ui[UiRole::Text], rgba("#cfdbe8"));
+    // Without the key, trees have the text colour.
+    let plain = &by_name(&items, "Plain").theme;
+    assert_eq!(plain.ui[UiRole::TreeText], plain.ui[UiRole::Text]);
+}
+
+#[test]
+fn a_theme_without_a_new_ui_parent_has_classic_controls() {
+    let items = plugin_imports();
+    let plain = &by_name(&items, "Plain").theme;
+    assert_eq!(plain.controls, Controls::Classic);
+    // Check boxes it does not colour look as the classic ones.
+    let classic =
+        |role| themes::icon_palette::control_default(role, Controls::Classic, plain.kind).unwrap();
+    assert_eq!(
+        plain.ui[UiRole::CheckboxBackgroundSelected],
+        classic(UiRole::CheckboxBackgroundSelected)
+    );
+    assert_eq!(
+        plain.ui[UiRole::CheckboxCheck],
+        classic(UiRole::CheckboxCheck)
+    );
 }
 
 #[test]

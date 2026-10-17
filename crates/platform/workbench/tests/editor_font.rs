@@ -216,6 +216,45 @@ fn a_font_change_reaches_the_editors_and_the_run_console(cx: &mut TestAppContext
     assert!(!text.contains("size = 20.0"), "{text}");
 }
 
+/// Under the ligatures the comment points to Reader mode, then Restore
+/// defaults and Typography Settings follow, as far apart as the reference
+/// draws them.
+#[gpui::test]
+fn the_reader_mode_comment_is_under_the_ligatures(cx: &mut TestAppContext) {
+    let mut h = setup(cx);
+    h.invoke("settings.open", json!({"page": "editor.font"}));
+    let settings =
+        h.cx.update(|cx| settings_ui::find(cx))
+            .expect("the Settings window");
+    let mut vcx = gpui::VisualTestContext::from_window(settings.into(), h.cx);
+    let mut bounds = |selector: &'static str| {
+        vcx.debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not drawn"))
+    };
+    let ligatures = bounds("font:ligatures");
+    let comment = bounds("font:reader-mode");
+    let restore = bounds("font:restore-defaults");
+    let typography = bounds("font:typography");
+    assert_eq!(comment.left(), ligatures.left());
+    assert!(
+        ligatures.bottom() < comment.top(),
+        "{ligatures:?} {comment:?}"
+    );
+    assert!(comment.bottom() < restore.top(), "{comment:?} {restore:?}");
+    assert!(
+        restore.bottom() < typography.top(),
+        "{restore:?} {typography:?}"
+    );
+    // The link selects the Reader mode page where there is one; here the
+    // page stays.
+    let link = bounds("font:reader-mode-link");
+    assert!(link.left() > comment.left() && link.right() <= comment.right());
+    vcx.simulate_click(link.center(), gpui::Modifiers::none());
+    h.draw();
+    let s = h.invoke("settings.state", json!(null));
+    assert_eq!(s["page"], json!("editor.font"), "{s}");
+}
+
 /// The stored font is put over the theme's at start-up, and an editor
 /// opened later has it too.
 #[gpui::test]

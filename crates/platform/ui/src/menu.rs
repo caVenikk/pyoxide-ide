@@ -90,6 +90,11 @@ struct Metrics {
     /// Space above the first row (without a title) and below the last.
     pad_top: f32,
     pad_bottom: f32,
+    /// Radius of the selection background.
+    radius: f32,
+    /// A list popup (rows that are chosen, not a menu with submenus that
+    /// open on hover).
+    list: bool,
 }
 
 // Metrics of the reference IDE's popup menus in the New UI (see NOTICE).
@@ -107,6 +112,8 @@ const MENU: Metrics = Metrics {
     separator_x: 10.0,
     pad_top: 6.0,
     pad_bottom: 6.0,
+    radius: SELECTION_RADIUS,
+    list: false,
 };
 
 // List popups (`ListPopupImpl`) in the New UI: rows of `List.rowHeight`
@@ -123,6 +130,25 @@ const LIST: Metrics = Metrics {
     separator_x: 8.0,
     pad_top: 8.0,
     pad_bottom: 8.0,
+    radius: SELECTION_RADIUS,
+    list: true,
+};
+
+// The list of a combo box whose rows have a renderer of their own (an
+// icon and a comment, as the interpreter combo boxes): Swing's combo
+// popup (`ComboPopup.border` 1 around the list) with the selection from
+// edge to edge, square, and no space above or below the rows; only the
+// New UI's default renderer of plain text rows insets its selection
+// (`DarculaComboBoxRenderer`, the [`LIST`] metrics).
+const COMBO: Metrics = Metrics {
+    selection_x: 0.0,
+    selection_y: 0.0,
+    content_x: 6.0,
+    separator_x: 0.0,
+    pad_top: 0.0,
+    pad_bottom: 0.0,
+    radius: 0.0,
+    list: true,
 };
 
 /// Radius of the selection background: `PopupMenu.Selection.arc` and
@@ -619,6 +645,10 @@ pub struct PopupOptions {
     /// window it belongs to, instead of being dispatched in the popup's
     /// window.
     pub own_window: bool,
+    /// The list of a combo box with rows of its own renderer: the
+    /// selection fills the row from edge to edge, without padding above
+    /// and below the rows (plain text rows keep the inset selection).
+    pub edge_to_edge: bool,
 }
 
 /// The action chosen in a popup that has a window of its own
@@ -702,7 +732,8 @@ impl ContextMenu {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        Self::open(items, LIST, options, window, cx)
+        let metrics = if options.edge_to_edge { COMBO } else { LIST };
+        Self::open(items, metrics, options, window, cx)
     }
 
     fn open(
@@ -713,7 +744,7 @@ impl ContextMenu {
         cx: &mut App,
     ) -> Entity<Self> {
         let origin = window.focused(cx);
-        let list = metrics == LIST;
+        let list = metrics.list;
         let mut items = items;
         if let Some(origin) = &origin {
             fill_shortcuts(&mut items, origin, window);
@@ -1323,7 +1354,7 @@ impl ContextMenu {
     fn render_level(&self, level: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let m = self.metrics;
-        let list = m == LIST;
+        let list = m.list;
         let items = self.level_items(level);
         let shown = self.shown(level);
         let with_icons = items.iter().any(|i| i.icon_name().is_some());
@@ -1496,7 +1527,7 @@ impl ContextMenu {
                             .items_center()
                             .pl(px(m.content_x))
                             .pr(px(right))
-                            .rounded(px(SELECTION_RADIUS))
+                            .rounded(px(m.radius))
                             .when(is_selected, |d| d.bg(selection))
                             .text_color(if enabled { text } else { disabled })
                             .when(with_icons, |d| {
@@ -2229,6 +2260,36 @@ mod tests {
         assert_eq!(line.size.height, px(1.0));
         // The line spans the popup less `Popup.separatorInsets` (8).
         assert_eq!(line.size.width, row.size.width - px(2.0 * LIST.separator_x));
+    }
+
+    #[gpui::test]
+    fn a_combo_list_selects_its_rows_from_edge_to_edge(cx: &mut TestAppContext) {
+        let (_, _, cx) = open_with(cx, |window, cx| {
+            let options = PopupOptions {
+                edge_to_edge: true,
+                ..PopupOptions::default()
+            };
+            ContextMenu::popup(popup_items(), options, window, cx)
+        });
+        let level = cx.debug_bounds("menu-level-0").unwrap();
+        let row = cx.debug_bounds("menu-item:Python 3.12 (demo)").unwrap();
+        let inner = cx.debug_bounds("menu-row:Python 3.12 (demo)").unwrap();
+        // The selection fills the row, the rows fill the list inside its
+        // border, the first row is at the top and separators reach the
+        // sides.
+        assert_eq!(inner.size.width, row.size.width);
+        assert_eq!(row.size.width, level.size.width - px(2.0));
+        assert_eq!(row.top(), level.top() + px(1.0));
+        let line = cx.debug_bounds("menu-separator-0-1").unwrap();
+        assert_eq!(line.size.width, row.size.width);
+        // A list of plain rows insets its selection.
+        let (_, _, cx) = popup(cx, None);
+        let row = cx.debug_bounds("menu-item:uv (demo)").unwrap();
+        let inner = cx.debug_bounds("menu-row:uv (demo)").unwrap();
+        assert_eq!(
+            inner.size.width,
+            row.size.width - px(2.0 * LIST.selection_x)
+        );
     }
 
     /// The pointer shape over the element with this debug selector.

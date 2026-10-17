@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::color::Rgba;
+use crate::model::Controls;
 
 use super::archive::{self, ArchiveSummary, DataKind};
 use super::convert::{Imported, Inputs, convert};
@@ -492,11 +493,13 @@ impl Library {
                 sources.push(origin.clone());
             }
         }
+        let controls = Some(controls_of(&ui_layers));
         let imported = convert(Inputs {
             name: theme.name.clone(),
             kind: SourceKind::UiTheme,
             author: ui_layers.iter().find_map(|l| l.author.clone()),
             dark,
+            controls,
             ui_layers,
             scheme_layers,
             sources,
@@ -524,6 +527,7 @@ impl Library {
             kind: SourceKind::Scheme,
             author: None,
             dark,
+            controls: None,
             ui_layers: Vec::new(),
             scheme_layers,
             sources,
@@ -612,6 +616,28 @@ fn find_on_disk(theme_file: &Path, reference: &str) -> Option<PathBuf> {
     dir.ancestors()
         .map(|a| a.join(&relative))
         .find(|p| p.is_file())
+}
+
+/// The look of a UI theme's controls: New UI when the theme or an ancestor
+/// is one of the New UI themes (named `Dark` and `Light`,
+/// `UITheme.isBasedOnExperimentalTheme`), also through the table of known
+/// themes when the ancestor is not among the inputs; classic otherwise,
+/// as for a theme that names no parent.
+fn controls_of(layers: &[&UiThemeData]) -> Controls {
+    let new_ui = |name: &str| name == "Dark" || name == "Light";
+    if layers.iter().any(|l| new_ui(&l.name)) {
+        return Controls::New;
+    }
+    let known_new_ui = layers.iter().filter_map(|l| l.parent.as_deref()).any(|id| {
+        known_chain(id)
+            .into_iter()
+            .any(|id| known_theme(id).is_some_and(|t| new_ui(t.name)))
+    });
+    if known_new_ui {
+        Controls::New
+    } else {
+        Controls::Classic
+    }
 }
 
 /// Whether the scheme paints a dark editor background, from its `TEXT`

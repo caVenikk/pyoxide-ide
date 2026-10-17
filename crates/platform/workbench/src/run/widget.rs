@@ -296,13 +296,22 @@ pub fn render_selector(
 /// selector.
 pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
-    let icon = |name: IconName| Icon::new(name).size(px(16.0)).into_any_element();
+    // The buttons draw the stroke variants of their icons in the theme's
+    // colours (`RunWidgetButtonLook.paintIcon`, `toStrokeIcon`): Run and
+    // Debug in the run icon colour, icons on a coloured background in the
+    // running icon colour, the others in the widget's icon colour.
+    let icon = |name: IconName, role: UiRole| {
+        Icon::new(name)
+            .size(px(16.0))
+            .tint(theme.color(role))
+            .into_any_element()
+    };
     let run_icon = if state.launching {
         spinner("run-launching", cx).into_any_element()
     } else if state.file_running {
-        icon(IconName::RERUN_STROKE)
+        icon(IconName::RERUN_STROKE, UiRole::RunWidgetRunningIcon)
     } else if state.can_run() {
-        icon(IconName::RUN)
+        icon(IconName::RUN_STROKE, UiRole::RunWidgetRunIcon)
     } else {
         inactive(IconName::RUN_STROKE, cx)
     };
@@ -341,7 +350,7 @@ pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl 
         let count = state.running.len();
         let stop_icon = div()
             .relative()
-            .child(icon(IconName::STOP_STROKE))
+            .child(icon(IconName::STOP_STROKE, UiRole::RunWidgetRunningIcon))
             .when(count > 1, |d| {
                 let text = if count > 9 {
                     "9+".to_owned()
@@ -377,7 +386,7 @@ pub fn render_buttons(state: &WidgetState, anchors: &Anchors, cx: &App) -> impl 
     };
     let more = button(
         "run-more",
-        icon(IconName::MORE_VERTICAL),
+        icon(IconName::MORE_VERTICAL, UiRole::RunWidgetIcon),
         None,
         true,
         Some(("More Actions".to_owned(), None)),

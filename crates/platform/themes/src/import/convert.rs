@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::builtin;
 use crate::color::Rgba;
-use crate::model::{Theme, ThemeKind, UnderlineStyle};
+use crate::icon_palette::{control_default, reference_color};
+use crate::model::{Controls, Theme, ThemeKind, UnderlineStyle};
 use crate::roles::{Metric, TextRole, UiRole};
 use crate::{TextStyle, TextStyles, UiColors};
 
@@ -33,6 +34,9 @@ pub(crate) struct Inputs<'a> {
     pub kind: SourceKind,
     pub author: Option<String>,
     pub dark: bool,
+    /// The look of the controls: classic for a UI theme that is not based
+    /// on a New UI theme; `None` for a scheme alone (the base theme's).
+    pub controls: Option<Controls>,
     /// UI theme and its available ancestors, nearest first.
     pub ui_layers: Vec<&'a UiThemeData>,
     /// Scheme and its available ancestors, nearest first.
@@ -54,6 +58,8 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
         palette.extend(layer.palette.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
     let mut cx = Converter {
+        kind: base_kind,
+        controls: inputs.controls,
         ui_layers: inputs.ui_layers,
         chain: SchemeChain {
             layers: inputs.scheme_layers,
@@ -75,6 +81,9 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
     theme.name = inputs.name;
     theme.kind = base_kind;
     theme.author = inputs.author;
+    if let Some(controls) = inputs.controls {
+        theme.controls = controls;
+    }
     theme.description = Some(
         match inputs.kind {
             SourceKind::UiTheme => "Imported PyCharm UI theme",
@@ -128,6 +137,8 @@ fn code_default(role: UiRole, dark: bool) -> Option<Rgba> {
 }
 
 struct Converter<'a> {
+    kind: ThemeKind,
+    controls: Option<Controls>,
     ui_layers: Vec<&'a UiThemeData>,
     chain: SchemeChain<'a>,
     palette: BTreeMap<String, String>,
@@ -308,7 +319,46 @@ impl<'a> Converter<'a> {
             Src::Bg(key) => self.eval_attr(key, Part::Bg),
             Src::Effect(key) => self.eval_attr(key, Part::Effect),
             Src::Stripe(key) => self.eval_attr(key, Part::Stripe),
+            Src::Palette(key) => self.eval_palette(key),
         }
+    }
+
+    /// Finds a key of the icon colour palette: in each layer, nearest
+    /// first, the key itself, in a dark theme the key with `.Dark`, then a
+    /// `#RRGGBB` key naming the colour the key stands for in the icons.
+    fn eval_palette(&mut self, key: &str) -> Option<Hit> {
+        let dark = self.kind == ThemeKind::Dark;
+        let dark_key = format!("{key}.Dark");
+        let stands_for = reference_color(key, self.kind);
+        let mut found: Option<(String, String)> = None;
+        for layer in &self.ui_layers {
+            let palette = &layer.icon_palette;
+            let hit = palette
+                .get_key_value(key)
+                .or_else(|| {
+                    dark.then(|| palette.get_key_value(dark_key.as_str()))
+                        .flatten()
+                })
+                .or_else(|| {
+                    let color = stands_for?;
+                    palette
+                        .iter()
+                        .find(|(k, _)| k.starts_with('#') && Rgba::parse(k).ok() == Some(color))
+                });
+            if let Some((k, v)) = hit {
+                found = Some((k.clone(), v.clone()));
+                break;
+            }
+        }
+        let (found_key, value) = found?;
+        let label = format!("ColorPalette.{found_key}");
+        let color = self.ui_color(&label, &Value::String(value))?;
+        Some(Hit {
+            color,
+            source: KeySource::IconPalette,
+            key: found_key,
+            wildcard: false,
+        })
     }
 
     // ---- UI colours -------------------------------------------------
@@ -374,8 +424,11 @@ impl<'a> Converter<'a> {
                 }
                 ancestor = from.fallback();
             }
-            match derived {
-                Some((from, color)) => {
+            let control = self
+                .controls
+                .and_then(|controls| control_default(role, controls, self.kind));
+            match (derived, control) {
+                (Some((from, color)), _) => {
                     out[role] = color;
                     self.report.approximations.push(Approximation {
                         key: format!("ui.{from}"),
@@ -383,7 +436,21 @@ impl<'a> Converter<'a> {
                         note: format!("no key sets it; takes the colour of ui.{from}"),
                     });
                 }
-                None => {
+                // Check boxes and tree arrows look as the reference draws
+                // them for the theme's kind of controls.
+                (None, Some(color)) => {
+                    out[role] = color;
+                    let look = match self.controls {
+                        Some(Controls::Classic) => "classic",
+                        _ => "New UI",
+                    };
+                    self.report.approximations.push(Approximation {
+                        key: target.clone(),
+                        target,
+                        note: format!("no key sets it; the colour of the {look} controls"),
+                    });
+                }
+                (None, None) => {
                     out[role] = base[role];
                     self.report.defaulted.push(Defaulted { target });
                 }
@@ -670,6 +737,13 @@ impl<'a> Converter<'a> {
                     *counts.entry((KeySource::UiTheme, key.clone())).or_default() += 1;
                 }
             }
+            for key in layer.icon_palette.keys() {
+                if !is_known_palette_key(key, known) {
+                    *counts
+                        .entry((KeySource::IconPalette, key.clone()))
+                        .or_default() += 1;
+                }
+            }
             for (section, leaves) in &layer.other {
                 *counts
                     .entry((KeySource::UiThemeSection, section.clone()))
@@ -714,6 +788,13 @@ impl<'a> Converter<'a> {
             );
         }
     }
+}
+
+/// A palette key some role reads: one of the table, with `.Dark`, or a
+/// `#RRGGBB` key (it may name the colour of a key of the table).
+fn is_known_palette_key(key: &str, known: &mapping::KnownKeys) -> bool {
+    let key = key.strip_suffix(".Dark").unwrap_or(key);
+    known.palette.contains(key) || key.starts_with('#')
 }
 
 fn is_known_ui_key(key: &str, known: &mapping::KnownKeys) -> bool {

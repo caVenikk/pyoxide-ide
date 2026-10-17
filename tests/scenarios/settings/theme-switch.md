@@ -8,6 +8,8 @@
 3. Open the Theme popup again, move to another theme and press Enter.
 4. Press Ctrl+` (Quick Switch Scheme) and choose Theme.
 5. Restart the IDE.
+6. Import a theme plugin with an icon colour palette (Monokai Pro) and
+   switch to one of its themes; open Settings > Editor > Font.
 
 ## Expected
 - Step 1: the whole IDE switches at once, before Apply; Cancel does not
@@ -21,6 +23,13 @@
 - Step 4: a popup titled Switch lists Theme; choosing it opens the same
   Theme popup.
 - Step 5: the chosen theme is used; the settings file stores it.
+- Step 6: the icons take the theme's colours: the run widget's Run and
+  More icons (`RunWidget.*`), folders and source roots in the project tree,
+  git status colours of files, the incoming and outgoing arrows of the VCS
+  widget, the toolbar and tool window icons. A classic theme (not based on
+  a New UI theme) draws filled triangles as tree arrows, 14 px check boxes
+  in its palette's check box colours and dialog buttons 24 high; the
+  bundled themes draw chevrons, 16 px check boxes and buttons 28 high.
 
 ## Commands
 `settings.switch-theme {"id": ...}`, `settings.quick-switch`,
@@ -31,4 +40,5 @@ https://www.jetbrains.com/help/pycharm/settings-appearance.html;
 IntelliJ Community (Apache-2.0) at `pycharm/2026.2.3`:
 `AppearanceConfigurable`, `QuickChangeLookAndFeel`, `ThemeListProviderImpl`,
 `SettingsEntryPointGroup` (the gear's rows end with an ellipsis and run the
-switcher), `QuickChangeSchemesAction`.
+switcher), `QuickChangeSchemesAction`, `UITheme` (icon colour palette),
+`RedesignedRunWidget` (run widget icon colours).

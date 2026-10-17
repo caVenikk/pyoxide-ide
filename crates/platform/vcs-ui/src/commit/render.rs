@@ -398,11 +398,7 @@ impl CommitView {
                     .absolute()
                     .left(left)
                     .top((row_h - px(ICON)) / 2.0)
-                    .child(Icon::new(if expanded {
-                        IconName::CHEVRON_DOWN
-                    } else {
-                        IconName::CHEVRON_RIGHT
-                    }))
+                    .child(ui::components::tree_arrow(expanded, cx))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         cx.stop_propagation();
                         this.tree.set_expanded(g, !expanded);

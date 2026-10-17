@@ -11,9 +11,14 @@
 //! [`DialogOptions::key`], and opening it again brings that one to the
 //! front. A modal dialog can open over a non-modal one and blocks only it.
 //!
-//! On macOS a dialog is a child window of its parent, so it stays above
-//! it. When the dialog closes, by [`close`] or by its title bar's close
-//! button, the element of the parent that had the focus gets it back.
+//! On macOS a modal dialog is a child window of its parent, so it stays
+//! above it. A non-modal dialog is a window of its own, as the reference's
+//! owned windows are: the system's window capture picks it alone (a child
+//! window is picked together with its parent) and it does not move with
+//! its parent; it comes back above its parent whenever the parent is
+//! activated. When the dialog closes, by [`close`] or by its title bar's
+//! close button, the element of the parent that had the focus gets it
+//! back.
 //!
 //! The dialog's view is the root of its window: nothing of the parent
 //! window draws into it; a dialog draws [`crate::pointer::frame`] so that
@@ -115,6 +120,24 @@ struct NonModal {
     /// Had the focus in the parent window when the dialog opened.
     return_focus: Option<FocusHandle>,
     activate: bool,
+    /// Brings the dialog back above its parent when the parent is
+    /// activated.
+    _keep_above: Option<(Entity<KeepAbove>, Subscription)>,
+}
+
+/// Observes a parent window's activation for its non-modal dialogs.
+struct KeepAbove;
+
+/// Orders the non-modal dialogs of `parent` above it, and theirs above
+/// them (they are not child windows: the system does not keep them there).
+fn raise_non_modal(parent: AnyWindowHandle, cx: &mut App) {
+    let Ok(number) = parent.update(cx, |_, window, _| native::window_number(window)) else {
+        return;
+    };
+    for dialog in non_modal_of(parent, cx) {
+        let _ = dialog.update(cx, |_, window, _| native::order_above(window, number));
+        raise_non_modal(dialog, cx);
+    }
 }
 
 /// The open dialogs: the modal ones by their parent windows, the
@@ -212,10 +235,33 @@ pub fn open<V: 'static + Render>(
             parent: parent_handle,
             return_focus,
             activate: options.activate,
+            _keep_above: None,
         });
+        let keeper = cx.new(|_| KeepAbove);
+        let subscription = keeper.update(cx, |_, cx| {
+            cx.observe_window_activation(parent, move |_, window, cx| {
+                if window.is_window_active() {
+                    let parent = window.window_handle();
+                    cx.defer(move |cx| raise_non_modal(parent, cx));
+                }
+            })
+        });
+        if let Some(open) = cx
+            .global_mut::<Modals>()
+            .non_modal
+            .iter_mut()
+            .find(|d| d.dialog == dialog)
+        {
+            open._keep_above = Some((keeper, subscription));
+        }
     }
+    let parent_number = native::window_number(parent);
     let _ = dialog.update(cx, |_, window, _| {
-        native::attach(parent, window);
+        if options.modal {
+            native::attach(parent, window);
+        } else {
+            native::order_above(window, parent_number);
+        }
         if options.activate {
             window.activate_window();
         }
@@ -678,6 +724,35 @@ mod native {
         }
     }
 
+    /// The window's number in the window server (`None` without a native
+    /// window).
+    #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+    pub fn window_number(window: &Window) -> Option<isize> {
+        if !crate::pointer::native() {
+            return None;
+        }
+        let ns = ns_window(window)?;
+        // SAFETY: a live NSWindow, on the main thread.
+        Some(unsafe { msg_send![ns, windowNumber] })
+    }
+
+    /// Orders `window` just above the window numbered `above` (on the
+    /// screen, without activating it).
+    #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
+    pub fn order_above(window: &Window, above: Option<isize>) {
+        // The test platform has no native windows (and no numbers).
+        let Some(above) = above.filter(|_| crate::pointer::native()) else {
+            return;
+        };
+        let Some(ns) = ns_window(window) else {
+            return;
+        };
+        // SAFETY: a live NSWindow, on the main thread.
+        unsafe {
+            let _: () = msg_send![ns, orderWindow: ABOVE relativeTo: above];
+        }
+    }
+
     /// Makes `dialog` a child window of `parent`: it stays above it.
     #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
     pub fn attach(parent: &Window, dialog: &Window) {
@@ -698,6 +773,12 @@ mod native {
 #[cfg(not(target_os = "macos"))]
 mod native {
     pub fn attach(_: &gpui::Window, _: &gpui::Window) {}
+
+    pub fn window_number(_: &gpui::Window) -> Option<isize> {
+        None
+    }
+
+    pub fn order_above(_: &gpui::Window, _: Option<isize>) {}
 
     /// Sizes a popup window to `size`; the window keeps its top left
     /// corner.

@@ -866,17 +866,12 @@ impl ProjectPanel {
         let non_project = entry.excluded.then(|| theme.color(UiRole::NonProjectFile));
         let icon = self.icon(node);
         let chevron = entry.is_dir().then(|| {
-            let name = if node.expanded {
-                IconName::CHEVRON_DOWN
-            } else {
-                IconName::CHEVRON_RIGHT
-            };
             div()
                 .id(("chevron", ix))
                 .absolute()
                 .left(left)
                 .top((row_height - px(CHEVRON)) / 2.0)
-                .child(Icon::new(name))
+                .child(ui::components::tree_arrow(node.expanded, cx))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     this.selected = Some(id);

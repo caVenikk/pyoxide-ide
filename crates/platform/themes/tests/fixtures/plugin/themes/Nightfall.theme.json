@@ -40,7 +40,8 @@
     },
     "Tree": {
       "rowHeight": 26,
-      "background": "alias"
+      "background": "alias",
+      "foreground": "#c0c1b5"
     },
     "Component": {
       "focusColor": "#ffb347",
@@ -68,7 +69,10 @@
   "icons": {
     "ColorPalette": {
       "Fixture.a": "#101010",
-      "Fixture.b": "#202020"
+      "Fixture.b": "#202020",
+      "Green.Stroke": "flame",
+      "#CED0D6": "#c0c0c0",
+      "Checkbox.Background.Selected.Dark": "#3b3c35"
     }
   }
 }
