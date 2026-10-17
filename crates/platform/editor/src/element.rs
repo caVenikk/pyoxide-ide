@@ -369,8 +369,6 @@ pub(crate) struct Prepaint {
     selections: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
     search: Vec<SearchRect>,
-    /// Backgrounds of char ranges (changed words of a diff).
-    range_rects: Vec<(Bounds<Pixels>, Hsla)>,
     /// Marks of search matches on the scrollbar.
     stripe_marks: Vec<Bounds<Pixels>>,
     /// The problems' stripe marks as painted: one rectangle per run of
@@ -1456,48 +1454,6 @@ impl Element for EditorElement {
             }
         }
 
-        // Char range backgrounds on the visible rows (an empty range is a
-        // thin bar).
-        let mut range_rects = Vec::new();
-        if !editor.range_backgrounds.is_empty() {
-            let vis_start = editor.buffer.line_start(first);
-            let vis_end = editor.buffer.line_end(last.saturating_sub(1).max(first));
-            for rb in &editor.range_backgrounds {
-                let r = &rb.range;
-                if r.end < vis_start || r.start > vis_end {
-                    continue;
-                }
-                let color = theme.color(rb.color);
-                let ra = editor.caret_row(r.start, false);
-                let rb_row = editor.caret_row(r.end, r.end > r.start);
-                for l in &lines {
-                    if l.row < ra || l.row > rb_row {
-                        continue;
-                    }
-                    let x0 = if l.row == ra {
-                        line_x(l, r.start - l.line_start)
-                    } else {
-                        line_x(l, l.seg_start)
-                    };
-                    let x1 = if l.row == rb_row {
-                        line_x(l, r.end - l.line_start)
-                    } else if l.last {
-                        line_x(l, editor.buffer.line_len(l.line)) + m.char_width
-                    } else {
-                        line_x(l, l.end_col)
-                    };
-                    let x1 = if x1 > x0 { x1 } else { x0 + px(2.0) };
-                    range_rects.push((
-                        Bounds::from_corners(
-                            point(x0, top_of(l.row)),
-                            point(x1, top_of(l.row) + lh),
-                        ),
-                        color,
-                    ));
-                }
-            }
-        }
-
         // The placeholder of an empty one-line field.
         let placeholder = editor.shown_placeholder(focused).cloned().map(|text| {
             let run = TextRun {
@@ -1870,7 +1826,6 @@ impl Element for EditorElement {
             selections: selection_rects,
             caret,
             search: search_rects,
-            range_rects,
             stripe_marks,
             problem_spans,
             placeholder,
@@ -1966,9 +1921,6 @@ impl Element for EditorElement {
                 }
                 for (r, c) in &p.diff_bars {
                     window.paint_quad(fill(*r, *c));
-                }
-                for (r, color) in &p.range_rects {
-                    window.paint_quad(fill(*r, *color));
                 }
                 let in_selection = p.colors.search_current_background.is_some();
                 if !in_selection {
