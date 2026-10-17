@@ -452,10 +452,14 @@ impl DebuggerView {
         }
     }
 
-    pub(crate) fn step_into_action(&mut self, _: &StepInto, cx: &mut Context<Self>) {
-        if let Some(s) = self.command_session(cx) {
-            self.run_request(s.step_into(), cx);
-        }
+    /// Steps into; `false` without a session (the key is not used: F7 is
+    /// also Next Difference).
+    pub(crate) fn step_into_action(&mut self, _: &StepInto, cx: &mut Context<Self>) -> bool {
+        let Some(s) = self.command_session(cx) else {
+            return false;
+        };
+        self.run_request(s.step_into(), cx);
+        true
     }
 
     pub(crate) fn step_into_my_code_action(&mut self, _: &StepIntoMyCode, cx: &mut Context<Self>) {
