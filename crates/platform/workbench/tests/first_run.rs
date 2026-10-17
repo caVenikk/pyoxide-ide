@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
-use gpui::{AnyWindowHandle, TestAppContext};
+use gpui::{AnyWindowHandle, AppContext as _, TestAppContext};
 use serde_json::{Value, json};
 use settings_ui::first_run::{self, FirstRunWindow, Start};
 use settings_ui::theme_switch;
@@ -358,7 +358,7 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
     let mut h = open(cx, true);
     h.invoke("first-run.other-options", json!(null));
     let popup = h.state()["popup"].clone();
-    let labels: Vec<String> = popup["items"]
+    let labels: Vec<String> = popup["levels"][0]["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -380,6 +380,9 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
         ],
         "{popup}"
     );
+    // The popup takes the commands while it is open.
+    h.invoke("menu.cancel", json!(null));
+    assert!(h.state()["popup"].is_null());
     let folder = h._dir.path().join("not-a-config");
     std::fs::create_dir_all(&folder).unwrap();
     h.invoke(

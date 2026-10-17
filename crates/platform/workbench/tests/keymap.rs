@@ -2946,7 +2946,6 @@ impl H<'_> {
     }
 }
 
-/// The breakpoint keys in `a.py` (`a = 1`, `b = 2`, the caret on line 2).
 /// The first-run window over the main window (`settings.import-reference`)
 /// with nothing to import: it opens on Choose Theme.
 fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
@@ -2963,11 +2962,9 @@ fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
     h.draw();
     if command == "first-run.continue" {
         assert_eq!(state(h)["page"], json!("keymap"), "{what}");
-        h.dispatched.borrow_mut().clear();
+        // Escape closes the window again.
         h.cx.simulate_keystrokes(dialog, "escape");
         h.draw();
-        // The keystroke of this binding is the one checked.
-        h.dispatched.borrow_mut().push(command.to_owned());
     }
     let open = h
         .cx
@@ -2975,6 +2972,7 @@ fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
     assert!(open.is_none(), "{what}: the window closes");
 }
 
+/// The breakpoint keys in `a.py` (`a = 1`, `b = 2`, the caret on line 2).
 fn check_breakpoints(h: &mut H, command: &str, keys: &str, what: &str, context: Option<&str>) {
     h.clear_breakpoints();
     h.set_editor("a = 1\nb = 2|\n");
