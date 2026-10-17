@@ -12,9 +12,11 @@
 //! - [`DebugHook`]: what a product supplies (its debug adapter provider).
 
 pub mod breakpoints;
+pub mod frames;
 mod hook;
 pub mod icons;
 pub mod session;
+pub mod variables;
 mod view;
 
 pub use breakpoints::commands::{

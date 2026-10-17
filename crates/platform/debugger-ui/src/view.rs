@@ -227,6 +227,11 @@ impl DebuggerView {
                 }
             }
         }));
+        let (root, provider) = (debugger.root().to_owned(), debugger.provider().clone());
+        self.tool_window.update(cx, |w, _| {
+            w.root = Some(root);
+            w.provider = Some(provider);
+        });
         self.debugger = Some(debugger);
         self.sync_muted(cx);
         self.refresh_all(cx);
@@ -886,6 +891,63 @@ fn forward_session_actions<E: InteractiveElement>(
             cx.emit(DebuggerViewEvent::MoreMenu(position))
         })
     });
+    let v = view.clone();
+    let el = el.on_action(move |a: &TypeInput, _, cx| v.update(cx, |v, cx| v.type_input(a, cx)));
+    forward_frame_actions(el, view)
+}
+
+/// The commands of the frames and variables views.
+fn forward_frame_actions<E: InteractiveElement>(el: E, view: Entity<DebuggerView>) -> E {
+    let v = view.clone();
+    let el = el.on_action(move |_: &ShowThreads, window, cx| {
+        v.update(cx, |v, cx| v.show_threads(window, cx))
+    });
+    let v = view.clone();
+    let el =
+        el.on_action(move |a: &SelectThread, _, cx| v.update(cx, |v, cx| v.select_thread(a, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |a: &SelectFrame, _, cx| {
+        v.update(cx, |v, cx| v.select_frame(a.index, cx))
+    });
+    let v = view.clone();
+    let el =
+        el.on_action(move |_: &PreviousFrame, _, cx| v.update(cx, |v, cx| v.step_frame(-1, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |_: &NextFrame, _, cx| v.update(cx, |v, cx| v.step_frame(1, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |_: &CloseFramesHint, _, cx| {
+        v.update(cx, |v, cx| v.close_frames_hint(cx))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |_: &VariablesUp, _, cx| {
+        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.move_selection(-1, cx)))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |_: &VariablesDown, _, cx| {
+        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.move_selection(1, cx)))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |_: &VariablesLeft, _, cx| {
+        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.left_right(false, cx)))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |_: &VariablesRight, _, cx| {
+        v.update(cx, |v, cx| v.with_variables(cx, |t, cx| t.left_right(true, cx)))
+    });
+    let v = view.clone();
+    let el = el.on_action(move |a: &SelectVariable, _, cx| {
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| {
+                t.select_names(&a.path, cx);
+            })
+        })
+    });
     let v = view;
-    el.on_action(move |a: &TypeInput, _, cx| v.update(cx, |v, cx| v.type_input(a, cx)))
+    el.on_action(move |a: &ExpandVariable, _, cx| {
+        v.update(cx, |v, cx| {
+            v.with_variables(cx, |t, cx| {
+                t.expand_names(&a.path, a.expanded, cx);
+            })
+        })
+    })
 }
