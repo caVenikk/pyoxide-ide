@@ -3549,15 +3549,18 @@ fn close_diffs(h: &mut H) {
 }
 
 /// The diff of `a.py` against its committed text with a line added at
-/// its start and one at its end, the focus in its right side.
+/// its start and one at its end, the focus in its right side. `a.py` is
+/// open in an editor tab: the diff edits the tab's text, so the lines are
+/// typed into the tab (a write to the file would not reach it).
 fn open_diff(h: &mut H, what: &str) -> Value {
     ensure_repository(h);
     let base = git_in(h, &["show", "HEAD:a.py"]);
-    std::fs::write(h.root.join("a.py"), format!("first = 0\n{base}last = 9\n")).unwrap();
-    h.invoke("vcs.refresh", json!(null));
-    wait_vcs(h, "a.py modified", |v| {
-        commit_row(&v["commit"], "a.py")["status"] == "modified"
-    });
+    let tab = h.state()["tabs"]
+        .as_array()
+        .and_then(|t| t.iter().position(|t| t["path"] == json!("a.py")))
+        .expect("a.py is open");
+    h.invoke("tabs.select", json!({ "index": tab }));
+    h.set_editor(&format!("{CARET}first = 0\n{base}last = 9\n"));
     h.invoke("vcs.show-diff", json!({ "path": "a.py" }));
     let diff = wait_diff(h, what, |d| {
         d["path"].as_str().is_some_and(|p| p.ends_with("a.py"))
