@@ -64,9 +64,12 @@ pub struct ConfigFolder {
 
 impl ConfigFolder {
     /// The folder as the first-run window names it: the reference's
-    /// product names do not appear in the UI.
+    /// product names do not appear in the UI; a folder of another name is
+    /// named by its name.
     pub fn label(&self) -> String {
-        if self.product.ends_with("CE") {
+        if self.version.is_empty() {
+            self.name.clone()
+        } else if self.product.ends_with("CE") {
             format!("Reference IDE {} Community", self.version)
         } else {
             format!("Reference IDE {}", self.version)
@@ -454,7 +457,7 @@ pub fn read_options(dir: &Path) -> ReferenceOptions {
 }
 
 /// The per-OS folder of `options` (`getPerOsSettingsStorageFolderName`).
-fn os_folder() -> &'static str {
+pub(crate) fn os_folder() -> &'static str {
     if cfg!(target_os = "macos") {
         "mac"
     } else if cfg!(windows) {
@@ -484,7 +487,7 @@ fn theme_id(root: &Element) -> Option<String> {
 }
 
 /// The `<component name>` of an `<application>` file.
-fn component<'a>(root: &'a Element, name: &str) -> Option<&'a Element> {
+pub(crate) fn component<'a>(root: &'a Element, name: &str) -> Option<&'a Element> {
     if root.name == "component" && root.attr("name") == Some(name) {
         return Some(root);
     }
@@ -493,7 +496,7 @@ fn component<'a>(root: &'a Element, name: &str) -> Option<&'a Element> {
 }
 
 /// `<option name value>` as written, empty included.
-fn raw_option<'a>(component: &'a Element, name: &str) -> Option<&'a str> {
+pub(crate) fn raw_option<'a>(component: &'a Element, name: &str) -> Option<&'a str> {
     component
         .children_named("option")
         .find(|o| o.attr("name") == Some(name))
@@ -501,7 +504,7 @@ fn raw_option<'a>(component: &'a Element, name: &str) -> Option<&'a str> {
 }
 
 /// `<option name value>` with a value.
-fn option<'a>(component: &'a Element, name: &str) -> Option<&'a str> {
+pub(crate) fn option<'a>(component: &'a Element, name: &str) -> Option<&'a str> {
     raw_option(component, name).filter(|v| !v.is_empty())
 }
 

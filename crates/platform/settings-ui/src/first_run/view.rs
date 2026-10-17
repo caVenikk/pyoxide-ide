@@ -40,8 +40,8 @@ use ui::theme::ThemeExt;
 
 use super::import::{self, Applied};
 use super::{
-    Back, Cancel, ChooseFolder, Continue, ImportFrom, KEY_CONTEXT, OtherOptions, SelectKeymap,
-    SelectNext, SelectPrevious, SelectTheme, SelectThemeKind, SkipImport, Start,
+    Back, Cancel, ChooseFolder, Continue, Done, ImportFrom, KEY_CONTEXT, OtherOptions,
+    SelectKeymap, SelectNext, SelectPrevious, SelectTheme, SelectThemeKind, SkipImport, Start,
 };
 use crate::commands::OpenSettings;
 use crate::{store, theme_switch};
@@ -209,7 +209,7 @@ pub struct FirstRunWindow {
     main_anchor: Rc<Cell<Bounds<Pixels>>>,
     focus: FocusHandle,
     /// Runs once the window closed (the start-up's main window).
-    done: Option<Box<dyn FnOnce(&mut App)>>,
+    done: Option<Done>,
     /// Open over a main window (`settings.import-reference`).
     in_dialog: bool,
     activate: bool,
@@ -220,7 +220,7 @@ impl FirstRunWindow {
     pub(super) fn new(
         start: Start,
         found: Found,
-        done: Option<Box<dyn FnOnce(&mut App)>>,
+        done: Option<Done>,
         in_dialog: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -328,11 +328,11 @@ impl FirstRunWindow {
         self.go(Page::Progress, cx);
         let in_dialog = self.in_dialog;
         self.work = Some(cx.spawn(async move |this, cx| {
-            let read = cx.background_executor().spawn({
-                let folder = folder.clone();
-                async move { Arc::new(import::read_source(folder, config_dir)) }
-            });
-            let source = read.await;
+            let prepared = cx
+                .background_executor()
+                .spawn(async move { import::prepare(folder, config_dir) })
+                .await;
+            let source = Arc::new(prepared.source);
             let mut applied: Vec<Applied> = Vec::new();
             for (n, importer) in importers.iter().enumerate() {
                 let source = source.clone();
@@ -348,8 +348,11 @@ impl FirstRunWindow {
                 });
             }
             let _ = cx.update(|cx| {
-                let outcome = import::apply_all(applied, cx);
-                store::set(cx, &ImportSettings::imported(&source.folder.name));
+                let mut outcome = import::apply_all(applied, cx);
+                outcome.problems.extend(prepared.problem);
+                let ran: Vec<&str> = importers.iter().map(|i| i.id).collect();
+                let record = import::record(&source.folder, prepared.snapshot.as_deref(), &ran);
+                store::set(cx, &record);
                 super::report(
                     import::notification(&source.folder, &outcome),
                     in_dialog,

@@ -2,14 +2,18 @@
 //! with an empty configuration folder it offers the reference's newest
 //! configuration folder, imports its theme (from a theme plugin), font,
 //! soft wraps, autosave, file types and custom keymap, preselects them on
-//! Choose Theme and Choose Keymap and records the decision; Skip Import
-//! keeps the defaults; with nothing to import it opens on Choose Theme.
+//! Choose Theme and Choose Keymap and records the decision with a snapshot
+//! of the reference's data files (no secrets); an importer added later
+//! takes its part from the snapshot once; Skip Import keeps the defaults;
+//! with nothing to import it opens on Choose Theme.
 
 use std::cell::Cell;
 use std::fs::File;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use gpui::{AnyWindowHandle, AppContext as _, TestAppContext};
@@ -60,6 +64,11 @@ impl H<'_> {
 
     fn state(&mut self) -> Value {
         self.invoke("first-run.state", json!(null))
+    }
+
+    /// The configuration folder (`settings.toml`'s).
+    fn config(&self) -> PathBuf {
+        self.file.parent().unwrap().to_owned()
     }
 
     fn get(&mut self, key: &str) -> Value {
@@ -135,6 +144,9 @@ fn reference(root: &Path) {
   <option name="inactiveTimeout" value="30" />
 </component></application>"#,
     );
+    // Secrets stay behind.
+    write(&o.join("security.xml"), "<application/>");
+    write(&dir.join("c.kdbx"), "secret");
     write(
         &o.join("filetypes.xml"),
         r#"<application><component name="FileTypeManager" version="19"><extensionMap>
@@ -145,8 +157,8 @@ fn reference(root: &Path) {
     let jar = dir.join("plugins/nightfall/lib/nightfall.jar");
     std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
     let mut zip = zip::ZipWriter::new(File::create(&jar).unwrap());
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     for (name, text) in [
         (
             "META-INF/plugin.xml".to_owned(),
@@ -159,7 +171,10 @@ fn reference(root: &Path) {
             "themes/Nightfall.theme.json".to_owned(),
             themes_fixture("Nightfall.theme.json"),
         ),
-        ("themes/Nightfall.xml".to_owned(), themes_fixture("Nightfall.xml")),
+        (
+            "themes/Nightfall.xml".to_owned(),
+            themes_fixture("Nightfall.xml"),
+        ),
     ] {
         zip.start_file(name, options).unwrap();
         zip.write_all(text.as_bytes()).unwrap();
@@ -243,8 +258,15 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     });
     assert_eq!(name, "Nightfall");
     assert_eq!(s["chosen"], json!(theme));
-    assert!(s["cards"].as_array().unwrap().contains(&json!(theme)), "{s}");
-    assert_eq!(h.get("appearance.editor-scheme"), Value::Null, "its own scheme");
+    assert!(
+        s["cards"].as_array().unwrap().contains(&json!(theme)),
+        "{s}"
+    );
+    assert_eq!(
+        h.get("appearance.editor-scheme"),
+        Value::Null,
+        "its own scheme"
+    );
     assert_eq!(h.get("editor.font.family"), json!("Menlo"));
     assert_eq!(h.get("editor.font.size"), json!(14.5));
     assert_eq!(h.get("editor.font.ligatures"), json!(true));
@@ -255,7 +277,29 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
         h.get("file-types.associations"),
         json!([{"pattern": "*.jinja", "type": "HTML"}])
     );
-    assert_eq!(h.get("import.source"), json!("PyCharm2026.2"));
+    assert_eq!(h.get("import.source"), json!("PyCharm"));
+    assert_eq!(h.get("import.version"), json!("2026.2"));
+    assert_eq!(h.get("import.snapshot"), json!("imported/PyCharm-2026.2"));
+    let applied = h.get("import.applied");
+    for id in [
+        "appearance",
+        "editor-font",
+        "soft-wraps",
+        "autosave",
+        "file-types",
+        "keymap",
+        "search-everywhere",
+    ] {
+        assert_eq!(applied[id], json!(true), "{id}: {applied}");
+    }
+    // The snapshot: the data files, not the plugins or the secrets.
+    let snapshot = h.config().join("imported/PyCharm-2026.2");
+    assert!(snapshot.join("options/laf.xml").is_file());
+    assert!(snapshot.join("options/editor-font.xml").is_file());
+    assert!(snapshot.join("keymaps/Mine.xml").is_file());
+    assert!(!snapshot.join("options/security.xml").exists());
+    assert!(!snapshot.join("c.kdbx").exists());
+    assert!(!snapshot.join("plugins").exists());
     assert_eq!(h.get("keymap.name"), json!("Mine"));
     let report = h.cx.update(first_run::take_report).expect("a balloon");
     assert_eq!(report.title.as_ref(), "Settings imported");
@@ -283,10 +327,17 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     let macos = cfg!(target_os = "macos");
     assert_eq!(
         go_to_file(card("Mine")),
-        json!(if macos { "\u{21e7}\u{2318}P" } else { "Shift+Win+P" }),
+        json!(if macos {
+            "\u{21e7}\u{2318}P"
+        } else {
+            "Shift+Win+P"
+        }),
         "{s}"
     );
-    assert_ne!(go_to_file(card("Mine")), go_to_file(card(cards[0]["name"].as_str().unwrap())));
+    assert_ne!(
+        go_to_file(card("Mine")),
+        go_to_file(card(cards[0]["name"].as_str().unwrap()))
+    );
     // Another card switches at once; Back and forward again keep it.
     h.invoke("first-run.select-keymap", json!({"name": "VSCode"}));
     assert_eq!(h.get("keymap.name"), json!("VSCode"));
@@ -300,10 +351,9 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     assert!(h.window().is_none());
     assert!(h.done.get());
     let text = std::fs::read_to_string(&h.file).unwrap();
-    assert!(
-        text.contains("[import]\nsource = \"PyCharm2026.2\""),
-        "{text}"
-    );
+    assert!(text.contains("[import]\n"), "{text}");
+    assert!(text.contains("source = \"PyCharm\"\n"), "{text}");
+    assert!(text.contains("[import.applied]\n"), "{text}");
     // The window comes once: the decision is stored.
     assert!(!h.cx.update(|cx| first_run::undecided(cx)));
 }
@@ -314,7 +364,10 @@ fn skip_import_keeps_the_defaults_and_records_the_choice(cx: &mut TestAppContext
     h.invoke("first-run.skip", json!(null));
     let s = h.state();
     assert_eq!(s["page"], json!("theme"), "{s}");
-    assert_eq!(s["buttons"], json!(["first-run-continue", "first-run-back"]));
+    assert_eq!(
+        s["buttons"],
+        json!(["first-run-continue", "first-run-back"])
+    );
     assert_eq!(h.get("import.source"), json!("skipped"));
     assert_eq!(s["chosen"], json!("islands-dark"));
     assert_eq!(h.get("editor.font.size"), Value::Null);
@@ -329,7 +382,11 @@ fn skip_import_keeps_the_defaults_and_records_the_choice(cx: &mut TestAppContext
     h.invoke("first-run.theme-kind", json!({"kind": "dark"}));
     assert_eq!(h.state()["chosen"], json!("islands-dark"));
     h.invoke("first-run.theme-kind", json!({"kind": "light"}));
-    assert_eq!(h.state()["chosen"], json!("pyoxide-light"), "the last light one");
+    assert_eq!(
+        h.state()["chosen"],
+        json!("pyoxide-light"),
+        "the last light one"
+    );
     // Back goes to the import page; closing the window goes on.
     h.invoke("first-run.back", json!(null));
     assert_eq!(h.state()["page"], json!("import"));
@@ -398,9 +455,77 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
             .ends_with("does not appear to be this IDE's settings or installation directory"),
         "{s}"
     );
-    assert!(s["popup"].is_null());
     // An older folder imports too.
     h.invoke("first-run.import", json!({"folder": "PyCharm2025.1"}));
     assert_eq!(h.state()["page"], json!("theme"));
-    assert_eq!(h.get("import.source"), json!("PyCharm2025.1"));
+    assert_eq!(h.get("import.source"), json!("PyCharm"));
+    assert_eq!(h.get("import.version"), json!("2025.1"));
+}
+
+/// What the importer added after the import read, and how often it was
+/// applied.
+static LATER_READ: Mutex<Option<String>> = Mutex::new(None);
+static LATER_APPLIED: AtomicUsize = AtomicUsize::new(0);
+
+fn later_importer(source: &first_run::Source) -> first_run::Applied {
+    let value = source
+        .snapshot
+        .option("ide.general.xml", "GeneralSettings", "inactiveTimeout");
+    *LATER_READ.lock().unwrap() = value;
+    Box::new(|_| {
+        LATER_APPLIED.fetch_add(1, Ordering::SeqCst);
+        first_run::Outcome::imported("the later setting")
+    })
+}
+
+#[gpui::test]
+fn an_importer_added_later_takes_its_part_from_the_snapshot_once(cx: &mut TestAppContext) {
+    let mut h = open(cx, true);
+    h.invoke("first-run.import", json!({}));
+    h.invoke("first-run.continue", json!(null));
+    h.invoke("first-run.continue", json!(null));
+    assert!(h.done.get());
+    // Nothing is pending: every importer ran with the import.
+    h.cx.update(first_run::pick_up);
+    h.settle();
+    // A later version brings an area with settings of its own.
+    h.cx.update(|cx| {
+        first_run::register_importer(
+            cx,
+            first_run::Importer {
+                id: "later",
+                work: later_importer,
+            },
+        )
+    });
+    assert_eq!(h.get("import.applied.later"), Value::Null);
+    h.cx.update(first_run::pick_up);
+    h.settle();
+    assert_eq!(LATER_APPLIED.load(Ordering::SeqCst), 1);
+    assert_eq!(LATER_READ.lock().unwrap().as_deref(), Some("30"));
+    assert_eq!(h.get("import.applied.later"), json!(true));
+    // Once: the next start does not apply it again.
+    h.cx.update(first_run::pick_up);
+    h.settle();
+    assert_eq!(LATER_APPLIED.load(Ordering::SeqCst), 1);
+}
+
+#[gpui::test]
+fn nothing_is_picked_up_after_skip_import(cx: &mut TestAppContext) {
+    let mut h = open(cx, true);
+    h.invoke("first-run.skip", json!(null));
+    h.cx.update(|cx| {
+        first_run::register_importer(
+            cx,
+            first_run::Importer {
+                id: "later",
+                work: later_importer,
+            },
+        )
+    });
+    h.cx.update(first_run::pick_up);
+    h.settle();
+    assert_eq!(LATER_APPLIED.load(Ordering::SeqCst), 0);
+    assert_eq!(h.get("import.applied.later"), Value::Null);
+    assert!(!h.config().join("imported").exists());
 }

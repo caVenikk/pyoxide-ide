@@ -8,24 +8,33 @@
 //! preselected. Back and Continue go between the pages; Continue on the
 //! last page, or closing the window, goes on to the main window.
 //!
-//! The decision is stored in `[import]` of the settings (the folder's name
-//! or `skipped`), so the window comes once; `settings.import-reference`
-//! opens it again over a main window, modal to it.
+//! The decision is stored in `[import]` of the settings (where the
+//! settings came from, when, and their snapshot; or `skipped`), so the
+//! window comes once; `settings.import-reference` opens it again over a
+//! main window, modal to it.
 //!
 //! Areas import their part of the reference's settings through
 //! [`register_importer`]: an importer reads and writes files off the UI
 //! thread and returns what to apply on it. The window's own importers
 //! ([`import`]) bring the theme and editor colour scheme, the editor font,
 //! soft wraps, autosave and file type associations; the workbench adds the
-//! keymap and the Search Everywhere preview, the Python product the
-//! interpreters. The keymap page asks the workbench for the keymaps
-//! through [`set_keymaps`]. The reference's files are never written.
+//! keymap and the Search Everywhere preview. The keymap page asks the
+//! workbench for the keymaps through [`set_keymaps`]. The reference's
+//! files are never written.
+//!
+//! An import first copies the reference's data files into the
+//! configuration folder (`settings_import::snapshot`), and the importers
+//! read that copy; `[import.applied]` lists the importers that ran. An
+//! area that comes in a later version registers its importer like the
+//! others, and [`pick_up`] runs it once against the snapshot at the next
+//! start: values changed after that are never overwritten.
 
 mod import;
 mod view;
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use gpui::{App, AppContext as _, Bounds, Global, SharedString, TitlebarOptions, WindowBounds};
@@ -35,6 +44,7 @@ use settings_import::pycharm::options::{self, Found};
 use ui::notification::Notification;
 
 pub use import::{Applied, Importer, Outcome, Source, nothing};
+pub use settings_import::snapshot::Snapshot;
 pub use view::FirstRunWindow;
 
 ui::ui_commands! {
@@ -105,6 +115,9 @@ pub const KEY_CONTEXT: &str = "FirstRun";
 /// Shows a balloon in a main window.
 pub type Notify = Rc<dyn Fn(Notification, &mut App)>;
 
+/// Runs once the first-run window has closed (the start-up's main window).
+pub type Done = Box<dyn FnOnce(&mut App)>;
+
 /// What the keymap page offers, from the workbench that has the keymaps.
 #[derive(Clone, Copy)]
 pub struct KeymapChoice {
@@ -127,6 +140,8 @@ struct Hooks {
     pending: Option<Notification>,
     /// Where to look for the reference's folders instead (tests).
     reference_root: Option<Option<PathBuf>>,
+    /// A [`pick_up`] is running.
+    picking_up: bool,
 }
 
 impl Global for Hooks {}
@@ -232,7 +247,7 @@ pub fn open(start: Start, cx: &mut App, done: impl FnOnce(&mut App) + 'static) {
 fn open_window(
     start: Start,
     found: Found,
-    done: Box<dyn FnOnce(&mut App)>,
+    done: Done,
     cx: &mut App,
 ) -> Option<WindowHandle<FirstRunWindow>> {
     let themed = true;
@@ -298,6 +313,73 @@ pub fn open_over(parent: &mut gpui::Window, start: Start, cx: &mut App) {
     .detach();
 }
 
+/// Runs once, against the snapshot of the import, the importers that are
+/// not in `[import.applied]` yet (areas that came after the import), and
+/// marks them; their balloon shows in a main window. Nothing happens
+/// without an import, a snapshot or such importers. Call it at start-up,
+/// after every area registered its importer.
+pub fn pick_up(cx: &mut App) {
+    let record = crate::store::get::<ImportSettings>(cx);
+    let Some(config_dir) = import::config_dir(cx) else {
+        return;
+    };
+    let Some(dir) = record.snapshot_dir(&config_dir) else {
+        return;
+    };
+    let pending: Vec<Importer> = importers(cx)
+        .into_iter()
+        .filter(|i| !record.is_applied(i.id))
+        .collect();
+    if pending.is_empty() || hooks(cx).picking_up {
+        return;
+    }
+    hooks(cx).picking_up = true;
+    cx.spawn(async move |cx| {
+        let read = {
+            let (dir, config_dir) = (dir.clone(), config_dir.clone());
+            cx.background_executor().spawn(async move {
+                dir.is_dir()
+                    .then(|| Arc::new(import::recorded_source(&record, dir, config_dir)))
+            })
+        };
+        let source = read.await;
+        let mut applied = Vec::new();
+        if let Some(source) = &source {
+            for importer in &pending {
+                let (source, work) = (source.clone(), importer.work);
+                let done = cx.background_executor().spawn(async move { work(&source) });
+                applied.push((importer.id, done.await));
+            }
+        }
+        let _ = cx.update(|cx| {
+            hooks(cx).picking_up = false;
+            let Some(source) = source else {
+                return;
+            };
+            // Only while the import read is the one recorded, and for the
+            // importers an import meanwhile did not run.
+            let mut record = crate::store::get::<ImportSettings>(cx);
+            if record.snapshot_dir(&config_dir) != Some(dir) {
+                return;
+            }
+            let mut todo: Vec<Applied> = Vec::new();
+            for (id, apply) in applied {
+                if !record.is_applied(id) {
+                    record.mark_applied(id);
+                    todo.push(apply);
+                }
+            }
+            let applied = todo;
+            let outcome = import::apply_all(applied, cx);
+            crate::store::set(cx, &record);
+            if !outcome.imported.is_empty() || !outcome.problems.is_empty() {
+                report(import::notification(&source.folder, &outcome), true, cx);
+            }
+        });
+    })
+    .detach();
+}
+
 /// Records how the first start ended when nothing was recorded yet.
 fn decide_skipped(cx: &mut App) {
     if undecided(cx) {
@@ -307,10 +389,10 @@ fn decide_skipped(cx: &mut App) {
 
 /// Shows the import's balloon: in a main window when one is open (and a
 /// notifier is set), else later through [`take_report`].
-fn report(notification: Notification, in_dialog: bool, cx: &mut App) {
+fn report(notification: Notification, main_window_open: bool, cx: &mut App) {
     let notify = hooks(cx).notify.clone();
     match notify {
-        Some(notify) if in_dialog => notify(notification, cx),
+        Some(notify) if main_window_open => notify(notification, cx),
         _ => hooks(cx).pending = Some(notification),
     }
 }

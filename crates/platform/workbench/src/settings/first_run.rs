@@ -118,7 +118,7 @@ fn import_keymap(source: &Source) -> Applied {
         });
     }
     let (Some(file), Some(dir)) = (
-        options::keymap_file(&source.folder.path, &name),
+        options::keymap_file(source.snapshot.dir(), &name),
         source.config_dir.as_ref().map(|d| d.join("keymaps")),
     ) else {
         return Box::new(move |_| {

@@ -1,26 +1,35 @@
 //! The import of a configuration folder: what importers are, the ones of
 //! the platform's settings (theme and editor colour scheme, editor font,
-//! soft wraps, autosave, file type associations), and the balloon that
-//! says what came in.
+//! soft wraps, autosave, file type associations), the snapshot the import
+//! keeps, and the balloon that says what came in.
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use gpui::App;
 use settings::{
-    AppearanceSettings, EditorFontSettings, FileTypeAssociation, FileTypeSettings, SaveSettings,
-    SoftWrapSettings, SyncSettings,
+    AppearanceSettings, EditorFontSettings, FileTypeAssociation, FileTypeSettings, ImportSettings,
+    SaveSettings, SoftWrapSettings, SyncSettings,
 };
 use settings_import::pycharm::options::{self, ConfigFolder, ReferenceOptions, ThemePlugin};
+use settings_import::snapshot::{self, Snapshot};
 use themes::ThemeKind;
 use themes::catalog::ImportedFile;
 use ui::notification::{Notification, NotificationKind};
 
 use crate::{store, theme_switch};
 
-/// What importers read: the folder and its options, read once.
+/// What importers read: the folder imported from, the snapshot of its
+/// data files and the options Pyoxide imports, read once from it.
 #[derive(Debug, Clone)]
 pub struct Source {
+    /// The folder imported from: its name and version, and its plugins
+    /// (theme plugins are read there, not copied).
     pub folder: ConfigFolder,
+    /// The data files to read: the import's snapshot (the folder itself
+    /// when no snapshot could be kept). Importers read option, keymap and
+    /// scheme files here, never in [`ConfigFolder::path`].
+    pub snapshot: Snapshot,
     pub options: ReferenceOptions,
     /// Pyoxide's configuration folder (where `settings.toml` is), for the
     /// files an importer writes (`themes/`, `keymaps/`, `interpreters.toml`).
@@ -201,7 +210,7 @@ fn appearance(source: &Source) -> Applied {
             }
             _ => None,
         };
-        let own = options::scheme_file(&source.folder.path, &name);
+        let own = options::scheme_file(source.snapshot.dir(), &name);
         if let Some(file) = own {
             let mut sources = vec![file];
             sources.extend(plugins().into_iter().map(|p| p.archive));
@@ -465,13 +474,104 @@ fn join_parts(parts: &[String]) -> String {
     }
 }
 
-/// Reads the folder's options (off the UI thread).
-pub(super) fn read_source(folder: ConfigFolder, config_dir: Option<PathBuf>) -> Source {
-    let options = options::read_options(&folder.path);
+/// The source of an import, with its snapshot.
+pub(super) struct Prepared {
+    pub source: Source,
+    /// The snapshot's path in the configuration folder; `None` when none
+    /// was kept.
+    pub snapshot: Option<String>,
+    /// Why no snapshot was kept, a sentence of the balloon.
+    pub problem: Option<String>,
+}
+
+/// Keeps the snapshot of `folder` in the configuration folder and reads
+/// the options from it (off the UI thread). Without a configuration
+/// folder, or when the copy fails, the folder itself is read.
+pub(super) fn prepare(folder: ConfigFolder, config_dir: Option<PathBuf>) -> Prepared {
+    let name = snapshot::folder_name(&source_name(&folder), &folder.version);
+    let relative = format!("{}/{name}", snapshot::FOLDER);
+    let saved = config_dir
+        .as_ref()
+        .map(|dir| snapshot::save_pycharm(&folder.path, &dir.join(snapshot::FOLDER).join(&name)));
+    let (snapshot, kept, problem) = match saved {
+        Some(Ok(snapshot)) => (snapshot, Some(relative), None),
+        Some(Err(e)) => {
+            eprintln!("import: the snapshot could not be kept: {e}");
+            (
+                Snapshot::at(&folder.path),
+                None,
+                Some(format!(
+                    "The settings could not be kept for features that come later: {e}."
+                )),
+            )
+        }
+        None => (Snapshot::at(&folder.path), None, None),
+    };
+    let options = snapshot.options();
+    Prepared {
+        source: Source {
+            folder,
+            snapshot,
+            options,
+            config_dir,
+        },
+        snapshot: kept,
+        problem,
+    }
+}
+
+/// The application a folder belongs to as `[import]` records it
+/// (`PyCharm`; the folder's name for a folder of another name).
+fn source_name(folder: &ConfigFolder) -> String {
+    if folder.product.is_empty() {
+        folder.name.clone()
+    } else {
+        folder.product.clone()
+    }
+}
+
+/// The record of a finished import: where it came from, its snapshot and
+/// the importers that ran.
+pub(super) fn record(
+    folder: &ConfigFolder,
+    snapshot: Option<&str>,
+    ran: &[&str],
+) -> ImportSettings {
+    let mut record =
+        ImportSettings::imported(&source_name(folder), &folder.version, SystemTime::now());
+    if let Some(path) = snapshot {
+        record = record.with_snapshot(path);
+    }
+    for id in ran {
+        record.mark_applied(id);
+    }
+    record
+}
+
+/// The source of a pick-up: the snapshot of the import `record` names,
+/// read again (off the UI thread).
+pub(super) fn recorded_source(
+    record: &ImportSettings,
+    dir: PathBuf,
+    config_dir: PathBuf,
+) -> Source {
+    let product = record.source.clone().unwrap_or_default();
+    let version = record.version.clone().unwrap_or_default();
+    let folder = ConfigFolder {
+        path: dir.clone(),
+        name: format!("{product}{version}"),
+        product,
+        version,
+        last_used: SystemTime::UNIX_EPOCH,
+        plugins: dir.join("plugins"),
+    };
+    let snapshot = Snapshot::at(dir);
+    let options = snapshot.options();
     Source {
         folder,
+        snapshot,
         options,
-        config_dir,
+        config_dir: Some(config_dir),
     }
 }
 

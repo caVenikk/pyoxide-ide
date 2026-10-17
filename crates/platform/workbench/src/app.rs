@@ -486,8 +486,9 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
 }
 
 /// Opens the main window with `paths`, quits with its last window, runs
-/// `PYOXIDE_RUN` and `PYOXIDE_SHOT` there, and shows the balloon of an
-/// import the first-run window made.
+/// `PYOXIDE_RUN` and `PYOXIDE_SHOT` there, shows the balloon of an import
+/// the first-run window made, and lets areas that came after an earlier
+/// import take their part of it (`settings_ui::first_run::pick_up`).
 fn open_main(
     product: Rc<Product>,
     paths: Vec<std::path::PathBuf>,
@@ -518,6 +519,8 @@ fn open_main(
     if let Some(report) = settings_ui::first_run::take_report(cx) {
         let _ = window.update(cx, |workbench, _, cx| workbench.notify(report, cx));
     }
+    // Areas added after the import take their part of it, once.
+    settings_ui::first_run::pick_up(cx);
     cx.on_window_closed(|cx| {
         if cx.windows().is_empty() {
             cx.quit();
