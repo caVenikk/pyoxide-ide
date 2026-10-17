@@ -72,6 +72,10 @@ impl Inner {
         lock(&self.state)
     }
 
+    pub(crate) fn provider(&self) -> &Arc<dyn DebugAdapterProvider> {
+        &self.provider
+    }
+
     pub(crate) fn emit(&self, event: DebuggerEvent) {
         let mut listeners = lock(&self.listeners);
         listeners.retain(|tx| tx.send(event.clone()).is_ok());
@@ -678,6 +682,7 @@ impl Debugger {
                     "name": s.name,
                     "watches_key": s.watches_key,
                     "state": s.phase.as_str(),
+                    "subprocesses": session.subprocesses(),
                     "stop": s.stop.as_ref().map(|stop| json!({
                         "reason": stop.reason,
                         "thread": stop.thread_id,

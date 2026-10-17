@@ -80,6 +80,11 @@ pub struct DebugOptions {
     pub qt: Option<String>,
     /// "Enable Debugpy Logging" (off): the folder for debugpy's logs.
     pub log_dir: Option<PathBuf>,
+    /// "Attach to subprocess automatically while debugging"
+    /// (`myAttachToSubprocess`, on): debugpy debugs the Python processes
+    /// the program starts (`subprocess`, `multiprocessing`, `os.exec*`),
+    /// each a child session of the debug session.
+    pub attach_to_subprocess: bool,
 }
 
 impl Default for DebugOptions {
@@ -90,6 +95,7 @@ impl Default for DebugOptions {
             gevent: false,
             qt: Some("auto".to_owned()),
             log_dir: None,
+            attach_to_subprocess: true,
         }
     }
 }
@@ -156,7 +162,7 @@ pub fn launch_arguments_with(
     arguments.insert("redirectOutput".into(), json!(false));
     arguments.insert("justMyCode".into(), json!(just_my_code));
     arguments.insert("showReturnValue".into(), json!(options.show_return_values));
-    arguments.insert("subProcess".into(), json!(false));
+    arguments.insert("subProcess".into(), json!(options.attach_to_subprocess));
     arguments.insert("stopOnEntry".into(), json!(false));
     arguments.insert(
         "variablePresentation".into(),
@@ -173,6 +179,23 @@ pub fn launch_arguments_with(
         .unwrap_or_else(|| "none".to_owned());
     arguments.insert("qt".into(), json!(qt));
     Value::Object(arguments)
+}
+
+/// How long connecting to the adapter for a subprocess may take.
+pub const CHILD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Where the adapter waits for the client of a subprocess: the `connect`
+/// of the child's configuration (debugpy 1.8.21 `adapter/clients.py`
+/// `notify_of_subprocess`: the address the adapter listens on for
+/// clients).
+pub fn child_address(configuration: &Value) -> Result<(String, u16), String> {
+    let connect = &configuration["connect"];
+    let host = connect["host"].as_str().unwrap_or("127.0.0.1");
+    let port = connect["port"]
+        .as_u64()
+        .and_then(|p| u16::try_from(p).ok())
+        .ok_or_else(|| "No debugger address for the subprocess".to_owned())?;
+    Ok((host.to_owned(), port))
 }
 
 /// How pydevd presents variables: special variables (`__x__`) in their
@@ -357,7 +380,7 @@ mod tests {
                 "redirectOutput": false,
                 "justMyCode": false,
                 "showReturnValue": false,
-                "subProcess": false,
+                "subProcess": true,
                 "stopOnEntry": false,
                 "variablePresentation": {"all": "inline", "special": "group",
                     "function": "hide", "class": "hide"},
@@ -376,6 +399,7 @@ mod tests {
             gevent: true,
             qt: None,
             log_dir: None,
+            attach_to_subprocess: false,
         };
         let args = launch_arguments_with(&run, "tool", true, &options, no_env());
         assert_eq!(args["module"], "pkg.tool");
@@ -385,6 +409,7 @@ mod tests {
         assert_eq!(args["justMyCode"], true);
         assert_eq!(args["showReturnValue"], true);
         assert_eq!(args["gevent"], true);
+        assert_eq!(args["subProcess"], false);
         assert_eq!(args["qt"], "none");
         assert_eq!(
             args["variablePresentation"],
@@ -478,6 +503,25 @@ mod tests {
             &command.args[1..],
             ["--log-dir", "/tmp/logs"].map(OsString::from)
         );
+    }
+
+    #[test]
+    fn the_address_of_a_subprocess() {
+        let configuration = json!({
+            "name": "Subprocess 4242",
+            "subProcessId": 4242,
+            "connect": {"host": "127.0.0.1", "port": 50123},
+        });
+        assert_eq!(
+            child_address(&configuration),
+            Ok(("127.0.0.1".to_owned(), 50123))
+        );
+        assert_eq!(
+            child_address(&json!({"connect": {"port": 7}})),
+            Ok(("127.0.0.1".to_owned(), 7))
+        );
+        assert!(child_address(&json!({"subProcessId": 1})).is_err());
+        assert!(child_address(&json!({"connect": {"port": 70000}})).is_err());
     }
 
     #[test]
