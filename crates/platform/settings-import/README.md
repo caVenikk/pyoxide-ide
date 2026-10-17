@@ -34,7 +34,20 @@ database, file path, connect descriptor or TNS alias, TLS mode, parameters):
 - The schema model files in `.idea/dataSources/` (they hold no connection
   settings; one that does is merged).
 - Anything from PyCharm's application settings other than the password
-  settings (`options/security.xml`).
+  settings (`options/security.xml`), for data sources.
+
+## Application options and the snapshot
+
+`pycharm::options` finds the reference's configuration folders (newest
+first) and reads the options of the first-run import (ADR 0017): theme,
+colour scheme, keymap, editor font, soft wraps, the honoured UI options,
+autosave and file type associations, and the theme plugins' descriptors
+(`META-INF/plugin.xml` only). `snapshot` copies a configuration folder's
+data files (`options/*.xml`, `keymaps/`, `colors/`, `codestyles/`,
+`templates/`) into Pyoxide's configuration folder, never `security.xml`,
+password stores, licences or token files, and reads values back from
+the copy (`Snapshot::option`) for features that take their settings
+later.
 
 ## Passwords
 

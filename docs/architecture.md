@@ -27,7 +27,9 @@ Platform (`crates/platform/`, language-agnostic):
 - `db-cli`: `pyoxide-db`, a thin front-end over `db-service`.
 - `secrets`: secret stores (OS credential store, KeePass, memory), their
   settings and the reader of a JetBrains IDE credential store for import.
-- `settings-import`: PyCharm project settings (data sources, JDBC URLs).
+- `settings-import`: PyCharm project settings (data sources, JDBC URLs),
+  the reference's application options and configuration folders, and the
+  snapshot an import keeps of them.
 - `text`: the text model (ADR 0007): rope buffer, selections, undoable
   transactions, caret movement, encoding and line separator of the file,
   reloading from disk as one undo step with carets kept through a line
@@ -271,7 +273,7 @@ crates (`scripts/check-layers.py` gets these rules).
 | `git` | platform | no | the `git` executable: lookup, runner, parsers, `.git` readers, operations, repository detection, `git.*` engine commands | 0016 |
 | `vcs-ui` | platform | yes | file status colours, change markers and their popup, the VCS widget, branches popup and branch dialogs; later the Commit tool window, changes tree, diff viewer tab, other git dialogs | 0016 |
 | `settings` | platform | no | the application settings store (`settings.toml` and dedicated files), scopes, change events, `settings.get` / `settings.set` | 0017 |
-| `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import | 0017, 0018 |
+| `settings-ui` | platform | yes | the Settings window, the page registry and page trait, pages that only edit the store (Appearance), the theme in use with its switchers and import, the first-run window and its importers | 0017, 0018 |
 | `py-debug` | python | no | debugpy helper lookup, launch arguments, stoppable lines, inline value positions, Python debugger settings | 0015 |
 | `pyoxide-ide` (extended) | python | yes | venv and uv activation in the terminal, the Python settings pages, the debug adapter provider | 0014, 0015, 0017 |
 
@@ -351,6 +353,21 @@ once, before or with its first user:
 - **Application settings store.** Terminal, debugger and git options need
   the `settings` crate (ADR 0017) before their settings pages exist; their
   first versions read it with defaults.
+- **Settings from the reference, for features that come later.** The
+  first-run import copies the reference's configuration data files into
+  `imported/<source>-<version>/` of the configuration folder
+  (`settings_import::snapshot`; never `security.xml`, password stores or
+  token files) and records `[import]` in `settings.toml`: source,
+  version, time, the snapshot's path, and `[import.applied]`, the
+  importers that ran. A feature that ships with settings of its own
+  registers an importer (`settings_ui::first_run::register_importer`)
+  that reads its keys from the snapshot (`Snapshot::option`,
+  `Snapshot::component`) off the UI thread and returns what to store. At
+  the next start `first_run::pick_up` runs every importer not in
+  `[import.applied]` once against the snapshot and marks it, so the
+  values the person changes afterwards are never overwritten. A later
+  import from VS Code (`settings.json`, `keybindings.json`) uses the
+  same snapshot format.
 
 The editor's context menu does not exist yet; the debugger's and git's
 entries in it (Run to Cursor, Add to Watches, Git) follow when it is added.
