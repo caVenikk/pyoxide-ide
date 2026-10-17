@@ -71,8 +71,8 @@ pub enum Adapter {
     /// A process started with this command line, over its standard
     /// streams.
     Command(CommandLine),
-    /// A connection made already (tests, adapters in the process; later
-    /// sockets).
+    /// A connection made already (a socket to an adapter that listens,
+    /// tests, adapters in the process).
     Transport(Transport),
 }
 
@@ -154,6 +154,22 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// Step Into My Code; `None` makes it a plain Step Into.
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
         None
+    }
+
+    /// The product debugs the child sessions its adapter asks for (DAP
+    /// `startDebugging`: subprocesses of the program); the client offers
+    /// them at `initialize`.
+    fn child_sessions(&self) -> bool {
+        false
+    }
+
+    /// How to reach the adapter for a child session, given the child's
+    /// `attach` or `launch` configuration (from `startDebugging`). An
+    /// error is answered to the adapter, and the child runs on without the
+    /// debugger. Blocking (connects a socket): called off the UI thread.
+    fn child_adapter(&self, configuration: &Value) -> Result<Adapter, String> {
+        let _ = configuration;
+        Err("child sessions are not supported".to_owned())
     }
 
     /// The title of the balloon of a session whose debugger could not

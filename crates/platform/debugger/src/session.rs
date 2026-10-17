@@ -4,6 +4,14 @@
 //! adapter with their verification, and the debuggee started through
 //! `runInTerminal`.
 //!
+//! Subprocesses of the program that the adapter debugs come as child
+//! sessions (`startDebugging`), each over a connection of its own; they
+//! are processes of this session, as the reference's multiprocess
+//! debugger keeps them in one session: breakpoints go to every process,
+//! the session shows the process that stopped (one that stops while
+//! another is shown waits until that one moves on), and Stop ends them
+//! all.
+//!
 //! ```text
 //! Starting --initialized, configurationDone, launch answered--> Running
 //! Running --stopped--> Suspended --resume / step answered, continued--> Running
@@ -212,6 +220,30 @@ struct Data {
     after_step: Option<(String, Value)>,
     /// Run to Cursor: where the program runs to.
     run_to: Option<RunTo>,
+    /// The program's subprocesses debugged in the session.
+    subprocesses: Vec<Subprocess>,
+    next_subprocess: u64,
+    /// Stops of processes that came while another process is shown
+    /// suspended, oldest first.
+    waiting: Vec<(Process, dap_client::Stopped)>,
+}
+
+/// A process of the session: the program, or one of its subprocesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Process {
+    Program,
+    Subprocess(u64),
+}
+
+/// A subprocess of the program: a child session of the adapter over a
+/// connection of its own.
+struct Subprocess {
+    key: u64,
+    client: Client,
+    /// `initialized` came: breakpoint changes are sent to it.
+    configured: bool,
+    /// Its breakpoint ids.
+    adapter_ids: HashMap<i64, BreakpointId>,
 }
 
 /// Run to Cursor's target: a breakpoint of the session only, on top of the
@@ -228,7 +260,15 @@ pub(crate) struct SessionInner {
     name: String,
     watches_key: String,
     debugger: Weak<DebuggerInner>,
+    /// The program's connection.
     client: OnceLock<Client>,
+    /// The adapter's type, for the subprocesses' `initialize`.
+    adapter_id: OnceLock<String>,
+    /// The subprocess the session shows (its key and connection), `None`
+    /// for the program: requests about threads, frames and values and the
+    /// stepping actions go to its connection. Locked after `data`, never
+    /// before it.
+    focus: Mutex<Option<(u64, Client)>>,
     step_into_my_code: Option<StepIntoMyCode>,
     /// "Redirect input from": the file the program reads.
     input_file: Option<PathBuf>,
@@ -270,6 +310,8 @@ impl Session {
                 watches_key,
                 debugger,
                 client: OnceLock::new(),
+                adapter_id: OnceLock::new(),
+                focus: Mutex::new(None),
                 step_into_my_code,
                 input_file,
                 data: Mutex::new(Data {
@@ -299,6 +341,9 @@ impl Session {
                     console_command: None,
                     after_step: None,
                     run_to: None,
+                    subprocesses: Vec::new(),
+                    next_subprocess: 0,
+                    waiting: Vec::new(),
                 }),
             }),
         }
@@ -313,15 +358,19 @@ impl Session {
             crate::provider::Adapter::Transport(transport) => transport,
         };
         lock(&self.inner.data).adapter_pid = transport.process().map(ProcessHandle::pid);
-        let handler = Arc::new(SessionHandler(Arc::downgrade(&self.inner)));
+        let handler = Arc::new(SessionHandler {
+            session: Arc::downgrade(&self.inner),
+            process: Process::Program,
+        });
         let client = Client::start(&self.inner.name, transport, handler)
             .map_err(|e| format!("Cannot start the debugger: {e}"))?;
         let _ = self.inner.client.set(client.clone());
+        let _ = self.inner.adapter_id.set(launch.adapter_id.clone());
         let weak = Arc::downgrade(&self.inner);
         let kind = launch.kind;
         let arguments = launch.arguments;
         client
-            .initialize(&ClientInfo::new(launch.adapter_id))
+            .initialize(&self.client_info())
             .on_done(move |result| {
                 let Some(session) = weak.upgrade().map(|inner| Session { inner }) else {
                     return;
@@ -429,8 +478,74 @@ impl Session {
         lock(&self.inner.data).debuggee.clone()
     }
 
+    /// The connection of the process the session shows.
     fn client(&self) -> Option<Client> {
+        match &*lock(&self.inner.focus) {
+            Some((_, client)) => Some(client.clone()),
+            None => self.program_client(),
+        }
+    }
+
+    /// The program's connection.
+    fn program_client(&self) -> Option<Client> {
         self.inner.client.get().cloned()
+    }
+
+    /// The process the session shows.
+    fn focus(&self) -> Process {
+        match &*lock(&self.inner.focus) {
+            Some((key, _)) => Process::Subprocess(*key),
+            None => Process::Program,
+        }
+    }
+
+    /// Shows a process (its connection is in `data`, which the caller has
+    /// locked).
+    fn set_focus(&self, data: &Data, process: Process) {
+        let focus = match process {
+            Process::Program => None,
+            Process::Subprocess(key) => data
+                .subprocesses
+                .iter()
+                .find(|s| s.key == key)
+                .map(|s| (key, s.client.clone())),
+        };
+        *lock(&self.inner.focus) = focus;
+    }
+
+    /// The configured processes and their connections, the program first.
+    fn targets(&self) -> Vec<(Process, Client)> {
+        let data = lock(&self.inner.data);
+        let program = self
+            .program_client()
+            .filter(|_| data.configured)
+            .map(|c| (Process::Program, c));
+        program
+            .into_iter()
+            .chain(
+                data.subprocesses
+                    .iter()
+                    .filter(|s| s.configured)
+                    .map(|s| (Process::Subprocess(s.key), s.client.clone())),
+            )
+            .collect()
+    }
+
+    /// What the client says of itself at `initialize`: child sessions
+    /// when the product debugs them.
+    fn client_info(&self) -> ClientInfo {
+        let mut info = ClientInfo::new(self.inner.adapter_id.get().cloned().unwrap_or_default());
+        info.start_debugging = self
+            .inner
+            .debugger
+            .upgrade()
+            .is_some_and(|d| d.provider().child_sessions());
+        info
+    }
+
+    /// The number of subprocesses debugged in the session now.
+    pub fn subprocesses(&self) -> usize {
+        lock(&self.inner.data).subprocesses.len()
     }
 
     fn emit(&self, event: DebuggerEvent) {
@@ -487,13 +602,42 @@ impl Session {
         }
     }
 
+    /// Sends the breakpoints of a file to every process.
     fn send_breakpoints(&self, file: &Path) {
-        let (Some(client), Some(debugger)) = (self.client(), self.inner.debugger.upgrade()) else {
+        let Some(ids) = self.breakpoints_to_send(file).map(|(ids, _)| ids) else {
             return;
         };
+        {
+            let mut data = lock(&self.inner.data);
+            if let Some(old) = data.sent.insert(file.to_owned(), ids.clone()) {
+                for id in old {
+                    data.statuses.remove(&id);
+                }
+            }
+            data.adapter_ids.retain(|_, id| !ids.contains(id));
+            for subprocess in &mut data.subprocesses {
+                subprocess.adapter_ids.retain(|_, id| !ids.contains(id));
+            }
+        }
+        for (process, client) in self.targets() {
+            self.send_breakpoints_to(process, &client, file);
+        }
+    }
+
+    /// The breakpoints of a file as the adapter takes them, with their ids.
+    fn breakpoints_to_send(
+        &self,
+        file: &Path,
+    ) -> Option<(Vec<BreakpointId>, Vec<SourceBreakpoint>)> {
+        let (Some(client), Some(debugger)) = (self.program_client(), self.inner.debugger.upgrade())
+        else {
+            return None;
+        };
         let (muted, breakpoints) = debugger.breakpoints_of(file);
-        let run_to = lock(&self.inner.data).run_to.clone();
-        let ignored = run_to.as_ref().is_some_and(|r| r.ignore_breakpoints);
+        let ignored = lock(&self.inner.data)
+            .run_to
+            .as_ref()
+            .is_some_and(|r| r.ignore_breakpoints);
         let capabilities = client.capabilities();
         let sent: Vec<(BreakpointId, SourceBreakpoint)> = if muted || ignored {
             Vec::new()
@@ -503,21 +647,22 @@ impl Session {
                 .filter_map(|b| source_breakpoint(b, capabilities.log_points).map(|s| (b.id, s)))
                 .collect()
         };
-        let ids: Vec<BreakpointId> = sent.iter().map(|(id, _)| *id).collect();
-        {
-            let mut data = lock(&self.inner.data);
-            if let Some(old) = data.sent.insert(file.to_owned(), ids.clone()) {
-                for id in old {
-                    data.statuses.remove(&id);
-                }
-            }
-            data.adapter_ids.retain(|_, id| !ids.contains(id));
-        }
-        let mut list: Vec<SourceBreakpoint> = sent.into_iter().map(|(_, s)| s).collect();
+        Some(sent.into_iter().unzip())
+    }
+
+    /// Sends the breakpoints of a file to one process; its answer is what
+    /// the program's says, or what a subprocess says when it verified one
+    /// (or nothing was said yet).
+    fn send_breakpoints_to(&self, process: Process, client: &Client, file: &Path) {
+        let Some((ids, mut list)) = self.breakpoints_to_send(file) else {
+            return;
+        };
+        let run_to = lock(&self.inner.data).run_to.clone();
         // Run to Cursor's target suspends whatever a breakpoint of its line
         // says until the next stop; one of its own goes last, where its
-        // answer has no breakpoint of the project to go to.
-        if let Some(run_to) = run_to.filter(|r| r.file == file) {
+        // answer has no breakpoint of the project to go to. Only the
+        // process shown runs to it.
+        if let Some(run_to) = run_to.filter(|r| r.file == file && self.focus() == process) {
             match list.iter_mut().find(|b| b.line == run_to.line) {
                 Some(b) => *b = SourceBreakpoint::at(run_to.line),
                 None => list.push(SourceBreakpoint::at(run_to.line)),
@@ -530,33 +675,52 @@ impl Session {
             };
             {
                 let mut data = lock(&session.inner.data);
-                match result {
-                    Ok(answers) => {
-                        for (id, answer) in ids.iter().zip(answers) {
-                            if let Some(adapter_id) = answer.id {
-                                data.adapter_ids.insert(adapter_id, *id);
-                            }
-                            data.statuses.insert(
-                                *id,
-                                BreakpointStatus {
-                                    verified: answer.verified,
-                                    message: answer.message,
-                                    line: answer.line,
-                                },
-                            );
-                        }
+                let data = &mut *data;
+                let statuses: Vec<(BreakpointId, Option<i64>, BreakpointStatus)> = match result {
+                    Ok(answers) => ids
+                        .iter()
+                        .zip(answers)
+                        .map(|(id, answer)| {
+                            let status = BreakpointStatus {
+                                verified: answer.verified,
+                                message: answer.message,
+                                line: answer.line,
+                            };
+                            (*id, answer.id, status)
+                        })
+                        .collect(),
+                    Err(error) => ids
+                        .iter()
+                        .map(|id| {
+                            let status = BreakpointStatus {
+                                verified: false,
+                                message: Some(error.to_string()),
+                                line: None,
+                            };
+                            (*id, None, status)
+                        })
+                        .collect(),
+                };
+                let adapter_ids = match process {
+                    Process::Program => Some(&mut data.adapter_ids),
+                    Process::Subprocess(key) => data
+                        .subprocesses
+                        .iter_mut()
+                        .find(|s| s.key == key)
+                        .map(|s| &mut s.adapter_ids),
+                };
+                let Some(adapter_ids) = adapter_ids else {
+                    return;
+                };
+                for (id, adapter_id, status) in statuses {
+                    if let Some(adapter_id) = adapter_id {
+                        adapter_ids.insert(adapter_id, id);
                     }
-                    Err(error) => {
-                        for id in &ids {
-                            data.statuses.insert(
-                                *id,
-                                BreakpointStatus {
-                                    verified: false,
-                                    message: Some(error.to_string()),
-                                    line: None,
-                                },
-                            );
-                        }
+                    let keep = process != Process::Program
+                        && !status.verified
+                        && data.statuses.contains_key(&id);
+                    if !keep {
+                        data.statuses.insert(id, status);
                     }
                 }
             }
@@ -564,8 +728,15 @@ impl Session {
         });
     }
 
+    /// Sends the exception breakpoints to every process.
     fn send_exceptions(&self) {
-        let (Some(client), Some(debugger)) = (self.client(), self.inner.debugger.upgrade()) else {
+        for (_, client) in self.targets() {
+            self.send_exceptions_to(&client);
+        }
+    }
+
+    fn send_exceptions_to(&self, client: &Client) {
+        let Some(debugger) = self.inner.debugger.upgrade() else {
             return;
         };
         let ignored = lock(&self.inner.data)
@@ -583,7 +754,7 @@ impl Session {
     /// `initialized`: the breakpoints, the exception filters, then
     /// `configurationDone`.
     fn configure(&self) {
-        let Some(client) = self.client() else {
+        let Some(client) = self.program_client() else {
             return;
         };
         lock(&self.inner.data).configured = true;
@@ -626,11 +797,24 @@ impl Session {
 
     // ---- events ----------------------------------------------------------------
 
-    fn stopped(&self, stopped: dap_client::Stopped) {
+    /// A process stopped: the session shows it, unless another process is
+    /// shown suspended (then it waits for that one to move on).
+    fn stopped(&self, process: Process, stopped: dap_client::Stopped) {
         let (generation, thread, after_step, hits, run_to) = {
             let mut data = lock(&self.inner.data);
             if matches!(data.phase, Phase::Stopping | Phase::Ended) {
                 return;
+            }
+            let shown = self.focus();
+            if data.phase == Phase::Suspended && shown != process {
+                data.waiting.retain(|(p, _)| *p != process);
+                data.waiting.push((process, stopped));
+                return;
+            }
+            if shown != process {
+                self.set_focus(&data, process);
+                data.threads.clear();
+                data.selected_thread = None;
             }
             data.generation += 1;
             data.phase = Phase::Suspended;
@@ -649,10 +833,18 @@ impl Session {
                 all_threads: stopped.all_threads_stopped,
                 exception: None,
             });
+            let adapter_ids = match process {
+                Process::Program => Some(&data.adapter_ids),
+                Process::Subprocess(key) => data
+                    .subprocesses
+                    .iter()
+                    .find(|s| s.key == key)
+                    .map(|s| &s.adapter_ids),
+            };
             let hits: Vec<BreakpointId> = stopped
                 .hit_breakpoint_ids
                 .iter()
-                .filter_map(|id| data.adapter_ids.get(id).copied())
+                .filter_map(|id| adapter_ids.and_then(|ids| ids.get(id)).copied())
                 .collect();
             (
                 data.generation,
@@ -820,8 +1012,10 @@ impl Session {
         .boxed()
     }
 
+    /// The process shown moved on; a process that stopped meanwhile is
+    /// shown next.
     fn resumed(&self) {
-        {
+        let next = {
             let mut data = lock(&self.inner.data);
             if data.phase != Phase::Suspended {
                 return;
@@ -833,14 +1027,87 @@ impl Session {
             data.scopes.clear();
             data.children.clear();
             data.selected_frame = None;
-        }
+            (!data.waiting.is_empty()).then(|| data.waiting.remove(0))
+        };
         self.changed();
+        if let Some((process, stopped)) = next {
+            self.stopped(process, stopped);
+        }
+    }
+
+    /// An event of a process: the program's, or a subprocess's.
+    fn process_event(&self, process: Process, event: Event) {
+        let shown = self.focus() == process;
+        match event {
+            Event::Stopped(stopped) => return self.stopped(process, stopped),
+            // A waiting stop is over.
+            Event::Continued {
+                thread_id,
+                all_threads,
+            } if !shown => {
+                lock(&self.inner.data).waiting.retain(|(p, s)| {
+                    *p != process || !(all_threads || s.thread_id.is_none_or(|t| t == thread_id))
+                });
+                return;
+            }
+            // The threads of a process that is not shown.
+            Event::ThreadStarted(_) | Event::ThreadExited(_) | Event::Invalidated if !shown => {
+                return;
+            }
+            _ => {}
+        }
+        let Process::Subprocess(key) = process else {
+            self.handle_event(event);
+            return;
+        };
+        match event {
+            Event::Initialized => self.configure_subprocess(key),
+            Event::Continued { .. }
+            | Event::ThreadStarted(_)
+            | Event::ThreadExited(_)
+            | Event::Invalidated
+            | Event::Output(_) => self.handle_event(event),
+            Event::Breakpoint { breakpoint, .. } => {
+                let found = {
+                    let mut data = lock(&self.inner.data);
+                    let id = data
+                        .subprocesses
+                        .iter()
+                        .find(|s| s.key == key)
+                        .and_then(|s| breakpoint.id.and_then(|a| s.adapter_ids.get(&a)))
+                        .copied();
+                    if let Some(id) = id
+                        && breakpoint.verified
+                    {
+                        data.statuses.insert(
+                            id,
+                            BreakpointStatus {
+                                verified: true,
+                                message: breakpoint.message,
+                                line: breakpoint.line,
+                            },
+                        );
+                    }
+                    id.is_some()
+                };
+                if found {
+                    self.emit(DebuggerEvent::BreakpointsChanged);
+                }
+            }
+            // The subprocess ended: its connection is closed.
+            Event::Terminated => self.end_subprocess(key),
+            Event::Stopped(_)
+            | Event::Exited { .. }
+            | Event::Process { .. }
+            | Event::Capabilities(_)
+            | Event::Other { .. } => {}
+        }
     }
 
     fn handle_event(&self, event: Event) {
         match event {
             Event::Initialized => self.configure(),
-            Event::Stopped(stopped) => self.stopped(stopped),
+            Event::Stopped(stopped) => self.stopped(Process::Program, stopped),
             Event::Continued {
                 thread_id,
                 all_threads,
@@ -993,6 +1260,190 @@ impl Session {
         self.emit(DebuggerEvent::SessionEnded(self.inner.id));
     }
 
+    // ---- subprocesses ------------------------------------------------------------
+
+    /// `startDebugging`: a subprocess of the program waits for a child
+    /// session. The product says how to reach the adapter for it (on a
+    /// thread of its own: it connects a socket); the request is answered,
+    /// then the child session is started and attached to this one.
+    fn start_subprocess(&self, kind: String, configuration: Value, responder: Responder) {
+        let Some(debugger) = self.inner.debugger.upgrade() else {
+            return;
+        };
+        if lock(&self.inner.data).stopping {
+            responder.respond(Err("The debug session is ending".to_owned()));
+            return;
+        }
+        let weak = Arc::downgrade(&self.inner);
+        // When no thread can start, the closure and the responder in it
+        // are dropped: the adapter gets an error answer.
+        let _ = thread::Builder::new()
+            .name("debug subprocess".to_owned())
+            .spawn(move || {
+                let adapter = debugger.provider().child_adapter(&configuration);
+                drop(debugger);
+                let transport = match adapter {
+                    Ok(crate::provider::Adapter::Transport(transport)) => transport,
+                    Ok(crate::provider::Adapter::Command(command)) => {
+                        match dap_client::Transport::stdio(&command) {
+                            Ok(transport) => transport,
+                            Err(error) => {
+                                responder
+                                    .respond(Err(format!("Cannot start the debugger: {error}")));
+                                return;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        responder.respond(Err(error));
+                        return;
+                    }
+                };
+                let Some(session) = weak.upgrade().map(|inner| Session { inner }) else {
+                    responder.respond(Err("The debug session has ended".to_owned()));
+                    return;
+                };
+                responder.respond(Ok(Value::Null));
+                session.connect_subprocess(transport, &kind, configuration);
+            });
+    }
+
+    /// Starts the child session of a subprocess over `transport`:
+    /// `initialize`, then `attach` (or `launch`) with its configuration;
+    /// the breakpoints follow its `initialized`.
+    fn connect_subprocess(
+        &self,
+        transport: dap_client::Transport,
+        kind: &str,
+        configuration: Value,
+    ) {
+        let key = {
+            let mut data = lock(&self.inner.data);
+            data.next_subprocess += 1;
+            data.next_subprocess
+        };
+        let handler = Arc::new(SessionHandler {
+            session: Arc::downgrade(&self.inner),
+            process: Process::Subprocess(key),
+        });
+        let name = format!("{} {key}", self.inner.name);
+        let Ok(client) = Client::start(&name, transport, handler) else {
+            return;
+        };
+        let stopping = {
+            let mut data = lock(&self.inner.data);
+            data.subprocesses.push(Subprocess {
+                key,
+                client: client.clone(),
+                configured: false,
+                adapter_ids: HashMap::new(),
+            });
+            data.stopping
+        };
+        if stopping {
+            self.end_subprocess(key);
+            return;
+        }
+        self.changed();
+        let weak = Arc::downgrade(&self.inner);
+        let launch = kind == "launch";
+        let started = client.clone();
+        client
+            .initialize(&self.client_info())
+            .on_done(move |result| {
+                let Some(session) = weak.upgrade().map(|inner| Session { inner }) else {
+                    return;
+                };
+                if result.is_err() {
+                    session.end_subprocess(key);
+                    return;
+                }
+                let request = if launch {
+                    started.launch(configuration)
+                } else {
+                    started.attach(configuration)
+                };
+                let weak = Arc::downgrade(&session.inner);
+                request.on_done(move |result| {
+                    if let (Err(error), Some(inner)) = (result, weak.upgrade())
+                        && error != DapError::Closed
+                    {
+                        Session { inner }.end_subprocess(key);
+                    }
+                });
+            });
+    }
+
+    /// A subprocess's `initialized`: its breakpoints, its exception
+    /// filters, then `configurationDone` (the subprocess runs on).
+    fn configure_subprocess(&self, key: u64) {
+        let client = {
+            let mut data = lock(&self.inner.data);
+            let Some(subprocess) = data.subprocesses.iter_mut().find(|s| s.key == key) else {
+                return;
+            };
+            subprocess.configured = true;
+            subprocess.client.clone()
+        };
+        let files = self
+            .inner
+            .debugger
+            .upgrade()
+            .map(|d| d.breakpoint_files())
+            .unwrap_or_default();
+        let process = Process::Subprocess(key);
+        for file in &files {
+            self.send_breakpoints_to(process, &client, file);
+        }
+        self.send_exceptions_to(&client);
+        if client.capabilities().configuration_done {
+            let weak = Arc::downgrade(&self.inner);
+            client.configuration_done().on_done(move |result| {
+                if let (Err(error), Some(inner)) = (result, weak.upgrade())
+                    && error != DapError::Closed
+                {
+                    Session { inner }.end_subprocess(key);
+                }
+            });
+        }
+    }
+
+    /// Ends a subprocess's child session (`disconnect`, leaving the
+    /// process to the adapter); its connection then closes.
+    fn end_subprocess(&self, key: u64) {
+        let client = lock(&self.inner.data)
+            .subprocesses
+            .iter()
+            .find(|s| s.key == key)
+            .map(|s| s.client.clone());
+        if let Some(client) = client {
+            // Ends on a thread of its own; nobody waits for it.
+            drop(client.shutdown(false, STOP_TIMEOUT));
+        }
+    }
+
+    /// A subprocess's connection closed: it is no longer a process of the
+    /// session; when it was shown suspended, the session moves on.
+    fn subprocess_closed(&self, key: u64) {
+        let process = Process::Subprocess(key);
+        let shown = {
+            let mut data = lock(&self.inner.data);
+            data.subprocesses.retain(|s| s.key != key);
+            data.waiting.retain(|(p, _)| *p != process);
+            let shown = self.focus() == process;
+            if shown {
+                self.set_focus(&data, Process::Program);
+                data.threads.clear();
+                data.selected_thread = None;
+            }
+            shown
+        };
+        if shown {
+            self.resumed();
+        }
+        self.changed();
+    }
+
     // ---- actions -----------------------------------------------------------------
 
     /// The thread the program stopped in, or the selected one.
@@ -1142,6 +1593,29 @@ impl Session {
             data.selected_thread
                 .or_else(|| data.threads.first().map(|t| t.id))
         };
+        // The reference suspends every process of the session.
+        let shown = self.focus();
+        let others: Vec<Client> = {
+            let data = lock(&self.inner.data);
+            let program = self.program_client().filter(|_| shown != Process::Program);
+            program
+                .into_iter()
+                .chain(
+                    data.subprocesses
+                        .iter()
+                        .filter(|s| Process::Subprocess(s.key) != shown)
+                        .map(|s| s.client.clone()),
+                )
+                .collect()
+        };
+        for other in others {
+            let paused = other.clone();
+            other.threads().on_done(move |result| {
+                if let Some(thread) = result.ok().and_then(|t| t.first().map(|t| t.id)) {
+                    paused.pause(thread).detach();
+                }
+            });
+        }
         match thread {
             Some(thread) => track(client.pause(thread), |_| {}),
             None => {
@@ -1171,23 +1645,35 @@ impl Session {
     /// killed. The receiver gets a message when every process is gone.
     pub fn stop(&self) -> flume::Receiver<()> {
         let (done, finished) = flume::bounded(1);
-        let (client, debuggee, first) = {
+        let (debuggee, first, subprocesses) = {
             let mut data = lock(&self.inner.data);
             let first = !data.stopping;
             data.stopping = true;
             if data.phase != Phase::Ended {
                 data.phase = Phase::Stopping;
             }
-            (self.client(), data.debuggee.clone(), first)
+            let subprocesses: Vec<Client> =
+                data.subprocesses.iter().map(|s| s.client.clone()).collect();
+            (data.debuggee.clone(), first, subprocesses)
         };
+        let client = self.program_client();
         if first {
             self.changed();
         }
         let spawned = thread::Builder::new()
             .name("debug stop".to_owned())
             .spawn(move || {
+                // The program's session first: its adapter then ends the
+                // program and the subprocesses it debugs.
                 if let Some(client) = &client {
                     let _ = client.shutdown(true, STOP_TIMEOUT).recv();
+                }
+                let ending: Vec<_> = subprocesses
+                    .iter()
+                    .map(|client| client.shutdown(true, STOP_TIMEOUT))
+                    .collect();
+                for ended in ending {
+                    let _ = ended.recv();
                 }
                 if let Some(debuggee) = debuggee {
                     wait_exit(&debuggee, Duration::from_millis(500));
@@ -1197,7 +1683,7 @@ impl Session {
                 let _ = done.send(());
             });
         if spawned.is_err()
-            && let Some(client) = self.client()
+            && let Some(client) = self.program_client()
         {
             client.kill();
         }
@@ -1205,13 +1691,14 @@ impl Session {
     }
 
     /// Kills the program's and the adapter's process trees at once (the
-    /// application quits).
+    /// application quits); the subprocesses' connections close with the
+    /// adapter.
     pub fn kill(&self) {
         let debuggee = lock(&self.inner.data).debuggee.clone();
         if let Some(debuggee) = debuggee {
             let _ = debuggee.kill();
         }
-        if let Some(client) = self.client() {
+        if let Some(client) = self.program_client() {
             client.kill();
         }
     }
@@ -1552,18 +2039,23 @@ fn wait_exit(process: &ProcessHandle, timeout: Duration) {
     }
 }
 
-struct SessionHandler(Weak<SessionInner>);
+/// What one connection of the session (the program's or a subprocess's)
+/// receives.
+struct SessionHandler {
+    session: Weak<SessionInner>,
+    process: Process,
+}
 
 impl SessionHandler {
     fn session(&self) -> Option<Session> {
-        self.0.upgrade().map(|inner| Session { inner })
+        self.session.upgrade().map(|inner| Session { inner })
     }
 }
 
 impl Handler for SessionHandler {
     fn event(&self, event: Event) {
         if let Some(session) = self.session() {
-            session.handle_event(event);
+            session.process_event(self.process, event);
         }
     }
 
@@ -1572,13 +2064,22 @@ impl Handler for SessionHandler {
             return;
         };
         match request {
-            ReverseRequest::RunInTerminal(request) => session.run_in_terminal(request, responder),
-            // Subprocesses come later; the adapter gets an error answer.
-            ReverseRequest::StartDebugging { .. } | ReverseRequest::Other { .. } => drop(responder),
+            ReverseRequest::RunInTerminal(request) if self.process == Process::Program => {
+                session.run_in_terminal(request, responder);
+            }
+            ReverseRequest::StartDebugging {
+                request,
+                configuration,
+            } => session.start_subprocess(request, configuration, responder),
+            // The adapter gets an error answer.
+            ReverseRequest::RunInTerminal(_) | ReverseRequest::Other { .. } => drop(responder),
         }
     }
 
     fn stderr(&self, chunk: &[u8]) {
+        if self.process != Process::Program {
+            return;
+        }
         if let Some(session) = self.session() {
             let mut data = lock(&session.inner.data);
             data.log_tail.push_str(&String::from_utf8_lossy(chunk));
@@ -1594,7 +2095,10 @@ impl Handler for SessionHandler {
 
     fn closed(&self, status: Option<ExitStatus>) {
         if let Some(session) = self.session() {
-            session.closed(status);
+            match self.process {
+                Process::Program => session.closed(status),
+                Process::Subprocess(key) => session.subprocess_closed(key),
+            }
         }
     }
 }

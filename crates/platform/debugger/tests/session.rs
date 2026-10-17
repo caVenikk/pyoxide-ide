@@ -23,6 +23,10 @@ struct Provider {
     script: Mutex<Option<Vec<Value>>>,
     /// Step Into My Code sends `evaluate` requests around the step.
     my_code: bool,
+    /// Child sessions are offered, with these scripts for the ones the
+    /// adapter asks for, in order.
+    offers_children: bool,
+    children: Mutex<Vec<Vec<Value>>>,
 }
 
 impl Provider {
@@ -69,6 +73,21 @@ impl DebugAdapterProvider for Provider {
             "python-exception",
             "BaseException",
         )]
+    }
+
+    fn child_sessions(&self) -> bool {
+        self.offers_children
+    }
+
+    fn child_adapter(&self, configuration: &Value) -> Result<Adapter, String> {
+        assert_eq!(configuration["subProcessId"], 7, "{configuration}");
+        let mut children = self.children.lock().unwrap();
+        if children.is_empty() {
+            return Err("no child script".to_owned());
+        }
+        Ok(Adapter::Transport(dap_client::fake::adapter(
+            children.remove(0),
+        )))
     }
 
     fn step_into_my_code(&self) -> Option<StepIntoMyCode> {
@@ -378,6 +397,7 @@ fn run_to_cursor_force_and_step_into_my_code() {
     let provider = Arc::new(Provider {
         script: Mutex::new(Some(script)),
         my_code: true,
+        ..Provider::default()
     });
     let debugger = Debugger::open(root, provider);
     debugger.toggle_breakpoint(&main, 3, false);
@@ -642,4 +662,150 @@ fn new_breakpoints_take_the_types_policy_and_follow_their_lines() {
         again.breakpoints().at(&main, 4).unwrap().suspend,
         SuspendPolicy::Thread
     );
+}
+
+/// A subprocess of the program comes as a child session (`startDebugging`)
+/// over a connection of its own and is a process of the same session: it
+/// gets the breakpoints, the session shows it when it stops (its frames,
+/// stepping), a stop of the program meanwhile waits until it moves on,
+/// and it leaves the session when it ends.
+#[test]
+fn a_subprocess_is_a_process_of_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let util = root.join("util.py");
+    let mut program = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    program[0] = json!({"expect": "initialize",
+        "arguments": {"adapterID": "fake", "supportsStartDebuggingRequest": true}});
+    program.extend([
+        json!({"request": "startDebugging", "arguments": {"request": "attach",
+            "configuration": {"name": "Subprocess 7", "subProcessId": 7}}}),
+        json!({"expect_response": "startDebugging", "success": true}),
+        // A breakpoint added while the subprocess is suspended.
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "util.py"},
+            "breakpoints": [{"line": 2}]}}),
+        json!({"respond": {"breakpoints": [{"verified": true, "line": 2, "id": 21}]}}),
+        // The program stops while the subprocess is shown.
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "hitBreakpointIds": [21]}}),
+        // Shown once the subprocess moved on.
+        json!({"expect": "threads"}),
+        json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": {"stackFrames": [{"id": 100, "name": "<module>", "line": 2,
+            "column": 1, "source": {"path": util}}], "totalFrames": 1}}),
+    ]);
+    let child = vec![
+        json!({"expect": "initialize",
+            "arguments": {"adapterID": "fake", "supportsStartDebuggingRequest": true}}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true,
+            "exceptionBreakpointFilters": [{"filter": "uncaught", "label": "Uncaught", "default": true}]}}),
+        json!({"expect": "attach", "arguments": {"name": "Subprocess 7", "subProcessId": 7}}),
+        json!({"event": "initialized"}),
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "main.py"},
+            "breakpoints": [{"line": 3}]}}),
+        json!({"respond": {"breakpoints": [{"verified": true, "line": 3, "id": 1}]}}),
+        json!({"expect": "setExceptionBreakpoints", "arguments": {"filters": ["uncaught"]}}),
+        json!({"respond": null}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "attach"}),
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "hitBreakpointIds": [1]}}),
+        json!({"expect": "threads"}),
+        json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+        // The same frame id as the program's: another connection.
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": {"stackFrames": [{"id": 100, "name": "hello", "line": 3,
+            "column": 1, "source": {"path": main}}], "totalFrames": 1}}),
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "util.py"},
+            "breakpoints": [{"line": 2}]}}),
+        json!({"respond": {"breakpoints": [{"verified": false, "line": 2, "id": 2}]}}),
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+        json!({"event": "terminated"}),
+        json!({"expect": "disconnect", "arguments": {"terminateDebuggee": false}}),
+        json!({"respond": null}),
+    ];
+    let provider = Arc::new(Provider {
+        script: Mutex::new(Some(program)),
+        offers_children: true,
+        children: Mutex::new(vec![child]),
+        ..Provider::default()
+    });
+    let debugger = Debugger::open(root, provider);
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+
+    wait_until("the subprocess's stop", || {
+        let s = session.snapshot();
+        assert!(s.error.is_none(), "{:?}", s.error);
+        s.phase == Phase::Suspended && s.frames.first().is_some_and(|f| f.name == "hello")
+    });
+    assert_eq!(session.subprocesses(), 1);
+    assert_eq!(debugger.state_json()["sessions"][0]["subprocesses"], 1);
+    let three = debugger.breakpoints().at(&main, 3).unwrap().id;
+    assert!(debugger.breakpoint_status(three).unwrap().verified);
+
+    // The new breakpoint reaches both processes; the subprocess's answer
+    // does not hide the program's.
+    debugger.toggle_breakpoint(&util, 2, false);
+    let two = debugger.breakpoints().at(&util, 2).unwrap().id;
+    wait_until("the program's answer", || {
+        debugger.breakpoint_status(two).is_some_and(|s| s.verified)
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.phase, Phase::Suspended);
+    assert_eq!(
+        snapshot.frames[0].name, "hello",
+        "the subprocess stays shown"
+    );
+
+    // Resume goes to the subprocess; the program's stop is shown next.
+    block_on(session.resume()).unwrap();
+    wait_until("the program's stop", || {
+        let s = session.snapshot();
+        s.phase == Phase::Suspended && s.frames.first().is_some_and(|f| f.name == "<module>")
+    });
+    wait_until("the subprocess leaves", || session.subprocesses() == 0);
+    assert_eq!(session.snapshot().phase, Phase::Suspended);
+    assert!(debugger.breakpoint_status(two).unwrap().verified);
+
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
+/// A child session the product does not start gets an error answer; the
+/// session goes on.
+#[test]
+fn a_child_session_the_product_does_not_start_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let program = vec![
+        json!({"expect": "initialize",
+            "arguments": {"adapterID": "fake", "supportsStartDebuggingRequest": false}}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true}}),
+        json!({"expect": "launch"}),
+        json!({"event": "initialized"}),
+        json!({"expect": "setExceptionBreakpoints"}),
+        json!({"respond": null}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "launch"}),
+        json!({"request": "startDebugging", "arguments": {"request": "attach",
+            "configuration": {"subProcessId": 7}}}),
+        json!({"expect_response": "startDebugging", "success": false}),
+        json!({"event": "exited", "body": {"exitCode": 0}}),
+        json!({"event": "terminated"}),
+    ];
+    let debugger = Debugger::open(root, Provider::with(Value::Array(program)));
+    let session = debugger.start(request(root)).unwrap();
+    wait_phase(&session, Phase::Ended);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.error, None);
+    assert_eq!(snapshot.exit_code, Some(0));
+    assert_eq!(session.subprocesses(), 0);
 }

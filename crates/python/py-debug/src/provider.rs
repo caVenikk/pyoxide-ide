@@ -174,6 +174,22 @@ impl DebugAdapterProvider for PythonDebugProvider {
         Some(launch::step_into_my_code())
     }
 
+    /// Subprocesses ("Attach to subprocess automatically while
+    /// debugging") come as child sessions: debugpy asks for them with
+    /// `startDebugging` when the client offers it.
+    fn child_sessions(&self) -> bool {
+        true
+    }
+
+    /// A subprocess's child session goes to the adapter's address in its
+    /// configuration (`connect`), over a socket.
+    fn child_adapter(&self, configuration: &serde_json::Value) -> Result<Adapter, String> {
+        let (host, port) = launch::child_address(configuration)?;
+        debugger::Transport::connect(&host, port, launch::CHILD_CONNECT_TIMEOUT)
+            .map(Adapter::Transport)
+            .map_err(|e| format!("Cannot connect to the debugger at {host}:{port}: {e}"))
+    }
+
     /// The reference's balloon title of a failed connection
     /// (`PyDebugProcess`).
     fn connection_failed_title(&self) -> Option<String> {

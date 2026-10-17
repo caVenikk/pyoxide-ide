@@ -55,8 +55,9 @@ debugpy over DAP, with Pyoxide's own client.
   where the adapter supports it). Reverse requests go to a handler.
   Hand-written serde structs for the ~25 messages used, private to the
   crate, `serde_json::Value` for rare fields. A transport trait: standard
-  streams now, TCP later (attach, subprocesses). A fake adapter binary for
-  tests, as `lsp-fake-server`.
+  streams of an adapter process, or a TCP connection to an adapter that
+  listens (subprocesses; attach later). A fake adapter binary for tests,
+  as `lsp-fake-server`.
 - `debugger` (platform, no toolkit): sessions and their state machine,
   threads, frames, a variables tree with lazy, paged children,
   breakpoints (line, temporary, condition, log message, enabled, suspend
@@ -71,9 +72,22 @@ debugpy over DAP, with Pyoxide's own client.
   `launch` with the program or module, arguments, working directory and
   environment from the run configuration, `console: integratedTerminal`,
   `justMyCode: false` (the reference's Step Into enters libraries),
-  `showReturnValue` from the settings, `subProcess: false`, a variable
-  presentation that groups special variables and hides functions, classes
-  and modules (the reference's Simplified Variables View).
+  `showReturnValue` from the settings, `subProcess` from "Attach to
+  subprocess automatically while debugging" (on, as in the reference), a
+  variable presentation that groups special variables and hides
+  functions, classes and modules (the reference's Simplified Variables
+  View).
+- Subprocesses (a web server's reloader or workers, `multiprocessing`):
+  `initialize` advertises `supportsStartDebuggingRequest`; debugpy asks
+  for a child session with `startDebugging` (an `attach` configuration
+  with `subProcessId` and `connect`, the adapter's client port). The
+  client connects a second DAP connection there, sends `initialize` and
+  `attach`, and configures it as the first one. The child is a process of
+  the same session, as the reference's multiprocess debugger keeps one
+  session: breakpoints go to every process, the session shows the process
+  that stopped (a stop of another process waits until the shown one moves
+  on), Pause suspends all of them, and Stop ends the program's session
+  first, so the adapter ends the subprocesses too.
 - `runInTerminal` is answered by spawning the given command line with the
   `process` crate and feeding its output to the Debug Console exactly as
   the Run console (standard input, ANSI, links, Stop); the integrated
@@ -88,9 +102,8 @@ debugpy over DAP, with Pyoxide's own client.
   timeout the debuggee's process tree and the adapter are killed. Rerun is
   stop and a new session. Adapter, launcher and debuggee must all be gone
   after Stop, closing the tab, closing the project or a crash, on every OS.
-- One backend, so no Mode switch. Attach to Process, subprocess debugging
-  (`startDebugging` or `debugpyAttach` over TCP) and remote targets come
-  later.
+- One backend, so no Mode switch. Attach to Process and remote targets
+  come later.
 
 ### debugpy distribution
 - Pinned to 1.8.21, the reference's version: it supports Python 3.8 and

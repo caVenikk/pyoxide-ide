@@ -11,7 +11,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | editor | 62% `██████░░░░` | 5 | 6 | 3 |
 | settings-import | 55% `█████░░░░░` | 1 | 2 | 1 |
 | python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 37% `████░░░░░░` | 5 | 5 | 16 |
+| run-debug | 40% `████░░░░░░` | 6 | 5 | 15 |
 | terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
 | vcs | 40% `████░░░░░░` | 6 | 3 | 16 |
 | settings | 72% `███████░░░` | 10 | 3 | 5 |
@@ -149,7 +149,7 @@ _Generated from `replica/features.csv` by `scripts/progress.py`; do not edit by 
 | ⬜ | Smart Step Into | should | Community; on by default in the reference |
 | ⬜ | Debug Console (prompt in the current frame) | should | Community |
 | ⬜ | Attach to Process | should | Community |
-| ⬜ | Subprocess debugging | should | Community; debugpy child sessions over TCP |
+| ✅ | Subprocess debugging | should | Community; debugpy child sessions shown in the same Debug tab, attach to subprocess on by default (#234); no Python Debugger settings page yet |
 | ⬜ | Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views) | should | Community |
 | ⬜ | Jump To Cursor and the Run to Cursor inlay | could | Community |
 | ⬜ | Dependent breakpoints (disable until another is hit) | could | Community |

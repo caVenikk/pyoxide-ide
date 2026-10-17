@@ -12,7 +12,11 @@
 //!   interpreter directly;
 //! - `PYOXIDE_CACHE_DIR`: an application cache other than the user's;
 //! - `PYOXIDE_DEBUG_DEMO`: a copy of a project with the demo's `main.py`
-//!   (`describe`, `fail`) for [`the_demo_project`]; skipped without it.
+//!   (`describe`, `fail`) for [`the_demo_project`]; skipped without it;
+//! - `PYOXIDE_TEST_FASTAPI_PYTHON`: an interpreter with FastAPI and uvicorn
+//!   for the web application tests; without it each makes a virtual
+//!   environment with `uv` (`fastapi[standard]`, from uv's cache or the
+//!   network).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,7 +46,11 @@ fn helper() -> Helper {
 /// A provider that runs configurations with [`python`], through `uv run`
 /// when `uv` is on and the interpreter has an environment.
 fn provider(uv: bool) -> Arc<PythonDebugProvider> {
-    let python = python();
+    provider_with(python(), uv)
+}
+
+/// [`provider`] with another interpreter.
+fn provider_with(python: PathBuf, uv: bool) -> Arc<PythonDebugProvider> {
     let resolve = move |request: &DebugRequest| -> Result<DebugTarget, String> {
         let uv = uv
             .then(|| py_env::paths::venv_root_of(&python))
@@ -387,4 +395,210 @@ fn the_demo_project() {
         "{}",
         console.output
     );
+}
+
+// ---- a web application: FastAPI under uvicorn ------------------------------
+
+/// An interpreter with FastAPI and uvicorn: `PYOXIDE_TEST_FASTAPI_PYTHON`,
+/// else one of a virtual environment made with `uv` in `dir` (with
+/// `fastapi[standard]`: uvloop, watchfiles and the `fastapi` command).
+fn fastapi_python(dir: &Path) -> PathBuf {
+    if let Some(python) = std::env::var_os("PYOXIDE_TEST_FASTAPI_PYTHON").filter(|p| !p.is_empty())
+    {
+        return PathBuf::from(python);
+    }
+    let venv = dir.join(".venv");
+    let uv = |args: &[&str]| {
+        let status = std::process::Command::new("uv")
+            .args(args)
+            .env("VIRTUAL_ENV", &venv)
+            .status()
+            .unwrap_or_else(|e| panic!("uv is needed without PYOXIDE_TEST_FASTAPI_PYTHON: {e}"));
+        assert!(status.success(), "uv {args:?} failed");
+    };
+    uv(&["venv", "--quiet", &venv.to_string_lossy()]);
+    uv(&["pip", "install", "--quiet", "fastapi[standard]"]);
+    py_env::paths::environment_python(&venv).expect("the environment's interpreter")
+}
+
+/// The application: an `async def` endpoint that answers with its
+/// process, its parent and a variable of the `.env` file.
+const API: &str = "\
+import os
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get(\"/hello\")
+async def hello():
+    pid = os.getpid()
+    return {\"pid\": pid, \"ppid\": os.getppid(), \"greeting\": os.environ.get(\"GREETING\")}
+";
+/// The breakpoint's line in [`API`].
+const API_LINE: u32 = 10;
+
+/// A port nothing listens on.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// Calls `GET /hello` as soon as the server listens; the body comes
+/// through the receiver.
+fn call_hello(port: u16) -> std::sync::mpsc::Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let start = Instant::now();
+        let mut stream = loop {
+            match std::net::TcpStream::connect(("127.0.0.1", port)) {
+                Ok(stream) => break stream,
+                Err(_) if start.elapsed() < WAIT => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => panic!("the server did not listen on {port}: {e}"),
+            }
+        };
+        stream
+            .write_all(b"GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        let body = response
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body.to_owned())
+            .unwrap_or(response);
+        let _ = tx.send(body);
+    });
+    rx
+}
+
+/// How the server is started.
+enum Server {
+    /// `run.py`: `uvicorn.run(app)`.
+    Run,
+    /// `run.py`: `uvicorn.run("service.api:app", reload=True)`.
+    RunReload,
+    /// `python -m uvicorn service.api:app --reload`.
+    ModuleReload,
+    /// `python -m fastapi dev service/api.py`.
+    FastapiDev,
+}
+
+/// The project of the failing report: `run.py` at the root run with
+/// `uv run`, the working directory a subfolder, a `.env` file, "Debug just
+/// my code" on; the endpoint in a package outside the working directory.
+/// A breakpoint in the `async def` endpoint stops the session when the
+/// endpoint is called (in the server's process, a subprocess with a
+/// reloader), stepping works there, and Stop ends the server and its
+/// parents.
+fn web_app(server: Server) {
+    let dir = tempfile::tempdir().unwrap();
+    let python = fastapi_python(dir.path());
+    let root = dir.path().join("project");
+    let service = root.join("service");
+    std::fs::create_dir_all(&service).unwrap();
+    std::fs::create_dir_all(root.join("application")).unwrap();
+    std::fs::write(service.join("__init__.py"), "").unwrap();
+    let api = service.join("api.py");
+    std::fs::write(&api, API).unwrap();
+    std::fs::write(root.join(".env"), "GREETING=hi\n").unwrap();
+    let port = free_port();
+    let (script, module, parameters) = match server {
+        Server::Run => {
+            let run = format!(
+                "import uvicorn\n\nfrom service.api import app\n\nif __name__ == \"__main__\":\n    uvicorn.run(app, port={port})\n"
+            );
+            std::fs::write(root.join("run.py"), run).unwrap();
+            ("run.py".to_owned(), false, String::new())
+        }
+        Server::RunReload => {
+            let run = format!(
+                "import uvicorn\n\nif __name__ == \"__main__\":\n    uvicorn.run(\"service.api:app\", port={port}, reload=True)\n"
+            );
+            std::fs::write(root.join("run.py"), run).unwrap();
+            ("run.py".to_owned(), false, String::new())
+        }
+        Server::ModuleReload => (
+            "uvicorn".to_owned(),
+            true,
+            format!("service.api:app --port {port} --reload"),
+        ),
+        Server::FastapiDev => (
+            "fastapi".to_owned(),
+            true,
+            format!("dev \"{}\" --port {port}", api.display()),
+        ),
+    };
+    let config = configuration(&script, |o| {
+        o.module_mode = module;
+        o.parameters = parameters;
+        o.working_directory = root.join("application").to_string_lossy().into_owned();
+        o.env_files = vec![root.join(".env").to_string_lossy().into_owned()];
+        o.run_with_uv = Some(true);
+        o.debug_just_my_code = true;
+    });
+
+    let debugger = Debugger::open(&root, provider_with(python, true));
+    debugger.toggle_breakpoint(&api, API_LINE, false);
+    let session = debugger.start(request(&root, config)).unwrap();
+    let mut console = Console::of(&session);
+    let answer = call_hello(port);
+    wait_stop(&session, "breakpoint", API_LINE);
+    assert_eq!(session.snapshot().frames[0].name, "hello");
+    block_on(session.step_over()).unwrap();
+    wait_stop(&session, "step", API_LINE + 1);
+    let pid = local(&session, "pid");
+    block_on(session.resume()).unwrap();
+    let body = answer.recv_timeout(WAIT).unwrap_or_else(|_| {
+        console.finish();
+        panic!("no answer; the output:\n{}", console.output)
+    });
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["pid"].to_string(), pid, "{body}");
+    assert_eq!(body["greeting"], "hi", "{body}");
+    let server_pid = body["pid"].as_u64().unwrap() as u32;
+    let parent = body["ppid"].as_u64().unwrap() as u32;
+    let snapshot = session.snapshot();
+    let adapter = snapshot.adapter_pid.unwrap();
+    let launcher = snapshot.debuggee_pid.unwrap();
+    assert!(alive(server_pid) && alive(parent));
+
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_until("the end", || session.is_ended());
+    wait_until("every process ends", || {
+        [adapter, launcher, parent, server_pid]
+            .iter()
+            .all(|pid| !alive(*pid))
+    });
+    assert_eq!(session.snapshot().error, None);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn a_breakpoint_in_an_async_endpoint_with_uvicorn_run() {
+    web_app(Server::Run);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn a_breakpoint_in_an_async_endpoint_with_uvicorn_run_reload() {
+    web_app(Server::RunReload);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn a_breakpoint_in_an_async_endpoint_with_python_m_uvicorn_reload() {
+    web_app(Server::ModuleReload);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn a_breakpoint_in_an_async_endpoint_with_fastapi_dev() {
+    web_app(Server::FastapiDev);
 }

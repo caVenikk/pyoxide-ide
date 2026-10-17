@@ -1,9 +1,10 @@
 //! The Debug Adapter Protocol client of Pyoxide IDE (ADR 0015).
 //!
 //! A [`Client`] talks to one debug adapter over a [`Transport`] (an adapter
-//! process's standard streams now, a socket later): typed requests that
-//! return [`Request`] futures (dropping one cancels the request), events
-//! and reverse requests (`runInTerminal`) passed to a [`Handler`], and
+//! process's standard streams, or a socket to an adapter that listens):
+//! typed requests that return [`Request`] futures (dropping one cancels the
+//! request), events and reverse requests (`runInTerminal`,
+//! `startDebugging`) passed to a [`Handler`], and
 //! [`Client::shutdown`], which ends the adapter with `terminate` and
 //! `disconnect` and kills what is left after a timeout.
 //!

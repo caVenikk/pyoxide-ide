@@ -97,7 +97,7 @@ Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; w
 Smart Step Into,run-debug,should,yes,no,Community; on by default in the reference
 Debug Console (prompt in the current frame),run-debug,should,yes,no,Community
 Attach to Process,run-debug,should,yes,no,Community
-Subprocess debugging,run-debug,should,yes,no,Community; debugpy child sessions over TCP
+Subprocess debugging,run-debug,should,yes,yes,"Community; debugpy child sessions shown in the same Debug tab, attach to subprocess on by default (#234); no Python Debugger settings page yet"
 "Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views)",run-debug,should,yes,no,Community
 Jump To Cursor and the Run to Cursor inlay,run-debug,could,yes,no,Community
 Dependent breakpoints (disable until another is hit),run-debug,could,yes,no,Community
