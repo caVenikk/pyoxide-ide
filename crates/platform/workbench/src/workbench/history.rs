@@ -36,14 +36,17 @@ impl Workbench {
     /// The place of the active editor: its file and caret, and where the
     /// caret's line is in the view.
     pub fn current_place(&self, cx: &App) -> Option<Place> {
-        self.active.map(|i| self.tab_place(i, cx))
+        self.active.and_then(|i| self.tab_place(i, cx))
     }
 
-    fn tab_place(&self, index: usize, cx: &App) -> Place {
+    /// The place in a file's tab (a view's tab has none).
+    fn tab_place(&self, index: usize, cx: &App) -> Option<Place> {
         let tab = &self.tabs[index];
-        let editor = tab.editor.read(cx);
-        Place::new(tab.path.clone(), editor.caret_point())
-            .with_view_y(editor.caret_view_y().map(f32::from))
+        let editor = tab.editor()?.read(cx);
+        Some(
+            Place::new(tab.path()?.clone(), editor.caret_point())
+                .with_view_y(editor.caret_view_y().map(f32::from)),
+        )
     }
 
     /// The window's navigation history.
@@ -96,17 +99,20 @@ impl Workbench {
             .navigation
             .opening
             .take()
-            .filter(|place| place.path == self.tabs[index].path);
-        if let Some(place) = &opening {
-            self.tabs[index].editor.update(cx, |e, cx| {
+            .filter(|place| self.tabs[index].is_file(&place.path));
+        if let Some(place) = &opening
+            && let Some(editor) = self.tabs[index].editor()
+        {
+            editor.update(cx, |e, cx| {
                 e.go_to_place(place.caret, place.view_y.map(px), cx)
             });
         }
         if let Some(previous) = previous.filter(|p| *p != index)
             && !self.navigation.moving
             && opening.is_none()
+            && let Some(place) = self.tab_place(previous, cx)
         {
-            self.navigation.history.record(self.tab_place(previous, cx));
+            self.navigation.history.record(place);
         }
     }
 
@@ -116,8 +122,9 @@ impl Workbench {
         if let Some(active) = self.active
             && self.tabs.len() > 1
             && !self.navigation.moving
+            && let Some(place) = self.tab_place(active, cx)
         {
-            self.navigation.history.record(self.tab_place(active, cx));
+            self.navigation.history.record(place);
         }
     }
 
@@ -154,14 +161,16 @@ impl Workbench {
     /// Opens a place's file (or selects its tab) with the caret and its
     /// line in the view where they were, recording nothing.
     fn go_to_place(&mut self, place: Place, window: &mut Window, cx: &mut Context<Self>) {
-        match self.tabs.iter().position(|t| t.path == place.path) {
+        match self.file_tab(&place.path) {
             Some(i) => {
                 self.navigation.moving = true;
                 self.activate(i, window, cx);
                 self.navigation.moving = false;
-                self.tabs[i].editor.update(cx, |e, cx| {
-                    e.go_to_place(place.caret, place.view_y.map(px), cx)
-                });
+                if let Some(editor) = self.tabs[i].editor() {
+                    editor.update(cx, |e, cx| {
+                        e.go_to_place(place.caret, place.view_y.map(px), cx)
+                    });
+                }
             }
             None => {
                 let path = place.path.clone();

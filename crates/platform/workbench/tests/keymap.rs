@@ -678,6 +678,13 @@ impl H<'_> {
         if !self.state()["vcs"]["marker_popup"].is_null() {
             self.invoke("marker-popup.close", json!(null));
         }
+        // No diff tab.
+        while let Some(i) = self.state()["tabs"]
+            .as_array()
+            .and_then(|t| t.iter().position(|t| t.get("view").is_some()))
+        {
+            self.invoke("tabs.close", json!({ "index": i }));
+        }
         let commit = self.state()["vcs"]["commit"].clone();
         if let Some(kind) = commit["dialog"]["kind"].as_str() {
             let focus = self.workbench(|w, cx| w.commit_dialog_focus(cx));
@@ -2428,6 +2435,8 @@ fn check(h: &mut H, b: &Binding) -> bool {
         {
             check_commit(h, c, keys, &what)
         }
+        // The diff viewer (#171).
+        c if c.starts_with("diff.") => check_diff(h, c, keys, &what),
         "vcs.next-change" => {
             h.set_editor_with_base("|a\nB\nc\nD\ne\n", "a\nb\nc\nd\ne\n");
             h.press(keys);
@@ -2457,18 +2466,28 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.set_editor_with_base("a\nB|\nc\n", "a\nb\nc\n");
             h.invoke("vcs.show-current-change", json!(null));
             assert!(!h.marker_popup().is_null(), "{what}: the popup shows");
+            let state = h.state();
+            let file =
+                state["tabs"][state["active_tab"].as_u64().unwrap() as usize]["path"].clone();
             h.press(keys);
             if b.command == "marker-popup.close" {
                 assert!(h.marker_popup().is_null(), "{what}");
             } else {
-                // The popup's key: the line is not duplicated, the popup
-                // stays (the diff viewer comes later).
-                assert!(!h.marker_popup().is_null(), "{what}");
+                // The popup's key: the line is not duplicated, the file's
+                // diff opens at the popup's change.
+                assert!(h.marker_popup().is_null(), "{what}");
                 assert_eq!(
                     h.dispatched.borrow().last().map(String::as_str),
                     Some("vcs.show-diff-lines"),
                     "{what}"
                 );
+                let diff = wait_diff(h, &what, |d| d["right"]["caret"] == json!([1, 0]));
+                assert_eq!(diff["status"], "1 difference", "{what}");
+                close_diffs(h);
+                // Back to the file's tab.
+                if let Some(path) = file.as_str() {
+                    h.invoke("project.open-file", json!({ "path": path }));
+                }
             }
             assert_eq!(h.editor_marked(), "a\n|B\nc\n", "{what}");
         }
@@ -3476,6 +3495,139 @@ fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
     }
 }
 
+// ---- the diff viewer (#171) ---------------------------------------------
+
+/// Waits for the active diff to be computed and to satisfy `f`.
+fn wait_diff(h: &mut H, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..3000 {
+        support::tick(h.cx);
+        h.draw();
+        let diff = h.state()["diff"].clone();
+        if diff["computed"] == json!(true) && f(&diff) {
+            return diff;
+        }
+    }
+    panic!(
+        "{what}: timed out waiting for the diff: {:#}",
+        h.state()["diff"]
+    );
+}
+
+/// Closes the diff tabs.
+fn close_diffs(h: &mut H) {
+    while let Some(i) = h.state()["tabs"]
+        .as_array()
+        .and_then(|t| t.iter().position(|t| t.get("view").is_some()))
+    {
+        h.invoke("tabs.close", json!({ "index": i }));
+    }
+}
+
+/// The diff of `a.py` against its committed text with a line added at
+/// its start and one at its end, the focus in its right side. `a.py` is
+/// open in an editor tab: the diff edits the tab's text, so the lines are
+/// typed into the tab (a write to the file would not reach it).
+fn open_diff(h: &mut H, what: &str) -> Value {
+    ensure_repository(h);
+    let base = git_in(h, &["show", "HEAD:a.py"]);
+    let tab = h.state()["tabs"]
+        .as_array()
+        .and_then(|t| t.iter().position(|t| t["path"] == json!("a.py")))
+        .expect("a.py is open");
+    h.invoke("tabs.select", json!({ "index": tab }));
+    h.set_editor(&format!("{CARET}first = 0\n{base}last = 9\n"));
+    h.invoke("vcs.show-diff", json!({ "path": "a.py" }));
+    let diff = wait_diff(h, what, |d| {
+        d["path"].as_str().is_some_and(|p| p.ends_with("a.py"))
+            && d["changes"].as_array().is_some_and(|c| c.len() == 2)
+    });
+    focus_diff(h, vcs_ui::diff::Side::Right);
+    diff
+}
+
+fn focus_diff(h: &mut H, side: vcs_ui::diff::Side) {
+    let focus = h.workbench(|w, cx| {
+        w.active_diff()
+            .expect("a diff")
+            .read(cx)
+            .editor(side)
+            .focus_handle(cx)
+    });
+    h.focus(focus);
+}
+
+fn check_diff(h: &mut H, command: &str, keys: &str, what: &str) {
+    match command {
+        "diff.next" | "diff.previous" => {
+            let diff = open_diff(h, what);
+            let last = diff["changes"][1]["right"][0].clone();
+            if command == "diff.previous" {
+                h.invoke("diff.next", json!(null));
+            }
+            h.press(keys);
+            let expected = if command == "diff.next" {
+                last
+            } else {
+                json!(0)
+            };
+            assert_eq!(h.state()["diff"]["right"]["caret"][0], expected, "{what}");
+        }
+        "diff.next-file" | "diff.previous-file" => {
+            // An unversioned file: the list of the unversioned files.
+            ensure_repository(h);
+            h.invoke("vcs.refresh", json!(null));
+            wait_vcs(h, "b.py unversioned", |v| {
+                commit_row(&v["commit"], "b.py")["status"] == "unversioned"
+            });
+            h.invoke("vcs.show-diff", json!({ "path": "b.py" }));
+            let diff = wait_diff(h, what, |d| {
+                d["path"].as_str().is_some_and(|p| p.ends_with("b.py"))
+            });
+            let index = diff["files"][0].as_u64().unwrap();
+            let count = diff["files"][1].as_u64().unwrap();
+            assert!(count > 1, "{what}: {diff:#}");
+            let target = if command == "diff.next-file" {
+                if index + 1 == count {
+                    h.invoke("diff.previous-file", json!(null));
+                    index
+                } else {
+                    index + 1
+                }
+            } else if index == 0 {
+                h.invoke("diff.next-file", json!(null));
+                0
+            } else {
+                index - 1
+            };
+            focus_diff(h, vcs_ui::diff::Side::Right);
+            h.press(keys);
+            wait_diff(h, what, |d| d["files"][0] == json!(target));
+        }
+        "diff.focus-opposite" => {
+            open_diff(h, what);
+            h.press(keys);
+            assert_eq!(h.state()["diff"]["current_side"], "left", "{what}");
+        }
+        "diff.jump-to-source" => {
+            open_diff(h, what);
+            h.press(keys);
+            let root = h.root.clone();
+            let mut opened = false;
+            for _ in 0..300 {
+                support::tick(h.cx);
+                if h.workbench(|w, cx| w.active_file(cx)) == Some(root.join("a.py")) {
+                    opened = true;
+                    break;
+                }
+            }
+            assert!(opened, "{what}: a.py opens");
+            assert_eq!(h.caret_line().0, 0, "{what}: at the caret's line");
+        }
+        other => panic!("{what}: no diff check for {other}"),
+    }
+    close_diffs(h);
+}
+
 // ---- the Commit tool window (#170) --------------------------------------
 
 /// Runs git in the project for a check's own setup.
@@ -3724,7 +3876,18 @@ fn check_commit(h: &mut H, command: &str, keys: &str, what: &str) {
                 json!({ "paths": ["a.py"], "included": true }),
             );
         }
-        "commit-tree.open" | "commit-tree.show-diff" | "commit-tree.jump-to-source" => {
+        "commit-tree.open" | "commit-tree.show-diff" => {
+            change_a(h, "a = 'open'\n");
+            focus_commit_tree(h);
+            h.invoke("commit-tree.select", json!({ "path": "a.py" }));
+            h.press(keys);
+            let diff = wait_diff(h, what, |d| {
+                d["path"].as_str().is_some_and(|p| p.ends_with("a.py"))
+            });
+            assert_eq!(diff["title"], "Commit: a.py", "{what}");
+            close_diffs(h);
+        }
+        "commit-tree.jump-to-source" => {
             change_a(h, "a = 'open'\n");
             while h.state()["tabs"].as_array().is_some_and(|t| !t.is_empty()) {
                 h.invoke("tabs.close", json!({ "index": 0 }));

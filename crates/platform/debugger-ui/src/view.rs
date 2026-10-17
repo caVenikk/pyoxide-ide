@@ -835,8 +835,12 @@ fn forward_session_actions<E: InteractiveElement>(
     let el =
         el.on_action(move |a: &StepOver, _, cx| v.update(cx, |v, cx| v.step_over_action(a, cx)));
     let v = view.clone();
-    let el =
-        el.on_action(move |a: &StepInto, _, cx| v.update(cx, |v, cx| v.step_into_action(a, cx)));
+    let el = el.on_action(move |a: &StepInto, _, cx| {
+        // Without a session the key goes on to the next binding.
+        if !v.update(cx, |v, cx| v.step_into_action(a, cx)) {
+            cx.propagate();
+        }
+    });
     let v = view.clone();
     let el = el.on_action(move |a: &StepIntoMyCode, _, cx| {
         v.update(cx, |v, cx| v.step_into_my_code_action(a, cx))

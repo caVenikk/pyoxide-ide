@@ -244,6 +244,9 @@ pub enum EditorEvent {
         id: DecorationId,
         position: gpui::Point<Pixels>,
     },
+    /// The view scrolled: by the wheel, the scrollbar, or to bring the
+    /// caret into view (not by [`Editor::set_scroll_position`]).
+    Scrolled,
 }
 
 /// Input of an editor that forwards it (a console's standard input).
@@ -391,6 +394,14 @@ pub struct Editor {
     pub(crate) hovered_after: Option<DecorationId>,
     /// A changed range's highlights ([`Editor::set_diff_highlights`]).
     pub(crate) diff_highlights: Option<crate::DiffHighlights>,
+    /// The gutter at the right and the scrollbar at the left
+    /// ([`Editor::set_mirrored`]).
+    pub(crate) mirrored: bool,
+    /// The caret's row is highlighted ([`Editor::set_caret_row_shown`]).
+    pub(crate) caret_row_shown: bool,
+    /// Rows of room below the last one instead of a view's height
+    /// ([`Editor::set_room_after_end`]).
+    pub(crate) room_after_end: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -488,6 +499,9 @@ impl Editor {
             hovered_change: None,
             hovered_after: None,
             diff_highlights: None,
+            mirrored: false,
+            caret_row_shown: true,
+            room_after_end: None,
             _subscriptions: subscriptions,
         }
     }
@@ -948,10 +962,9 @@ impl Editor {
     /// gutter and the error stripe), for placing popups.
     pub fn text_area_bounds(&self) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
-        let right = layout.stripe.map_or(layout.bounds.right(), |s| s.left());
         Some(Bounds::from_corners(
             point(layout.text_x, layout.bounds.top()),
-            point(right, layout.bounds.bottom()),
+            point(layout.text_end, layout.bounds.bottom()),
         ))
     }
 
@@ -2786,9 +2799,13 @@ impl Editor {
     pub(crate) fn scroll_by(&mut self, delta: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         self.hide_read_only_hint(cx);
         let max_y = self.max_scroll_y();
+        let before = self.scroll;
         self.scroll.y = (self.scroll.y + delta.y).clamp(px(0.0), max_y);
         if self.soft_wrap.is_none() {
             self.scroll.x = (self.scroll.x + delta.x).max(px(0.0));
+        }
+        if self.scroll != before {
+            cx.emit(EditorEvent::Scrolled);
         }
         cx.notify();
     }
@@ -2806,15 +2823,18 @@ impl Editor {
     pub(crate) fn max_scroll_y_for(&self, view_height: Pixels) -> Pixels {
         let line_height = self.row_height();
         let rows = self.display_rows();
-        if self.console {
-            (line_height * rows as f32 - view_height).max(px(0.0))
-        } else {
-            line_height * rows.saturating_sub(1) as f32
+        match self.lines_after_end() {
+            Some(extra) => (line_height * (rows + extra) as f32 - view_height).max(px(0.0)),
+            None => line_height * rows.saturating_sub(1) as f32,
         }
     }
 
     pub(crate) fn set_scroll_y(&mut self, y: Pixels, cx: &mut Context<Self>) {
+        let before = self.scroll.y;
         self.scroll.y = y.clamp(px(0.0), self.max_scroll_y());
+        if self.scroll.y != before {
+            cx.emit(EditorEvent::Scrolled);
+        }
         cx.notify();
     }
 }

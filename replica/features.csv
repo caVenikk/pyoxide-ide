@@ -131,7 +131,7 @@ Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; 
 "Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,yes,"Community; Cmd+K / Ctrl+K, non-modal commit, Amend, options, commit checks (#170); no grouping by directory, Shelve, change lists"
 "Amend and commit options (author, sign-off, hooks)",vcs,must,yes,no,Community (#91)
 Rollback of files (Rollback Changes dialog),vcs,must,yes,yes,Community (#170)
-"Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,no,Community (#91)
+"Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,yes,"Community; diff tab from the Commit window, marker popup and Project view, word highlights, synced scroll, F7 / Shift+F7, Compare Next / Previous File, Jump to Source, settings popup (#171)"
 "VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind)",vcs,must,yes,yes,"Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28)"
 "Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,partial,"Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch work (#172), favourites not saved"
 "Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected)",vcs,must,yes,yes,"Community; credentials through the user's helper and ssh-agent (#91); push dialog, force-with-lease, Commit and Push (#172)"

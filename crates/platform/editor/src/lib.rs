@@ -17,6 +17,7 @@ mod gutter;
 pub mod highlight;
 mod input;
 mod inspection;
+pub mod side_by_side;
 mod soft_wrap;
 mod viewer;
 mod wrap;

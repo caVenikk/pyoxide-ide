@@ -100,6 +100,9 @@ pub(crate) struct LayoutInfo {
     pub bounds: Bounds<Pixels>,
     /// Window x of text column 0 without horizontal scrolling.
     pub text_x: Pixels,
+    /// Window x where the text area ends: the error stripe, or the gutter
+    /// of a mirrored editor.
+    pub text_end: Pixels,
     pub line_height: Pixels,
     pub char_width: Pixels,
     /// Lines with a row in the view.
@@ -172,9 +175,7 @@ impl LayoutInfo {
     /// Whether a window position is over the text (not the gutter, the
     /// error stripe or outside).
     pub fn over_text(&self, position: gpui::Point<Pixels>) -> bool {
-        self.bounds.contains(&position)
-            && position.x >= self.text_x
-            && self.stripe.is_none_or(|s| position.x < s.left())
+        self.bounds.contains(&position) && position.x >= self.text_x && position.x < self.text_end
     }
 }
 
@@ -359,7 +360,10 @@ pub(crate) struct Prepaint {
     /// The text area without the gutter and the scrollbar (I-beam cursor).
     text_hitbox: Hitbox,
     layout: LayoutInfo,
-    gutter_width: Pixels,
+    /// The gutter, and the text area (the rest without the scrollbar's
+    /// strip of a mirrored editor).
+    gutter: Bounds<Pixels>,
+    text_bounds: Bounds<Pixels>,
     numbers: Vec<(ShapedLine, gpui::Point<Pixels>)>,
     current_lines: Vec<Bounds<Pixels>>,
     selections: Vec<Bounds<Pixels>>,
@@ -970,27 +974,49 @@ impl Element for EditorElement {
                 px(TEXT_LEFT),
             )
         };
-        let text_x = bounds.left() + gutter_width + text_left;
-        let text_width = (bounds.right() - text_x).max(px(0.0));
+        // A mirrored editor has its gutter at the right and its scrollbar's
+        // strip at the left, the text between them.
+        let mirrored = self.editor.read(cx).mirrored && !single_line && !console;
+        let (gutter_x, text_x) = if mirrored {
+            (
+                bounds.right() - gutter_width,
+                bounds.left() + scrollbar_width + text_left,
+            )
+        } else {
+            (bounds.left(), bounds.left() + gutter_width + text_left)
+        };
+        let text_area_end = if mirrored { gutter_x } else { bounds.right() };
+        let text_width = (text_area_end - text_x).max(px(0.0));
         let viewport_lines = (bounds.size.height / lh).floor().max(1.0) as usize;
 
         // Soft wraps fill the view up to the scrollbar's strip (the
         // reference does not wrap text under its scrollbar).
-        let wrap_cols = (f32::from(bounds.right() - scrollbar_width - text_x)
-            / f32::from(m.char_width))
-        .floor()
-        .max(1.0) as usize;
+        let wrap_right = if mirrored {
+            text_area_end
+        } else {
+            bounds.right() - scrollbar_width
+        };
+        let wrap_cols = (f32::from(wrap_right - text_x) / f32::from(m.char_width))
+            .floor()
+            .max(1.0) as usize;
 
         // Keep the caret in view after edits and caret moves.
         self.editor.update(cx, |e, cx| {
             if !single_line {
                 e.update_wrap_width(wrap_cols, cx);
             }
+            // The view's own moves (to the caret, a match, a place) are
+            // reported; clamping is not.
+            let before = e.scroll;
+            let moves = e.scroll_to_end
+                || e.reveal.is_some()
+                || e.autoscroll
+                || e.center_caret
+                || e.caret_view_y.is_some();
             let rows = e.display_rows();
-            let max_y = if console {
-                (lh * rows as f32 - bounds.size.height).max(px(0.0))
-            } else {
-                lh * rows.saturating_sub(1) as f32
+            let max_y = match e.lines_after_end() {
+                Some(extra) => (lh * (rows + extra) as f32 - bounds.size.height).max(px(0.0)),
+                None => lh * rows.saturating_sub(1) as f32,
             };
             if std::mem::take(&mut e.scroll_to_end) {
                 e.scroll.y = max_y;
@@ -1036,6 +1062,9 @@ impl Element for EditorElement {
             } else {
                 e.scroll.x.max(px(0.0))
             };
+            if moves && e.scroll != before {
+                cx.emit(EditorEvent::Scrolled);
+            }
             // Highlight spans for the lines about to be painted (a line has
             // at least one row).
             let first_row = ((e.scroll.y / lh).floor() as usize).min(rows - 1);
@@ -1462,6 +1491,7 @@ impl Element for EditorElement {
         // console).
         let current_lines = if !single_line
             && !console
+            && editor.caret_row_shown
             && editor.selections.iter().all(|s| s.is_empty())
         {
             caret_rows
@@ -1475,12 +1505,19 @@ impl Element for EditorElement {
 
         // Line numbers, right-aligned, on the first row of each line, unless
         // a gutter icon is drawn there.
-        let numbers_right = bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32;
+        let numbers_right = if mirrored {
+            bounds.right() - px(GUTTER_LEFT)
+        } else {
+            bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32
+        };
         let (mut decoration_paint, decoration_geometry) = gutter::prepaint(
             editor,
             &gutter::Frame {
                 bounds,
                 text_x,
+                gutter_x,
+                gutter_width,
+                mirrored,
                 scroll,
                 line_height: lh,
                 char_width: m.char_width,
@@ -1528,14 +1565,18 @@ impl Element for EditorElement {
 
         // Vertical scrollbar when the text is taller than the view; the view
         // can scroll until the last row is at the top.
-        let content = if console {
-            (lh * total_rows as f32).max(bounds.size.height)
+        let content = match editor.lines_after_end() {
+            Some(extra) => (lh * (total_rows + extra) as f32).max(bounds.size.height),
+            None => lh * (total_rows.saturating_sub(1)) as f32 + bounds.size.height,
+        };
+        let strip_x = if mirrored {
+            bounds.left()
         } else {
-            lh * (total_rows.saturating_sub(1)) as f32 + bounds.size.height
+            bounds.right() - scrollbar_width
         };
         let scrollbar = (!single_line && total_rows > viewport_lines).then(|| {
             let track = Bounds::new(
-                point(bounds.right() - scrollbar_width, bounds.top()),
+                point(strip_x, bounds.top()),
                 size(scrollbar_width, bounds.size.height),
             );
             let h = (bounds.size.height * (bounds.size.height / content))
@@ -1568,7 +1609,7 @@ impl Element for EditorElement {
         let stripe = scrollbar.map(|s| s.track).or_else(|| {
             (!single_line && !console && shows_problems).then(|| {
                 Bounds::new(
-                    point(bounds.right() - scrollbar_width, bounds.top()),
+                    point(strip_x, bounds.top()),
                     size(scrollbar_width, bounds.size.height),
                 )
             })
@@ -1697,10 +1738,17 @@ impl Element for EditorElement {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        let text_right = stripe.map_or(bounds.right(), |s| s.left());
+        let (text_left_edge, text_right) = if mirrored {
+            (stripe.map_or(bounds.left(), |s| s.right()), gutter_x)
+        } else {
+            (
+                bounds.left() + gutter_width,
+                stripe.map_or(bounds.right(), |s| s.left()),
+            )
+        };
         let text_hitbox = window.insert_hitbox(
             Bounds::from_corners(
-                point(bounds.left() + gutter_width, bounds.top()),
+                point(text_left_edge, bounds.top()),
                 point(text_right, bounds.bottom()),
             ),
             HitboxBehavior::Normal,
@@ -1717,7 +1765,7 @@ impl Element for EditorElement {
             .iter()
             .map(|l| {
                 let visible = l.bounds.intersect(&Bounds::from_corners(
-                    point(bounds.left() + gutter_width, bounds.top()),
+                    point(text_left_edge, bounds.top()),
                     point(text_right, bounds.bottom()),
                 ));
                 window.insert_hitbox(visible, HitboxBehavior::Normal)
@@ -1725,7 +1773,7 @@ impl Element for EditorElement {
             .collect();
         // The link highlight: the hand pointer over it.
         let text_area = Bounds::from_corners(
-            point(bounds.left() + gutter_width, bounds.top()),
+            point(text_left_edge, bounds.top()),
             point(text_right, bounds.bottom()),
         );
         let link_highlight_hitboxes = link_highlight_cols
@@ -1742,6 +1790,7 @@ impl Element for EditorElement {
         let layout = LayoutInfo {
             bounds,
             text_x,
+            text_end: text_right,
             line_height: lh,
             char_width: m.char_width,
             visible,
@@ -1760,7 +1809,18 @@ impl Element for EditorElement {
             hitbox,
             text_hitbox,
             layout,
-            gutter_width,
+            gutter: Bounds::new(
+                point(gutter_x, bounds.top()),
+                size(gutter_width, bounds.size.height),
+            ),
+            text_bounds: if mirrored {
+                Bounds::from_corners(bounds.origin, point(gutter_x, bounds.bottom()))
+            } else {
+                Bounds::from_corners(
+                    point(bounds.left() + gutter_width, bounds.top()),
+                    bounds.bottom_right(),
+                )
+            },
             numbers,
             current_lines,
             selections: selection_rects,
@@ -1800,10 +1860,7 @@ impl Element for EditorElement {
         );
         let lh = p.layout.line_height;
         let scroll_x = self.editor.read(cx).scroll.x;
-        let text_bounds = Bounds::from_corners(
-            point(bounds.left() + p.gutter_width, bounds.top()),
-            bounds.bottom_right(),
-        );
+        let text_bounds = p.text_bounds;
         // Arrow over the gutter and the scrollbar, I-beam over the text.
         ui::pointer::request(CursorStyle::Arrow, &p.hitbox, window);
         ui::pointer::request(CursorStyle::IBeam, &p.text_hitbox, window);
@@ -1817,10 +1874,7 @@ impl Element for EditorElement {
         }
 
         window.paint_quad(fill(bounds, p.colors.background));
-        window.paint_quad(fill(
-            Bounds::new(bounds.origin, size(p.gutter_width, bounds.size.height)),
-            p.colors.gutter,
-        ));
+        window.paint_quad(fill(p.gutter, p.colors.gutter));
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for r in &p.current_lines {
                 window.paint_quad(fill(*r, p.colors.current_line));
@@ -1929,8 +1983,9 @@ impl Element for EditorElement {
             window.paint_quad(fill(*bounds, *color));
         }
         if let Some(bar) = p.layout.scrollbar {
+            let x = window.mouse_position().x;
             let hovered =
-                window.mouse_position().x >= bar.track.left() && p.hitbox.is_hovered(window);
+                x >= bar.track.left() && x <= bar.track.right() && p.hitbox.is_hovered(window);
             let thumb_color = if hovered {
                 p.colors.scrollbar_hover
             } else {
