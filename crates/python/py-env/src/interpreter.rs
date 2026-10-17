@@ -226,7 +226,18 @@ pub(crate) async fn probe_with(
     if !done.success() {
         return Err(EnvError::from_failure("python", done.code, &done.stderr));
     }
-    let out = parse_probe(&done.stdout)?;
+    let mut out = parse_probe(&done.stdout)?;
+    // `-S` leaves out `site`, which points `sys.prefix` at a virtual
+    // environment: the environment's `pyvenv.cfg` tells instead.
+    if out.prefix == out.base_prefix
+        && let Some(env) = python
+            .parent()
+            .and_then(Path::parent)
+            .and_then(crate::venv::inspect)
+            .filter(|env| env.layout == crate::venv::EnvLayout::Venv)
+    {
+        out.prefix = env.dir;
+    }
     let is_venv = out.prefix != out.base_prefix;
     let kind = classify(hint, is_venv, python, &out.prefix, loc);
     Ok(Interpreter {
@@ -306,6 +317,41 @@ mod tests {
             parse_probe("{\"version\": 3}").unwrap_err().kind,
             ErrorKind::Parse
         );
+    }
+
+    /// A virtual environment's interpreter run with `-S` reports its
+    /// base as `sys.prefix`; its `pyvenv.cfg` makes it a virtual
+    /// environment again.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn environments_are_known_by_their_pyvenv_cfg() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let env = dir.path().join("env");
+        let python = env.join("bin/python");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(
+            &python,
+            "#!/bin/sh\necho '{\"version\": [3, 13, 5, \"final\", 0], \"implementation\": \"cpython\", \"prefix\": \"/opt/py\", \"base_prefix\": \"/opt/py\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let ctx = RunContext::default();
+        let base = probe(&python, "manual", Duration::from_secs(10), &ctx)
+            .await
+            .unwrap();
+        assert!(!base.is_venv);
+        std::fs::write(
+            env.join("pyvenv.cfg"),
+            "home = /opt/py/bin\nversion = 3.13.5\n",
+        )
+        .unwrap();
+        let venv = probe(&python, "manual", Duration::from_secs(10), &ctx)
+            .await
+            .unwrap();
+        assert!(venv.is_venv);
+        assert_eq!(venv.venv_root.as_deref(), Some(env.as_path()));
+        assert_eq!(venv.base_prefix, Path::new("/opt/py"));
     }
 
     #[test]
