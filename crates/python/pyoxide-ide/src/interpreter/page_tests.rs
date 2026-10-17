@@ -36,7 +36,11 @@ pub(super) struct Fixture {
 /// environment of another project and one of `demo` kept outside it.
 pub(super) fn fixture(cx: &mut TestAppContext) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let base = dunce::canonicalize(dir.path()).unwrap();
+    // As the workbench keeps the project's root (`canonicalize`, with the
+    // verbatim prefix on Windows): the interpreters found in the project,
+    // its associations and the keys of its state are then the same paths
+    // as the test's.
+    let base = std::fs::canonicalize(dir.path()).unwrap();
     let root = base.join("demo");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(

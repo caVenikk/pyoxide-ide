@@ -71,9 +71,15 @@ impl Project {
 }
 
 /// A path for display, with the home directory as `~`. A Windows path made
-/// by `canonicalize` (`\\?\C:\x`) is shown as `C:\x`.
+/// by `canonicalize` (`\\?\C:\x`, `\\?\UNC\srv\share\x`) is shown as
+/// `C:\x` (`\\srv\share\x`).
 pub fn display_path(path: &Path) -> String {
     let path = dunce::simplified(path);
+    // `dunce` leaves the verbatim form of a network share as it is.
+    #[cfg(windows)]
+    if let Some(rest) = path.to_str().and_then(|p| p.strip_prefix(r"\\?\UNC\")) {
+        return format!(r"\\{rest}");
+    }
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
     if let Some(home) = home.map(PathBuf::from)
         && let Ok(rest) = path.strip_prefix(&home)
