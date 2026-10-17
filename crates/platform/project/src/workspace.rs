@@ -84,6 +84,55 @@ pub fn save_values(
     table: &str,
     values: &[(&str, Option<&str>)],
 ) -> Result<bool, StoreError> {
+    let items: Vec<(&str, Option<Item>)> = values
+        .iter()
+        .map(|(key, value)| (*key, value.map(toml_edit::value)))
+        .collect();
+    save_items(root, table, items)
+}
+
+/// The list of strings under `key` in `[table]` (a dotted path); empty
+/// when the file, the table or the key is missing, values that are not
+/// strings left out.
+pub fn load_list(root: &Path, table: &str, key: &str) -> Result<Vec<String>, StoreError> {
+    let path = workspace_file(root);
+    let Some(doc) = read_document(&path)? else {
+        return Ok(Vec::new());
+    };
+    let Some(table) = find_table(&doc, table, &path)? else {
+        return Ok(Vec::new());
+    };
+    Ok(table
+        .get(key)
+        .and_then(Item::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Sets `key` in `[table]` to a list of strings (recent commit messages),
+/// or removes it with `None`, under the rules of [`save_value`].
+pub fn save_list(
+    root: &Path,
+    table: &str,
+    key: &str,
+    values: Option<&[String]>,
+) -> Result<bool, StoreError> {
+    let item = values.map(|values| {
+        let array: toml_edit::Array = values.iter().map(String::as_str).collect();
+        toml_edit::value(array)
+    });
+    save_items(root, table, vec![(key, item)])
+}
+
+fn save_items(
+    root: &Path,
+    table: &str,
+    values: Vec<(&str, Option<Item>)>,
+) -> Result<bool, StoreError> {
     let _lock = lock_root(root);
     let path = workspace_file(root);
     let existing = read_document(&path)?;
@@ -114,7 +163,7 @@ pub fn save_values(
         };
         match value {
             Some(value) => {
-                t.insert(key, toml_edit::value(*value));
+                t.insert(key, value);
                 changed = true;
             }
             None => changed |= t.remove(key).is_some(),
@@ -280,6 +329,23 @@ mod tests {
             .collect();
         files.sort();
         assert_eq!(files, [GITIGNORE_FILE, WORKSPACE_FILE]);
+    }
+
+    #[test]
+    fn lists_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(load_list(root, "vcs", "recent").unwrap().is_empty());
+        let values = vec!["Fix\nmore".to_owned(), "First".to_owned()];
+        assert!(save_list(root, "vcs", "recent", Some(&values)).unwrap());
+        save_value(root, "vcs", "draft", Some("wip")).unwrap();
+        assert_eq!(load_list(root, "vcs", "recent").unwrap(), values);
+        assert_eq!(
+            load_value(root, "vcs", "draft").unwrap().as_deref(),
+            Some("wip")
+        );
+        assert!(save_list(root, "vcs", "recent", None).unwrap());
+        assert!(load_list(root, "vcs", "recent").unwrap().is_empty());
     }
 
     #[test]

@@ -38,6 +38,7 @@ use crate::search_everywhere::{self, SearchEverywhere, SearchEverywhereEvent, Ta
 use crate::settings::SaveSettings;
 
 mod branches;
+mod commit;
 mod debug;
 mod file_events;
 mod file_sync;
@@ -218,6 +219,8 @@ pub struct Workbench {
     branch_ui: branches::BranchUi,
     /// Breakpoints and the debugger (`debug.rs`).
     debugger: Entity<debugger_ui::DebuggerView>,
+    /// The Commit tool window and its dialogs.
+    commit_ui: commit::CommitUi,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -342,8 +345,9 @@ impl Workbench {
         let notifications = cx.new(|cx| Notifications::new(window, cx));
         let notifications_window =
             cx.new(|cx| NotificationsToolWindow::new(notifications.clone(), cx));
-        let tool_windows =
+        let mut tool_windows =
             tool_window_areas::default_tool_windows(&product, &run_window, &notifications_window);
+        let commit_ui = commit::CommitUi::new(file_types.clone(), &mut tool_windows, window, cx);
         // Names are coloured by their version control status (#169).
         let version_control = version_control::VersionControl::default();
         let colors = version_control.markers.colors.clone();
@@ -391,6 +395,7 @@ impl Workbench {
             version_control,
             branch_ui: Default::default(),
             debugger,
+            commit_ui,
             _subscriptions: subscriptions,
         }
     }
@@ -2412,6 +2417,7 @@ impl Render for Workbench {
         root = self.vcs_actions(root, cx);
         root = self.branch_actions(root, cx);
         root = self.debug_actions(root);
+        root = self.commit_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);
         root.flex()
@@ -2459,6 +2465,7 @@ impl Render for Workbench {
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_branch_overlays(window, cx))
+            .children(self.render_commit_overlays())
             .children(self.render_switch_popup(window))
             .children(ui::dialog_window::blocker(window, cx))
             .children(self.dialog.as_ref().map(|d| d.dialog.clone()))

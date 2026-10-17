@@ -16,6 +16,8 @@
 //! - [`StatusService`]: statuses kept current from file watcher batches.
 //! - [`branches`]: checkout (Smart and Force too), new branch, rename,
 //!   delete and restore, recent checkouts, `git init`.
+//! - [`commit`]: commit and amend (`commit --only`), the last commit, the
+//!   user's identity, rollback, Add to VCS, commit hooks.
 //! - [`idea`]: the reference IDE's `.idea/vcs.xml` mapping.
 //! - [`commands::register`]: `git.status`, `git.branches`, `git.state`,
 //!   `git.checkout`, `git.new-branch`, `git.rename-branch`,
@@ -24,6 +26,7 @@
 mod backend;
 pub mod branches;
 pub mod commands;
+pub mod commit;
 mod exe;
 pub mod idea;
 mod parse;
@@ -37,7 +40,8 @@ use serde_json::{Value as Json, json};
 
 pub use backend::{GitRepo, MAX_PATHSPECS};
 pub use branches::{CheckedOut, Checkout, CheckoutError, CheckoutMode};
-pub use exe::{GitExe, LookupError, Version};
+pub use commit::{Committed, Identity};
+pub use exe::{GitExe, LookupError, Version, use_global_config};
 pub use repo::{Config, Repository, watched_in_git_dir};
 pub use runner::{Access, Output, Runner, error_text};
 pub use service::{DEBOUNCE, StatusService, StatusUpdate};

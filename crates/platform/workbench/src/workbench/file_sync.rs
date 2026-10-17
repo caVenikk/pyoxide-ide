@@ -699,7 +699,7 @@ impl Workbench {
     }
 
     /// Looks at open files (`None`: all) off the UI thread.
-    fn check_open_files(&mut self, paths: Option<Vec<PathBuf>>, cx: &mut Context<Self>) {
+    pub(super) fn check_open_files(&mut self, paths: Option<Vec<PathBuf>>, cx: &mut Context<Self>) {
         let checks: Vec<Check> = self
             .tabs
             .iter()

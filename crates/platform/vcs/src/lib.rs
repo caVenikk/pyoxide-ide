@@ -13,16 +13,20 @@
 //!   repository is and what it has.
 //! - [`branch_name`]: names of new branches checked and cleaned as the
 //!   reference's New Branch dialog does.
+//! - [`CommitRequest`], [`LastCommit`] and [`rollback_kind`]: what the
+//!   Commit tool window asks of a backend.
 //! - [`Backend`]: what a version control backend (`git`) offers; UI crates
 //!   depend on this trait, never on the backend.
 
 mod backend;
 mod branch;
 pub mod branch_name;
+mod commit;
 mod ranges;
 mod status;
 
 pub use backend::{Backend, Cancel, Snapshot, VcsError, VcsErrorKind};
 pub use branch::{Branch, BranchKind, Head, Remote, RepoInfo, RepoState, Tracking};
+pub use commit::{CommitRequest, LastCommit, RollbackKind, rollback_kind};
 pub use ranges::{LineRanges, Range, RangeKind, split_lines};
 pub use status::{Change, FileStatus, StatusMap};

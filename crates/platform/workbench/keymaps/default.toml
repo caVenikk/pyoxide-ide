@@ -241,6 +241,68 @@ name = "BranchDialog > Editor"
 "enter" = "branch-dialog.confirm"
 "escape" = "branch-dialog.cancel"
 
+# Commit (#170): Commit... opens the Commit tool window with every
+# change included and the focus in the message (`CheckinProject`);
+# Alt+0 shows or hides the tool window (`ActivateCommitToolWindow`);
+# Commit and Push... and Add to VCS.
+[[context]]
+[context.bindings]
+"ctrl-k" = "vcs.commit"
+"alt-0" = "workbench.toggle-commit"
+"ctrl-alt-k" = "vcs.commit.push"
+"ctrl-alt-a" = "vcs.add"
+
+# Rollback... in the main window's context, so that an editor's Rollback
+# Lines (a deeper context) keeps the key.
+[[context]]
+name = "Workbench"
+[context.bindings]
+"ctrl-alt-z" = "vcs.rollback"
+
+# In the Commit tool window Ctrl+Enter presses the commit button, Alt+M
+# is the Amend check box's mnemonic and Ctrl+O opens the commit options.
+[[context]]
+name = "CommitToolWindow"
+[context.bindings]
+"ctrl-enter" = "vcs.commit.run"
+"alt-m" = "vcs.commit.toggle-amend"
+"ctrl-o" = "vcs.commit.options"
+
+# The changes tree: Up and Down move, Left and Right collapse and expand,
+# Space ticks or unticks the selected rows, Enter and Ctrl+D open the
+# diff (the file without a diff viewer), F4 opens the file.
+[[context]]
+name = "CommitTree"
+[context.bindings]
+"up" = "commit-tree.up"
+"down" = "commit-tree.down"
+"left" = "commit-tree.left"
+"right" = "commit-tree.right"
+"space" = "commit-tree.toggle"
+"enter" = "commit-tree.open"
+"ctrl-d" = "commit-tree.show-diff"
+"f4" = "commit-tree.jump-to-source"
+
+# The commit options popup, the Rollback Changes and Git User Name Is Not
+# Defined dialogs.
+[[context]]
+name = "CommitOptions > Editor"
+[context.bindings]
+"escape" = "commit-options.close"
+
+[[context]]
+name = "RollbackDialog"
+[context.bindings]
+"enter" = "rollback-dialog.confirm"
+"escape" = "rollback-dialog.cancel"
+
+[[context]]
+name = "UserNameDialog > Editor"
+[context.bindings]
+"enter" = "user-name-dialog.confirm"
+"escape" = "user-name-dialog.cancel"
+"tab" = "user-name-dialog.next-field"
+
 # The completion popup leaves the focus in the editor; while it shows,
 # Enter inserts the selected item, Tab replaces the identifier at the
 # caret with it, Escape closes it, and the keys that move the caret up
