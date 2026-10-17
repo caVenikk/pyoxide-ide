@@ -457,6 +457,76 @@ fn known_parent_without_file_is_a_note_and_missing_values_come_from_the_base() {
 }
 
 #[test]
+fn the_marker_popup_border_takes_the_reference_default() {
+    // `LineStatusMarkerPopupPanel.getBorderColor`: a theme that does not
+    // set `VersionControl.MarkerPopup.borderColor` gets Gray 75 (dark) or
+    // Gray 206 (light), not its popup border.
+    let items = plugin_imports();
+    let dark = by_name(&items, "Nightfall");
+    assert_eq!(
+        dark.theme.ui[UiRole::MarkerPopupBorder],
+        Rgba::rgb(75, 75, 75)
+    );
+    assert!(
+        dark.report
+            .approximations
+            .iter()
+            .any(|a| a.target == "ui.marker-popup-border")
+    );
+    let light = by_name(&items, "Orphan");
+    assert_eq!(
+        light.theme.ui[UiRole::MarkerPopupBorder],
+        Rgba::rgb(206, 206, 206)
+    );
+}
+
+#[test]
+fn balloon_text_and_border_take_the_reference_defaults() {
+    // A theme that sets neither `Notification.foreground` nor
+    // `Notification.borderColor` (nor a wildcard for them) gets the base
+    // theme's text and `NotificationsManagerImpl.BORDER_COLOR`, not its label
+    // text and popup border.
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, text: &str| {
+        File::create(dir.path().join(name))
+            .unwrap()
+            .write_all(text.as_bytes())
+            .unwrap();
+    };
+    write(
+        "Night.theme.json",
+        r##"{"name":"Night","dark":true,"ui":{"Label":{"foreground":"#cfdbe8"},"Popup":{"borderColor":"#2a4259"}}}"##,
+    );
+    write(
+        "Day.theme.json",
+        r##"{"name":"Day","dark":false,"ui":{"Label":{"foreground":"#2b2723"},"Popup":{"borderColor":"#c0b8aa"}}}"##,
+    );
+    write(
+        "Wild.theme.json",
+        r##"{"name":"Wild","dark":true,"ui":{"*":{"foreground":"#cfdbe8"}}}"##,
+    );
+    let items = import_path(dir.path(), &[]).unwrap();
+    let dark = by_name(&items, "Night");
+    assert_eq!(
+        dark.theme.ui[UiRole::NotificationText],
+        Rgba::rgb(0xbb, 0xbb, 0xbb)
+    );
+    assert_eq!(
+        dark.theme.ui[UiRole::NotificationBorder],
+        Rgba::new(0x56, 0x5a, 0x5c, 0xcd)
+    );
+    let light = by_name(&items, "Day");
+    assert_eq!(light.theme.ui[UiRole::NotificationText], Rgba::BLACK);
+    assert_eq!(
+        light.theme.ui[UiRole::NotificationBorder],
+        Rgba::new(0xb2, 0xb2, 0xb2, 0xcd)
+    );
+    // `*.foreground` reaches `Notification.foreground`, as in `UITheme`.
+    let wild = by_name(&items, "Wild");
+    assert_eq!(wild.theme.ui[UiRole::NotificationText], rgba("#cfdbe8"));
+}
+
+#[test]
 fn unknown_parent_theme_is_a_warning() {
     let items = plugin_imports();
     let item = by_name(&items, "Orphan");

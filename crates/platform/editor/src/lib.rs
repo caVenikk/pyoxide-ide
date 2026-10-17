@@ -8,6 +8,7 @@
 pub mod commands;
 pub mod decorations;
 mod diagnostics;
+mod diff_highlights;
 mod editor;
 mod element;
 pub mod field;
@@ -25,6 +26,7 @@ pub use decorations::{
     TextPiece,
 };
 pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
+pub use diff_highlights::DiffHighlights;
 pub use editor::{
     BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, MatchBackground,
     SearchHighlights, forward_actions, new_editor,

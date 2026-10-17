@@ -3,8 +3,11 @@
 //! without a repository, the New Branch, Rename Branch and Checkout
 //! dialogs, "Git Checkout Problem" (Smart Checkout, Force Checkout, Don't
 //! Checkout) and the balloons of the branch commands ("Checked out {0}",
-//! "Checked out new branch {0} from {1}", "Deleted branch {0}" with
-//! Restore).
+//! "Checked out new branch {0} from {1}", "**Deleted Branch:** {0}" with
+//! Restore; the names in the editor font, as the reference's `<code>`).
+//! The reference's Tasks plugin may replace the checkout balloon with
+//! "Workspace associated with branch … has been restored" (branch
+//! workspaces); without that feature the plain checkout text shows.
 //!
 //! Every git call runs off the UI thread through the project's
 //! [`git::GitRepo`]; the statuses and the widget follow from the
@@ -88,16 +91,26 @@ struct OpenProblem {
     _subscription: Subscription,
 }
 
+/// A name as the reference's balloons show it (`GitUIUtil.code`).
+fn code(name: &str) -> String {
+    format!("<code>{}</code>", ui::notification::escape(name))
+}
+
 /// A checkout's balloon (`checkout.operation.checked.out`,
-/// `checked.out.new.branch.from`).
+/// `checked.out.new.branch.from`), as HTML ([`Notification::html`]).
 fn checked_out_text(done: &CheckedOut) -> String {
     match done {
-        CheckedOut::Branch { name } => format!("Checked out {name}"),
+        CheckedOut::Branch { name } => format!("Checked out {}", code(name)),
         CheckedOut::NewBranch { name, from } => {
-            format!("Checked out new branch {name} from {from}")
+            format!("Checked out new branch {} from {}", code(name), code(from))
         }
-        CheckedOut::Detached { target } => format!("Checked out {target}"),
+        CheckedOut::Detached { target } => format!("Checked out {}", code(target)),
     }
+}
+
+/// The balloon of a deleted branch (`delete.branch.operation.deleted.branch.bold`).
+fn deleted_text(name: &str) -> String {
+    format!("<b>Deleted Branch:</b> {}", ui::notification::escape(name))
 }
 
 /// The message of "Git Checkout Problem" (`smart.operation.dialog.north.
@@ -525,9 +538,10 @@ impl Workbench {
 
     // ---- commands -------------------------------------------------------------
 
-    fn info_balloon(&mut self, text: String, cx: &mut Context<Self>) {
+    /// A balloon without a title; `html` as [`Notification::html`] reads it.
+    fn info_balloon(&mut self, html: String, cx: &mut Context<Self>) {
         self.notify(
-            Notification::new(NotificationKind::Information, "", text),
+            Notification::html(NotificationKind::Information, "", &html),
             cx,
         );
     }
@@ -660,10 +674,13 @@ impl Workbench {
             },
             move |this, result, _, cx| match result {
                 Ok(()) if checkout => this.info_balloon(
-                    format!("Checked out new branch {name} from {shown_from}"),
+                    checked_out_text(&CheckedOut::NewBranch {
+                        name: name.clone(),
+                        from: shown_from.clone(),
+                    }),
                     cx,
                 ),
-                Ok(()) => this.info_balloon(format!("Branch {name} was created"), cx),
+                Ok(()) => this.info_balloon(format!("Branch {} was created", code(&name)), cx),
                 Err(e) => this.error_balloon(
                     format!("Could not create new branch {name}"),
                     e.to_string(),
@@ -799,7 +816,14 @@ impl Workbench {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| match result {
-                Ok(()) => this.info_balloon(format!("Branch {from} was renamed to {to}"), cx),
+                Ok(()) => this.info_balloon(
+                    format!(
+                        "Branch <b>{}</b> was renamed to <b>{}</b>",
+                        code(&from),
+                        code(&to)
+                    ),
+                    cx,
+                ),
                 Err(e) => this.error_balloon(format!("Could not rename {from}"), e, cx),
             });
         })
@@ -832,16 +856,12 @@ impl Workbench {
             move |this, result, _, cx| match result {
                 Ok(oid) => {
                     this.notify(
-                        Notification::new(
-                            NotificationKind::Information,
-                            "",
-                            format!("Deleted branch {name}"),
-                        )
-                        .with_action(
-                            "Restore",
-                            "git.restore-branch",
-                            json!({ "name": name, "oid": oid }),
-                        ),
+                        Notification::html(NotificationKind::Information, "", &deleted_text(&name))
+                            .with_action(
+                                "Restore",
+                                "git.restore-branch",
+                                json!({ "name": name, "oid": oid }),
+                            ),
                         cx,
                     );
                 }
@@ -1046,15 +1066,16 @@ mod tests {
             checked_out_text(&CheckedOut::Branch {
                 name: "main".into()
             }),
-            "Checked out main"
+            "Checked out <code>main</code>"
         );
         assert_eq!(
             checked_out_text(&CheckedOut::NewBranch {
                 name: "feat".into(),
                 from: "origin/feat".into()
             }),
-            "Checked out new branch feat from origin/feat"
+            "Checked out new branch <code>feat</code> from <code>origin/feat</code>"
         );
+        assert_eq!(deleted_text("a<b"), "<b>Deleted Branch:</b> a&lt;b");
         let message = problem_message(&["a.py".into()]);
         assert!(message.starts_with(
             "Your local changes to the following files would be overwritten by checkout."

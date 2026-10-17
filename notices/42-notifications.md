@@ -19,6 +19,7 @@
   notification and its time), with the strings of platform/platform-api/
   resources/messages/IdeBundle.properties and the chevron mapping of
   platform/icons/src/PlatformIconMappings.json. Changes: reimplemented in
-  Rust on GPUI; plain-text content without HTML, wrapped by GPUI's line
-  wrapper; no settings button, Suggestions group, search, unread state or
-  menus in the tool window.
+  Rust on GPUI; content in plain text or a small subset of HTML (bold and
+  code parts, line breaks), wrapped by GPUI's line wrapper; no settings
+  button, Suggestions group, search, unread state or menus in the tool
+  window.

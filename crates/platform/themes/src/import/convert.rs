@@ -83,7 +83,7 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
         .to_owned(),
     );
 
-    cx.fill_ui(&mut theme.ui, &base.ui);
+    cx.fill_ui(&mut theme.ui, &base.ui, base_kind == ThemeKind::Dark);
     cx.note_text_from_background();
     cx.fill_text(&mut theme.text, &base.text);
     cx.fill_metrics(&mut theme);
@@ -93,6 +93,37 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
     Imported {
         theme,
         report: cx.report,
+    }
+}
+
+/// The colour the reference's code uses for a role when no theme key sets
+/// it (`JBColor.namedColor(key, default)`), in a dark or a light theme; it
+/// stands in before a fallback role and the base theme.
+fn code_default(role: UiRole, dark: bool) -> Option<Rgba> {
+    match role {
+        // `LineStatusMarkerPopupPanel.getBorderColor`:
+        // `JBColor(Gray._206, Gray._75)`.
+        UiRole::MarkerPopupBorder => Some(if dark {
+            Rgba::rgb(75, 75, 75)
+        } else {
+            Rgba::rgb(206, 206, 206)
+        }),
+        // `Notification.foreground` of `darcula.theme.json` (the base of a
+        // theme without a parent); in a light theme `NotificationsManagerImpl`
+        // takes `DEFAULT_TEXT_COLOR`, black.
+        UiRole::NotificationText => Some(if dark {
+            Rgba::rgb(0xbb, 0xbb, 0xbb)
+        } else {
+            Rgba::rgb(0, 0, 0)
+        }),
+        // `NotificationsManagerImpl.BORDER_COLOR`:
+        // `JBColor(0xCDB2B2B2, 0xCD565A5C)`, 80 % opaque.
+        UiRole::NotificationBorder => Some(if dark {
+            Rgba::new(0x56, 0x5a, 0x5c, 0xcd)
+        } else {
+            Rgba::new(0xb2, 0xb2, 0xb2, 0xcd)
+        }),
+        _ => None,
     }
 }
 
@@ -282,7 +313,7 @@ impl<'a> Converter<'a> {
 
     // ---- UI colours -------------------------------------------------
 
-    fn fill_ui(&mut self, out: &mut UiColors, base: &UiColors) {
+    fn fill_ui(&mut self, out: &mut UiColors, base: &UiColors, dark: bool) {
         let mut direct: Vec<Option<Rgba>> = vec![None; UiRole::COUNT];
         for &role in UiRole::ALL {
             let target = format!("ui.{role}");
@@ -323,6 +354,15 @@ impl<'a> Converter<'a> {
             let target = format!("ui.{role}");
             if let Some(color) = direct[role.index()] {
                 out[role] = color;
+                continue;
+            }
+            if let Some(color) = code_default(role, dark) {
+                out[role] = color;
+                self.report.approximations.push(Approximation {
+                    key: format!("ui.{role}"),
+                    target,
+                    note: "no key sets it; takes the reference's default colour".to_owned(),
+                });
                 continue;
             }
             let mut ancestor = role.fallback();

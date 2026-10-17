@@ -5,7 +5,9 @@
 //!
 //! A balloon has a kind with its icon, a title (bold when there is
 //! content), a content text, action links and a close button shown while
-//! the mouse is over it. An ordinary balloon goes after 10 s, a sticky one
+//! the mouse is over it. The content may set words apart as the
+//! reference's HTML content does: bold (`<b>`) or in the editor font
+//! (`<code>`), see [`Notification::html`]. An ordinary balloon goes after 10 s, a sticky one
 //! (the reference's `STICKY_BALLOON` display type, used for errors) after
 //! 5 min; the time runs from the first input after it was shown, stops
 //! while the mouse is over the balloon and while the window is inactive.
@@ -21,12 +23,13 @@
 //! [`BalloonStack`] is the model, without a toolkit clock (the caller
 //! passes the time); [`render_stack`] draws it.
 
+use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, BoxShadow, FontWeight, IntoElement, LineFragment, LineWrapper, Pixels,
-    SharedString, Window, div, point, prelude::*, px,
+    AnyElement, App, BoxShadow, FontWeight, Hsla, IntoElement, LineFragment, LineWrapper, Pixels,
+    SharedString, StyledText, TextRun, Window, div, point, prelude::*, px,
 };
 use themes::UiRole;
 
@@ -58,11 +61,15 @@ const RADIUS: f32 = 6.0;
 const SHADOW: f32 = 5.0;
 const SHADOW_ALPHA: f32 = 16.0 / 255.0;
 /// `Notification.borderInsets` of the New UI (top, left, bottom; none on
-/// the right) and the gap between the icon and the text.
+/// the right) and the gap between the icon and the text. The insets are
+/// measured from the body's outer edge, so the 1 px border lies inside them
+/// ([`BORDER`]).
 const INSET_TOP: f32 = 4.0;
 const INSET_LEFT: f32 = 4.0;
 const INSET_BOTTOM: f32 = 6.0;
 const ICON_GAP: f32 = 2.0;
+/// The width of a balloon's border.
+const BORDER: f32 = 1.0;
 /// Width of the icon column and the icon's distance from its left edge.
 const ICON_COLUMN: f32 = 32.0;
 const ICON_LEFT: f32 = 10.0;
@@ -88,11 +95,13 @@ pub const MAX_EXPANDED_LINES: usize = 10;
 /// The expand and collapse chevron's distance from the right edge
 /// (`rightActionsOffset` of the New UI).
 const EXPAND_RIGHT: f32 = 9.0;
-/// Line height of the label font in balloons.
-const LINE: f32 = 16.0;
+/// Line height of the label font in balloons (Inter 13 in the reference:
+/// content lines 17 px apart, action links 17 px high).
+const LINE: f32 = 17.0;
 /// The strip: 10 above its text and 4 below; its top 7 px lie under the
 /// oldest balloon (`ActionCenterBalloonLayout.CollapseInfo`).
 const MORE_TOP: f32 = 10.0;
+const MORE_LINE: f32 = 16.0;
 const MORE_BOTTOM: f32 = 4.0;
 const MORE_UNDER: f32 = 7.0;
 
@@ -142,15 +151,117 @@ pub struct NotificationAction {
     pub args: serde_json::Value,
 }
 
+/// How a part of a balloon's content is set apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Emphasis {
+    /// Bold (`<b>`).
+    Bold,
+    /// The editor font (`<code>`: the IDE's style sheet gives `code` the
+    /// editor's font family, `LafCssProvider`).
+    Code,
+}
+
+impl Emphasis {
+    pub fn name(self) -> &'static str {
+        match self {
+            Emphasis::Bold => "bold",
+            Emphasis::Code => "code",
+        }
+    }
+}
+
 /// What a balloon shows.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Notification {
     pub kind: NotificationKind,
     pub title: SharedString,
     pub content: SharedString,
+    /// Byte ranges of `content` set apart, by start; a bold part may hold
+    /// a code part or the other way round.
+    pub emphasis: Vec<(Range<usize>, Emphasis)>,
     pub actions: Vec<NotificationAction>,
     /// Stays 5 min instead of 10 s.
     pub sticky: bool,
+}
+
+/// Escapes text for [`Notification::html`].
+pub fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The text and the emphasized parts of the HTML a notification's content
+/// is written in: `<b>`, `<code>` and `<br>` tags and the entities `&lt;`,
+/// `&gt;`, `&amp;`, `&quot;`, `&#39;`, `&nbsp;`; other tags are dropped,
+/// a `<` that starts no tag is text.
+fn parse_html(html: &str) -> (String, Vec<(Range<usize>, Emphasis)>) {
+    let mut text = String::with_capacity(html.len());
+    let mut spans = Vec::new();
+    let mut open: Vec<(Emphasis, usize)> = Vec::new();
+    let mut rest = html;
+    while let Some(c) = rest.chars().next() {
+        if c == '<'
+            && let Some(end) = rest.find('>')
+        {
+            let tag = rest[1..end].trim().to_ascii_lowercase();
+            let (closing, name) = match tag.strip_prefix('/') {
+                Some(name) => (true, name.trim()),
+                None => (false, tag.trim_end_matches('/').trim()),
+            };
+            let emphasis = match name {
+                "b" | "strong" => Some(Emphasis::Bold),
+                "code" => Some(Emphasis::Code),
+                _ => None,
+            };
+            match (emphasis, closing) {
+                (Some(e), false) => open.push((e, text.len())),
+                (Some(e), true) => {
+                    if let Some(i) = open.iter().rposition(|(o, _)| *o == e) {
+                        let (_, start) = open.remove(i);
+                        if start < text.len() {
+                            spans.push((start..text.len(), e));
+                        }
+                    }
+                }
+                (None, _) if name == "br" => text.push('\n'),
+                (None, _) => {}
+            }
+            rest = &rest[end + 1..];
+            continue;
+        }
+        if c == '&'
+            && let Some(end) = rest.find(';').filter(|&e| e <= 6)
+        {
+            let decoded = match &rest[1..end] {
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "amp" => Some('&'),
+                "quot" => Some('"'),
+                "#39" | "apos" => Some('\''),
+                "nbsp" => Some('\u{a0}'),
+                _ => None,
+            };
+            if let Some(d) = decoded {
+                text.push(d);
+                rest = &rest[end + 1..];
+                continue;
+            }
+        }
+        text.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    spans.sort_by_key(|(r, _)| r.start);
+    (text, spans)
 }
 
 impl Notification {
@@ -164,8 +275,21 @@ impl Notification {
             kind,
             title: title.into(),
             content: content.into(),
+            emphasis: Vec::new(),
             actions: Vec::new(),
             sticky: kind == NotificationKind::Error,
+        }
+    }
+
+    /// A notification whose content is written in the small part of HTML
+    /// the reference's balloons use: `<b>`, `<code>` and `<br>` tags and
+    /// the common entities, as in `"<b>Deleted Branch:</b> main"`; other
+    /// tags are dropped. Values put into it go through [`escape`].
+    pub fn html(kind: NotificationKind, title: impl Into<SharedString>, html: &str) -> Self {
+        let (content, emphasis) = parse_html(html);
+        Self {
+            emphasis,
+            ..Self::new(kind, title, content)
         }
     }
 
@@ -210,8 +334,9 @@ pub struct Balloon {
     /// The whole content is shown (the chevron was clicked).
     pub expanded: bool,
     /// The content's lines, wrapped by [`BalloonStack::wrap`] for the font
-    /// they were wrapped with.
+    /// they were wrapped with, and their byte ranges in the content.
     lines: Vec<SharedString>,
+    line_ranges: Vec<Range<usize>>,
     /// The width of the widest of them (the advances of its characters).
     content_width: f32,
     wrapped_for: Option<(SharedString, Pixels)>,
@@ -301,6 +426,7 @@ impl BalloonStack {
             collapsed: 0,
             expanded: false,
             lines: Vec::new(),
+            line_ranges: Vec::new(),
             content_width: 0.0,
             wrapped_for: None,
         });
@@ -331,7 +457,13 @@ impl BalloonStack {
         let mut wrapper = text_system.line_wrapper(font, key.1);
         for b in &mut self.balloons {
             if b.wrapped_for.as_ref() != Some(&key) {
-                b.lines = content_lines(&b.notification.content, &mut wrapper);
+                let content = &b.notification.content;
+                b.line_ranges = content_line_ranges(content, &mut wrapper);
+                b.lines = b
+                    .line_ranges
+                    .iter()
+                    .map(|r| SharedString::from(content[r.clone()].to_owned()))
+                    .collect();
                 b.content_width = b.lines.iter().map(|l| width(l)).fold(0.0, f32::max);
                 b.wrapped_for = Some(key.clone());
             }
@@ -438,6 +570,10 @@ impl BalloonStack {
                     "kind": b.notification.kind.name(),
                     "title": b.notification.title.as_ref(),
                     "content": b.notification.content.as_ref(),
+                    "emphasis": b.notification.emphasis.iter().map(|(r, e)| serde_json::json!({
+                        "text": &b.notification.content[r.clone()],
+                        "kind": e.name(),
+                    })).collect::<Vec<_>>(),
                     "actions": b.notification.actions.iter()
                         .map(|a| a.text.as_ref()).collect::<Vec<_>>(),
                     "sticky": b.notification.sticky,
@@ -511,6 +647,14 @@ pub fn close_tooltip() -> &'static str {
 /// (`NotificationsManagerImpl.createBalloon`: the content gets the
 /// `width:240px` style when its preferred width is over `MaxWidth`).
 pub fn content_lines(text: &str, wrapper: &mut LineWrapper) -> Vec<SharedString> {
+    content_line_ranges(text, wrapper)
+        .into_iter()
+        .map(|r| SharedString::from(text[r].to_owned()))
+        .collect()
+}
+
+/// The byte ranges of [`content_lines`] in `text`.
+fn content_line_ranges(text: &str, wrapper: &mut LineWrapper) -> Vec<Range<usize>> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -525,7 +669,13 @@ pub fn content_lines(text: &str, wrapper: &mut LineWrapper) -> Vec<SharedString>
         .lines()
         .any(|line| !wraps_at(wrapper, line, MAX_CONTENT_WIDTH).is_empty());
     let mut out = Vec::new();
-    for line in text.lines() {
+    let mut next = 0;
+    // The lines of `str::lines`, with their offsets.
+    for raw in text.split_inclusive('\n') {
+        let at = next;
+        next += raw.len();
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
         let breaks = if wide {
             wraps_at(wrapper, line, WRAP_WIDTH)
         } else {
@@ -533,7 +683,8 @@ pub fn content_lines(text: &str, wrapper: &mut LineWrapper) -> Vec<SharedString>
         };
         let mut start = 0;
         for end in breaks.into_iter().chain([line.len()]) {
-            out.push(SharedString::from(line[start..end].trim_end().to_owned()));
+            let shown = line[start..end].trim_end().len();
+            out.push(at + start..at + start + shown);
             start = end;
         }
     }
@@ -614,7 +765,7 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
         if has_title {
             column = column.child(div().h(px(spaces.title_content)));
         }
-        column = column.child(render_content(b, on));
+        column = column.child(render_content(b, on, cx));
     }
     if has_actions {
         let space = if has_content {
@@ -665,8 +816,8 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
             .id(("balloon-close", id as usize))
             .debug_selector(move || format!("balloon-close-{id}"))
             .absolute()
-            .top(px(CLOSE_EDGE - CLOSE_HOVER_GAP))
-            .right(px(CLOSE_EDGE - CLOSE_HOVER_GAP))
+            .top(px(CLOSE_EDGE - BORDER - CLOSE_HOVER_GAP))
+            .right(px(CLOSE_EDGE - BORDER - CLOSE_HOVER_GAP))
             .p(px(CLOSE_HOVER_GAP))
             .rounded(px(CLOSE_RADIUS))
             .hover(|s| s.bg(theme.color(UiRole::NotificationIconHover)))
@@ -688,9 +839,9 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
         .flex_row()
         .flex_none()
         .w(px(WIDTH))
-        .pt(px(INSET_TOP))
-        .pl(px(INSET_LEFT))
-        .pb(px(INSET_BOTTOM))
+        .pt(px(INSET_TOP - BORDER))
+        .pl(px(INSET_LEFT - BORDER))
+        .pb(px(INSET_BOTTOM - BORDER))
         .gap(px(ICON_GAP))
         .rounded(px(RADIUS))
         .border_1()
@@ -726,16 +877,17 @@ fn render_balloon(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
 /// with the expand chevron at the right of the last one, and a click
 /// anywhere on them expands (`HoverAdapter`); expanded, all of them, up to
 /// [`MAX_EXPANDED_LINES`] before they scroll.
-fn render_content(b: &Balloon, on: &BalloonHandler) -> AnyElement {
+fn render_content(b: &Balloon, on: &BalloonHandler, cx: &App) -> AnyElement {
     let id = b.id;
     let shown = b.shown_lines();
     let lines = shown.iter().enumerate().map(|(i, line)| {
+        let range = b.line_ranges.get(i).cloned().unwrap_or(0..0);
         div()
             .debug_selector(move || format!("balloon-line-{id}-{i}"))
             .h(px(LINE))
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(line.clone())
+            .child(line_text(line, range, &b.notification.emphasis, cx))
             .into_any_element()
     });
     let content = div()
@@ -769,6 +921,65 @@ fn render_content(b: &Balloon, on: &BalloonHandler) -> AnyElement {
         )
         .on_click(move |_, window, cx| on(&BalloonEvent::Expand { id }, window, cx))
         .pointing_hand()
+        .into_any_element()
+}
+
+/// A line of content (bytes `range` of it) with its emphasized parts.
+fn line_text(
+    line: &SharedString,
+    range: Range<usize>,
+    emphasis: &[(Range<usize>, Emphasis)],
+    cx: &App,
+) -> AnyElement {
+    let parts: Vec<(Range<usize>, Emphasis)> = emphasis
+        .iter()
+        .filter_map(|(r, e)| {
+            let (a, b) = (r.start.max(range.start), r.end.min(range.end));
+            (a < b).then(|| (a - range.start..b - range.start, *e))
+        })
+        .collect();
+    if parts.is_empty() {
+        return line.clone().into_any_element();
+    }
+    let theme = cx.theme();
+    let color: Hsla = theme.color(UiRole::NotificationText);
+    // Parts may nest (`<b><code>name</code></b>`): every stretch between
+    // two boundaries takes all the parts over it.
+    let mut cuts: Vec<usize> = vec![0, line.len()];
+    for (r, _) in &parts {
+        cuts.push(r.start);
+        cuts.push(r.end);
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    let runs = cuts
+        .windows(2)
+        .map(|w| {
+            let over = |e: Emphasis| {
+                parts
+                    .iter()
+                    .any(|(r, p)| *p == e && r.start <= w[0] && w[1] <= r.end)
+            };
+            let mut font = gpui::font(if over(Emphasis::Code) {
+                theme.mono_family()
+            } else {
+                theme.ui_family()
+            });
+            if over(Emphasis::Bold) {
+                font.weight = FontWeight::BOLD;
+            }
+            TextRun {
+                len: w[1] - w[0],
+                font,
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    StyledText::new(line.clone())
+        .with_runs(runs)
         .into_any_element()
 }
 
@@ -827,7 +1038,7 @@ fn render_more(count: usize, on: &BalloonHandler, cx: &App) -> AnyElement {
         .bg(theme.color(UiRole::NotificationMore))
         .shadow(shadow())
         .text_size(theme.ui_size() - px(1.0))
-        .line_height(px(LINE))
+        .line_height(px(MORE_LINE))
         .text_color(theme.color(UiRole::NotificationMoreText))
         .on_click(move |_, window, cx| on(&BalloonEvent::ShowMore, window, cx))
         .child(more_text(count))
@@ -869,6 +1080,36 @@ mod tests {
 
     fn info(title: &str) -> Notification {
         Notification::new(NotificationKind::Information, title.to_owned(), "")
+    }
+
+    #[test]
+    fn html_content_keeps_its_bold_and_code_parts() {
+        let n = Notification::html(
+            NotificationKind::Information,
+            "",
+            &format!("<b>Deleted Branch:</b> {}", escape("feat/<x>")),
+        );
+        assert_eq!(n.content.as_ref(), "Deleted Branch: feat/<x>");
+        assert_eq!(n.emphasis, vec![(0..15, Emphasis::Bold)]);
+        let n = Notification::html(
+            NotificationKind::Information,
+            "",
+            "Checked out new branch <code>x</code> from <code>main</code><br/>and &amp; more",
+        );
+        assert_eq!(
+            n.content.as_ref(),
+            "Checked out new branch x from main\nand & more"
+        );
+        let parts: Vec<_> = n
+            .emphasis
+            .iter()
+            .map(|(r, e)| (&n.content[r.clone()], *e))
+            .collect();
+        assert_eq!(parts, [("x", Emphasis::Code), ("main", Emphasis::Code)]);
+        // Not a tag, not an entity: text.
+        let n = Notification::html(NotificationKind::Information, "", "a < b &c");
+        assert_eq!(n.content.as_ref(), "a < b &c");
+        assert!(n.emphasis.is_empty());
     }
 
     #[test]

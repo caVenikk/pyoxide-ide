@@ -128,7 +128,7 @@ impl Workbench {
             m.colors.set_document(&t.path, None);
         }
         if m.popup.as_ref().is_some_and(|p| p.editor == *editor) {
-            m.popup = None;
+            self.vcs_close_popup(cx);
         }
         self.vcs_colors_changed(cx);
     }
@@ -145,9 +145,9 @@ impl Workbench {
     /// Another project: no statuses and no base texts until its
     /// repository is found.
     pub(in crate::workbench) fn vcs_markers_reset(&mut self, cx: &mut Context<Self>) {
+        self.vcs_close_popup(cx);
         let m = &mut self.version_control.markers;
         m.colors.set_snapshot(None);
-        m.popup = None;
         for t in m.trackers.values_mut() {
             t.base_of = None;
             t._loading = None;
@@ -322,8 +322,13 @@ impl Workbench {
             .and_then(|p| self.file_types.for_path(p))
             .and_then(|t| t.highlighter.as_ref())
             .map(|factory| factory());
-        let lines = vcs_ui::popup_lines(&base, &doc, &range, highlighter);
-        let view = cx.new(|_| MarkerPopup::new(editor.clone(), range, line, lines, enabled));
+        let text = vcs_ui::popup_text(&base, &doc, &range, highlighter);
+        let doc_start = buffer.line_start((range.line1 as usize).min(buffer.len_lines()));
+        let highlights = vcs_ui::doc_highlights(&text, &doc, doc_start, &range, cx);
+        self.vcs_close_popup(cx);
+        editor.update(cx, |e, cx| e.set_diff_highlights(highlights, cx));
+        let view =
+            cx.new(|cx| MarkerPopup::new(editor.clone(), range, line, text, enabled, window, cx));
         let actions = cx.subscribe_in(
             &view,
             window,
@@ -345,8 +350,7 @@ impl Workbench {
                 _ => false,
             };
             if close {
-                m.popup = None;
-                cx.notify();
+                this.vcs_close_popup(cx);
             }
         });
         let m = &mut self.version_control.markers;
@@ -363,9 +367,10 @@ impl Workbench {
         cx.notify();
     }
 
-    /// Closes the marker popup.
+    /// Closes the marker popup; the editor's highlights of its change go.
     pub(in crate::workbench) fn vcs_close_popup(&mut self, cx: &mut Context<Self>) {
-        if self.version_control.markers.popup.take().is_some() {
+        if let Some(p) = self.version_control.markers.popup.take() {
+            p.editor.update(cx, |e, cx| e.set_diff_highlights(None, cx));
             cx.notify();
         }
     }
@@ -484,7 +489,7 @@ impl Workbench {
     /// The marker popup as JSON (`workbench.state`).
     pub(in crate::workbench) fn vcs_popup_json(&self, cx: &gpui::App) -> serde_json::Value {
         match &self.version_control.markers.popup {
-            Some(p) => p.view.read(cx).state_json(),
+            Some(p) => p.view.read(cx).state_json(cx),
             None => serde_json::Value::Null,
         }
     }

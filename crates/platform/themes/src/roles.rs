@@ -400,8 +400,6 @@ impl UiRole {
             TreeIndentGuide => Some(Divider),
             ListButtonHover => Some(Hover),
             ListButtonSeparator => Some(Pressed),
-            NotificationBorder => Some(PopupBorder),
-            NotificationText => Some(Text),
             NotificationLink => Some(TextLink),
             NotificationIconHover => Some(Hover),
             NotificationMore => Some(Notification),
@@ -411,7 +409,6 @@ impl UiRole {
             }
             GutterIgnoredAdded | StripeAdded => Some(GutterAdded),
             GutterIgnoredDeleted | StripeDeleted => Some(GutterDeleted),
-            MarkerPopupBorder => Some(PopupBorder),
             MarkerPopupToolbar => Some(Surface),
             MarkerPopupText => Some(CurrentLine),
             GitMerged => Some(GitModified),

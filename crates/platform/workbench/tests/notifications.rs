@@ -395,7 +395,7 @@ fn long_content_wraps_inside_the_balloon_and_expands(cx: &mut TestAppContext) {
 
     let balloon = bounds(cx, window, &format!("balloon-{id}")).unwrap();
     let text = bounds(cx, window, &format!("balloon-content-{id}")).unwrap();
-    assert_eq!(text.size.height, px(48.0), "three lines of 16");
+    assert_eq!(text.size.height, px(51.0), "three lines of 17");
     assert!(text.right() <= balloon.right());
     // Every line fits in 240 px (the test font: 0.6 em per character).
     let ui_size = cx.update(|cx| cx.theme().ui_size());
@@ -413,7 +413,7 @@ fn long_content_wraps_inside_the_balloon_and_expands(cx: &mut TestAppContext) {
     assert_eq!(state["expanded"], json!(true));
     assert_eq!(state["shown_lines"], json!(lines.len()));
     let text = bounds(cx, window, &format!("balloon-content-{id}")).unwrap();
-    assert_eq!(text.size.height, px(16.0) * lines.len() as f32);
+    assert_eq!(text.size.height, px(17.0) * lines.len() as f32);
     let collapse = bounds(cx, window, &format!("balloon-expand-{id}")).unwrap();
     assert!(collapse.top() >= text.bottom(), "below the text");
     click(cx, window, collapse.center(), Modifiers::none());

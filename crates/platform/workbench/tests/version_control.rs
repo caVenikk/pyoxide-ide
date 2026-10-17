@@ -303,8 +303,23 @@ fn change_markers_follow_edits_and_go_back(cx: &mut TestAppContext) {
     assert_eq!(popup["text"], json!(["line_3 = 3"]));
     assert_eq!(
         popup["words"],
-        json!([[{"text": "line_3", "kind": "modified"}]])
+        json!([[{"text": "line_3", "column": 0, "kind": "modified"}]])
     );
+    // The same word is highlighted in the editor, over the changed lines.
+    let highlights = h.invoke("editor.state", Value::Null)["diff_highlights"].clone();
+    assert_eq!(highlights["lines"], json!([3, 4]));
+    assert_eq!(highlights["line_background"], true);
+    assert_eq!(
+        highlights["words"],
+        json!([{"start": {"line": 3, "column": 0}, "end": {"line": 3, "column": 6}, "text": "LINE_3"}])
+    );
+    // The toolbar row has the reference's width, the commit field is off.
+    assert_eq!(popup["toolbar_width"], 431.0);
+    assert_eq!(popup["commit_field"]["enabled"], false);
+    // Closing the popup takes the editor's highlights away.
+    h.invoke("marker-popup.close", Value::Null);
+    assert!(h.popup().is_null());
+    assert!(h.invoke("editor.state", Value::Null)["diff_highlights"].is_null());
     assert_eq!(popup["actions"][0]["enabled"], false, "no previous change");
     h.invoke("vcs.next-change", Value::Null);
     assert_eq!(h.caret_line(), 7);
