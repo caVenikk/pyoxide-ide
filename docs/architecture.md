@@ -141,6 +141,13 @@ Platform (`crates/platform/`, language-agnostic):
   (state machine, threads, frames and variables in pages, evaluate, Set
   Value, stepping, Stop), the `DebugAdapterProvider` product hook and the
   `debug.*` engine commands. UI crates use it, never `dap-client`.
+- `debugger-ui`: the debugger UI on GPUI (ADR 0015): the `DebuggerView`
+  the workbench reports editors to (it opens a project's `Debugger` off
+  the UI thread), line breakpoints in the gutter through the editor's
+  decorations (the hover icon, clicks with modifiers, icons by state,
+  tooltips; breakpoints follow edits), the properties popup, the
+  Breakpoints dialog, the `DebugHook` product hook and the breakpoint
+  commands (`debug.*`, `breakpoint-popup.*`, `breakpoints-dialog.*`).
 - `code-intel-ui`: the code intelligence of a main window: the product
   hook (`CodeIntelProvider`, `CodeIntelHook`), the `CodeIntelView` the
   workbench reports editors to, the `code.*` and `completion.*` commands.
@@ -226,8 +233,9 @@ virtual environment activation; the `terminal.*` commands come with their
 users), and so do
 `stream-framing`, `dap-client` and `debugger` (#162) and `py-debug` (#163:
 the helper, launch arguments, stoppable lines, exception breakpoints and
-the provider; the helper is fetched by `scripts/fetch-debugpy.py`); the
-other crates are planned. Crates without a toolkit are tested without GPUI; UI
+the provider; the helper is fetched by `scripts/fetch-debugpy.py`) and
+`debugger-ui` (#164: breakpoints in the gutter, the properties popup and
+the Breakpoints dialog); the other crates are planned. Crates without a toolkit are tested without GPUI; UI
 crates depend on the model crates, never on the protocol or backend
 crates (`scripts/check-layers.py` gets these rules).
 
