@@ -1,0 +1,47 @@
+# Pyoxide keymap for macOS. Navigation: back and forward, Go to Line and
+# Recent Files.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+[[context]]
+[context.bindings]
+# Navigation history: Back and Forward, also the mouse's back and
+# forward buttons.
+"cmd-[" = "workbench.back"
+"cmd-alt-left" = "workbench.back"
+"button4" = "workbench.back"
+"cmd-]" = "workbench.forward"
+"cmd-alt-right" = "workbench.forward"
+"button5" = "workbench.forward"
+# Recent Files
+"cmd-e" = "recent-files.open"
+
+[[context]]
+name = "Editor"
+[context.bindings]
+# Go to Line
+"cmd-l" = "workbench.go-to-line"
+
+# The Go to Line field is a one-line editor: Enter and Escape close it.
+[[context]]
+name = "GoToLine > Editor"
+[context.bindings]
+"enter" = "go-to-line.confirm"
+"escape" = "go-to-line.cancel"
+
+# Recent Files: Up and Down (round), Left and Right between the tool
+# windows and the files, Enter opens, Escape clears the speed search or
+# closes, Delete and Backspace take a file off the list (or a char off the
+# speed search).
+[[context]]
+name = "RecentFiles"
+[context.bindings]
+"up" = "recent-files.up"
+"down" = "recent-files.down"
+"left" = "recent-files.left"
+"right" = "recent-files.right"
+"enter" = "recent-files.select"
+"escape" = "recent-files.close"
+"delete" = "recent-files.delete"
+"backspace" = "recent-files.delete"
+"cmd-backspace" = "recent-files.delete"

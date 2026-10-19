@@ -1,0 +1,34 @@
+# Pyoxide keymap for Windows and Linux. Run: starting and stopping, the run
+# widget and the Run tool window.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# The Run tool window, running the current file and stopping it.
+[[context]]
+[context.bindings]
+"alt-4" = "workbench.toggle-run"
+# Run: the current file (Current File is the only configuration yet);
+# Run Context Configuration runs it as well; Stop stops the run, a second
+# Stop kills it.
+"shift-f10" = "run.run"
+"ctrl-shift-f10" = "run.current-file"
+"ctrl-f2" = "run.stop"
+# Choose Run Configuration: the run widget's dropdown (the Run tool window's
+# empty state names this key).
+"alt-shift-f10" = "run.configurations"
+
+# The Run tool window: Rerun, Close Tab, Up and Down the Stack Trace;
+# Escape goes to the editor, Shift+Escape hides the tool window. (A
+# binding without a context counts as one of the innermost context, so
+# these sections come after the global ones, here and in window.toml; the
+# console, an editor, repeats the keys that the editor or the whole window
+# bind, see console.toml.)
+[[context]]
+name = "RunToolWindow"
+[context.bindings]
+"ctrl-f5" = "run.rerun"
+"ctrl-f4" = "run.close-tab"
+"ctrl-alt-up" = "run.console.previous-link"
+"ctrl-alt-down" = "run.console.next-link"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"

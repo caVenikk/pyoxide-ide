@@ -1,0 +1,89 @@
+# Pyoxide keymap for macOS. Find and Replace in Files.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# Find in Files and Replace in Files.
+[[context]]
+[context.bindings]
+"cmd-shift-f" = "find-in-files.open"
+"cmd-shift-r" = "find-in-files.open-replace"
+
+# The Find in Files popup. In its fields Enter opens the selected result
+# (Shift+Enter too) and Escape closes the popup; Up and Down (while the
+# field holds one line), Page Up and Page Down and the Find Next and
+# Previous keys move through the results; Tab and Shift+Tab go from field
+# to field; Option+Down shows the field's history. The options, the file
+# mask and the scopes take the reference IDE's mnemonic keys: Ctrl+Option
+# and Option with the letter; Recursively only Ctrl+Option+Y. In the
+# preview, Enter, Tab and Option+Down are the editor's, and Cmd+G and
+# Cmd+Shift+G its Find Next and Find Previous (below). Cmd+Down and F4
+# (Edit Source) open the file: from the preview at its caret.
+[[context]]
+name = "FindInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.open-result"
+"shift-enter" = "find-in-files.open-result"
+"escape" = "find-in-files.close"
+"cmd-g" = "find-in-files.next-result"
+"cmd-shift-g" = "find-in-files.previous-result"
+"tab" = "find-in-files.next-field"
+"shift-tab" = "find-in-files.previous-field"
+"alt-down" = "find.show-history"
+"ctrl-alt-c" = "find.toggle-case"
+"alt-c" = "find.toggle-case"
+"ctrl-alt-w" = "find.toggle-words"
+"alt-w" = "find.toggle-words"
+"ctrl-alt-x" = "find.toggle-regex"
+"alt-x" = "find.toggle-regex"
+"ctrl-alt-k" = "find-in-files.toggle-mask"
+"alt-k" = "find-in-files.toggle-mask"
+"ctrl-alt-p" = "find-in-files.scope-project"
+"alt-p" = "find-in-files.scope-project"
+"ctrl-alt-m" = "find-in-files.scope-module"
+"alt-m" = "find-in-files.scope-module"
+"ctrl-alt-d" = "find-in-files.scope-directory"
+"alt-d" = "find-in-files.scope-directory"
+"ctrl-alt-s" = "find-in-files.scope-named"
+"alt-s" = "find-in-files.scope-named"
+"ctrl-alt-y" = "find-in-files.toggle-recursive"
+"cmd-down" = "find-in-files.edit-source"
+"f4" = "find-in-files.edit-source"
+
+# Find Next and Find Previous in the preview are the editor's.
+[[context]]
+name = "FindInFilesPreview > Editor"
+[context.bindings]
+"cmd-g" = "find.next"
+"cmd-shift-g" = "find.previous"
+
+# The search and replace fields can hold several lines.
+[[context]]
+name = "FindInFilesQuery > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"pagedown" = "find-in-files.page-down"
+"pageup" = "find-in-files.page-up"
+"cmd-shift-enter" = "find.new-line"
+
+[[context]]
+name = "FindInFilesReplace > Editor"
+[context.bindings]
+"down" = "find-in-files.down"
+"up" = "find-in-files.up"
+"cmd-shift-enter" = "find.new-line"
+
+# Replace in Files: Enter replaces the selected match, Shift+Option+Enter
+# replaces them all.
+[[context]]
+name = "ReplaceInFiles > Editor"
+[context.bindings]
+"enter" = "find-in-files.replace-selected"
+"shift-enter" = "find-in-files.replace-selected"
+"alt-shift-enter" = "find-in-files.replace-all"
+
+# Shift+Enter in the folder field shows the folder chooser.
+[[context]]
+name = "FindInFilesDirectory > Editor"
+[context.bindings]
+"shift-enter" = "find-in-files.browse-directory"

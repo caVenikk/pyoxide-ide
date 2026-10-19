@@ -1,0 +1,7 @@
+# ---- Main Menu > Help ----------------------------------------------------
+
+[[action]]
+id = "GotoAction"
+text = "Find Action…"
+groups = ["Main Menu > Help"]
+command = "search-everywhere.go-to-action"

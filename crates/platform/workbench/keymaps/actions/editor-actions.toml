@@ -1,0 +1,246 @@
+# ---- Editor Actions ------------------------------------------------------
+
+[[action]]
+id = "EditorBackSpace"
+text = "Backspace"
+groups = ["Editor Actions"]
+command = "editor.backspace"
+context = "Editor"
+
+[[action]]
+id = "EditorDeleteLine"
+text = "Delete Line"
+groups = ["Editor Actions"]
+command = "editor.delete-line"
+context = "Editor"
+
+[[action]]
+id = "EditorDeleteToWordStart"
+text = "Delete to Word Start"
+groups = ["Editor Actions"]
+command = "editor.delete-word-left"
+context = "Editor"
+
+[[action]]
+id = "EditorDeleteToWordEnd"
+text = "Delete to Word End"
+groups = ["Editor Actions"]
+command = "editor.delete-word-right"
+context = "Editor"
+
+[[action]]
+id = "EditorDeleteToLineStart"
+text = "Delete to Line Start"
+groups = ["Editor Actions"]
+command = "editor.delete-to-line-start"
+context = "Editor"
+
+[[action]]
+id = "EditorDeleteToLineEnd"
+text = "Delete to Line End"
+groups = ["Editor Actions"]
+command = "editor.delete-to-line-end"
+context = "Editor"
+
+[[action]]
+id = "EditorEscape"
+text = "Escape"
+groups = ["Editor Actions"]
+command = "editor.escape"
+context = "Editor"
+
+[[action]]
+id = "EditorEnter"
+text = "Enter"
+groups = ["Editor Actions"]
+command = "editor.newline"
+context = "Editor"
+
+[[action]]
+id = "EditorStartNewLine"
+text = "Start New Line"
+groups = ["Editor Actions"]
+command = "editor.start-new-line"
+context = "Editor"
+
+[[action]]
+id = "EditorTab"
+text = "Tab"
+groups = ["Editor Actions"]
+command = "editor.tab"
+context = "Editor"
+
+[[action]]
+id = "EditorLeft"
+text = "Left"
+groups = ["Editor Actions"]
+command = "editor.move-left"
+context = "Editor"
+
+[[action]]
+id = "EditorRight"
+text = "Right"
+groups = ["Editor Actions"]
+command = "editor.move-right"
+context = "Editor"
+
+[[action]]
+id = "EditorUp"
+text = "Up"
+groups = ["Editor Actions"]
+command = "editor.move-up"
+context = "Editor"
+
+[[action]]
+id = "EditorDown"
+text = "Down"
+groups = ["Editor Actions"]
+command = "editor.move-down"
+context = "Editor"
+
+[[action]]
+id = "EditorLeftWithSelection"
+text = "Left with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-left"
+context = "Editor"
+
+[[action]]
+id = "EditorRightWithSelection"
+text = "Right with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-right"
+context = "Editor"
+
+[[action]]
+id = "EditorUpWithSelection"
+text = "Up with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-up"
+context = "Editor"
+
+[[action]]
+id = "EditorDownWithSelection"
+text = "Down with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-down"
+context = "Editor"
+
+[[action]]
+id = "EditorPreviousWord"
+text = "Move Caret to Previous Word"
+groups = ["Editor Actions"]
+command = "editor.move-word-left"
+context = "Editor"
+
+[[action]]
+id = "EditorNextWord"
+text = "Move Caret to Next Word"
+groups = ["Editor Actions"]
+command = "editor.move-word-right"
+context = "Editor"
+
+[[action]]
+id = "EditorPreviousWordWithSelection"
+text = "Move Caret to Previous Word with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-word-left"
+context = "Editor"
+
+[[action]]
+id = "EditorNextWordWithSelection"
+text = "Move Caret to Next Word with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-word-right"
+context = "Editor"
+
+[[action]]
+id = "EditorLineStart"
+text = "Move Caret to Line Start"
+groups = ["Editor Actions"]
+command = "editor.move-line-start"
+context = "Editor"
+
+[[action]]
+id = "EditorLineEnd"
+text = "Move Caret to Line End"
+groups = ["Editor Actions"]
+command = "editor.move-line-end"
+context = "Editor"
+
+[[action]]
+id = "EditorLineStartWithSelection"
+text = "Move Caret to Line Start with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-line-start"
+context = "Editor"
+
+[[action]]
+id = "EditorLineEndWithSelection"
+text = "Move Caret to Line End with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-line-end"
+context = "Editor"
+
+[[action]]
+id = "EditorTextStart"
+text = "Move Caret to Text Start"
+groups = ["Editor Actions"]
+command = "editor.move-document-start"
+context = "Editor"
+
+[[action]]
+id = "EditorTextEnd"
+text = "Move Caret to Text End"
+groups = ["Editor Actions"]
+command = "editor.move-document-end"
+context = "Editor"
+
+[[action]]
+id = "EditorTextStartWithSelection"
+text = "Move Caret to Text Start with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-document-start"
+context = "Editor"
+
+[[action]]
+id = "EditorTextEndWithSelection"
+text = "Move Caret to Text End with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-document-end"
+context = "Editor"
+
+[[action]]
+id = "EditorPageUp"
+text = "Page Up"
+groups = ["Editor Actions"]
+command = "editor.page-up"
+context = "Editor"
+
+[[action]]
+id = "EditorPageDown"
+text = "Page Down"
+groups = ["Editor Actions"]
+command = "editor.page-down"
+context = "Editor"
+
+[[action]]
+id = "EditorPageUpWithSelection"
+text = "Page Up with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-page-up"
+context = "Editor"
+
+[[action]]
+id = "EditorPageDownWithSelection"
+text = "Page Down with Selection"
+groups = ["Editor Actions"]
+command = "editor.select-page-down"
+context = "Editor"
+
+[[action]]
+id = "FocusEditor"
+text = "Focus Editor"
+groups = ["Editor Actions"]
+command = "workbench.focus-editor"
+contexts = ["ProjectTree", "RunToolWindow", "RunConsole > Editor"]

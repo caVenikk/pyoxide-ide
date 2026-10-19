@@ -1,0 +1,47 @@
+# Pyoxide keymap for Windows and Linux. The Run/Debug Configurations dialog.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# The Run/Debug Configurations dialog: Enter is OK, Escape Cancel, Alt+M
+# opens Modify options, Alt with an option's mnemonic turns it on or off
+# (Allow m&ultiple instances, &Environment variables, &Paths to ".env"
+# files); also in its fields, which are editors.
+[[context]]
+name = "RunConfigurationsDialog"
+[context.bindings]
+"alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
+"enter" = "run.configurations.dialog.ok"
+"escape" = "run.configurations.dialog.cancel"
+"alt-m" = "run.configurations.dialog.modify-options"
+
+[[context]]
+name = "RunConfigurationsDialog > Editor"
+[context.bindings]
+"alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
+"enter" = "run.configurations.dialog.ok"
+"escape" = "run.configurations.dialog.cancel"
+"alt-m" = "run.configurations.dialog.modify-options"
+
+# Its tree: Up and Down move, Left and Right collapse and expand; Alt+Insert
+# adds, Delete removes and Ctrl+D copies a configuration
+# (`CommonShortcuts.getInsert`, `getDelete`, `getDuplicate`).
+[[context]]
+name = "RunConfigurationsTree"
+[context.bindings]
+"up" = "run.configurations.dialog.previous"
+"down" = "run.configurations.dialog.next"
+"alt-insert" = "run.configurations.dialog.add"
+"delete" = "run.configurations.dialog.remove"
+"ctrl-d" = "run.configurations.dialog.copy"
+"left" = "run.configurations.dialog.collapse"
+"right" = "run.configurations.dialog.expand"
+
+# An option tag under its form: Backspace removes the option (`TagButton`).
+[[context]]
+name = "RunConfigurationsTag"
+[context.bindings]
+"backspace" = "run.configurations.dialog.remove-tag"

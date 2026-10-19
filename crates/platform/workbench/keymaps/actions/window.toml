@@ -1,0 +1,29 @@
+# ---- Main Menu > Window --------------------------------------------------
+
+[[action]]
+id = "HideActiveWindow"
+text = "Hide Active Tool Window"
+groups = ["Main Menu > Window > Active Tool Window"]
+command = "workbench.hide-tool-window"
+contexts = ["ProjectTree", "RunToolWindow"]
+
+[[action]]
+id = "NextTab"
+text = "Select Next Tab"
+groups = ["Main Menu > Window > Editor Tabs"]
+command = "tabs.next"
+
+[[action]]
+id = "PreviousTab"
+text = "Select Previous Tab"
+groups = ["Main Menu > Window > Editor Tabs"]
+command = "tabs.previous"
+
+[[action]]
+id = "CloseContent"
+text = "Close Tab"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+commands = [
+  { command = "tabs.close" },
+  { command = "run.close-tab", contexts = ["RunToolWindow", "RunConsole > Editor"] },
+]

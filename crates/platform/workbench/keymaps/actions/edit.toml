@@ -1,0 +1,180 @@
+# ---- Main Menu > Edit ----------------------------------------------------
+
+[[action]]
+id = "$Undo"
+text = "Undo"
+groups = ["Main Menu > Edit"]
+command = "editor.undo"
+context = "Editor"
+
+[[action]]
+id = "$Redo"
+text = "Redo"
+groups = ["Main Menu > Edit"]
+command = "editor.redo"
+context = "Editor"
+
+[[action]]
+id = "$Cut"
+text = "Cut"
+groups = ["Main Menu > Edit > Cut/Copy/Paste Actions"]
+command = "project.tree.cut"
+context = "ProjectTree"
+
+[[action]]
+id = "EditorCut"
+text = "Cut"
+use-shortcut-of = "$Cut"
+command = "editor.cut"
+context = "Editor"
+
+[[action]]
+id = "$Copy"
+text = "Copy"
+groups = ["Main Menu > Edit > Cut/Copy/Paste Actions"]
+command = "project.tree.copy"
+context = "ProjectTree"
+
+[[action]]
+id = "EditorCopy"
+text = "Copy"
+use-shortcut-of = "$Copy"
+command = "editor.copy"
+context = "Editor"
+
+[[action]]
+id = "CopyPaths"
+text = "Copy Paths"
+groups = ["Main Menu > Edit > Cut/Copy/Paste Actions"]
+command = "project.tree.copy-paths"
+context = "ProjectTree"
+
+[[action]]
+id = "$Paste"
+text = "Paste"
+groups = ["Main Menu > Edit > Cut/Copy/Paste Actions > Paste"]
+command = "project.tree.paste"
+context = "ProjectTree"
+
+[[action]]
+id = "EditorPaste"
+text = "Paste"
+use-shortcut-of = "$Paste"
+command = "editor.paste"
+context = "Editor"
+
+[[action]]
+id = "$Delete"
+text = "Delete"
+groups = ["Main Menu > Edit > Editor Create/Delete Actions"]
+command = "project.tree.delete"
+context = "ProjectTree"
+
+[[action]]
+id = "EditorDelete"
+text = "Delete"
+use-shortcut-of = "$Delete"
+command = "editor.delete"
+context = "Editor"
+
+[[action]]
+id = "Find"
+text = "Find…"
+groups = ["Main Menu > Edit > Find"]
+commands = [
+  { command = "find.open", context = "Editor" },
+  { command = "settings.find", contexts = ["SettingsWindow", "SettingsWindow > Editor"] },
+]
+
+[[action]]
+id = "Replace"
+text = "Replace…"
+groups = ["Main Menu > Edit > Find"]
+command = "find.replace"
+context = "Editor"
+
+[[action]]
+id = "FindNext"
+text = "Find Next / Move to Next Occurrence"
+groups = ["Main Menu > Edit > Find"]
+commands = [
+  { command = "find.next", contexts = ["Editor", "FindInFilesPreview > Editor"] },
+  { command = "find-in-files.next-result", context = "FindInFiles > Editor" },
+]
+
+[[action]]
+id = "FindPrevious"
+text = "Find Previous / Move to Previous Occurrence"
+groups = ["Main Menu > Edit > Find"]
+commands = [
+  { command = "find.previous", contexts = ["Editor", "FindInFilesPreview > Editor"] },
+  { command = "find-in-files.previous-result", context = "FindInFiles > Editor" },
+]
+
+[[action]]
+id = "ToggleFindInSelection"
+text = "Search in Selection Only"
+groups = ["Main Menu > Edit > Find"]
+command = "find.toggle-in-selection"
+context = "FindBar > Editor"
+
+[[action]]
+id = "FindInPath"
+text = "Find in Files…"
+groups = ["Main Menu > Edit > Find"]
+command = "find-in-files.open"
+
+[[action]]
+id = "ReplaceInPath"
+text = "Replace in Files…"
+groups = ["Main Menu > Edit > Find"]
+command = "find-in-files.open-replace"
+
+[[action]]
+id = "ShowUsages"
+text = "Show Usages"
+groups = ["Main Menu > Edit > Find Usages"]
+command = "code.show-usages"
+context = "Editor"
+
+[[action]]
+id = "$SelectAll"
+text = "Select All"
+groups = ["Main Menu > Edit > Editor Select Actions"]
+command = "editor.select-all"
+context = "Editor"
+
+[[action]]
+id = "EditorSelectWord"
+text = "Extend Selection"
+groups = ["Editor Actions", "Main Menu > Edit > Editor Select Actions > Select Word Actions"]
+command = "editor.select-word"
+context = "Editor"
+
+[[action]]
+id = "EditorUnSelectWord"
+text = "Shrink Selection"
+groups = ["Editor Actions", "Main Menu > Edit > Editor Select Actions > Select Word Actions"]
+command = "editor.shrink-selection"
+context = "Editor"
+
+[[action]]
+id = "EditorDuplicate"
+text = "Duplicate Line or Selection"
+groups = ["Editor Actions", "Main Menu > Edit > Edit Code Actions"]
+command = "editor.duplicate"
+context = "Editor"
+
+[[action]]
+id = "EditorJoinLines"
+text = "Join Lines"
+groups = ["Editor Actions", "Main Menu > Edit > Edit Code Actions"]
+command = "editor.join-lines"
+context = "Editor"
+
+[[action]]
+id = "EditorUnindentSelection"
+text = "Unindent Line or Selection"
+groups = ["Editor Actions", "Main Menu > Edit > Edit Code Actions"]
+command = "editor.unindent"
+context = "Editor"

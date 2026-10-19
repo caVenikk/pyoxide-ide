@@ -1,0 +1,62 @@
+# Pyoxide keymap for macOS. Debug: starting a session, the steps, the Debug
+# tool window, the frames and the variables.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# Debugging (#165): Debug, Debug Context Configuration, the Debug tool
+# window, Resume, the steps, Run to Cursor and Show Execution Point
+# (`Debug`, `DebugClass`, `ActivateDebugToolWindow`, `Resume`,
+# `StepOver`, `StepInto`, `StepIntoMyCode`, `StepOut`, `RunToCursor`,
+# `ForceRunToCursor`, `ShowExecutionPoint`). Pause has no key.
+[[context]]
+[context.bindings]
+"ctrl-d" = "debug.debug"
+"ctrl-shift-d" = "debug.current-file"
+"cmd-5" = "workbench.toggle-debug"
+"cmd-alt-r" = "debug.resume"
+"f9" = "debug.resume"
+"f8" = "debug.step-over"
+"f7" = "debug.step-into"
+"alt-shift-f7" = "debug.step-into-my-code"
+"shift-f8" = "debug.step-out"
+"alt-f9" = "debug.run-to-cursor"
+"cmd-alt-f9" = "debug.force-run-to-cursor"
+"alt-f10" = "debug.show-execution-point"
+
+# Threads & Variables (#166): Previous and Next Frame from anywhere while
+# debugging (`PreviousOccurence`, `NextOccurence` over the frames list,
+# `XFramesView.addFramesNavigationAd`), in the main window's context so
+# that the Run console's links (a deeper context) keep the keys. In the
+# frames list Up and Down select frames; in the variables view they move,
+# Left and Right collapse and expand.
+[[context]]
+name = "Workbench"
+[context.bindings]
+"cmd-alt-up" = "debug.previous-frame"
+"cmd-alt-down" = "debug.next-frame"
+
+# The Debug tool window (its Console is in console.toml): Rerun, Stop and
+# Close Tab of the session; Escape goes to the editor, Shift+Escape hides
+# the tool window.
+[[context]]
+name = "DebugToolWindow"
+[context.bindings]
+"cmd-r" = "debug.rerun"
+"cmd-f2" = "debug.stop"
+"cmd-w" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+[[context]]
+name = "DebugFrames"
+[context.bindings]
+"up" = "debug.previous-frame"
+"down" = "debug.next-frame"
+
+[[context]]
+name = "DebugVariables"
+[context.bindings]
+"up" = "debug.variables.up"
+"down" = "debug.variables.down"
+"left" = "debug.variables.left"
+"right" = "debug.variables.right"

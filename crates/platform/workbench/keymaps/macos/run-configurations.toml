@@ -1,0 +1,48 @@
+# Pyoxide keymap for macOS. The Run/Debug Configurations dialog.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# The Run/Debug Configurations dialog: Enter is OK, Escape Cancel, Option+M
+# opens Modify options, Control+Option with an option's mnemonic turns it
+# on or off (Allow m&ultiple instances, &Environment variables, &Paths to
+# ".env" files); also in its fields, which are editors.
+[[context]]
+name = "RunConfigurationsDialog"
+[context.bindings]
+"ctrl-alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"ctrl-alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"ctrl-alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
+"enter" = "run.configurations.dialog.ok"
+"escape" = "run.configurations.dialog.cancel"
+"alt-m" = "run.configurations.dialog.modify-options"
+
+[[context]]
+name = "RunConfigurationsDialog > Editor"
+[context.bindings]
+"ctrl-alt-u" = { command = "run.configurations.dialog.toggle-option", args = { option = "allow-parallel" } }
+"ctrl-alt-e" = { command = "run.configurations.dialog.toggle-option", args = { option = "env" } }
+"ctrl-alt-p" = { command = "run.configurations.dialog.toggle-option", args = { option = "env-files" } }
+"enter" = "run.configurations.dialog.ok"
+"escape" = "run.configurations.dialog.cancel"
+"alt-m" = "run.configurations.dialog.modify-options"
+
+# Its tree: Up and Down move, Left and Right collapse and expand; Cmd+N
+# adds, Delete removes and Cmd+D copies a configuration
+# (`CommonShortcuts.getInsert`, `getDelete`, `getDuplicate`).
+[[context]]
+name = "RunConfigurationsTree"
+[context.bindings]
+"up" = "run.configurations.dialog.previous"
+"down" = "run.configurations.dialog.next"
+"cmd-n" = "run.configurations.dialog.add"
+"delete" = "run.configurations.dialog.remove"
+"cmd-backspace" = "run.configurations.dialog.remove"
+"cmd-d" = "run.configurations.dialog.copy"
+"left" = "run.configurations.dialog.collapse"
+"right" = "run.configurations.dialog.expand"
+
+# An option tag under its form: Backspace removes the option (`TagButton`).
+[[context]]
+name = "RunConfigurationsTag"
+[context.bindings]
+"backspace" = "run.configurations.dialog.remove-tag"

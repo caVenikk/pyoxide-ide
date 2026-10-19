@@ -1,0 +1,93 @@
+# ---- Main Menu > Navigate ------------------------------------------------
+
+[[action]]
+id = "Back"
+text = "Back"
+groups = ["Main Menu > Navigate"]
+commands = [
+  { command = "workbench.back" },
+  { command = "settings.back", context = "SettingsWindow" },
+]
+
+[[action]]
+id = "Forward"
+text = "Forward"
+groups = ["Main Menu > Navigate"]
+commands = [
+  { command = "workbench.forward" },
+  { command = "settings.forward", context = "SettingsWindow" },
+]
+
+[[action]]
+id = "SearchEverywhere"
+text = "Search Everywhere"
+groups = ["Main Menu > Navigate"]
+command = "search-everywhere.open"
+
+[[action]]
+id = "GotoFile"
+text = "Go to File…"
+groups = ["Main Menu > Navigate > Goto by Name Actions"]
+command = "search-everywhere.go-to-file"
+
+[[action]]
+id = "TextSearchAction"
+text = "Text…"
+groups = ["Main Menu > Navigate > Goto by Name Actions"]
+command = "search-everywhere.go-to-text"
+
+[[action]]
+id = "GotoDeclaration"
+text = "Go to Declaration or Usages"
+groups = ["Main Menu > Navigate > Goto by Reference Actions"]
+command = "code.go-to-declaration"
+context = "Editor"
+
+[[action]]
+id = "GotoLine"
+text = "Go to Line:Column…"
+groups = ["Main Menu > Navigate"]
+command = "workbench.go-to-line"
+context = "Editor"
+
+[[action]]
+id = "GotoNextError"
+text = "Next Highlighted Error"
+groups = ["Main Menu > Navigate > Goto Error/Bookmark Actions"]
+command = "code.next-problem"
+context = "Editor"
+
+[[action]]
+id = "GotoPreviousError"
+text = "Previous Highlighted Error"
+groups = ["Main Menu > Navigate > Goto Error/Bookmark Actions"]
+command = "code.previous-problem"
+context = "Editor"
+
+[[action]]
+id = "VcsShowNextChangeMarker"
+text = "Next Change"
+groups = ["Main Menu > Navigate > Navigate in File > Change Navigation Actions"]
+command = "vcs.next-change"
+context = "Editor"
+
+[[action]]
+id = "VcsShowPrevChangeMarker"
+text = "Previous Change"
+groups = ["Main Menu > Navigate > Navigate in File > Change Navigation Actions"]
+command = "vcs.previous-change"
+context = "Editor"
+
+[[action]]
+id = "NextOccurence"
+text = "Next Occurrence"
+groups = ["Main Menu > Navigate"]
+command = "run.console.next-link"
+context = "RunToolWindow"
+
+[[action]]
+id = "PreviousOccurence"
+text = "Previous Occurrence"
+groups = ["Main Menu > Navigate"]
+command = "run.console.previous-link"
+context = "RunToolWindow"

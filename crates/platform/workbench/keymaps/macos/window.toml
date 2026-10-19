@@ -1,0 +1,32 @@
+# Pyoxide keymap for macOS. Main window: quit, editor tabs, an open context
+# menu and message dialogs.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# Quit and the editor tabs.
+[[context]]
+[context.bindings]
+"cmd-q" = "app.quit"
+"cmd-w" = "tabs.close"
+"cmd-}" = "tabs.next"
+"ctrl-right" = "tabs.next"
+"cmd-{" = "tabs.previous"
+"ctrl-left" = "tabs.previous"
+
+# An open context menu (Swing popup menu keys of the reference IDE).
+[[context]]
+name = "ContextMenu"
+[context.bindings]
+"up" = "menu.up"
+"down" = "menu.down"
+"right" = "menu.open-submenu"
+"left" = "menu.close-submenu"
+"enter" = "menu.confirm"
+"escape" = "menu.cancel"
+
+# A message dialog: Enter chooses the default button, Escape cancels.
+[[context]]
+name = "Dialog"
+[context.bindings]
+"enter" = "dialog.confirm"
+"escape" = "dialog.cancel"

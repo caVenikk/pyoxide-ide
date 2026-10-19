@@ -1,0 +1,60 @@
+# Pyoxide keymap for Windows and Linux. Debug: starting a session, the
+# steps, the Debug tool window, the frames and the variables.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# Debugging (#165): Debug, the Debug tool window, Resume, the steps, Run
+# to Cursor and Show Execution Point (`Debug`, `ActivateDebugToolWindow`,
+# `Resume`, `StepOver`, `StepInto`, `StepIntoMyCode`, `StepOut`,
+# `RunToCursor`, `ForceRunToCursor`, `ShowExecutionPoint`). Debug Context
+# Configuration (`DebugClass`) and Pause have no key in this keymap.
+[[context]]
+[context.bindings]
+"shift-f9" = "debug.debug"
+"alt-5" = "workbench.toggle-debug"
+"f9" = "debug.resume"
+"f8" = "debug.step-over"
+"f7" = "debug.step-into"
+"alt-shift-f7" = "debug.step-into-my-code"
+"shift-f8" = "debug.step-out"
+"alt-f9" = "debug.run-to-cursor"
+"ctrl-alt-f9" = "debug.force-run-to-cursor"
+"alt-f10" = "debug.show-execution-point"
+
+# Threads & Variables (#166): Previous and Next Frame from anywhere while
+# debugging (`PreviousOccurence`, `NextOccurence` over the frames list,
+# `XFramesView.addFramesNavigationAd`), in the main window's context so
+# that the Run console's links (a deeper context) keep the keys. In the
+# frames list Up and Down select frames; in the variables view they move,
+# Left and Right collapse and expand.
+[[context]]
+name = "Workbench"
+[context.bindings]
+"ctrl-alt-up" = "debug.previous-frame"
+"ctrl-alt-down" = "debug.next-frame"
+
+# The Debug tool window (its Console is in console.toml): Rerun, Stop and
+# Close Tab of the session; Escape goes to the editor, Shift+Escape hides
+# the tool window.
+[[context]]
+name = "DebugToolWindow"
+[context.bindings]
+"ctrl-f5" = "debug.rerun"
+"ctrl-f2" = "debug.stop"
+"ctrl-f4" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+
+[[context]]
+name = "DebugFrames"
+[context.bindings]
+"up" = "debug.previous-frame"
+"down" = "debug.next-frame"
+
+[[context]]
+name = "DebugVariables"
+[context.bindings]
+"up" = "debug.variables.up"
+"down" = "debug.variables.down"
+"left" = "debug.variables.left"
+"right" = "debug.variables.right"

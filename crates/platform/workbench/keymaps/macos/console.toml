@@ -1,0 +1,22 @@
+# Pyoxide keymap for macOS. The Run and Debug consoles.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# The Debug console: the keys of the Debug tool window (debug.toml).
+[[context]]
+name = "DebugConsole > Editor"
+[context.bindings]
+"cmd-r" = "debug.rerun"
+"cmd-f2" = "debug.stop"
+"cmd-w" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
+
+# The Run console: Rerun, Close Tab and Send EOF take the keys of Replace,
+# Close and Duplicate Line; Escape leaves it.
+[[context]]
+name = "RunConsole > Editor"
+[context.bindings]
+"cmd-r" = "run.rerun"
+"cmd-w" = "run.close-tab"
+"cmd-d" = "run.console.send-eof"
+"escape" = "workbench.focus-editor"

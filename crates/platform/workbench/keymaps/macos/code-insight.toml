@@ -1,0 +1,39 @@
+# Pyoxide keymap for macOS. Code insight: documentation, parameter info,
+# problems, intentions and fixes, navigation to declarations and usages,
+# reformatting and imports.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# The problems, documentation, parameter info and the actions at the
+# caret, navigation and formatting.
+[[context]]
+name = "Editor"
+[context.bindings]
+# Problems
+"f2" = "code.next-problem"
+"shift-f2" = "code.previous-problem"
+# Documentation, parameter info, actions at the caret, navigation and
+# formatting
+"f1" = "code.quick-doc"
+"ctrl-j" = "code.quick-doc"
+"cmd-p" = "code.parameter-info"
+"cmd-f1" = "code.error-description"
+"alt-shift-enter" = "code.apply-first-fix"
+"alt-enter" = "code.show-intentions"
+"cmd-b" = "code.go-to-declaration"
+"cmd-alt-f7" = "code.show-usages"
+"cmd-alt-l" = "code.reformat"
+"ctrl-alt-o" = "code.optimize-imports"
+
+# The documentation and parameter info popups leave the focus in the
+# editor; Escape closes them (completion.toml is joined later, so the
+# completion popup's Escape wins while it shows).
+[[context]]
+name = "ParameterInfo > Editor"
+[context.bindings]
+"escape" = "parameter-info.close"
+
+[[context]]
+name = "Documentation > Editor"
+[context.bindings]
+"escape" = "documentation.close"

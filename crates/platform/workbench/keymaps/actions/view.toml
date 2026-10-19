@@ -1,0 +1,62 @@
+# ---- Main Menu > View ----------------------------------------------------
+
+[[action]]
+id = "ActivateProjectToolWindow"
+text = "Project"
+groups = ["Main Menu > View > Tool Windows"]
+command = "workbench.toggle-project"
+
+[[action]]
+id = "ActivateRunToolWindow"
+text = "Run"
+groups = ["Main Menu > View > Tool Windows"]
+command = "workbench.toggle-run"
+
+[[action]]
+id = "QuickChangeScheme"
+text = "Quick Switch Scheme…"
+groups = ["Main Menu > View"]
+command = "settings.quick-switch"
+
+[[action]]
+id = "QuickJavaDoc"
+text = "Quick Documentation"
+groups = ["Main Menu > View"]
+command = "code.quick-doc"
+context = "Editor"
+
+[[action]]
+id = "ShowErrorDescription"
+text = "Error Description"
+groups = ["Main Menu > View > Code Editor View Actions > Code View Actions"]
+command = "code.error-description"
+context = "Editor"
+
+[[action]]
+id = "ParameterInfo"
+text = "Parameter Info"
+groups = ["Main Menu > View > Code Editor View Actions > Code View Actions"]
+command = "code.parameter-info"
+context = "Editor"
+
+[[action]]
+id = "EditSource"
+text = "Jump to Source"
+groups = ["Main Menu > View"]
+commands = [
+  { command = "find-in-files.edit-source", context = "FindInFiles > Editor" },
+  { command = "diff.jump-to-source", context = "Diff" },
+]
+
+[[action]]
+id = "EditorToggleUseSoftWraps"
+text = "Soft-Wrap"
+groups = ["Main Menu > View > Active Editor"]
+command = "editor.toggle-soft-wraps"
+context = "Editor"
+
+[[action]]
+id = "RecentFiles"
+text = "Recent Files"
+groups = ["Main Menu > View > View Recent Actions Group"]
+command = "recent-files.open"

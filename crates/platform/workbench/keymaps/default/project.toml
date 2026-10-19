@@ -1,0 +1,53 @@
+# Pyoxide keymap for Windows and Linux. Project: the Project tool window,
+# file operations, saving and reloading.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# The Project tool window, Save All and Reload All from Disk.
+[[context]]
+[context.bindings]
+"alt-1" = "workbench.toggle-project"
+"ctrl-s" = "workbench.save-all"
+"ctrl-alt-y" = "workbench.synchronize"
+
+[[context]]
+name = "ProjectTree"
+[context.bindings]
+"up" = "project.tree.up"
+"down" = "project.tree.down"
+"right" = "project.tree.expand"
+"left" = "project.tree.collapse"
+"enter" = "project.tree.open"
+"f4" = "project.tree.open"
+"ctrl--" = "project.tree.collapse-all"
+"ctrl-=" = "project.tree.expand-all"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+"menu" = "project.tree.context-menu"
+# File operations (#37): New (NewElement), Rename (RenameElement), Delete
+# ($Delete).
+"alt-insert" = "project.tree.new"
+"shift-f6" = "project.tree.rename"
+"delete" = "project.tree.delete"
+# Cut, Copy, Paste ($Cut, $Copy, $Paste), Move (F6), Copy (CopyElement,
+# F5), Copy Paths.
+"ctrl-x" = "project.tree.cut"
+"shift-delete" = "project.tree.cut"
+"ctrl-c" = "project.tree.copy"
+"ctrl-insert" = "project.tree.copy"
+"ctrl-v" = "project.tree.paste"
+"shift-insert" = "project.tree.paste"
+"f6" = "project.tree.move"
+"f5" = "project.tree.copy-element"
+"ctrl-shift-c" = "project.tree.copy-paths"
+
+# The name field of New File, New Directory and Rename (#37).
+[[context]]
+name = "NameInput > Editor"
+[context.bindings]
+"enter" = "name-input.confirm"
+"escape" = "name-input.cancel"
+"down" = "name-input.next-kind"
+"up" = "name-input.previous-kind"
+"tab" = "name-input.next-field"
+"shift-tab" = "name-input.previous-field"

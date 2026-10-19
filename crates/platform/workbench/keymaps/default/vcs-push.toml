@@ -1,0 +1,35 @@
+# Pyoxide keymap for Windows and Linux. Version control, push: Push, Update
+# Project and the VCS Operations popup.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# Push, Update Project and the VCS Operations popup (#172): `Vcs.Push`,
+# `Vcs.UpdateProject` and `Vcs.QuickListPopupAction`. In the Push dialog
+# Enter pushes, Escape closes it, Up and Down move in the push log; in the
+# field of the target branch Enter keeps the name and Escape restores it.
+# In the Update Project dialog Enter chooses OK and Escape cancels.
+[[context]]
+[context.bindings]
+"ctrl-shift-k" = "vcs.push"
+"ctrl-t" = "vcs.update-project"
+"alt-`" = "vcs.operations-popup"
+
+[[context]]
+name = "PushDialog"
+[context.bindings]
+"enter" = "push-dialog.push"
+"escape" = "push-dialog.cancel"
+"up" = "push-dialog.up"
+"down" = "push-dialog.down"
+
+[[context]]
+name = "PushDialog > Editor"
+[context.bindings]
+"enter" = "push-dialog.confirm-target"
+"escape" = "push-dialog.cancel-target"
+
+[[context]]
+name = "UpdateDialog"
+[context.bindings]
+"enter" = "update-dialog.ok"
+"escape" = "update-dialog.cancel"

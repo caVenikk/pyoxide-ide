@@ -1,4 +1,4 @@
-//! The action table (`keymaps/actions.toml`, ADR 0018): the reference
+//! The action table (`keymaps/actions/`, ADR 0018): the reference
 //! IDE's action ids with their texts, their places in the Keymap page's
 //! tree and the Pyoxide commands they run, each in its key contexts.
 //! Keymaps of the reference are converted through it.
@@ -9,8 +9,24 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use serde_json::Value as Json;
 
-/// The action table that ships.
-pub const ACTIONS: &str = include_str!("../../keymaps/actions.toml");
+/// The action table that ships: the files of `keymaps/actions/`, one per menu
+/// of the Keymap page's tree (`header.toml`, with the version, first), joined
+/// in this order, which is the order of the actions within a group.
+pub const ACTIONS: &str = concat!(
+    include_str!("../../keymaps/actions/header.toml"),
+    include_str!("../../keymaps/actions/file.toml"),
+    include_str!("../../keymaps/actions/edit.toml"),
+    include_str!("../../keymaps/actions/view.toml"),
+    include_str!("../../keymaps/actions/navigate.toml"),
+    include_str!("../../keymaps/actions/code.toml"),
+    include_str!("../../keymaps/actions/refactor.toml"),
+    include_str!("../../keymaps/actions/run.toml"),
+    include_str!("../../keymaps/actions/git.toml"),
+    include_str!("../../keymaps/actions/window.toml"),
+    include_str!("../../keymaps/actions/help.toml"),
+    include_str!("../../keymaps/actions/editor-actions.toml"),
+    include_str!("../../keymaps/actions/other.toml"),
+);
 
 /// The tree's group of editor actions, sorted by action id as the
 /// reference sorts it.

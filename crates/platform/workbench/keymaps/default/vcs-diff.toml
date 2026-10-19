@@ -1,0 +1,16 @@
+# Pyoxide keymap for Windows and Linux. Version control, the diff viewer.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# The diff viewer (#171): Next and Previous Difference (pressed again at
+# the last or the first one: the next or the previous file), Compare Next
+# and Previous File, Select Opposite Diff Pane and Jump to Source.
+[[context]]
+name = "Diff"
+[context.bindings]
+"f7" = "diff.next"
+"shift-f7" = "diff.previous"
+"alt-shift-right" = "diff.next-file"
+"alt-shift-left" = "diff.previous-file"
+"ctrl-shift-tab" = "diff.focus-opposite"
+"f4" = "diff.jump-to-source"
