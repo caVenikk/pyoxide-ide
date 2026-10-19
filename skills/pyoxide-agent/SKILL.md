@@ -23,7 +23,7 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 - Reuse what exists (`ui::dialog_window` incl. non-modal, `ui::form`, `editor::field`, `ui::menu`, `ui::tree_guides`, the tool window registry `workbench/src/tool_windows.rs`, theme roles, navigation history, file sync hooks, `run-config`). Do not build a second one.
 - Layering: platform crates know no language (ADR 0005, `python3 scripts/check-layers.py`); Python specifics come through product hooks.
 - Hot shared files (`workbench/src/workbench.rs`, keymaps, `ui/src/menu.rs`, the editor crate): small hunks, logic in your own modules, rebase on `origin/main` before every push, keep everyone's changes.
-- Every user-visible action is a registry command with the reference's bindings in `workbench/keymaps/macos.toml` and `default.toml` and a keystroke check in `workbench/tests/keymap.rs`.
+- Every user-visible action is a registry command with the reference's bindings in `workbench/keymaps/macos.toml` and `default.toml` and a keystroke check in `workbench/tests/it/keymap.rs`.
 - Never block the UI thread: file I/O and analysis off the UI thread, cancellable, incremental.
 - Windows: items used only under `cfg(unix)` / `cfg(windows)` are gated like their users (no blanket allow); native paths in anything shown.
 - New `[workspace.dependencies]` only if the issue/ADR allows it; state the licence in the PR.

@@ -73,5 +73,5 @@ https://microsoft.github.io/debug-adapter-protocol/specification
 (initialization sequence, `runInTerminal`, `cancel`, `terminate`,
 `disconnect`); IntelliJ Community (Apache-2.0) at `pycharm/2026.2.3`: the
 `XDebuggerManager` component of `.idea/workspace.xml` in
-`platform/xdebugger-impl`. The tests are `crates/platform/dap-client/tests/
-fake_adapter.rs` and `crates/platform/debugger/tests/session.rs`.
+`platform/xdebugger-impl`. The tests are `crates/platform/dap-client/tests/it/
+fake_adapter.rs` and `crates/platform/debugger/tests/it/session.rs`.

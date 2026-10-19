@@ -254,13 +254,13 @@ pyoxide call <id> [<json>]
   output, pyproject, `uv.lock`, requirements and PEP 723 samples, error
   classification, PEP 440 ordering, discovery over fake interpreters, a local HTTP
   server for the PyPI client.
-- `crates/python/py-env/tests/uv_integration.rs` runs the real uv offline in
+- `crates/python/py-env/tests/it/uv_integration.rs` runs the real uv offline in
   temporary directories (venv, init, add and remove with `--frozen`, lock, sync, tree,
   `pip` install of a wheel built on the spot, typed failures). It skips itself without
   uv or an installed Python.
-- `crates/python/pyoxide-cli/tests/cli.rs` runs the binary: `commands`, `call` and an
+- `crates/python/pyoxide-cli/tests/it/cli.rs` runs the binary: `commands`, `call` and an
   offline project workflow.
-- Ignored, need the network (`cargo test -p py-env --test uv_integration -- --ignored`):
+- Ignored, need the network (`cargo test -p py-env --test it uv_integration:: -- --ignored`):
   adding and syncing `requests` from PyPI with the outdated check and the tree,
   `uv python install` into a temporary directory, the pip fallback on a seeded venv,
   and the live PyPI lookup.

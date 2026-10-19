@@ -10,7 +10,7 @@ product describes with `ServerSpec`s.
 `lsp-fake-server`, a scripted server built with the crate
 (`src/bin/lsp-fake-server.rs`; its script format is described there).
 
-`tests/real_servers.rs` runs against real servers and is ignored by default.
+`tests/it/real_servers.rs` runs against real servers and is ignored by default.
 It needs:
 
 | server | executable | variable |
@@ -30,7 +30,7 @@ uv tool install basedpyright
 export LSP_CLIENT_TY=/tmp/lsp-tools/bin/ty
 export LSP_CLIENT_BASEDPYRIGHT=/tmp/lsp-tools/bin/basedpyright-langserver
 export LSP_CLIENT_RUFF="$(command -v ruff)"
-cargo test -p lsp-client --test real_servers -- --ignored
+cargo test -p lsp-client --test it real_servers:: -- --ignored
 ```
 
 Run one server's test by name, for example `-- --ignored ruff`.

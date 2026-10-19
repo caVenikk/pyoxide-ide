@@ -4,8 +4,8 @@ The find bar of the reference IDE's editor, with its default keymaps:
 macOS ("Mac") and Windows/Linux ("Win"). Keystrokes come from the IntelliJ
 Platform Community keymap files; option and button keys are the mnemonics
 of their labels (see NOTICE). Covered by
-`crates/platform/workbench/tests/find.rs` (keystrokes through both
-keymaps), `crates/platform/workbench/tests/keymap.rs` (every binding),
+`crates/platform/workbench/tests/it/find.rs` (keystrokes through both
+keymaps), `crates/platform/workbench/tests/it/keymap.rs` (every binding),
 `crates/platform/search` (matching and replacement) and the unit tests of
 `crates/platform/editor/src/find.rs`.
 

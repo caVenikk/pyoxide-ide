@@ -2,9 +2,9 @@
 
 The reference IDE's Back and Forward with its default keymaps: macOS
 ("Mac") and Windows/Linux ("Win"). Covered by
-`crates/platform/workbench/tests/navigation.rs`, the model's unit tests in
+`crates/platform/workbench/tests/it/navigation.rs`, the model's unit tests in
 `crates/platform/workbench/src/navigation.rs` and
-`crates/platform/workbench/tests/keymap.rs` (every binding).
+`crates/platform/workbench/tests/it/keymap.rs` (every binding).
 
 ## Keys
 | Action | Mac | Win |
