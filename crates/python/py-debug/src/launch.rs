@@ -63,6 +63,23 @@ pub fn step_into_my_code() -> debugger::StepIntoMyCode {
     }
 }
 
+/// What [`task_steps`] runs in pydevd.
+const TASK_STEPS: &str = include_str!("task_steps.py");
+
+/// Steps that keep to their asyncio task, sent to each debugged process
+/// before its first step: pydevd keeps a step that starts in a coroutine
+/// in it with Python's trace function, but not in its `sys.monitoring`
+/// mode (Python 3.12 and later), where a step over an `await` stops in
+/// whatever task of the event loop runs next. `task_steps.py` adds that
+/// to pydevd's debugger in the process (its answer: `'installed'`, or
+/// `'trace'` when pydevd traces and keeps to the coroutine itself).
+pub fn task_steps() -> (String, Value) {
+    let source = serde_json::to_string(TASK_STEPS).expect("a string is JSON");
+    with_pydevd(&format!(
+        "(lambda ns: exec({source}, ns) or ns['result'])({{'d': d}})"
+    ))
+}
+
 /// The Python debugger options that change a launch (the reference's
 /// `PyDebuggerSettings` and `PyDebuggerOptionsProvider`), with the
 /// reference's defaults.
@@ -522,6 +539,29 @@ mod tests {
         );
         assert!(child_address(&json!({"subProcessId": 1})).is_err());
         assert!(child_address(&json!({"connect": {"port": 70000}})).is_err());
+    }
+
+    /// The source runs in pydevd's debugger as a Python string literal (a
+    /// JSON string is one) and answers with its `result`.
+    #[test]
+    fn task_steps_run_their_source_in_pydevd() {
+        let (command, arguments) = task_steps();
+        assert_eq!(command, "evaluate");
+        assert_eq!(arguments["context"], "repl");
+        assert!(arguments.get("frameId").is_none());
+        let expression = arguments["expression"].as_str().unwrap();
+        let literal = serde_json::to_string(TASK_STEPS).unwrap();
+        assert_eq!(
+            expression,
+            format!(
+                "(lambda d: (lambda ns: exec({literal}, ns) or ns['result'])({{'d': d}}))\
+                 (__import__('sys').modules['pydevd'].get_global_debugger())"
+            )
+        );
+        assert!(!literal.contains("\\/"), "Python keeps the backslash");
+        for result in ["result = \"trace\"", "result = \"installed\""] {
+            assert!(TASK_STEPS.contains(result), "{result}");
+        }
     }
 
     #[test]

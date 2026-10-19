@@ -602,3 +602,214 @@ fn a_breakpoint_in_an_async_endpoint_with_python_m_uvicorn_reload() {
 fn a_breakpoint_in_an_async_endpoint_with_fastapi_dev() {
     web_app(Server::FastapiDev);
 }
+
+// ---- stepping in an async endpoint with background work --------------------
+
+/// An application with a busy background task started in `lifespan` (an
+/// `asyncio.Task` polling with `asyncio.sleep`, on the same event loop and
+/// thread as the endpoint) and a busy thread.
+const BUSY_API: &str = "\
+import asyncio
+import os
+import threading
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+
+async def poll(state):
+    while True:
+        state[\"ticks\"] += 1
+        await asyncio.sleep(0)
+        state[\"ticks\"] += 1
+        await asyncio.sleep(0.001)
+
+
+def work(state):
+    while True:
+        state[\"beats\"] += 1
+        time.sleep(0.001)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    state = {\"ticks\": 0, \"beats\": 0}
+    task = asyncio.create_task(poll(state))
+    threading.Thread(target=work, args=(state,), daemon=True).start()
+    yield
+    task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+async def plus_one(x):
+    await asyncio.sleep(0.01)
+    return x + 1
+
+
+@app.get(\"/hello\")
+async def hello():
+    a = 1
+    await asyncio.sleep(0.01)
+    b = await plus_one(a)
+    await asyncio.sleep(0)
+    c = a + b
+    return {\"pid\": os.getpid(), \"c\": c}
+";
+/// `plus_one`'s first line in [`BUSY_API`].
+const PLUS_ONE_LINE: u32 = 37;
+/// The endpoint's first line in [`BUSY_API`]: the breakpoint.
+const HELLO_LINE: u32 = 43;
+
+/// Where a stop is: its reason, the top frame's function and line, and the
+/// thread.
+#[derive(Debug, PartialEq, Eq)]
+struct At {
+    reason: String,
+    function: String,
+    line: u32,
+    thread: i64,
+}
+
+/// Runs a step and waits for its stop; the session shows the thread that
+/// stopped.
+fn step_to(session: &Session, step: debugger::Pending<()>) -> At {
+    let before = session.snapshot().generation;
+    block_on(step).unwrap();
+    let mut found = None;
+    wait_until("the step's stop", || {
+        let s = session.snapshot();
+        assert!(s.error.is_none(), "{:?}", s.error);
+        assert_ne!(s.phase, Phase::Ended, "the session ended");
+        if s.phase != Phase::Suspended || s.generation <= before {
+            return false;
+        }
+        let (Some(stop), Some(top)) = (s.stop.as_ref(), s.frames.first()) else {
+            return false;
+        };
+        assert_eq!(
+            s.selected_thread, stop.thread_id,
+            "the stopped thread is shown"
+        );
+        found = Some(At {
+            reason: stop.reason.clone(),
+            function: top.name.clone(),
+            line: top.line,
+            thread: stop.thread_id.unwrap(),
+        });
+        true
+    });
+    found.unwrap()
+}
+
+/// Step Into My Code, Step Over, Step Out and Step Into through an `async
+/// def` endpoint, over `await`s of library code and of a coroutine of the
+/// program, with "Debug just my code" on: every stop is in the endpoint's
+/// coroutine (or the one it awaits) and thread, never in the background
+/// task or thread. pydevd steps with `sys.monitoring` from Python 3.12 on,
+/// where a step over an `await` stops in whatever task runs next unless
+/// the session prepared the process's steps (`launch::task_steps`).
+fn async_steps(server: Server) {
+    let dir = tempfile::tempdir().unwrap();
+    let python = fastapi_python(dir.path());
+    let root = dir.path().join("project");
+    let service = root.join("service");
+    std::fs::create_dir_all(&service).unwrap();
+    std::fs::write(service.join("__init__.py"), "").unwrap();
+    let api = service.join("api.py");
+    std::fs::write(&api, BUSY_API).unwrap();
+    let port = free_port();
+    let run = match server {
+        Server::Run => format!(
+            "import uvicorn\n\nfrom service.api import app\n\nif __name__ == \"__main__\":\n    uvicorn.run(app, port={port})\n"
+        ),
+        Server::RunReload => format!(
+            "import uvicorn\n\nif __name__ == \"__main__\":\n    uvicorn.run(\"service.api:app\", port={port}, reload=True)\n"
+        ),
+        Server::ModuleReload | Server::FastapiDev => unreachable!("a server of run.py"),
+    };
+    std::fs::write(root.join("run.py"), run).unwrap();
+    let config = configuration("run.py", |o| {
+        o.working_directory = root.to_string_lossy().into_owned();
+        o.run_with_uv = Some(true);
+        o.debug_just_my_code = true;
+    });
+
+    let debugger = Debugger::open(&root, provider_with(python, true));
+    debugger.toggle_breakpoint(&api, HELLO_LINE, false);
+    let session = debugger.start(request(&root, config)).unwrap();
+    let mut console = Console::of(&session);
+    let answer = call_hello(port);
+    wait_stop(&session, "breakpoint", HELLO_LINE);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.frames[0].name, "hello");
+    let thread = snapshot.stop.as_ref().and_then(|s| s.thread_id).unwrap();
+    assert_eq!(snapshot.selected_thread, Some(thread));
+    let at = |function: &str, line: u32| At {
+        reason: "step".to_owned(),
+        function: function.to_owned(),
+        line,
+        thread,
+    };
+    type Step = fn(&Session) -> debugger::Pending<()>;
+    let steps: [(&str, Step, At); 8] = [
+        (
+            "Step Into My Code",
+            Session::step_into_my_code,
+            at("hello", HELLO_LINE + 1),
+        ),
+        // Over `await asyncio.sleep(0.01)`.
+        (
+            "Step Into My Code",
+            Session::step_into_my_code,
+            at("hello", HELLO_LINE + 2),
+        ),
+        // Into the awaited coroutine.
+        (
+            "Step Into My Code",
+            Session::step_into_my_code,
+            at("plus_one", PLUS_ONE_LINE),
+        ),
+        (
+            "Step Over",
+            Session::step_over,
+            at("plus_one", PLUS_ONE_LINE + 1),
+        ),
+        ("Step Out", Session::step_out, at("hello", HELLO_LINE + 2)),
+        ("Step Over", Session::step_over, at("hello", HELLO_LINE + 3)),
+        // Over `await asyncio.sleep(0)`.
+        ("Step Into", Session::step_into, at("hello", HELLO_LINE + 4)),
+        ("Step Over", Session::step_over, at("hello", HELLO_LINE + 5)),
+    ];
+    for (name, step, expected) in steps {
+        assert_eq!(step_to(&session, step(&session)), expected, "{name}");
+    }
+    assert_eq!(local(&session, "c"), "3");
+    let breakpoint = debugger.breakpoints().at(&api, HELLO_LINE).unwrap().id;
+    debugger.remove_breakpoint(breakpoint);
+    block_on(session.resume()).unwrap();
+    let body = answer.recv_timeout(WAIT).unwrap_or_else(|_| {
+        console.finish();
+        panic!("no answer; the output:\n{}", console.output)
+    });
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["c"], 3, "{body}");
+
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_until("the end", || session.is_ended());
+    assert_eq!(session.snapshot().error, None);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn steps_in_an_async_endpoint_stay_in_its_coroutine() {
+    async_steps(Server::Run);
+}
+
+#[test]
+#[ignore = "needs the debugpy helper and FastAPI (PYOXIDE_TEST_FASTAPI_PYTHON or uv)"]
+fn steps_in_an_async_endpoint_of_a_reloading_server_stay_in_its_coroutine() {
+    async_steps(Server::RunReload);
+}

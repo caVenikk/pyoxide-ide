@@ -177,6 +177,15 @@ impl DebugAdapterProvider for PythonDebugProvider {
         Some(launch::step_into_my_code())
     }
 
+    /// A step that starts in an asyncio task stops only in that task while
+    /// it runs (pydevd's stepping in a coroutine, which its
+    /// `sys.monitoring` mode lacks): Step Over, Step Into and Step Into My
+    /// Code over an `await` stay in the coroutine instead of stopping in a
+    /// background task of the same event loop.
+    fn prepare_steps(&self) -> Option<(String, serde_json::Value)> {
+        Some(launch::task_steps())
+    }
+
     /// Subprocesses ("Attach to subprocess automatically while
     /// debugging") come as child sessions: debugpy asks for them with
     /// `startDebugging` when the client offers it.
@@ -394,6 +403,7 @@ mod tests {
             after.contains("set_use_libraries_filter(vars(d).pop("),
             "{after}"
         );
+        assert_eq!(provider.prepare_steps(), Some(launch::task_steps()));
         assert_eq!(provider.line_breakpoint_type().unwrap().id, "python-line");
         assert!(
             provider

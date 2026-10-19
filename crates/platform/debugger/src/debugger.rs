@@ -543,6 +543,7 @@ impl Debugger {
             request.watches_key().to_owned(),
             Arc::downgrade(&self.inner),
             self.inner.provider.step_into_my_code(),
+            self.inner.provider.prepare_steps(),
             launch.input_file.clone(),
         );
         self.inner.state().sessions.push(session.clone());
