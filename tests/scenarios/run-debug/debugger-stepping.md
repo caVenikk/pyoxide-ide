@@ -11,6 +11,12 @@
    between and use Force Run to Cursor (Cmd+Alt+F9 / Ctrl+Alt+F9).
 6. Scroll away and press Alt+F10.
 7. Press F9 until the end.
+8. A FastAPI app (Python 3.12 or later) whose `lifespan` starts a
+   background task, `asyncio.create_task(poller())`, a loop of
+   `await asyncio.sleep(0.01)`; a breakpoint in an `async def` endpoint
+   that awaits a library call (`await asyncio.sleep(0.1)`) and a coroutine
+   of the project. Call the endpoint, then press F8, F7, Alt+Shift+F7
+   (Step Into My Code) and Shift+F8 on its `await` lines.
 
 ## Expected
 - Step 2: the execution line moves down; frames and variables update;
@@ -25,6 +31,11 @@
 - Step 6: the editor shows the execution point again.
 - Step 7: the session ends; step actions are disabled; "Process finished
   with exit code 0".
+- Step 8: every stop is in the endpoint's coroutine, or in the project
+  coroutine it awaits (F7 and Step Into My Code enter it, Shift+F8
+  returns), on the event loop's thread; never in the poller, which runs
+  on the same loop. After the endpoint returns, a step may stop in the
+  poller once the request's task has finished.
 
 ## Commands
 `debug.step-over`, `debug.step-into`, `debug.step-into-my-code`,

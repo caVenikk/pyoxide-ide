@@ -23,6 +23,8 @@ struct Provider {
     script: Mutex<Option<Vec<Value>>>,
     /// Step Into My Code sends `evaluate` requests around the step.
     my_code: bool,
+    /// Each process gets an `evaluate` request before its first step.
+    prepares: bool,
     /// Child sessions are offered, with these scripts for the ones the
     /// adapter asks for, in order.
     offers_children: bool,
@@ -95,6 +97,11 @@ impl DebugAdapterProvider for Provider {
             before: ("evaluate".to_owned(), json!({"expression": "filter on"})),
             after: ("evaluate".to_owned(), json!({"expression": "filter off"})),
         })
+    }
+
+    fn prepare_steps(&self) -> Option<(String, Value)> {
+        self.prepares
+            .then(|| ("evaluate".to_owned(), json!({"expression": "prepare"})))
     }
 
     fn idea_types(&self) -> IdeaTypes {
@@ -808,4 +815,250 @@ fn a_child_session_the_product_does_not_start_is_refused() {
     assert_eq!(snapshot.error, None);
     assert_eq!(snapshot.exit_code, Some(0));
     assert_eq!(session.subprocesses(), 0);
+}
+
+/// Waits until the session shows a stop whose top frame has this id.
+fn wait_frame(session: &Session, frame: i64) {
+    wait_until(&format!("a stop in frame {frame}"), || {
+        let s = session.snapshot();
+        assert!(s.error.is_none(), "{:?}", s.error);
+        s.phase == Phase::Suspended && s.frames.first().is_some_and(|f| f.id == frame)
+    });
+}
+
+/// The product's preparation of steps goes to the program once, answered
+/// before its first step; the session shows the thread a step stopped in
+/// (the `stopped` event's), not the first one of the program.
+#[test]
+fn steps_are_prepared_once_and_show_the_thread_they_stop_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let threads =
+        json!({"threads": [{"id": 1, "name": "MainThread"}, {"id": 2, "name": "worker"}]});
+    let frame = |id: i64, name: &str, line: u32| {
+        json!({"stackFrames": [{"id": id, "name": name, "line": line, "column": 1,
+            "source": {"path": main}}], "totalFrames": 1})
+    };
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.extend([
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "allThreadsStopped": true, "hitBreakpointIds": [11]}}),
+        json!({"expect": "threads"}),
+        json!({"respond": threads}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(100, "hello", 3)}),
+        json!({"expect": "evaluate", "arguments": {"expression": "prepare"}}),
+        json!({"respond": {"result": "'installed'", "variablesReference": 0}}),
+        json!({"expect": "next", "arguments": {"threadId": 1}}),
+        json!({"respond": null}),
+        json!({"event": "stopped", "body": {"reason": "step", "threadId": 2,
+            "allThreadsStopped": true}}),
+        json!({"expect": "threads"}),
+        json!({"respond": threads}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 2}}),
+        json!({"respond": frame(200, "work", 9)}),
+        // Step Into My Code: the product's requests around the step only.
+        json!({"expect": "evaluate", "arguments": {"expression": "filter on"}}),
+        json!({"respond": {"result": "None", "variablesReference": 0}}),
+        json!({"expect": "stepIn", "arguments": {"threadId": 2}}),
+        json!({"respond": null}),
+        json!({"event": "stopped", "body": {"reason": "step", "threadId": 2,
+            "allThreadsStopped": true}}),
+        json!({"expect": "evaluate", "arguments": {"expression": "filter off"}}),
+        json!({"respond": {"result": "None", "variablesReference": 0}}),
+        json!({"expect": "threads"}),
+        json!({"respond": threads}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 2}}),
+        json!({"respond": frame(201, "work", 10)}),
+        json!({"forbid": "evaluate", "for": 100}),
+    ]);
+    let provider = Arc::new(Provider {
+        script: Mutex::new(Some(script)),
+        my_code: true,
+        prepares: true,
+        ..Provider::default()
+    });
+    let debugger = Debugger::open(root, provider);
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    wait_frame(&session, 100);
+    assert_eq!(session.snapshot().selected_thread, Some(1));
+
+    block_on(session.step_over()).unwrap();
+    wait_frame(&session, 200);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.threads.len(), 2);
+    assert_eq!(snapshot.selected_thread, Some(2));
+    assert_eq!(snapshot.stop.unwrap().thread_id, Some(2));
+
+    block_on(session.step_into_my_code()).unwrap();
+    wait_frame(&session, 201);
+    assert_eq!(session.snapshot().selected_thread, Some(2));
+    // The script's end: no other preparation came.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.snapshot().error, None);
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
+/// While the shown process steps, the stop of another process waits (it is
+/// shown when the stepped one resumes), unless it is at a breakpoint: then
+/// the session shows it, and the step's stop waits. Each process gets the
+/// product's preparation before its own first step.
+#[test]
+fn a_step_keeps_to_its_process_unless_another_hits_a_breakpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let util = root.join("util.py");
+    let thread = json!({"threads": [{"id": 1, "name": "MainThread"}]});
+    let frame = |id: i64, name: &str, path: &Path, line: u32| {
+        json!({"stackFrames": [{"id": id, "name": name, "line": line, "column": 1,
+            "source": {"path": path}}], "totalFrames": 1})
+    };
+    let util_breakpoints = |lines: &[u32]| {
+        let lines: Vec<Value> = lines.iter().map(|l| json!({"line": l})).collect();
+        let answers: Vec<Value> = lines
+            .iter()
+            .map(|l| json!({"verified": true, "line": l["line"]}))
+            .collect();
+        [
+            json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "util.py"},
+                "breakpoints": lines}}),
+            json!({"respond": {"breakpoints": answers}}),
+        ]
+    };
+    let mut program = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    program[0] = json!({"expect": "initialize",
+        "arguments": {"adapterID": "fake", "supportsStartDebuggingRequest": true}});
+    program.extend([
+        json!({"request": "startDebugging", "arguments": {"request": "attach",
+            "configuration": {"name": "Subprocess 7", "subProcessId": 7}}}),
+        json!({"expect_response": "startDebugging", "success": true}),
+    ]);
+    // Once the subprocess is shown suspended, the program pauses.
+    program.extend(util_breakpoints(&[2]));
+    program.extend([
+        json!({"event": "stopped", "body": {"reason": "pause", "threadId": 1,
+            "allThreadsStopped": true}}),
+        // Shown once the subprocess resumes, not at its step.
+        json!({"expect": "threads"}),
+        json!({"respond": thread}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(100, "<module>", &util, 2)}),
+        json!({"expect": "evaluate", "arguments": {"expression": "prepare"}}),
+        json!({"respond": {"result": "'installed'", "variablesReference": 0}}),
+        json!({"expect": "next", "arguments": {"threadId": 1}}),
+        json!({"respond": null}),
+    ]);
+    program.extend(util_breakpoints(&[2, 5]));
+    // The step's stop comes once the subprocess's breakpoint stop is shown.
+    program.extend(util_breakpoints(&[2, 5, 6]));
+    program.extend([
+        json!({"event": "stopped", "body": {"reason": "step", "threadId": 1,
+            "allThreadsStopped": true}}),
+        json!({"expect": "threads"}),
+        json!({"respond": thread}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(101, "<module>", &util, 3)}),
+    ]);
+    let mut child = vec![
+        json!({"expect": "initialize",
+            "arguments": {"adapterID": "fake", "supportsStartDebuggingRequest": true}}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true,
+            "exceptionBreakpointFilters": [{"filter": "uncaught", "label": "Uncaught", "default": true}]}}),
+        json!({"expect": "attach", "arguments": {"subProcessId": 7}}),
+        json!({"event": "initialized"}),
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "main.py"},
+            "breakpoints": [{"line": 3}]}}),
+        json!({"respond": {"breakpoints": [{"verified": true, "line": 3, "id": 1}]}}),
+        json!({"expect": "setExceptionBreakpoints", "arguments": {"filters": ["uncaught"]}}),
+        json!({"respond": null}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "attach"}),
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "allThreadsStopped": true, "hitBreakpointIds": [1]}}),
+        json!({"expect": "threads"}),
+        json!({"respond": thread}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(500, "hello", &main, 3)}),
+    ];
+    child.extend(util_breakpoints(&[2]));
+    child.extend([
+        json!({"expect": "evaluate", "arguments": {"expression": "prepare"}}),
+        json!({"respond": {"result": "'installed'", "variablesReference": 0}}),
+        json!({"expect": "next", "arguments": {"threadId": 1}}),
+        json!({"respond": null}),
+        json!({"event": "stopped", "body": {"reason": "step", "threadId": 1,
+            "allThreadsStopped": true}}),
+        json!({"expect": "threads"}),
+        json!({"respond": thread}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(501, "hello", &main, 4)}),
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+    ]);
+    // A breakpoint hit while the program steps.
+    child.extend(util_breakpoints(&[2, 5]));
+    child.extend([
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1,
+            "allThreadsStopped": true}}),
+        json!({"expect": "threads"}),
+        json!({"respond": thread}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": frame(502, "helper", &util, 5)}),
+    ]);
+    child.extend(util_breakpoints(&[2, 5, 6]));
+    child.extend([
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+    ]);
+    let provider = Arc::new(Provider {
+        script: Mutex::new(Some(program)),
+        offers_children: true,
+        children: Mutex::new(vec![child]),
+        prepares: true,
+        ..Provider::default()
+    });
+    let debugger = Debugger::open(root, provider);
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    let wait_answers = |line: u32| {
+        wait_until(&format!("both answers for line {line}"), || {
+            let id = debugger.breakpoints().at(&util, line).unwrap().id;
+            debugger.breakpoint_status(id).is_some_and(|s| s.verified)
+        });
+        // The stop each process sends after its answer comes meanwhile.
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    wait_frame(&session, 500);
+    debugger.toggle_breakpoint(&util, 2, false);
+    wait_answers(2);
+    // The program's pause waits through the subprocess's step.
+    block_on(session.step_over()).unwrap();
+    wait_frame(&session, 501);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.snapshot().frames[0].id, 501);
+    block_on(session.resume()).unwrap();
+    wait_frame(&session, 100);
+
+    // The program steps; the subprocess hits a breakpoint meanwhile.
+    block_on(session.step_over()).unwrap();
+    debugger.toggle_breakpoint(&util, 5, false);
+    wait_frame(&session, 502);
+    // The program's step stop waits for the subprocess.
+    debugger.toggle_breakpoint(&util, 6, false);
+    wait_answers(6);
+    assert_eq!(session.snapshot().frames[0].id, 502);
+    block_on(session.resume()).unwrap();
+    wait_frame(&session, 101);
+    assert_eq!(session.snapshot().stop.unwrap().reason, "step");
+
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
 }

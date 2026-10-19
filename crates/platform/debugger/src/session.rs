@@ -9,7 +9,8 @@
 //! are processes of this session, as the reference's multiprocess
 //! debugger keeps them in one session: breakpoints go to every process,
 //! the session shows the process that stopped (one that stops while
-//! another is shown waits until that one moves on), and Stop ends them
+//! another is shown waits until that one moves on; while the shown one
+//! steps, it waits unless it stopped at a breakpoint), and Stop ends them
 //! all.
 //!
 //! ```text
@@ -238,8 +239,13 @@ struct Data {
     subprocesses: Vec<Subprocess>,
     next_subprocess: u64,
     /// Stops of processes that came while another process is shown
-    /// suspended, oldest first.
+    /// suspended (or steps), oldest first.
     waiting: Vec<(Process, dap_client::Stopped)>,
+    /// A step of the shown process is on its way: until its stop, the stop
+    /// of another process waits unless it is at a breakpoint.
+    stepping: bool,
+    /// The product's preparation of steps was sent to the program.
+    steps_prepared: bool,
 }
 
 /// A process of the session: the program, or one of its subprocesses.
@@ -258,6 +264,8 @@ struct Subprocess {
     configured: bool,
     /// Its breakpoint ids.
     adapter_ids: HashMap<i64, BreakpointId>,
+    /// The product's preparation of steps was sent to it.
+    steps_prepared: bool,
 }
 
 /// Run to Cursor's target: a breakpoint of the session only, on top of the
@@ -284,6 +292,8 @@ pub(crate) struct SessionInner {
     /// before it.
     focus: Mutex<Option<(u64, Client)>>,
     step_into_my_code: Option<StepIntoMyCode>,
+    /// Sent to each process before its first step.
+    prepare_steps: Option<(String, Value)>,
     /// "Redirect input from": the file the program reads.
     input_file: Option<PathBuf>,
     data: Mutex<Data>,
@@ -315,6 +325,7 @@ impl Session {
         watches_key: String,
         debugger: Weak<DebuggerInner>,
         step_into_my_code: Option<StepIntoMyCode>,
+        prepare_steps: Option<(String, Value)>,
         input_file: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -327,6 +338,7 @@ impl Session {
                 adapter_id: OnceLock::new(),
                 focus: Mutex::new(None),
                 step_into_my_code,
+                prepare_steps,
                 input_file,
                 data: Mutex::new(Data {
                     phase: Phase::Starting,
@@ -359,6 +371,8 @@ impl Session {
                     subprocesses: Vec::new(),
                     next_subprocess: 0,
                     waiting: Vec::new(),
+                    stepping: false,
+                    steps_prepared: false,
                 }),
             }),
         }
@@ -814,7 +828,9 @@ impl Session {
     // ---- events ----------------------------------------------------------------
 
     /// A process stopped: the session shows it, unless another process is
-    /// shown suspended (then it waits for that one to move on).
+    /// shown suspended (then it waits for that one to move on) or steps
+    /// (then it waits unless it stopped at a breakpoint, as the reference
+    /// switches processes only for a breakpoint hit).
     fn stopped(&self, process: Process, stopped: dap_client::Stopped) {
         let (generation, thread, after_step, hits, run_to) = {
             let mut data = lock(&self.inner.data);
@@ -822,11 +838,14 @@ impl Session {
                 return;
             }
             let shown = self.focus();
-            if data.phase == Phase::Suspended && shown != process {
+            let waits = data.phase == Phase::Suspended
+                || (data.stepping && !at_breakpoint(&stopped.reason));
+            if shown != process && waits {
                 data.waiting.retain(|(p, _)| *p != process);
                 data.waiting.push((process, stopped));
                 return;
             }
+            data.stepping = false;
             if shown != process {
                 self.set_focus(&data, process);
                 data.threads.clear();
@@ -1030,7 +1049,8 @@ impl Session {
     }
 
     /// The process shown moved on; a process that stopped meanwhile is
-    /// shown next.
+    /// shown next, unless the shown one steps (it is shown at the step's
+    /// stop).
     fn resumed(&self) {
         let next = {
             let mut data = lock(&self.inner.data);
@@ -1045,7 +1065,7 @@ impl Session {
             data.children.clear();
             data.reference_frames.clear();
             data.selected_frame = None;
-            (!data.waiting.is_empty()).then(|| data.waiting.remove(0))
+            (!data.stepping && !data.waiting.is_empty()).then(|| data.waiting.remove(0))
         };
         self.changed();
         if let Some((process, stopped)) = next {
@@ -1356,6 +1376,7 @@ impl Session {
                 client: client.clone(),
                 configured: false,
                 adapter_ids: HashMap::new(),
+                steps_prepared: false,
             });
             data.stopping
         };
@@ -1454,6 +1475,8 @@ impl Session {
                 self.set_focus(&data, Process::Program);
                 data.threads.clear();
                 data.selected_thread = None;
+                // Its step is over: a waiting stop is shown.
+                data.stepping = false;
             }
             shown
         };
@@ -1480,19 +1503,65 @@ impl Session {
         Ok((client, thread))
     }
 
-    fn run(&self, request: impl FnOnce(&Client, i64) -> Request<()>) -> Pending<()> {
+    /// A step of the thread the program stopped in (or the selected one),
+    /// sent once the product's preparation of steps is answered.
+    fn step(
+        &self,
+        request: impl FnOnce(&Client, i64) -> Request<()> + Send + 'static,
+    ) -> Pending<()> {
         let (client, thread) = match self.thread() {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
+        lock(&self.inner.data).stepping = true;
         let weak = Arc::downgrade(&self.inner);
-        track(request(&client, thread), move |result| {
-            if result.is_ok()
-                && let Some(inner) = weak.upgrade()
-            {
-                Session { inner }.resumed();
+        let (tx, rx) = oneshot::channel();
+        let stepping = client.clone();
+        self.prepared(&client, move || {
+            request(&stepping, thread).on_done(move |result| {
+                if let Some(inner) = weak.upgrade() {
+                    Session { inner }.stepped(result.is_ok());
+                }
+                let _ = tx.send(result.map_err(DebugError::from));
+            });
+        });
+        rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed()
+    }
+
+    /// Runs `then` once the shown process answered the product's
+    /// preparation of steps, sent before its first step only.
+    fn prepared(&self, client: &Client, then: impl FnOnce() + Send + 'static) {
+        match self.steps_preparation() {
+            Some((command, arguments)) => client.custom(&command, arguments).on_done(|_| then()),
+            None => then(),
+        }
+    }
+
+    /// The product's preparation of steps, when the shown process has not
+    /// had it yet.
+    fn steps_preparation(&self) -> Option<(String, Value)> {
+        let request = self.inner.prepare_steps.clone()?;
+        let mut data = lock(&self.inner.data);
+        let prepared = match self.focus() {
+            Process::Program => &mut data.steps_prepared,
+            Process::Subprocess(key) => {
+                &mut data
+                    .subprocesses
+                    .iter_mut()
+                    .find(|s| s.key == key)?
+                    .steps_prepared
             }
-        })
+        };
+        (!std::mem::replace(prepared, true)).then_some(request)
+    }
+
+    /// A step was answered: the program moves on, or the step failed.
+    fn stepped(&self, ok: bool) {
+        if ok {
+            self.resumed();
+        } else {
+            lock(&self.inner.data).stepping = false;
+        }
     }
 
     /// Resume Program.
@@ -1501,6 +1570,7 @@ impl Session {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
+        lock(&self.inner.data).stepping = false;
         let weak = Arc::downgrade(&self.inner);
         track(client.resume(thread), move |result| {
             if result.is_ok()
@@ -1514,11 +1584,11 @@ impl Session {
     }
 
     pub fn step_over(&self) -> Pending<()> {
-        self.run(|client, thread| client.step_over(thread))
+        self.step(|client, thread| client.step_over(thread))
     }
 
     pub fn step_into(&self) -> Pending<()> {
-        self.run(|client, thread| client.step_into(thread))
+        self.step(|client, thread| client.step_into(thread))
     }
 
     /// Step Into My Code: the product's request, answered before the step
@@ -1532,27 +1602,29 @@ impl Session {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
+        lock(&self.inner.data).stepping = true;
         let weak = Arc::downgrade(&self.inner);
         let (tx, rx) = oneshot::channel();
         let (command, arguments) = step.before;
         let stepping = client.clone();
-        client.custom(&command, arguments).on_done(move |before| {
-            let Some(inner) = weak.upgrade() else {
-                let _ = tx.send(Err(DebugError::Ended));
-                return;
-            };
-            // When the product's request failed, the step is a plain one.
-            if before.is_ok() {
-                lock(&inner.data).after_step = Some(step.after);
-            }
-            let weak = Arc::downgrade(&inner);
-            stepping.step_into(thread).on_done(move |result| {
-                if result.is_ok()
-                    && let Some(inner) = weak.upgrade()
-                {
-                    Session { inner }.resumed();
+        self.prepared(&client, move || {
+            let before = stepping.clone();
+            before.custom(&command, arguments).on_done(move |before| {
+                let Some(inner) = weak.upgrade() else {
+                    let _ = tx.send(Err(DebugError::Ended));
+                    return;
+                };
+                // When the product's request failed, the step is a plain one.
+                if before.is_ok() {
+                    lock(&inner.data).after_step = Some(step.after);
                 }
-                let _ = tx.send(result.map_err(DebugError::from));
+                let weak = Arc::downgrade(&inner);
+                stepping.step_into(thread).on_done(move |result| {
+                    if let Some(inner) = weak.upgrade() {
+                        Session { inner }.stepped(result.is_ok());
+                    }
+                    let _ = tx.send(result.map_err(DebugError::from));
+                });
             });
         });
         rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed()
@@ -1593,7 +1665,7 @@ impl Session {
     }
 
     pub fn step_out(&self) -> Pending<()> {
-        self.run(|client, thread| client.step_out(thread))
+        self.step(|client, thread| client.step_out(thread))
     }
 
     /// Pause Program: suspends the selected thread (the adapter suspends
@@ -2140,6 +2212,19 @@ fn source_breakpoint(b: &LineBreakpoint, log_points: bool) -> Option<SourceBreak
         out.log_message = Some(message.join("\n"));
     }
     Some(out)
+}
+
+/// A stop of this reason is a breakpoint hit (a line, function, data,
+/// instruction or exception breakpoint).
+fn at_breakpoint(reason: &str) -> bool {
+    matches!(
+        reason,
+        "breakpoint"
+            | "function breakpoint"
+            | "data breakpoint"
+            | "instruction breakpoint"
+            | "exception"
+    )
 }
 
 /// The request as a future, with `then` run on the reader thread first.

@@ -158,6 +158,14 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// A request sent to each process of a session before its first step,
+    /// answered before that step is sent: it prepares the adapter's
+    /// stepping (debugpy: a step keeps to the asyncio task it starts in).
+    /// `None`: nothing is sent.
+    fn prepare_steps(&self) -> Option<(String, Value)> {
+        None
+    }
+
     /// The product debugs the child sessions its adapter asks for (DAP
     /// `startDebugging`: subprocesses of the program); the client offers
     /// them at `initialize`.

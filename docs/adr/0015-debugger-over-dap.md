@@ -86,8 +86,9 @@ debugpy over DAP, with Pyoxide's own client.
   the same session, as the reference's multiprocess debugger keeps one
   session: breakpoints go to every process, the session shows the process
   that stopped (a stop of another process waits until the shown one moves
-  on), Pause suspends all of them, and Stop ends the program's session
-  first, so the adapter ends the subprocesses too.
+  on; while the shown one steps, it waits unless it is at a breakpoint),
+  Pause suspends all of them, and Stop ends the program's session first,
+  so the adapter ends the subprocesses too.
 - `runInTerminal` is answered by spawning the given command line with the
   `process` crate and feeding its output to the Debug Console exactly as
   the Run console (standard input, ANSI, links, Stop); the integrated
@@ -98,6 +99,16 @@ debugpy over DAP, with Pyoxide's own client.
   `configurationDone`; the `launch` answer is not awaited before that.
 - Step Into My Code: `setDebuggerProperty {justMyCode: true}` for one step.
   Run to Cursor: a temporary breakpoint and `continue`.
+- Steps in coroutines: pydevd keeps a step that starts in a coroutine in
+  it when it traces with `sys.settrace` (Python before 3.12), but not in
+  its `sys.monitoring` mode (3.12 and later), where a step over an `await`
+  stops in whatever task of the event loop runs next (a background
+  poller). Before the first step of each process the session sends one
+  `evaluate` that wraps the `set_suspend` and `do_wait_suspend` methods of
+  pydevd's debugger object in that process (`py-debug`
+  `task_steps.py`): a step that starts in an asyncio task does not stop in
+  another task until its own task has finished. pydevd's files stay
+  unpatched; with `sys.settrace` the evaluation does nothing.
 - Stop: `terminate`, then `disconnect {terminateDebuggee: true}`; after a
   timeout the debuggee's process tree and the adapter are killed. Rerun is
   stop and a new session. Adapter, launcher and debuggee must all be gone
