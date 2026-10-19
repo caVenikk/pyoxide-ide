@@ -59,24 +59,20 @@ jobs:
     defaults:
       run:
         shell: bash
+    # Build settings of CI only; they change no test result (measured in
+    # replica/perf.md, CI). Line tables instead of full debug info take about
+    # 40% off a warm build and keep file and line in backtraces. CI builds
+    # from scratch, so incremental compilation only costs time. Faster
+    # linkers (mold, rust-lld) and a Dev Drive on Windows gained nothing.
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
     steps:
       - name: Skipped
         if: needs.scope.outputs.full != 'true'
         run: echo "Draft or documentation only, see job scope."
       - uses: actions/checkout@v4
         if: needs.scope.outputs.full == 'true'
-      - name: machine (temporary)
-        if: needs.scope.outputs.full == 'true'
-        run: |
-          case "$RUNNER_OS" in
-            Linux) nproc; lscpu | grep 'Model name' ;;
-            macOS) sysctl -n hw.ncpu machdep.cpu.brand_string ;;
-            Windows) nproc; powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' ;;
-          esac
       # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
       # fontconfig on Linux; tests use its headless test platform.
       - name: Linux packages for GPUI
@@ -136,119 +132,6 @@ jobs:
             target/cargo-timings/cargo-timing.html
           retention-days: 14
           if-no-files-found: ignore
-
-  # TEMPORARY, removed before merge: build variants measured for #246.
-  # Each job restores a variant's cache and builds the test binaries several
-  # times on the same machine, cleaning the workspace crates in between (a
-  # warm build of a pull request), with one setting changed each time.
-  exp:
-    needs: scope
-    if: needs.scope.outputs.full == 'true'
-    # A failing variant does not make the run red.
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: windows-latest, variant: dbg-opt-lld, dbg: true, lld: true }
-          - { os: windows-latest, variant: opt }
-          - { os: ubuntu-latest, variant: opt }
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - uses: actions/checkout@v4
-      - name: machine
-        run: |
-          case "$RUNNER_OS" in
-            Linux) nproc; lscpu | grep 'Model name' ;;
-            Windows) nproc; powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' ;;
-          esac
-      - name: variant env
-        env:
-          DBG: ${{ matrix.dbg }}
-          LLD: ${{ matrix.lld }}
-        run: |
-          if [ "$DBG" = true ]; then
-            echo "CARGO_PROFILE_DEV_DEBUG=line-tables-only" >> "$GITHUB_ENV"
-          fi
-          if [ "$LLD" = true ]; then
-            echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe" >> "$GITHUB_ENV"
-          fi
-      - name: Linux packages for GPUI
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.variant }}
-          save-if: false
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
-        with:
-          tool: cargo-nextest@0.9.148
-      - name: helpers
-        run: |
-          cat > "$RUNNER_TEMP/exp.sh" <<'SH'
-          if python3 -c '' >/dev/null 2>&1; then PY=python3; else PY=python; fi
-          WS=$(cargo metadata --no-deps --format-version 1 | $PY -c 'import json,sys; print(" ".join("-p " + p["id"] for p in json.load(sys.stdin)["packages"]))')
-          build() {
-            local name=$1 s log="$RUNNER_TEMP/$1.log"
-            s=$(date +%s)
-            cargo nextest run --workspace --profile ci --no-run > "$log" 2>&1 || { tail -30 "$log"; return 1; }
-            echo "TIMING $name $(( $(date +%s) - s )) s, $(grep -c ' Compiling ' "$log") crates compiled, $(grep 'Finished' "$log")"
-          }
-          clean_ws() { cargo clean $WS 2>&1 | tail -1; }
-          SH
-      - name: Windows, line tables, rust-lld vs link.exe
-        if: matrix.variant == 'dbg-opt-lld'
-        run: |
-          . "$RUNNER_TEMP/exp.sh"
-          build lld-cache
-          clean_ws; build lld-1
-          clean_ws; (unset CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER; build link-exe)
-          clean_ws; build lld-2
-      - uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
-        if: matrix.variant == 'dbg-opt-lld'
-        with:
-          drive-size: 30GB
-          trusted-dev-drive: true
-      - name: Windows, target on a Dev Drive
-        if: matrix.variant == 'dbg-opt-lld'
-        run: |
-          . "$RUNNER_TEMP/exp.sh"
-          s=$(date +%s); cp -r target "$DEV_DRIVE/target"; echo "TIMING copy $(( $(date +%s) - s )) s"
-          export CARGO_TARGET_DIR="$DEV_DRIVE/target"
-          clean_ws; build dd-lld-1
-          clean_ws; build dd-lld-2
-      - name: Windows, full debug info, link.exe vs rust-lld
-        if: runner.os == 'Windows' && matrix.variant == 'opt'
-        run: |
-          . "$RUNNER_TEMP/exp.sh"
-          build full-cache
-          clean_ws; build full-link-1
-          clean_ws; CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe build full-lld
-          clean_ws; build full-link-2
-      - name: Linux, full debug info vs line tables
-        if: runner.os == 'Linux'
-        run: |
-          . "$RUNNER_TEMP/exp.sh"
-          build full-cache
-          clean_ws; build full-1
-          export CARGO_PROFILE_DEV_DEBUG=line-tables-only
-          build lt-cold
-          clean_ws; build lt-1
-          clean_ws; build lt-2
-          unset CARGO_PROFILE_DEV_DEBUG
-          clean_ws; build full-2
 
   progress:
     runs-on: ubuntu-latest

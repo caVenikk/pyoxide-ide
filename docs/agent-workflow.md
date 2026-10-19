@@ -80,6 +80,11 @@ What CI runs, and when (`.github/workflows/ci.yml`):
   anything, so the required checks report; marking a draft ready for review
   starts the full run. Push checkpoints as drafts.
 - Pull requests restore the build cache of `main` and do not save their own.
+- The checks build with the workspace's dev profile, as a local debug build
+  does (optimized dependencies, ADR 0007), so `scripts/check.sh` reuses what
+  `cargo test` compiled. CI adds only settings that change no result: line
+  tables instead of full debug info, no incremental compilation (measured in
+  `replica/perf.md`, CI).
 
 ## Hygiene
 Public files are English and contain no personal data. Reference screenshots and

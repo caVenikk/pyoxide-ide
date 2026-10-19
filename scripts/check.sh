@@ -27,8 +27,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Flags of every cargo command that builds, here and in CI.
-CARGO_FLAGS=()
+# The cargo commands use the workspace's dev profile as it is, the same as
+# a local debug build, so a check reuses what `cargo build` and `cargo test`
+# compiled (ADR 0007). CI only adds settings that change no result
+# (.github/workflows/ci.yml, job check).
 
 ALL_STEPS=(fmt clippy clippy-windows build test throughput doc repo)
 WINDOWS_TARGET=x86_64-pc-windows-gnu
@@ -90,19 +92,6 @@ if [ "$quick" -eq 1 ]; then
     fi
 fi
 
-# `cargo` with the shared flags. Empty arrays are expanded this way for the
-# bash 3.2 that macOS ships, where "${a[@]}" of an empty array fails under -u.
-# The flags follow the subcommand (`nextest run` is two words).
-cargo_run() {
-    local sub=("$1")
-    shift
-    if [ "${sub[0]}" = nextest ]; then
-        sub+=("$1")
-        shift
-    fi
-    cargo "${sub[@]}" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} "$@"
-}
-
 # Whether a cargo step has anything to check.
 has_scope() {
     [ ${#scope[@]} -gt 0 ]
@@ -137,32 +126,32 @@ run_step() {
         fmt) cargo fmt --all --check ;;
         clippy)
             if has_scope; then
-                cargo_run clippy "${scope[@]}" --all-targets -- -D warnings
+                cargo clippy "${scope[@]}" --all-targets -- -D warnings
             fi
             ;;
         clippy-windows)
             if has_scope && windows_ready; then
-                cargo_run clippy "${scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
+                cargo clippy "${scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
             fi
             ;;
         build)
             if has_scope; then
-                cargo_run nextest run "${scope[@]}" --profile ci --no-run --timings
+                cargo nextest run "${scope[@]}" --profile ci --no-run --timings
             fi
             ;;
         test)
             if has_scope; then
-                cargo_run nextest run "${scope[@]}" --profile ci
+                cargo nextest run "${scope[@]}" --profile ci
             fi
             ;;
         throughput)
             if includes terminal; then
-                cargo_run test -p terminal --test it throughput:: -- --ignored --nocapture
+                cargo test -p terminal --test it throughput:: -- --ignored --nocapture
             fi
             ;;
         doc)
             if [ ${#doc_scope[@]} -gt 0 ]; then
-                cargo_run test --doc "${doc_scope[@]}"
+                cargo test --doc "${doc_scope[@]}"
             fi
             ;;
         repo)

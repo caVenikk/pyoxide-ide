@@ -255,12 +255,16 @@ the dependencies (GPUI, tree-sitter, ropey, ...) with `opt-level = 2`
 text shaping and the parser run far slower without optimization, and a
 debug build should stay responsive enough for manual checks, while the
 workspace crates keep fast incremental builds and full debug information.
-The cost is a longer first build of the dependencies. CI does not pay it:
-clippy and the tests run with
-`--config 'profile.dev.package."*".opt-level=0'` (.github/workflows/ci.yml).
-With optimized dependencies the Windows check job took 28-36 min (clippy
-8-11 min, tests 15-19 min); with the override it takes about 6 min
-(clippy 1.2 min, tests 2.8 min), macOS and Linux about 3 min.
+The cost is a longer first build of the dependencies. The checks
+(`scripts/check.sh`, which CI's `check` job calls) build with the same
+profile: CI restores the compiled dependencies from its cache, so a pull
+request builds only the workspace crates, and the GUI tests run three to
+four times faster than with unoptimized dependencies (replica/perf.md, CI).
+Until 2026-10-19 the checks built the dependencies without optimization
+(`--config 'profile.dev.package."*".opt-level=0'`), which kept a cold build
+short (the Windows job took 28-36 min with optimized dependencies and about
+6 min without, when the test suite was small); with the suite grown, the
+slower tests cost more than the shorter cold build saved.
 
 ### Look
 The shell reproduces the reference IDE's current New UI ("Islands") layout
