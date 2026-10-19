@@ -3,18 +3,181 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review: a draft that becomes ready gets its full run.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+
+# One run per pull request: a new push cancels the run of the one before
+# instead of letting both finish. Runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Whether the OS matrix and the integration tests run: on main, and for a
+  # pull request that is not a draft and changes more than documentation.
+  # When they do not, their jobs still start and pass without running
+  # anything: the required checks need a result, and a matrix job skipped
+  # by `if` reports under the job's name, not under each OS's.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+        with:
+          # The merge commit and its parents: HEAD^1 is the base branch.
+          fetch-depth: 2
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          full=true
+          if [ "$EVENT" = pull_request ]; then
+            if [ "$DRAFT" = true ]; then
+              full=false
+              echo "Draft pull request: the OS matrix runs when it is ready for review."
+            elif ! git diff --name-only HEAD^1 HEAD \
+                | grep -qvE '(\.md$|^docs/|^replica/|^tests/scenarios/)'; then
+              full=false
+              echo "Only documentation changed: nothing to build or test."
+            fi
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
   check:
+    needs: scope
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The steps are those of scripts/check.sh, which runs the same commands
+    # locally.
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
     steps:
+      - name: Skipped
+        if: needs.scope.outputs.full != 'true'
+        run: echo "Draft or documentation only, see job scope."
       - uses: actions/checkout@v4
+        if: needs.scope.outputs.full == 'true'
+      - name: machine (temporary)
+        if: needs.scope.outputs.full == 'true'
+        run: |
+          case "$RUNNER_OS" in
+            Linux) nproc; lscpu | grep 'Model name' ;;
+            macOS) sysctl -n hw.ncpu machdep.cpu.brand_string ;;
+            Windows) nproc; powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' ;;
+          esac
       # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
       # fontconfig on Linux; tests use its headless test platform.
+      - name: Linux packages for GPUI
+        if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.scope.outputs.full == 'true'
+        with:
+          components: rustfmt, clippy
+      # Only main saves the cache; a pull request restores main's. Saved
+      # caches of pull requests would fill the repository's 10 GB and evict
+      # main's. The key hashes the CARGO_* variables above, so a change of
+      # build settings starts a new cache instead of restoring one built
+      # differently (which would never be saved again).
+      - uses: Swatinem/rust-cache@v2
+        if: needs.scope.outputs.full == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Tests run under cargo-nextest (.config/nextest.toml). The action is
+      # pinned to a commit and installs a checksummed prebuilt binary.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        if: needs.scope.outputs.full == 'true'
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: fmt
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh fmt
+      - name: clippy
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh clippy
+      - name: build tests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh build
+      - name: tests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh test
+      # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
+      # Windows) into the emulator, and the emulator alone; the numbers go
+      # to the log. Reuses the test build of the step above.
+      - name: terminal throughput
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh throughput
+      # nextest does not run doctests.
+      - name: doctests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh doc
+      - uses: actions/upload-artifact@v4
+        if: always() && needs.scope.outputs.full == 'true'
+        with:
+          name: junit-${{ matrix.os }}
+          path: |
+            target/nextest/ci/junit.xml
+            target/cargo-timings/cargo-timing.html
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # TEMPORARY, removed before merge: build variants measured for #246.
+  # Each job restores a variant's cache and builds the test binaries several
+  # times on the same machine, cleaning the workspace crates in between (a
+  # warm build of a pull request), with one setting changed each time.
+  exp:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
+    # A failing variant does not make the run red.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, variant: dbg-opt-lld, dbg: true, lld: true }
+          - { os: windows-latest, variant: opt }
+          - { os: ubuntu-latest, variant: opt }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: machine
+        run: |
+          case "$RUNNER_OS" in
+            Linux) nproc; lscpu | grep 'Model name' ;;
+            Windows) nproc; powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' ;;
+          esac
+      - name: variant env
+        env:
+          DBG: ${{ matrix.dbg }}
+          LLD: ${{ matrix.lld }}
+        run: |
+          if [ "$DBG" = true ]; then
+            echo "CARGO_PROFILE_DEV_DEBUG=line-tables-only" >> "$GITHUB_ENV"
+          fi
+          if [ "$LLD" = true ]; then
+            echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe" >> "$GITHUB_ENV"
+          fi
       - name: Linux packages for GPUI
         if: runner.os == 'Linux'
         run: |
@@ -26,41 +189,66 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # Tests run under cargo-nextest (.config/nextest.toml). The action is
-      # pinned to a commit and installs a checksummed prebuilt binary.
+        with:
+          key: ${{ matrix.variant }}
+          save-if: false
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-nextest@0.9.148
-      - run: cargo fmt --all --check
-      # Debug builds optimize dependencies so that the IDE stays responsive
-      # when run from a debug build (ADR 0007). CI does not need that:
-      # clippy and the tests build dependencies without optimization, which
-      # keeps the builds short.
-      - run: >-
-          cargo clippy --workspace --all-targets
-          --config 'profile.dev.package."*".opt-level=0' -- -D warnings
-        shell: bash
-      - run: >-
-          cargo nextest run --workspace --profile ci
-          --config 'profile.dev.package."*".opt-level=0'
-        shell: bash
-      # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
-      # Windows) into the emulator, and the emulator alone; the numbers go
-      # to the log. Reuses the test build of the step above.
-      - run: >-
-          cargo test -p terminal --test it throughput::
-          --config 'profile.dev.package."*".opt-level=0' -- --ignored --nocapture
-        shell: bash
-      # nextest does not run doctests.
-      - run: cargo test --doc --workspace --config 'profile.dev.package."*".opt-level=0'
-        shell: bash
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: helpers
+        run: |
+          cat > "$RUNNER_TEMP/exp.sh" <<'SH'
+          if python3 -c '' >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          WS=$(cargo metadata --no-deps --format-version 1 | $PY -c 'import json,sys; print(" ".join("-p " + p["id"] for p in json.load(sys.stdin)["packages"]))')
+          build() {
+            local name=$1 s log="$RUNNER_TEMP/$1.log"
+            s=$(date +%s)
+            cargo nextest run --workspace --profile ci --no-run > "$log" 2>&1 || { tail -30 "$log"; return 1; }
+            echo "TIMING $name $(( $(date +%s) - s )) s, $(grep -c ' Compiling ' "$log") crates compiled, $(grep 'Finished' "$log")"
+          }
+          clean_ws() { cargo clean $WS 2>&1 | tail -1; }
+          SH
+      - name: Windows, line tables, rust-lld vs link.exe
+        if: matrix.variant == 'dbg-opt-lld'
+        run: |
+          . "$RUNNER_TEMP/exp.sh"
+          build lld-cache
+          clean_ws; build lld-1
+          clean_ws; (unset CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER; build link-exe)
+          clean_ws; build lld-2
+      - uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        if: matrix.variant == 'dbg-opt-lld'
         with:
-          name: junit-${{ matrix.os }}
-          path: target/nextest/ci/junit.xml
-          retention-days: 14
-          if-no-files-found: ignore
+          drive-size: 30GB
+          trusted-dev-drive: true
+      - name: Windows, target on a Dev Drive
+        if: matrix.variant == 'dbg-opt-lld'
+        run: |
+          . "$RUNNER_TEMP/exp.sh"
+          s=$(date +%s); cp -r target "$DEV_DRIVE/target"; echo "TIMING copy $(( $(date +%s) - s )) s"
+          export CARGO_TARGET_DIR="$DEV_DRIVE/target"
+          clean_ws; build dd-lld-1
+          clean_ws; build dd-lld-2
+      - name: Windows, full debug info, link.exe vs rust-lld
+        if: runner.os == 'Windows' && matrix.variant == 'opt'
+        run: |
+          . "$RUNNER_TEMP/exp.sh"
+          build full-cache
+          clean_ws; build full-link-1
+          clean_ws; CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe build full-lld
+          clean_ws; build full-link-2
+      - name: Linux, full debug info vs line tables
+        if: runner.os == 'Linux'
+        run: |
+          . "$RUNNER_TEMP/exp.sh"
+          build full-cache
+          clean_ws; build full-1
+          export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+          build lt-cold
+          clean_ws; build lt-1
+          clean_ws; build lt-2
+          unset CARGO_PROFILE_DEV_DEBUG
+          clean_ws; build full-2
 
   progress:
     runs-on: ubuntu-latest
@@ -78,10 +266,13 @@ jobs:
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.
   integration:
+    needs: scope
     runs-on: ubuntu-latest
     services:
+      # An empty image starts no container: drafts and documentation-only
+      # pull requests do not pull the database images.
       postgres:
-        image: postgres:18-alpine
+        image: ${{ needs.scope.outputs.full == 'true' && 'postgres:18-alpine' || '' }}
         env:
           POSTGRES_USER: pyoxide
           POSTGRES_PASSWORD: pyoxide
@@ -91,7 +282,7 @@ jobs:
           --health-cmd "pg_isready -U pyoxide -d pyoxide"
           --health-interval 5s --health-timeout 5s --health-retries 30
       oracle:
-        image: gvenzl/oracle-free:23-slim-faststart
+        image: ${{ needs.scope.outputs.full == 'true' && 'gvenzl/oracle-free:23-slim-faststart' || '' }}
         env:
           ORACLE_PASSWORD: pyoxide
           APP_USER: pyoxide
@@ -103,10 +294,19 @@ jobs:
     env:
       PYOXIDE_DB_PASSWORD: pyoxide
     steps:
+      - name: Skipped
+        if: needs.scope.outputs.full != 'true'
+        run: echo "Draft or documentation only, see job scope."
       - uses: actions/checkout@v4
+        if: needs.scope.outputs.full == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.scope.outputs.full == 'true'
       - uses: Swatinem/rust-cache@v2
-      - run: >-
+        if: needs.scope.outputs.full == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: needs.scope.outputs.full == 'true'
+        run: >-
           cargo test -p db-postgres -p db-sqlite -p db-oracle-thin -p db-service
           --config 'profile.dev.package."*".opt-level=0' -- --ignored --skip bench_
 

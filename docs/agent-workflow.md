@@ -29,7 +29,7 @@ Release: `/replica-brand` (sweep for trademarked names), `/replica-launch`,
 3. The editor core and UI toolkit are built sequentially by a single agent until
    interfaces stabilise.
 4. Each sub-agent runs the skill loop for its area and finishes with
-   `cargo fmt`, `clippy`, `test`, measurements and a short report.
+   `scripts/check.sh` (see Checks), measurements and a short report.
 5. The lead reviews the sub-agent's branch, opens a pull request that
    references the issue, waits for CI on Windows, macOS and Linux, squash-merges
    it and updates the plan, the feature files and the roadmap.
@@ -51,6 +51,35 @@ appending to a shared one, and nothing generated is committed:
 - **Third-party notices**: one file per entry in `notices/` (ADR 0019).
 - **Counts written by hand** that every feature would change (for example the
   number of theme roles) are left out of the docs; the code is the list.
+
+## Checks
+`scripts/check.sh` is the one definition of the checks: CI's `check` job
+calls it step by step, so a local run uses the same commands and flags as
+CI. On Windows, `scripts/check.ps1` runs it with the bash of Git for Windows.
+
+| command | when | what |
+|---|---|---|
+| `scripts/check.sh --quick` | while iterating | the crates changed against `origin/main` (committed or not) and the crates that depend on them |
+| `scripts/check.sh` | before the last push | every step on the whole workspace |
+| `scripts/check.sh clippy test` | any time | only the named steps (`--help` lists them) |
+
+The steps: `fmt`, `clippy`, `clippy-windows` (clippy for
+`x86_64-pc-windows-gnu`, which catches items used only under `cfg(unix)`
+before the Windows job does; needs `rustup target add x86_64-pc-windows-gnu`
+and mingw-w64, skipped with a note without them), `build` and `test`
+(cargo-nextest, profile `ci`), `throughput` (terminal, ADR 0014), `doc`
+(doctests) and `repo` (progress, layer and notice checks).
+
+What CI runs, and when (`.github/workflows/ci.yml`):
+- One run per pull request: a new push cancels the run of the push before.
+  Runs on `main` are never cancelled.
+- The OS matrix (`check` on Linux, macOS and Windows) and `integration` run
+  on `main` and for pull requests that are ready for review and change more
+  than documentation (`*.md`, `docs/`, `replica/`, `tests/scenarios/`). For a
+  draft or a documentation-only pull request their jobs pass without running
+  anything, so the required checks report; marking a draft ready for review
+  starts the full run. Push checkpoints as drafts.
+- Pull requests restore the build cache of `main` and do not save their own.
 
 ## Hygiene
 Public files are English and contain no personal data. Reference screenshots and

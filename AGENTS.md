@@ -33,11 +33,16 @@ Rules for AI agents and human contributors. Read this file, then
   regressions fail CI.
 
 ## Workflow
-- Before every commit: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo nextest run --workspace`, `cargo test --doc --workspace`. Tests run under
-  [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`; one process per
-  test, timeouts and retries for known flaky tests in `.config/nextest.toml`); nextest does not
-  run doctests, hence the second command. A new test must pass on its own in a fresh process.
+- Before every commit: `cargo fmt --all`. Before every push: `scripts/check.sh`
+  (Windows: `scripts/check.ps1`), which runs what CI runs with the same commands and flags
+  (CI calls it): fmt, clippy (also for `x86_64-pc-windows-gnu` when that target and
+  mingw-w64 are installed), the tests, the doctests and the progress, layer and notice
+  checks. `scripts/check.sh --quick` checks only the crates changed against `origin/main`
+  and the crates that depend on them; see [docs/agent-workflow.md](docs/agent-workflow.md).
+  Tests run under [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`;
+  one process per test, timeouts and retries for known flaky tests in `.config/nextest.toml`);
+  nextest does not run doctests, the script runs them separately. A new test must pass on
+  its own in a fresh process.
 - Layering: `db-core` has no driver dependencies; UI crates depend on traits only.
   Platform crates (`crates/platform/`) know no specific language and never
   depend on product crates (`crates/python/`, ...); see ADR 0005,

@@ -34,10 +34,12 @@ without `cfg` gates.
 
 ```bash
 cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace   # cargo install cargo-nextest --locked
-cargo test --doc --workspace    # doctests: nextest does not run them
+scripts/check.sh            # what CI runs; Windows: scripts/check.ps1
+scripts/check.sh --quick    # only the changed crates and their dependents
 ```
+
+`scripts/check.sh` needs cargo-nextest (`cargo install cargo-nextest --locked`)
+and python3; `scripts/check.sh --help` lists its steps.
 
 - Add tests with your change. Tests that need external services are `#[ignore]`
   and documented.
