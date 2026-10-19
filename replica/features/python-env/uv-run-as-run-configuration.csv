@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+uv run as run configuration,python-env,should,yes,yes,"the current file and Python configurations run through uv run in a uv environment, standalone uv run configurations imported as Python ones (#45, #74)"

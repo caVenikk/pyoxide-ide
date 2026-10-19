@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Package search and version picker,python-env,should,yes,partial,PyPI lookup (env search); picker UI todo

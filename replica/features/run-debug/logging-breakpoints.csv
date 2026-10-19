@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Logging breakpoints (log message, stack trace, Evaluate and log)",run-debug,should,yes,no,Community

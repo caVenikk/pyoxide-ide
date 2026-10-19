@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Search in file and project,editor,must,yes,partial,"find and replace in file (#31) and in files (#43: scopes, masks, editable preview, Replace in Files); missing: Find tool window (#65), multi-row selection (#66), undo across files (#67), comment/string filters (#50)"

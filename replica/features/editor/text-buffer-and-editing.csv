@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Text buffer and editing,editor,must,yes,partial,"rope buffer, undo/redo, clipboard, IME, default keymaps and editing basics (pairing, smart indent, comment, line moves, extend selection, go to line); files changed on disk reloaded, File Cache Conflict, Reload All from Disk (#36)"

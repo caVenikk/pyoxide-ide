@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Interpreter and virtualenv discovery,python-intel,must,yes,partial,"py-env: uv, PATH, venv, Poetry, conda, pyenv, py launcher; status bar widget and popup with the project's environments, the reference's interpreter name imported once; configured interpreters, the Python > Interpreter page and Add Python Interpreter: area settings (#75)"

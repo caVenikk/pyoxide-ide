@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+uv: install and manage Python versions,python-env,should,yes,partial,engine and CLI (env python-install); no UI yet

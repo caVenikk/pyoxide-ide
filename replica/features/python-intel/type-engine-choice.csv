@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Type engine choice (Types widget),python-intel,could,yes,yes,"Pro in the reference (Built-in / Pyrefly, observed); Pyoxide switches its type server here: ty / basedpyright (#87)"

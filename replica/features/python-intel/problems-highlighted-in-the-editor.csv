@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Problems highlighted in the editor (severity, unused, deprecated, tooltip)",python-intel,must,yes,yes,"Community; from ruff and the type server (#84, #86: one hover popup with problems, first fix and documentation)"

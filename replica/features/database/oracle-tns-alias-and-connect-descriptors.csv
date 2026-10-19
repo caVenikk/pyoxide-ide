@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Oracle TNS alias and connect descriptors,database,should,yes,yes,"Oracle Client (dsn as is); thin via oracle_net (Easy Connect, descriptors, tnsnames.ora)"

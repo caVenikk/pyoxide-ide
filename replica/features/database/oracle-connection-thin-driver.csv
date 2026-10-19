@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Oracle connection (thin driver),database,must,yes,yes,"db-oracle-thin over oracle-rs with a PL/SQL wrapper (works around oracle-rs bugs); no NNE, no cancel"

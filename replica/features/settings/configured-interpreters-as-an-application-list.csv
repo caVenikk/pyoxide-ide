@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Configured interpreters as an application list with one-time import from the reference,settings,must,yes,yes,"Community; interpreters of the reference that still exist (#75); interpreters.toml, imported once from jdk.table.xml (#75)"

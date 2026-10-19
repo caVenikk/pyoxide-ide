@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Quick fixes and intention actions (Alt+Enter),python-intel,must,yes,yes,"Community; ruff fixes with Disable for file / line / project (#86, #87); intention preview later"

@@ -48,5 +48,6 @@ with the skill loop described in [agent-workflow.md](agent-workflow.md).
       and UI theme import done in the `themes` crate (settings UI pending);
       PyCharm data sources and passwords import done
 
-Priorities are adjusted from the feature parity report (`replica/features.csv`)
-and the performance report (`replica/perf.md`), not the other way around.
+Priorities are adjusted from the feature parity report (`replica/features/`,
+`python3 scripts/progress.py`) and the performance report (`replica/perf.md`),
+not the other way around.

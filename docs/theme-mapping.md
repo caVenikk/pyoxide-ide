@@ -10,17 +10,18 @@ a key or a role is missing from this file.
 
 ## The theme model
 
-A theme assigns a value to every role of three kinds, plus fonts:
+A theme assigns a value to every role of three kinds, plus fonts. The roles
+are listed, with a description each, in `crates/platform/themes/src/roles.rs`.
 
-- **UI roles** (`ui.*`, 222 of them): flat colours of the interface, the
-  editor chrome, controls, icons, version control, diagnostics, the Run
-  console and the terminal.
-- **Text roles** (`syntax.*`, 53): syntax tokens and editor decorations.
+- **UI roles** (`ui.*`): flat colours of the interface, the editor chrome,
+  controls, icons, version control, diagnostics, the Run console and the
+  terminal.
+- **Text roles** (`syntax.*`): syntax tokens and editor decorations.
   Each has text attributes: foreground `fg`, background `bg`, `bold`, `italic`,
   `underline` (`single`, `double`, `wavy`, `dotted`, `dashed`, `thick`) with
   `underline-color`, `strikethrough` and a `border` colour. Unset attributes
   inherit from the editor defaults.
-- **Metrics** (`metrics.*`, 28): layout numbers in logical pixels (row height,
+- **Metrics** (`metrics.*`): layout numbers in logical pixels (row height,
   gutter width, paddings, radii, ...).
 - **Fonts** (`font.*`): UI, editor and terminal families (a list, first match
   wins), sizes, editor line spacing and ligatures.

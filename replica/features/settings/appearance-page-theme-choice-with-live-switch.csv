@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Appearance page: theme choice with live switch, Custom themes and Import Theme…",settings,must,yes,yes,"Community; Theme combo (grouped, live, Cancel keeps it), editor scheme combo, Import Theme… (#153); Sync with OS, Accessibility and UI Options groups not drawn yet"

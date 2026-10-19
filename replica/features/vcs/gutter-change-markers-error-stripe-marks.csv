@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Gutter change markers, error stripe marks and marker popup (Rollback Lines, Next / Previous Change)",vcs,must,yes,partial,"Community; markers within 5 ms of a keystroke, popup with Rollback / Copy / Next / Previous (#169); no Show Diff (no diff viewer yet), no Commit this change"

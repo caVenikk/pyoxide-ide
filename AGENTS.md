@@ -18,9 +18,10 @@ Rules for AI agents and human contributors. Read this file, then
   assistant. Decisions go into ADRs as neutral context, decision and consequences.
 - Public text (code, comments, docs, commits, issues) is in English.
 - **Keep progress current.** A change that adds or finishes a feature updates its
-  row in `replica/features.csv` (`clone`: no / partial / yes) in the same PR, then
-  runs `python3 scripts/progress.py`, which regenerates `docs/PROGRESS.md` and the
-  README progress block. CI fails if they are out of date.
+  file in `replica/features/<area>/` (one CSV file per feature, `clone`: no /
+  partial / yes) in the same PR; a new feature is a new file. CI validates the
+  files (`python3 scripts/progress.py --check-data`). The progress report is
+  generated from them after the merge and published, never committed (ADR 0020).
 - No unrelated refactors. Keep changes small and reviewable.
 
 ## Language and performance

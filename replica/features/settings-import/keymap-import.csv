@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Keymap import,settings-import,must,yes,yes,"reference keymap XML with its parent chain, Import Keymap… on the Keymap page (#40)"

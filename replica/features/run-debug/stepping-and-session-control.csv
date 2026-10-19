@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Stepping and session control (step over / into / into my code / out, run to cursor, resume, pause, stop, rerun)",run-debug,must,yes,yes,Community; keys of the macOS and Windows keymaps (#165); debug actions not yet on the Keymap page

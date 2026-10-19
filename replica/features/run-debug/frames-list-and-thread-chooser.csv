@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Frames list and thread chooser (library frames folded),run-debug,must,yes,yes,"Community; thread combo, library frames on the non-project tint, frame up / down from anywhere (#166)"

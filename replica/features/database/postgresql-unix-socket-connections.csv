@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+PostgreSQL Unix-socket connections,database,could,yes,partial,"implemented, untested"

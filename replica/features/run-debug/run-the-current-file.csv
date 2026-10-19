@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Run the current file (Run tool window: console with ANSI colours and links, stdin, stop / rerun)",run-debug,must,yes,yes,"#45; uv run for uv environments; soft wraps, print and console find later"

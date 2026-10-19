@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Main window chrome (toolbar, tool-window stripes, status bar)",editor,must,yes,partial,New UI layout and Islands themes; toolbar file path; run widget and Run tool window work for Current File; interpreter status widget; other stripe buttons and status widgets are placeholders; native caption on Windows/Linux

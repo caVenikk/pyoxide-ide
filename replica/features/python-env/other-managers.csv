@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Other managers (poetry / conda / pipenv / pip),python-env,should,yes,partial,"discovery of Poetry/conda/Pipenv, pip fallback for packages"

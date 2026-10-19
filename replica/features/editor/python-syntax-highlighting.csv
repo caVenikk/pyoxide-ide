@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Python syntax highlighting,editor,must,yes,yes,tree-sitter off the UI thread mapped to theme text roles

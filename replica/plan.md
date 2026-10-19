@@ -3,8 +3,8 @@
 Kept by the lead agent. Areas, dependencies, owners and status. Order of
 areas: db (M1) -> editor (M2) -> python-env (M2b) -> python-intel (M3) ->
 run-debug (M4) -> vcs (M5) -> db-gui (M6) -> docker, settings-import,
-packaging (M7). Priorities are adjusted with `python3
-skills/replica-diff/parity.py replica/features.csv` and `replica/perf.md`.
+packaging (M7). Priorities are adjusted with the parity report (`python3
+scripts/progress.py`, from `replica/features/`) and `replica/perf.md`.
 
 ## Rules for parallel work
 - Contracts first: traits, command ids, file formats are committed on `main`
@@ -13,8 +13,9 @@ skills/replica-diff/parity.py replica/features.csv` and `replica/perf.md`.
   worktree and branch, finish with `cargo fmt --all`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace`,
   measurements and a short report.
-- Sub-agents do not edit `replica/features.csv`, `docs/PROGRESS.md`,
-  `README.md` or the roadmap; the lead updates them when merging.
+- Sub-agents do not edit `replica/features/`, `README.md` or the roadmap;
+  the lead updates them when merging. Generated progress output is never
+  committed (ADR 0020).
 - The editor core and the UI toolkit are built by one agent, sequentially.
 
 ## M1: database layer (area db)

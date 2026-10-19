@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Debug tool window (session tabs, toolbar, Threads & Variables, Console with stdin)",run-debug,must,yes,partial,Community; Console through DAP runInTerminal like the Run console (#165); Threads & Variables with frames and variables (#166); no evaluate field yet

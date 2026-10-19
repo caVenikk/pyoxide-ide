@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Editor > Font page,settings,must,yes,yes,"Community; font, size, line height, ligatures, Restore defaults, fallback font, preview; editors and Run console follow on Apply (#154); no weights / character variants"

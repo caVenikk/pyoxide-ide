@@ -16,7 +16,7 @@ description: >-
 - "Shell" = main window: menus, command palette, dockable tool-window layout, status bar, editor tabs, wired to the command registry. "Screens" = panels, dialogs, settings pages.
 - Vertical slice first: open project -> open file -> edit with highlighting -> diagnostics -> run script -> output panel. Then DB console, debugger, VCS.
 - Every user-visible action is a registered command; no logic inside widgets. Write labels and strings fresh, or take them from the IntelliJ Platform Community (Apache-2.0) with a `notices/` entry; never from proprietary products or plugins.
-- Per screen done = states implemented, keyboard path, theme tokens only, scenario file passes, `features.csv` updated, `cargo fmt/clippy/test` green on Windows and macOS CI.
+- Per screen done = states implemented, keyboard path, theme tokens only, scenario file passes, the feature's file in `replica/features/` updated, `cargo fmt/clippy/test` green on Windows and macOS CI.
 - If stuck on "how does PyCharm do X": use recon sources only (docs, scenarios, Community source). Never look inside Pro binaries.
 
 Reads `replica/recon.md`, `replica/architecture.md`, `replica/design/`.

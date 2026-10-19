@@ -13,6 +13,7 @@ as is (rules, formats, scripts).
 | backend | engine services: LSP/DAP clients, DB drivers (`db-*`), VCS, Docker, keychain (no auth/payments) |
 | deploy | release: signed builds for Windows/macOS/Linux, GitHub Release (no hosting/domains) |
 | landing, pricing, store listing | README, docs site, release notes (no pricing, no stores) |
+| `replica/features.csv` | `replica/features/<area>/<name>.csv`, one file per feature with the same columns (ADR 0020); `python3 scripts/progress.py --csv` prints the whole matrix as one CSV, e.g. for `parity.py` |
 
 ## Allowed sources (in addition to upstream rules)
 1. Public documentation, specifications, protocols (LSP, DAP, Oracle docs, ...).

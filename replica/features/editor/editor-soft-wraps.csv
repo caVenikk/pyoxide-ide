@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Editor soft wraps,editor,must,yes,yes,"#119: wrap over visual rows (caret, selection, Up/Down, Home/End, PageUp/Down, scroll, hit testing), incremental re-wrap with large texts off the UI thread, Soft-Wrap command (View > Active Editor), signs on the caret line or all, original indent, editor.toml masks (Editor > General page with #92), Python wrap rules; Home stop inside a continuation indent later"

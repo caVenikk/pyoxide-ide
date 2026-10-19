@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+File tree and project model,editor,must,yes,partial,"open folder, lazy tree, ignored-files list and excluded folders as in the reference (Mark Directory As > Excluded, .oxide store, one-time .idea import), context menu; New (File, Directory, Python File / Package), Rename, Delete to the trash, Cut / Copy / Paste, Copy / Move dialogs, drag and drop, Copy Path (#37); no multi-selection (#125), no Safe Delete or rename with usages (#123)"

@@ -66,7 +66,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scripts/progress.py --check
+      # The feature matrix, one file per feature in replica/features/
+      # (ADR 0020). The report is not committed: it goes to the job summary
+      # here and is published from main by progress.yml.
+      - run: python3 scripts/progress.py --check-data
+      - run: python3 scripts/progress.py >> "$GITHUB_STEP_SUMMARY"
       - run: python3 scripts/check-layers.py
       # notices/ holds the third-party notices, one file per entry (ADR 0019).
       - run: python3 scripts/notice.py --check

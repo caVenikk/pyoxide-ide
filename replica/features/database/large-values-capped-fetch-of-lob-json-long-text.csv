@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Large values: capped fetch of LOB / JSON / long text,database,must,yes,partial,max_value_bytes and Value::Truncated; lazy full fetch todo

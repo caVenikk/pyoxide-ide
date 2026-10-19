@@ -89,7 +89,7 @@ Pyoxide mapping: `DataSource` = connection profile (TOML, ADR 0004);
 `Session` = `db_core::Connection`; `ResultPage` = `Cursor::next_page`.
 
 ### Feature matrix
-See `replica/features.csv`, areas `database` and `db-gui`. Database tools
+See `replica/features/`, areas `database` and `db-gui`. Database tools
 are a PyCharm Professional feature; they are promoted to MVP priorities here.
 
 ### Out of scope for the MVP
@@ -254,7 +254,7 @@ Pyoxide mapping: `Project` is the crate `project`, `Document` the crate
 `Keymap` the TOML keymaps of the crate `workbench` (ADR 0007).
 
 ### Feature matrix
-See `replica/features.csv`, area `editor`: text buffer and editing, Python
+See `replica/features/`, area `editor`: text buffer and editing, Python
 syntax highlighting, tabs, file tree and project model are this slice;
 search, multiple carets, folding and live templates come later.
 
@@ -466,7 +466,7 @@ Pyoxide mapping: tool and engine settings in `.oxide/project.toml`
 services crates (ADR 0010).
 
 ### Feature matrix
-See `replica/features.csv`, area `python-intel`.
+See `replica/features/`, area `python-intel`.
 
 ### Out of scope for this area
 - PyCharm's own PSI engine and its inspections (replaced by servers).
@@ -644,7 +644,7 @@ once from `.idea`. Emulator and PTY: ADR 0014 (proposed; candidate
 a product hook (ADR 0005).
 
 ### Feature matrix
-See `replica/features.csv`, area `terminal`.
+See `replica/features/`, area `terminal`.
 
 ### Out of scope or deferred
 - Engine choice, the Classic engine, AI agent sessions, SSH and remote
@@ -823,7 +823,7 @@ the program starts through DAP `runInTerminal` so the Console keeps stdin
 like Run. DAP client and debugpy distribution: ADR 0015 (proposed).
 
 ### Feature matrix
-See `replica/features.csv`, area `run-debug` (debugger rows).
+See `replica/features/`, area `run-debug` (debugger rows).
 
 ### Out of scope or deferred
 - The Mode switch and pydevd (one backend).
@@ -998,7 +998,7 @@ thread. Proposed budgets: status of a 10k-file repository within 150 ms of
 the watcher batch; gutter markers within 50 ms of the last keystroke.
 
 ### Feature matrix
-See `replica/features.csv`, area `vcs`.
+See `replica/features/`, area `vcs`.
 
 ### Out of scope or deferred
 - Later: blame, Git log tool window and file history, merge conflict UI,
@@ -1182,7 +1182,7 @@ switching: ADR 0018 (proposed); VS Code keymaps come from Community data
 files (NOTICE entry).
 
 ### Feature matrix
-See `replica/features.csv`, area `settings`; import formats stay in area
+See `replica/features/`, area `settings`; import formats stay in area
 `settings-import`, the packages table is the python-env row "Package
 manager panel".
 

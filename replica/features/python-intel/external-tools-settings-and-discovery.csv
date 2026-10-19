@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+External tools settings and discovery (ruff / ty / Pyright / Basedpyright / Pyrefly),python-intel,must,yes,partial,"Community; lookup Sdk / Path / uvx as the reference, settings in .oxide, one-time .idea/pyLspTools.xml import (#87); Settings pages: area settings (#92); Pyright / Pyrefly not offered yet"

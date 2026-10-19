@@ -127,7 +127,7 @@ completion usable, or users will treat it as a downgrade.
 
 ## Implications for Pyoxide
 
-### Existing rows in `replica/features.csv`
+### Existing rows in `replica/features/`
 
 | theme | existing rows | suggested change |
 |---|---|---|
@@ -183,7 +183,7 @@ Notes for whoever publishes this paragraph:
 - The statements about Rust, the absence of a Java runtime and driver
   downloads, plain-text profiles and the keychain or KeePass storage describe
   accepted design (ADR 0003 and ADR 0004). Paging, cancel, on-demand loading
-  and PostgreSQL and SQLite support are not complete in `replica/features.csv`;
+  and PostgreSQL and SQLite support are not complete in `replica/features/`;
   describe them as shipped only when they are.
 - The last sentence is the only place numbers would appear. Do not state any
   speed, startup, memory or Windows figure until the measured rows exist.

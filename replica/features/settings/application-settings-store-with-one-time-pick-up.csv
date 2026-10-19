@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Application settings store with one-time pick-up of the reference's settings (theme, scheme, keymap, font, soft wraps, autosave)",settings,must,yes,yes,"own store (settings.toml); the reference's data files are snapshotted at import and each feature picks its values up once (`[import.applied]`) (#92, #40, #155)"

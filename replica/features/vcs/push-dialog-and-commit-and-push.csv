@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Push dialog and Commit and Push (upstream for new branches, force with lease, Push Rejected)",vcs,must,yes,yes,"Community; credentials through the user's helper and ssh-agent (#91); push dialog, force-with-lease, Commit and Push (#172)"

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Python packages and source roots in the tree,editor,must,yes,yes,"#120: package and pyproject-module icons, sources / test sources roots with hints, Mark Directory As (incl. the project root), .oxide [roots] with one-time .idea sourceFolder import; roots feed Go to File, run PYTHONPATH and module names (ADR 0013); Namespace Package and Not Excluded later"

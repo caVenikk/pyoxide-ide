@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Dependency groups and extras in pyproject.toml,python-env,should,yes,partial,read and edit via uv add --group/--optional; no UI yet

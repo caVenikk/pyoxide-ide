@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+PEP 723 inline script dependencies,python-env,could,yes,partial,parsed by the project model

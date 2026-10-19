@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Theme quick switch with preview (gear > Theme, Quick Switch Scheme)",settings,must,yes,partial,"Community; gear Theme… popup with 500 ms preview, Esc restores; Quick Switch Scheme (Ctrl+`) has only the Theme row (#153)"

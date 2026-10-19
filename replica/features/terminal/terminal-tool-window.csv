@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,no,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89)"

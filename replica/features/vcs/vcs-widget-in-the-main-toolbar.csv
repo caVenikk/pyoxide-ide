@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"VCS widget in the main toolbar (branch, detached HEAD, operation state, ahead / behind)",vcs,must,yes,yes,"Community; branch / tag / commit, merging / rebasing state, incoming and outgoing arrows, tooltips (#28)"

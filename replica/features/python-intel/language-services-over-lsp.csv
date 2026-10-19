@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Language services over LSP (start, stop, restart, status widget)",python-intel,must,yes,yes,Community; ruff and ty / basedpyright over the platform LSP client (#83); Language Services widget and popup with restart / stop and server error output (#85)
