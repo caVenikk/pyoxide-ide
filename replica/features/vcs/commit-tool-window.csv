@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Commit tool window (changes tree with check boxes, message, Commit, legend, errors)",vcs,must,yes,yes,"Community; Cmd+K / Ctrl+K, non-modal commit, Amend, options, commit checks (#170); no grouping by directory, Shelve, change lists"

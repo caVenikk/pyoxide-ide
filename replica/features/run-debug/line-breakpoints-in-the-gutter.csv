@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Line breakpoints in the gutter (click, Cmd+F8 / Ctrl+F8, temporary, Alt+click, icons over line numbers)",run-debug,must,yes,yes,"Community; stoppable lines as the reference, hover icon, state icons, follow edits (#164)"

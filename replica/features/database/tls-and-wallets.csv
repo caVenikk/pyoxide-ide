@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+TLS and wallets,database,should,yes,partial,"PostgreSQL all modes; Oracle Client tcps and wallets; thin: TCPS with ewallet.pem, no cwallet.sso; TCPS untested live"

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Python > Interpreter page (combo, Show All, add / remove / rename)",settings,must,yes,yes,"Community; combo, Add Interpreter, Show All… dialog with rename / remove / paths, packages panel placeholder (#75)"

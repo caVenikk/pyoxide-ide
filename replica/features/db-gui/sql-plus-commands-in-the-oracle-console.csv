@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+SQL*Plus commands in the Oracle console (DESCRIBE / EXEC),db-gui,should,no,no,own feature; feedback

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Code completion (basic, auto-popup, auto-import)",python-intel,must,yes,yes,"Community (#85, #87); completion characters, documentation in the lookup and postfix templates later"

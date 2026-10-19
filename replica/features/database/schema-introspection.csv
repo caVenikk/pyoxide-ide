@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Schema introspection (tables / views / columns),database,must,yes,yes,"Oracle (ALL_* views, 19c-safe), PostgreSQL, SQLite"

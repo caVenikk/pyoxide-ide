@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+uv: project init and sync (pyproject.toml / uv.lock),python-env,must,yes,partial,engine and CLI (env init/sync/lock); no UI yet

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Open a SQLite file directly,db-gui,should,yes,no,feedback

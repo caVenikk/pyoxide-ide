@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Run widget and configurations during a debug session (Pause / Resume / Rerun, Debug in the dropdown and dialog)",run-debug,must,yes,yes,"Community; Debug buttons of #74 enabled, shared Stop / Rerun, Is Running dialog (#165)"

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Type checking,python-intel,must,yes,yes,"Community in the reference (PSI inspections or an LSP tool); Pyoxide: ty (ADR 0011), basedpyright as an option; type problems shown as warnings as the built-in engine does"

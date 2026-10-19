@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Settings window (page tree with search, Revert changes, Apply / OK / Cancel, non-modal, Cmd+, / Ctrl+Alt+S)",settings,must,yes,yes,Community; ADR 0017 (#92)

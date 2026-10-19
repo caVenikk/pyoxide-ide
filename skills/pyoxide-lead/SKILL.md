@@ -21,7 +21,7 @@ The lead is the session that plans, delegates and reviews; sub-agents implement 
 4. Differences: small ones -> a follow-up issue with exact items; real bugs -> back to the agent as a numbered must-fix list.
 
 ## Merging
-- Bookkeeping in the PR branch: a `replica/features.csv` row (`clone` yes / partial) + `python3 scripts/progress.py`, commit `docs(progress): ... (#N)`.
+- Bookkeeping in the PR branch: the feature's file in `replica/features/<area>/` (`clone` yes / partial; a new feature is a new file `<name>.csv`, header and one row) + `python3 scripts/progress.py --check-data`, commit `docs(progress): ... (#N)`. Nothing generated is committed: the Progress workflow publishes the report to GitHub Pages after the merge (ADR 0020).
 - Third-party notices: a PR that copies or adapts open-source code adds its own file `notices/<area>-<name>.md` (one per entry, checked by `python3 scripts/notice.py --check` in CI); the root `NOTICE` is not edited. A branch that still edits the root `NOTICE` moves its entry into such a file when it rebases.
 - When main moved: rebase (or merge main into a branch others build on); after conflicts run clippy and `cargo nextest run --workspace` (plus `cargo test --doc --workspace`) before pushing. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
 - Merge through auto-merge after review: `gh pr ready <n>` (if draft), `gh pr merge <n> --auto --squash --subject "<title> (#n)" --body "... Closes #N"`. Do not poll CI; disable auto-merge (`--disable-auto`) before pushing further changes. Squash merge, never a `Co-Authored-By` line. Pull requests from forks are merged only with a maintainer's explicit OK.

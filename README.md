@@ -33,27 +33,13 @@ the same engine.
 
 ## Progress
 
-<!-- progress:start -->
-**Overall parity: 53%** `███████████░░░░░░░░░`
+[![Feature parity](https://img.shields.io/endpoint?url=https%3A%2F%2Fcavenikk.github.io%2Fpyoxide-ide%2Fparity.json)](https://cavenikk.github.io/pyoxide-ide/)
 
-| Area | Parity | Done | Partial | Todo |
-|---|---|---|---|---|
-| database | 71% `███████░░░` | 15 | 6 | 6 |
-| db-gui | 0% `░░░░░░░░░░` | 0 | 0 | 8 |
-| editor | 62% `██████░░░░` | 5 | 6 | 3 |
-| settings-import | 55% `█████░░░░░` | 1 | 2 | 1 |
-| python-intel | 67% `███████░░░` | 10 | 4 | 7 |
-| run-debug | 48% `█████░░░░░` | 7 | 6 | 13 |
-| terminal | 21% `██░░░░░░░░` | 0 | 7 | 14 |
-| vcs | 46% `█████░░░░░` | 7 | 3 | 15 |
-| settings | 79% `████████░░` | 12 | 2 | 4 |
-| docker | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
-| platform | 0% `░░░░░░░░░░` | 0 | 0 | 1 |
-| packaging | 30% `███░░░░░░░` | 0 | 1 | 1 |
-| python-env | 55% `██████░░░░` | 1 | 8 | 0 |
-
-Per-feature status: [docs/PROGRESS.md](docs/PROGRESS.md)
-<!-- progress:end -->
+Feature parity with PyCharm, overall, per area and per feature, is published at
+[cavenikk.github.io/pyoxide-ide](https://cavenikk.github.io/pyoxide-ide/) after
+every change on `main`. It is generated from the feature matrix in
+[`replica/features/`](replica/features/), one file per feature;
+`python3 scripts/progress.py` prints the same report locally.
 
 ## Workspace
 

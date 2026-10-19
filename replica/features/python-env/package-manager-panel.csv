@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Package manager panel (list / install / upgrade / remove),python-env,must,yes,partial,"engine and CLI (env packages/add/remove, outdated); panel UI todo"

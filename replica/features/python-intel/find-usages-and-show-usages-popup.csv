@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Find usages and Show Usages popup,python-intel,must,yes,partial,Community; Show Usages popup (#86); Find Usages tool window later

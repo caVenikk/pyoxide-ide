@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Object source and DDL,database,should,yes,yes,"Oracle (ALL_SOURCE, DBMS_METADATA), PostgreSQL, SQLite"

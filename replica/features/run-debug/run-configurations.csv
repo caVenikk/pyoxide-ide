@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Run configurations,run-debug,must,yes,partial,"Python and Shell Script types, one-time import from .idea (personal and shared, unsupported types kept read-only), run widget dropdown, Edit Configurations dialog, temporary configurations (#74, ADR 0012); no debug (#90), no gutter or Project view Run entries, interpreter as text until #75"

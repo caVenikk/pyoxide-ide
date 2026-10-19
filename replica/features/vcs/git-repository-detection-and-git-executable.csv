@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Git repository detection and git executable lookup,vcs,must,yes,yes,"Community; the git executable for every operation, ADR 0016 (#91)"

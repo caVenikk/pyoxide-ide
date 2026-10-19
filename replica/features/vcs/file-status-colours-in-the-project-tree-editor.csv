@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"File status colours in the project tree, editor tabs and file lists (ignored included)",vcs,must,yes,yes,"Community; tree, tabs, Recent Files and Go to File rows, unsaved edits at once (#169)"

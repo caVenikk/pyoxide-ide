@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Go to declaration (Cmd+B / Cmd+click) and type declaration,python-intel,must,yes,partial,"Community; Cmd+B, Cmd+click, chooser, usages on the declaration (#86), Back / Forward (#103); Go to Type Declaration missing"

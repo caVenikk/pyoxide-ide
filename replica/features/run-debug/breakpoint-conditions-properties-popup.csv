@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Breakpoint conditions, properties popup, Breakpoints dialog and Mute Breakpoints",run-debug,must,yes,partial,"Community; condition, popup, dialog (#164); no completion in the condition, Mute shown per project"

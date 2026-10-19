@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Add Python Interpreter dialog (new virtualenv or uv, existing interpreter)",settings,must,yes,yes,"Community; Virtualenv and uv, select existing, all validation messages, Pythons to download through uv (#75)"

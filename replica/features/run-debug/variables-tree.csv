@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Variables tree (lazy and paged children, Special Variables, Set Value, Copy Value)",run-debug,must,yes,partial,"Community; lazy children, Special Variables, Return Values, sizes, changed values (#166); no Set Value / Copy Value yet"

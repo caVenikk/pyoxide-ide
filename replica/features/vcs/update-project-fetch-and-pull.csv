@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Update Project, Fetch and Pull",vcs,must,yes,partial,"Community (#91); merge/rebase with stash, fetch, pull (#172); no askpass, choices not saved"

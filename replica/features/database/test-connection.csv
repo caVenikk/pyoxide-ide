@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Test connection (server and driver version),database,must,yes,yes,pyoxide-db test / db.connection.test

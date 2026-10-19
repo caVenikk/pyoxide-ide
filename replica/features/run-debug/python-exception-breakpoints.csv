@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Python exception breakpoints (Any exception on termination / on raise),run-debug,must,yes,partial,Community; Any exception + built-in classes in the dialog (#164); one class needs exceptionOptions (#200)

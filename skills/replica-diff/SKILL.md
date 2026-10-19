@@ -14,7 +14,7 @@ description: >-
 
 ## Pyoxide override (read first; see `../PYOXIDE.md`)
 
-- Feature parity: `python3 parity.py replica/features.csv` after every milestone; Pro-only features count as `could` unless the maintainers promote them.
+- Feature parity: `python3 scripts/progress.py --csv > <tmp>/features.csv`, then `python3 skills/replica-diff/parity.py <tmp>/features.csv` after every milestone (the matrix is one file per feature in `replica/features/`); Pro-only features count as `could` unless the maintainers promote them.
 - Layout diff: `imgdiff.py` between reference screenshots of PyCharm (`replica/screens/`, local only) and Pyoxide screenshots rendered offscreen. Layout resemblance is a goal for muscle memory. Nothing is copied from proprietary products (pixels, icons, wording); Community (Apache-2.0) icons, themes, metrics and strings are allowed with a `notices/` entry (`docs/clean-room.md`).
 - Behaviour diff = run the scenario files; report pass/fail per scenario.
 - Also report performance deltas against the baseline numbers measured in PyCharm (see docs/performance.md) (startup, typing latency, memory).

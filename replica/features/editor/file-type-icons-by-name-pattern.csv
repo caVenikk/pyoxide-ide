@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+File type icons by name pattern,editor,must,yes,yes,"#121: associations as data (exact name, name in any case, pattern, extension; later ones override), reference icons incl. Docker / Compose / .dockerignore / GitLab CI / GitHub / ignore files / INI / .env, our own YAML icon; unknown names typed from their first bytes off the UI thread; File Types settings page with #92"

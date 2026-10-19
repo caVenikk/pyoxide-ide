@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Transaction mode (auto / manual),database,should,yes,yes,all four backends

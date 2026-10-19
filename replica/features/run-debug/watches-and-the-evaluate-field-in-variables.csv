@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Watches and the evaluate field in Variables,run-debug,should,yes,no,Community; watches kept per run configuration

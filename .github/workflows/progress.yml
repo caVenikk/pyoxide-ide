@@ -1,0 +1,35 @@
+name: Progress
+# Publishes the feature parity report and its badge (scripts/progress.py) to
+# GitHub Pages after a change of the feature matrix on main (ADR 0020). Pages
+# must be enabled with "GitHub Actions" as the source.
+on:
+  push:
+    branches: [main]
+    paths:
+      - replica/features/**
+      - scripts/progress.py
+      - .github/workflows/progress.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+# One deployment at a time; a newer run waits and publishes the newer data.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  pages:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/progress.py --site _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -9,7 +9,7 @@ settings-import, packaging):
 
 | Step | Skill | Output |
 |---|---|---|
-| 1 | `/replica-recon` | behaviour map, `replica/features.csv`, scenarios in `tests/scenarios/<area>/` |
+| 1 | `/replica-recon` | behaviour map, feature matrix in `replica/features/`, scenarios in `tests/scenarios/<area>/` |
 | 2 | `/replica-architect` | ADRs in `docs/adr/`, module boundaries |
 | 3 | `/replica-design` | themes and tokens, contrast checks |
 | 4 | `/replica-build` | panels, dialogs, commands, vertical slices |
@@ -32,9 +32,25 @@ Release: `/replica-brand` (sweep for trademarked names), `/replica-launch`,
    `cargo fmt`, `clippy`, `test`, measurements and a short report.
 5. The lead reviews the sub-agent's branch, opens a pull request that
    references the issue, waits for CI on Windows, macOS and Linux, squash-merges
-   it and updates the plan, `features.csv` and the roadmap.
+   it and updates the plan, the feature files and the roadmap.
 6. Prototypes built to compare options stay out of `main`: their conclusions and
    numbers go into the ADR, raw data into the issue.
+
+## Files that parallel pull requests share
+Pull requests are developed in parallel and merged in any order, and each
+rebase costs a CI run. So a change adds its own small files instead of
+appending to a shared one, and nothing generated is committed:
+- **Feature status**: one CSV file per feature,
+  `replica/features/<area>/<name>.csv` (ADR 0020). A pull request edits the
+  `clone` column of its features or adds a file for a new one;
+  `python3 scripts/progress.py --check-data` validates the files (the
+  `progress` CI job). The report is generated, not committed: the `progress`
+  job shows it in its summary, and the Progress workflow publishes it to
+  GitHub Pages after each change on `main` (the README links the page and its
+  badge). `python3 scripts/progress.py` prints it locally.
+- **Third-party notices**: one file per entry in `notices/` (ADR 0019).
+- **Counts written by hand** that every feature would change (for example the
+  number of theme roles) are left out of the docs; the code is the list.
 
 ## Hygiene
 Public files are English and contain no personal data. Reference screenshots and

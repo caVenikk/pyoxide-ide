@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Keymap choice and runtime switch (macOS, Windows, VS Code; gear > Keymap)",settings,must,yes,yes,"Community; ADR 0018; VS Code keymaps from Community data, Settings, gear menu, Quick Switch Scheme (#40); no Zed keymap (no permissive source)"

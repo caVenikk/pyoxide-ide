@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Navigation popups (Search Everywhere, Go to File / Action, Recent Files)",editor,must,yes,partial,"All / Files / Actions / Text tabs, ported name matcher, file:line, recent files; Classes and Symbols with M3; Preview toggle with a read-only preview shared with Find in Files (#118; look follow-ups #177); Find window (#65); the reference's ML ranking replaced by a fixed rule"

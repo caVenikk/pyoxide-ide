@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+uv: create virtualenv from the IDE,python-env,must,yes,partial,engine and pyoxide CLI (env venv); no UI yet

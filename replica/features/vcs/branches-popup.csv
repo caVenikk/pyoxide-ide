@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Branches popup (Recent / Local / Remote, search, checkout, new, rename, delete, Smart Checkout)",vcs,must,yes,partial,"Community; groups, search, branch submenu, New / Rename / Checkout dialogs, Smart Checkout by stash (#28); Update / Push / Fetch work (#172), favourites not saved"
