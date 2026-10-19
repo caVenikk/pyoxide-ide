@@ -367,6 +367,66 @@ of two between runs; compare runs with a similar library time.
 | 2026-10-19 | mac-1 | test executables of a full test build | 157 files, 5.7 GiB | 81 files, 1.1 GiB | per worktree `target/` |
 | 2026-10-19 | mac-1 | `cargo nextest run --workspace` | 277 s, 2111 run, 158 skipped | 346 s, 2111 run, 158 skipped | load 15-25 before, 30-35 after; the two keymap tests (one test each) set the length |
 
+### CI
+The `check` job of `.github/workflows/ci.yml` on GitHub-hosted runners:
+`ubuntu-latest` (4 vCPU, x64), `macos-latest` (3 cores, arm64),
+`windows-latest` (4 vCPU, x64). Runners of one label differ in CPU (AMD
+EPYC 7763, 9V74 or 9V45, Intel Xeon 6973P; Apple M1 or M2 Pro), and with it
+the times by up to a factor of two, so settings are compared on one machine
+where possible: one job restores a cache, cleans the workspace crates and
+builds again with one setting changed (the build of a pull request with a
+warm cache). Minutes unless stated; "build" is cargo's time for the test
+build, "tests" nextest's run time; the test counts are the same before and
+after (2111 on Linux and macOS, 2047 on Windows).
+
+Job and steps with a warm cache, before and after:
+
+| date | OS | settings | job | clippy | build | tests | notes |
+|---|---|---|---|---|---|---|---|
+| 2026-10-17 | Linux | main: dependencies `opt-level=0`, full debug info, 102 test programs | 19.6 | 0.6 | 4.1 | 13.7 (822 s) | |
+| 2026-10-17 | macOS | same | 23.9 | 0.7 | 4.3 | 17.4 (1046 s) | |
+| 2026-10-17 | Windows | same | 30.3 | 1.8 | 10.3 | 15.9 (956 s) | |
+| 2026-10-19 | Linux | main, one test program per crate | 18.1 | 0.5 | 2.2 | 14.2 (854 s) | |
+| 2026-10-19 | macOS | same | 18.2 | 0.9 | 2.7 | 13.5 (812 s) | |
+| 2026-10-19 | Windows | same | 24.9 | 1.4 | 4.7 | 16.6 (994 s) | |
+| 2026-10-19 | Linux | dependencies optimized (the dev profile), line tables | | 0.4 | 1.0 | 2.3 (136 s) | build: EPYC 9V45, see below; tests: Xeon 6973P |
+| 2026-10-19 | macOS | same | | 0.3 | 1.0 | 5.2 (310 s) | build: M2 Pro, 102 test programs; tests: M1 |
+| 2026-10-19 | Windows | same | | | 2.7 | 5.0 (297 s) | build: EPYC 7763 with rust-lld (no difference, see below) |
+
+With the new settings the first run after a change of the settings or of
+the Rust toolchain builds the dependencies from scratch (job 16.3 min on
+Linux, 28.6 on macOS, 38.1 on Windows; clippy 4.6 / 9.0 / 11.7, build
+8.5 / 12.9 / 19.4) and main saves the cache for the pull requests after it.
+The two keymap tests (one test each) are the longest tests and set the
+length of the test step: 114 s / 147 s / 222 s, before 757 s / 605 s /
+840 s.
+
+Each setting:
+
+| date | setting | OS | machine | before | after | kept |
+|---|---|---|---|---|---|---|
+| 2026-10-19 | dependencies `opt-level=2` instead of 0: CPU time of all tests | Linux | different | 2057 s | 350 s | yes |
+| 2026-10-19 | same | macOS | different | 1534 s | 525 s | yes |
+| 2026-10-19 | same | Windows | different | 2502 s | 848 s | yes |
+| 2026-10-19 | same: test step on one CPU type | Linux | EPYC 9V74 | 577 s | 173 s | |
+| 2026-10-19 | same: cold build (clippy + test build) | Linux | different | 2.2 + 4.6 | 6.4 + 12.3 | cost of a cold cache |
+| 2026-10-19 | same: cold build (clippy + test build) | Windows | different | 4.5 + 8.0 | 7.8 + 13.1 | cost of a cold cache |
+| 2026-10-19 | line tables (`CARGO_PROFILE_DEV_DEBUG=line-tables-only`) instead of full debug info: warm build | Linux | EPYC 9V45, one job | 110 s, 107 s | 63 s, 60 s | yes |
+| 2026-10-19 | same | Windows | EPYC 9V74 / 7763 | 269 s (link.exe) | 165 s (rust-lld) | yes |
+| 2026-10-19 | same, dependencies `opt-level=0` | macOS | M1, different runs | 149 s | 228 s | yes, one setting for every OS: no gain measured on macOS (two runs, different machines), cache 1045 MB -> 946 MB |
+| 2026-10-19 | mold instead of the default rust-lld, warm build, dependencies `opt-level=0` | Linux | EPYC 7763, two jobs | 140 s | 139 s | no |
+| 2026-10-19 | rust-lld instead of link.exe, cold build | Windows | EPYC 7763, one job | 1192 s | 1174 s | no; with full debug info (EPYC 9V74) 1302 s and 1331 s |
+| 2026-10-19 | Dev Drive (ReFS, trusted) for `target/` | Windows | EPYC 7763, one job | warm 165 s, cold 1174 s | warm 161 s, cold 1108 s | no: the workspace is already on the runner's local disk `D:` |
+| 2026-10-19 | cache saved by main only, restored by pull requests | all | | 12 caches, 10.9 GB, 5.8 GB of them from 2 pull requests | main's caches only | yes: pull request caches evicted main's |
+
+`CARGO_INCREMENTAL=0` was already set by the cache action and is now set
+explicitly. sccache on the GitHub Actions cache was not measured: a warm
+build now takes one to three minutes; sccache could skip compiling the
+workspace crates a pull request does not change, but not the linking, and
+its entries would share the repository's 10 GB of cache with the dependency
+caches, which already fill it. It is a candidate if the build becomes the
+longer part of the job again.
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

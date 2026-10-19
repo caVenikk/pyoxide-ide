@@ -36,7 +36,7 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 
 ## Commits, checkpoint, PR
 - Conventional commits (`feat(area): ...`), `cargo fmt --all` before each. NEVER a `Co-Authored-By` trailer.
-- Before a push: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace`, `cargo test --doc --workspace`, `python3 scripts/check-layers.py`. Tests run under cargo-nextest (one process per test; `.config/nextest.toml`): a test must pass in a fresh process on its own, and a flaky test is fixed, not added to the retry list.
+- Before a push: `scripts/check.sh` (what CI runs: fmt, clippy for the host and for Windows, tests, doctests, progress, layer and notice checks; `--quick` for the changed crates and their dependents while iterating, the full run before the last push). Tests run under cargo-nextest (one process per test; `.config/nextest.toml`): a test must pass in a fresh process on its own, and a flaky test is fixed, not added to the retry list.
 - Checkpoint (if the lead asked for one): after stage 1 commit, do NOT push, report and end; the lead resumes you.
 - Otherwise: push only your branch, open ONE ready PR (`Closes #N`, body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`). Never merge.
 - No secrets or personal data in code, tests, commits, PR text; screenshots of real projects stay local.

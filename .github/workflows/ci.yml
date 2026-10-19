@@ -3,62 +3,133 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review: a draft that becomes ready gets its full run.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+
+# One run per pull request: a new push cancels the run of the one before
+# instead of letting both finish. Runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Whether the OS matrix and the integration tests run: on main, and for a
+  # pull request that is not a draft and changes more than documentation.
+  # When they do not, their jobs still start and pass without running
+  # anything: the required checks need a result, and a matrix job skipped
+  # by `if` reports under the job's name, not under each OS's.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+        with:
+          # The merge commit and its parents: HEAD^1 is the base branch.
+          fetch-depth: 2
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          full=true
+          if [ "$EVENT" = pull_request ]; then
+            if [ "$DRAFT" = true ]; then
+              full=false
+              echo "Draft pull request: the OS matrix runs when it is ready for review."
+            elif ! git diff --name-only HEAD^1 HEAD \
+                | grep -qvE '(\.md$|^docs/|^replica/|^tests/scenarios/)'; then
+              full=false
+              echo "Only documentation changed: nothing to build or test."
+            fi
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
   check:
+    needs: scope
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The steps are those of scripts/check.sh, which runs the same commands
+    # locally.
+    defaults:
+      run:
+        shell: bash
+    # Build settings of CI only; they change no test result (measured in
+    # replica/perf.md, CI). Line tables instead of full debug info take about
+    # 40% off a warm build and keep file and line in backtraces. CI builds
+    # from scratch, so incremental compilation only costs time. Faster
+    # linkers (mold, rust-lld) and a Dev Drive on Windows gained nothing.
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
+      - name: Skipped
+        if: needs.scope.outputs.full != 'true'
+        run: echo "Draft or documentation only, see job scope."
       - uses: actions/checkout@v4
+        if: needs.scope.outputs.full == 'true'
       # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
       # fontconfig on Linux; tests use its headless test platform.
       - name: Linux packages for GPUI
-        if: runner.os == 'Linux'
+        if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.scope.outputs.full == 'true'
         with:
           components: rustfmt, clippy
+      # Only main saves the cache; a pull request restores main's. Saved
+      # caches of pull requests would fill the repository's 10 GB and evict
+      # main's. The key hashes the CARGO_* variables above, so a change of
+      # build settings starts a new cache instead of restoring one built
+      # differently (which would never be saved again).
       - uses: Swatinem/rust-cache@v2
+        if: needs.scope.outputs.full == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Tests run under cargo-nextest (.config/nextest.toml). The action is
       # pinned to a commit and installs a checksummed prebuilt binary.
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        if: needs.scope.outputs.full == 'true'
         with:
           tool: cargo-nextest@0.9.148
-      - run: cargo fmt --all --check
-      # Debug builds optimize dependencies so that the IDE stays responsive
-      # when run from a debug build (ADR 0007). CI does not need that:
-      # clippy and the tests build dependencies without optimization, which
-      # keeps the builds short.
-      - run: >-
-          cargo clippy --workspace --all-targets
-          --config 'profile.dev.package."*".opt-level=0' -- -D warnings
-        shell: bash
-      - run: >-
-          cargo nextest run --workspace --profile ci
-          --config 'profile.dev.package."*".opt-level=0'
-        shell: bash
+      - name: fmt
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh fmt
+      - name: clippy
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh clippy
+      - name: build tests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh build
+      - name: tests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh test
       # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
       # Windows) into the emulator, and the emulator alone; the numbers go
       # to the log. Reuses the test build of the step above.
-      - run: >-
-          cargo test -p terminal --test it throughput::
-          --config 'profile.dev.package."*".opt-level=0' -- --ignored --nocapture
-        shell: bash
+      - name: terminal throughput
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh throughput
       # nextest does not run doctests.
-      - run: cargo test --doc --workspace --config 'profile.dev.package."*".opt-level=0'
-        shell: bash
+      - name: doctests
+        if: needs.scope.outputs.full == 'true'
+        run: bash scripts/check.sh doc
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && needs.scope.outputs.full == 'true'
         with:
           name: junit-${{ matrix.os }}
-          path: target/nextest/ci/junit.xml
+          path: |
+            target/nextest/ci/junit.xml
+            target/cargo-timings/cargo-timing.html
           retention-days: 14
           if-no-files-found: ignore
 
@@ -78,10 +149,13 @@ jobs:
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.
   integration:
+    needs: scope
     runs-on: ubuntu-latest
     services:
+      # An empty image starts no container: drafts and documentation-only
+      # pull requests do not pull the database images.
       postgres:
-        image: postgres:18-alpine
+        image: ${{ needs.scope.outputs.full == 'true' && 'postgres:18-alpine' || '' }}
         env:
           POSTGRES_USER: pyoxide
           POSTGRES_PASSWORD: pyoxide
@@ -91,7 +165,7 @@ jobs:
           --health-cmd "pg_isready -U pyoxide -d pyoxide"
           --health-interval 5s --health-timeout 5s --health-retries 30
       oracle:
-        image: gvenzl/oracle-free:23-slim-faststart
+        image: ${{ needs.scope.outputs.full == 'true' && 'gvenzl/oracle-free:23-slim-faststart' || '' }}
         env:
           ORACLE_PASSWORD: pyoxide
           APP_USER: pyoxide
@@ -103,10 +177,19 @@ jobs:
     env:
       PYOXIDE_DB_PASSWORD: pyoxide
     steps:
+      - name: Skipped
+        if: needs.scope.outputs.full != 'true'
+        run: echo "Draft or documentation only, see job scope."
       - uses: actions/checkout@v4
+        if: needs.scope.outputs.full == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.scope.outputs.full == 'true'
       - uses: Swatinem/rust-cache@v2
-      - run: >-
+        if: needs.scope.outputs.full == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: needs.scope.outputs.full == 'true'
+        run: >-
           cargo test -p db-postgres -p db-sqlite -p db-oracle-thin -p db-service
           --config 'profile.dev.package."*".opt-level=0' -- --ignored --skip bench_
 
