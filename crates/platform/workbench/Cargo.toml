@@ -56,10 +56,10 @@ code-intel = { workspace = true, features = ["fake"] }
 dap-client = { workspace = true, features = ["fake"] }
 debugger.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
-# The list type of GPUI's `ExternalPaths` (tests/drop.rs).
+# The list type of GPUI's `ExternalPaths` (tests/it/drop.rs).
 smallvec = "1"
 tempfile = "3"
-# Theme plugins of the reference in tests/first_run.rs.
+# Theme plugins of the reference in tests/it/first_run.rs.
 zip.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

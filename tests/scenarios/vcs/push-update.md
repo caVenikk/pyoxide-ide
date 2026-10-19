@@ -78,8 +78,8 @@
 `git.fetch`, `git.pull`, `git.update-branch`, `vcs.operations-popup`,
 `push-dialog.*`, `update-dialog.*`, `dialog.choose`, `vcs.state`
 (`remote`: the dialogs; the widget's arrows), `workbench.state`
-(notifications). Tests: `crates/platform/workbench/tests/remote.rs`,
-`crates/platform/git/tests/remote.rs`.
+(notifications). Tests: `crates/platform/workbench/tests/it/remote.rs`,
+`crates/platform/git/tests/it/remote.rs`.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/commit-and-push-changes.html,

@@ -162,7 +162,7 @@ every keystroke (macOS: the layer's display callback), so the typed text is
 ready for the next refresh; the table above is measured that way.
 
 ### Find in file
-Engine: `cargo test --release -p search --test perf -- --ignored --nocapture`
+Engine: `cargo test --release -p search --test it perf:: -- --ignored --nocapture`
 on the generated 10 MB file (10,485,700 bytes, 108,100 lines), median of 5
 runs. In the application: `PYOXIDE_BACKGROUND=1 PYOXIDE_BENCH=find:<query>`
 clears the find field and types the query one key every 150 ms, 5 runs; time
@@ -224,7 +224,7 @@ and the generated 20,000-file tree of the Find in Files rows.
 | 2026-10-13 | mac-1 | 20k files, `pkg0sub`: key to rows / search | p50 127 ms / 1.4 ms | p90 157 ms / 31 ms |
 
 ### Terminal sessions
-`cargo test -p terminal --release --test throughput -- --ignored --nocapture`:
+`cargo test -p terminal --release --test it throughput:: -- --ignored --nocapture`:
 16 MiB of 77-byte lines from the test helper through the pseudo-terminal
 into the emulator (120x40, 10,000 lines of scrollback) while a view takes a
 snapshot at most once per 16.7 ms frame, spawn to exit; and the same bytes
@@ -241,7 +241,7 @@ prints the numbers in the log. The machine was busy with other builds
 | 2026-10-16 | mac-1 | through the PTY, snapshots per frame (rerun) | 42 MiB/s | a snapshot of 120x40 in 0.22 ms |
 
 ### Terminal view (headless)
-`cargo test --release -p terminal-ui --test perf -- --ignored --nocapture --test-threads=1`,
+`cargo test --release -p terminal-ui --test it perf:: -- --ignored --nocapture --test-threads=1`,
 no window: the work of a frame before painting (the snapshot and the plan of
 backgrounds, text runs and the cursor), `cat` of a 16 MiB file of 85-byte
 lines with SGR colours through the pseudo-terminal with a snapshot and a plan
@@ -315,8 +315,8 @@ machine ran other builds.
 Engine measurements (ADR 0016 budgets), release builds, git 2.56.0, other
 builds running on the machine. Status: a generated repository of 10,000
 committed files in 100 folders with 5 files changed;
-`cargo test --release --workspace --test perf -- --ignored --nocapture`
-(`crates/platform/git/tests/perf.rs`), medians of 7 runs (5 for the
+`cargo test --release --workspace --test it perf:: -- --ignored --nocapture`
+(`crates/platform/git/tests/it/perf.rs`), medians of 7 runs (5 for the
 service). "Watcher batch to snapshot" is the time from a reported batch to
 the merged snapshot minus the 300 ms debounce: the limited status of the
 dirty path, the readers and the merge. Line ranges: a 10,000-line file with
@@ -332,8 +332,8 @@ dirty path, the readers and the merge. Line ranges: a 10,000-line file with
 | 2026-10-16 | mac-1 | 10,000 lines: ranges shifted by an edit | 0.9 µs | until the next computation |
 
 ### Change markers
-`cargo test -p workbench --release --test version_control perf -- --ignored
---nocapture` (`crates/platform/workbench/tests/version_control.rs`): a
+`cargo test -p workbench --release --test it version_control::perf -- --ignored
+--nocapture` (`crates/platform/workbench/tests/it/version_control.rs`): a
 committed file of 10,000 lines opened in the workbench, a character typed
 at a different line each time; "keystroke to markers" is the time from the
 simulated key to the markers drawn by the editor's decorations, including
@@ -345,6 +345,27 @@ lines are marked at once). Median of 9.
 | 2026-10-16 | mac-1 | 10,000 lines: keystroke to markers | 4.0 ms | budget 50 ms after the last keystroke |
 | 2026-10-17 | mac-1 | 10,000 lines: keystroke to markers | 4.6 ms | same build rebased; load average about 58 from other builds |
 | 2026-10-17 | mac-1 | 10,000 lines: edit to ranges drawn | 3.0 ms | the part after the edit: the whole-text ranges and the redraw (9 ranges) |
+
+### Test build: one test program per crate
+Issue #246: the integration tests of a crate were one test program per file
+(102 programs, 40 of them in `workbench`), each linking the crate's whole
+dependency tree; now they are one program per crate (`tests/it/main.rs`, a
+module per former file, 26 programs). Debug builds, `CARGO_BUILD_JOBS=4`,
+sccache for the dependencies. "Clean" is `cargo clean -p <every workspace
+crate>` and then `cargo nextest run --workspace --no-run --timings`; "test
+programs" is the sum of the `--timings` durations of the integration test
+programs (their compile and link). Other builds ran on the machine
+the whole time (load average 20 to 40), so the wall times vary by a factor
+of two between runs; compare runs with a similar library time.
+
+| date | machine | metric | before | after | notes |
+|---|---|---|---|---|---|
+| 2026-10-19 | mac-1 | clean, run 1: total / test programs / libraries | 204 s / 308 s (102) / 258 s | 205 s / 107 s (26) / 410 s | the libraries took 60% longer in the second run: load |
+| 2026-10-19 | mac-1 | clean, run 2: total / test programs / libraries | 401 s / 603 s (102) / 561 s | 279 s / 137 s (26) / 587 s | similar library time: total -30%, test programs -77% |
+| 2026-10-19 | mac-1 | `workbench` test programs, clean | 40 programs, 194 s (run 1) | 1 program, 35 s | the largest program now builds last, alone |
+| 2026-10-19 | mac-1 | touch `workbench/src/lib.rs`, rebuild every test program | 76 s, 45 programs relinked (221 s) | 20 s, 2 programs (13 s) | load 40 before, 20 after |
+| 2026-10-19 | mac-1 | test executables of a full test build | 157 files, 5.7 GiB | 81 files, 1.1 GiB | per worktree `target/` |
+| 2026-10-19 | mac-1 | `cargo nextest run --workspace` | 277 s, 2111 run, 158 skipped | 346 s, 2111 run, 158 skipped | load 15-25 before, 30-35 after; the two keymap tests (one test each) set the length |
 
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file

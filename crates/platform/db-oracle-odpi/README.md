@@ -166,7 +166,7 @@ ordinary one and fails with `ORA-01005`.
 cargo test -p db-oracle-odpi                  # unit tests, no client needed
 docker compose up -d oracle                   # Oracle Free, FREEPDB1
 cargo test -p db-oracle-odpi -- --ignored     # needs an Oracle Client
-cargo test -p db-oracle-odpi --test oracle bench_fetch_100k -- --ignored --nocapture
+cargo test -p db-oracle-odpi --test it oracle::bench_fetch_100k -- --ignored --nocapture
 ```
 
 See `docs/testing-databases.md` for the connection defaults and overrides.

@@ -27,12 +27,12 @@ value with `PYOXIDE_TEST_PG_HOST`, `PYOXIDE_TEST_PG_PORT`,
 ## Conformance suite
 `crates/platform/db-testkit` holds one suite of contract cases (typed values, paging,
 busy rule, early close, cancel, timeout, transactions, read-only, error
-kinds) that every driver runs from its `tests/conformance.rs`. SQLite runs it
+kinds) that every driver runs from its `tests/it/conformance.rs`. SQLite runs it
 in every `cargo test`; the server backends run it with the ignored tests:
 
 ```bash
-cargo test -p db-postgres --test conformance -- --ignored
-cargo test -p db-oracle-thin --test conformance -- --ignored
+cargo test -p db-postgres --test it conformance:: -- --ignored
+cargo test -p db-oracle-thin --test it conformance:: -- --ignored
 ```
 
 ## Rules for integration tests

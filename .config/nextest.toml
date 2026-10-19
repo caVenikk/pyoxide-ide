@@ -8,6 +8,10 @@
 # tests (per-test overrides below), not a blanket setting: a test that fails
 # on every attempt is a bug. A test that passes only on a retry is reported
 # as FLAKY in the summary.
+#
+# A crate's integration tests are one test program, `it` (tests/it/main.rs),
+# with a module per area, so a filter names the module in the test's path:
+# `package(workbench) and binary(it) and test(/^keymap::/)`.
 
 nextest-version = "0.9.100"
 
@@ -31,21 +35,21 @@ retries = { backoff = "fixed", count = 2, delay = "1s" }
 # The file watcher reports events asynchronously; on a loaded runner the
 # event can arrive after the test's own wait.
 [[profile.default.overrides]]
-filter = 'package(workbench) and binary(file_ops) and test(the_file_watcher_does_not_take_tree_operations_for_external_changes)'
+filter = 'package(workbench) and binary(it) and test(=file_ops::the_file_watcher_does_not_take_tree_operations_for_external_changes)'
 retries = { backoff = "fixed", count = 2, delay = "1s" }
 
 # The keymap test presses every binding of both keymaps in one test, so it
 # legitimately runs for minutes on a slow machine (about ten on the Windows
 # runner, and it grows with every binding): twenty periods, not five.
 [[profile.default.overrides]]
-filter = 'binary(keymap)'
+filter = 'package(workbench) and binary(it) and test(/^keymap::/)'
 slow-timeout = { period = "60s", terminate-after = 20, grace-period = "5s" }
 
 # The debugger checks wait for a scripted adapter's stop, which a loaded
 # runner sometimes misses (issue #239). Remove this override when that issue
 # is fixed.
 [[profile.default.overrides]]
-filter = 'package(workbench) and ((binary(keymap) and test(/^every_.*_binding_works$/)) or (binary(debug_sessions) and test(a_session_stops_on_a_line_and_runs_to_the_end)))'
+filter = 'package(workbench) and binary(it) and (test(/^keymap::every_.*_binding_works$/) or test(=debug_sessions::a_session_stops_on_a_line_and_runs_to_the_end))'
 retries = { backoff = "fixed", count = 2, delay = "1s" }
 
 [profile.ci]

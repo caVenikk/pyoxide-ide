@@ -45,6 +45,10 @@ Rules for AI agents and human contributors. Read this file, then
 - Every user-visible action is a command in the command registry (UI, CLI and
   agent control channel call the same functions).
 - Integration tests that need external services are `#[ignore]` and documented.
+- A crate's integration tests are one test program, `tests/it/main.rs` with a
+  module per area (`tests/it/<area>.rs`, shared helpers once): a new area is a
+  new module, never a new file directly in `tests/`, since every test program
+  links the crate's whole dependency tree again.
 - Windows, macOS and Linux must keep building; gate platform-specific code with `cfg`.
 - Commits: conventional style (`feat(db-core): ...`).
 - Third-party notices: for anything copied or closely adapted from open-source
