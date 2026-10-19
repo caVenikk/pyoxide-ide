@@ -183,10 +183,9 @@ pub(crate) fn is_python_name(file_name: &OsStr) -> bool {
     }
 }
 
-/// Canonical form of a path for comparisons only (on Windows the result may
-/// carry a `\\?\` prefix and must not be shown to users).
+/// Canonical form of a path for comparisons.
 pub(crate) fn canonical_key(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    native_path::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 #[cfg(test)]

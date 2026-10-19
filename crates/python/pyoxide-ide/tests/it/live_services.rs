@@ -58,7 +58,7 @@ fn quick_documentation_of_a_standard_library_function(cx: &mut TestAppContext) {
     // application quits and waits for them to exit.
     cx.executor().allow_parking();
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("app.py"), "import json\n\njson.dumps({})\n").unwrap();
     let mut search = SearchPaths::from_env();
     if let Some(tools) = std::env::var_os("PYOXIDE_PY_TOOLS") {

@@ -62,7 +62,7 @@ struct Repos {
 
 fn repos() -> Repos {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path().canonicalize().unwrap();
+    let base = native_path::canonicalize(dir.path()).unwrap();
     let root = base.join("demo");
     let remote = base.join("demo-remote.git");
     let other = base.join("other");

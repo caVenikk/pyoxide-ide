@@ -197,7 +197,7 @@ fn guides(tree: &Value, path: &str) -> Vec<f64> {
 #[gpui::test]
 fn indent_guides_run_below_open_folders(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     invoke(
@@ -230,7 +230,9 @@ fn indent_guides_run_below_open_folders(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_cut_row_reaches_the_edge_and_shows_its_rest_on_hover(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join(LONG_ROOT);
     layout(&root);
     let window = open(cx, &root);
     let t = tree(cx, window);
@@ -295,7 +297,9 @@ fn a_cut_row_reaches_the_edge_and_shows_its_rest_on_hover(cx: &mut TestAppContex
 #[gpui::test]
 fn selecting_a_cut_row_with_the_keyboard_shows_its_rest(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join(LONG_ROOT);
     layout(&root);
     let window = open(cx, &root);
     // Focus the tree on a short row, then go up to the root.
@@ -313,7 +317,9 @@ fn selecting_a_cut_row_with_the_keyboard_shows_its_rest(cx: &mut TestAppContext)
 #[gpui::test]
 fn the_rest_of_a_row_shows_10_ms_after_the_pointer_comes(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join(LONG_ROOT);
     layout(&root);
     let window = open(cx, &root);
     let at = drawn(cx, window, "tree-row:").center();
@@ -332,7 +338,9 @@ fn the_rest_of_a_row_shows_10_ms_after_the_pointer_comes(cx: &mut TestAppContext
 #[gpui::test]
 fn the_rest_of_a_row_stays_under_the_pointer_and_takes_the_rows_clicks(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join(LONG_ROOT);
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join(LONG_ROOT);
     layout(&root);
     let window = open(cx, &root);
     click(cx, window, "tree-row:src");

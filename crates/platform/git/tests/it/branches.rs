@@ -39,12 +39,7 @@ fn read(dir: &Path, rel: &str) -> String {
 
 fn temp() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let path = std::fs::canonicalize(dir.path()).unwrap();
-    #[cfg(windows)]
-    let path = match path.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-        Some(rest) => PathBuf::from(rest),
-        None => path,
-    };
+    let path = native_path::canonicalize(dir.path()).unwrap();
     (dir, path)
 }
 

@@ -189,7 +189,7 @@ fn settings(root: &Path) -> Option<String> {
 #[gpui::test]
 fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     let t = tree(cx, window);
@@ -348,7 +348,7 @@ fn mark_directory_as_excluded_and_cancel_with_mouse_and_keys(cx: &mut TestAppCon
 #[gpui::test]
 fn marks_persist_and_files_can_be_excluded_by_command(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     invoke(
@@ -441,7 +441,7 @@ fn marks_persist_and_files_can_be_excluded_by_command(cx: &mut TestAppContext) {
 #[gpui::test]
 fn context_menu_from_the_keyboard(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     invoke(cx, window, "project.tree.reveal", json!({"path": "src"}));

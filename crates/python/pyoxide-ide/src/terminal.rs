@@ -102,7 +102,10 @@ fn inside(dir: &Path, root: &Path) -> bool {
     if dir.starts_with(root) {
         return true;
     }
-    match (dir.canonicalize(), root.canonicalize()) {
+    match (
+        native_path::canonicalize(dir),
+        native_path::canonicalize(root),
+    ) {
         (Ok(dir), Ok(root)) => dir.starts_with(root),
         _ => false,
     }

@@ -142,7 +142,7 @@ impl H<'_> {
 fn open(cx: &mut TestAppContext, prepare: impl FnOnce(&Path)) -> (H<'_>, tempfile::TempDir) {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     prepare(&root);
     let product = Product::default();
     let window = cx.update(|cx| {

@@ -412,7 +412,7 @@ async fn open(window: WindowHandle<Workbench>, path: PathBuf, cx: &mut AsyncApp)
     }
     sleep(cx, Duration::from_secs(3)).await;
     let display = display_frames(window, cx).await;
-    let path = std::fs::canonicalize(&path).unwrap_or(path);
+    let path = native_path::canonicalize(&path).unwrap_or(path);
     let t0 = Instant::now();
     let _ = window.update(cx, |w, window, cx| w.open_file(path.clone(), window, cx));
     let until = Instant::now() + Duration::from_secs(60);

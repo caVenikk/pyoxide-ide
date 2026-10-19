@@ -225,7 +225,7 @@ impl ProjectPanel {
         let p = if p.is_absolute() {
             p.to_owned()
         } else {
-            root.join(p)
+            native_path::join(&root, p)
         };
         p.starts_with(&root).then_some(p)
     }

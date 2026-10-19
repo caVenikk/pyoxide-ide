@@ -184,7 +184,7 @@ fn p(path: &str, line: usize) -> (String, usize) {
 /// services (an in-memory fake).
 fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let text: String = (0..200).map(|i| format!("line {i}\n")).collect();
     for name in ["a.py", "b.py", "c.py"] {
         std::fs::write(root.join(name), &text).unwrap();
@@ -415,7 +415,7 @@ fn another_project_forgets_the_places(cx: &mut TestAppContext) {
     h.open("b.py");
     assert!(!h.history().0.is_empty());
     let other = tempfile::tempdir().unwrap();
-    let folder = std::fs::canonicalize(other.path()).unwrap();
+    let folder = native_path::canonicalize(other.path()).unwrap();
     h.invoke(
         "project.open-folder",
         json!({ "path": folder.display().to_string() }),

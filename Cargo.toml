@@ -17,6 +17,7 @@ members = [
     "crates/platform/debugger",
     "crates/platform/debugger-ui",
     "crates/platform/name-match",
+    "crates/platform/native-path",
     "crates/platform/process",
     "crates/platform/project",
     "crates/platform/project-search",
@@ -102,6 +103,7 @@ db-core = { path = "crates/platform/db-core" }
 editor = { path = "crates/platform/editor" }
 lsp-client = { path = "crates/platform/lsp-client" }
 name-match = { path = "crates/platform/name-match" }
+native-path = { path = "crates/platform/native-path" }
 process = { path = "crates/platform/process" }
 file-index = { path = "crates/platform/file-index" }
 file-watcher = { path = "crates/platform/file-watcher" }

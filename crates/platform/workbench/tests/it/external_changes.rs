@@ -35,7 +35,7 @@ const A: &str = "def f():\n    return 1\n\nx = f()\n";
 /// the window active; the fake language services see it all.
 fn open(cx: &mut TestAppContext, sync: SyncSettings) -> (H<'_>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("a.py"), A).unwrap();
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("src/m.py"), "m = 1\n").unwrap();
@@ -79,7 +79,7 @@ fn open_in_background(
     project: bool,
 ) -> (H<'_>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("a.py"), "def hello():\n    return 1\n").unwrap();
     let fake = FakeCodeIntel::new();
     let product = Product {

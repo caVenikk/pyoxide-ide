@@ -776,7 +776,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
     isolate_git();
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [
         ("a.py", "a = 1\n"),
         ("b.py", "b = 2\n"),

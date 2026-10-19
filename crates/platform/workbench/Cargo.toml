@@ -22,6 +22,7 @@ futures = "0.3"
 git.workspace = true
 gpui.workspace = true
 name-match.workspace = true
+native-path.workspace = true
 process.workspace = true
 project.workspace = true
 project-search.workspace = true

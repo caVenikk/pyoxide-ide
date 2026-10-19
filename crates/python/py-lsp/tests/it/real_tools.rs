@@ -54,7 +54,9 @@ fn search() -> SearchPaths {
 /// environment's interpreter.
 fn sample(search: &SearchPaths) -> (tempfile::TempDir, PathBuf, Option<PathBuf>) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("project");
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join("project");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("pyproject.toml"),

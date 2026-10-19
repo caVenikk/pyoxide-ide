@@ -167,7 +167,7 @@ impl H<'_> {
 fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str, keys: &'static Keys) -> H<'a> {
     let dir = tempfile::tempdir().unwrap();
     // A fixed project name: Go to File matches folder paths from it.
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+    let root = native_path::canonicalize(dir.path()).unwrap().join("proj");
     for (path, text) in [
         (
             "app.py",
@@ -363,7 +363,7 @@ fn a_path_outside_the_project_typed_in_full(cx: &mut TestAppContext) {
         let dir = if cfg!(windows) {
             outside.path().to_path_buf()
         } else {
-            std::fs::canonicalize(outside.path()).unwrap()
+            native_path::canonicalize(outside.path()).unwrap()
         };
         let file = dir.join("outside.txt");
         std::fs::write(&file, "one\ntwo\n").unwrap();

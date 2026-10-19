@@ -73,8 +73,8 @@ fn start(program: &str, files: &[(&str, &str)], activate_name: &str, activate_te
     let home_dir = tempfile::tempdir().unwrap();
     let work_dir = tempfile::tempdir().unwrap();
     let scripts = tempfile::tempdir().unwrap();
-    let home = home_dir.path().canonicalize().unwrap();
-    let work = work_dir.path().canonicalize().unwrap();
+    let home = native_path::canonicalize(home_dir.path()).unwrap();
+    let work = native_path::canonicalize(work_dir.path()).unwrap();
     for (name, text) in files {
         let path = home.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -160,7 +160,9 @@ impl Shell {
 
     fn last_directory(&self) -> Option<PathBuf> {
         self.events.iter().rev().find_map(|e| match e {
-            SessionEvent::WorkingDirectory(dir) => Some(dir.canonicalize().unwrap_or(dir.clone())),
+            SessionEvent::WorkingDirectory(dir) => {
+                Some(native_path::canonicalize(dir).unwrap_or(dir.clone()))
+            }
             _ => None,
         })
     }

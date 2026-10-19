@@ -21,6 +21,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
 ] }
 
+[dev-dependencies]
+native-path.workspace = true
+
 # A small program the integration tests start instead of Python or shell
 # tools, so the tests behave the same on every OS.
 [[bin]]

@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-dunce = "1"
+native-path.workspace = true
 quick-xml.workspace = true
 text.workspace = true
 thiserror.workspace = true

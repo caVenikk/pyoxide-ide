@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 commands.workspace = true
 flume.workspace = true
+native-path.workspace = true
 quick-xml.workspace = true
 serde.workspace = true
 serde_json.workspace = true

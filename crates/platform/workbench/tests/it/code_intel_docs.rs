@@ -79,7 +79,7 @@ struct H<'a> {
 impl<'a> H<'a> {
     fn new(cx: &'a mut TestAppContext, files: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         for (path, text) in files {
             std::fs::write(root.join(path), text).unwrap();
         }

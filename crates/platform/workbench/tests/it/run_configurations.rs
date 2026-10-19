@@ -125,7 +125,7 @@ fn snapshot(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 /// configurations of the test type, and one of a type nobody knows.
 fn project() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let beta = script("echo beta-$MODE", "echo beta-!MODE!");
     write(
         &root,
@@ -379,7 +379,7 @@ fn run_runs_the_selected_configuration(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_shell_script_configuration_runs_in_the_run_tool_window(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let text = script("echo shell-$MODE", "echo shell-%MODE%");
     write(
         &root,
@@ -456,7 +456,7 @@ fn field(h: &mut H<'_>, id: &str) -> Value {
 #[gpui::test]
 fn context_runs_make_temporary_configurations(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for i in 0..6 {
         write(&root, &format!("t{i}.py"), "x = 1\n");
     }

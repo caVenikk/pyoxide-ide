@@ -1,0 +1,13 @@
+[package]
+name = "native-path"
+description = "Paths in the form the system's tools take and users read: the one canonicalize of the workspace (no Windows verbatim prefix) and the simplified form of a path"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dunce = "1"
+
+[dev-dependencies]
+tempfile = "3"

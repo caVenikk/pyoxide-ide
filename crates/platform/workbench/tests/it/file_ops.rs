@@ -85,7 +85,7 @@ fn setup(cx: &mut TestAppContext) -> H<'_> {
 /// The project opened with these settings of the file watcher.
 fn setup_with(cx: &mut TestAppContext, sync: SyncSettings) -> H<'_> {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [
         ("app.py", "a = 1\n"),
         ("notes.txt", "n\n"),
@@ -999,7 +999,7 @@ fn dragging_rows_onto_a_folder_moves_them(cx: &mut TestAppContext) {
     assert_eq!(t["title"], json!("Move"));
     assert_eq!(
         t["directory"],
-        json!(h.root.join("src/pkg").display().to_string())
+        json!(h.root.join("src").join("pkg").display().to_string())
     );
     h.press("enter");
     assert!(h.root.join("src/pkg/notes.txt").is_file());

@@ -169,10 +169,10 @@ fn environment_and_working_directory() {
     let (_, rx) = spawn(&cmd).unwrap();
     assert_eq!(run_to_end(&rx).stdout(), "<unset>\n");
 
-    let dir = std::env::temp_dir().canonicalize().unwrap();
+    let dir = native_path::canonicalize(std::env::temp_dir()).unwrap();
     let (_, rx) = spawn(&helper(&["cwd"]).current_dir(&dir)).unwrap();
     let printed = std::path::PathBuf::from(run_to_end(&rx).stdout().trim_end());
-    assert_eq!(printed.canonicalize().unwrap(), dir);
+    assert_eq!(native_path::canonicalize(&printed).unwrap(), dir);
 }
 
 #[test]

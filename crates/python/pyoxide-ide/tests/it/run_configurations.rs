@@ -93,7 +93,7 @@ const PYTHON: &str = "#!/bin/sh\necho \"ARGS:$*\"\necho \"CWD:$(pwd)\"\necho \"F
 fn an_imported_python_configuration_runs_with_the_project_interpreter(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     write(&root, ".idea/workspace.xml", WORKSPACE);
     write(&root, ".env", "FROM_FILE=file\n");
     write(&root, "app/main.py", "print('hi')\n");

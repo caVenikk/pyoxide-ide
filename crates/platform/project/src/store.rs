@@ -605,7 +605,7 @@ pub(crate) struct RootLock(PathBuf);
 /// reference IDE's exclusions and a product's settings, on background
 /// threads) would each drop the other's change.
 pub(crate) fn lock_root(root: &Path) -> RootLock {
-    let key = std::fs::canonicalize(root).unwrap_or_else(|_| lexical(root));
+    let key = native_path::canonicalize(root).unwrap_or_else(|_| lexical(root));
     let (writing, released) = &*WRITING;
     let mut busy = writing.lock().unwrap_or_else(PoisonError::into_inner);
     while busy.contains(&key) {

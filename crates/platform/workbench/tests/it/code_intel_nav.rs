@@ -45,7 +45,7 @@ struct H<'a> {
 impl<'a> H<'a> {
     fn new(cx: &'a mut TestAppContext, files: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         for (path, text) in files {
             let path = root.join(path);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -356,9 +356,7 @@ fn h_app(other: &Path) -> PathBuf {
 #[gpui::test]
 fn library_files_open_read_only(cx: &mut TestAppContext) {
     let library = tempfile::tempdir().unwrap();
-    let stub = library
-        .path()
-        .canonicalize()
+    let stub = native_path::canonicalize(library.path())
         .unwrap()
         .join("json/__init__.pyi");
     std::fs::create_dir_all(stub.parent().unwrap()).unwrap();
@@ -593,9 +591,7 @@ fn the_bulb_shows_that_actions_are_there(cx: &mut TestAppContext) {
 #[gpui::test]
 fn edits_of_files_that_are_not_documents(cx: &mut TestAppContext) {
     let outside = tempfile::tempdir().unwrap();
-    let outside = outside
-        .path()
-        .canonicalize()
+    let outside = native_path::canonicalize(outside.path())
         .unwrap()
         .join("pyproject.toml");
     let mut h = H::new(

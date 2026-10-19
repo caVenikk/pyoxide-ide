@@ -137,7 +137,7 @@ fn project() -> (tempfile::TempDir, PathBuf) {
 /// A project whose main.py is `text`.
 fn project_with(text: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("main.py"), text).unwrap();
     let made = std::process::Command::new(python())
         .args(["-m", "venv", "--without-pip", ".venv"])
@@ -484,7 +484,7 @@ fn a_breakpoint_in_a_web_app_with_a_reloader(cx: &mut TestAppContext) {
     use std::io::{Read, Write};
 
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
         .unwrap()
         .local_addr()

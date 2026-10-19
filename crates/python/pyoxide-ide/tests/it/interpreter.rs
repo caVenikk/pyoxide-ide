@@ -102,7 +102,7 @@ fn venv(dir: &Path, cfg: &str) -> PathBuf {
 /// A uv project `demo` with its `.venv` and a plain `venv`.
 fn uv_project() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("demo");
+    let root = native_path::canonicalize(dir.path()).unwrap().join("demo");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("pyproject.toml"),
@@ -197,7 +197,9 @@ fn the_widget_follows_the_active_file(cx: &mut TestAppContext) {
     invoke(cx, window, "project.open-file", json!({"path": "main.py"}));
     assert_eq!(state(cx, window)["visible"], json!(true));
     // A file outside the project: hidden.
-    let outside = std::fs::canonicalize(dir.path()).unwrap().join("notes.txt");
+    let outside = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join("notes.txt");
     std::fs::write(&outside, "n\n").unwrap();
     invoke(
         cx,
@@ -391,7 +393,7 @@ fn the_choice_survives_reopening_the_project(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_project_without_an_environment(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("main.py"), "print('hi')\n").unwrap();
     let window = open(cx, &root, Some("main.py"));
     let s = state(cx, window);
