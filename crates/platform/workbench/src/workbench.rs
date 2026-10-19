@@ -794,7 +794,7 @@ impl Workbench {
     fn resolve(&self, path: &str, cx: &App) -> PathBuf {
         let p = Path::new(path);
         match self.project(cx) {
-            Some(project) if p.is_relative() => project.root().join(p),
+            Some(project) if p.is_relative() => native_path::join(project.root(), p),
             _ => p.to_owned(),
         }
     }

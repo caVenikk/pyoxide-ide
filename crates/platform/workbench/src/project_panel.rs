@@ -574,7 +574,7 @@ impl ProjectPanel {
         let path = if path.is_absolute() {
             path.to_owned()
         } else {
-            project.root().join(path)
+            native_path::join(project.root(), path)
         };
         self.reveal(&path, cx);
     }
@@ -591,7 +591,7 @@ impl ProjectPanel {
                 if p.is_absolute() {
                     p.to_owned()
                 } else {
-                    self.project.as_ref()?.root().join(p)
+                    native_path::join(self.project.as_ref()?.root(), p)
                 }
             }
             None => tree.node(self.selected?).entry.path.clone(),

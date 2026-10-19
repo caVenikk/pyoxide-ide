@@ -904,7 +904,7 @@ impl Workbench {
             Some(path) => {
                 let path = PathBuf::from(path);
                 let path = match (&root, path.is_relative()) {
-                    (Some(root), true) => root.join(path),
+                    (Some(root), true) => native_path::join(root, &path),
                     _ => path,
                 };
                 self.init_repository(path, cx);

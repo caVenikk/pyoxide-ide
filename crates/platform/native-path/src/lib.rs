@@ -12,7 +12,7 @@
 
 use std::borrow::Cow;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// `path` made absolute with links, `.` and `..` resolved, as
 /// `std::fs::canonicalize` does, but on Windows without the verbatim prefix.
@@ -30,6 +30,21 @@ pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
         Cow::Borrowed(_) => canonical,
         Cow::Owned(plain) => plain,
     })
+}
+
+/// `base` with the relative `path` appended component by component, so that
+/// a path typed with `/` (a command argument, a field) has the separators of
+/// the system. `Path::join` keeps the `/` of `path` unless `base` is a
+/// verbatim Windows path (the form `std::fs::canonicalize` gave), which hid
+/// the difference.
+pub fn join(base: &Path, path: &Path) -> PathBuf {
+    let mut joined = base.to_path_buf();
+    for component in path.components() {
+        if component != Component::CurDir {
+            joined.push(component);
+        }
+    }
+    joined
 }
 
 /// `path` without a Windows verbatim prefix when the plain form means the
@@ -122,6 +137,25 @@ mod tests {
         assert!(
             !canonical.to_string_lossy().starts_with(r"\\?\"),
             "{canonical:?}"
+        );
+    }
+
+    #[test]
+    fn a_relative_path_is_joined_component_by_component() {
+        let base = Path::new(if cfg!(windows) { r"C:\a" } else { "/a" });
+        let joined = join(base, Path::new("b/./c//d"));
+        let expected = base.join("b").join("c").join("d");
+        // The same separators all the way, as the system writes them.
+        assert_eq!(joined.to_str(), expected.to_str());
+        assert_eq!(join(base, Path::new("")), base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_relative_path_gets_backslashes_on_windows() {
+        assert_eq!(
+            join(Path::new(r"C:\a"), Path::new("b/c.py")).to_str(),
+            Some(r"C:\a\b\c.py")
         );
     }
 

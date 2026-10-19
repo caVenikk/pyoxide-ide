@@ -825,7 +825,11 @@ impl FindInFiles {
         }
         if let Some(dir) = &args.directory {
             let dir = match &context.root {
-                Some(root) if Path::new(dir).is_relative() => root.join(dir).display().to_string(),
+                Some(root) if Path::new(dir).is_relative() => {
+                    native_path::join(root, Path::new(dir))
+                        .display()
+                        .to_string()
+                }
                 _ => dir.clone(),
             };
             set_field_text(&self.directory, &dir, cx);
@@ -1036,7 +1040,7 @@ impl FindInFiles {
             ScopeKind::Directory => {
                 let dir = self.directory.read(cx).text();
                 // A relative folder is one of the project's.
-                let path = root.join(dir.trim());
+                let path = native_path::join(&root, Path::new(dir.trim()));
                 if dir.trim().is_empty() || !path.is_dir() {
                     return Err(invalid("Directory is not found".into(), Field::Directory));
                 }
