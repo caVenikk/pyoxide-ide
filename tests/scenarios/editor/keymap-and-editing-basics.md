@@ -4,7 +4,7 @@ The everyday editing keys of the reference IDE, with its default keymaps:
 macOS ("Mac") and Windows/Linux ("Win"). Keystrokes come from the IntelliJ
 Platform Community keymap files (see NOTICE); the behaviour is described
 here in Pyoxide's own words. Every binding of both keymaps is pressed as a
-real keystroke in `crates/platform/workbench/tests/it/keymap.rs`; the behaviour
+real keystroke in `crates/platform/workbench/tests/it/keymap/`; the behaviour
 below is covered by `crates/platform/editor/tests/it/basics.rs` and the Python
 test of `crates/python/pyoxide-ide`.
 

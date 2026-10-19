@@ -5,7 +5,7 @@ macOS ("Mac") and Windows/Linux ("Win"). Keystrokes come from the IntelliJ
 Platform Community keymap files; option and button keys are the mnemonics
 of their labels (see NOTICE). Covered by
 `crates/platform/workbench/tests/it/find.rs` (keystrokes through both
-keymaps), `crates/platform/workbench/tests/it/keymap.rs` (every binding),
+keymaps), `crates/platform/workbench/tests/it/keymap/find.rs` (every binding),
 `crates/platform/search` (matching and replacement) and the unit tests of
 `crates/platform/editor/src/find.rs`.
 

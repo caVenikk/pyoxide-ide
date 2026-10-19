@@ -6,7 +6,7 @@ from the IntelliJ Platform Community keymap files; option keys are the
 mnemonics of their labels (see NOTICE). Covered by
 `crates/platform/workbench/tests/it/find_in_files.rs` (keystrokes through both
 keymaps, synthetic mouse and scroll events),
-`crates/platform/workbench/tests/it/keymap.rs` (every binding) and
+`crates/platform/workbench/tests/it/keymap/find_in_files.rs` (every binding) and
 `crates/platform/project-search` (what is searched, masks, limits,
 replacing in files).
 

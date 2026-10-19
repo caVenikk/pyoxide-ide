@@ -38,13 +38,6 @@ retries = { backoff = "fixed", count = 2, delay = "1s" }
 filter = 'package(workbench) and binary(it) and test(=file_ops::the_file_watcher_does_not_take_tree_operations_for_external_changes)'
 retries = { backoff = "fixed", count = 2, delay = "1s" }
 
-# The keymap test presses every binding of both keymaps in one test, so it
-# legitimately runs for minutes on a slow machine (about ten on the Windows
-# runner, and it grows with every binding): twenty periods, not five.
-[[profile.default.overrides]]
-filter = 'package(workbench) and binary(it) and test(/^keymap::/)'
-slow-timeout = { period = "60s", terminate-after = 20, grace-period = "5s" }
-
 [profile.ci]
 fail-fast = false
 retries = 0

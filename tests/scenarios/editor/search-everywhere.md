@@ -8,7 +8,7 @@ language provides them; they come with a language server. Keystrokes come
 from the IntelliJ Platform Community keymap files (see NOTICE). Covered by
 `crates/platform/workbench/tests/it/search_everywhere.rs` (keystrokes,
 modifier events and clicks through both keymaps),
-`crates/platform/workbench/tests/it/keymap.rs` (every binding),
+`crates/platform/workbench/tests/it/keymap/search_everywhere.rs` (every binding),
 `crates/platform/name-match` (matching and degrees, cases of the
 reference's matcher tests) and `crates/platform/file-index` (the index,
 the reference's own Go to File cases, the order on the Flask repository's

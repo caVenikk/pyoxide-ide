@@ -48,6 +48,23 @@ appending to a shared one, and nothing generated is committed:
   job shows it in its summary, and the Progress workflow publishes it to
   GitHub Pages after each change on `main` (the README links the page and its
   badge). `python3 scripts/progress.py` prints it locally.
+- **Keymaps and their checks**: the bindings of the workbench are one file per
+  area, `crates/platform/workbench/keymaps/macos/<area>.toml` and
+  `keymaps/default/<area>.toml` (`editor`, `find`, `vcs-commit`, ...), and the
+  action table one file per menu, `keymaps/actions/<menu>.toml`. A feature
+  adds its bindings to its area's file in both keymaps and its keystroke
+  checks to `tests/it/keymap/<area>.rs`, whose two tests
+  (`keymap::<area>::every_macos_binding_works` and
+  `..._every_windows_and_linux_binding_works`) start their own app with the
+  complete keymap and press only that file's bindings, in parallel with the
+  other areas. A new area is a new file in both folders, one line in the
+  `concat!` lists of `src/keymap.rs` (and `src/keymap/actions.rs`) and a
+  module in `tests/it/keymap/mod.rs`; a test fails for a file that is not
+  joined once or has no module. The order of the files in the lists is part
+  of the keymap (of two bindings of one keystroke in the same innermost
+  context, or one of them without a context, the later wins, so the file of
+  a popup's Escape comes after the editor's): put a new file after the files
+  whose bindings it must win over, and do not reorder the lists.
 - **Third-party notices**: one file per entry in `notices/` (ADR 0019).
 - **Counts written by hand** that every feature would change (for example the
   number of theme roles) are left out of the docs; the code is the list.
