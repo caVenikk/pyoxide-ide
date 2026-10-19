@@ -76,7 +76,7 @@ fn tabs(s: &Value) -> Vec<String> {
 /// The path is canonical, as the workbench keeps the project root.
 fn project() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let w = |p: &str, text: &[u8]| {
         let path = root.join(p);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -216,7 +216,7 @@ fn files_dropped_on_the_editor_area_open_in_tabs(cx: &mut TestAppContext) {
     // Onto the editor, dragged in over the tree: a file from outside the
     // project opens too.
     let other = tempfile::tempdir().unwrap();
-    let outside = std::fs::canonicalize(other.path())
+    let outside = native_path::canonicalize(other.path())
         .unwrap()
         .join("notes.txt");
     std::fs::write(&outside, "notes\n").unwrap();

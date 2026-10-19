@@ -850,7 +850,7 @@ pub(crate) mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         let script = |path: &Path, body: &str| {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -998,7 +998,7 @@ pub(crate) mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         let tools = root.join("tools");
         std::fs::create_dir_all(&tools).unwrap();
         let uvx = tools.join("uvx");

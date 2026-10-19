@@ -418,7 +418,7 @@ fn folder(args: &PathArgs) -> Result<PathBuf, CommandError> {
         Some(p) => PathBuf::from(p),
         None => std::env::current_dir().map_err(|e| CommandError::new("io", e.to_string()))?,
     };
-    std::fs::canonicalize(&path)
+    native_path::canonicalize(&path)
         .map_err(|e| CommandError::not_found(format!("{}: {e}", path.display())))
 }
 

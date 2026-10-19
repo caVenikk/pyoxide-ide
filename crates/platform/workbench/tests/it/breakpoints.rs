@@ -207,7 +207,7 @@ fn python() -> FileType {
 fn setup<'a>(cx: &'a mut TestAppContext, hook: DebugHook) -> (H<'a>, tempfile::TempDir) {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [
         ("main.py", MAIN),
         ("other.py", "a = 1\nb = 2\n"),

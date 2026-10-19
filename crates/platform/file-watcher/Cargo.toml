@@ -12,4 +12,5 @@ notify.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+native-path.workspace = true
 tempfile = "3"

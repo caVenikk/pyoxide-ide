@@ -211,7 +211,7 @@ fn open(cx: &mut TestAppContext, prepare: impl FnOnce(&Path)) -> (H<'_>, tempfil
     global_config();
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     prepare(&root);
     let product = Product::default();
     let window = cx.update(|cx| {
@@ -630,7 +630,7 @@ fn the_draft_is_kept_and_a_folder_without_git_offers_one(cx: &mut TestAppContext
     }
 
     let other = tempfile::tempdir().unwrap();
-    let path = other.path().canonicalize().unwrap();
+    let path = native_path::canonicalize(other.path()).unwrap();
     write(&path, "x.py", "x\n");
     h.invoke(
         "project.open-folder",

@@ -30,7 +30,7 @@ struct Project {
 
 fn project() -> Project {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+    let root = native_path::canonicalize(dir.path()).unwrap().join("proj");
     for file in FILES {
         let path = root.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -234,7 +234,7 @@ fn bench() {
     let Some(root) = std::env::var_os("FILE_INDEX_BENCH") else {
         return;
     };
-    let root = std::fs::canonicalize(root).unwrap();
+    let root = native_path::canonicalize(root).unwrap();
     let filter = Filter::for_root(&root);
     let mut builds = Vec::new();
     let mut index = None;

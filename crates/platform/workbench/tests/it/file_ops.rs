@@ -85,7 +85,7 @@ fn setup(cx: &mut TestAppContext) -> H<'_> {
 /// The project opened with these settings of the file watcher.
 fn setup_with(cx: &mut TestAppContext, sync: SyncSettings) -> H<'_> {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [
         ("app.py", "a = 1\n"),
         ("notes.txt", "n\n"),

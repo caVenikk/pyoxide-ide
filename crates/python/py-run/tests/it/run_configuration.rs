@@ -73,7 +73,7 @@ struct Project {
 
 fn project() -> Project {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let python = root.join(".venv/bin/python");
     executable(&python, PYTHON);
     std::fs::write(root.join(".venv/pyvenv.cfg"), "home = /usr/bin\n").unwrap();

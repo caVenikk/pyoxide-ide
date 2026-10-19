@@ -234,7 +234,7 @@ fn location(root: &Path) -> String {
 #[gpui::test]
 fn packages_modules_and_roots_in_the_tree(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     for path in ["app", "services"] {
@@ -422,7 +422,7 @@ fn packages_modules_and_roots_in_the_tree(cx: &mut TestAppContext) {
 #[gpui::test]
 fn roots_follow_renames_and_packages_their_marker_files(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     let window = open(cx, &root);
     invoke(
@@ -481,7 +481,7 @@ fn roots_follow_renames_and_packages_their_marker_files(cx: &mut TestAppContext)
 #[gpui::test]
 fn source_folders_of_the_reference_are_imported_once(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     layout(&root);
     // A project Pyoxide opened before (its exclusions are stored) and the
     // reference IDE marks folders in.

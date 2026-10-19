@@ -2386,6 +2386,7 @@ version = "0.0.1"
 dependencies = [
  "ignore",
  "name-match",
+ "native-path",
  "project",
  "regex",
  "tempfile",
@@ -2396,6 +2397,7 @@ name = "file-watcher"
 version = "0.0.1"
 dependencies = [
  "flume",
+ "native-path",
  "notify",
  "tempfile",
  "thiserror 2.0.21",
@@ -2803,6 +2805,7 @@ dependencies = [
  "commands",
  "flume",
  "futures",
+ "native-path",
  "quick-xml 0.42.0",
  "serde",
  "serde_json",
@@ -4348,6 +4351,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-path"
+version = "0.0.1"
+dependencies = [
+ "dunce",
+ "tempfile",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5244,6 +5255,7 @@ version = "0.0.1"
 dependencies = [
  "flume",
  "libc",
+ "native-path",
  "windows-sys 0.61.2",
 ]
 
@@ -5270,7 +5282,7 @@ dependencies = [
 name = "project"
 version = "0.0.1"
 dependencies = [
- "dunce",
+ "native-path",
  "quick-xml 0.42.0",
  "tempfile",
  "text",
@@ -5364,6 +5376,7 @@ dependencies = [
  "async-trait",
  "commands",
  "dirs 7.0.0",
+ "native-path",
  "rustls-native-certs",
  "serde",
  "serde_json",
@@ -5383,6 +5396,7 @@ dependencies = [
  "dirs 7.0.0",
  "futures",
  "lsp-client",
+ "native-path",
  "process",
  "project",
  "py-env",
@@ -5401,6 +5415,7 @@ name = "py-run"
 version = "0.0.1"
 dependencies = [
  "console",
+ "native-path",
  "process",
  "py-env",
  "regex",
@@ -5443,11 +5458,11 @@ dependencies = [
  "code-intel-ui",
  "debugger",
  "dirs 7.0.0",
- "dunce",
  "editor",
  "flume",
  "gpui",
  "lsp-client",
+ "native-path",
  "process",
  "project",
  "py-debug",
@@ -7243,6 +7258,7 @@ dependencies = [
  "dirs 7.0.0",
  "flume",
  "libc",
+ "native-path",
  "parking_lot",
  "polling",
  "process",
@@ -9073,6 +9089,7 @@ dependencies = [
  "gpui",
  "image",
  "name-match",
+ "native-path",
  "objc",
  "process",
  "project",

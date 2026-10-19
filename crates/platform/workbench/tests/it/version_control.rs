@@ -78,7 +78,7 @@ impl H<'_> {
 fn open(cx: &mut TestAppContext, prepare: impl FnOnce(&Path)) -> (H<'_>, tempfile::TempDir) {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
     std::fs::write(root.join("a.py"), "a = 1\n").unwrap();
     git(&root, &["add", "a.py"]);

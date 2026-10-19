@@ -13,7 +13,7 @@ use file_watcher::{Batch, FileWatcher, Kind};
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 fn root(dir: &tempfile::TempDir) -> PathBuf {
-    std::fs::canonicalize(dir.path()).unwrap()
+    native_path::canonicalize(dir.path()).unwrap()
 }
 
 /// The path of an event is `rel` under the watched folder.

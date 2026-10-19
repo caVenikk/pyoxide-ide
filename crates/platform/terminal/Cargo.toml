@@ -34,6 +34,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+native-path.workspace = true
 tempfile = "3"
 
 # A small program the PTY tests start instead of real shells, so they behave

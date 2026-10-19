@@ -108,6 +108,12 @@ Platform (`crates/platform/`, language-agnostic):
 - `name-match`: the reference IDE's name matcher (camel humps, word
   starts, wildcards, middle matches) and its matching degree, for Go to
   File, actions and speed search.
+- `native-path`: the one `canonicalize` of the workspace and the simplified
+  form of a path. On Windows `std::fs::canonicalize` returns the verbatim
+  `\\?\C:\x` form, which git does not read and users must not see;
+  `native_path::canonicalize` gives `C:\x` (`\\srv\share\x`), and
+  `clippy.toml` bans the std and `dunce` functions so the helper is the
+  only way (issues #240, #245). No dependencies besides `dunce`.
 - `file-index`: the project's files and folders by name, built in the
   background with the project tree's rules and kept current, and Go to
   File's matching and ranking (`name:line:column` included).

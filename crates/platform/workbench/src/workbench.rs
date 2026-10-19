@@ -763,7 +763,7 @@ impl Workbench {
 
     /// Opens a folder as the project.
     pub fn open_folder(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path = native_path::canonicalize(&path).unwrap_or(path);
         if !path.is_dir() {
             self.message = Some(format!("{} is not a folder", path.display()).into());
             cx.notify();
@@ -889,7 +889,7 @@ impl Workbench {
             // As files named on the command line.
             let paths: Vec<PathBuf> = paths
                 .into_iter()
-                .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                .map(|p| native_path::canonicalize(&p).unwrap_or(p))
                 .collect();
             if !has_project && let Some(folder) = paths.iter().find(|p| p.is_dir()) {
                 return vec![Dropped::Folder(folder.clone())];

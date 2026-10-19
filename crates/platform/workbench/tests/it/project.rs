@@ -387,7 +387,7 @@ fn opening_a_project_creates_no_settings_folder(cx: &mut TestAppContext) {
 fn toolbar_shows_the_active_file_path(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     project(dir.path());
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     let window = open(cx);
     invoke(
         cx,
@@ -667,4 +667,51 @@ fn a_modified_file_shows_a_dot_in_its_tab(cx: &mut TestAppContext) {
     assert_eq!(dot.size.width, gpui::px(16.0));
     // The title has no asterisk.
     assert_eq!(state(cx, window)["tabs"][0]["modified"], json!(true));
+}
+
+/// Every string of `value` that holds the verbatim prefix of Windows.
+fn verbatim_paths(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(s) if s.contains(r"\\?\") => found.push(s.clone()),
+        Value::Array(items) => items.iter().for_each(|v| verbatim_paths(v, found)),
+        Value::Object(map) => map.values().for_each(|v| verbatim_paths(v, found)),
+        _ => {}
+    }
+}
+
+/// The folder is given as the user gives it (not canonical): on Windows
+/// `std::fs::canonicalize` would make `\\?\C:\...` of it, and every path
+/// derived from the root would show that (#240).
+#[gpui::test]
+fn no_shown_path_has_the_verbatim_prefix(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path().display().to_string()}),
+    );
+    invoke(
+        cx,
+        window,
+        "project.open-file",
+        json!({"path": "src/app.py"}),
+    );
+    let s = state(cx, window);
+    let root = native_path::canonicalize(dir.path()).unwrap();
+    assert_eq!(s["project"]["root"], json!(root.display().to_string()));
+    let full = root.join("src").join("app.py");
+    assert_eq!(
+        s["title_path"],
+        json!(format!(
+            "{} [{}]",
+            Path::new("src").join("app.py").display(),
+            full.display()
+        ))
+    );
+    let mut found = Vec::new();
+    verbatim_paths(&s, &mut found);
+    assert!(found.is_empty(), "verbatim paths are shown: {found:?}");
 }

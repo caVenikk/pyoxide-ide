@@ -189,7 +189,7 @@ fn line_kinds(state: &Value, tab: usize, line: usize) -> Vec<String> {
 fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [("a.py", "a = 1\n"), ("b.py", "b = 2\n"), ("c.txt", "c\n")] {
         std::fs::write(root.join(path), text).unwrap();
     }

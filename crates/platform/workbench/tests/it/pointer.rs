@@ -96,7 +96,7 @@ impl H<'_> {
 
 fn setup(cx: &mut TestAppContext) -> H<'_> {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     for (path, text) in [
         ("app.py", "import os\n\ndef main():\n    print(\"x\")\n"),
         ("notes.txt", "a note\n"),

@@ -567,9 +567,9 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
         return true;
     }
     match (a.parent(), b.parent(), a.file_name(), b.file_name()) {
-        (Some(pa), Some(pb), Some(na), Some(nb)) if na == nb => dunce::canonicalize(pa)
+        (Some(pa), Some(pb), Some(na), Some(nb)) if na == nb => native_path::canonicalize(pa)
             .ok()
-            .is_some_and(|pa| dunce::canonicalize(pb).is_ok_and(|pb| pa == pb)),
+            .is_some_and(|pa| native_path::canonicalize(pb).is_ok_and(|pb| pa == pb)),
         _ => false,
     }
 }
@@ -847,7 +847,7 @@ mod tests {
     #[test]
     fn the_reference_interpreters_are_imported_once() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .map(PathBuf::from)
             .unwrap();
@@ -924,7 +924,7 @@ mod tests {
     #[test]
     fn environments_of_one_base_are_different_interpreters() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         let base = root.join("base/python3.13");
         std::fs::create_dir_all(base.parent().unwrap()).unwrap();
         std::fs::write(&base, "").unwrap();

@@ -68,12 +68,7 @@ struct Remotes {
 impl Remotes {
     fn new() -> Self {
         let tmp = tempfile::tempdir().unwrap();
-        let base = std::fs::canonicalize(tmp.path()).unwrap();
-        #[cfg(windows)]
-        let base = match base.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-            Some(rest) => PathBuf::from(rest),
-            None => base,
-        };
+        let base = native_path::canonicalize(tmp.path()).unwrap();
         let remote = base.join("remote.git");
         let seed = base.join("seed");
         std::fs::create_dir_all(&remote).unwrap();

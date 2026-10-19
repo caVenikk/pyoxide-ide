@@ -1,0 +1,12 @@
+# Clippy configuration (https://doc.rust-lang.org/clippy/lint_configuration.html).
+#
+# On Windows `std::fs::canonicalize` returns the verbatim form (`\\?\C:\x`):
+# git reads it as a host name, and a path derived from a canonical project
+# root reaches the UI. `native_path::canonicalize` is the one way to
+# canonicalize; it gives `C:\x` and is compared in one form everywhere
+# (issues #240, #245).
+disallowed-methods = [
+    { path = "std::fs::canonicalize", reason = "returns the verbatim `\\\\?\\` form on Windows: use `native_path::canonicalize`" },
+    { path = "std::path::Path::canonicalize", reason = "returns the verbatim `\\\\?\\` form on Windows: use `native_path::canonicalize`" },
+    { path = "dunce::canonicalize", reason = "use `native_path::canonicalize`, which also simplifies the network form" },
+]

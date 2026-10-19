@@ -39,7 +39,7 @@ fn median(mut v: Vec<Duration>) -> Duration {
 #[ignore]
 fn status_of_a_10k_file_repository() {
     let tmp = tempfile::tempdir().unwrap();
-    let dir = std::fs::canonicalize(tmp.path()).unwrap();
+    let dir = native_path::canonicalize(tmp.path()).unwrap();
     git(&dir, &["init", "-q", "-b", "main"]);
     for d in 0..100 {
         let folder = dir.join(format!("pkg{d:03}"));

@@ -202,7 +202,7 @@ fn product_hooks_see_the_workbench(cx: &mut TestAppContext) {
     assert!(bounds(cx, window, "test-widget").is_some());
 
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("a.py"), "a = 1\n").unwrap();
     invoke(
         cx,

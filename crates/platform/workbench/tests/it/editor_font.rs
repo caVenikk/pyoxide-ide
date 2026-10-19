@@ -93,7 +93,7 @@ impl H<'_> {
 fn setup(cx: &mut TestAppContext) -> H<'_> {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("demo");
+    let root = native_path::canonicalize(dir.path()).unwrap().join("demo");
     std::fs::create_dir(&root).unwrap();
     std::fs::write(root.join("a.py"), "a = 1\n").unwrap();
     let file = dir.path().join("config").join("settings.toml");

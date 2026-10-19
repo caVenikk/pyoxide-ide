@@ -52,7 +52,7 @@ fn open_deep_project(cx: &mut TestAppContext) -> (tempfile::TempDir, WindowHandl
         .join("work/clients/2026/projects/backend-services/skin-tech-api");
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("src/app.py"), "print('hi')\n").unwrap();
-    let root = std::fs::canonicalize(&root).unwrap();
+    let root = native_path::canonicalize(&root).unwrap();
     let window = open(cx);
     invoke(
         cx,

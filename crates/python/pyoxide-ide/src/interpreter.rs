@@ -899,7 +899,7 @@ fn scan_with(
 /// `p` with links resolved and, on Windows, without the `\\?\` prefix
 /// `std::fs::canonicalize` adds.
 fn canonical(p: &Path) -> PathBuf {
-    dunce::canonicalize(p).unwrap_or_else(|_| p.to_owned())
+    native_path::canonicalize(p).unwrap_or_else(|_| p.to_owned())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -1054,7 +1054,7 @@ mod tests {
 
     fn project(name: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(dir.path()).unwrap().join(name);
+        let root = native_path::canonicalize(dir.path()).unwrap().join(name);
         std::fs::create_dir_all(&root).unwrap();
         (dir, root)
     }
@@ -1365,7 +1365,7 @@ mod tests {
     fn configured_interpreters_join_the_project_environments() {
         let (dir, root) = project("demo");
         let uv = venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.14\n");
-        let base = dunce::canonicalize(dir.path()).unwrap();
+        let base = native_path::canonicalize(dir.path()).unwrap();
         let shared = venv(&base.join("envs/shared"), "version = 3.12.1\n");
         let other = venv(&base.join("other/.venv"), "version = 3.11.1\n");
         let mut table = Table::default();

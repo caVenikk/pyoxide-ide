@@ -25,4 +25,5 @@ toml_edit = "0.25"
 
 [dev-dependencies]
 futures.workspace = true
+native-path.workspace = true
 tempfile = "3"

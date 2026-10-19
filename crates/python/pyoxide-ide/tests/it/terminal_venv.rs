@@ -29,7 +29,7 @@ struct Project {
 
 fn project() -> Project {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path().canonicalize().unwrap();
+    let base = native_path::canonicalize(dir.path()).unwrap();
     let root = base.join("demo");
     let home = base.join("home");
     std::fs::create_dir_all(&root).unwrap();

@@ -82,7 +82,7 @@ macro_rules! fixture {
 }
 
 fn canonical(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap()
+    native_path::canonicalize(p).unwrap()
 }
 
 /// A wheel with one module, built with the interpreter's `zipfile`.

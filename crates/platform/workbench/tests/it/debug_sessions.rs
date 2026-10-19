@@ -150,7 +150,7 @@ fn python() -> FileType {
 fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("main.py"), MAIN).unwrap();
     std::fs::write(root.join("other.py"), "x = 1\n").unwrap();
     let product = Product {

@@ -19,7 +19,7 @@ struct Fixture {
 /// Files (and, ending with `/`, folders) under a project folder `src`.
 fn fixture(files: &[&str]) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join("src");
+    let root = native_path::canonicalize(dir.path()).unwrap().join("src");
     std::fs::create_dir_all(&root).unwrap();
     for file in files {
         let path = root.join(file);
@@ -327,7 +327,7 @@ fn a_full_path() {
 fn absolute_paths_outside_the_project() {
     let f = fixture(&["foo/index.html"]);
     let outside = tempfile::tempdir().unwrap();
-    let dir = std::fs::canonicalize(outside.path()).unwrap();
+    let dir = native_path::canonicalize(outside.path()).unwrap();
     let file = dir.join("outside.txt");
     std::fs::write(&file, "").unwrap();
     let text = file.display().to_string();

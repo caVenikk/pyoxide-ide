@@ -21,7 +21,7 @@ struct Fixture {
 
 fn flask(folder: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap().join(folder);
+    let root = native_path::canonicalize(dir.path()).unwrap().join(folder);
     for file in FILES.lines().filter(|l| !l.is_empty()) {
         let path = root.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

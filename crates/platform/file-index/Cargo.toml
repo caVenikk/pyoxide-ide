@@ -13,4 +13,5 @@ project.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+native-path.workspace = true
 tempfile = "3"

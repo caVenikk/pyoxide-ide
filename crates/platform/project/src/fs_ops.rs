@@ -318,7 +318,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// system that ignores case): Windows resolves both to the name on disk.
 #[cfg(windows)]
 fn same_file(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+    match (native_path::canonicalize(a), native_path::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
     }
@@ -787,7 +787,7 @@ pub mod trash {
     fn same_volume(a: &Path, b: &Path) -> bool {
         use std::path::Component;
         let prefix = |p: &Path| {
-            std::fs::canonicalize(p)
+            native_path::canonicalize(p)
                 .ok()
                 .and_then(|p| match p.components().next() {
                     Some(Component::Prefix(prefix)) => {
@@ -830,7 +830,7 @@ mod tests {
 
     fn project() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         std::fs::create_dir_all(root.join("src/pkg")).unwrap();
         std::fs::write(root.join("src/app.py"), "").unwrap();
         std::fs::write(root.join("README.md"), "").unwrap();
@@ -1273,7 +1273,7 @@ mod tests {
     #[ignore = "puts a file into the system trash"]
     fn moves_to_the_trash() {
         let dir = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         let file = root.join("pyoxide-trash-test.txt");
         std::fs::write(&file, "x").unwrap();
         assert!(trash::can_move(&file));

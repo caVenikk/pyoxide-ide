@@ -134,7 +134,7 @@ fn invoke(
 #[gpui::test]
 fn a_project_gets_the_products_services(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
     std::fs::write(root.join("app.py"), "import os\n").unwrap();
     let fake = FakeCodeIntel::new();
     let mut ruff = ServerStatus::new(ServerId::new("ruff"), "ruff");
@@ -207,7 +207,7 @@ struct H<'a> {
 impl<'a> H<'a> {
     fn new(cx: &'a mut TestAppContext, files: &[(&str, &str)]) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = native_path::canonicalize(dir.path()).unwrap();
         for (path, text) in files {
             std::fs::write(root.join(path), text).unwrap();
         }

@@ -511,7 +511,7 @@ fn open_main(
             if path.is_dir() {
                 workbench.open_folder(path, window, cx)
             } else {
-                let path = std::fs::canonicalize(&path).unwrap_or(path);
+                let path = native_path::canonicalize(&path).unwrap_or(path);
                 workbench.open_file(path, window, cx)
             }
         });
