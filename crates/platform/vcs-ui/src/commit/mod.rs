@@ -645,11 +645,7 @@ impl CommitView {
     ) {
         let paths: Vec<PathBuf> = match &action.paths {
             Some(paths) => paths.iter().map(|p| self.resolve(p)).collect(),
-            None => {
-                let mut all = self.tree.files(Group::Changes);
-                all.extend(self.tree.files(Group::Unversioned));
-                all
-            }
+            None => self.tree.all_files(),
         };
         self.tree.set_included(&paths, action.included);
         self.inclusion_changed(cx);

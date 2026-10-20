@@ -9,7 +9,9 @@
 //! the tab), or, without a tab, edits and saves its own document, which a
 //! tab opened later continues with. A file of the Commit tool window's
 //! list opens in the list's preview tab (`Commit: main.py`), with the
-//! list's other files a step away (Compare Next and Previous File).
+//! list's other files a step away (Compare Next and Previous File): all
+//! files of its groups in order, or the selected files; the counter counts
+//! the files of the shown file's group.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -90,6 +92,9 @@ struct DiffTab {
     /// shown.
     files: Vec<PathBuf>,
     index: usize,
+    /// The files are the Commit tool window's selected ones (the counter
+    /// counts them, not a group).
+    selection: bool,
     /// The list is the Commit tool window's.
     commit: bool,
     /// The file being loaded: its base text and its document.
@@ -176,8 +181,8 @@ impl Workbench {
 
     /// Opens the diff of `path`. A file of the Commit tool window's list
     /// opens in the list's preview tab with the list (the selected files
-    /// when there are several, else the files of its group); another file
-    /// in a tab of its own.
+    /// when there are several, else the files of all groups in order);
+    /// another file in a tab of its own.
     pub(super) fn show_diff_of(
         &mut self,
         path: PathBuf,
@@ -187,18 +192,19 @@ impl Workbench {
     ) {
         let commit = self.commit_ui.view.read(cx);
         let tree = commit.tree();
-        let (files, index, commit_list) = match tree.group_of(&path) {
-            Some(group) => {
+        let (files, index, commit_list, selection) = match tree.group_of(&path) {
+            Some(_) => {
                 let selected = commit.selected_files();
-                let files = if selected.len() > 1 && selected.contains(&path) {
+                let selection = selected.len() > 1 && selected.contains(&path);
+                let files = if selection {
                     selected
                 } else {
-                    tree.files(group)
+                    tree.all_files()
                 };
                 let index = files.iter().position(|p| *p == path).unwrap_or(0);
-                (files, index, true)
+                (files, index, true, selection)
             }
-            None => (vec![path.clone()], 0, false),
+            None => (vec![path.clone()], 0, false, false),
         };
         // The list's preview tab, or the file's own diff tab.
         let existing = self.diff_tabs.tabs.iter().find_map(|(id, t)| {
@@ -218,6 +224,7 @@ impl Workbench {
             previous = t.files.get(t.index).cloned().filter(|p| *p != path);
             t.files = files;
             t.index = index;
+            t.selection = selection;
         }
         if let Some(previous) = previous {
             self.diff_forget_document(&previous, cx);
@@ -271,6 +278,7 @@ impl Workbench {
                 document,
                 files: Vec::new(),
                 index: 0,
+                selection: false,
                 commit,
                 loading: None,
                 _subscriptions: subscriptions,
@@ -474,6 +482,15 @@ impl Workbench {
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));
+        // The counter: the file in its group, or in the selected files.
+        let files = match tree.group_of(path).filter(|_| t.commit && !t.selection) {
+            Some(group) => {
+                let group = tree.files(group);
+                let index = group.iter().position(|p| p == path).unwrap_or(0);
+                (index, group.len())
+            }
+            None => (t.index, t.files.len()),
+        };
         DiffRequest {
             path: path.to_owned(),
             title: if t.commit {
@@ -486,7 +503,8 @@ impl Workbench {
             right,
             included,
             one_side,
-            files: (t.index, t.files.len()),
+            files,
+            steps: (t.index > 0, t.index + 1 < t.files.len()),
             preview: t.commit,
         }
     }

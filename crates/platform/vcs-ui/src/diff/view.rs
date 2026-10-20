@@ -109,8 +109,15 @@ pub struct DiffRequest {
     /// an added or unversioned file, the base of a deleted one; `None`:
     /// both sides.
     pub one_side: Option<Side>,
-    /// The file's index in the list and the list's length.
+    /// The file's index in its group of the Commit tool window's tree (or
+    /// in the selected files) and the group's length: the files counter
+    /// (`iterateChangesInSameGroup`).
     pub files: (usize, usize),
+    /// Compare Previous and Next File can go on: the files before and
+    /// after this one in the list the diff steps through, all groups of
+    /// the Commit tool window's tree in order or the selected files
+    /// (`getSelectionStrategy`).
+    pub steps: (bool, bool),
     /// Shown in a preview tab (grey title, the next diff of the list
     /// takes its place).
     pub preview: bool,
@@ -610,8 +617,8 @@ impl DiffView {
 
     fn has_file(&self, next: bool) -> bool {
         self.request.as_ref().is_some_and(|r| {
-            let (index, count) = r.files;
-            if next { index + 1 < count } else { index > 0 }
+            let (previous, following) = r.steps;
+            if next { following } else { previous }
         })
     }
 
@@ -833,6 +840,7 @@ impl DiffView {
             "right_title": self.request.as_ref().map(|r| title(&r.right)),
             "included": self.request.as_ref().and_then(|r| r.included),
             "files": self.request.as_ref().map(|r| json!([r.files.0, r.files.1])),
+            "steps": self.request.as_ref().map(|r| json!([r.steps.0, r.steps.1])),
             "preview": self.request.as_ref().is_some_and(|r| r.preview),
             "files_text": self.files_text(),
             "status": self.status_text(),

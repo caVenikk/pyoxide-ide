@@ -335,6 +335,57 @@ fn differences_files_and_sides_are_navigated(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn next_difference_goes_on_to_the_unversioned_files(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, |root| {
+        repository(root);
+        change(root);
+        write(root, "new.py", "new = 1\n");
+    });
+    h.wait_commit("the unversioned file", |c| {
+        c["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["group"] == "unversioned"))
+    });
+    h.focus_commit_tree();
+    h.invoke("commit-tree.select", json!({ "path": "main.py" }));
+    h.invoke("commit-tree.open", Value::Null);
+    let d = h.wait_diff("main.py");
+    // The counter counts the Changes; the files after them are a step away.
+    assert_eq!(d["files"], json!([1, 2]));
+    assert_eq!(d["files_text"], "2/2 files");
+    assert_eq!(d["steps"], json!([true, true]));
+
+    // F7 at the last difference: the hint, then the unversioned file.
+    h.focus_diff(Side::Right);
+    h.invoke("diff.next", Value::Null);
+    assert_eq!(h.right_caret(), 21);
+    h.invoke("diff.next", Value::Null);
+    assert_eq!(h.diff()["hint"], "Press again to go to the next file");
+    h.invoke("diff.next", Value::Null);
+    let d = h.wait_diff("new.py");
+    assert_eq!(d["one_side"], "right");
+    assert_eq!(d["files"], json!([0, 1]));
+    assert_eq!(d["files_text"], "1 file");
+    assert_eq!(d["steps"], json!([true, false]));
+    // The Commit tool window selects it (its group expanded).
+    let commit = h.commit();
+    let selected: Vec<&Value> = commit["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["selected"] == true)
+        .map(|r| &r["path"])
+        .collect();
+    assert_eq!(selected, [&json!("new.py")]);
+
+    // Compare Previous File: back to the last of the Changes.
+    h.invoke("diff.previous-file", Value::Null);
+    let d = h.wait_diff("main.py");
+    assert_eq!(d["files"], json!([1, 2]));
+    assert_eq!(d["steps"], json!([true, true]));
+}
+
+#[gpui::test]
 fn edits_of_the_right_side_reach_the_file(cx: &mut TestAppContext) {
     let (mut h, _dir) = open(cx, |root| {
         repository(root);

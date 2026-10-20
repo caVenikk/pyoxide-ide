@@ -210,6 +210,14 @@ impl ChangesTree {
         }
     }
 
+    /// The files of all groups in their order (Changes, then Unversioned
+    /// Files).
+    pub fn all_files(&self) -> Vec<PathBuf> {
+        let mut out = self.files(Group::Changes);
+        out.extend(self.files(Group::Unversioned));
+        out
+    }
+
     pub fn is_expanded(&self, group: Group) -> bool {
         match group {
             Group::Changes => self.expanded_changes,
