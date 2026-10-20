@@ -357,16 +357,17 @@ mod tests {
 
     #[test]
     fn a_partial_text_leaves_the_excluded_changes_out() {
+        let one = |r: std::ops::Range<u32>| vec![r];
         let base = "a\nb\nc\nd\n";
         let text = "a\nB\nc\nd\nE\n";
         assert_eq!(partial_text(base, text, &[]), text);
-        assert_eq!(partial_text(base, text, &[1..2]), "a\nb\nc\nd\nE\n");
-        assert_eq!(partial_text(base, text, &[4..4]), "a\nB\nc\nd\n");
+        assert_eq!(partial_text(base, text, &one(1..2)), "a\nb\nc\nd\nE\n");
+        assert_eq!(partial_text(base, text, &one(4..4)), "a\nB\nc\nd\n");
         assert_eq!(partial_text(base, text, &[1..2, 4..4]), base);
         // A deletion, and the line breaks of either text.
         let base = "a\r\nb\r\nc\r\n";
         let text = "a\r\nc\r\nX\r\n";
-        assert_eq!(partial_text(base, text, &[1..2]), "a\r\nb\r\nc\r\nX\r\n");
-        assert_eq!(partial_text(base, text, &[3..3]), "a\r\nc\r\n");
+        assert_eq!(partial_text(base, text, &one(1..2)), "a\r\nb\r\nc\r\nX\r\n");
+        assert_eq!(partial_text(base, text, &one(3..3)), "a\r\nc\r\n");
     }
 }

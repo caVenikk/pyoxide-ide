@@ -400,13 +400,7 @@ fn segments_outline(cx: &App) -> Div {
 /// A choice of a segmented button: the selected one raised, its outline
 /// one pixel outside it over the button's outline
 /// (`SegmentedButtonComponent.paint`, `SegmentedButtonLook`).
-fn segment(
-    id: &'static str,
-    ix: usize,
-    chosen: bool,
-    enabled: bool,
-    cx: &App,
-) -> Stateful<Div> {
+fn segment(id: &'static str, ix: usize, chosen: bool, enabled: bool, cx: &App) -> Stateful<Div> {
     let theme = cx.theme();
     let radius = field_radius(cx);
     div()

@@ -1,5 +1,10 @@
 - crates/platform/vcs-ui/src/diff/, crates/platform/editor/src/side_by_side.rs,
-  crates/platform/editor/src/gutter.rs (the diff gutter),
+  crates/platform/editor/src/gutter.rs (the diff gutter and its action icons),
+  crates/platform/vcs-ui/src/commit/tree.rs (changes left out of a file),
+  crates/platform/vcs/src/ranges.rs (`partial_text`),
+  crates/platform/git/src/commit.rs (the partial commit),
+  crates/platform/git/src/idea.rs (the commit messages of `.idea/workspace.xml`),
+  crates/platform/workbench/src/workbench/diff.rs (the files of all groups),
   crates/platform/ui/src/form.rs (the segmented button's look), the theme
   roles `segmented-selected` and `segmented-selected-border`, the icons
   crates/platform/ui/assets/icons/diff/gutterCheckBox@14x14.svg,
@@ -25,7 +30,21 @@
   platform/platform-api/src/com/intellij/util/animation/Easing.java
   (`EASE_OUT`), platform/platform-impl/src/com/intellij/ui/dsl/builder/
   components/SegmentedButtonComponent.kt (the selected choice's outline over
-  the button's) and the `SegmentedButton` colours of platform/
+  the button's), tools/simple/SimpleDiffChangeUi.java and util/
+  DiffGutterOperation.java (the `>>` of a change by the left numbers, "Revert",
+  "Replace change"), LocalTrackerDiffUtil.kt's `createCheckboxToggle` and
+  `getStatusText` and platform/vcs-impl/src/com/intellij/openapi/vcs/ex/
+  PartialLocalLineStatusTracker.kt (a change's check box by the right numbers,
+  the file partly included), plugins/git4idea/backend/src/checkin/
+  GitCheckinEnvironment.kt (a partial commit staging the included content),
+  platform/vcs-impl/src/com/intellij/openapi/vcs/changes/
+  ChangeViewDiffRequestProcessor.java and ChangesViewDiffPreviewProcessor.kt
+  (the next file across the groups, the counter of the file's group),
+  platform/vcs-impl/src/com/intellij/vcs/commit/ChangesViewCommitMessagePolicy.kt
+  and platform/vcs-api/shared/src/com/intellij/openapi/vcs/VcsConfiguration.java
+  (where the unsent and the recent commit messages are kept), the
+  `Diff.ApplyLeftSide` keystrokes of platform/platform-resources/src/keymaps/
+  and the `SegmentedButton` colours of platform/
   platform-resources/src/themes/islands/ManyIslandsDark.theme.json and
   ManyIslandsLight.theme.json. Behaviour, numbers and texts reimplemented in Rust
   with GPUI; the gutter's sizes are measured on the reference. The icons are

@@ -766,33 +766,40 @@ mod tests {
     fn changes_of_a_file_are_left_out_one_by_one() {
         let mut t = tree();
         let main = root().join("main.py");
-        let all = [1..2, 4..4];
-        t.set_change_included(&main, 4..4, &all, false);
+        let (modified, inserted) = (1..2, 4..4);
+        let all = [modified.clone(), inserted.clone()];
+        t.set_change_included(&main, inserted.clone(), &all, false);
         assert_eq!(t.file_inclusion(&main), Inclusion::Some);
         assert_eq!(t.inclusion(Group::Changes), Inclusion::Some);
-        assert_eq!(t.excluded_changes(&main), [4..4]);
+        assert_eq!(t.excluded_changes(&main), std::slice::from_ref(&inserted));
         assert_eq!(
             t.partial_files(),
             [PartialFile {
                 path: main.clone(),
-                excluded: vec![4..4],
+                excluded: all[1..].to_vec(),
             }]
         );
         // The last one out: the file is out.
-        t.set_change_included(&main, 1..2, &all, false);
+        t.set_change_included(&main, modified.clone(), &all, false);
         assert_eq!(t.file_inclusion(&main), Inclusion::None);
         assert!(t.partial_files().is_empty());
         // One in: the file is in with the other one left out.
-        t.set_change_included(&main, 4..4, &all, true);
+        t.set_change_included(&main, inserted, &all, true);
         assert_eq!(t.file_inclusion(&main), Inclusion::Some);
-        assert_eq!(t.excluded_changes(&main), [1..2]);
+        assert_eq!(t.excluded_changes(&main), std::slice::from_ref(&modified));
         // Its check box includes all of it.
         t.toggle(&[Row::File(main.clone())]);
         assert_eq!(t.file_inclusion(&main), Inclusion::All);
         assert!(t.excluded_changes(&main).is_empty());
         // An unversioned file has no changes to leave out.
         let untracked = root().join("untracked.py");
-        t.set_change_included(&untracked, 0..0, &[0..0], false);
+        let start = 0..0;
+        t.set_change_included(
+            &untracked,
+            start.clone(),
+            std::slice::from_ref(&start),
+            false,
+        );
         assert_eq!(t.file_inclusion(&untracked), Inclusion::None);
     }
 }

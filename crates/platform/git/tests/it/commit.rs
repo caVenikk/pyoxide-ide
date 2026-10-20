@@ -234,7 +234,8 @@ fn a_partial_commit_takes_the_included_changes_only() {
         unversioned: vec![dir.join("new.py")],
         partial: vec![vcs::PartialFile {
             path: dir.join("a.py"),
-            excluded: vec![4..5],
+            // The fifth line's change.
+            excluded: (4..5).map(|l| l..l + 1).collect(),
         }],
         run_hooks: true,
         ..CommitRequest::default()
