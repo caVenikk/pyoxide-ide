@@ -1687,8 +1687,25 @@ impl Workbench {
     }
 
     fn open_file_action(&mut self, action: &OpenFile, window: &mut Window, cx: &mut Context<Self>) {
-        let path = self.resolve(&action.path, cx);
-        self.open_file(path, window, cx);
+        if let Some(path) = &action.path {
+            let path = self.resolve(path, cx);
+            self.open_file(path, window, cx);
+            return;
+        }
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = chosen.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update_in(cx, |this, window, cx| this.open_file(path, window, cx));
+            }
+        })
+        .detach();
     }
 
     fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
@@ -2475,6 +2492,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_welcome_action))
             .on_action(cx.listener(Self::welcome_theme))
             .on_action(cx.listener(Self::welcome_keymap))
+            .on_action(cx.listener(Self::new_script))
             .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))

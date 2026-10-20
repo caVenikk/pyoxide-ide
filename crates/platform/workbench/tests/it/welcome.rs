@@ -105,7 +105,27 @@ fn the_welcome_tab_switches_the_theme_and_the_keymap(cx: &mut TestAppContext) {
     assert_eq!(s["title_path"], Value::Null, "no title in the toolbar");
     let w = h.welcome();
     assert_eq!(w["subtitle"], json!("Start in one click"));
-    assert_eq!(w["tiles"][0]["label"], json!("Open File"));
+    // The platform's tiles (a product puts its own first): Open File, then
+    // Learn and Plugins with nothing behind them yet.
+    let tiles: Vec<(String, bool)> = w["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["label"].as_str().unwrap().to_owned(),
+                t["enabled"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        tiles,
+        [
+            ("Open File".to_owned(), true),
+            ("Learn".to_owned(), false),
+            ("Plugins".to_owned(), false),
+        ]
+    );
     assert_eq!(w["tiles"][0]["command"], json!("project.open-file"));
     assert_eq!(w["theme"], json!("Theme: Islands Dark"));
     let keymap = w["keymap"].as_str().unwrap().to_owned();
@@ -221,4 +241,31 @@ fn projects_and_files_shows_while_no_project_is_open(cx: &mut TestAppContext) {
     let s = h.state();
     assert_eq!(s["projects_and_files"], Value::Null, "{s}");
     assert!(s["tree"]["rows"].is_array(), "{s}");
+}
+
+#[gpui::test]
+fn new_script_makes_a_scratch_file_and_opens_it(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    let dir = h._dir.path().join("scratches");
+    let args = json!({ "extension": "py", "directory": dir.to_string_lossy() });
+    h.invoke("welcome.new-script", args.clone());
+    let tab = |s: &Value, ix: usize| {
+        let path = s["tabs"][ix]["path"].as_str().unwrap_or_default();
+        std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+    };
+    let s = h.state();
+    assert_eq!(tab(&s, 0).as_deref(), Some("scratch.py"), "{s}");
+    assert_eq!(std::fs::read_to_string(dir.join("scratch.py")).unwrap(), "");
+    // The next one does not overwrite it.
+    std::fs::write(dir.join("scratch.py"), "x = 1\n").unwrap();
+    h.invoke("welcome.new-script", args);
+    let s = h.state();
+    assert_eq!(tab(&s, 1).as_deref(), Some("scratch_1.py"), "{s}");
+    assert_eq!(s["active_tab"], json!(1));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("scratch.py")).unwrap(),
+        "x = 1\n"
+    );
 }

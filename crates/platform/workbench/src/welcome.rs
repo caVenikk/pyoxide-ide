@@ -24,6 +24,7 @@ use serde_json::{Value as Json, json};
 use settings_ui::commands::SwitchTheme;
 use settings_ui::theme_switch;
 use themes::UiRole;
+use ui::components::Tooltip;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
@@ -44,6 +45,10 @@ ui::ui_commands! {
     /// The Keymap list of the Welcome tab.
     ChooseKeymap => "welcome.keymap", "Keymap",
         "Opens the list of the Welcome tab's Keymap combo box (the tab opens first if it is not); a keymap chosen in it is the keymap at once.";
+    /// A new script of the product's language.
+    NewScript { extension: Option<String>, directory: Option<String> } => "welcome.new-script", "New Script",
+        "Creates an empty file `scratch.<extension>` (then `scratch_1.<extension>`, ...; `txt` without an extension) in `scratches` of the configuration folder, or in `directory`, and opens it in a tab.",
+        r#"{"extension": "py"}"#;
 }
 
 /// `non.modal.welcome.screen.secondary.title` (`PyWelcomeBundle`).
@@ -53,8 +58,12 @@ pub const SUBTITLE: &str = "Start in one click";
 /// (`NonModalWelcomeScreenBundle`).
 pub const THEME_PREFIX: &str = "Theme: ";
 pub const KEYMAP_PREFIX: &str = "Keymap: ";
-/// `non.modal.welcome.screen.feature.open.file`.
+/// `non.modal.welcome.screen.feature.open.file`, `.learn`, `.plugins`.
 pub const OPEN_FILE: &str = "Open File";
+pub const LEARN: &str = "Learn";
+pub const PLUGINS: &str = "Plugins";
+/// The tooltip of a tile with nothing behind it yet.
+pub const NOT_AVAILABLE: &str = projects::NOT_AVAILABLE;
 
 const TITLE_SIZE: f32 = 20.0;
 const TITLE_LINE: f32 = 24.0;
@@ -73,13 +82,37 @@ const LIST_MIN_WIDTH: f32 = 200.0;
 /// The glow's blobs.
 const GLOW_SIZE: f32 = 560.0;
 
-/// A tile of the Welcome tab: a command of the registry, run without
-/// arguments.
+/// How a tile's icon is drawn: in the accent colour (the reference's
+/// blue line icons), or in its own colours (a product's logo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileTint {
+    Accent,
+    Own,
+}
+
+/// A tile of the Welcome tab: a command of the registry and its arguments
+/// (JSON); without a command it has nothing behind it yet and is drawn
+/// dimmed, with [`NOT_AVAILABLE`] as its tooltip.
 #[derive(Debug, Clone, Copy)]
 pub struct WelcomeTile {
     pub label: &'static str,
     pub icon: IconName,
-    pub command: &'static str,
+    pub tint: TileTint,
+    pub command: Option<&'static str>,
+    pub args: Option<&'static str>,
+}
+
+impl WelcomeTile {
+    /// A tile with nothing behind it yet.
+    pub const fn unavailable(label: &'static str, icon: IconName, tint: TileTint) -> Self {
+        Self {
+            label,
+            icon,
+            tint,
+            command: None,
+            args: None,
+        }
+    }
 }
 
 /// What a product adds to the Welcome tab.
@@ -91,13 +124,22 @@ pub struct WelcomeHook {
     pub tiles: Vec<WelcomeTile>,
 }
 
-/// The platform's tiles: Open File (`IMPORT_FILE`, the `OpenFile` action).
+/// The platform's tiles after the product's, in the reference's order:
+/// Open File (`IMPORT_FILE`, the `OpenFile` action: a file chooser), Learn
+/// (the Learn tab in the editor) and Plugins (Settings > Plugins); we have
+/// neither of the last two yet.
 fn platform_tiles() -> Vec<WelcomeTile> {
-    vec![WelcomeTile {
-        label: OPEN_FILE,
-        icon: IconName::UPLOAD,
-        command: "project.open-file",
-    }]
+    vec![
+        WelcomeTile {
+            label: OPEN_FILE,
+            icon: IconName::UPLOAD,
+            tint: TileTint::Accent,
+            command: Some("project.open-file"),
+            args: None,
+        },
+        WelcomeTile::unavailable(LEARN, IconName::LEARN, TileTint::Accent),
+        WelcomeTile::unavailable(PLUGINS, IconName::PLUGIN, TileTint::Accent),
+    ]
 }
 
 /// The two combo boxes at the bottom.
@@ -249,6 +291,7 @@ impl WelcomeView {
             "tiles": self.tiles.iter().map(|t| json!({
                 "label": t.label,
                 "command": t.command,
+                "enabled": t.command.is_some(),
             })).collect::<Vec<_>>(),
             "theme": format!("{THEME_PREFIX}{}", Self::theme_name(cx)),
             "keymap": format!("{KEYMAP_PREFIX}{}", keymaps::active_name(cx)),
@@ -272,8 +315,12 @@ impl WelcomeView {
 
     fn render_tile(&self, ix: usize, tile: WelcomeTile, cx: &App) -> AnyElement {
         let theme = cx.theme();
-        let tint = theme.color(UiRole::TextLink);
-        let command = tile.command;
+        let icon = Icon::new(tile.icon).size(px(TILE_ICON));
+        let icon = match tile.tint {
+            TileTint::Accent => icon.tint(theme.color(UiRole::TextLink)),
+            TileTint::Own => icon,
+        };
+        let enabled = tile.command.is_some();
         div()
             .id(("welcome-tile", ix))
             .debug_selector(move || format!("welcome-tile-{ix}"))
@@ -284,17 +331,14 @@ impl WelcomeView {
             .py(px(12.0))
             .rounded(px(TILE_RADIUS))
             .bg(Self::wash(0.07, 0.05, cx))
-            .hover(|s| s.bg(Self::wash(0.12, 0.08, cx)))
-            .active(|s| s.bg(Self::wash(0.18, 0.12, cx)))
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .child(
-                Icon::new(tile.icon)
-                    .size(px(TILE_ICON))
-                    .tint(tint)
-                    .into_any_element(),
+                div()
+                    .when(!enabled, |d| d.opacity(ui::components::DISABLED_ALPHA))
+                    .child(icon.into_any_element()),
             )
             .child(
                 div()
@@ -302,13 +346,25 @@ impl WelcomeView {
                     .text_size(px(SUBTITLE_SIZE))
                     .line_height(px(SUBTITLE_LINE))
                     .text_center()
+                    .when(!enabled, |d| {
+                        d.text_color(theme.color(UiRole::TextDisabled))
+                    })
                     .child(tile.label),
             )
-            .on_click(move |_: &ClickEvent, window, cx| {
-                if let Err(e) = ui::command::invoke(command, Json::Null, window, cx) {
-                    eprintln!("welcome: {command}: {e:?}");
-                }
+            .when_some(tile.command, |d, command| {
+                d.hover(|s| s.bg(Self::wash(0.12, 0.08, cx)))
+                    .active(|s| s.bg(Self::wash(0.18, 0.12, cx)))
+                    .on_click(move |_: &ClickEvent, window, cx| {
+                        let args = tile
+                            .args
+                            .and_then(|a| serde_json::from_str(a).ok())
+                            .unwrap_or(Json::Null);
+                        if let Err(e) = ui::command::invoke(command, args, window, cx) {
+                            eprintln!("welcome: {command}: {e:?}");
+                        }
+                    })
             })
+            .when(!enabled, |d| d.tooltip(Tooltip::text(NOT_AVAILABLE, None)))
             .into_any_element()
     }
 

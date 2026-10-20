@@ -44,8 +44,8 @@ ui::ui_commands! {
         "Opens a folder as the project; without a path a folder chooser is shown.",
         r#"{"path": "/path/to/project"}"#;
     /// Open a file in a tab.
-    OpenFile { path: String } => "project.open-file", "Open File",
-        "Opens a file in an editor tab (a path relative to the project or absolute).",
+    OpenFile { path: Option<String> } => "project.open-file", "Open File",
+        "Opens a file in an editor tab (a path relative to the project or absolute); without a path a file chooser is shown.",
         r#"{"path": "src/app.py"}"#;
     /// Save the active file.
     Save => "editor.save", "Save", "Writes the active file to disk.";

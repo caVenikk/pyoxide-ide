@@ -281,10 +281,11 @@ pub fn product() -> Product {
         // The Python group: Type Engine and Tools > External Tools.
         settings_pages: settings_pages::pages(),
         terminal: Some(terminal::hook()),
-        // The Welcome tab carries the Python icon.
+        // The Welcome tab carries the Python icon; New Script and New
+        // Notebook come before the platform's tiles (`PyWelcomeFeatures`).
         welcome: workbench::welcome::WelcomeHook {
             icon: Some(IconName("python/file")),
-            tiles: Vec::new(),
+            tiles: welcome_tiles(),
         },
     }
 }
@@ -299,6 +300,23 @@ pub fn product_with_tools(search: py_lsp::SearchPaths) -> Product {
         )),
         ..product()
     }
+}
+
+/// New Script (a new `.py` scratch file; the reference makes a
+/// `PyCharmMiscProject` with `script.py`) and New Notebook (nothing
+/// behind it yet).
+fn welcome_tiles() -> Vec<workbench::welcome::WelcomeTile> {
+    use workbench::welcome::{TileTint, WelcomeTile};
+    vec![
+        WelcomeTile {
+            label: "New Script",
+            icon: IconName("python/file"),
+            tint: TileTint::Own,
+            command: Some("welcome.new-script"),
+            args: Some(r#"{"extension": "py"}"#),
+        },
+        WelcomeTile::unavailable("New Notebook", IconName::JUPYTER_NOTEBOOK, TileTint::Own),
+    ]
 }
 
 #[cfg(test)]

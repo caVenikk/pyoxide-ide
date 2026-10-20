@@ -217,6 +217,12 @@ impl IconName {
     pub const DARK_THEME: Self = Self("meetNewUi/darkTheme");
     pub const LIGHT_THEME: Self = Self("meetNewUi/lightTheme");
     pub const KEYBOARD: Self = Self("general/keyboard");
+    /// The Welcome tab's Learn and Plugins tiles (`AllIcons.General.Learn`,
+    /// `AllIcons.Nodes.Plugin`) and New Notebook's
+    /// (`AllIcons.FileTypes.JupyterNotebook`).
+    pub const LEARN: Self = Self("general/learn");
+    pub const PLUGIN: Self = Self("nodes/plugin");
+    pub const JUPYTER_NOTEBOOK: Self = Self("fileTypes/jupyterNotebook");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -270,7 +276,7 @@ platform_icons! {
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
         "general/showAsTree", "general/up", "general/upload", "general/vcs",
-        "general/keyboard",
+        "general/keyboard", "general/learn",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",
@@ -279,7 +285,7 @@ platform_icons! {
         "nodes/class", "nodes/constant", "nodes/enum", "nodes/errorMark", "nodes/excludeRoot",
         "nodes/field",
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
-        "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
+        "nodes/package", "nodes/parameter", "nodes/plugin", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
