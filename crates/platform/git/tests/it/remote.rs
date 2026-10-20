@@ -44,7 +44,6 @@ fn read(dir: &Path, rel: &str) -> String {
 
 fn configure(dir: &Path) {
     for (key, value) in [
-        ("core.autocrlf", "false"),
         ("core.fsmonitor", "false"),
         ("user.name", "Test"),
         ("user.email", "test@example.invalid"),
@@ -74,7 +73,7 @@ impl Remotes {
         std::fs::create_dir_all(&remote).unwrap();
         std::fs::create_dir_all(&seed).unwrap();
         git(&remote, &["init", "-q", "--bare", "-b", "main"]);
-        git(&seed, &["init", "-q", "-b", "main"]);
+        git::testing::init(&seed);
         configure(&seed);
         write(&seed, "a.py", "1\n2\n3\n");
         write(&seed, "b.py", "b\n");
@@ -84,21 +83,8 @@ impl Remotes {
         git(&seed, &["push", "-q", "-u", "origin", "main"]);
         let ours = base.join("ours");
         let theirs = base.join("theirs");
-        // The pin goes into the clone command: the checkout itself must not
-        // convert line endings (Git for Windows defaults to `autocrlf=true`,
-        // and `configure` below would come after the files are written).
         for name in ["ours", "theirs"] {
-            git(
-                &base,
-                &[
-                    "clone",
-                    "-q",
-                    "-c",
-                    "core.autocrlf=false",
-                    "remote.git",
-                    name,
-                ],
-            );
+            git::testing::clone(&base, "remote.git", name);
         }
         configure(&ours);
         configure(&theirs);

@@ -35,13 +35,12 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// A repository on `main` with its own identity (stashes need one), a
 /// tag `v1` and a branch `other` whose `a.py` differs in its last line.
 fn repository(root: &Path) {
-    git(root, &["init", "-q", "-b", "main"]);
+    git::testing::init(root);
     for (key, value) in [
         ("user.name", "Test"),
         ("user.email", "test@example.invalid"),
         ("commit.gpgsign", "false"),
         ("tag.gpgsign", "false"),
-        ("core.autocrlf", "false"),
     ] {
         git(root, &["config", key, value]);
     }

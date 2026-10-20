@@ -37,7 +37,6 @@ fn identity(dir: &Path) {
         ("user.name", "Test"),
         ("user.email", "test@example.invalid"),
         ("commit.gpgsign", "false"),
-        ("core.autocrlf", "false"),
         ("pull.rebase", "false"),
     ] {
         git(dir, &["config", key, value]);
@@ -71,7 +70,7 @@ fn repos() -> Repos {
         &base,
         &["init", "-q", "--bare", "-b", "main", "demo-remote.git"],
     );
-    git(&root, &["init", "-q", "-b", "main"]);
+    git::testing::init(&root);
     identity(&root);
     commit(&root, "a.py", "1\n2\n3\n", "first");
     commit(&root, "b.py", "b\n", "second");
@@ -80,12 +79,7 @@ fn repos() -> Repos {
     let url = run_config::paths::simplified(remote.to_str().unwrap());
     git(&root, &["remote", "add", "origin", &url]);
     git(&root, &["push", "-q", "-u", "origin", "main"]);
-    // The pin is part of the clone: the checkout must not convert line
-    // endings (Git for Windows defaults to `autocrlf=true`).
-    git(
-        &base,
-        &["clone", "-q", "-c", "core.autocrlf=false", &url, "other"],
-    );
+    git::testing::clone(&base, &url, "other");
     identity(&other);
     Repos {
         _dir: dir,

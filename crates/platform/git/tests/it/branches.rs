@@ -48,9 +48,8 @@ fn temp() -> (tempfile::TempDir, PathBuf) {
 /// repository's own identity makes stashes and commits work anywhere.
 fn repository() -> (tempfile::TempDir, PathBuf) {
     let (tmp, dir) = temp();
-    git(&dir, &["init", "-q", "-b", "main"]);
+    git::testing::init(&dir);
     for (key, value) in [
-        ("core.autocrlf", "false"),
         ("core.fsmonitor", "false"),
         ("user.name", "Test"),
         ("user.email", "test@example.invalid"),

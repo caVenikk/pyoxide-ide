@@ -103,6 +103,13 @@ What CI runs, and when (`.github/workflows/ci.yml`):
   tables instead of full debug info, no incremental compilation (measured in
   `replica/perf.md`, CI).
 
+## Test repositories
+A test that needs a Git repository makes it with `git::testing::init` (or
+`git::testing::clone`), never with a bare `git init` / `git clone`: they pin
+`core.autocrlf=false` and `core.eol=lf` before the first file is written,
+because Git for Windows defaults to `autocrlf=true` and converts line endings
+there only.
+
 ## Hygiene
 Public files are English and contain no personal data. Reference screenshots and
 collected user feedback stay local (`replica/screens/`, `replica/reviews.csv`,

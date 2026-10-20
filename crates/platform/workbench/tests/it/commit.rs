@@ -58,12 +58,9 @@ fn write(root: &Path, rel: &str, text: &str) {
 /// its first commit "initial"; its own identity unless `identity` is
 /// false.
 fn repository(root: &Path, identity: bool) {
-    git(root, &["init", "-q", "-b", "main"]);
-    for (key, value) in [
-        ("commit.gpgsign", "false"),
-        ("core.autocrlf", "false"),
-        ("core.fsmonitor", "false"),
-    ] {
+    global_config();
+    git::testing::init(root);
+    for (key, value) in [("commit.gpgsign", "false"), ("core.fsmonitor", "false")] {
         git(root, &["config", key, value]);
     }
     for f in ["a.py", "b.py", "c.py", "notes.txt"] {

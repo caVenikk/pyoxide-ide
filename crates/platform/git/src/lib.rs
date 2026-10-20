@@ -21,6 +21,7 @@
 //! - [`idea`]: the reference IDE's `.idea/vcs.xml` mapping.
 //! - [`remote`]: fetch, push with its results and the commits it sends,
 //!   Update Project (merge or rebase with the local changes stashed).
+//! - [`testing`]: temporary repositories for tests, line endings pinned.
 //! - [`commands::register`]: `git.status`, `git.branches`, `git.state`,
 //!   `git.checkout`, `git.new-branch`, `git.rename-branch`,
 //!   `git.delete-branch`, `git.init`, `git.fetch`, `git.push`, `git.update`.
@@ -36,6 +37,7 @@ pub mod remote;
 mod repo;
 mod runner;
 mod service;
+pub mod testing;
 
 use std::path::Path;
 

@@ -38,7 +38,7 @@ pub(super) fn ensure_repository(h: &mut H) {
                 .unwrap();
             assert!(out.status.success(), "git {args:?}");
         };
-        git(&["init", "-q", "-b", "main"]);
+        git::testing::init(&h.root);
         git(&["config", "user.name", "Test"]);
         git(&["config", "user.email", "test@example.invalid"]);
         git(&["config", "commit.gpgsign", "false"]);

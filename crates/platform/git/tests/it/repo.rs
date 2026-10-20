@@ -38,9 +38,8 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// A new repository on `main` with the machine's global settings that
 /// change results switched off.
 fn init(dir: &Path) {
-    git(dir, &["init", "-q", "-b", "main"]);
+    git::testing::init(dir);
     for (key, value) in [
-        ("core.autocrlf", "false"),
         ("core.fsmonitor", "false"),
         ("core.excludesFile", "no-such-file"),
         ("status.renames", "true"),
