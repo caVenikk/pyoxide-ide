@@ -50,6 +50,7 @@ mod run_actions;
 pub(crate) mod terminal_dev;
 mod tool_window_areas;
 mod version_control;
+mod welcome;
 
 use crate::tool_windows::Area;
 pub use crate::tool_windows::{BOTTOM_WEIGHT, PROJECT_WIDTH, ToolWindow};
@@ -635,7 +636,9 @@ impl Workbench {
     /// then the full path in brackets; a view's title (`Commit: main.py`).
     pub fn title_path(&self, cx: &App) -> Option<String> {
         if let Some(view) = self.active.and_then(|i| self.tabs[i].view()) {
-            return Some(view.title(cx).to_string());
+            return view
+                .title_in_toolbar(cx)
+                .then(|| view.title(cx).to_string());
         }
         let path = self.active_editor()?.read(cx).path()?.clone();
         let full = path.display().to_string();
@@ -2456,6 +2459,9 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::set_theme))
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::import_reference_settings))
+            .on_action(cx.listener(Self::open_welcome_action))
+            .on_action(cx.listener(Self::welcome_theme))
+            .on_action(cx.listener(Self::welcome_keymap))
             .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))

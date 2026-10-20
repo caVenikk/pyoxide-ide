@@ -33,6 +33,7 @@ pub mod simulate;
 pub mod tab_view;
 pub mod terminal;
 pub mod tool_windows;
+pub mod welcome;
 pub mod workbench;
 
 pub use crate::settings::{SaveSettings, SyncSettings};

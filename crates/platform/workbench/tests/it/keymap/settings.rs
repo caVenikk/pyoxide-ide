@@ -5,7 +5,8 @@ use super::*;
 area_tests!("settings");
 
 /// The first-run window over the main window (`settings.import-reference`)
-/// with nothing to import: it opens on Choose Theme.
+/// with nothing to import: it opens on the import page, where Enter
+/// imports the newest folder (there is none) and Escape closes it.
 fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
     h.cx.update(|cx| settings_ui::first_run::set_reference_root(cx, None));
     h.invoke("settings.import-reference", json!(null));
@@ -13,12 +14,12 @@ fn check_first_run(h: &mut H, command: &str, keys: &str, what: &str) {
         h.cx.update(|cx| ui::dialog_window::child_of(h.window.into(), cx))
             .expect("the first-run window");
     let state = |h: &mut H| h.invoke("first-run.state", json!(null));
-    assert_eq!(state(h)["page"], json!("theme"), "{what}");
+    assert_eq!(state(h)["page"], json!("import"), "{what}");
     h.dispatched.borrow_mut().clear();
     h.cx.simulate_keystrokes(dialog, keys);
     h.draw();
     if command == "first-run.continue" {
-        assert_eq!(state(h)["page"], json!("keymap"), "{what}");
+        assert_eq!(state(h)["page"], json!("import"), "{what}: nothing to import");
         // Escape closes the window again.
         h.cx.simulate_keystrokes(dialog, "escape");
         h.draw();

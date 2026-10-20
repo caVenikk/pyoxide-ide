@@ -281,6 +281,11 @@ pub fn product() -> Product {
         // The Python group: Type Engine and Tools > External Tools.
         settings_pages: settings_pages::pages(),
         terminal: Some(terminal::hook()),
+        // The Welcome tab carries the Python icon.
+        welcome: workbench::welcome::WelcomeHook {
+            icon: Some(IconName("python/file")),
+            tiles: Vec::new(),
+        },
     }
 }
 

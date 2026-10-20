@@ -1,50 +1,40 @@
 //! The first-run window's pages, as the reference's onboarding dialog lays
 //! them out (IntelliJ Community, Apache-2.0: `ProductChooserPage`,
-//! `ImportProgressPage`, `ThemeChooserPage`, `KeymapChooserPage`,
-//! `WizardPagePane`, `SchemePane`, `KeymapPane`, `RoundedPanel`,
-//! `UiUtils`):
+//! `ImportProgressPage`, `UiUtils`):
 //!
 //! - Import Settings: the title (`JBFont.h1`) 26 above a column of 280 by
 //!   40 buttons 8 apart (the newest folder, then Skip Import as a link
 //!   button), and Other Options at the bottom right;
-//! - Importing settings: the title, "Importing from …", a 280 wide bar;
-//! - Choose Theme and Choose Keymap: a line, the title (the label font
-//!   plus 7, 18 above and 17 below) with Dark and Light at the right of
-//!   Choose Theme, the cards side by side 9 apart (the chosen one twice as
-//!   wide, a 2 px blue outline, 1 px in blue under the mouse, else 1 px
-//!   in the border colour, corners of 10), a line and the
-//!   buttons (Back, Continue) in a bar 57 high, 20 from the right edge.
+//! - Importing settings: the title, "Importing from …", a 280 wide bar.
 //!
-//! A theme's card shows a few lines of code in its colours (the reference
-//! shows a picture of its editor); a keymap's card shows the sample
-//! shortcuts in key caps, with their names on the chosen card.
+//! The import done, or skipped, the window closes: the theme and the
+//! keymap are chosen on the main window's Welcome tab (the reference's
+//! 2026.2 flow has no Choose Theme or Choose Keymap page).
 
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, FocusHandle, Focusable, FontWeight, Hsla,
-    IntoElement, PathPromptOptions, Pixels, Render, SharedString, Task, Window, canvas, div,
-    prelude::*, px, rgb,
+    AnyElement, AnyWindowHandle, App, Bounds, ClickEvent, Context, FocusHandle, Focusable,
+    FontWeight, Hsla, IntoElement, PathPromptOptions, Pixels, Render, SharedString, Task, Window,
+    canvas, div, prelude::*, px, rgb,
 };
 use serde_json::{Value as Json, json};
 use settings::ImportSettings;
 use settings_import::pycharm::options::{ConfigFolder, Found};
-use themes::{TextRole, ThemeKind, UiRole};
-use ui::form::{BarButton, BottomBar, ButtonRole, MenuPopup};
+use themes::UiRole;
+use ui::form::MenuPopup;
 use ui::icons::{Icon, IconName};
 use ui::menu::MenuItem;
 use ui::theme::ThemeExt;
 
 use super::import::{self, Applied};
 use super::{
-    Back, Cancel, ChooseFolder, Continue, Done, ImportFrom, KEY_CONTEXT, OtherOptions,
-    SelectKeymap, SelectNext, SelectPrevious, SelectTheme, SelectThemeKind, SkipImport, Start,
+    Cancel, ChooseFolder, Continue, Done, ImportFrom, KEY_CONTEXT, OtherOptions, SkipImport, Start,
 };
 use crate::commands::OpenSettings;
-use crate::{store, theme_switch};
+use crate::store;
 
 /// Strings of the reference (`ImportSettingsBundle`, `BootstrapBundle`).
 pub const IMPORT_TITLE: &str = "Import Settings";
@@ -53,84 +43,20 @@ pub const OTHER_OPTIONS: &str = "Other Options";
 pub const LOCAL_SETTINGS: &str = "Local Settings";
 pub const CUSTOM_DIR: &str = "Config or Installation Directory";
 pub const IMPORTING: &str = "Importing settings\u{2026}";
-pub const THEME_TITLE: &str = "Choose Theme";
-pub const KEYMAP_TITLE: &str = "Choose Keymap";
-pub const DARK: &str = "Dark";
-pub const LIGHT: &str = "Light";
-pub const BACK: &str = "Back";
-pub const CONTINUE: &str = "Continue";
 /// The products of the main choices under one button.
 pub const REFERENCE: &str = "Reference IDE";
 
-/// The commands whose shortcuts the keymap cards show.
-pub const SAMPLE_SHORTCUTS: [(&str, &str); 5] = [
-    ("Search Everywhere", "search-everywhere.open"),
-    ("Find Action", "search-everywhere.go-to-action"),
-    ("Go to File", "search-everywhere.go-to-file"),
-    ("Find in Files", "find-in-files.open"),
-    ("Run", "run.run"),
-];
-
-/// Metrics (`UiUtils`, `ProductChooserPage`, `WizardPagePane`).
+/// Metrics (`UiUtils`, `ProductChooserPage`).
 const BUTTON_WIDTH: f32 = 280.0;
 const BUTTON_HEIGHT: f32 = 40.0;
 const BUTTON_GAP: f32 = 4.0;
 const TITLE_GAP: f32 = 26.0;
 const SOUTH_HEIGHT: f32 = 47.0;
-const BAR_HEIGHT: f32 = 57.0;
-const BAR_RIGHT: f32 = 20.0;
-const CARD_SIDE: f32 = 19.0;
-const CARD_BOTTOM: f32 = 13.0;
-const CARD_GAP: f32 = 9.0;
-const CARD_RADIUS: f32 = 10.0;
-const HEADER_TOP: f32 = 18.0;
-const HEADER_BOTTOM: f32 = 17.0;
-/// `JBFont.h1()`: the label font plus 9, bold; `UiUtils.HEADER_FONT`:
-/// plus 7.
+/// `JBFont.h1()`: the label font plus 9, bold.
 const H1_PLUS: f32 = 9.0;
-const HEADER_PLUS: f32 = 7.0;
 /// `OnboardingDialogButtons.BUTTON_HOVER_BORDER_COLOR`.
 const HOVER_BORDER_LIGHT: u32 = 0xa8adbd;
 const HOVER_BORDER_DARK: u32 = 0x6f737a;
-/// `RoundedPanel.SELECTED_BORDER_COLOR` and `BORDER_COLOR`.
-const CARD_SELECTED: u32 = 0x3574f0;
-const CARD_BORDER_LIGHT: u32 = 0xd3d5db;
-const CARD_BORDER_DARK: u32 = 0x43454a;
-/// `KeymapPane.KEY_BACKGROUND`.
-const KEY_LIGHT: u32 = 0xdfe1e5;
-const KEY_DARK: u32 = 0x4e5157;
-/// Key caps are at most this wide (`KeymapPane`: 85).
-const KEY_MAX: f32 = 85.0;
-/// The code a theme's card shows.
-const PREVIEW: &[&[(&str, TextRole)]] = &[
-    &[
-        ("class ", TextRole::Keyword),
-        ("Greeter", TextRole::ClassDecl),
-        (":", TextRole::Punctuation),
-    ],
-    &[
-        ("    ", TextRole::Variable),
-        ("\"\"\"Say hello.\"\"\"", TextRole::Docstring),
-    ],
-    &[
-        ("    def ", TextRole::Keyword),
-        ("greet", TextRole::FunctionDecl),
-        ("(", TextRole::Punctuation),
-        ("self", TextRole::SelfParameter),
-        (", ", TextRole::Punctuation),
-        ("name", TextRole::Parameter),
-        ("):", TextRole::Punctuation),
-    ],
-    &[("        # one line", TextRole::Comment)],
-    &[
-        ("        return ", TextRole::Keyword),
-        ("f\"Hi, ", TextRole::String),
-        ("{name}", TextRole::FstringExpression),
-        ("!\"", TextRole::String),
-        (" * ", TextRole::Operator),
-        ("2", TextRole::Number),
-    ],
-];
 
 pub(super) fn init(cx: &mut App) {
     // Commands that the window answers come through its handlers; the
@@ -159,8 +85,6 @@ pub(super) fn init(cx: &mut App) {
 pub enum Page {
     Import,
     Progress,
-    Theme,
-    Keymap,
 }
 
 impl Page {
@@ -168,30 +92,14 @@ impl Page {
         match self {
             Page::Import => "import",
             Page::Progress => "progress",
-            Page::Theme => "theme",
-            Page::Keymap => "keymap",
         }
     }
-}
-
-/// A theme's card: its id, name and the colours its preview needs.
-#[derive(Clone)]
-struct ThemeCard {
-    id: String,
-    name: SharedString,
-    background: Hsla,
-    foreground: Hsla,
-    gutter: Hsla,
-    line_number: Hsla,
-    text: Vec<Hsla>,
 }
 
 pub struct FirstRunWindow {
     title: SharedString,
     found: Found,
     page: Page,
-    /// The import page was offered: Choose Theme has Back.
-    offered_import: bool,
     /// The folder being imported or imported last.
     importing: Option<ConfigFolder>,
     /// Importers done and all of them.
@@ -199,19 +107,12 @@ pub struct FirstRunWindow {
     /// An error over the import page (a folder that is not a
     /// configuration folder).
     error: Option<SharedString>,
-    /// Choose Theme shows the dark themes.
-    dark: bool,
-    /// The theme last chosen of each kind (dark, light).
-    chosen: [Option<String>; 2],
-    /// Resolved themes of the cards, by id.
-    cards: HashMap<String, ThemeCard>,
-    /// The sample shortcuts of the keymaps' cards, by keymap.
-    shortcuts: HashMap<String, Vec<Option<String>>>,
-    hovered: Option<usize>,
     popup: Option<MenuPopup>,
     other_anchor: Rc<Cell<Bounds<Pixels>>>,
     main_anchor: Rc<Cell<Bounds<Pixels>>>,
     focus: FocusHandle,
+    /// The window the view is the content of.
+    window: AnyWindowHandle,
     /// Runs once the window closed (the start-up's main window).
     done: Option<Done>,
     /// Open over a main window (`settings.import-reference`).
@@ -231,12 +132,7 @@ impl FirstRunWindow {
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus);
-        let page = if found.is_empty() {
-            Page::Theme
-        } else {
-            Page::Import
-        };
-        // The window closed by its title bar goes on as Continue would.
+        // The window closed by its title bar goes on as Skip Import would.
         if !in_dialog {
             window.on_window_should_close(cx, |window, cx| {
                 if let Some(view) = window.root::<FirstRunWindow>().flatten() {
@@ -245,24 +141,18 @@ impl FirstRunWindow {
                 true
             });
         }
-        let dark = cx.theme().is_dark();
         Self {
             title: start.title,
-            offered_import: page == Page::Import,
             found,
-            page,
+            page: Page::Import,
             importing: None,
             progress: (0, 0),
             error: None,
-            dark,
-            chosen: [None, None],
-            cards: HashMap::new(),
-            shortcuts: HashMap::new(),
-            hovered: None,
             popup: None,
             other_anchor: Rc::default(),
             main_anchor: Rc::default(),
             focus,
+            window: window.window_handle(),
             done,
             in_dialog,
             activate: start.activate,
@@ -277,12 +167,6 @@ impl FirstRunWindow {
     fn go(&mut self, page: Page, cx: &mut Context<Self>) {
         self.close_popup(cx);
         self.error = None;
-        self.hovered = None;
-        if page == Page::Theme {
-            self.dark = cx.theme().is_dark();
-        }
-        // Keymaps may have come in with an import.
-        self.shortcuts.clear();
         self.page = page;
         cx.notify();
     }
@@ -320,7 +204,7 @@ impl FirstRunWindow {
         }
     }
 
-    /// Imports `folder` in the background, then shows Choose Theme.
+    /// Imports `folder` in the background, then closes the window.
     fn import(&mut self, folder: ConfigFolder, cx: &mut Context<Self>) {
         if self.page == Page::Progress {
             return;
@@ -366,7 +250,7 @@ impl FirstRunWindow {
             });
             let _ = this.update(cx, |this, cx| {
                 this.work = None;
-                this.go(Page::Theme, cx);
+                this.close(cx);
             });
         }));
     }
@@ -376,7 +260,7 @@ impl FirstRunWindow {
             return;
         }
         super::decide_skipped(cx);
-        self.go(Page::Theme, cx);
+        self.close(cx);
     }
 
     fn on_other_options(&mut self, _: &OtherOptions, window: &mut Window, cx: &mut Context<Self>) {
@@ -401,10 +285,7 @@ impl FirstRunWindow {
             }
             items.push(MenuItem::separator());
         }
-        items.push(MenuItem::action(
-            format!("{CUSTOM_DIR}\u{2026}"),
-            ChooseFolder { path: None },
-        ));
+        items.push(MenuItem::action(CUSTOM_DIR, ChooseFolder { path: None }));
         let position = self.other_anchor.get().bottom_left() + gpui::point(px(0.0), px(4.0));
         self.open_popup(items, position, window, cx);
     }
@@ -490,44 +371,34 @@ impl FirstRunWindow {
         }
     }
 
-    // ---- going between pages ----------------------------------------------------
+    // ---- closing ----------------------------------------------------------------
 
-    fn on_back(&mut self, _: &Back, _: &mut Window, cx: &mut Context<Self>) {
-        match self.page {
-            Page::Keymap => self.go(Page::Theme, cx),
-            Page::Theme if self.offered_import => self.go(Page::Import, cx),
-            _ => {}
+    /// Enter: the newest folder is imported, as its button does.
+    fn on_continue(&mut self, _: &Continue, _: &mut Window, cx: &mut Context<Self>) {
+        if self.page == Page::Import
+            && let Some(folder) = self.folder(None)
+        {
+            self.import(folder, cx);
         }
     }
 
-    fn on_continue(&mut self, _: &Continue, window: &mut Window, cx: &mut Context<Self>) {
-        match self.page {
-            Page::Import => {
-                if let Some(folder) = self.folder(None) {
-                    self.import(folder, cx);
-                }
-            }
-            Page::Progress => {}
-            Page::Theme => self.go(Page::Keymap, cx),
-            Page::Keymap => self.close(window, cx),
-        }
-    }
-
-    fn on_cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
         if self.page != Page::Progress {
-            self.close(window, cx);
+            self.close(cx);
         }
     }
 
     /// Closes the window and goes on.
-    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn close(&mut self, cx: &mut Context<Self>) {
         self.close_popup(cx);
         self.finished(cx);
+        let handle = self.window;
         if self.in_dialog {
-            let handle = window.window_handle();
             cx.defer(move |cx| ui::dialog_window::close(handle, cx));
         } else {
-            window.remove_window();
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            });
         }
     }
 
@@ -537,147 +408,6 @@ impl FirstRunWindow {
         super::decide_skipped(cx);
         if let Some(done) = self.done.take() {
             cx.defer(done);
-        }
-    }
-
-    // ---- themes -----------------------------------------------------------------
-
-    /// The themes of the kind shown, in the catalog's order.
-    fn theme_ids(&self, cx: &App) -> Vec<String> {
-        let kind = if self.dark {
-            ThemeKind::Dark
-        } else {
-            ThemeKind::Light
-        };
-        theme_switch::catalog(cx)
-            .themes()
-            .filter(|e| e.kind == kind)
-            .map(|e| e.id.clone())
-            .collect()
-    }
-
-    fn card(&mut self, id: &str, cx: &App) -> Option<ThemeCard> {
-        if let Some(card) = self.cards.get(id) {
-            return Some(card.clone());
-        }
-        let catalog = theme_switch::catalog(cx);
-        let entry = catalog.get(id)?;
-        let theme = catalog.resolve(id).ok()?;
-        let color = ui::theme::color;
-        let card = ThemeCard {
-            id: id.to_owned(),
-            name: entry.name.clone().into(),
-            background: color(theme.ui[UiRole::EditorBackground]),
-            foreground: color(theme.ui[UiRole::EditorText]),
-            gutter: color(theme.ui[UiRole::Gutter]),
-            line_number: color(theme.ui[UiRole::LineNumber]),
-            text: PREVIEW
-                .iter()
-                .flat_map(|line| line.iter().map(|(_, role)| color(theme.text_color(*role))))
-                .collect(),
-        };
-        self.cards.insert(id.to_owned(), card.clone());
-        Some(card)
-    }
-
-    fn select_theme(&mut self, id: &str, cx: &mut Context<Self>) {
-        let kind = theme_switch::catalog(cx).get(id).map(|e| e.kind);
-        let Some(kind) = kind else {
-            return;
-        };
-        if let Err(e) = theme_switch::switch(id, cx) {
-            eprintln!("first-run: {e}");
-            return;
-        }
-        self.dark = kind == ThemeKind::Dark;
-        self.chosen[usize::from(!self.dark)] = Some(id.to_owned());
-        cx.notify();
-    }
-
-    fn on_select_theme(&mut self, a: &SelectTheme, _: &mut Window, cx: &mut Context<Self>) {
-        if self.page == Page::Theme {
-            self.select_theme(&a.id, cx);
-        }
-    }
-
-    fn on_theme_kind(&mut self, a: &SelectThemeKind, _: &mut Window, cx: &mut Context<Self>) {
-        if self.page != Page::Theme {
-            return;
-        }
-        let dark = match a.kind.as_str() {
-            "dark" => true,
-            "light" => false,
-            _ => return,
-        };
-        self.set_kind(dark, cx);
-    }
-
-    /// Dark or Light: the last theme chosen of that kind, else its first.
-    fn set_kind(&mut self, dark: bool, cx: &mut Context<Self>) {
-        if dark == self.dark && dark == cx.theme().is_dark() {
-            return;
-        }
-        self.dark = dark;
-        let ids = self.theme_ids(cx);
-        let id = self.chosen[usize::from(!dark)]
-            .clone()
-            .filter(|id| ids.contains(id))
-            .or_else(|| ids.first().cloned());
-        if let Some(id) = id {
-            self.select_theme(&id, cx);
-        }
-        cx.notify();
-    }
-
-    // ---- keymaps ----------------------------------------------------------------
-
-    fn keymaps(cx: &App) -> Vec<String> {
-        super::keymap_choice(cx)
-            .map(|c| (c.keymaps)(cx))
-            .unwrap_or_default()
-    }
-
-    fn current_keymap(cx: &App) -> Option<String> {
-        super::keymap_choice(cx).map(|c| (c.current)(cx))
-    }
-
-    fn select_keymap(&mut self, name: &str, cx: &mut Context<Self>) {
-        let Some(choice) = super::keymap_choice(cx) else {
-            return;
-        };
-        if let Err(e) = (choice.switch)(name, cx) {
-            eprintln!("first-run: {e}");
-        }
-        cx.notify();
-    }
-
-    fn on_select_keymap(&mut self, a: &SelectKeymap, _: &mut Window, cx: &mut Context<Self>) {
-        if self.page == Page::Keymap {
-            self.select_keymap(&a.name, cx);
-        }
-    }
-
-    /// The card `by` from the chosen one on Choose Theme or Choose Keymap.
-    fn step(&mut self, by: isize, cx: &mut Context<Self>) {
-        let (names, current) = match self.page {
-            Page::Theme => (self.theme_ids(cx), theme_switch::current_theme(cx)),
-            Page::Keymap => (
-                Self::keymaps(cx),
-                Self::current_keymap(cx).unwrap_or_default(),
-            ),
-            _ => return,
-        };
-        let Some(at) = names.iter().position(|n| *n == current) else {
-            return;
-        };
-        let next = at as isize + by;
-        if next < 0 || next as usize >= names.len() {
-            return;
-        }
-        let name = names[next as usize].clone();
-        match self.page {
-            Page::Theme => self.select_theme(&name, cx),
-            _ => self.select_keymap(&name, cx),
         }
     }
 
@@ -705,7 +435,7 @@ impl FirstRunWindow {
                 "used": used(f),
             })
         };
-        let mut state = json!({
+        json!({
             "page": self.page.name(),
             "title": self.title.as_ref(),
             "main": self.found.main.iter().map(folder).collect::<Vec<_>>(),
@@ -715,55 +445,7 @@ impl FirstRunWindow {
             "progress": [self.progress.0, self.progress.1],
             "popup": self.popup.as_ref().map(|p| p.menu.read(cx).state_json()),
             "decided": crate::store::get::<ImportSettings>(cx).source,
-            "buttons": self.buttons().iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
-        });
-        match self.page {
-            Page::Theme => {
-                let current = theme_switch::current_theme(cx);
-                state["kind"] = json!(if self.dark { "dark" } else { "light" });
-                state["cards"] = json!(self.theme_ids(cx));
-                state["chosen"] = json!(current);
-            }
-            Page::Keymap => {
-                let current = Self::current_keymap(cx);
-                let cards: Vec<Json> = Self::keymaps(cx)
-                    .iter()
-                    .map(|name| {
-                        let keys = sample_shortcuts(name, cx);
-                        let shortcuts: Vec<Json> = SAMPLE_SHORTCUTS
-                            .iter()
-                            .zip(keys)
-                            .map(|((label, _), keys)| json!({"name": label, "keys": keys}))
-                            .collect();
-                        json!({"name": name, "shortcuts": shortcuts})
-                    })
-                    .collect();
-                state["cards"] = json!(cards);
-                state["chosen"] = json!(current);
-            }
-            _ => {}
-        }
-        state
-    }
-
-    /// The bar's buttons of the page: id, label, primary.
-    fn buttons(&self) -> Vec<(&'static str, &'static str, bool)> {
-        match self.page {
-            Page::Theme if self.offered_import => {
-                vec![
-                    ("first-run-continue", CONTINUE, true),
-                    ("first-run-back", BACK, false),
-                ]
-            }
-            Page::Theme => vec![("first-run-continue", CONTINUE, true)],
-            Page::Keymap => {
-                vec![
-                    ("first-run-continue", CONTINUE, true),
-                    ("first-run-back", BACK, false),
-                ]
-            }
-            _ => Vec::new(),
-        }
+        })
     }
 
     // ---- drawing ----------------------------------------------------------------
@@ -931,339 +613,6 @@ impl FirstRunWindow {
             )
             .into_any_element()
     }
-
-    /// A card's outline over its content, in a 2 px band
-    /// (`RoundedBorder`): 2 px in the selection colour when chosen, 1 px
-    /// in it under the mouse, else 1 px in the border colour, a pixel in
-    /// (`RoundedPanel`: fixed colours, whatever the theme).
-    fn outline(chosen: bool, hovered: bool, cx: &App) -> gpui::Div {
-        let accent: Hsla = rgb(CARD_SELECTED).into();
-        let border: Hsla = rgb(if cx.theme().is_dark() {
-            CARD_BORDER_DARK
-        } else {
-            CARD_BORDER_LIGHT
-        })
-        .into();
-        let ring = div().absolute().rounded(px(CARD_RADIUS));
-        match (chosen, hovered) {
-            (true, _) => ring.inset_0().border_2().border_color(accent),
-            (false, hover) => ring
-                .top(px(1.0))
-                .left(px(1.0))
-                .right(px(1.0))
-                .bottom(px(1.0))
-                .border_1()
-                .border_color(if hover { accent } else { border }),
-        }
-    }
-
-    fn render_cards(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let mut cards: Vec<AnyElement> = Vec::new();
-        match self.page {
-            Page::Theme => {
-                let ids = self.theme_ids(cx);
-                let current = theme_switch::current_theme(cx);
-                let mono = cx.theme().mono_family();
-                for (ix, id) in ids.iter().enumerate() {
-                    let Some(card) = self.card(id, cx) else {
-                        continue;
-                    };
-                    let chosen = *id == current;
-                    let hovered = self.hovered == Some(ix);
-                    cards.push(self.theme_card(ix, card, chosen, hovered, mono.clone(), cx));
-                }
-            }
-            Page::Keymap => {
-                let names = Self::keymaps(cx);
-                let current = Self::current_keymap(cx).unwrap_or_default();
-                for (ix, name) in names.iter().enumerate() {
-                    let chosen = *name == current;
-                    let hovered = self.hovered == Some(ix);
-                    let keys = self
-                        .shortcuts
-                        .entry(name.clone())
-                        .or_insert_with(|| sample_shortcuts(name, cx))
-                        .clone();
-                    cards.push(self.keymap_card(ix, name, keys, chosen, hovered, cx));
-                }
-            }
-            _ => {}
-        }
-        div()
-            .flex_1()
-            .min_h(px(0.0))
-            .flex()
-            .flex_row()
-            .gap(px(CARD_GAP))
-            .children(cards)
-            .into_any_element()
-    }
-
-    fn card_frame(
-        &self,
-        ix: usize,
-        kind: &'static str,
-        chosen: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        let mut card = div()
-            .id((kind, ix))
-            .debug_selector(move || format!("first-run-{kind}-{ix}"))
-            .relative()
-            .h_full()
-            .min_w(px(0.0))
-            .flex_basis(px(0.0))
-            .flex_shrink()
-            .on_hover(cx.listener(move |this, over: &bool, _, cx| {
-                if *over {
-                    this.hovered = Some(ix);
-                } else if this.hovered == Some(ix) {
-                    this.hovered = None;
-                }
-                cx.notify();
-            }));
-        card.style().flex_grow = Some(if chosen { 2.0 } else { 1.0 });
-        card
-    }
-
-    fn theme_card(
-        &self,
-        ix: usize,
-        card: ThemeCard,
-        chosen: bool,
-        hovered: bool,
-        mono: SharedString,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let size = cx.theme().ui_size() - px(2.0);
-        let mut colors = card.text.iter();
-        let lines: Vec<AnyElement> = PREVIEW
-            .iter()
-            .enumerate()
-            .map(|(n, line)| {
-                let spans: Vec<AnyElement> = line
-                    .iter()
-                    .map(|(text, _)| {
-                        let color = colors.next().copied().unwrap_or(card.line_number);
-                        div().text_color(color).child(*text).into_any_element()
-                    })
-                    .collect();
-                div()
-                    .flex()
-                    .flex_row()
-                    .whitespace_nowrap()
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(22.0))
-                            .pr(px(8.0))
-                            .flex()
-                            .justify_end()
-                            .bg(card.gutter)
-                            .text_color(card.line_number)
-                            .child(format!("{}", n + 1)),
-                    )
-                    .child(div().pl(px(6.0)).flex().flex_row().children(spans))
-                    .into_any_element()
-            })
-            .collect();
-        let id = card.id.clone();
-        let frame = self.card_frame(ix, "theme", chosen, cx);
-        frame
-            .p(px(2.0))
-            .child(
-                div()
-                    .size_full()
-                    .rounded(px(CARD_RADIUS - 2.0))
-                    .overflow_hidden()
-                    .bg(card.background)
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex_none()
-                            .w_full()
-                            .pt(px(9.0))
-                            .pb(px(5.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(card.foreground)
-                            .font_weight(FontWeight::BOLD)
-                            .whitespace_nowrap()
-                            .child(card.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .overflow_hidden()
-                            .pt(px(4.0))
-                            .font_family(mono)
-                            .text_size(size)
-                            .line_height(px(18.0))
-                            .children(lines),
-                    ),
-            )
-            .child(Self::outline(chosen, hovered, cx))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.select_theme(&id, cx)))
-            .into_any_element()
-    }
-
-    fn keymap_card(
-        &self,
-        ix: usize,
-        name: &str,
-        keys: Vec<Option<String>>,
-        chosen: bool,
-        hovered: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = cx.theme();
-        let key_ring: Hsla = rgb(if theme.is_dark() { KEY_DARK } else { KEY_LIGHT }).into();
-        let surface = theme.color(UiRole::SurfaceAlt);
-        let small = theme.ui_size() - px(1.0);
-        let rows: Vec<AnyElement> = SAMPLE_SHORTCUTS
-            .iter()
-            .zip(keys)
-            .map(|((label, _), keys)| {
-                let keys = keys.unwrap_or_else(|| "\u{2013}".to_owned());
-                let cap = div()
-                    .flex_none()
-                    .max_w(px(KEY_MAX))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .px(px(4.0))
-                    .rounded(px(4.0))
-                    .border_2()
-                    .border_color(key_ring)
-                    .text_size(small)
-                    .child(keys);
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .px(px(8.0))
-                    .mb(px(14.0))
-                    .when(chosen, |d| {
-                        d.child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .child(*label),
-                        )
-                    })
-                    .when(!chosen, |d| d.justify_center())
-                    .child(cap)
-                    .into_any_element()
-            })
-            .collect();
-        let target = name.to_owned();
-        let frame = self.card_frame(ix, "keymap", chosen, cx);
-        frame
-            .p(px(2.0))
-            .child(
-                div()
-                    .size_full()
-                    .rounded(px(CARD_RADIUS - 2.0))
-                    .overflow_hidden()
-                    .bg(surface)
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex_none()
-                            .py(px(13.0))
-                            .flex()
-                            .justify_center()
-                            .font_weight(FontWeight::BOLD)
-                            .whitespace_nowrap()
-                            .child(name.to_owned()),
-                    )
-                    .children(rows),
-            )
-            .child(Self::outline(chosen, hovered, cx))
-            .on_click(
-                cx.listener(move |this, _: &ClickEvent, _, cx| this.select_keymap(&target, cx)),
-            )
-            .into_any_element()
-    }
-
-    fn render_wizard(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let header = theme.ui_size() + px(HEADER_PLUS);
-        let line = theme.color(UiRole::Border);
-        let title = if self.page == Page::Theme {
-            THEME_TITLE
-        } else {
-            KEYMAP_TITLE
-        };
-        let kinds = (self.page == Page::Theme).then(|| {
-            let choices: [SharedString; 2] = [DARK.into(), LIGHT.into()];
-            let selected = Some(usize::from(!self.dark));
-            ui::form::segmented(
-                "first-run-kind",
-                &choices,
-                selected,
-                |ix, window, cx| {
-                    let kind = if ix == 0 { "dark" } else { "light" };
-                    window.dispatch_action(
-                        Box::new(SelectThemeKind {
-                            kind: kind.to_owned(),
-                        }),
-                        cx,
-                    )
-                },
-                cx,
-            )
-        });
-        let cards = self.render_cards(cx);
-        let mut bar = BottomBar::new().metrics(BAR_HEIGHT, BAR_RIGHT);
-        for (id, label, primary) in self.buttons() {
-            let action: Box<dyn gpui::Action> = if primary {
-                Box::new(Continue)
-            } else {
-                Box::new(Back)
-            };
-            let role = if primary {
-                ButtonRole::Ok
-            } else {
-                ButtonRole::Other
-            };
-            bar = bar.button(BarButton::new(id, label, role, action).primary(primary));
-        }
-        div()
-            .flex_1()
-            .min_h(px(0.0))
-            .flex()
-            .flex_col()
-            .border_t_1()
-            .border_color(line)
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .px(px(CARD_SIDE))
-                    .pb(px(CARD_BOTTOM))
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .pt(px(HEADER_TOP))
-                            .pb(px(HEADER_BOTTOM))
-                            .child(div().flex_1().text_size(header).child(title))
-                            .children(kinds),
-                    )
-                    .child(cards),
-            )
-            .child(bar.render(cx))
-            .into_any_element()
-    }
 }
 
 impl Focusable for FirstRunWindow {
@@ -1280,7 +629,6 @@ impl Render for FirstRunWindow {
         let page = match self.page {
             Page::Import => self.render_import(cx),
             Page::Progress => self.render_progress(cx),
-            Page::Theme | Page::Keymap => self.render_wizard(cx),
         };
         let error = self.error.clone().map(|e| {
             div()
@@ -1303,15 +651,9 @@ impl Render for FirstRunWindow {
             .on_action(cx.listener(Self::on_skip))
             .on_action(cx.listener(Self::on_other_options))
             .on_action(cx.listener(Self::on_choose_folder))
-            .on_action(cx.listener(Self::on_back))
             .on_action(cx.listener(Self::on_continue))
             .on_action(cx.listener(Self::on_cancel))
-            .on_action(cx.listener(Self::on_select_theme))
-            .on_action(cx.listener(Self::on_theme_kind))
-            .on_action(cx.listener(Self::on_select_keymap))
             .on_action(cx.listener(Self::on_open_settings))
-            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.step(1, cx)))
-            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.step(-1, cx)))
             .relative()
             .flex()
             .flex_col()
@@ -1321,15 +663,6 @@ impl Render for FirstRunWindow {
             .children(error)
             .children(ui::dialog_window::blocker(window, cx))
             .child(ui::pointer::frame())
-    }
-}
-
-/// The sample shortcuts of a keymap (`None`: not assigned).
-fn sample_shortcuts(keymap: &str, cx: &App) -> Vec<Option<String>> {
-    let commands: Vec<&str> = SAMPLE_SHORTCUTS.iter().map(|(_, c)| *c).collect();
-    match super::keymap_choice(cx) {
-        Some(choice) => (choice.shortcuts)(keymap, &commands, cx),
-        None => vec![None; commands.len()],
     }
 }
 

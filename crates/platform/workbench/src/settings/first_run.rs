@@ -1,31 +1,19 @@
 //! The workbench's part of the first-run window (ADR 0017,
-//! `settings_ui::first_run`): the keymaps Choose Keymap offers with their
-//! sample shortcuts, the importers of the reference's keymap and of the
-//! Search Everywhere preview, the import's balloon in a main window, and
-//! `settings.import-reference` over a main window.
+//! `settings_ui::first_run`): the importers of the reference's keymap and
+//! of the Search Everywhere preview, the import's balloon in a main window,
+//! and `settings.import-reference` over a main window.
 
 use std::rc::Rc;
 
-use gpui::{App, Context, Keystroke, Window};
+use gpui::{App, Context, Window};
 use settings_import::pycharm::options;
-use settings_ui::first_run::{
-    self, Applied, ImportReference, Importer, KeymapChoice, Source, Start,
-};
+use settings_ui::first_run::{self, Applied, ImportReference, Importer, Source, Start};
 
 use crate::keymap::active::{self as keymaps};
-use crate::keymap::{double_tap_text, parse_double_tap, reference};
+use crate::keymap::reference;
 use crate::workbench::Workbench;
 
 pub(super) fn init(cx: &mut App) {
-    first_run::set_keymaps(
-        cx,
-        KeymapChoice {
-            keymaps: offered,
-            shortcuts,
-            current: |cx| keymaps::active_name(cx),
-            switch: keymaps::switch,
-        },
-    );
     first_run::register_importer(
         cx,
         Importer {
@@ -51,48 +39,6 @@ pub fn start(title: &str) -> Start {
         reference_root: crate::env::reference_config_root().or_else(options::config_root),
         activate: !crate::env::background(),
     }
-}
-
-/// The predefined keymaps the platform offers, then the custom keymap in
-/// use (an imported one).
-fn offered(cx: &App) -> Vec<String> {
-    let current = keymaps::active_name(cx);
-    let mut out: Vec<String> = keymaps::entries(cx)
-        .into_iter()
-        .filter(|e| e.predefined || e.name == current)
-        .map(|e| e.name)
-        .collect();
-    if !out.contains(&current) {
-        out.push(current);
-    }
-    out
-}
-
-/// The shortcuts of `commands` in `keymap`, as hints show them (`⇧⌘A`,
-/// `Double ⇧`, `Ctrl+Shift+A`).
-fn shortcuts(keymap: &str, commands: &[&str], cx: &App) -> Vec<Option<String>> {
-    let resolved = keymaps::resolve(keymap, cx).ok();
-    let macos = cfg!(target_os = "macos");
-    commands
-        .iter()
-        .map(|command| {
-            let keys = resolved.as_ref()?.keys_for(command)?;
-            Some(shortcut_text(keys, macos))
-        })
-        .collect()
-}
-
-fn shortcut_text(keys: &str, macos: bool) -> String {
-    if let Some(key) = parse_double_tap(keys) {
-        return double_tap_text(key, macos);
-    }
-    keys.split(' ')
-        .map(|stroke| match Keystroke::parse(stroke) {
-            Ok(k) => ui::keys::format_keystroke(&k, macos),
-            Err(_) => stroke.to_owned(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// The reference's keymap: a predefined one by its Pyoxide name, a custom
@@ -187,18 +133,5 @@ impl Workbench {
     ) {
         let title = self.product_name();
         first_run::open_over(window, start(title), cx);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shortcuts_read_as_hints() {
-        assert_eq!(shortcut_text("shift shift", true), "Double \u{21e7}");
-        assert_eq!(shortcut_text("cmd-shift-a", true), "\u{21e7}\u{2318}A");
-        assert_eq!(shortcut_text("ctrl-shift-a", false), "Ctrl+Shift+A");
-        assert_eq!(shortcut_text("ctrl-k ctrl-s", false), "Ctrl+K, Ctrl+S");
     }
 }

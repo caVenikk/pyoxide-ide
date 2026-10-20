@@ -210,6 +210,13 @@ impl IconName {
     /// The diff viewer's modes.
     pub const DIFF_SIDE_BY_SIDE: Self = Self("diff/sideBySide");
     pub const DIFF_UNIFIED: Self = Self("diff/unified");
+    /// The Welcome tab: Open File, and the Theme (dark or light) and
+    /// Keymap combo boxes (`AllIcons.General.Upload`,
+    /// `MeetNewUi.DarkTheme`, `MeetNewUi.LightTheme`, `General.Keyboard`).
+    pub const UPLOAD: Self = Self("general/upload");
+    pub const DARK_THEME: Self = Self("meetNewUi/darkTheme");
+    pub const LIGHT_THEME: Self = Self("meetNewUi/lightTheme");
+    pub const KEYBOARD: Self = Self("general/keyboard");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -262,11 +269,13 @@ platform_icons! {
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
-        "general/showAsTree", "general/up", "general/vcs",
+        "general/showAsTree", "general/up", "general/upload", "general/vcs",
+        "general/keyboard",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",
         "json/object",
+        "meetNewUi/darkTheme", "meetNewUi/lightTheme",
         "nodes/class", "nodes/constant", "nodes/enum", "nodes/errorMark", "nodes/excludeRoot",
         "nodes/field",
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
