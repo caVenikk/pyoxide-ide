@@ -349,6 +349,40 @@ pub fn files_text(index: usize, count: usize) -> String {
 
 // ---- synchronized scrolling -------------------------------------------------
 
+/// How long an animated scroll over `distance` pixels takes
+/// (`ScrollingModelImpl.AnimatedScrollingRunnable.getScrollDuration`):
+/// nothing for a line or less, 100 ms for 11 lines or more, in proportion
+/// between.
+pub fn scroll_duration(distance: f32, line_height: f32) -> std::time::Duration {
+    if line_height <= 0.0 {
+        return std::time::Duration::ZERO;
+    }
+    let lines = distance.abs() / line_height;
+    let part = ((lines - 1.0) / 10.0).clamp(0.0, 1.0);
+    std::time::Duration::from_millis((part * 100.0).round() as u64)
+}
+
+/// The animation's progress at `t` of its time (`Easing.EASE_OUT`, the
+/// cubic Bézier curve (0, 0), (0, 0), (0.58, 1), (1, 1)).
+pub fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let (c2x, c2y) = (0.58_f32, 1.0_f32);
+    // x(s) and y(s) of the curve with its first control point at the origin.
+    let x = |s: f32| 3.0 * (1.0 - s) * s * s * c2x + s * s * s;
+    let y = |s: f32| 3.0 * (1.0 - s) * s * s * c2y + s * s * s;
+    // x is increasing: find s with x(s) = t by bisection.
+    let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+    for _ in 0..30 {
+        let mid = (lo + hi) / 2.0;
+        if x(mid) < t {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    y((lo + hi) / 2.0)
+}
+
 /// Lines of `side` and of the other side that correspond
 /// (`BaseSyncScrollable.getRange`): the block of `side`'s line `line`
 /// between change boundaries, as (`start1`, `end1`) of `side` and
@@ -533,6 +567,19 @@ pub fn change_at(changes: &[DiffChange], side: Side, line: u32) -> Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scroll_to_a_change_eases_out_in_up_to_a_tenth_of_a_second() {
+        use std::time::Duration;
+        assert_eq!(scroll_duration(20.0, 20.0), Duration::ZERO);
+        assert_eq!(scroll_duration(-120.0, 20.0), Duration::from_millis(50));
+        assert_eq!(scroll_duration(2000.0, 20.0), Duration::from_millis(100));
+        assert_eq!(ease_out(0.0), 0.0);
+        assert!((ease_out(1.0) - 1.0).abs() < 1e-4);
+        // Fast at first, slow at the end.
+        assert!(ease_out(0.5) > 0.6);
+        assert!(ease_out(0.25) < ease_out(0.5));
+    }
 
     fn ranges(left: &str, right: &str) -> Vec<(Range<u32>, Range<u32>, ChangeKind)> {
         compare(left, right, DiffSettings::default())

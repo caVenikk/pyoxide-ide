@@ -62,9 +62,9 @@ const ICON: f32 = 16.0;
 const SEPARATOR_ROOM: f32 = 3.5;
 const SEPARATOR_HEIGHT: f32 = 17.0;
 const FILES_GAP: f32 = 1.5;
-const STATUS_GAP: f32 = 15.0;
+const STATUS_GAP: f32 = 13.5;
 const MODE_SIZE: (f32, f32) = (48.0, 26.0);
-const MODE_GAP: f32 = 8.0;
+const MODE_GAP: f32 = 10.5;
 /// The titles (`DiffContentPanel`, measured on the reference): their
 /// height above the tear line of 1 px; the room at their ends
 /// (`Diff.ContentTitle.insets`) and the lock's; the gap between a revision
@@ -172,6 +172,8 @@ pub struct DiffView {
     /// Next or Previous Difference at the end: the hint shows and the same
     /// command goes to the next file.
     file_jump: Option<FileJump>,
+    /// Both sides on their way to a change.
+    animation: Option<Task<()>>,
     settings_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
     /// The gear's position (where the settings popup opens).
     gear_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -232,6 +234,7 @@ impl DiffView {
             current: Side::Right,
             pending_scroll: None,
             file_jump: None,
+            animation: None,
             settings_menu: None,
             gear_bounds: Rc::new(Cell::new(None)),
             _subscriptions: subscriptions,
@@ -445,6 +448,8 @@ impl DiffView {
     /// One side scrolled: the other follows (`SyncScrollSupport`).
     fn scrolled(&mut self, side: Side, cx: &mut Context<Self>) {
         self.file_jump = None;
+        // Scrolled by hand: the way to a change ends here.
+        self.animation = None;
         let master = self.editor(side).read(cx);
         let Some((line_height, view_height)) = master.view_metrics() else {
             return;
@@ -468,17 +473,19 @@ impl DiffView {
     }
 
     /// Scrolls both sides to show a change, its first line a third down,
-    /// and puts both carets at its start (`scrollToChange`).
+    /// and puts both carets at its start (`scrollToChange`): animated, the
+    /// sides together (`SyncScrollSupport.doMakeVisible` with its anchor).
     fn scroll_to_change(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(change) = self.changes.get(index).cloned() else {
             return;
         };
+        self.animation = None;
         for side in [Side::Left, Side::Right] {
             let line = change.lines(side).start as usize;
             self.editor(side).update(cx, |e, cx| {
                 let line = line.min(e.buffer().len_lines() - 1);
                 let at = e.buffer().line_start(line);
-                e.set_selections(SelectionSet::single(Selection::new(at, at)), cx);
+                e.set_selections_in_place(SelectionSet::single(Selection::new(at, at)), cx);
             });
         }
         let (l, r) = (self.left.read(cx), self.right.read(cx));
@@ -515,12 +522,58 @@ impl DiffView {
             [f32::from(h1), f32::from(h2)],
             [f32::from(l.max_scroll_top()), f32::from(r.max_scroll_top())],
         );
-        let x = [l.scroll_position().x, r.scroll_position().x];
+        let from = [
+            f32::from(l.scroll_position().y),
+            f32::from(r.scroll_position().y),
+        ];
+        let master = self.current.select(0, 1);
+        let duration = model::scroll_duration(tops[master] - from[master], f32::from(lh));
+        self.animate_scroll(from, tops, duration, cx);
+    }
+
+    /// Moves both sides from `from` to `to` (tops in pixels, the text at
+    /// its left edge) in `duration`, eased out (`ScrollingModelImpl`'s
+    /// animated scrolling, every 4 ms).
+    fn animate_scroll(
+        &mut self,
+        from: [f32; 2],
+        to: [f32; 2],
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        if duration.is_zero() {
+            self.set_tops(to, cx);
+            return;
+        }
+        let executor = cx.background_executor().clone();
+        let started = std::time::Instant::now();
+        self.animation = Some(cx.spawn(async move |this, cx| {
+            loop {
+                executor.timer(Duration::from_millis(4)).await;
+                let t = started.elapsed().as_secs_f32() / duration.as_secs_f32();
+                let k = model::ease_out(t);
+                let tops = [
+                    from[0] + (to[0] - from[0]) * k,
+                    from[1] + (to[1] - from[1]) * k,
+                ];
+                let done = t >= 1.0;
+                let tops = if done { to } else { tops };
+                let alive = this.update(cx, |this, cx| this.set_tops(tops, cx)).is_ok();
+                if done || !alive {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Both sides' tops in pixels, the text at its left edge.
+    fn set_tops(&mut self, tops: [f32; 2], cx: &mut Context<Self>) {
         for (i, side) in [Side::Left, Side::Right].into_iter().enumerate() {
             self.editor(side).update(cx, |e, cx| {
-                e.set_scroll_position(point(x[i], px(tops[i])), cx)
+                e.set_scroll_position(point(px(0.0), px(tops[i])), cx)
             });
         }
+        cx.notify();
     }
 
     /// The initial scroll, once the differences are known (views not laid

@@ -113,6 +113,17 @@ impl Editor {
         Some(diff_action_x(l.text_x, l.text_end, self.mirrored) - l.bounds.left())
     }
 
+    /// Puts the carets without scrolling to them: the owner scrolls the
+    /// view itself (the diff viewer moving to a change in steps).
+    pub fn set_selections_in_place(
+        &mut self,
+        selections: text::SelectionSet,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_selections(selections, cx);
+        self.autoscroll = false;
+    }
+
     /// Lays the editor out mirrored: the line numbers at the right edge,
     /// the scrollbar and the error stripe at the left.
     pub fn set_mirrored(&mut self, mirrored: bool, cx: &mut Context<Self>) {
