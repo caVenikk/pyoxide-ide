@@ -197,6 +197,38 @@ fn a_dropped_request_is_cancelled() {
 }
 
 #[test]
+fn a_request_without_an_answer_in_time_fails_and_is_cancelled() {
+    let (client, recorder) = start(json!([
+        {"expect": "initialize"},
+        {"respond": {"supportsCancelRequest": true}},
+        {"expect": "evaluate", "arguments": {"expression": "hang()", "context": "repl"}},
+        {"expect": "cancel", "arguments": {"requestId": "$seq:evaluate"}},
+        {"respond": null},
+        {"fail": "cancelled", "to": "evaluate"},
+        {"expect": "threads"},
+        {"respond": {"threads": [{"id": 1, "name": "MainThread"}]}},
+    ]));
+    initialize(&client);
+    let after = Duration::from_millis(150);
+    let started = Instant::now();
+    let hung = client
+        .evaluate("hang()", None, dap_client::EvaluateContext::Repl)
+        .timeout(after);
+    assert_eq!(block_on(hung), Err(DapError::TimedOut(after)));
+    assert!(started.elapsed() >= after);
+    // Answered in time: the deadline later changes nothing.
+    let threads = block_on(client.threads().timeout(WAIT)).unwrap();
+    assert_eq!(threads[0].name, "MainThread");
+    assert!(
+        recorder.log.lock().unwrap().is_empty(),
+        "the late answer is dropped: {:?}",
+        recorder.log.lock().unwrap()
+    );
+    client.shutdown(false, WAIT).recv_timeout(WAIT).unwrap();
+    assert_exit_code(&recorder, 0);
+}
+
+#[test]
 fn an_adapter_crash_fails_pending_and_later_requests() {
     let (client, recorder) = start(json!([
         {"expect": "initialize"},

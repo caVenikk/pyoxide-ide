@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use commands::Registry;
 use debugger::{
-    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, Debugger, DebuggerEvent,
-    EvaluateContext, ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting, IdeaTypes,
-    LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
+    Adapter, AdapterLaunch, DebugAdapterProvider, DebugError, DebugRequest, Debugger,
+    DebuggerEvent, EvaluateContext, ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting,
+    IdeaTypes, LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
 };
 use futures::executor::block_on;
 use run_config::{RunConfiguration, Storage};
@@ -29,6 +29,8 @@ struct Provider {
     /// adapter asks for, in order.
     offers_children: bool,
     children: Mutex<Vec<Vec<Value>>>,
+    /// How long an evaluation waits for its answer.
+    evaluation_timeout: Option<Duration>,
 }
 
 impl Provider {
@@ -56,6 +58,7 @@ impl DebugAdapterProvider for Provider {
             kind: LaunchKind::Launch,
             arguments: json!({"program": "main.py"}),
             input_file: None,
+            evaluation_timeout: self.evaluation_timeout,
         })
     }
 
@@ -523,6 +526,43 @@ fn a_late_answer_to_a_step_or_a_resume_keeps_the_next_stop() {
     session.stop().recv_timeout(WAIT).unwrap();
     wait_phase(&session, Phase::Ended);
     assert_eq!(session.snapshot().error, None);
+}
+
+#[test]
+fn an_evaluation_the_adapter_does_not_answer_fails_after_the_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.extend([
+        json!({"ignore": ["threads", "stackTrace", "scopes", "variables"]}),
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1}}),
+        // Never answered; the one after it is.
+        json!({"expect": "evaluate", "arguments": {"expression": "hang()"}}),
+        json!({"expect": "evaluate", "arguments": {"expression": "1 + 1"}}),
+        json!({"respond": {"result": "2", "variablesReference": 0}}),
+    ]);
+    let after = Duration::from_millis(150);
+    let provider = Arc::new(Provider {
+        script: Mutex::new(Some(script)),
+        evaluation_timeout: Some(after),
+        ..Provider::default()
+    });
+    let debugger = Debugger::open(root, provider);
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    wait_phase(&session, Phase::Suspended);
+    let started = Instant::now();
+    let error = block_on(session.evaluate("hang()", EvaluateContext::Repl)).unwrap_err();
+    assert!(started.elapsed() >= after);
+    assert!(
+        matches!(&error, DebugError::Adapter(m) if m.contains("timeout") && m.contains("150 ms")),
+        "{error}"
+    );
+    let value = block_on(session.evaluate("1 + 1", EvaluateContext::Repl)).unwrap();
+    assert_eq!(value.value, "2");
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
 }
 
 #[test]

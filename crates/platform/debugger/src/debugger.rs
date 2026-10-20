@@ -545,6 +545,7 @@ impl Debugger {
             self.inner.provider.step_into_my_code(),
             self.inner.provider.prepare_steps(),
             launch.input_file.clone(),
+            launch.evaluation_timeout,
         );
         self.inner.state().sessions.push(session.clone());
         self.inner.emit(DebuggerEvent::SessionStarted(id));

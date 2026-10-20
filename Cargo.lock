@@ -5362,11 +5362,14 @@ dependencies = [
  "dirs 7.0.0",
  "futures",
  "process",
+ "project",
  "py-env",
  "py-run",
  "run-config",
  "serde_json",
  "tempfile",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
 ]
 
 [[package]]

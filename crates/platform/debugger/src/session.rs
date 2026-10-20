@@ -115,6 +115,7 @@ impl From<DapError> for DebugError {
             DapError::Adapter(message) | DapError::Malformed(message) => {
                 DebugError::Adapter(message)
             }
+            DapError::TimedOut(_) => DebugError::Adapter(error.to_string()),
             DapError::Cancelled => DebugError::Adapter("cancelled".to_owned()),
             DapError::Closed => DebugError::Ended,
             DapError::Unsupported(what) => DebugError::Unsupported(what.to_owned()),
@@ -312,6 +313,8 @@ pub(crate) struct SessionInner {
     prepare_steps: Option<(String, Value)>,
     /// "Redirect input from": the file the program reads.
     input_file: Option<PathBuf>,
+    /// How long an evaluation waits for its answer.
+    evaluation_timeout: Option<Duration>,
     data: Mutex<Data>,
 }
 
@@ -343,6 +346,7 @@ impl Session {
         step_into_my_code: Option<StepIntoMyCode>,
         prepare_steps: Option<(String, Value)>,
         input_file: Option<PathBuf>,
+        evaluation_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: Arc::new(SessionInner {
@@ -356,6 +360,7 @@ impl Session {
                 step_into_my_code,
                 prepare_steps,
                 input_file,
+                evaluation_timeout,
                 data: Mutex::new(Data {
                     phase: Phase::Starting,
                     configured: false,
@@ -2122,8 +2127,11 @@ impl Session {
         };
         let generation = lock(&self.inner.data).generation;
         let weak = Arc::downgrade(&self.inner);
-        client
-            .evaluate(expression, frame, context)
+        let mut request = client.evaluate(expression, frame, context);
+        if let Some(timeout) = self.inner.evaluation_timeout {
+            request = request.timeout(timeout);
+        }
+        request
             .map(move |result| {
                 if let (Ok(value), Some(inner), Some(frame)) = (&result, weak.upgrade(), frame)
                     && value.reference > 0

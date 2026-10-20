@@ -91,6 +91,20 @@ pub fn save_values(
     save_items(root, table, items)
 }
 
+/// Like [`save_values`] with TOML values of any type (booleans, numbers,
+/// strings), for a product's typed settings; `None` removes the key.
+pub fn save_toml_values(
+    root: &Path,
+    table: &str,
+    values: Vec<(&str, Option<toml_edit::Value>)>,
+) -> Result<bool, StoreError> {
+    let items = values
+        .into_iter()
+        .map(|(key, value)| (key, value.map(Item::Value)))
+        .collect();
+    save_items(root, table, items)
+}
+
 /// The list of strings under `key` in `[table]` (a dotted path); empty
 /// when the file, the table or the key is missing, values that are not
 /// strings left out.
