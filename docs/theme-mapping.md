@@ -348,6 +348,7 @@ colours the New UI icons do not use and are listed as unmapped.
 | `ui.indent-guide` | `INDENT_GUIDE` (scheme color) | Indent guides |
 | `ui.indent-guide-active` | `SELECTED_INDENT_GUIDE` (scheme color) | Indent guide of the caret block |
 | `ui.right-margin` | `RIGHT_MARGIN_COLOR` (scheme color) | Right margin line |
+| `ui.tearline` | `TEARLINE_COLOR` (scheme color) | Line under the titles of a diff's sides |
 | `ui.whitespace` | `WHITESPACES` (scheme color) | Visible whitespace markers |
 | `ui.soft-wrap-sign` | `SOFT_WRAP_SIGN_COLOR` (scheme color) | Signs at the soft wraps of a line |
 | `ui.completion-popup` | `LOOKUP_COLOR` (scheme color) | Completion popup background |

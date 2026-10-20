@@ -75,6 +75,22 @@ pub struct LineBackground {
     /// Drawn over the gutter too (the reference's diff highlighters paint
     /// the line numbers' background, `DiffLineMarkerRenderer`).
     pub over_gutter: bool,
+    /// How the gutter part is drawn when it differs from the text's (the
+    /// reference's gutter paint mode of a diff change); `None`: as the
+    /// text.
+    pub gutter: Option<GutterFill>,
+}
+
+/// The gutter part of a diff change's background
+/// (`DiffDrawUtil.PaintMode`): the colour or its faded variant, and for
+/// a change left out of the commit a line of the full colour along its
+/// top and bottom (`EXCLUDED_GUTTER`). It reaches up to the whitespace
+/// separator, three pixels short of the text (`getWhitespaceSeparatorOffset`);
+/// the text's background fills the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GutterFill {
+    pub faded: bool,
+    pub border: bool,
 }
 
 /// What changed in a decoration's lines, for its change marker.
@@ -188,6 +204,7 @@ impl Decoration {
             layer,
             faded: false,
             over_gutter: false,
+            gutter: None,
         });
         self
     }
@@ -205,6 +222,16 @@ impl Decoration {
     pub fn over_gutter(mut self) -> Self {
         if let Some(bg) = &mut self.background {
             bg.over_gutter = true;
+        }
+        self
+    }
+
+    /// The background drawn over the gutter in its own way (see
+    /// [`GutterFill`]).
+    pub fn gutter_fill(mut self, fill: GutterFill) -> Self {
+        if let Some(bg) = &mut self.background {
+            bg.over_gutter = true;
+            bg.gutter = Some(fill);
         }
         self
     }

@@ -10,7 +10,71 @@ use gpui::{Context, Pixels, Point, px};
 
 use crate::editor::Editor;
 
+/// The diff editors' gutter, measured on the reference (New UI, 13 px line
+/// numbers): from the line numbers' outer edge to the gutter's outer edge,
+/// and from their inner edge to the text, where the column of the
+/// changes' actions is. The numbers of a mirrored gutter are left-aligned,
+/// nearer the text than on the right.
+const OUTER: f32 = 6.4;
+const NUMBERS_TO_TEXT: f32 = 46.0;
+const MIRRORED_NUMBERS_TO_TEXT: f32 = 42.0;
+/// The action column (`>>`, the check boxes: 14 px icons) ends this far
+/// before the text; in a mirrored gutter it starts this far after it.
+pub const ACTION_SIZE: f32 = 14.0;
+const ACTION_TO_TEXT: f32 = 24.0;
+const MIRRORED_ACTION_FROM_TEXT: f32 = 19.0;
+
+/// The diff gutter's width for `digits` digits of `number_width` each.
+pub(crate) fn diff_gutter_width(number_width: Pixels, digits: usize) -> Pixels {
+    px(OUTER + NUMBERS_TO_TEXT) + number_width * digits as f32
+}
+
+/// Where the line numbers of a diff gutter go: the right edge (normal) or
+/// the left edge (mirrored), from the gutter's left edge `gutter_x`.
+pub(crate) fn diff_numbers_x(gutter_x: Pixels, gutter_width: Pixels, mirrored: bool) -> Pixels {
+    if mirrored {
+        gutter_x + px(MIRRORED_NUMBERS_TO_TEXT)
+    } else {
+        gutter_x + gutter_width - px(NUMBERS_TO_TEXT)
+    }
+}
+
+/// The action column's left edge: before the text, or in a mirrored
+/// editor after its end (`text_end`, the gutter's left edge).
+pub(crate) fn diff_action_x(text_x: Pixels, text_end: Pixels, mirrored: bool) -> Pixels {
+    if mirrored {
+        text_end + px(MIRRORED_ACTION_FROM_TEXT)
+    } else {
+        text_x - px(ACTION_TO_TEXT + ACTION_SIZE)
+    }
+}
+
 impl Editor {
+    /// Lays the gutter out as the reference's diff editors have it: the
+    /// line numbers at its outer side, a column for the changes' actions
+    /// between them and the text, a separator line before the text, and
+    /// the text right after it (no breakpoints, change markers or
+    /// folding area).
+    pub fn set_diff_gutter(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.diff_gutter != on {
+            self.diff_gutter = on;
+            cx.notify();
+        }
+    }
+
+    pub fn has_diff_gutter(&self) -> bool {
+        self.diff_gutter
+    }
+
+    /// Where the diff gutter's action column (the left edge of its icons)
+    /// was in the last frame, from the editor's left edge; `None` before
+    /// the first frame or without a diff gutter. A title above the editor
+    /// puts its check box there.
+    pub fn diff_action_offset(&self) -> Option<Pixels> {
+        let l = self.layout.as_ref().filter(|_| self.diff_gutter)?;
+        Some(diff_action_x(l.text_x, l.text_end, self.mirrored) - l.bounds.left())
+    }
+
     /// Lays the editor out mirrored: the line numbers at the right edge,
     /// the scrollbar and the error stripe at the left.
     pub fn set_mirrored(&mut self, mirrored: bool, cx: &mut Context<Self>) {

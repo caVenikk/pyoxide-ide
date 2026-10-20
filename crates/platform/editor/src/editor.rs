@@ -399,6 +399,8 @@ pub struct Editor {
     pub(crate) mirrored: bool,
     /// The caret's row is highlighted ([`Editor::set_caret_row_shown`]).
     pub(crate) caret_row_shown: bool,
+    /// The diff viewer's gutter ([`Editor::set_diff_gutter`]).
+    pub(crate) diff_gutter: bool,
     /// Rows of room below the last one instead of a view's height
     /// ([`Editor::set_room_after_end`]).
     pub(crate) room_after_end: Option<usize>,
@@ -501,6 +503,7 @@ impl Editor {
             diff_highlights: None,
             mirrored: false,
             caret_row_shown: true,
+            diff_gutter: false,
             room_after_end: None,
             _subscriptions: subscriptions,
         }

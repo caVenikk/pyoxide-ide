@@ -27,6 +27,11 @@ pub trait TabView: Render + Focusable {
     fn title_in_toolbar(&self, _: &App) -> bool {
         true
     }
+    /// The line under the tabs is drawn (a view with an island at its top,
+    /// as the diff's toolbar, turns it off: `SEPARATOR_DISABLED`).
+    fn tab_separator(&self, _: &App) -> bool {
+        true
+    }
 }
 
 /// A tab's view whatever its type.
@@ -40,6 +45,7 @@ pub(crate) trait AnyTabView {
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn state(&self, cx: &App) -> serde_json::Value;
     fn title_in_toolbar(&self, cx: &App) -> bool;
+    fn separator(&self, cx: &App) -> bool;
     /// The entity, for the owner that knows its type.
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -79,6 +85,10 @@ impl<T: TabView + 'static> AnyTabView for Entity<T> {
 
     fn title_in_toolbar(&self, cx: &App) -> bool {
         self.read(cx).title_in_toolbar(cx)
+    }
+
+    fn separator(&self, cx: &App) -> bool {
+        self.read(cx).tab_separator(cx)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

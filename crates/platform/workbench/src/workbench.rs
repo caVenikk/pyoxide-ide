@@ -2217,6 +2217,10 @@ impl Workbench {
             let tabs: Vec<AnyElement> = (0..self.tabs.len())
                 .map(|i| self.render_tab(i, cx))
                 .collect();
+            let separator = match &self.tabs[active].content {
+                TabContent::View(view) if !view.separator(cx) => gpui::transparent_black(),
+                _ => separator,
+            };
             return self
                 .editor_island(min, cx)
                 .child(

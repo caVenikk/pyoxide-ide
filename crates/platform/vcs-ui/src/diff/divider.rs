@@ -79,20 +79,39 @@ pub fn band(change: &DiffChange, line_height: f32, scroll1: f32, scroll2: f32) -
     }
 }
 
-/// The divider element of the views `left` and `right`.
+/// The divider element of the views `left` and `right`; `excluded[i]`:
+/// change `i` is left out of the commit (`ExcludablePainter`).
 pub fn render(
     left: &Entity<Editor>,
     right: &Entity<Editor>,
     changes: std::rc::Rc<Vec<DiffChange>>,
+    excluded: std::rc::Rc<Vec<bool>>,
 ) -> impl IntoElement {
     let (left, right) = (left.clone(), right.clone());
     canvas(
         |_, _, _| (),
-        move |bounds, _, window, cx| paint(bounds, &left, &right, &changes, window, cx),
+        move |bounds, _, window, cx| paint(bounds, &left, &right, &changes, &excluded, window, cx),
     )
     .flex_none()
     .w(px(WIDTH))
     .h_full()
+}
+
+/// How much of the editor's background the band of an excluded change is
+/// (`TextDiffTypeFactory.MIDDLE_COLOR_FACTOR`).
+const FADED: f32 = 0.6;
+
+/// `a` mixed with `b`, `factor` of `b` (`ColorUtil.mix`).
+fn mix(a: Hsla, b: Hsla, factor: f32) -> Hsla {
+    let (a, b) = (gpui::Rgba::from(a), gpui::Rgba::from(b));
+    let m = |x: f32, y: f32| x * (1.0 - factor) + y * factor;
+    gpui::Rgba {
+        r: m(a.r, b.r),
+        g: m(a.g, b.g),
+        b: m(a.b, b.b),
+        a: m(a.a, b.a),
+    }
+    .into()
 }
 
 fn paint(
@@ -100,6 +119,7 @@ fn paint(
     left: &Entity<Editor>,
     right: &Entity<Editor>,
     changes: &[DiffChange],
+    excluded: &[bool],
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -115,16 +135,43 @@ fn paint(
         f32::from(r.scroll_position().y),
     );
     let height = f32::from(bounds.size.height);
+    let editor_background = theme.color(UiRole::EditorBackground);
     window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-        for change in changes {
+        for (i, change) in changes.iter().enumerate() {
             let b = band(change, lh, scroll1, scroll2);
             if (b.end1 < 0.0 && b.end2 < 0.0) || (b.start1 > height && b.start2 > height) {
                 continue;
             }
             let color = theme.color(change_role(change.kind()));
-            paint_band(window, bounds, b, color);
+            if excluded.get(i).copied().unwrap_or(false) {
+                // Faded, its edges in the full colour.
+                paint_band(window, bounds, b, mix(color, editor_background, FADED));
+                paint_edges(window, bounds, b, color);
+            } else {
+                paint_band(window, bounds, b, color);
+            }
         }
     });
+}
+
+/// The edges of a band, curves one pixel thick (`drawCurveTrapezium`'s
+/// border: `drawCurveLine` from start to start and from end to end).
+fn paint_edges(window: &mut Window, bounds: Bounds<Pixels>, b: Band, color: Hsla) {
+    let x1 = bounds.left();
+    let width = f32::from(bounds.size.width);
+    let x2 = x1 + px(width);
+    let top = bounds.top();
+    let p = |x: Pixels, y: f32| point(x, top + px(y + 0.5));
+    let c1 = x1 + px(width * CTRL_PROXIMITY);
+    let c2 = x1 + px(width * (1.0 - CTRL_PROXIMITY));
+    for (y1, y2) in [(b.start1, b.start2), (b.end1, b.end2)] {
+        let mut edge = PathBuilder::stroke(px(1.0));
+        edge.move_to(p(x1, y1));
+        edge.cubic_bezier_to(p(x2, y2), p(c1, y1), p(c2, y2));
+        if let Ok(path) = edge.build() {
+            window.paint_path(path, color);
+        }
+    }
 }
 
 /// `DiffDrawUtil.drawCurveTrapezium`: the area between two cubic curves,

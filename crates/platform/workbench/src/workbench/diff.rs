@@ -68,6 +68,11 @@ impl TabView for DiffView {
         state["kind"] = "diff".into();
         state
     }
+
+    /// The toolbar's island takes the line's place.
+    fn tab_separator(&self, _: &App) -> bool {
+        false
+    }
 }
 
 /// The diff tabs of the window.
@@ -448,12 +453,24 @@ impl Workbench {
         } else {
             SideTitle::default()
         };
+        // An added or unversioned file shows its text alone, a deleted one
+        // its base (`SimpleOnesideDiffViewer`); the current text's title
+        // alone names the file.
+        let deleted = self.diff_deleted(path);
+        let one_side = if deleted && has_base {
+            Some(vcs_ui::diff::Side::Left)
+        } else if !has_base {
+            Some(vcs_ui::diff::Side::Right)
+        } else {
+            None
+        };
         let renamed = base_path != path;
+        let named = renamed || one_side == Some(vcs_ui::diff::Side::Right);
         let right = SideTitle {
             label: CURRENT_VERSION.into(),
-            path: renamed.then(|| rel(path).into()),
-            tooltip: renamed.then(|| path.display().to_string().into()),
-            read_only: self.diff_deleted(path),
+            path: named.then(|| rel(path).into()),
+            tooltip: named.then(|| path.display().to_string().into()),
+            read_only: deleted,
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));
@@ -468,6 +485,7 @@ impl Workbench {
             left,
             right,
             included,
+            one_side,
             files: (t.index, t.files.len()),
             preview: t.commit,
         }

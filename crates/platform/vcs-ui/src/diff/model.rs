@@ -324,6 +324,20 @@ pub fn status_text(count: usize) -> String {
     }
 }
 
+/// The status text of a file in the commit's list, `included` of whose
+/// `count` changes go into the commit (`LocalTrackerDiffUtil.getStatusText`,
+/// `diff.included.count.differences.status.text`): "1 difference, 0
+/// included"; nothing more when all of them do.
+pub fn status_text_included(count: usize, included: Option<usize>) -> String {
+    let mut text = status_text(count);
+    if let Some(n) = included
+        && n != count
+    {
+        text.push_str(&format!(", {n} included"));
+    }
+    text
+}
+
 /// The files counter (`diff.files.count.progress`): "2/3 files".
 pub fn files_text(index: usize, count: usize) -> String {
     match count {
