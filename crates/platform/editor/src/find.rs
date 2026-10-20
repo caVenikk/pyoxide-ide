@@ -351,6 +351,7 @@ impl FindBar {
                 | EditorEvent::ConfirmUndo { .. }
                 | EditorEvent::GutterHovered { .. }
                 | EditorEvent::GutterClicked { .. }
+                | EditorEvent::GutterActionClicked { .. }
                 | EditorEvent::ChangeMarkerClicked { .. }
                 | EditorEvent::AfterLineTextClicked { .. }
                 | EditorEvent::Scrolled => {}

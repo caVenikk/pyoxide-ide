@@ -1557,6 +1557,7 @@ impl Element for EditorElement {
                 total_rows,
                 gutter: !single_line && !console,
                 diff_gutter,
+                diff_actions: diff_gutter && diff_actions,
             },
             theme,
             window,

@@ -234,6 +234,9 @@ pub enum EditorEvent {
         modifiers: Modifiers,
         position: gpui::Point<Pixels>,
     },
+    /// A click on a decoration's icon in the diff gutter's action column
+    /// ([`crate::Decoration::action`]).
+    GutterActionClicked { id: DecorationId },
     /// A press on a decoration's change marker.
     ChangeMarkerClicked {
         id: DecorationId,

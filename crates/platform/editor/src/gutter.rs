@@ -103,9 +103,18 @@ pub(crate) struct DecorationGeometry {
     pub lanes: Lanes,
     pub changes: Vec<ChangeHit>,
     pub after_texts: Vec<AfterHit>,
+    /// The diff gutter's action icons.
+    pub actions: Vec<AfterHit>,
 }
 
 impl DecorationGeometry {
+    pub fn action_at(&self, position: gpui::Point<Pixels>) -> Option<DecorationId> {
+        self.actions
+            .iter()
+            .find(|a| a.bounds.contains(&position))
+            .map(|a| a.id)
+    }
+
     pub fn change_at(&self, position: gpui::Point<Pixels>) -> Option<DecorationId> {
         if !self.lanes.in_markers(position.x) {
             return None;
@@ -183,6 +192,8 @@ pub(crate) struct Frame<'a> {
     /// The diff viewer's gutter ([`Editor::set_diff_gutter`]): a separator
     /// line before the text.
     pub diff_gutter: bool,
+    /// The diff gutter has the column of the changes' actions.
+    pub diff_actions: bool,
 }
 
 impl Frame<'_> {
@@ -326,10 +337,32 @@ pub(crate) fn prepaint(
             ),
         )
     };
+    // The action column of a diff gutter (`DiffGutterOperation`'s icons).
+    let action_x = crate::side_by_side::diff_action_x(frame.text_x, frame.gutter_x, frame.mirrored);
+    let action_size = px(crate::side_by_side::ACTION_SIZE);
     for (entry, lines) in decorations.entries().iter().zip(all_lines.iter()) {
         let d = &entry.decoration;
         let last_line = lines.end.max(lines.start + 1) - 1;
         let shown = lines.start < visible.end && last_line >= visible.start;
+        // On its first line, or the line below the boundary it stands on.
+        let action_line = lines.start.min(len_lines - 1);
+        if frame.gutter
+            && frame.diff_actions
+            && let Some(action) = &d.action
+            && visible.contains(&action_line)
+            && let Some(row) = frame.rows_of(action_line).find(|l| l.sub == 0)
+        {
+            let y = ((lh - action_size) / 2.0).floor();
+            let bounds = Bounds::new(
+                point(action_x, frame.top_of(row.row) + y),
+                size(action_size, action_size),
+            );
+            paint.icons.push((action.icon, bounds, 1.0));
+            geometry.actions.push(AfterHit {
+                id: entry.id,
+                bounds,
+            });
+        }
         if frame.gutter
             && let Some(icon) = &d.gutter_icon
             && visible.contains(&lines.start)
@@ -612,7 +645,7 @@ pub(crate) fn insert_hitboxes(
                 .push(window.insert_hitbox(rect, HitboxBehavior::Normal));
         }
     }
-    for a in &geometry.after_texts {
+    for a in geometry.after_texts.iter().chain(&geometry.actions) {
         let rect = a.bounds.intersect(&bounds);
         if rect.size.width > px(0.0) {
             paint

@@ -54,6 +54,17 @@ pub struct GutterIcon {
     pub tooltip: Option<SharedString>,
 }
 
+/// An icon in the diff gutter's column of change actions on a
+/// decoration's first line (the reference's `DiffGutterOperation`: the
+/// `>>` of a change, its include check box); a click on it is reported
+/// ([`crate::EditorEvent::GutterActionClicked`]). Drawn only with
+/// [`crate::side_by_side::DiffGutter::Actions`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct GutterAction {
+    pub icon: IconName,
+    pub tooltip: Option<SharedString>,
+}
+
 /// Where a gutter icon's badge goes from the icon's top left corner, and
 /// its size.
 pub const BADGE_OFFSET: (f32, f32) = (7.0, 6.0);
@@ -174,6 +185,7 @@ pub struct StripeMark {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Decoration {
     pub gutter_icon: Option<GutterIcon>,
+    pub action: Option<GutterAction>,
     pub background: Option<LineBackground>,
     pub change: Option<ChangeKind>,
     pub after_text: Option<AfterLineText>,
@@ -187,6 +199,12 @@ impl Decoration {
             badge: None,
             tooltip,
         });
+        self
+    }
+
+    /// An icon in the diff gutter's action column (see [`GutterAction`]).
+    pub fn action(mut self, icon: IconName, tooltip: Option<SharedString>) -> Self {
+        self.action = Some(GutterAction { icon, tooltip });
         self
     }
 
@@ -625,6 +643,18 @@ impl Editor {
             .map(|a| a.bounds)
     }
 
+    /// Window bounds of a decoration's gutter action icon in the last frame
+    /// (`None` when it was not visible).
+    pub fn gutter_action_bounds(&self, id: DecorationId) -> Option<Bounds<Pixels>> {
+        let layout = self.layout.as_ref()?;
+        layout
+            .decorations
+            .actions
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.bounds)
+    }
+
     /// The decoration whose change marker the mouse is over.
     pub fn hovered_change_marker(&self) -> Option<DecorationId> {
         self.hovered_change
@@ -666,6 +696,10 @@ impl Editor {
         };
         let geometry = &layout.decorations;
         if button == MouseButton::Left {
+            if let Some(id) = geometry.action_at(position) {
+                cx.emit(EditorEvent::GutterActionClicked { id });
+                return true;
+            }
             if let Some(id) = geometry.change_at(position) {
                 cx.emit(EditorEvent::ChangeMarkerClicked { id, position });
                 return true;
@@ -805,6 +839,7 @@ impl Editor {
                         "lines": [l.start, l.end],
                         "gutter_icon": d.gutter_icon.as_ref().map(|g| g.icon.0),
                         "badge": d.gutter_icon.as_ref().and_then(|g| g.badge).map(|b| b.0),
+                        "action": d.action.as_ref().map(|a| a.icon.0),
                         "background": d.background.map(|b| b.layer),
                         "change": d.change.map(ChangeKind::name),
                         "after_text": d.after_text.as_ref().map(|a| a
