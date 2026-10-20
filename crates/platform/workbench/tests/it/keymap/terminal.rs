@@ -62,7 +62,7 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
             assert_eq!(s["cursor"]["line"], json!(0), "{what}: the prompt moves up");
         }
         "terminal.line-up" | "terminal.page-up" => {
-            h.terminal_with_history();
+            let before = history(&h.terminal_with_history());
             h.press(keys);
             let s = h.wait_terminal(what, |s| offset(s) > 0);
             let expected = if command == "terminal.line-up" {
@@ -70,16 +70,19 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
             } else {
                 s["rows"].as_u64().unwrap()
             };
-            assert_eq!(offset(&s), expected, "{what}");
+            // Output that arrives while the view is scrolled up (the shell's
+            // next prompt, late on ConPTY) moves the offset with it.
+            assert_eq!(offset(&s), expected + history(&s) - before, "{what}");
         }
         "terminal.line-down" | "terminal.page-down" => {
             h.terminal_with_history();
             h.invoke("terminal.page-up", json!(null));
-            let up = offset(&h.wait_terminal("scrolled up", |s| offset(s) > 0));
+            let scrolled = h.wait_terminal("scrolled up", |s| offset(s) > 0);
+            let up = offset(&scrolled);
             h.press(keys);
             let s = h.wait_terminal(what, |s| offset(s) < up);
             let expected = if command == "terminal.line-down" {
-                up - 1
+                up - 1 + history(&s) - history(&scrolled)
             } else {
                 0
             };
@@ -88,6 +91,11 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
         }
         _ => unreachable!("{command}"),
     }
+}
+
+/// The number of scrollback lines in a terminal state.
+fn history(s: &Value) -> u64 {
+    s["history"].as_u64().unwrap()
 }
 
 impl H<'_> {
