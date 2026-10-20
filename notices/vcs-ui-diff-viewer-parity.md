@@ -1,5 +1,7 @@
 - crates/platform/vcs-ui/src/diff/, crates/platform/editor/src/side_by_side.rs,
-  crates/platform/editor/src/gutter.rs (the diff gutter), the icons
+  crates/platform/editor/src/gutter.rs (the diff gutter),
+  crates/platform/ui/src/form.rs (the segmented button's look), the theme
+  roles `segmented-selected` and `segmented-selected-border`, the icons
   crates/platform/ui/assets/icons/diff/gutterCheckBox@14x14.svg,
   gutterCheckBoxSelected@14x14.svg, gutterCheckBoxIndeterminate@14x14.svg and
   arrowRight@14x14.svg (with their `_dark.svg` variants)
@@ -17,7 +19,15 @@
   changes/actions/diff/lst/SimpleLocalChangeListDiffViewer.kt and
   LocalTrackerDiffUtil.kt (the status text with the included changes, the
   title's check box) and the strings of platform/diff-api/resources/messages/
-  DiffBundle.properties. Behaviour, numbers and texts reimplemented in Rust
+  DiffBundle.properties, tools/util/SyncScrollSupport.java (both sides moving
+  to a change together), platform/platform-impl/src/com/intellij/openapi/
+  editor/impl/ScrollingModelImpl.java (the duration of an animated scroll),
+  platform/platform-api/src/com/intellij/util/animation/Easing.java
+  (`EASE_OUT`), platform/platform-impl/src/com/intellij/ui/dsl/builder/
+  components/SegmentedButtonComponent.kt (the selected choice's outline over
+  the button's) and the `SegmentedButton` colours of platform/
+  platform-resources/src/themes/islands/ManyIslandsDark.theme.json and
+  ManyIslandsLight.theme.json. Behaviour, numbers and texts reimplemented in Rust
   with GPUI; the gutter's sizes are measured on the reference. The icons are
   unchanged copies of platform/icons/src/expui/diff/gutterCheckBox@14x14.svg,
   gutterCheckBoxSelected@14x14.svg, gutterCheckBoxIndeterminate@14x14.svg and

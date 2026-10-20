@@ -365,7 +365,12 @@ pub fn scroll_duration(distance: f32, line_height: f32) -> std::time::Duration {
 /// The animation's progress at `t` of its time (`Easing.EASE_OUT`, the
 /// cubic Bézier curve (0, 0), (0, 0), (0.58, 1), (1, 1)).
 pub fn ease_out(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if t >= 1.0 {
+        return 1.0;
+    }
     let (c2x, c2y) = (0.58_f32, 1.0_f32);
     // x(s) and y(s) of the curve with its first control point at the origin.
     let x = |s: f32| 3.0 * (1.0 - s) * s * s * c2x + s * s * s;

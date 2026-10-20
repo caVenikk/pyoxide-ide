@@ -1132,7 +1132,6 @@ impl DiffView {
                         .left(px(x))
                         .top(px((TITLE_HEIGHT - size) / 2.0))
                         .size(px(size))
-                        .cursor_pointer()
                         .child(Icon::new(icon).size(px(size)))
                         .tooltip(Tooltip::text("Include into commit", None))
                         .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
