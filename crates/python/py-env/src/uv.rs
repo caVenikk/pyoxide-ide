@@ -25,6 +25,12 @@ pub struct UvConfig {
     pub cache_dir: Option<PathBuf>,
     /// Where uv keeps the interpreters it installs (`UV_PYTHON_INSTALL_DIR`).
     pub python_install_dir: Option<PathBuf>,
+    /// Do not pass the variables that steer uv's choices on from this
+    /// process's environment (`UV_*`, `VIRTUAL_ENV`, `CONDA_PREFIX` and the
+    /// like, see [`crate::process::steering_env`]), so that only this config
+    /// and the arguments decide. For tests; the IDE respects the user's
+    /// environment.
+    pub hermetic: bool,
 }
 
 impl Default for UvConfig {
@@ -35,6 +41,7 @@ impl Default for UvConfig {
             no_config: false,
             cache_dir: None,
             python_install_dir: None,
+            hermetic: false,
         }
     }
 }
@@ -311,6 +318,9 @@ impl Uv {
 
     fn spec(&self, args: Vec<OsString>) -> Spec {
         let mut spec = Spec::new(&self.program).args(args);
+        if self.config.hermetic {
+            spec = spec.without_steering_env();
+        }
         spec = spec.env("NO_COLOR", "1").env("UV_NO_PROGRESS", "1");
         if self.config.offline {
             spec = spec.env("UV_OFFLINE", "1");
@@ -998,6 +1008,7 @@ mod tests {
                 no_config: true,
                 cache_dir: Some("/c".into()),
                 python_install_dir: Some("/p".into()),
+                hermetic: false,
             },
         ));
         for (k, v) in [
@@ -1009,6 +1020,23 @@ mod tests {
         ] {
             assert!(strict.contains(&(k.to_owned(), v.to_owned())), "{k}");
         }
+    }
+
+    #[test]
+    fn only_a_hermetic_uv_hides_the_callers_steering_variables() {
+        let default = Uv::new("uv", UvConfig::default());
+        assert!(default.spec(vec![]).env_remove.is_empty());
+        let hermetic = Uv::new(
+            "uv",
+            UvConfig {
+                hermetic: true,
+                ..UvConfig::default()
+            },
+        );
+        assert_eq!(
+            hermetic.spec(vec![]).env_remove,
+            crate::process::steering_env()
+        );
     }
 
     #[test]

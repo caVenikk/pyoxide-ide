@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -71,6 +71,29 @@ impl std::fmt::Debug for RunContext {
     }
 }
 
+/// Whether an environment variable steers which Python a tool picks or where
+/// it puts environments and packages: `UV_*`, `PIP_*`, `VIRTUAL_ENV`,
+/// `CONDA_PREFIX`, `CONDA_DEFAULT_ENV`, `PYTHONHOME` and `PYTHONPATH`.
+pub fn is_steering_var(name: &OsStr) -> bool {
+    let name = name.to_string_lossy().to_ascii_uppercase();
+    name.starts_with("UV_")
+        || name.starts_with("PIP_")
+        || matches!(
+            name.as_str(),
+            "VIRTUAL_ENV" | "CONDA_PREFIX" | "CONDA_DEFAULT_ENV" | "PYTHONHOME" | "PYTHONPATH"
+        )
+}
+
+/// The steering variables ([`is_steering_var`]) set in this process. A test
+/// that spawns a tool removes them from the child, so that the developer's
+/// shell does not decide its outcome; the product leaves them alone.
+pub fn steering_env() -> Vec<OsString> {
+    std::env::vars_os()
+        .map(|(name, _)| name)
+        .filter(|name| is_steering_var(name))
+        .collect()
+}
+
 /// What to run.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Spec {
@@ -78,6 +101,9 @@ pub(crate) struct Spec {
     pub args: Vec<OsString>,
     pub cwd: Option<PathBuf>,
     pub env: Vec<(OsString, OsString)>,
+    /// Variables of this process's environment the child must not inherit.
+    /// Applied before `env`, so a variable in both is set.
+    pub env_remove: Vec<OsString>,
     /// Forward stdout lines to the progress sink too. Off for tools whose
     /// stdout is data (JSON), on for tools that narrate on stdout.
     pub forward_stdout: bool,
@@ -107,6 +133,13 @@ impl Spec {
 
     pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
         self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Keep the child from inheriting the variables that steer Python tooling
+    /// ([`steering_env`]).
+    pub fn without_steering_env(mut self) -> Self {
+        self.env_remove.extend(steering_env());
         self
     }
 
@@ -156,6 +189,9 @@ pub(crate) async fn run(
         .kill_on_drop(true);
     if let Some(cwd) = &spec.cwd {
         cmd.current_dir(cwd);
+    }
+    for k in &spec.env_remove {
+        cmd.env_remove(k);
     }
     for (k, v) in &spec.env {
         cmd.env(k, v);
@@ -374,6 +410,42 @@ mod tests {
         assert_eq!(done.stdout, "out\n");
         assert_eq!(done.stderr, "err");
         assert!(!done.success());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn removed_variables_are_not_inherited_unless_set_again() {
+        let probe = |spec: Spec| async {
+            run("sh", spec, &RunContext::default(), Duration::from_secs(10))
+                .await
+                .unwrap()
+                .stdout
+        };
+        let script = r#"echo "${HOME-unset}""#;
+        let mut spec = sh(script);
+        spec.env_remove.push("HOME".into());
+        assert_eq!(probe(spec).await, "unset\n");
+        let mut spec = sh(script).env("HOME", "set-again");
+        spec.env_remove.push("HOME".into());
+        assert_eq!(probe(spec).await, "set-again\n");
+    }
+
+    #[test]
+    fn steering_variables_are_recognised() {
+        for name in [
+            "UV_PYTHON",
+            "UV_INDEX_URL",
+            "uv_cache_dir",
+            "PIP_INDEX_URL",
+            "VIRTUAL_ENV",
+            "CONDA_PREFIX",
+            "PYTHONHOME",
+        ] {
+            assert!(is_steering_var(OsStr::new(name)), "{name}");
+        }
+        for name in ["PATH", "HOME", "PYOXIDE_UV", "NO_COLOR", "UVICORN_PORT"] {
+            assert!(!is_steering_var(OsStr::new(name)), "{name}");
+        }
     }
 
     #[cfg(unix)]
