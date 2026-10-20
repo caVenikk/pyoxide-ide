@@ -213,6 +213,69 @@ fn amend_replaces_the_last_commit() {
 }
 
 #[test]
+fn a_partial_commit_takes_the_included_changes_only() {
+    let (_tmp, dir) = repository(true);
+    write(&dir, "a.py", "one\ntwo\nthree\nfour\nfive\n");
+    git(&dir, &["commit", "-q", "-am", "Lines"]);
+    // Two changes of a.py, the second one left out; b.py whole; c.py
+    // staged and not included stays staged.
+    write(&dir, "a.py", "ONE\ntwo\nthree\nfour\nFIVE\n");
+    write(&dir, "b.py", "b changed\n");
+    write(&dir, "c.py", "c staged\n");
+    git(&dir, &["add", "c.py"]);
+    write(&dir, "new.py", "new\n");
+    let repo = open(&dir);
+    let request = CommitRequest {
+        message: "Part".into(),
+        changes: vec![
+            change(&dir, "a.py", FileStatus::Modified),
+            change(&dir, "b.py", FileStatus::Modified),
+        ],
+        unversioned: vec![dir.join("new.py")],
+        partial: vec![vcs::PartialFile {
+            path: dir.join("a.py"),
+            excluded: vec![4..5],
+        }],
+        run_hooks: true,
+        ..CommitRequest::default()
+    };
+    let done = repo.commit(&request, &Cancel::new()).unwrap();
+    assert_eq!(done.files, 3);
+    assert_eq!(git(&dir, &["log", "-1", "--format=%B"]).trim(), "Part");
+    assert_eq!(
+        git(&dir, &["show", "HEAD:a.py"]),
+        "ONE\ntwo\nthree\nfour\nfive\n"
+    );
+    assert_eq!(git(&dir, &["show", "HEAD:b.py"]), "b changed\n");
+    assert_eq!(git(&dir, &["show", "HEAD:new.py"]), "new\n");
+    let files = git(&dir, &["show", "--name-only", "--format=", "HEAD"]);
+    assert_eq!(
+        files.lines().collect::<Vec<_>>(),
+        vec!["a.py", "b.py", "new.py"]
+    );
+    // The change left out stays a local change; the work tree is as it
+    // was; the staged file stays staged.
+    assert_eq!(read(&dir, "a.py"), "ONE\ntwo\nthree\nfour\nFIVE\n");
+    assert_eq!(git(&dir, &["diff", "--name-only"]).trim(), "a.py");
+    let diff = git(&dir, &["diff", "-U0", "a.py"]);
+    assert!(diff.contains("-five\n+FIVE"), "{diff}");
+    assert_eq!(
+        git(&dir, &["diff", "--cached", "--name-only"]).trim(),
+        "c.py"
+    );
+    assert_eq!(status_of(&repo, &dir, "a.py"), FileStatus::Modified);
+    // No temporary index is left behind.
+    let git_dir = dir.join(".git");
+    let left: Vec<_> = std::fs::read_dir(&git_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("pyoxide-index"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
 fn sign_off_and_author_go_into_the_commit() {
     let (_tmp, dir) = repository(true);
     write(&dir, "a.py", "x\n");

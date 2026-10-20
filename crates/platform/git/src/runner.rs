@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::Read as _;
 use std::path::Path;
 use std::process::{Child, Stdio};
@@ -94,17 +94,34 @@ impl Runner {
         I: IntoIterator<Item = S>,
         S: Into<OsString>,
     {
+        self.run_env(dir, args, &[], access, cancel)
+    }
+
+    /// Like [`Runner::run`] with environment variables for git (a
+    /// temporary index, `GIT_INDEX_FILE`).
+    pub fn run_env<I, S>(
+        &self,
+        dir: &Path,
+        args: I,
+        env: &[(&str, &OsStr)],
+        access: Access,
+        cancel: &Cancel,
+    ) -> Result<Output, VcsError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
         let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
         match access {
             Access::Read => {
                 let _read = self.lock.read().unwrap_or_else(PoisonError::into_inner);
-                self.spawn(dir, &args, access, cancel)
+                self.spawn(dir, &args, env, access, cancel)
             }
             Access::Write => {
                 self.writes.fetch_add(1, Ordering::SeqCst);
                 let out = {
                     let _write = self.lock.write().unwrap_or_else(PoisonError::into_inner);
-                    self.spawn(dir, &args, access, cancel)
+                    self.spawn(dir, &args, env, access, cancel)
                 };
                 self.writes.fetch_sub(1, Ordering::SeqCst);
                 for f in self
@@ -145,6 +162,7 @@ impl Runner {
         &self,
         dir: &Path,
         args: &[OsString],
+        env: &[(&str, &OsStr)],
         access: Access,
         cancel: &Cancel,
     ) -> Result<Output, VcsError> {
@@ -158,6 +176,9 @@ impl Runner {
             .stderr(Stdio::piped());
         if access == Access::Read {
             cmd.env("GIT_OPTIONAL_LOCKS", "0");
+        }
+        for (key, value) in env {
+            cmd.env(key, value);
         }
         let mut child = cmd.spawn().map_err(|e| {
             VcsError::unavailable(format!("Cannot run {}: {e}", self.exe.path.display()))

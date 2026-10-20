@@ -22,6 +22,19 @@ pub struct CommitRequest {
     pub run_hooks: bool,
     /// Another author than the configured user (`--author`).
     pub author: Option<String>,
+    /// Included changes committed in part (the reference's partial
+    /// commit): of these files the commit takes the base text with the
+    /// changes applied that are not left out ([`crate::partial_text`]).
+    pub partial: Vec<PartialFile>,
+}
+
+/// A file committed in part: its changes left out of the commit, named by
+/// their lines in the base text (zero-based, ends exclusive; an empty
+/// range is the place of inserted lines).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartialFile {
+    pub path: PathBuf,
+    pub excluded: Vec<std::ops::Range<u32>>,
 }
 
 impl CommitRequest {

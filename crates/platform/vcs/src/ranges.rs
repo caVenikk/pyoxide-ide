@@ -189,6 +189,36 @@ impl LineRanges {
     }
 }
 
+/// The text a partial commit takes of a document: `base` with the changes
+/// of `text` applied except those left out, named by their base lines
+/// (`excluded`; a change whose base lines are one of them, or overlap
+/// one, keeps the base's lines). Line breaks stay as either text has them.
+pub fn partial_text(base: &str, text: &str, excluded: &[std::ops::Range<u32>]) -> String {
+    let ranges = LineRanges::compute(base, text);
+    let base_lines: Vec<&str> = base.split('\n').collect();
+    let text_lines: Vec<&str> = text.split('\n').collect();
+    let left_out = |r: &Range| {
+        excluded.iter().any(|e| {
+            (e.start == r.vcs_line1 && e.end == r.vcs_line2)
+                || (e.start < r.vcs_line2 && r.vcs_line1 < e.end)
+        })
+    };
+    let mut out: Vec<&str> = Vec::with_capacity(base_lines.len().max(text_lines.len()));
+    let mut at = 0;
+    for r in ranges.ranges() {
+        let (v1, v2) = (r.vcs_line1 as usize, r.vcs_line2 as usize);
+        out.extend_from_slice(&base_lines[at..v1]);
+        if left_out(r) {
+            out.extend_from_slice(&base_lines[v1..v2]);
+        } else {
+            out.extend_from_slice(&text_lines[r.line1 as usize..r.line2 as usize]);
+        }
+        at = v2;
+    }
+    out.extend_from_slice(&base_lines[at..]);
+    out.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +353,20 @@ mod tests {
             "line ranges, 10 000 lines, {count} ranges: compute {:?} (median of 9), shift on an edit {shift:?}",
             times[4]
         );
+    }
+
+    #[test]
+    fn a_partial_text_leaves_the_excluded_changes_out() {
+        let base = "a\nb\nc\nd\n";
+        let text = "a\nB\nc\nd\nE\n";
+        assert_eq!(partial_text(base, text, &[]), text);
+        assert_eq!(partial_text(base, text, &[1..2]), "a\nb\nc\nd\nE\n");
+        assert_eq!(partial_text(base, text, &[4..4]), "a\nB\nc\nd\n");
+        assert_eq!(partial_text(base, text, &[1..2, 4..4]), base);
+        // A deletion, and the line breaks of either text.
+        let base = "a\r\nb\r\nc\r\n";
+        let text = "a\r\nc\r\nX\r\n";
+        assert_eq!(partial_text(base, text, &[1..2]), "a\r\nb\r\nc\r\nX\r\n");
+        assert_eq!(partial_text(base, text, &[3..3]), "a\r\nc\r\n");
     }
 }

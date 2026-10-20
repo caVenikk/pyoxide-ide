@@ -30,8 +30,8 @@ mod status;
 
 pub use backend::{Backend, Cancel, Snapshot, VcsError, VcsErrorKind};
 pub use branch::{Branch, BranchKind, Head, Remote, RepoInfo, RepoState, Tracking};
-pub use commit::{CommitRequest, LastCommit, RollbackKind, rollback_kind};
-pub use ranges::{LineRanges, Range, RangeKind, split_lines};
+pub use commit::{CommitRequest, LastCommit, PartialFile, RollbackKind, rollback_kind};
+pub use ranges::{LineRanges, Range, RangeKind, partial_text, split_lines};
 pub use remote::{
     CommitFile, ForceMode, OutgoingCommit, PushOutcome, PushResult, PushSpec, PushTarget, TagMode,
     UpdateMethod,

@@ -1,10 +1,14 @@
 //! The operations of the Commit tool window (the reference's
 //! `GitCheckinEnvironment`, `GitRollbackEnvironment`, `GitConfigUtil`):
 //! commit and amend (`git commit --only` with the included paths, so
-//! other staged changes stay staged), the last commit for Amend, the
-//! user's name and e-mail (`Git User Name Is Not Defined`), rollback of
-//! changes, adding files and whether the repository has commit hooks.
+//! other staged changes stay staged; with files committed in part, from a
+//! temporary index of `HEAD` and the included content), the last commit
+//! for Amend, the user's name and e-mail (`Git User Name Is Not Defined`),
+//! rollback of changes, adding files and whether the repository has
+//! commit hooks.
 
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -65,6 +69,31 @@ impl TempFile {
 impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// A temporary index in the git folder (a partial commit's), removed with
+/// its lock when dropped.
+struct TempIndex(PathBuf);
+
+impl TempIndex {
+    fn new(git_dir: &Path) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        Self(git_dir.join(format!("pyoxide-index-{}-{n}", std::process::id())))
+    }
+
+    fn env(&self) -> [(&str, &OsStr); 1] {
+        [("GIT_INDEX_FILE", self.0.as_os_str())]
+    }
+}
+
+impl Drop for TempIndex {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let mut lock = self.0.clone().into_os_string();
+        lock.push(".lock");
+        let _ = std::fs::remove_file(lock);
     }
 }
 
@@ -175,7 +204,12 @@ impl GitRepo {
 
     /// Commits the request's paths (`git commit --only`): unversioned
     /// files are added first; other staged changes stay staged. An amend
-    /// without paths changes the message (and author) only.
+    /// without paths changes the message (and author) only. Files
+    /// committed in part go through a temporary index (`commit --only`
+    /// takes the work tree's file): `HEAD`, the whole files and the
+    /// included content of the others; the real index then takes the
+    /// committed paths from the new `HEAD`, so the changes left out stay
+    /// local changes.
     pub fn commit(&self, request: &CommitRequest, cancel: &Cancel) -> Result<Committed, VcsError> {
         let root = &self.repository().root;
         let added = relative_all(root, &request.unversioned);
@@ -187,13 +221,12 @@ impl GitRepo {
             return Err(VcsError::failed("Nothing to commit"));
         }
         let message = TempFile::new("pyoxide-commit-message", request.message.as_bytes())?;
-        let mut args: Vec<String> = vec![
-            "--literal-pathspecs".into(),
-            "commit".into(),
-            "--only".into(),
-            "-F".into(),
-            message.0.display().to_string(),
-        ];
+        let partial = !request.partial.is_empty();
+        let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "commit".into()];
+        if !partial {
+            args.push("--only".into());
+        }
+        args.extend(["-F".into(), message.0.display().to_string()]);
         if request.amend {
             args.push("--amend".into());
         }
@@ -205,6 +238,17 @@ impl GitRepo {
         }
         if let Some(author) = request.author.as_deref().filter(|a| !a.trim().is_empty()) {
             args.push(format!("--author={}", author.trim()));
+        }
+        if partial {
+            let index = self.partial_index(request, &paths, cancel)?;
+            let out = self
+                .runner()
+                .run_env(root, &args, &index.env(), Access::Write, cancel)?;
+            if !out.success() {
+                return Err(VcsError::failed(failure_text(&out)));
+            }
+            self.write_paths(&["reset", "-q"], &paths, cancel)?;
+            return self.committed(request, cancel);
         }
         let total: usize = paths.iter().map(|p| p.len() + 1).sum();
         let _list;
@@ -226,6 +270,10 @@ impl GitRepo {
         if !out.success() {
             return Err(VcsError::failed(failure_text(&out)));
         }
+        self.committed(request, cancel)
+    }
+
+    fn committed(&self, request: &CommitRequest, cancel: &Cancel) -> Result<Committed, VcsError> {
         let oid = self
             .resolve_commit("HEAD", cancel)?
             .ok_or_else(|| VcsError::failed("HEAD not found after the commit"))?;
@@ -233,6 +281,86 @@ impl GitRepo {
             oid,
             files: request.file_count(),
         })
+    }
+
+    /// The index a partial commit commits from: `HEAD`, the whole files
+    /// of `paths` as they are in the work tree, and of each file committed
+    /// in part its base text with the included changes
+    /// (`PartialCommitHelper`, `GitIndexUtil.write`).
+    fn partial_index(
+        &self,
+        request: &CommitRequest,
+        paths: &[String],
+        cancel: &Cancel,
+    ) -> Result<TempIndex, VcsError> {
+        let root = &self.repository().root;
+        let index = TempIndex::new(&self.repository().git_dir);
+        let env = index.env();
+        let run = |args: &[&str]| -> Result<Output, VcsError> {
+            self.runner()
+                .run_env(root, args, &env, Access::Write, cancel)
+                .and_then(|out| {
+                    if out.success() {
+                        Ok(out)
+                    } else {
+                        Err(VcsError::failed(error_text(&out)))
+                    }
+                })
+        };
+        run(&["read-tree", "HEAD"])?;
+        let parts: Vec<(String, &vcs::PartialFile)> = request
+            .partial
+            .iter()
+            .filter_map(|p| Some((parse::relative(root, &p.path)?, p)))
+            .collect();
+        let in_part: HashSet<&str> = parts.iter().map(|(rel, _)| rel.as_str()).collect();
+        let whole: Vec<String> = paths
+            .iter()
+            .filter(|p| !in_part.contains(p.as_str()))
+            .cloned()
+            .collect();
+        for chunk in chunks(&whole) {
+            let mut args = vec!["--literal-pathspecs", "add", "-A", "--"];
+            args.extend(chunk.iter().map(String::as_str));
+            run(&args)?;
+        }
+        for (rel, part) in &parts {
+            // The base: `HEAD`'s file (a renamed file's old one) as the
+            // work tree has it.
+            let old = request
+                .changes
+                .iter()
+                .find(|c| c.path == part.path)
+                .and_then(|c| c.old_path.as_deref())
+                .and_then(|p| parse::relative(root, p))
+                .unwrap_or_else(|| rel.clone());
+            let base = self.read(["cat-file", "--filters", &format!("HEAD:{old}")], cancel)?;
+            let text = std::fs::read(&part.path).map_err(|e| {
+                VcsError::failed(format!("Cannot read {}: {e}", part.path.display()))
+            })?;
+            let content = vcs::partial_text(
+                &String::from_utf8_lossy(&base.stdout),
+                &String::from_utf8_lossy(&text),
+                &part.excluded,
+            );
+            let file = TempFile::new("pyoxide-partial", content.as_bytes())?;
+            let path_arg = format!("--path={rel}");
+            let file_arg = file.0.display().to_string();
+            let blob = run(&["hash-object", "-w", &path_arg, "--", &file_arg])?
+                .stdout_text()
+                .trim()
+                .to_owned();
+            let listed = run(&["--literal-pathspecs", "ls-files", "-s", "--", rel])?;
+            let mode = listed
+                .stdout_text()
+                .split_whitespace()
+                .next()
+                .unwrap_or("100644")
+                .to_owned();
+            let info = format!("{mode},{blob},{rel}");
+            run(&["update-index", "--add", "--cacheinfo", &info])?;
+        }
+        Ok(index)
     }
 
     /// The last commit of `HEAD`, `None` before the first one.
