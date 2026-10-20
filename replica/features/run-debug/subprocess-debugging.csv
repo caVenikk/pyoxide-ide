@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Subprocess debugging,run-debug,should,yes,yes,"Community; debugpy child sessions shown in the same Debug tab, attach to subprocess on by default (#234); no Python Debugger settings page yet"
+Subprocess debugging,run-debug,should,yes,yes,"Community; debugpy child sessions shown in the same Debug tab, attach to subprocess on by default (#234); option on Settings > Python > Debugger (#242)"
