@@ -73,7 +73,11 @@ debugpy over DAP, with Pyoxide's own client.
   environment from the run configuration, `console: integratedTerminal`,
   `justMyCode: false` (the reference's Step Into enters libraries),
   `showReturnValue` from the settings, `subProcess` from "Attach to
-  subprocess automatically while debugging" (on, as in the reference), a
+  subprocess automatically while debugging" (on, as in the reference),
+  `gevent` and `qt` from "Gevent compatible" and "PyQt compatible" (the
+  project's options of Settings > Python > Debugger, personal project
+  state `[python.debugger]`, read at each start; "Debugger evaluation
+  response timeout (ms)" limits the wait for an evaluation's answer), a
   variable presentation that groups special variables and hides
   functions, classes and modules (the reference's Simplified Variables
   View).
@@ -200,4 +204,4 @@ table; `.idea` is never written.
   Step Into, Jump To Cursor, Reset Frame,
   the interactive debug console, logging breakpoint details, dependent
   breakpoints, attach, remote, data views, type renderers, the debugger
-  settings pages.
+  settings pages other than Python > Debugger.
