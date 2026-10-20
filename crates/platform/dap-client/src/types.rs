@@ -4,6 +4,7 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// What the adapter supports (the `initialize` answer and later
 /// `capabilities` events).
@@ -368,6 +369,9 @@ pub enum DapError {
     Unsupported(&'static str),
     /// The answer did not have the expected form.
     Malformed(String),
+    /// No answer came within the time the request was given
+    /// ([`crate::Request::timeout`]).
+    TimedOut(Duration),
 }
 
 impl fmt::Display for DapError {
@@ -378,6 +382,11 @@ impl fmt::Display for DapError {
             DapError::Closed => f.write_str("the connection to the debugger is closed"),
             DapError::Unsupported(what) => write!(f, "the debugger does not support {what}"),
             DapError::Malformed(message) => write!(f, "a malformed answer: {message}"),
+            DapError::TimedOut(after) => write!(
+                f,
+                "timeout waiting for a response from the debugger ({} ms)",
+                after.as_millis()
+            ),
         }
     }
 }

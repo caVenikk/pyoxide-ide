@@ -168,6 +168,20 @@ impl Shared {
         }
     }
 
+    /// The request got no answer in time: it gets
+    /// [`DapError::TimedOut`] (and the adapter is told when it supports
+    /// `cancel`), unless it was answered meanwhile.
+    fn expire(&self, seq: i64, after: Duration) {
+        let Some(callback) = self.take(seq) else {
+            return;
+        };
+        if lock(&self.capabilities).cancel {
+            let arguments = to_value(&protocol::CancelArguments { request_id: seq });
+            self.send_request("cancel", Some(arguments), Box::new(|_| {}));
+        }
+        callback(Err(DapError::TimedOut(after)));
+    }
+
     /// No answers will come: every pending request gets
     /// [`DapError::Closed`], new ones get it at once.
     fn close_pending(&self) {
@@ -772,6 +786,24 @@ impl<T> Request<T> {
     pub fn detach(self) {
         self.on_done(|_| {});
     }
+
+    /// Gives the request `after` to be answered: later it fails with
+    /// [`DapError::TimedOut`] and the adapter is told to cancel it (when
+    /// it supports that). An answer that comes after is dropped.
+    #[must_use]
+    pub fn timeout(self, after: Duration) -> Self {
+        if let Some(shared) = &self.shared
+            && self.seq != 0
+        {
+            timers::add(
+                Instant::now() + after,
+                Arc::downgrade(shared),
+                self.seq,
+                after,
+            );
+        }
+        self
+    }
 }
 
 impl<T> Future for Request<T> {
@@ -848,6 +880,110 @@ impl Drop for Responder {
                 &self.command,
                 Err(format!("Pyoxide does not handle '{}'", self.command)),
             );
+        }
+    }
+}
+
+/// The clock of [`Request::timeout`]: one thread of the process, asleep
+/// until the earliest deadline, holds the requests' deadlines weakly (a
+/// closed client has nothing left to expire).
+mod timers {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    use std::sync::{Condvar, Mutex, OnceLock, Weak};
+    use std::time::{Duration, Instant};
+
+    use super::{Shared, lock};
+
+    struct Deadline {
+        at: Instant,
+        seq: i64,
+        shared: Weak<Shared>,
+        after: Duration,
+    }
+
+    impl PartialEq for Deadline {
+        fn eq(&self, other: &Self) -> bool {
+            (self.at, self.seq) == (other.at, other.seq)
+        }
+    }
+
+    impl Eq for Deadline {}
+
+    impl PartialOrd for Deadline {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for Deadline {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            (self.at, self.seq).cmp(&(other.at, other.seq))
+        }
+    }
+
+    struct Timers {
+        queue: Mutex<BinaryHeap<Reverse<Deadline>>>,
+        changed: Condvar,
+    }
+
+    fn timers() -> &'static Timers {
+        static TIMERS: OnceLock<&'static Timers> = OnceLock::new();
+        TIMERS.get_or_init(|| {
+            let timers: &'static Timers = Box::leak(Box::new(Timers {
+                queue: Mutex::new(BinaryHeap::new()),
+                changed: Condvar::new(),
+            }));
+            std::thread::Builder::new()
+                .name("dap timeouts".to_owned())
+                .spawn(move || run(timers))
+                .expect("a thread for the request timeouts");
+            timers
+        })
+    }
+
+    pub(super) fn add(at: Instant, shared: Weak<Shared>, seq: i64, after: Duration) {
+        let timers = timers();
+        lock(&timers.queue).push(Reverse(Deadline {
+            at,
+            seq,
+            shared,
+            after,
+        }));
+        timers.changed.notify_one();
+    }
+
+    fn run(timers: &Timers) {
+        let mut queue = lock(&timers.queue);
+        loop {
+            let now = Instant::now();
+            match queue.peek() {
+                None => {
+                    queue = timers
+                        .changed
+                        .wait(queue)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                }
+                Some(Reverse(next)) if next.at > now => {
+                    let wait = next.at - now;
+                    queue = timers
+                        .changed
+                        .wait_timeout(queue, wait)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0;
+                }
+                Some(_) => {
+                    let Some(Reverse(due)) = queue.pop() else {
+                        continue;
+                    };
+                    // The callback runs without the queue locked.
+                    drop(queue);
+                    if let Some(shared) = due.shared.upgrade() {
+                        shared.expire(due.seq, due.after);
+                    }
+                    queue = lock(&timers.queue);
+                }
+            }
         }
     }
 }

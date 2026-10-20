@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views)",run-debug,should,yes,no,Community
+"Debugger settings pages (Python Debugger, Debugger, Stepping, Data Views)",run-debug,should,yes,partial,"Python > Debugger (#242): subprocess, gevent, PyQt, evaluation timeout wired; Debugger, Stepping and Data Views pages not yet"

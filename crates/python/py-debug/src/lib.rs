@@ -13,6 +13,9 @@
 //! - [`breakpoints`]: the Python breakpoint types and the exception
 //!   breakpoint mapping ("On termination" is `uncaught`, "On raise" is
 //!   `raised`);
+//! - [`settings`]: the project's Python debugger options (Settings > Python >
+//!   Debugger) in the personal project state, imported once from the
+//!   reference's `workspace.xml`;
 //! - how the variables view shows Python values (groups, return values,
 //!   container sizes);
 //! - [`PythonDebugProvider`]: the product's [`debugger::DebugAdapterProvider`],
@@ -24,6 +27,7 @@ pub mod helper;
 pub mod launch;
 pub mod lines;
 mod provider;
+pub mod settings;
 mod values;
 
 pub use helper::{DEBUGPY_VERSION, Helper, HelperMissing};
@@ -32,3 +36,4 @@ pub use lines::StoppableLines;
 pub use provider::{
     ADAPTER_ID, DebugTarget, PythonDebugProvider, RunResolver, configuration_target,
 };
+pub use settings::{DebuggerSettings, QtBackend};

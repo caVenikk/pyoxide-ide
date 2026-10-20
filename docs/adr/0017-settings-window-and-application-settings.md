@@ -106,8 +106,8 @@ Storage option 2, window option 2, a `settings-ui` crate.
   File Types in `workbench`; Tools > Terminal in `terminal-ui`, and so on).
   Consumers follow the store's change events, not the pages. Products add
   pages through `workbench::Product` (`settings_pages`):
-  the Python product adds Python > Interpreter, Type Engine and Tools >
-  External Tools, in a top-level "Python" group as the reference.
+  the Python product adds Python > Interpreter, Type Engine, Debugger and
+  Tools > External Tools, in a top-level "Python" group as the reference.
 - Only pages Pyoxide implements are listed. Forms use `ui::form`
   (architecture.md, "Cross-cutting foundations").
 

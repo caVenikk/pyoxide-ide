@@ -679,6 +679,7 @@ impl debugger::DebugAdapterProvider for Verifying {
             kind: debugger::LaunchKind::Launch,
             arguments: json!({}),
             input_file: None,
+            evaluation_timeout: None,
         })
     }
 

@@ -5,6 +5,7 @@
 //! virtual environment's activation in the terminal).
 
 mod debug;
+pub mod debugger_settings;
 pub mod interpreter;
 mod new_items;
 pub mod run;

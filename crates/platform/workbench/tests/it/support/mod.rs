@@ -398,6 +398,7 @@ impl debugger::DebugAdapterProvider for TestDebug {
             kind: debugger::LaunchKind::Launch,
             arguments: serde_json::json!({"program": request.configuration.name}),
             input_file: None,
+            evaluation_timeout: None,
         })
     }
 

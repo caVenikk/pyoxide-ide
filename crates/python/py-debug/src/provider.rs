@@ -20,6 +20,7 @@ use run_config::RunConfiguration;
 use crate::breakpoints;
 use crate::helper::Helper;
 use crate::launch::{self, DebugOptions};
+use crate::settings;
 use crate::values;
 
 /// The adapter's type at `initialize`.
@@ -104,6 +105,18 @@ impl PythonDebugProvider {
             .clone()
     }
 
+    /// The options of a session of the project at `root`: the provider's,
+    /// with the project's Python debugger options over them (Settings >
+    /// Python > Debugger, read again at each start). Blocking.
+    fn project_options(&self, root: &Path) -> DebugOptions {
+        let mut options = self.options();
+        match settings::load(root) {
+            Ok(settings) => settings.apply(&mut options),
+            Err(error) => eprintln!("python debugger settings: {error}"),
+        }
+        options
+    }
+
     fn helper(&self) -> Result<Helper, String> {
         match &self.helper {
             Some(helper) => Ok(helper.clone()),
@@ -124,7 +137,7 @@ impl DebugAdapterProvider for PythonDebugProvider {
         };
         launch::check_version(&python, &version)?;
         let helper = self.helper()?;
-        let options = self.options();
+        let options = self.project_options(&request.root);
         let config = &request.configuration;
         let just_my_code = config.type_id == py_run::config::TYPE_ID
             && PythonOptions::read(config).debug_just_my_code;
@@ -135,6 +148,7 @@ impl DebugAdapterProvider for PythonDebugProvider {
             kind: LaunchKind::Launch,
             arguments: launch::launch_arguments(&target.run, &config.name, just_my_code, &options),
             input_file: target.input_file,
+            evaluation_timeout: options.evaluation_timeout,
         })
     }
 
@@ -339,6 +353,44 @@ mod tests {
             .unwrap();
         assert_eq!(launch.arguments["showReturnValue"], true);
         assert_eq!(launch.arguments["justMyCode"], false);
+    }
+
+    #[test]
+    fn the_projects_debugger_options_apply_at_each_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let provider = PythonDebugProvider::new(resolver(root.join("python"), Some("3.12.1")))
+            .with_helper(helper(&root.join("helper")));
+        let launch = provider
+            .prepare(&request(root, python_config(root, "main.py")))
+            .unwrap();
+        assert_eq!(launch.arguments["subProcess"], true);
+        assert_eq!(launch.arguments["qt"], "auto");
+        assert_eq!(
+            launch.evaluation_timeout,
+            Some(std::time::Duration::from_millis(60_000))
+        );
+        settings::save(
+            root,
+            &settings::DebuggerSettings {
+                attach_to_subprocess: false,
+                gevent: true,
+                pyqt_backend: settings::QtBackend::PyQt5,
+                evaluation_timeout_ms: 2500,
+                ..settings::DebuggerSettings::default()
+            },
+        )
+        .unwrap();
+        let launch = provider
+            .prepare(&request(root, python_config(root, "main.py")))
+            .unwrap();
+        assert_eq!(launch.arguments["subProcess"], false);
+        assert_eq!(launch.arguments["gevent"], true);
+        assert_eq!(launch.arguments["qt"], "pyqt5");
+        assert_eq!(
+            launch.evaluation_timeout,
+            Some(std::time::Duration::from_millis(2500))
+        );
     }
 
     #[test]

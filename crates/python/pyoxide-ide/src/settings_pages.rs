@@ -36,6 +36,7 @@ use crate::services::{refresh_root, services_for};
 /// Ids of the pages.
 pub const PYTHON: &str = "python";
 pub const TYPE_ENGINE: &str = "python.type-engine";
+pub const DEBUGGER: &str = "python.debugger";
 pub const TOOLS: &str = "python.tools";
 pub const EXTERNAL_TOOLS: &str = "python.tools.external-tools";
 
@@ -84,6 +85,20 @@ pub fn pages() -> Vec<PageSpec> {
             search_terms: TYPE_ENGINE_TERMS,
             description: None,
             create: Some(settings_ui::page::create(TypeEnginePage::new)),
+        },
+        // Debugger: weight 80, as `PyCharmProjectConfigurableStartupActivity`
+        // puts it in the Python group.
+        PageSpec {
+            id: DEBUGGER,
+            parent: Some(PYTHON),
+            title: "Debugger",
+            weight: 80,
+            scope: Scope::ProjectPersonal,
+            search_terms: crate::debugger_settings::SEARCH_TERMS,
+            description: None,
+            create: Some(settings_ui::page::create(
+                crate::debugger_settings::DebuggerPage::new,
+            )),
         },
         PageSpec {
             weight: 72,

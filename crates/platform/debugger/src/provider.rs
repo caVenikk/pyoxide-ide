@@ -8,6 +8,7 @@
 use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use dap_client::{Transport, Variable};
 use process::CommandLine;
@@ -99,6 +100,10 @@ pub struct AdapterLaunch {
     /// The program's standard input comes from this file ("Redirect input
     /// from"); its console then takes no input.
     pub input_file: Option<PathBuf>,
+    /// How long an expression evaluation may wait for the adapter's answer
+    /// before it fails (watches, Evaluate Expression, the console); `None`:
+    /// as long as the session lives.
+    pub evaluation_timeout: Option<Duration>,
 }
 
 /// Requests sent around one Step Into My Code: `before` is answered before

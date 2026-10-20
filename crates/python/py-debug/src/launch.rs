@@ -102,7 +102,15 @@ pub struct DebugOptions {
     /// the program starts (`subprocess`, `multiprocessing`, `os.exec*`),
     /// each a child session of the debug session.
     pub attach_to_subprocess: bool,
+    /// "Debugger evaluation response timeout (ms)"
+    /// (`myEvaluationResponseTimeout`, 60000): how long an evaluation
+    /// waits for its answer; `None` (0 ms) waits as long as the session
+    /// lives.
+    pub evaluation_timeout: Option<Duration>,
 }
+
+/// The reference's default of the evaluation response timeout.
+pub const DEFAULT_EVALUATION_TIMEOUT: Duration = Duration::from_millis(60_000);
 
 impl Default for DebugOptions {
     fn default() -> Self {
@@ -113,6 +121,7 @@ impl Default for DebugOptions {
             qt: Some("auto".to_owned()),
             log_dir: None,
             attach_to_subprocess: true,
+            evaluation_timeout: Some(DEFAULT_EVALUATION_TIMEOUT),
         }
     }
 }
@@ -417,6 +426,7 @@ mod tests {
             qt: None,
             log_dir: None,
             attach_to_subprocess: false,
+            evaluation_timeout: None,
         };
         let args = launch_arguments_with(&run, "tool", true, &options, no_env());
         assert_eq!(args["module"], "pkg.tool");

@@ -320,11 +320,25 @@ pub fn segmented(
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
+    segmented_enabled(id, choices, selected, &[], on_select, cx)
+}
+
+/// [`segmented`] with choices that may be disabled (drawn dim, no clicks):
+/// `enabled` says for each choice whether it is; a choice past its end is.
+pub fn segmented_enabled(
+    id: &'static str,
+    choices: &[SharedString],
+    selected: Option<usize>,
+    enabled: &[bool],
+    on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
     let theme = cx.theme();
     let radius = field_radius(cx);
     let on_select = std::rc::Rc::new(on_select);
     let segments = choices.iter().enumerate().map(|(ix, choice)| {
         let chosen = selected == Some(ix);
+        let enabled = enabled.get(ix).copied().unwrap_or(true);
         let on_select = on_select.clone();
         div()
             .id((id, ix))
@@ -341,9 +355,12 @@ pub fn segmented(
                     .border_1()
                     .border_color(theme.color(UiRole::BorderInput))
             })
-            .when(!chosen, |d| d.pointing_hand())
+            .when(!chosen && enabled, |d| d.pointing_hand())
+            .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
             .child(choice.clone())
-            .on_click(move |_, window, cx| on_select(ix, window, cx))
+            .when(enabled, |d| {
+                d.on_click(move |_, window, cx| on_select(ix, window, cx))
+            })
     });
     div()
         .flex()
