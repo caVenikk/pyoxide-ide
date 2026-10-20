@@ -22,7 +22,9 @@
 //! Everything runs on the client's reader thread or the caller's thread
 //! and returns at once; queries return futures the UI awaits on its
 //! executor. Answers that come after the program moved on (a stack trace
-//! of the previous stop) are dropped.
+//! of the previous stop) are dropped, as is the answer to a resume or a
+//! step handled after the next stop (the client runs a callback attached
+//! late on the caller's thread, after the events that followed it).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -207,6 +209,12 @@ struct Data {
     /// Grows whenever the program moves on: answers of an older one are
     /// dropped.
     generation: u64,
+    /// Stops shown so far: the answer to a resume or a step sent at one
+    /// stop does not move the program on from a later one. (A callback
+    /// attached after its answer came runs at once on the caller's thread,
+    /// so it may run after the events that followed the answer, the next
+    /// stop among them.)
+    stops: u64,
     threads: Vec<Thread>,
     stop: Option<StopInfo>,
     frames: HashMap<i64, Frames>,
@@ -347,6 +355,7 @@ impl Session {
                     configuration_done: false,
                     stopping: false,
                     generation: 0,
+                    stops: 0,
                     threads: Vec::new(),
                     stop: None,
                     frames: HashMap::new(),
@@ -832,15 +841,31 @@ impl Session {
     /// (then it waits unless it stopped at a breakpoint, as the reference
     /// switches processes only for a breakpoint hit).
     fn stopped(&self, process: Process, stopped: dap_client::Stopped) {
+        // Run to Cursor is over at the stop the session shows: the
+        // breakpoints as they are go to the adapter before the stop shows,
+        // so that what is done at the stop (another Run to Cursor) goes
+        // after them.
+        let run_to = {
+            let mut data = lock(&self.inner.data);
+            if matches!(data.phase, Phase::Stopping | Phase::Ended) {
+                return;
+            }
+            if self.stop_waits(&data, process, &stopped) {
+                None
+            } else {
+                data.run_to.take()
+            }
+        };
+        if let Some(run_to) = run_to {
+            self.restore_breakpoints(run_to);
+        }
         let (generation, thread, after_step, hits, run_to) = {
             let mut data = lock(&self.inner.data);
             if matches!(data.phase, Phase::Stopping | Phase::Ended) {
                 return;
             }
             let shown = self.focus();
-            let waits = data.phase == Phase::Suspended
-                || (data.stepping && !at_breakpoint(&stopped.reason));
-            if shown != process && waits {
+            if self.stop_waits(&data, process, &stopped) {
                 data.waiting.retain(|(p, _)| *p != process);
                 data.waiting.push((process, stopped));
                 return;
@@ -852,6 +877,7 @@ impl Session {
                 data.selected_thread = None;
             }
             data.generation += 1;
+            data.stops += 1;
             data.phase = Phase::Suspended;
             data.frames.clear();
             data.scopes.clear();
@@ -894,25 +920,9 @@ impl Session {
         let Some(client) = self.client() else {
             return;
         };
-        // Run to Cursor is over: the breakpoints as they are again.
+        // A Run to Cursor that came meanwhile is over too.
         if let Some(run_to) = run_to {
-            if run_to.ignore_breakpoints {
-                let mut files = self
-                    .inner
-                    .debugger
-                    .upgrade()
-                    .map(|d| d.breakpoint_files())
-                    .unwrap_or_default();
-                if !files.contains(&run_to.file) {
-                    files.push(run_to.file);
-                }
-                for file in &files {
-                    self.send_breakpoints(file);
-                }
-                self.send_exceptions();
-            } else {
-                self.send_breakpoints(&run_to.file);
-            }
+            self.restore_breakpoints(run_to);
         }
         if let Some(debugger) = self.inner.debugger.upgrade() {
             debugger.remove_temporary(&hits);
@@ -930,6 +940,35 @@ impl Session {
                 });
             }
             None => self.load_stop(&reason, thread, generation),
+        }
+    }
+
+    /// Whether a stop of `process` waits for the process shown (see
+    /// [`Self::stopped`]).
+    fn stop_waits(&self, data: &Data, process: Process, stopped: &dap_client::Stopped) -> bool {
+        let waits =
+            data.phase == Phase::Suspended || (data.stepping && !at_breakpoint(&stopped.reason));
+        self.focus() != process && waits
+    }
+
+    /// Run to Cursor is over: the breakpoints as they are again.
+    fn restore_breakpoints(&self, run_to: RunTo) {
+        if run_to.ignore_breakpoints {
+            let mut files = self
+                .inner
+                .debugger
+                .upgrade()
+                .map(|d| d.breakpoint_files())
+                .unwrap_or_default();
+            if !files.contains(&run_to.file) {
+                files.push(run_to.file);
+            }
+            for file in &files {
+                self.send_breakpoints(file);
+            }
+            self.send_exceptions();
+        } else {
+            self.send_breakpoints(&run_to.file);
         }
     }
 
@@ -1050,11 +1089,12 @@ impl Session {
 
     /// The process shown moved on; a process that stopped meanwhile is
     /// shown next, unless the shown one steps (it is shown at the step's
-    /// stop).
-    fn resumed(&self) {
+    /// stop). `at`: the stop a resume or a step was sent at, when this is
+    /// its answer (it is late when the program stopped again).
+    fn resumed(&self, at: Option<u64>) {
         let next = {
             let mut data = lock(&self.inner.data);
-            if data.phase != Phase::Suspended {
+            if data.phase != Phase::Suspended || at.is_some_and(|stop| stop != data.stops) {
                 return;
             }
             data.generation += 1;
@@ -1155,7 +1195,7 @@ impl Session {
                     .as_ref()
                     .and_then(|s| s.thread_id);
                 if all_threads || stopped_thread.is_none_or(|t| t == thread_id) {
-                    self.resumed();
+                    self.resumed(None);
                 }
             }
             Event::Exited { exit_code } => {
@@ -1481,7 +1521,7 @@ impl Session {
             shown
         };
         if shown {
-            self.resumed();
+            self.resumed(None);
         }
         self.changed();
     }
@@ -1513,14 +1553,14 @@ impl Session {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
-        lock(&self.inner.data).stepping = true;
+        let at = self.set_stepping(true);
         let weak = Arc::downgrade(&self.inner);
         let (tx, rx) = oneshot::channel();
         let stepping = client.clone();
         self.prepared(&client, move || {
             request(&stepping, thread).on_done(move |result| {
                 if let Some(inner) = weak.upgrade() {
-                    Session { inner }.stepped(result.is_ok());
+                    Session { inner }.stepped(result.is_ok(), at);
                 }
                 let _ = tx.send(result.map_err(DebugError::from));
             });
@@ -1555,12 +1595,24 @@ impl Session {
         (!std::mem::replace(prepared, true)).then_some(request)
     }
 
-    /// A step was answered: the program moves on, or the step failed.
-    fn stepped(&self, ok: bool) {
+    /// Whether a step of the shown process is on its way; the stop it is
+    /// sent at.
+    fn set_stepping(&self, stepping: bool) -> u64 {
+        let mut data = lock(&self.inner.data);
+        data.stepping = stepping;
+        data.stops
+    }
+
+    /// A step sent at stop `at` was answered: the program moves on, or the
+    /// step failed.
+    fn stepped(&self, ok: bool, at: u64) {
         if ok {
-            self.resumed();
+            self.resumed(Some(at));
         } else {
-            lock(&self.inner.data).stepping = false;
+            let mut data = lock(&self.inner.data);
+            if data.stops == at {
+                data.stepping = false;
+            }
         }
     }
 
@@ -1570,13 +1622,13 @@ impl Session {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
-        lock(&self.inner.data).stepping = false;
+        let at = self.set_stepping(false);
         let weak = Arc::downgrade(&self.inner);
         track(client.resume(thread), move |result| {
             if result.is_ok()
                 && let Some(inner) = weak.upgrade()
             {
-                Session { inner }.resumed();
+                Session { inner }.resumed(Some(at));
             }
         })
         .map(|r| r.map(|_| ()))
@@ -1602,7 +1654,7 @@ impl Session {
             Ok(found) => found,
             Err(error) => return ready(Err(error)),
         };
-        lock(&self.inner.data).stepping = true;
+        let at = self.set_stepping(true);
         let weak = Arc::downgrade(&self.inner);
         let (tx, rx) = oneshot::channel();
         let (command, arguments) = step.before;
@@ -1621,7 +1673,7 @@ impl Session {
                 let weak = Arc::downgrade(&inner);
                 stepping.step_into(thread).on_done(move |result| {
                     if let Some(inner) = weak.upgrade() {
-                        Session { inner }.stepped(result.is_ok());
+                        Session { inner }.stepped(result.is_ok(), at);
                     }
                     let _ = tx.send(result.map_err(DebugError::from));
                 });

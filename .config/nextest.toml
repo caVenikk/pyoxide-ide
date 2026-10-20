@@ -45,13 +45,6 @@ retries = { backoff = "fixed", count = 2, delay = "1s" }
 filter = 'package(workbench) and binary(it) and test(/^keymap::/)'
 slow-timeout = { period = "60s", terminate-after = 20, grace-period = "5s" }
 
-# The debugger checks wait for a scripted adapter's stop, which a loaded
-# runner sometimes misses (issue #239). Remove this override when that issue
-# is fixed.
-[[profile.default.overrides]]
-filter = 'package(workbench) and binary(it) and (test(/^keymap::every_.*_binding_works$/) or test(=debug_sessions::a_session_stops_on_a_line_and_runs_to_the_end))'
-retries = { backoff = "fixed", count = 2, delay = "1s" }
-
 [profile.ci]
 fail-fast = false
 retries = 0
