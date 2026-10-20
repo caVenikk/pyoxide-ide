@@ -30,6 +30,7 @@ use py_debug::settings::{self, DebuggerSettings, MAX_TIMEOUT_MS, QtBackend};
 use serde_json::{Value as Json, json};
 use settings_ui::commands::EditField;
 use settings_ui::{PageContext, SettingsPage};
+use text::{Selection, SelectionSet};
 use themes::UiRole;
 use ui::components::{DISABLED_ALPHA, Tooltip, checkbox_with};
 use ui::form::CHECK_GAP;
@@ -75,19 +76,29 @@ pub const SEARCH_TERMS: &[&str] = &[
     DEBUGPY_DESCRIPTION,
 ];
 
-/// Kotlin UI DSL spacing: check box rows 22 high with 2 between them
-/// (`verticalSmallGap`), a row with a field or a combo box 28 high with 6
-/// between rows, the label of a field, the gap before it; the timeout's
-/// spinner is as wide as the reference's (about 114).
+/// The page's rows as the reference's screenshot spaces them (measured
+/// against its text width, not taken from the sources): check box rows 22
+/// high 7.5 apart, rows with a field, combo box, spinner or segmented
+/// button 24 high with 11 between the blocks and 12 between rows of
+/// fields, 7 between a label and its field, the combo box and the spinner
+/// as wide as the reference's.
 const CHECK_ROW: f32 = 22.0;
-const CHECK_GAP_V: f32 = 2.0;
-const FIELD_ROW: f32 = 28.0;
-const ROW_GAP: f32 = 6.0;
-const LABEL_GAP: f32 = 12.0;
-const COMBO_WIDTH: f32 = 72.0;
-const SPINNER_WIDTH: f32 = 114.0;
+const CHECK_GAP_V: f32 = 7.5;
+const FIELD_ROW: f32 = 24.0;
+const BLOCK_GAP: f32 = 11.0;
+const FIELD_GAP: f32 = 12.0;
+const HINT_GAP: f32 = 10.5;
+/// The space above the first row, and the extra space above Mode.
+const PAGE_TOP: f32 = 4.0;
+const MODE_TOP: f32 = 2.0;
+const LABEL_GAP: f32 = 7.0;
+const MODE_GAP: f32 = 13.0;
+const COMBO_WIDTH: f32 = 88.0;
+const SPINNER_WIDTH: f32 = 142.0;
 const SPINNER_STEP: u32 = 500;
 const ICON_GAP: f32 = 12.0;
+/// The spinner's arrow buttons, each: width and height.
+const SPINNER_ARROW: (f32, f32) = (20.0, 13.0);
 
 /// The keys of `settings.edit`.
 mod field {
@@ -178,11 +189,19 @@ impl DebuggerPage {
     /// Makes `settings` the stored options and the draft.
     fn show(&mut self, settings: DebuggerSettings, cx: &mut Context<Self>) {
         let text = settings.evaluation_timeout_ms.to_string();
-        self.timeout
-            .update(cx, |e, cx| e.set_text_selected(&text, cx));
+        self.put(&text, cx);
         self.draft = settings.clone();
         self.stored = Some(settings);
         self.error = None;
+    }
+
+    /// Puts `text` into the timeout's field, the caret at its end.
+    fn put(&self, text: &str, cx: &mut Context<Self>) {
+        let end = text.chars().count();
+        self.timeout.update(cx, |e, cx| {
+            e.set_text_selected(text, cx);
+            e.set_selections(SelectionSet::single(Selection::new(end, end)), cx);
+        });
     }
 
     fn text(&self, cx: &App) -> String {
@@ -207,9 +226,7 @@ impl DebuggerPage {
     }
 
     fn set_timeout(&mut self, value: u32, cx: &mut Context<Self>) {
-        let text = value.to_string();
-        self.timeout
-            .update(cx, |e, cx| e.set_text_selected(&text, cx));
+        self.put(&value.to_string(), cx);
         cx.notify();
     }
 
@@ -369,39 +386,44 @@ impl DebuggerPage {
         let mut frame = editor::field::frame(field, true, error, window, cx);
         if spinner {
             let border = theme.color(UiRole::Border);
-            let arrow = |id: &'static str, icon: IconName, up: bool, cx: &mut Context<Self>| {
-                div()
-                    .id(id)
-                    .debug_selector(move || format!("debugger:timeout-{id}"))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(14.0))
-                    .pointing_hand()
-                    .child(Icon::new(icon))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.step(up, cx)))
-            };
+            let color = theme.color(UiRole::Text);
+            // The reference's spinner arrows: small solid triangles.
+            let arrow =
+                |id: &'static str, glyph: &'static str, up: bool, cx: &mut Context<Self>| {
+                    div()
+                        .id(id)
+                        .debug_selector(move || format!("debugger:timeout-{id}"))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(SPINNER_ARROW.0))
+                        .h(px(SPINNER_ARROW.1))
+                        .text_size(px(7.0))
+                        .text_color(color)
+                        .pointing_hand()
+                        .child(glyph)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.step(up, cx)))
+                };
             frame = frame.child(
                 div()
                     .flex_none()
                     .flex()
                     .flex_col()
                     .items_center()
-                    .pl(px(6.0))
                     .border_l_1()
                     .border_color(border)
-                    .child(arrow("up", IconName::ARROW_UP, true, cx))
-                    .child(arrow("down", IconName::ARROW_DOWN, false, cx)),
+                    .child(arrow("up", "\u{25B2}", true, cx))
+                    .child(arrow("down", "\u{25BC}", false, cx)),
             );
         }
         div()
             .id(id)
             .relative()
             .flex_none()
-            .h(px(ui::form::FIELD_HEIGHT))
+            .h(px(FIELD_ROW))
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
-            .child(frame.h(px(ui::form::FIELD_HEIGHT)))
+            .child(frame.h(px(FIELD_ROW)))
             // A disabled field takes no clicks.
             .when(!enabled, |d| {
                 d.child(
@@ -435,6 +457,7 @@ impl DebuggerPage {
         )
         .debug_selector(|| "debugger:qt-backend".into())
         .w(px(COMBO_WIDTH))
+        .h(px(FIELD_ROW))
         .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
         .when(enabled, |d| {
             d.pointing_hand()
@@ -538,13 +561,13 @@ impl DebuggerPage {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(LABEL_GAP))
+            .gap(px(MODE_GAP))
             .h(px(FIELD_ROW))
             .child(Self::label(MODE, None, true, cx))
             .child(
                 div()
                     .id("debugger-mode-selector")
-                    .child(selector)
+                    .child(selector.h(px(FIELD_ROW)))
                     .tooltip(Tooltip::text("pydevd is not supported yet", None)),
             )
             .into_any_element()
@@ -673,8 +696,7 @@ impl SettingsPage for DebuggerPage {
                     Json::Number(n) => n.to_string(),
                     _ => return Err("`evaluation-timeout` takes a number".into()),
                 };
-                self.timeout
-                    .update(cx, |e, cx| e.set_text_selected(&text, cx));
+                self.put(&text, cx);
             }
             field::LIST => match value {
                 Json::Null | Json::Bool(false) => self.close_list_in(window, cx),
@@ -714,6 +736,9 @@ impl Render for DebuggerPage {
         let checks = div()
             .flex()
             .flex_col()
+            // Each row is as wide as its content: the search spotlight's
+            // outline hugs it.
+            .items_start()
             .gap(px(CHECK_GAP_V))
             .child(self.check(
                 field::ATTACH_TO_SUBPROCESS,
@@ -731,7 +756,8 @@ impl Render for DebuggerPage {
             .flex_none()
             .flex()
             .flex_col()
-            .gap(px(ROW_GAP))
+            .items_start()
+            .gap(px(FIELD_GAP))
             .child(
                 div()
                     .h(px(FIELD_ROW))
@@ -757,7 +783,7 @@ impl Render for DebuggerPage {
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(ROW_GAP))
+            .gap(px(FIELD_GAP))
             .child(
                 self.framed(
                     "debugger-attach-filter",
@@ -786,22 +812,32 @@ impl Render for DebuggerPage {
             .list
             .as_ref()
             .map(|(menu, _)| ui::menu::overlay(menu, self.anchor.get().bottom_left(), window));
-        page.gap(px(ROW_GAP))
+        page.gap(px(BLOCK_GAP))
+            .pt(px(PAGE_TOP))
             .child(checks)
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_row()
                     .gap(px(LABEL_GAP))
                     .child(labels)
                     .child(fields),
             )
-            .child(self.mode_row(cx))
-            .child(settings_ui::search::spotlight(
-                DEBUGPY_DESCRIPTION,
-                div().text_color(muted).child(DEBUGPY_DESCRIPTION),
-                cx,
-            ))
+            .child(
+                div()
+                    .mt(px(MODE_TOP))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(HINT_GAP))
+                    .child(self.mode_row(cx))
+                    .child(settings_ui::search::spotlight(
+                        DEBUGPY_DESCRIPTION,
+                        div().text_color(muted).child(DEBUGPY_DESCRIPTION),
+                        cx,
+                    )),
+            )
             .children(
                 self.error
                     .clone()

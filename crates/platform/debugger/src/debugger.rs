@@ -544,8 +544,7 @@ impl Debugger {
             Arc::downgrade(&self.inner),
             self.inner.provider.step_into_my_code(),
             self.inner.provider.prepare_steps(),
-            launch.input_file.clone(),
-            launch.evaluation_timeout,
+            &launch,
         );
         self.inner.state().sessions.push(session.clone());
         self.inner.emit(DebuggerEvent::SessionStarted(id));

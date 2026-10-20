@@ -345,8 +345,7 @@ impl Session {
         debugger: Weak<DebuggerInner>,
         step_into_my_code: Option<StepIntoMyCode>,
         prepare_steps: Option<(String, Value)>,
-        input_file: Option<PathBuf>,
-        evaluation_timeout: Option<Duration>,
+        launch: &AdapterLaunch,
     ) -> Self {
         Self {
             inner: Arc::new(SessionInner {
@@ -359,8 +358,8 @@ impl Session {
                 focus: Mutex::new(None),
                 step_into_my_code,
                 prepare_steps,
-                input_file,
-                evaluation_timeout,
+                input_file: launch.input_file.clone(),
+                evaluation_timeout: launch.evaluation_timeout,
                 data: Mutex::new(Data {
                     phase: Phase::Starting,
                     configured: false,
