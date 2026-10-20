@@ -2,7 +2,10 @@
 //! Jump to Source, the previous and next file with the files counter; the
 //! count of differences, the viewer's mode and the settings), the titles of
 //! both sides, the two editors and the divider (`SimpleDiffViewer`,
-//! `TwosideTextDiffViewer`, `DiffRequestProcessor`'s toolbar).
+//! `TwosideTextDiffViewer`, `DiffRequestProcessor`'s toolbar), and the
+//! changes' actions in the gutters: `>>` by the left numbers reverts a
+//! change, a check box by the right ones includes it into the commit
+//! (`SimpleDiffChangeUi`, `LocalTrackerDiffUtil.createCheckboxToggle`).
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -13,7 +16,8 @@ use std::time::Duration;
 
 use editor::side_by_side::DiffGutter;
 use editor::{
-    Decoration, DiffHighlights, Editor, EditorConfig, EditorEvent, GutterFill, Highlighter,
+    Decoration, DecorationId, DiffHighlights, Editor, EditorConfig, EditorEvent, GutterFill,
+    Highlighter,
 };
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -23,7 +27,7 @@ use gpui::{
     canvas, deferred, div, point, px,
 };
 use serde_json::{Value as Json, json};
-use text::{Buffer, Selection, SelectionSet};
+use text::{Buffer, CaretPlacement, EditKind, Selection, SelectionSet};
 use themes::UiRole;
 use ui::components::{Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
@@ -35,8 +39,8 @@ use super::model::{
     self, ChangeKind, DiffChange, DiffSettings, HighlightPolicy, IgnorePolicy, Side,
 };
 use super::{
-    CONTEXT, FocusOpposite, JumpToSource, NextDifference, NextFile, PreviousDifference,
-    PreviousFile, SetHighlightPolicy, SetIgnorePolicy, ShowSettings,
+    ApplyLeftSide, CONTEXT, FocusOpposite, IncludeChange, JumpToSource, NextDifference, NextFile,
+    PreviousDifference, PreviousFile, SetHighlightPolicy, SetIgnorePolicy, ShowSettings,
 };
 
 /// The decorations' group in both editors.
@@ -79,6 +83,10 @@ const LABEL_AFTER_CHECKBOX: f32 = 27.3;
 /// The check box's place before the editor has been laid out (two-digit
 /// line numbers).
 const CHECKBOX_FALLBACK: f32 = 30.0;
+/// The tooltips of the gutter's actions (`action.presentation.diff.revert.text`,
+/// `action.presentation.diff.include.into.commit.text`).
+const REVERT: &str = "Revert";
+const INCLUDE: &str = "Include into commit";
 
 /// The title of a side (`DiffEditorTitleDetails`): a revision or a name,
 /// then the file's path in grey.
@@ -103,8 +111,11 @@ pub struct DiffRequest {
     pub left: SideTitle,
     pub right: SideTitle,
     /// The right title's check box: the file goes into the commit (`None`:
-    /// no check box).
+    /// not in the commit's list, no check boxes).
     pub included: Option<bool>,
+    /// The changes left out of the commit while the file goes in (it is
+    /// committed in part), by their lines in the base text.
+    pub excluded: Vec<Range<u32>>,
     /// The only side shown (`SimpleOnesideDiffViewer`): the current text of
     /// an added or unversioned file, the base of a deleted one; `None`:
     /// both sides.
@@ -148,6 +159,14 @@ pub enum DiffEvent {
     },
     /// The right title's check box was clicked.
     SetIncluded(bool),
+    /// A change's check box was clicked: the change, by its lines in the
+    /// base text, goes into the commit or not; `all` are the lines of
+    /// every change of the file.
+    SetChangeIncluded {
+        change: Range<u32>,
+        all: Vec<Range<u32>>,
+        included: bool,
+    },
     /// The differences were computed again (after an edit).
     Changed,
 }
@@ -184,6 +203,9 @@ pub struct DiffView {
     settings_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
     /// The gear's position (where the settings popup opens).
     gear_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The changes' decorations on the left and the right side, by change
+    /// (their gutter actions report these).
+    actions: [Vec<DecorationId>; 2],
     _subscriptions: Vec<Subscription>,
 }
 
@@ -244,6 +266,7 @@ impl DiffView {
             animation: None,
             settings_menu: None,
             gear_bounds: Rc::new(Cell::new(None)),
+            actions: [Vec::new(), Vec::new()],
             _subscriptions: subscriptions,
         }
     }
@@ -300,12 +323,19 @@ impl DiffView {
         cx.notify();
     }
 
-    /// Updates the titles and the list position (the base stays).
-    pub fn set_included(&mut self, included: Option<bool>, cx: &mut Context<Self>) {
+    /// The file's inclusion in the commit changed: the check boxes of the
+    /// title and the changes follow.
+    pub fn set_inclusion(
+        &mut self,
+        included: Option<bool>,
+        excluded: Vec<Range<u32>>,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(r) = &mut self.request
-            && r.included != included
+            && (r.included != included || r.excluded != excluded)
         {
             r.included = included;
+            r.excluded = excluded;
             self.decorate(cx);
         }
     }
@@ -354,6 +384,7 @@ impl DiffView {
                 self.rediff(REDIFF_DELAY, cx);
             }
             EditorEvent::Scrolled => self.scrolled(side, cx),
+            EditorEvent::GutterActionClicked { id } => self.gutter_action(side, *id, cx),
             EditorEvent::SelectionsChanged => {
                 let moved = self.file_jump.take().is_some();
                 if moved {
@@ -409,19 +440,128 @@ impl DiffView {
     fn decorate(&mut self, cx: &mut Context<Self>) {
         let one_side = self.one_side();
         let excluded = self.excluded_changes();
+        // `>>` while the right side can be edited, the check boxes while the
+        // file is in the commit's list.
+        let revert = self.can_revert(cx);
+        let checkboxes = self.request.as_ref().is_some_and(|r| r.included.is_some());
         for side in [Side::Left, Side::Right] {
+            let action = |i: usize| match side {
+                Side::Left => revert.then_some((IconName::DIFF_ARROW_RIGHT, REVERT)),
+                Side::Right => checkboxes.then(|| {
+                    let icon = if excluded.get(i).copied().unwrap_or(false) {
+                        IconName::DIFF_CHECKBOX
+                    } else {
+                        IconName::DIFF_CHECKBOX_SELECTED
+                    };
+                    (icon, INCLUDE)
+                }),
+            };
             let buffer = self.editor(side).read(cx).buffer();
             let (lines, ranges) = match one_side {
                 Some(shown) if shown == side => (vec![one_side_decoration(side, buffer)], None),
                 Some(_) => (Vec::new(), None),
-                None => decorations(&self.changes, &excluded, side, buffer, cx),
+                None => decorations(&self.changes, &excluded, side, buffer, &action, cx),
             };
-            self.editor(side).update(cx, |e, cx| {
-                e.set_decorations(GROUP, lines, cx);
+            let ids = self.editor(side).update(cx, |e, cx| {
                 e.set_diff_highlights(ranges, cx);
+                e.set_decorations(GROUP, lines, cx)
             });
+            self.actions[side.select(0, 1)] = if one_side.is_none() { ids } else { Vec::new() };
         }
         cx.notify();
+    }
+
+    /// The right side can be edited: a change can be reverted.
+    fn can_revert(&self, cx: &App) -> bool {
+        self.one_side().is_none()
+            && self.request.as_ref().is_some_and(|r| !r.right.read_only)
+            && !self.right.read(cx).buffer().is_read_only()
+    }
+
+    /// A change's action in a gutter was clicked: `>>` on the left, the
+    /// check box on the right.
+    fn gutter_action(&mut self, side: Side, id: DecorationId, cx: &mut Context<Self>) {
+        let Some(index) = self.actions[side.select(0, 1)]
+            .iter()
+            .position(|a| *a == id)
+        else {
+            return;
+        };
+        match side {
+            Side::Left => self.revert_change(index, cx),
+            Side::Right => self.set_change_included(index, None, cx),
+        }
+    }
+
+    /// Replaces the right lines of change `index` with its left lines as
+    /// one undoable edit (`SimpleDiffViewer.replaceChange`, "Replace
+    /// change"); the caret goes to where the change was.
+    pub fn revert_change(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.can_revert(cx) || !self.is_computed(cx) {
+            return;
+        }
+        let Some(c) = self.changes.get(index).cloned() else {
+            return;
+        };
+        let base = self.left.read(cx).buffer().rope().to_string();
+        let base_lines: Vec<&str> = vcs::split_lines(&base).collect();
+        let range = vcs::Range::new(c.right.start, c.right.end, c.left.start, c.left.end);
+        self.right.update(cx, |e, cx| {
+            let buffer = e.buffer();
+            let edit = crate::markers::rollback_edit(buffer, &base_lines, &range);
+            let line = (c.right.start as usize).min(buffer.len_lines() - 1);
+            let at = buffer.line_start(line);
+            let place = CaretPlacement::Explicit(SelectionSet::caret(at));
+            e.edit(vec![edit], EditKind::Other, place, cx);
+        });
+    }
+
+    /// Includes change `index` into the commit or leaves it out (`None`:
+    /// the other way than now); the owner keeps the state
+    /// ([`DiffEvent::SetChangeIncluded`]).
+    pub fn set_change_included(
+        &mut self,
+        index: usize,
+        included: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.request.as_ref().and_then(|r| r.included).is_none() {
+            return;
+        }
+        let excluded = self.excluded_changes();
+        let Some(c) = self.changes.get(index) else {
+            return;
+        };
+        cx.emit(DiffEvent::SetChangeIncluded {
+            change: c.left.clone(),
+            all: self.changes.iter().map(|c| c.left.clone()).collect(),
+            included: included.unwrap_or(excluded[index]),
+        });
+    }
+
+    /// Window bounds of a change's action in a side's gutter in the last
+    /// frame (`>>` on the left, the check box on the right).
+    pub fn action_bounds(&self, side: Side, index: usize, cx: &App) -> Option<Bounds<Pixels>> {
+        let id = *self.actions[side.select(0, 1)].get(index)?;
+        self.editor(side).read(cx).gutter_action_bounds(id)
+    }
+
+    /// The change at the caret of the current side.
+    fn change_at_caret(&self, cx: &App) -> Option<usize> {
+        let side = self.current;
+        model::change_at(&self.changes, side, self.caret_line(side, cx))
+    }
+
+    fn apply_left_side(&mut self, a: &ApplyLeftSide, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = a.index.or_else(|| self.change_at_caret(cx)) {
+            self.revert_change(i, cx);
+        }
+    }
+
+    fn include_change(&mut self, a: &IncludeChange, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = a.index.or_else(|| self.change_at_caret(cx)) {
+            self.set_change_included(i, a.included, cx);
+        }
     }
 
     /// The side shown alone, if any.
@@ -430,10 +570,23 @@ impl DiffView {
     }
 
     /// Whether each change is left out of the commit (`isExcluded`): all
-    /// of a file whose check box is off.
+    /// of a file whose check box is off, the ones left out of a file
+    /// committed in part.
     fn excluded_changes(&self) -> Vec<bool> {
-        let excluded = self.request.as_ref().and_then(|r| r.included) == Some(false);
-        vec![excluded; self.changes.len()]
+        let n = self.changes.len();
+        match self
+            .request
+            .as_ref()
+            .and_then(|r| Some((r.included?, &r.excluded)))
+        {
+            Some((false, _)) => vec![true; n],
+            Some((true, excluded)) => self
+                .changes
+                .iter()
+                .map(|c| excluded.contains(&c.left))
+                .collect(),
+            None => vec![false; n],
+        }
     }
 
     /// The changes going into the commit, when the file is in the commit's
@@ -846,12 +999,14 @@ impl DiffView {
             "status": self.status_text(),
             "one_side": self.one_side().map(|s| s.name()),
             "computed": self.is_computed(cx),
-            "changes": self.changes.iter().map(|c| json!({
+            "changes": self.changes.iter().zip(self.excluded_changes()).map(|(c, excluded)| json!({
                 "left": [c.left.start, c.left.end],
                 "right": [c.right.start, c.right.end],
                 "kind": c.kind().name(),
                 "words": c.words.as_ref().map(|w| w.len()),
+                "excluded": excluded,
             })).collect::<Vec<_>>(),
+            "revert": self.can_revert(cx),
             "current_side": self.current.name(),
             "left": side(Side::Left),
             "right": side(Side::Right),
@@ -1114,8 +1269,8 @@ impl DiffView {
             );
         }
         // The check box of the file's changes over the gutter's check
-        // boxes, the label after it (`ExcludeAllCheckboxPanel`); not for
-        // one side alone.
+        // boxes, the label after it (`ExcludeAllCheckboxPanel`): ticked,
+        // partly ticked or not as the changes are; not for one side alone.
         if side == Side::Right
             && request.one_side.is_none()
             && let Some(included) = request.included
@@ -1125,11 +1280,15 @@ impl DiffView {
                 .read(cx)
                 .diff_action_offset()
                 .map_or(CHECKBOX_FALLBACK, f32::from);
-            let icon = if included {
+            let partly = included && self.excluded_changes().contains(&true);
+            let icon = if partly {
+                IconName::DIFF_CHECKBOX_INDETERMINATE
+            } else if included {
                 IconName::DIFF_CHECKBOX_SELECTED
             } else {
                 IconName::DIFF_CHECKBOX
             };
+            let included = included && !partly;
             let size = editor::side_by_side::ACTION_SIZE;
             row = row
                 .child(
@@ -1236,6 +1395,7 @@ fn decorations(
     excluded: &[bool],
     side: Side,
     buffer: &Buffer,
+    action: &dyn Fn(usize) -> Option<(IconName, &'static str)>,
     cx: &App,
 ) -> (Vec<(Range<usize>, Decoration)>, Option<DiffHighlights>) {
     let theme = cx.theme();
@@ -1257,6 +1417,9 @@ fn decorations(
             .stripe(stripe_role(kind), false);
         if c.words.is_some() {
             d = d.faded();
+        }
+        if let Some((icon, tooltip)) = action(i) {
+            d = d.action(icon, Some(tooltip.into()));
         }
         lines.push((range, d));
         let Some(fragments) = &c.words else {
@@ -1314,6 +1477,8 @@ diff_actions! {
     SetIgnorePolicy => set_ignore_policy,
     SetHighlightPolicy => set_highlight_policy,
     ShowSettings => show_settings,
+    ApplyLeftSide => apply_left_side,
+    IncludeChange => include_change,
 }
 
 impl Render for DiffView {

@@ -91,6 +91,15 @@ fn check_diff(h: &mut H, command: &str, keys: &str, what: &str) {
             h.press(keys);
             wait_diff(h, what, |d| d["files"][0] == json!(target));
         }
+        "diff.apply-left-side" => {
+            // The caret at the first change (the line added at the start):
+            // it goes, the one at the end stays.
+            open_diff(h, what);
+            h.press(keys);
+            wait_diff(h, what, |d| {
+                d["changes"].as_array().is_some_and(|c| c.len() == 1)
+            });
+        }
         "diff.focus-opposite" => {
             open_diff(h, what);
             h.press(keys);

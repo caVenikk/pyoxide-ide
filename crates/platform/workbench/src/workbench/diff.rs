@@ -491,6 +491,7 @@ impl Workbench {
             }
             None => (t.index, t.files.len()),
         };
+        let excluded = tree.excluded_changes(path).to_vec();
         DiffRequest {
             path: path.to_owned(),
             title: if t.commit {
@@ -502,6 +503,7 @@ impl Workbench {
             left,
             right,
             included,
+            excluded,
             one_side,
             files,
             steps: (t.index > 0, t.index + 1 < t.files.len()),
@@ -553,6 +555,13 @@ impl Workbench {
                     cx,
                 );
             }
+            DiffEvent::SetChangeIncluded {
+                change,
+                all,
+                included,
+            } => self.commit_ui.view.update(cx, |v, cx| {
+                v.set_change_included(&path, change.clone(), all, *included, cx)
+            }),
             DiffEvent::Changed => self.diff_document_status(id, cx),
         }
     }
@@ -597,7 +606,8 @@ impl Workbench {
         self.load_diff(id, scroll, cx);
     }
 
-    /// The title's check box follows the file's inclusion.
+    /// The check boxes of the title and the changes follow the file's
+    /// inclusion.
     fn diff_sync_included(&mut self, id: EntityId, cx: &mut Context<Self>) {
         let Some(t) = self.diff_tab(id) else {
             return;
@@ -607,8 +617,9 @@ impl Workbench {
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));
+        let excluded = tree.excluded_changes(path).to_vec();
         let view = t.view.clone();
-        view.update(cx, |v, cx| v.set_included(included, cx));
+        view.update(cx, |v, cx| v.set_inclusion(included, excluded, cx));
     }
 
     /// The colour of a file the diff edits without a tab: modified at once
