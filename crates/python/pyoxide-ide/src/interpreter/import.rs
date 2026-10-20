@@ -3,9 +3,10 @@
 //! (`options/jdk.table.xml`) from the snapshot the import keeps, adds the
 //! interpreters that still exist to the list ([`table`]) and runs once,
 //! with the import or, for an import made before this area existed, at
-//! the next start (`[import.applied]`). Without a snapshot the list is
-//! imported from the reference's own folder when its file does not exist
-//! yet ([`table::load_or_import`]).
+//! the next start (`[import.applied]`). Only without an `[import]` record
+//! (a configuration older than the first-run window) the list is imported
+//! from the reference's own folder when its file does not exist yet
+//! ([`list::import_reference`]).
 
 use gpui::App;
 use settings_ui::first_run::{self, Applied, Importer, Outcome, Source, nothing};
@@ -155,6 +156,105 @@ mod tests {
         cx.run_until_parked();
         assert!(names(cx).is_empty());
         assert!(table::Table::load(&file).unwrap().entries.is_empty());
+    }
+
+    /// The reference's configuration folder holds two interpreters, its
+    /// snapshot (what an import keeps) one of them.
+    struct Machine {
+        _dir: tempfile::TempDir,
+        list_file: PathBuf,
+        settings_file: PathBuf,
+        reference: PathBuf,
+    }
+
+    fn machine() -> Machine {
+        let dir = tempfile::tempdir().unwrap();
+        let base = native_path::canonicalize(dir.path()).unwrap();
+        let first = venv(&base.join("envs/first"));
+        let second = venv(&base.join("envs/second"));
+        let table = |sdks: String| {
+            format!(
+                "<application>\n  <component name=\"ProjectJdkTable\">\n{sdks}  </component>\n</application>\n"
+            )
+        };
+        let reference = base.join("JetBrains/PyCharm2026.2");
+        let snapshot = base.join("config/imported/PyCharm-2026.2");
+        for (folder, sdks) in [
+            (&reference, sdk("first", &first) + &sdk("second", &second)),
+            (&snapshot, sdk("first", &first)),
+        ] {
+            std::fs::create_dir_all(folder.join("options")).unwrap();
+            std::fs::write(folder.join("options/jdk.table.xml"), table(sdks)).unwrap();
+        }
+        Machine {
+            list_file: base.join("config").join(FILE),
+            settings_file: base.join("config/settings.toml"),
+            reference,
+            _dir: dir,
+        }
+    }
+
+    /// The start-up as `main` runs it: the product starts and reads the
+    /// list, the settings load, the first-run window decides (`decision`,
+    /// none when it does not come), the main window opens and the areas
+    /// take their part of the import.
+    fn start_up(cx: &mut TestAppContext, m: &Machine, decision: Option<ImportSettings>) {
+        let product = std::rc::Rc::new(crate::product_with_tools(Default::default()));
+        cx.update(|cx| {
+            list::set_file(cx, m.list_file.clone(), vec![m.reference.clone()]);
+            workbench::init(cx, &product);
+            store::load(cx, m.settings_file.clone());
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            if let Some(mut record) = decision {
+                if record.imported_from().is_some() {
+                    for id in first_run::importer_ids(cx) {
+                        if id != ID {
+                            record.mark_applied(id);
+                        }
+                    }
+                }
+                store::set(cx, &record);
+            }
+            workbench::open_main_window(cx, product.clone());
+        });
+        cx.run_until_parked();
+        cx.update(first_run::pick_up);
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn skip_import_brings_nothing_from_the_reference(cx: &mut TestAppContext) {
+        let m = machine();
+        start_up(cx, &m, Some(ImportSettings::skipped()));
+        assert!(names(cx).is_empty());
+        assert!(!m.list_file.exists());
+    }
+
+    #[gpui::test]
+    fn import_brings_the_snapshots_interpreters_once(cx: &mut TestAppContext) {
+        let m = machine();
+        let record = ImportSettings::imported("PyCharm", "2026.2", SystemTime::now())
+            .with_snapshot("imported/PyCharm-2026.2");
+        start_up(cx, &m, Some(record));
+        // The snapshot's, not the reference folder's (which has another).
+        assert_eq!(names(cx), ["first"]);
+        assert_eq!(table::Table::load(&m.list_file).unwrap().entries.len(), 1);
+        cx.update(first_run::pick_up);
+        cx.update(list::import_reference);
+        cx.run_until_parked();
+        assert_eq!(names(cx), ["first"]);
+    }
+
+    #[gpui::test]
+    fn a_configuration_without_an_import_record_keeps_the_direct_import(cx: &mut TestAppContext) {
+        let m = machine();
+        std::fs::create_dir_all(m.settings_file.parent().unwrap()).unwrap();
+        std::fs::write(&m.settings_file, "# written before the first-run window\n").unwrap();
+        start_up(cx, &m, None);
+        assert_eq!(names(cx), ["first", "second"]);
+        assert_eq!(table::Table::load(&m.list_file).unwrap().entries.len(), 2);
     }
 
     #[test]

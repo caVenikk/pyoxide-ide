@@ -199,6 +199,9 @@ pub fn init(cx: &mut App) {
     widget::init(cx);
     import::register(cx);
     list::ensure_loaded(cx);
+    // The first-run window has decided by the time the main window opens.
+    cx.observe_new(|_: &mut workbench::Workbench, _, cx| list::import_reference(cx))
+        .detach();
 }
 
 /// The interpreter widget of the status bar.

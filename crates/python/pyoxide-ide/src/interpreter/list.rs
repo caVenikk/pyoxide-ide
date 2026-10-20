@@ -1,8 +1,10 @@
 //! The application's list of configured interpreters in memory
-//! ([`Table`]): read once in the background when the product starts (with
-//! the one-time import of the reference IDE's interpreters), changed at
-//! once in memory and written in the background. Views observe the
-//! [`Interpreters`] global.
+//! ([`Table`]): read once in the background when the product starts,
+//! changed at once in memory and written in the background. Views observe
+//! the [`Interpreters`] global. The reference IDE's interpreters come
+//! through the first-run window's importer (`import`); only people who
+//! never saw that window get them straight from the reference's folder
+//! ([`import_reference`]).
 //!
 //! The application keeps the list in its configuration folder
 //! ([`keep_in_config_dir`], called by `main`); tests keep it in memory, or
@@ -45,9 +47,9 @@ pub(super) fn exclusive<T>(write: impl FnOnce() -> T) -> T {
     write()
 }
 
-/// Keeps the list in `interpreters.toml` of the configuration folder,
-/// importing the reference IDE's interpreters into it once. Called by the
-/// application before it starts; without it the list stays in memory.
+/// Keeps the list in `interpreters.toml` of the configuration folder.
+/// Called by the application before it starts; without it the list stays
+/// in memory.
 pub fn keep_in_config_dir() {
     APP_FILE.get_or_init(|| settings::config_dir().map(|d| d.join(table::FILE)));
 }
@@ -100,20 +102,38 @@ pub(crate) fn ensure_loaded(cx: &mut App) {
     {
         return;
     }
+    read(false, cx);
+}
+
+/// Adds the reference IDE's interpreters to a list file that does not
+/// exist yet, once, for people who never saw the first-run window: their
+/// configuration has no `[import]` record. With a record (skipped, or
+/// imported: the importer brings the interpreters from the snapshot) none
+/// come from here. Called when the main window opens, so the first-run
+/// window has decided by then.
+pub(crate) fn import_reference(cx: &mut App) {
+    if !settings_ui::first_run::undecided(cx) {
+        return;
+    }
+    configure(cx);
+    let list = cx.default_global::<Interpreters>();
+    if list.file.is_none() || list.reference.is_empty() {
+        return;
+    }
     read(true, cx);
+    cx.default_global::<Interpreters>().reference.clear();
 }
 
 /// Reads the list again after a file written elsewhere (the import from
-/// the snapshot of the reference's configuration). The reference IDE's
-/// folders are not imported from here: whatever wrote the file decided
-/// what it holds.
+/// the snapshot of the reference's configuration): whatever wrote the
+/// file decided what it holds.
 pub(crate) fn reload(cx: &mut App) {
     configure(cx);
     read(false, cx);
 }
 
 /// Starts reading the list; `import` adds the reference IDE's interpreters
-/// to a file that does not exist yet.
+/// to a file that does not exist yet ([`import_reference`]).
 fn read(import: bool, cx: &mut App) {
     let list = cx.default_global::<Interpreters>();
     let Some(file) = list.file.clone() else {
