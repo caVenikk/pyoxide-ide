@@ -19,7 +19,9 @@
 - Step 1: the first-run window comes before the main window, modal, on
   "Import Settings": the newest configuration found, "Skip Import", and
   "Other Options" with the older ones and "Config or Installation
-  Directory". Without a configuration to offer no window comes (the
+  Directory" (each folder in two lines with an icon: the name over when
+  it was used; the list at least as wide as the button), over a teal and
+  olive glow. Without a configuration to offer no window comes (the
   Welcome tab offers the theme and the keymap, see welcome.md).
 - Step 2: "Importing settings…", then the window closes and the main
   window opens with a "Settings imported" balloon naming what came in and

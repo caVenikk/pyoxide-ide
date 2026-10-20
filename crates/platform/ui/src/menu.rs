@@ -151,6 +151,13 @@ const COMBO: Metrics = Metrics {
     list: true,
 };
 
+/// A row of the size of its content ([`RowExtra::flexible`]): 8 above and
+/// below it, 8 between the icon and the text.
+const FLEXIBLE_ROW_Y: f32 = 8.0;
+const FLEXIBLE_ICON_GAP: f32 = 8.0;
+/// The lines of such a row: 16 each (13 and 12 point text).
+const FLEXIBLE_LINE: f32 = 16.0;
+
 /// Radius of the selection background: `PopupMenu.Selection.arc` and
 /// `Popup.Selection.arc` 8 are diameters.
 const SELECTION_RADIUS: f32 = 4.0;
@@ -249,11 +256,28 @@ pub struct RowExtra {
     /// Levels the label is indented by (`SchemesCombo` indents a custom
     /// scheme under its parent).
     pub indent: u8,
+    /// Grey text on a second line below the label, in the comment's
+    /// smaller font (the import dialog's Other Options, `ProductChooserRenderer`).
+    pub comment: Option<SharedString>,
+    /// The icon drawn at this size, at the top of the row, 8 before the
+    /// text (a product's icon of 20).
+    pub icon_size: Option<f32>,
+}
+
+impl RowExtra {
+    /// A row of the size of its content, 8 above and below it, instead of
+    /// the list's row height (`PopupUtil.configListRendererFlexibleHeight`
+    /// with `JBUI.Borders.empty(8, 0)`): with a comment or a large icon.
+    fn flexible(&self) -> bool {
+        self.comment.is_some() || self.icon_size.is_some()
+    }
 }
 
 impl Clone for RowExtra {
     fn clone(&self) -> Self {
         Self {
+            comment: self.comment.clone(),
+            icon_size: self.icon_size,
             secondary: self.secondary.clone(),
             secondary_small: self.secondary_small,
             icon_alpha: self.icon_alpha,
@@ -475,6 +499,22 @@ impl MenuItem {
     pub fn secondary(mut self, text: impl Into<SharedString>) -> Self {
         if let Some(extra) = self.extra_mut() {
             extra.secondary = Some(text.into());
+        }
+        self
+    }
+
+    /// Grey text on a second line below the label ([`RowExtra::comment`]).
+    pub fn comment(mut self, text: impl Into<SharedString>) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.comment = Some(text.into());
+        }
+        self
+    }
+
+    /// The icon at `size`, at the top of the row ([`RowExtra::icon_size`]).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.icon_size = Some(size);
         }
         self
     }
@@ -1337,6 +1377,9 @@ impl ContextMenu {
                             if let Some(text) = &extra.secondary {
                                 row["secondary"] = json!(text.as_ref());
                             }
+                            if let Some(text) = &extra.comment {
+                                row["comment"] = json!(text.as_ref());
+                            }
                             if let Some(alpha) = extra.icon_alpha {
                                 row["icon_alpha"] = json!(alpha);
                             }
@@ -1476,6 +1519,14 @@ impl ContextMenu {
                 let secondary_small = extra.is_some_and(|e| e.secondary_small);
                 let shortcut = extra.and_then(|e| e.shortcut.clone());
                 let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
+                let comment = extra.and_then(|e| e.comment.clone());
+                let flexible = extra.is_some_and(RowExtra::flexible);
+                let icon_size = extra.and_then(|e| e.icon_size).unwrap_or(ICON);
+                let icon_gap = if flexible {
+                    FLEXIBLE_ICON_GAP
+                } else {
+                    ICON_GAP
+                };
                 let bold = extra.is_some_and(|e| e.bold);
                 let indent = extra.map_or(0, |e| e.indent);
                 let more = !self.submenu_on_hover && item.is_final_group();
@@ -1538,10 +1589,53 @@ impl ContextMenu {
                 };
                 let label = StyledText::new(label.clone())
                     .with_highlights(highlights(&label, &fragments, match_bg));
+                let label_row = div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .pl(px(INDENT * f32::from(indent)))
+                            .when(bold, |d| d.font_weight(FontWeight::BOLD))
+                            .child(label),
+                    )
+                    .children(secondary.map(|text| {
+                        div()
+                            .flex_none()
+                            .when(!secondary_small, |d| d.pl(px(SECONDARY_GAP)))
+                            .when(secondary_small, |d| d.text_size(small))
+                            .whitespace_nowrap()
+                            .text_color(muted)
+                            .child(text)
+                    }));
+                let two_lines = comment.is_some();
+                let text_column = match comment {
+                    None => label_row.into_any_element(),
+                    Some(comment) => div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .child(label_row)
+                        .child(
+                            div()
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_size(small)
+                                .text_color(muted)
+                                .child(comment),
+                        )
+                        .into_any_element(),
+                };
                 div()
                     .id(id)
                     .debug_selector(move || selector.clone())
-                    .h(px(item_height))
+                    .when(!flexible, |d| d.h(px(item_height)))
                     .px(px(m.selection_x))
                     .py(px(m.selection_y))
                     // A row, so that the selection fills it whatever the
@@ -1555,7 +1649,11 @@ impl ContextMenu {
                             .min_w(px(0.0))
                             .flex()
                             .flex_row()
-                            .items_center()
+                            .when(!two_lines, |d| d.items_center())
+                            .when(two_lines, |d| d.items_start())
+                            .when(flexible, |d| {
+                                d.py(px(FLEXIBLE_ROW_Y)).line_height(px(FLEXIBLE_LINE))
+                            })
                             .pl(px(m.content_x))
                             .pr(px(right))
                             .rounded(px(m.radius))
@@ -1565,37 +1663,15 @@ impl ContextMenu {
                                 d.child(
                                     div()
                                         .flex_none()
-                                        .w(px(ICON + ICON_GAP))
+                                        .w(px(icon_size + icon_gap))
                                         .when(icon_alpha < 1.0, |d| d.opacity(icon_alpha))
-                                        .children(item.icon_name().map(Icon::new)),
+                                        .children(
+                                            item.icon_name()
+                                                .map(|n| Icon::new(n).size(px(icon_size))),
+                                        ),
                                 )
                             })
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .whitespace_nowrap()
-                                            .pl(px(INDENT * f32::from(indent)))
-                                            .when(bold, |d| d.font_weight(FontWeight::BOLD))
-                                            .child(label),
-                                    )
-                                    .children(secondary.map(|text| {
-                                        div()
-                                            .flex_none()
-                                            .when(!secondary_small, |d| d.pl(px(SECONDARY_GAP)))
-                                            .when(secondary_small, |d| d.text_size(small))
-                                            .whitespace_nowrap()
-                                            .text_color(muted)
-                                            .child(text)
-                                    })),
-                            )
+                            .child(text_column)
                             .children(end),
                     )
                     .children(submenu)
@@ -2324,6 +2400,30 @@ mod tests {
             inner.size.width,
             row.size.width - px(2.0 * LIST.selection_x)
         );
+    }
+
+    #[gpui::test]
+    fn a_row_with_a_comment_grows_to_two_lines(cx: &mut TestAppContext) {
+        let (_, _, cx) = open_with(cx, |window, cx| {
+            let items = vec![
+                MenuItem::action("Reference IDE 2026.1", First)
+                    .icon(IconName::FOLDER)
+                    .icon_size(20.0)
+                    .comment("Used today"),
+                MenuItem::action("Plain", Second),
+                MenuItem::action("Config", Third)
+                    .icon(IconName::FOLDER)
+                    .icon_size(20.0),
+            ];
+            ContextMenu::popup(items, PopupOptions::default(), window, cx)
+        });
+        let two = cx.debug_bounds("menu-item:Reference IDE 2026.1").unwrap();
+        let plain = cx.debug_bounds("menu-item:Plain").unwrap();
+        let icon = cx.debug_bounds("menu-item:Config").unwrap();
+        // 8 above and below: two lines of 16, an icon of 20.
+        assert_eq!(two.size.height, px(8.0 + 16.0 + 16.0 + 8.0));
+        assert_eq!(icon.size.height, px(8.0 + 20.0 + 8.0));
+        assert!(plain.size.height < icon.size.height);
     }
 
     /// The pointer shape over the element with this debug selector.

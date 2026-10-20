@@ -26,7 +26,7 @@ use settings_import::pycharm::options::{ConfigFolder, Found};
 use themes::UiRole;
 use ui::form::MenuPopup;
 use ui::icons::{Icon, IconName};
-use ui::menu::MenuItem;
+use ui::menu::{MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
 use super::import::{self, Applied};
@@ -50,6 +50,8 @@ pub const REFERENCE: &str = "Reference IDE";
 const BUTTON_WIDTH: f32 = 280.0;
 const BUTTON_HEIGHT: f32 = 40.0;
 const BUTTON_GAP: f32 = 4.0;
+/// The icons of the folders' rows (`ProductChooserRenderer`, 20 by 20).
+const ROW_ICON: f32 = 20.0;
 const TITLE_GAP: f32 = 26.0;
 const SOUTH_HEIGHT: f32 = 47.0;
 /// `JBFont.h1()`: the label font plus 9, bold.
@@ -273,39 +275,32 @@ impl FirstRunWindow {
             items.push(MenuItem::header(LOCAL_SETTINGS));
             for folder in other {
                 items.push(
-                    MenuItem::action(
-                        folder.label(),
-                        ImportFrom {
-                            folder: Some(folder.name.clone()),
-                        },
-                    )
-                    .secondary(used(folder))
-                    .description(folder.path.to_string_lossy().into_owned()),
+                    product_row(folder).description(folder.path.to_string_lossy().into_owned()),
                 );
             }
             items.push(MenuItem::separator());
         }
-        items.push(MenuItem::action(CUSTOM_DIR, ChooseFolder { path: None }));
+        items.push(
+            MenuItem::action(CUSTOM_DIR, ChooseFolder { path: None })
+                .icon(IconName::CONFIG_FILE)
+                .icon_size(ROW_ICON),
+        );
         let position = self.other_anchor.get().bottom_left() + gpui::point(px(0.0), px(4.0));
         self.open_popup(items, position, window, cx);
     }
 
+    /// The lists are at least as wide as the buttons
+    /// (`UiUtils.DEFAULT_BUTTON_WIDTH`, `ProductChooserAction`).
+    fn popup_options() -> PopupOptions {
+        PopupOptions {
+            min_width: Some(BUTTON_WIDTH),
+            ..PopupOptions::default()
+        }
+    }
+
     /// The main button with more than one folder: their list below it.
     fn open_main_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let items = self
-            .found
-            .main
-            .iter()
-            .map(|folder| {
-                MenuItem::action(
-                    folder.label(),
-                    ImportFrom {
-                        folder: Some(folder.name.clone()),
-                    },
-                )
-                .secondary(used(folder))
-            })
-            .collect();
+        let items = self.found.main.iter().map(product_row).collect();
         let position = self.main_anchor.get().bottom_left() + gpui::point(px(0.0), px(4.0));
         self.open_popup(items, position, window, cx);
     }
@@ -319,9 +314,9 @@ impl FirstRunWindow {
     ) {
         self.close_popup(cx);
         let focus = self.focus.clone();
-        self.popup = MenuPopup::open(
+        self.popup = MenuPopup::open_with(
             items,
-            None,
+            Self::popup_options(),
             position,
             &focus,
             self.activate,
@@ -658,12 +653,43 @@ impl Render for FirstRunWindow {
             .flex()
             .flex_col()
             .bg(surface)
+            .child(glow(cx))
             .children(ui::dialog_window::title_bar(self.title.clone(), true, cx))
             .child(page)
             .children(error)
             .children(ui::dialog_window::blocker(window, cx))
             .child(ui::pointer::frame())
     }
+}
+
+/// Our own glow behind the page (the reference shows a blurred picture of
+/// its own there): green at the top left, teal at the top, olive at the
+/// right.
+fn glow(cx: &App) -> gpui::Div {
+    let alpha = if cx.theme().is_dark() { 1.0 } else { 0.25 };
+    let blob = |x: f32, y: f32, size: f32, color: u32| {
+        div()
+            .absolute()
+            .left(gpui::relative(x))
+            .top(gpui::relative(y))
+            .ml(px(-size / 2.0))
+            .mt(px(-size / 2.0))
+            .size(px(size))
+            .rounded_full()
+            .shadow(vec![gpui::BoxShadow {
+                color: Hsla::from(rgb(color)).opacity(alpha),
+                offset: gpui::point(px(0.0), px(0.0)),
+                blur_radius: px(size * 0.5),
+                spread_radius: px(0.0),
+            }])
+    };
+    div()
+        .absolute()
+        .inset_0()
+        .overflow_hidden()
+        .child(blob(0.08, 0.14, 220.0, 0x266247))
+        .child(blob(0.42, -0.02, 240.0, 0x2c7a82))
+        .child(blob(1.0, 0.62, 220.0, 0x504c21))
 }
 
 /// Keeps an element's bounds for a popup below it.
@@ -678,6 +704,22 @@ fn anchor_canvas(cell: Rc<Cell<Bounds<Pixels>>>) -> impl IntoElement {
 /// `import.chooser.error.unrecognized` (`BootstrapBundle`).
 fn unrecognized(path: &str) -> String {
     format!("{path} does not appear to be this IDE's settings or installation directory")
+}
+
+/// A folder's row in the lists of the main button and Other Options
+/// (`ProductChooserRenderer`): the product's icon (our settings icon in
+/// place of the reference's logo) at the top, the name over when it was
+/// used.
+fn product_row(folder: &ConfigFolder) -> MenuItem {
+    MenuItem::action(
+        folder.label(),
+        ImportFrom {
+            folder: Some(folder.name.clone()),
+        },
+    )
+    .icon(IconName::SETTINGS)
+    .icon_size(ROW_ICON)
+    .comment(used(folder))
 }
 
 /// When a folder was used last, as the reference says it

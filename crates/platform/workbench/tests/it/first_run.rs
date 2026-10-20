@@ -378,6 +378,12 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
         ],
         "{popup}"
     );
+    // The folder's row has two lines (`ProductChooserRenderer`).
+    let comment = popup["levels"][0]["items"][1]["comment"].clone();
+    assert!(
+        comment.as_str().is_some_and(|c| c.starts_with("Used ")),
+        "{popup}"
+    );
     // The popup takes the commands while it is open.
     h.invoke("menu.cancel", json!(null));
     assert!(h.state()["popup"].is_null());

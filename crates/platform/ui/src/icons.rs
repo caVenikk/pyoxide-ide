@@ -223,6 +223,9 @@ impl IconName {
     pub const LEARN: Self = Self("general/learn");
     pub const PLUGIN: Self = Self("nodes/plugin");
     pub const JUPYTER_NOTEBOOK: Self = Self("fileTypes/jupyterNotebook");
+    /// Config or Installation Directory of the import dialog's Other
+    /// Options (`StartupImportIcons.Icons.ConfigFile`, 20 by 20).
+    pub const CONFIG_FILE: Self = Self("startup/configFile");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -289,7 +292,8 @@ platform_icons! {
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
-        "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
+        "run/debug", "run/killProcess",
+        "startup/configFile", "run/rerun", "run/run", "run/stop",
         "status/error", "status/info", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
