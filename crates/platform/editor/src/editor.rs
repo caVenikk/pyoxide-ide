@@ -401,6 +401,8 @@ pub struct Editor {
     pub(crate) caret_row_shown: bool,
     /// The diff viewer's gutter ([`Editor::set_diff_gutter`]).
     pub(crate) diff_gutter: bool,
+    /// A scroll for the next layout ([`Editor::scroll_on_layout`]).
+    pub(crate) layout_scroll: Option<crate::side_by_side::LayoutScroll>,
     /// Rows of room below the last one instead of a view's height
     /// ([`Editor::set_room_after_end`]).
     pub(crate) room_after_end: Option<usize>,
@@ -504,6 +506,7 @@ impl Editor {
             mirrored: false,
             caret_row_shown: true,
             diff_gutter: false,
+            layout_scroll: None,
             room_after_end: None,
             _subscriptions: subscriptions,
         }

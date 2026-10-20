@@ -1030,6 +1030,13 @@ impl Element for EditorElement {
             if std::mem::take(&mut e.scroll_to_end) {
                 e.scroll.y = max_y;
             }
+            if let Some(to) = e
+                .layout_scroll
+                .take()
+                .and_then(|f| f(lh, bounds.size.height))
+            {
+                e.scroll = to;
+            }
             if let Some(pos) = e.reveal.take() {
                 // A search match goes to the middle of the view when hidden.
                 let y = lh * e.caret_row(pos, false) as f32;

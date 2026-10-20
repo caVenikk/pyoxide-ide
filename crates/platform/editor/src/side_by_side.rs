@@ -24,6 +24,10 @@ pub const ACTION_SIZE: f32 = 14.0;
 const ACTION_TO_TEXT: f32 = 24.0;
 const MIRRORED_ACTION_FROM_TEXT: f32 = 19.0;
 
+/// Where a view scrolls once it is laid out, from its row height and its
+/// height ([`Editor::scroll_on_layout`]).
+pub type LayoutScroll = Box<dyn FnOnce(Pixels, Pixels) -> Option<Point<Pixels>>>;
+
 /// The diff gutter's width for `digits` digits of `number_width` each.
 pub(crate) fn diff_gutter_width(number_width: Pixels, digits: usize) -> Pixels {
     px(OUTER + NUMBERS_TO_TEXT) + number_width * digits as f32
@@ -133,6 +137,15 @@ impl Editor {
             self.scroll.x = x;
             cx.notify();
         }
+    }
+
+    /// Scrolls the view where `f` says in its next layout, before its
+    /// rows are laid out: the first scroll of a view that has not been
+    /// drawn yet (its height unknown), in that very frame. Not reported as
+    /// [`crate::EditorEvent::Scrolled`].
+    pub fn scroll_on_layout(&mut self, f: LayoutScroll, cx: &mut Context<Self>) {
+        self.layout_scroll = Some(f);
+        cx.notify();
     }
 
     /// The scroll offset of the view.

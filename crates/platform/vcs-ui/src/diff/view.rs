@@ -474,6 +474,30 @@ impl DiffView {
         }
         let (l, r) = (self.left.read(cx), self.right.read(cx));
         let (Some((lh, h1)), Some((_, h2))) = (l.view_metrics(), r.view_metrics()) else {
+            // Not laid out yet (a diff just opened): each view scrolls in
+            // its first layout, both of the same height.
+            let counts = self.line_counts(cx);
+            for side in [Side::Left, Side::Right] {
+                let lines = [change.left.clone(), change.right.clone()];
+                self.editor(side).update(cx, |e, cx| {
+                    e.scroll_on_layout(
+                        Box::new(move |lh, height| {
+                            let (lh, h) = (f32::from(lh), f32::from(height));
+                            let max_top = |rows: u32| {
+                                (lh * (rows as usize + ROOM_AFTER_END) as f32 - h).max(0.0)
+                            };
+                            let tops = model::target_tops(
+                                lines,
+                                lh,
+                                [h, h],
+                                [max_top(counts.0), max_top(counts.1)],
+                            );
+                            Some(point(px(0.0), px(side.select(tops[0], tops[1]))))
+                        }),
+                        cx,
+                    )
+                });
+            }
             return;
         };
         let tops = model::target_tops(
@@ -490,10 +514,10 @@ impl DiffView {
         }
     }
 
-    /// The initial scroll, once the differences are known and the views
-    /// have been laid out.
+    /// The initial scroll, once the differences are known (views not laid
+    /// out yet scroll in their first layout).
     fn apply_scroll(&mut self, scroll: ScrollTo, cx: &mut Context<Self>) {
-        if self.computed_for.is_none() || self.right.read(cx).view_metrics().is_none() {
+        if self.computed_for.is_none() {
             return;
         }
         self.pending_scroll = None;
@@ -1237,13 +1261,6 @@ diff_actions! {
 
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(scroll) = self.pending_scroll {
-            self.apply_scroll(scroll, cx);
-            if self.pending_scroll.is_some() && self.computed_for.is_some() {
-                // Laid out in this frame: scrolled in the next.
-                cx.on_next_frame(window, |_, _, cx| cx.notify());
-            }
-        }
         let (background, tearline, family, size) = {
             let theme = cx.theme();
             (
