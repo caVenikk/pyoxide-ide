@@ -426,6 +426,7 @@ workspace crates a pull request does not change, but not the linking, and
 its entries would share the repository's 10 GB of cache with the dependency
 caches, which already fill it. It is a candidate if the build becomes the
 longer part of the job again.
+
 ### Keymap check: one pair of tests per area
 Issues #244 and #246: `workbench`'s keymap check was two tests
 (`keymap::every_macos_binding_works` and `..._windows_and_linux_...`), each
