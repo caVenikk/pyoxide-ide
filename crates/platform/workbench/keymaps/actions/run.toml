@@ -1,0 +1,25 @@
+# ---- Main Menu > Run -----------------------------------------------------
+
+[[action]]
+id = "Run"
+text = "Run"
+groups = ["Main Menu > Run"]
+command = "run.run"
+
+[[action]]
+id = "RunClass"
+text = "Run Context Configuration"
+groups = ["Main Menu > Run"]
+command = "run.current-file"
+
+[[action]]
+id = "ChooseRunConfiguration"
+text = "Run…"
+groups = ["Main Menu > Run"]
+command = "run.configurations"
+
+[[action]]
+id = "Stop"
+text = "Stop"
+groups = ["Main Menu > Run"]
+command = "run.stop"

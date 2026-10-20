@@ -53,7 +53,9 @@ Rules for AI agents and human contributors. Read this file, then
 - A crate's integration tests are one test program, `tests/it/main.rs` with a
   module per area (`tests/it/<area>.rs`, shared helpers once): a new area is a
   new module, never a new file directly in `tests/`, since every test program
-  links the crate's whole dependency tree again.
+  links the crate's whole dependency tree again. The keymap check is a module
+  per keymap area in the same way (`tests/it/keymap/<area>.rs`, the harness in
+  `tests/it/keymap/mod.rs`), see `docs/agent-workflow.md`.
 - Windows, macOS and Linux must keep building; gate platform-specific code with `cfg`.
 - Commits: conventional style (`feat(db-core): ...`).
 - Third-party notices: for anything copied or closely adapted from open-source

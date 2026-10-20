@@ -1,0 +1,19 @@
+# Pyoxide keymap for macOS. Terminal: the keys of a focused terminal.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# A focused terminal (the reference's `Terminal.*` actions): Copy only
+# with a selection (without one the key goes on), Paste (bracketed when
+# the program asked for it), Select All, Clear Terminal (the prompt line
+# stays), Line Up and Down, Page Up and Down.
+[[context]]
+name = "Terminal"
+[context.bindings]
+"cmd-c" = "terminal.copy"
+"cmd-v" = "terminal.paste"
+"cmd-a" = "terminal.select-all"
+"cmd-k" = "terminal.clear"
+"cmd-up" = "terminal.line-up"
+"cmd-down" = "terminal.line-down"
+"shift-pageup" = "terminal.page-up"
+"shift-pagedown" = "terminal.page-down"

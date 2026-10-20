@@ -3,7 +3,7 @@
 The reference IDE's Recent Files popup ("switcher"), with its default
 keymaps: macOS ("Mac") and Windows/Linux ("Win"). Covered by
 `crates/platform/workbench/tests/it/search_everywhere.rs` (`recent_files`)
-and `crates/platform/workbench/tests/it/keymap.rs` (every binding).
+and `crates/platform/workbench/tests/it/keymap/navigation.rs` (every binding).
 
 ## Keys
 | Action | Mac | Win | Where |

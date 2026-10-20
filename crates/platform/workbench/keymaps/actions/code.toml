@@ -1,0 +1,57 @@
+# ---- Main Menu > Code ----------------------------------------------------
+
+[[action]]
+id = "CodeCompletion"
+text = "Basic"
+groups = ["Main Menu > Code > Code Completion"]
+command = "code.complete"
+context = "Editor"
+
+[[action]]
+id = "MoveStatementDown"
+text = "Move Statement Down"
+groups = ["Main Menu > Code"]
+command = "editor.move-statement-down"
+context = "Editor"
+
+[[action]]
+id = "MoveStatementUp"
+text = "Move Statement Up"
+groups = ["Main Menu > Code"]
+command = "editor.move-statement-up"
+context = "Editor"
+
+[[action]]
+id = "MoveLineDown"
+text = "Move Line Down"
+groups = ["Main Menu > Code"]
+command = "editor.move-line-down"
+context = "Editor"
+
+[[action]]
+id = "MoveLineUp"
+text = "Move Line Up"
+groups = ["Main Menu > Code"]
+command = "editor.move-line-up"
+context = "Editor"
+
+[[action]]
+id = "CommentByLineComment"
+text = "Comment with Line Comment"
+groups = ["Main Menu > Code > Comment Actions"]
+command = "editor.toggle-comment"
+context = "Editor"
+
+[[action]]
+id = "ReformatCode"
+text = "Reformat Code"
+groups = ["Main Menu > Code > Code Formatting Actions"]
+command = "code.reformat"
+context = "Editor"
+
+[[action]]
+id = "OptimizeImports"
+text = "Optimize Imports"
+groups = ["Main Menu > Code > Code Formatting Actions"]
+command = "code.optimize-imports"
+context = "Editor"

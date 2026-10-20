@@ -17,6 +17,16 @@
 //! back and forward buttons (the reference keymaps' names), bound
 //! everywhere in the window.
 //!
+//! A default keymap is a folder of files, one per area (`keymaps/macos/`,
+//! `keymaps/default/`: `editor.toml`, `search.toml`, ...), so that two
+//! features seldom edit the same file; [`MACOS`] and [`DEFAULT`] join them in
+//! a fixed order. The order is part of the keymap: a deeper context wins,
+//! and of two bindings of one keystroke whose innermost context is the
+//! same (a binding without a context counts as the innermost one) the later
+//! one wins, so a popup's Escape comes after the editor's. An area's file is
+//! placed after the files whose bindings it must win over; a new area file
+//! is added to both lists.
+//!
 //! Besides the two base keymaps there are derived ones (ADR 0018,
 //! [`derived`]): the reference's VS Code keymaps and custom keymaps
 //! imported from the reference ([`reference`]), converted through the
@@ -41,10 +51,56 @@ use serde_json::Value as Json;
 
 pub use gesture::{DoubleTap, ModifierKey, double_tap_text, parse_double_tap};
 
-/// The default keymap of macOS.
-pub const MACOS: &str = include_str!("../keymaps/macos.toml");
-/// The default keymap of Windows and Linux.
-pub const DEFAULT: &str = include_str!("../keymaps/default.toml");
+/// The default keymap of macOS: the files of `keymaps/macos/`, one per area,
+/// joined in this order (see the module documentation).
+pub const MACOS: &str = concat!(
+    include_str!("../keymaps/macos/editor.toml"),
+    include_str!("../keymaps/macos/code-insight.toml"),
+    include_str!("../keymaps/macos/window.toml"),
+    include_str!("../keymaps/macos/run.toml"),
+    include_str!("../keymaps/macos/debug.toml"),
+    include_str!("../keymaps/macos/vcs-markers.toml"),
+    include_str!("../keymaps/macos/vcs-branches.toml"),
+    include_str!("../keymaps/macos/vcs-commit.toml"),
+    include_str!("../keymaps/macos/vcs-diff.toml"),
+    include_str!("../keymaps/macos/vcs-push.toml"),
+    include_str!("../keymaps/macos/completion.toml"),
+    include_str!("../keymaps/macos/navigation.toml"),
+    include_str!("../keymaps/macos/find.toml"),
+    include_str!("../keymaps/macos/find-in-files.toml"),
+    include_str!("../keymaps/macos/search-everywhere.toml"),
+    include_str!("../keymaps/macos/console.toml"),
+    include_str!("../keymaps/macos/run-configurations.toml"),
+    include_str!("../keymaps/macos/project.toml"),
+    include_str!("../keymaps/macos/settings.toml"),
+    include_str!("../keymaps/macos/breakpoints.toml"),
+    include_str!("../keymaps/macos/terminal.toml"),
+);
+/// The default keymap of Windows and Linux: the files of `keymaps/default/`,
+/// one per area, joined in this order (see the module documentation).
+pub const DEFAULT: &str = concat!(
+    include_str!("../keymaps/default/editor.toml"),
+    include_str!("../keymaps/default/code-insight.toml"),
+    include_str!("../keymaps/default/window.toml"),
+    include_str!("../keymaps/default/run.toml"),
+    include_str!("../keymaps/default/debug.toml"),
+    include_str!("../keymaps/default/vcs-markers.toml"),
+    include_str!("../keymaps/default/vcs-branches.toml"),
+    include_str!("../keymaps/default/vcs-commit.toml"),
+    include_str!("../keymaps/default/vcs-diff.toml"),
+    include_str!("../keymaps/default/vcs-push.toml"),
+    include_str!("../keymaps/default/completion.toml"),
+    include_str!("../keymaps/default/navigation.toml"),
+    include_str!("../keymaps/default/find.toml"),
+    include_str!("../keymaps/default/find-in-files.toml"),
+    include_str!("../keymaps/default/search-everywhere.toml"),
+    include_str!("../keymaps/default/console.toml"),
+    include_str!("../keymaps/default/run-configurations.toml"),
+    include_str!("../keymaps/default/project.toml"),
+    include_str!("../keymaps/default/settings.toml"),
+    include_str!("../keymaps/default/breakpoints.toml"),
+    include_str!("../keymaps/default/terminal.toml"),
+);
 
 /// The names of the predefined keymaps, as the reference shows them
 /// (`DefaultKeymap.getKeymapPresentableName`).
@@ -326,6 +382,29 @@ name = "Editor"
         for text in [MACOS, DEFAULT] {
             let keymap = Keymap::parse(text).unwrap();
             assert!(keymap.bindings.len() > 50);
+        }
+    }
+
+    /// A file in a keymap folder that is not in the `concat!` list, or in it
+    /// twice, or a list entry that is not a file, fails here.
+    #[test]
+    fn every_file_of_a_keymap_folder_is_joined_once() {
+        let keymaps = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("keymaps");
+        for (folder, joined) in [
+            ("macos", MACOS),
+            ("default", DEFAULT),
+            ("actions", actions::ACTIONS),
+        ] {
+            let mut length = 0;
+            for entry in std::fs::read_dir(keymaps.join(folder)).unwrap() {
+                let path = entry.unwrap().path();
+                assert_eq!(path.extension().and_then(|e| e.to_str()), Some("toml"));
+                let text = std::fs::read_to_string(&path).unwrap();
+                assert!(text.ends_with('\n'), "{path:?} ends with a line break");
+                assert_eq!(joined.matches(&text).count(), 1, "{path:?} is joined once");
+                length += text.len();
+            }
+            assert_eq!(joined.len(), length, "{folder}: nothing else is joined");
         }
     }
 }

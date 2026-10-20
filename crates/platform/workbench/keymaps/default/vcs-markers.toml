@@ -1,0 +1,21 @@
+# Pyoxide keymap for Windows and Linux. Version control, change markers: the
+# next and previous change, rollback of lines and the marker popup.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# Version control: Next and Previous Change move the caret to the changed
+# lines and show their popup; Rollback Lines puts the committed text back.
+# While the marker popup shows, Show Diff for Lines takes the key of
+# Duplicate Line and Escape closes the popup.
+[[context]]
+name = "Editor"
+[context.bindings]
+"ctrl-alt-shift-down" = "vcs.next-change"
+"ctrl-alt-shift-up" = "vcs.previous-change"
+"ctrl-alt-z" = "vcs.rollback-lines"
+
+[[context]]
+name = "LineStatusPopup > Editor"
+[context.bindings]
+"ctrl-d" = "vcs.show-diff-lines"
+"escape" = "marker-popup.close"

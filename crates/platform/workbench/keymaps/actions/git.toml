@@ -1,0 +1,25 @@
+# ---- Main Menu > Git -----------------------------------------------------
+
+[[action]]
+id = "Vcs.QuickListPopupAction"
+text = "VCS Operations Popup…"
+groups = ["Main Menu > Git"]
+command = "vcs.operations-popup"
+
+[[action]]
+id = "Vcs.UpdateProject"
+text = "Update Project"
+groups = ["Main Menu > Git"]
+command = "vcs.update-project"
+
+[[action]]
+id = "Vcs.Push"
+text = "Push…"
+groups = ["Main Menu > Git"]
+command = "vcs.push"
+
+[[action]]
+id = "Git.Fetch"
+text = "Fetch"
+groups = ["Main Menu > Git"]
+command = "git.fetch"

@@ -1,0 +1,25 @@
+# ---- Main Menu > File ----------------------------------------------------
+
+[[action]]
+id = "ShowSettings"
+text = "Settings…"
+groups = ["Main Menu > File > Settings Actions"]
+command = "settings.open"
+
+[[action]]
+id = "SaveAll"
+text = "Save All"
+groups = ["Main Menu > File"]
+command = "workbench.save-all"
+
+[[action]]
+id = "Synchronize"
+text = "Reload All from Disk"
+groups = ["Main Menu > File"]
+command = "workbench.synchronize"
+
+[[action]]
+id = "Exit"
+text = "Exit"
+groups = ["Main Menu > File"]
+command = "app.quit"

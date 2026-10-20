@@ -1,0 +1,22 @@
+# ---- Main Menu > Refactor ------------------------------------------------
+
+[[action]]
+id = "RenameElement"
+text = "Rename…"
+groups = ["Main Menu > Refactor"]
+command = "project.tree.rename"
+context = "ProjectTree"
+
+[[action]]
+id = "Move"
+text = "Move…"
+groups = ["Main Menu > Refactor"]
+command = "project.tree.move"
+context = "ProjectTree"
+
+[[action]]
+id = "CopyElement"
+text = "Copy…"
+groups = ["Main Menu > Refactor"]
+command = "project.tree.copy-element"
+context = "ProjectTree"

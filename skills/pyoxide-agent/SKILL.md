@@ -22,8 +22,8 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 - Rust: make sure `cargo` is on `PATH` (the lead says if the machine needs a prefix); `export CARGO_BUILD_JOBS=4` when several agents build at once; own `target/` in the worktree.
 - Reuse what exists (`ui::dialog_window` incl. non-modal, `ui::form`, `editor::field`, `ui::menu`, `ui::tree_guides`, the tool window registry `workbench/src/tool_windows.rs`, theme roles, navigation history, file sync hooks, `run-config`). Do not build a second one.
 - Layering: platform crates know no language (ADR 0005, `python3 scripts/check-layers.py`); Python specifics come through product hooks.
-- Hot shared files (`workbench/src/workbench.rs`, keymaps, `ui/src/menu.rs`, the editor crate): small hunks, logic in your own modules, rebase on `origin/main` before every push, keep everyone's changes.
-- Every user-visible action is a registry command with the reference's bindings in `workbench/keymaps/macos.toml` and `default.toml` and a keystroke check in `workbench/tests/it/keymap.rs`.
+- Hot shared files (`workbench/src/workbench.rs`, `ui/src/menu.rs`, the editor crate): small hunks, logic in your own modules, rebase on `origin/main` before every push, keep everyone's changes.
+- Every user-visible action is a registry command with the reference's bindings in the area's file of `workbench/keymaps/macos/` and `default/` (`<area>.toml`; the order of the files is part of the keymap, see `docs/agent-workflow.md`) and a keystroke check in the same area's module `workbench/tests/it/keymap/<area>.rs`.
 - Never block the UI thread: file I/O and analysis off the UI thread, cancellable, incremental.
 - Windows: items used only under `cfg(unix)` / `cfg(windows)` are gated like their users (no blanket allow); native paths in anything shown.
 - New `[workspace.dependencies]` only if the issue/ADR allows it; state the licence in the PR.

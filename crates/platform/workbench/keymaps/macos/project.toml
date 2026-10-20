@@ -1,0 +1,53 @@
+# Pyoxide keymap for macOS. Project: the Project tool window, file
+# operations, saving and reloading.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# The Project tool window, Save All and Reload All from Disk.
+[[context]]
+[context.bindings]
+"cmd-1" = "workbench.toggle-project"
+"cmd-s" = "workbench.save-all"
+"cmd-alt-y" = "workbench.synchronize"
+
+[[context]]
+name = "ProjectTree"
+[context.bindings]
+"up" = "project.tree.up"
+"down" = "project.tree.down"
+"right" = "project.tree.expand"
+"left" = "project.tree.collapse"
+"enter" = "project.tree.open"
+"cmd-down" = "project.tree.open"
+"f4" = "project.tree.open"
+"cmd--" = "project.tree.collapse-all"
+"cmd-=" = "project.tree.expand-all"
+"escape" = "workbench.focus-editor"
+"shift-escape" = "workbench.hide-tool-window"
+# File operations (#37): New (NewElement), Rename (RenameElement), Delete
+# ($Delete).
+"cmd-n" = "project.tree.new"
+"ctrl-enter" = "project.tree.new"
+"shift-f6" = "project.tree.rename"
+"delete" = "project.tree.delete"
+"backspace" = "project.tree.delete"
+"cmd-backspace" = "project.tree.delete"
+# Cut, Copy, Paste ($Cut, $Copy, $Paste), Move (F6), Copy (CopyElement,
+# F5), Copy Paths.
+"cmd-x" = "project.tree.cut"
+"cmd-c" = "project.tree.copy"
+"cmd-v" = "project.tree.paste"
+"f6" = "project.tree.move"
+"f5" = "project.tree.copy-element"
+"cmd-shift-c" = "project.tree.copy-paths"
+
+# The name field of New File, New Directory and Rename (#37).
+[[context]]
+name = "NameInput > Editor"
+[context.bindings]
+"enter" = "name-input.confirm"
+"escape" = "name-input.cancel"
+"down" = "name-input.next-kind"
+"up" = "name-input.previous-kind"
+"tab" = "name-input.next-field"
+"shift-tab" = "name-input.previous-field"

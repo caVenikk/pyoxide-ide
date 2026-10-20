@@ -1,0 +1,19 @@
+# The reference IDE's actions and the Pyoxide commands they run (ADR 0018).
+# Action ids, texts and the groups of the Keymap page's tree follow the
+# IntelliJ Platform Community (Apache-2.0, see NOTICE): the action files and
+# ActionsBundle of platform/platform-resources, the keymaps of
+# platform/platform-resources/src/keymaps.
+#
+# A keymap of the reference (the VS Code keymaps, a custom keymap) is
+# converted through this table: an action's shortcuts become the bindings
+# of its commands. A command runs in a key context ("Editor"); without one
+# it is global. An action Pyoxide does not have is not listed; the
+# conversion reports its shortcuts as unmapped.
+#
+# `groups` places the action in the tree, a path per place with " > "
+# between the groups; "Editor Actions" is sorted by action id, as in the
+# reference, other groups keep the order of this file. An action with
+# `use-shortcut-of` has the shortcuts of that action unless a keymap lists
+# it itself (the editor's Copy is `EditorCopy`, which uses `$Copy`'s); it
+# is not shown in the tree, as in the reference.
+version = 1

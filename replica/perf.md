@@ -427,6 +427,26 @@ its entries would share the repository's 10 GB of cache with the dependency
 caches, which already fill it. It is a candidate if the build becomes the
 longer part of the job again.
 
+### Keymap check: one pair of tests per area
+Issues #244 and #246: `workbench`'s keymap check was two tests
+(`keymap::every_macos_binding_works` and `..._windows_and_linux_...`), each
+pressing the 438 or 392 bindings of one keymap in one process. Now the keymaps
+are folders of area files and each of the 21 areas has its own pair
+(`keymap::<area>::every_*_binding_works`, 42 tests): an area starts its own
+app with the complete keymap and presses only the bindings of its file.
+"Before" is the old test binary run as nextest runs it (one process per
+test, the two in parallel); "after" is `cargo nextest run -p workbench -E
+'test(/^keymap::/)'`, wall time without the build, three runs. mac-1 has 10
+cores and other builds ran on it the whole time (load average 6 to 11 before,
+10 to 33 during the new runs).
+
+| date | machine | metric | before | after | notes |
+|---|---|---|---|---|---|
+| 2026-10-20 | mac-1 | wall time of the keymap tests (both keymaps) | 151 s | 41 s (42, 41, 42 s) | in each of these runs one `keymap::debug::...` test failed on its first try on the debugger wait of issue #239 (the fake adapter waited 30 s for a `stackTrace`) and passed on the retry, with its 33 s in the wall time; run alone or with `console` and `breakpoints` the six debugger tests passed in 13 s, three times out of three |
+| 2026-10-20 | mac-1 | longest single keymap test | 151 s (macOS keymap) | 23.6 s (`breakpoints`, macOS keymap) | the next ones: `editor` 20.6 s, `find_in_files` 18.3 s |
+| 2026-10-20 | mac-1 | sum of the keymap tests' own times | 286 s (2 tests) | 338 s (42 tests) | each test starts the app and opens the project: about 1.5 s of fixed cost |
+| 2026-10-20 | Windows CI | longest single keymap test | about 600 s (issue #246) | not measured | on mac-1 the longest test went from 151 s to 23.6 s, so about 100 s on the runner if the ratio holds; under the 300 s of five slow-timeout periods, so the 20-period override of `.config/nextest.toml` is gone |
+
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.

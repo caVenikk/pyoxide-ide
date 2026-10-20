@@ -1,0 +1,20 @@
+# Pyoxide keymap for Windows and Linux. The Run and Debug consoles.
+# Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
+# NOTICE).
+
+# The Debug console: the keys of the Debug tool window (debug.toml).
+[[context]]
+name = "DebugConsole > Editor"
+[context.bindings]
+"ctrl-f2" = "debug.stop"
+"ctrl-f4" = "debug.close-tab"
+"escape" = "workbench.focus-editor"
+
+# The Run console: Close Tab and Send EOF take the keys of Close and
+# Duplicate Line; Escape leaves it.
+[[context]]
+name = "RunConsole > Editor"
+[context.bindings]
+"ctrl-f4" = "run.close-tab"
+"ctrl-d" = "run.console.send-eof"
+"escape" = "workbench.focus-editor"

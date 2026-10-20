@@ -1,0 +1,58 @@
+# Pyoxide keymap for macOS. Settings: the Settings window, Quick Switch
+# Scheme and the first-run window.
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+[[context]]
+[context.bindings]
+"cmd-," = "settings.open"
+# Quick Switch Scheme: the Switch popup (Theme).
+"ctrl-`" = "settings.quick-switch"
+
+# The Settings window: Enter is OK, Escape clears the search, else
+# Cancel (`SettingsDialog`, `SettingsEditor.cancel`), in its fields too;
+# Find goes to the search field, Back and Forward to the pages selected
+# before (`SettingsNonModalDialog`, `SettingsEditor` history toolbar).
+[[context]]
+name = "SettingsWindow"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.escape"
+"cmd-f" = "settings.find"
+"cmd-[" = "settings.back"
+"cmd-alt-left" = "settings.back"
+"cmd-]" = "settings.forward"
+"cmd-alt-right" = "settings.forward"
+
+[[context]]
+name = "SettingsWindow > Editor"
+[context.bindings]
+"enter" = "settings.ok"
+"escape" = "settings.escape"
+"cmd-f" = "settings.find"
+
+# The page tree (`TreeUtil.installActions`).
+[[context]]
+name = "SettingsTree"
+[context.bindings]
+"up" = "settings.select-previous"
+"down" = "settings.select-next"
+"left" = "settings.collapse"
+"right" = "settings.expand"
+
+# The search field: Up and Down move the tree's selection, Enter goes to
+# the page (`SettingsSearch`, `SettingsEditor`).
+[[context]]
+name = "SettingsSearch > Editor"
+[context.bindings]
+"up" = "settings.select-previous"
+"down" = "settings.select-next"
+"enter" = "settings.go-to-page"
+
+# The first-run window (`OnboardingDialog`, a `DialogWrapper`): Enter is
+# its default button (Continue), Escape closes it.
+[[context]]
+name = "FirstRun"
+[context.bindings]
+"enter" = "first-run.continue"
+"escape" = "first-run.cancel"

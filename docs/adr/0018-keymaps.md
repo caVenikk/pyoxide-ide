@@ -71,10 +71,11 @@ Option 2.
   reference's XML writes the contexts of the action table. A keystroke an
   override binds is taken from the parent's other commands in that
   context, so a keystroke stays bound once per context.
-- **Action table**: `actions.toml` in the workbench maps the reference's
-  action ids to Pyoxide commands (with arguments and a context where one
-  action is several commands). It is written by hand from the Community
-  keymap files; actions Pyoxide does not have are listed as unmapped.
+- **Action table**: `keymaps/actions/*.toml` (one file per menu) in the
+  workbench maps the reference's action ids to Pyoxide commands (with
+  arguments and a context where one action is several commands). It is
+  written by hand from the Community keymap files; actions Pyoxide does not
+  have are listed as unmapped.
   An action can have `use-shortcut-of = "<action id>"`: it has the
   shortcuts of that action unless the keymap lists it itself (the
   editor's `EditorCopy` uses `$Copy`'s, so a keymap that lists only
