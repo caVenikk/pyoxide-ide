@@ -52,25 +52,37 @@ impl Harness {
         self.session.as_ref().expect("session")
     }
 
-    /// Takes snapshots on every event until `done` holds.
-    fn wait(&mut self, what: &str, done: impl Fn(&Snapshot, &[SessionEvent]) -> bool) -> Snapshot {
-        let deadline = Instant::now() + TIMEOUT;
+    /// Takes snapshots on every event until `done` holds; `None` when it
+    /// does not within `timeout` (or the session's channel closes first).
+    fn wait_for(
+        &mut self,
+        timeout: Duration,
+        done: impl Fn(&Snapshot, &[SessionEvent]) -> bool,
+    ) -> Option<Snapshot> {
+        let deadline = Instant::now() + timeout;
         loop {
             let snapshot = self.session().snapshot();
             if done(&snapshot, &self.events) {
-                return snapshot;
+                return Some(snapshot);
             }
             let left = deadline.saturating_duration_since(Instant::now());
             match self.rx.recv_timeout(left.min(Duration::from_millis(200))) {
                 Ok(event) => self.events.push(event),
                 Err(flume::RecvTimeoutError::Timeout) if !left.is_zero() => {}
-                Err(e) => panic!(
-                    "waiting for {what}: {e:?}; screen:\n{}\nevents: {:?}",
-                    snapshot.text(),
-                    self.events
-                ),
+                Err(_) => return None,
             }
         }
+    }
+
+    /// Takes snapshots on every event until `done` holds.
+    fn wait(&mut self, what: &str, done: impl Fn(&Snapshot, &[SessionEvent]) -> bool) -> Snapshot {
+        self.wait_for(TIMEOUT, done).unwrap_or_else(|| {
+            panic!(
+                "waiting for {what}; screen:\n{}\nevents: {:?}",
+                self.session().snapshot().text(),
+                self.events
+            )
+        })
     }
 
     fn wait_text(&mut self, needle: &str) -> Snapshot {
@@ -122,8 +134,25 @@ fn resize_reaches_the_program() {
     let mut h = start(options(&["size"], TerminalSize::new(80, 24)));
     h.wait_text("size 80x24");
     h.session().resize(TerminalSize::new(100, 30));
-    h.session().write(b"\r".to_vec());
-    let snapshot = h.wait_text("size 100x30");
+    // ConPTY applies a resize apart from the input pipe, so the helper can
+    // read a probe before the new size applies and print the old one: probe
+    // again until the new size shows (20 probes, 10 s at most).
+    let mut seen = None;
+    for _ in 0..20 {
+        h.session().write(b"\r".to_vec());
+        seen = h.wait_for(Duration::from_millis(500), |s, _| {
+            s.text().contains("size 100x30")
+        });
+        if seen.is_some() {
+            break;
+        }
+    }
+    let snapshot = seen.unwrap_or_else(|| {
+        panic!(
+            "no probe saw size 100x30; screen:\n{}",
+            h.session().snapshot().text()
+        )
+    });
     assert_eq!((snapshot.columns, snapshot.rows), (100, 30));
     assert_eq!(snapshot.cells.len(), 100 * 30);
     h.session().write(b"exit\r".to_vec());
