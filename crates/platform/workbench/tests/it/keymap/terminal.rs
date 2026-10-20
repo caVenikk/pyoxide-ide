@@ -71,8 +71,11 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
                 s["rows"].as_u64().unwrap()
             };
             // Output that arrives while the view is scrolled up (the shell's
-            // next prompt, late on ConPTY) moves the offset with it.
-            assert_eq!(offset(&s), expected + history(&s) - before, "{what}");
+            // next prompt, late on ConPTY) moves the offset with it; output
+            // that arrived before the key does not.
+            let late = history(&s) - before;
+            let o = offset(&s);
+            assert!(o >= expected && o <= expected + late, "{what}: {o}, {expected} + {late}");
         }
         "terminal.line-down" | "terminal.page-down" => {
             h.terminal_with_history();
@@ -81,12 +84,13 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
             let up = offset(&scrolled);
             h.press(keys);
             let s = h.wait_terminal(what, |s| offset(s) < up);
-            let expected = if command == "terminal.line-down" {
-                up - 1 + history(&s) - history(&scrolled)
+            if command == "terminal.line-down" {
+                let late = history(&s) - history(&scrolled);
+                let o = offset(&s);
+                assert!(o + 1 >= up && o < up + late, "{what}: {o}, {up} - 1 + {late}");
             } else {
-                0
-            };
-            assert_eq!(offset(&s), expected, "{what}");
+                assert_eq!(offset(&s), 0, "{what}");
+            }
             h.invoke("terminal.page-down", json!(null));
         }
         _ => unreachable!("{command}"),
