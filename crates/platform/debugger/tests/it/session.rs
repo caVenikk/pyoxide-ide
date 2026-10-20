@@ -433,6 +433,56 @@ fn run_to_cursor_force_and_step_into_my_code() {
     assert_eq!(session.snapshot().error, None);
 }
 
+/// The answer to a step or a resume that is handled after the next stop
+/// (the client runs a callback attached after its answer came at once, so
+/// on a busy machine after the events that followed the answer) leaves the
+/// program at that stop. The adapter here sends the stop first.
+#[test]
+fn a_late_answer_to_a_step_or_a_resume_keeps_the_next_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let stop = |reason: &str, description: &str| {
+        json!({"event": "stopped", "body": {"reason": reason, "threadId": 1,
+            "description": description}})
+    };
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.extend([
+        json!({"ignore": ["threads", "stackTrace", "scopes", "variables"]}),
+        stop("breakpoint", "first"),
+        json!({"expect": "next", "arguments": {"threadId": 1}}),
+        stop("step", "stepped"),
+        json!({"respond": null, "to": "next"}),
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        stop("breakpoint", "resumed"),
+        json!({"respond": {"allThreadsContinued": true}, "to": "continue"}),
+    ]);
+    let debugger = Debugger::open(root, Provider::with(Value::Array(script)));
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    let stopped_at = |session: &Session| {
+        let s = session.snapshot();
+        (s.phase, s.stop.and_then(|stop| stop.description))
+    };
+    wait_until("the first stop", || {
+        stopped_at(&session) == (Phase::Suspended, Some("first".to_owned()))
+    });
+    // The answer's callback has run once the request's future is ready.
+    block_on(session.step_over()).unwrap();
+    assert_eq!(
+        stopped_at(&session),
+        (Phase::Suspended, Some("stepped".to_owned()))
+    );
+    block_on(session.resume()).unwrap();
+    assert_eq!(
+        stopped_at(&session),
+        (Phase::Suspended, Some("resumed".to_owned()))
+    );
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
 #[test]
 fn an_adapter_crash_ends_the_session_with_its_log() {
     let dir = tempfile::tempdir().unwrap();

@@ -223,11 +223,13 @@ fn a_session_stops_on_a_line_and_runs_to_the_end(cx: &mut TestAppContext) {
     assert_eq!(widget["stop_tooltip"], json!("Stop 'main'"));
 
     h.invoke("debug.resume", json!(null));
+    // The program's exit and the adapter's end come apart: both are
+    // waited for.
     let s = h.wait("the end", |s| {
         s["tool_window"]["tabs"][0]["exit_code"] == json!(0)
+            && s["tool_window"]["tabs"][0]["state"] == json!("ended")
     });
     let tab = &s["tool_window"]["tabs"][0];
-    assert_eq!(tab["state"], json!("ended"));
     assert_eq!(tab["content"], json!("console"));
     assert_eq!(tab["toolbar"]["stop"], json!(false));
     assert_eq!(tab["toolbar"]["step"], json!(false));
