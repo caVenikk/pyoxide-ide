@@ -127,6 +127,7 @@ fn the_welcome_tab_switches_the_theme_and_the_keymap(cx: &mut TestAppContext) {
         ]
     );
     assert_eq!(w["tiles"][0]["command"], json!("project.open-file"));
+    assert_eq!(w["focused_tile"], json!(0), "the first tile has the focus");
     assert_eq!(w["theme"], json!("Theme: Islands Dark"));
     let keymap = w["keymap"].as_str().unwrap().to_owned();
     assert!(keymap.starts_with("Keymap: "), "{keymap}");

@@ -20,7 +20,8 @@
   New Script (the Python logo), New Notebook, Open File, then Learn and
   Plugins in a second row (New Notebook, Learn and Plugins dimmed, "Not
   available yet" on hover), and at the bottom "Theme: <theme>" and
-  "Keymap: <keymap>" with their icons and arrows. The main toolbar shows no file title. The
+  "Keymap: <keymap>" with their icons and arrows. New Script has the
+  focus: a lighter background and the focus ring. The main toolbar shows no file title. The
   project tool window is "Projects and Files": the Open…, New… and Clone
   Repository… buttons (New… and Clone Repository… dimmed, "Not available
   yet" on hover), a line, the "Search projects" field, a line and "No
@@ -30,7 +31,7 @@
   configuration folder; the second click opens `scratch_1.py`. Open File
   asks for a file and opens it in a tab.
 - Step 3: the list opens above the box with every theme, the current one
-  selected; the whole IDE switches at once and the box says "Theme:
+  selected in grey (rows of 22); the whole IDE switches at once and the box says "Theme:
   Islands Light" (its icon is the sun in a light theme).
 - Step 4: the list holds the keymaps of Settings > Keymap; the keymap is in
   use at once and stored.

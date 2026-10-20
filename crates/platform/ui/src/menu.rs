@@ -667,6 +667,10 @@ pub struct PopupOptions {
     /// selection fills the row from edge to edge, without padding above
     /// and below the rows (plain text rows keep the inset selection).
     pub edge_to_edge: bool,
+    /// The selected row in the colour of a list without the focus
+    /// (`List.selectionInactiveBackground`), as a Jewel combo box's list
+    /// shows it (the Welcome tab's Theme and Keymap lists).
+    pub inactive_selection: bool,
 }
 
 /// The action chosen in a popup that has a window of its own
@@ -702,6 +706,7 @@ pub struct ContextMenu {
     max_width: Option<f32>,
     row_height: Option<f32>,
     own_window: bool,
+    inactive_selection: bool,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
     submenu_on_hover: bool,
@@ -793,6 +798,7 @@ impl ContextMenu {
                 max_width: options.max_width,
                 row_height: options.row_height,
                 own_window: options.own_window,
+                inactive_selection: options.inactive_selection,
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
                 aim_history: [None; AIM_HISTORY],
@@ -1380,7 +1386,11 @@ impl ContextMenu {
         let with_icons = items.iter().any(|i| i.icon_name().is_some());
         let selected = self.selected[level];
         let open = self.selected.len() > level + 1;
-        let selection = theme.color(UiRole::Selection);
+        let selection = theme.color(if self.inactive_selection {
+            UiRole::SelectionInactive
+        } else {
+            UiRole::Selection
+        });
         let text = theme.color(UiRole::Text);
         let muted = theme.color(UiRole::TextMuted);
         let disabled = theme.color(UiRole::TextDisabled);

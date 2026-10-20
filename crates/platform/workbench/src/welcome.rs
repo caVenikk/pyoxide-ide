@@ -79,6 +79,11 @@ const COMBO_HEIGHT: f32 = 24.0;
 const COMBO_GAP: f32 = 16.0;
 const FOOTER_BOTTOM: f32 = 12.0;
 const LIST_MIN_WIDTH: f32 = 200.0;
+/// The lists' rows (Jewel's `SimpleListItem` in the popup of a
+/// `ListComboBox`), their selection grey (`List.selectionInactiveBackground`).
+const LIST_ROW: f32 = 22.0;
+/// The focus ring of a tile (Jewel's `focusOutline`).
+const FOCUS_WIDTH: f32 = 2.0;
 /// The glow's blobs.
 const GLOW_SIZE: f32 = 560.0;
 
@@ -177,6 +182,12 @@ pub struct WelcomeView {
     title: SharedString,
     icon: IconName,
     tiles: Vec<WelcomeTile>,
+    /// The tiles' focus: the first one has it when the tab is selected
+    /// (the reference requests the focus into the tab when it shows).
+    tile_focus: Vec<FocusHandle>,
+    /// The tile that had the focus when the tab was last drawn (for the
+    /// state).
+    focused_tile: Option<usize>,
     list: Option<OpenList>,
 }
 
@@ -184,11 +195,14 @@ impl WelcomeView {
     pub fn new(product: &str, hook: &WelcomeHook, cx: &mut Context<Self>) -> Self {
         let mut tiles = hook.tiles.clone();
         tiles.extend(platform_tiles());
+        let tile_focus = tiles.iter().map(|_| cx.focus_handle()).collect();
         Self {
             focus: cx.focus_handle(),
             title: format!("Welcome to {product}").into(),
             icon: hook.icon.unwrap_or(IconName::FILE_TEXT),
             tiles,
+            tile_focus,
+            focused_tile: None,
             list: None,
         }
     }
@@ -252,6 +266,8 @@ impl WelcomeView {
         let options = PopupOptions {
             selected,
             min_width: Some(LIST_MIN_WIDTH),
+            row_height: Some(LIST_ROW),
+            inactive_selection: true,
             ..PopupOptions::default()
         };
         let menu = ContextMenu::popup(items, options, window, cx);
@@ -293,6 +309,7 @@ impl WelcomeView {
                 "command": t.command,
                 "enabled": t.command.is_some(),
             })).collect::<Vec<_>>(),
+            "focused_tile": self.focused_tile,
             "theme": format!("{THEME_PREFIX}{}", Self::theme_name(cx)),
             "keymap": format!("{KEYMAP_PREFIX}{}", keymaps::active_name(cx)),
             "list": self.list.as_ref().map(|l| json!({
@@ -313,8 +330,12 @@ impl WelcomeView {
         }
     }
 
-    fn render_tile(&self, ix: usize, tile: WelcomeTile, cx: &App) -> AnyElement {
+    fn render_tile(&self, ix: usize, tile: WelcomeTile, window: &Window, cx: &App) -> AnyElement {
         let theme = cx.theme();
+        // Focused: the pressed background and the focus ring
+        // (`backgroundFocused`, `focusOutline`).
+        let focus = &self.tile_focus[ix];
+        let focused = focus.is_focused(window);
         let icon = Icon::new(tile.icon).size(px(TILE_ICON));
         let icon = match tile.tint {
             TileTint::Accent => icon.tint(theme.color(UiRole::TextLink)),
@@ -330,7 +351,18 @@ impl WelcomeView {
             .px(px(16.0))
             .py(px(12.0))
             .rounded(px(TILE_RADIUS))
-            .bg(Self::wash(0.07, 0.05, cx))
+            .track_focus(focus)
+            .border(px(FOCUS_WIDTH))
+            .border_color(if focused {
+                theme.color(UiRole::Focus)
+            } else {
+                gpui::transparent_black()
+            })
+            .bg(if focused {
+                Self::wash(0.18, 0.12, cx)
+            } else {
+                Self::wash(0.07, 0.05, cx)
+            })
             .flex()
             .flex_col()
             .items_center()
@@ -352,7 +384,7 @@ impl WelcomeView {
                     .child(tile.label),
             )
             .when_some(tile.command, |d, command| {
-                d.hover(|s| s.bg(Self::wash(0.12, 0.08, cx)))
+                d.when(!focused, |d| d.hover(|s| s.bg(Self::wash(0.12, 0.08, cx))))
                     .active(|s| s.bg(Self::wash(0.18, 0.12, cx)))
                     .on_click(move |_: &ClickEvent, window, cx| {
                         let args = tile
@@ -469,8 +501,9 @@ impl TabView for WelcomeView {
 }
 
 impl Focusable for WelcomeView {
+    /// The first tile's: selecting the tab focuses it.
     fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
+        self.tile_focus.first().unwrap_or(&self.focus).clone()
     }
 }
 
@@ -480,24 +513,22 @@ impl Render for WelcomeView {
         let background = theme.color(UiRole::EditorBackground);
         let text = theme.color(UiRole::Text);
         let subtitle = theme.color(UiRole::TextDisabled);
-        let rows: Vec<AnyElement> = self
-            .tiles
-            .chunks(TILES_PER_ROW)
-            .enumerate()
-            .map(|(row, tiles)| {
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(TILE_GAP))
-                    .children(
-                        tiles
-                            .iter()
-                            .enumerate()
-                            .map(|(i, t)| self.render_tile(row * TILES_PER_ROW + i, *t, cx)),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+        self.focused_tile = self.tile_focus.iter().position(|f| f.is_focused(window));
+        let rows: Vec<AnyElement> =
+            self.tiles
+                .chunks(TILES_PER_ROW)
+                .enumerate()
+                .map(|(row, tiles)| {
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(TILE_GAP))
+                        .children(tiles.iter().enumerate().map(|(i, t)| {
+                            self.render_tile(row * TILES_PER_ROW + i, *t, window, cx)
+                        }))
+                        .into_any_element()
+                })
+                .collect();
         let combos = [
             self.render_combo(Combo::Theme, cx),
             self.render_combo(Combo::Keymap, cx),
