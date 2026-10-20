@@ -100,6 +100,15 @@ const ICON_GAP: f32 = 12.0;
 /// The spinner's arrow buttons, each: width and height.
 const SPINNER_ARROW: (f32, f32) = (20.0, 13.0);
 
+/// How a one-line field of the page is drawn.
+#[derive(Clone, Copy)]
+enum FieldKind {
+    /// Not supported yet: dim, takes no clicks.
+    Disabled,
+    /// The timeout's spinner; `error`: its text is no number in range.
+    Spinner { error: bool },
+}
+
 /// The keys of `settings.edit`.
 mod field {
     pub const ATTACH_TO_SUBPROCESS: &str = "attach-to-subprocess";
@@ -371,17 +380,19 @@ impl DebuggerPage {
         settings_ui::search::spotlight(label, row, cx)
     }
 
-    /// A one-line field in its frame, 28 high, disabled when not `enabled`.
+    /// A one-line field in its frame.
     fn framed(
         &self,
         id: &'static str,
         field: &Entity<Editor>,
-        enabled: bool,
-        error: bool,
-        spinner: bool,
+        kind: FieldKind,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let (enabled, error, spinner) = match kind {
+            FieldKind::Disabled => (false, false, false),
+            FieldKind::Spinner { error } => (true, error, true),
+        };
         let theme = cx.theme();
         let mut frame = editor::field::frame(field, true, error, window, cx);
         if spinner {
@@ -788,9 +799,7 @@ impl Render for DebuggerPage {
                 self.framed(
                     "debugger-attach-filter",
                     &attach_filter,
-                    false,
-                    false,
-                    false,
+                    FieldKind::Disabled,
                     window,
                     cx,
                 )
@@ -800,9 +809,9 @@ impl Render for DebuggerPage {
                 self.framed(
                     "debugger-timeout",
                     &timeout,
-                    true,
-                    timeout_error,
-                    true,
+                    FieldKind::Spinner {
+                        error: timeout_error,
+                    },
                     window,
                     cx,
                 )
