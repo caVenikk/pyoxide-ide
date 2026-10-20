@@ -24,7 +24,9 @@
 //! executor. Answers that come after the program moved on (a stack trace
 //! of the previous stop) are dropped, as is the answer to a resume or a
 //! step handled after the next stop (the client runs a callback attached
-//! late on the caller's thread, after the events that followed it).
+//! late on the caller's thread, after the events that followed it). The ids
+//! of a breakpoints answer handled after a stop that hit one of them still
+//! count as its hit (a temporary breakpoint goes).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -230,6 +232,12 @@ struct Data {
     sent: HashMap<PathBuf, Vec<BreakpointId>>,
     /// The adapter's breakpoint ids.
     adapter_ids: HashMap<i64, BreakpointId>,
+    /// `setBreakpoints` requests not answered yet.
+    breakpoint_requests: usize,
+    /// Breakpoints a shown stop hit whose adapter ids no answer had told
+    /// yet, while a request was open: the answer may be handled after the
+    /// stop (see `stops`), and then it still counts the stop as their hit.
+    late_hits: Vec<(Process, i64)>,
     exit_code: Option<i64>,
     error: Option<String>,
     log_tail: String,
@@ -367,6 +375,8 @@ impl Session {
                     statuses: HashMap::new(),
                     sent: HashMap::new(),
                     adapter_ids: HashMap::new(),
+                    breakpoint_requests: 0,
+                    late_hits: Vec::new(),
                     exit_code: None,
                     error: None,
                     log_tail: String::new(),
@@ -708,13 +718,16 @@ impl Session {
             }
         }
         let weak = Arc::downgrade(&self.inner);
+        lock(&self.inner.data).breakpoint_requests += 1;
         client.set_breakpoints(file, &list).on_done(move |result| {
             let Some(session) = weak.upgrade().map(|inner| Session { inner }) else {
                 return;
             };
+            let mut late = Vec::new();
             {
                 let mut data = lock(&session.inner.data);
                 let data = &mut *data;
+                data.breakpoint_requests = data.breakpoint_requests.saturating_sub(1);
                 let statuses: Vec<(BreakpointId, Option<i64>, BreakpointStatus)> = match result {
                     Ok(answers) => ids
                         .iter()
@@ -754,6 +767,14 @@ impl Session {
                 for (id, adapter_id, status) in statuses {
                     if let Some(adapter_id) = adapter_id {
                         adapter_ids.insert(adapter_id, id);
+                        if let Some(at) = data
+                            .late_hits
+                            .iter()
+                            .position(|hit| *hit == (process, adapter_id))
+                        {
+                            data.late_hits.remove(at);
+                            late.push(id);
+                        }
                     }
                     let keep = process != Process::Program
                         && !status.verified
@@ -762,6 +783,14 @@ impl Session {
                         data.statuses.insert(id, status);
                     }
                 }
+                if data.breakpoint_requests == 0 {
+                    data.late_hits.clear();
+                }
+            }
+            if !late.is_empty()
+                && let Some(debugger) = session.inner.debugger.upgrade()
+            {
+                debugger.remove_temporary(&late);
             }
             session.emit(DebuggerEvent::BreakpointsChanged);
         });
@@ -903,11 +932,17 @@ impl Session {
                     .find(|s| s.key == key)
                     .map(|s| &s.adapter_ids),
             };
-            let hits: Vec<BreakpointId> = stopped
-                .hit_breakpoint_ids
-                .iter()
-                .filter_map(|id| adapter_ids.and_then(|ids| ids.get(id)).copied())
-                .collect();
+            let mut hits: Vec<BreakpointId> = Vec::new();
+            let mut unknown = Vec::new();
+            for id in &stopped.hit_breakpoint_ids {
+                match adapter_ids.and_then(|ids| ids.get(id)) {
+                    Some(hit) => hits.push(*hit),
+                    None => unknown.push((process, *id)),
+                }
+            }
+            if data.breakpoint_requests > 0 {
+                data.late_hits.extend(unknown);
+            }
             (
                 data.generation,
                 data.selected_thread,

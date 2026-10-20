@@ -59,10 +59,10 @@ fn write(root: &Path, rel: &str, text: &str) {
 const MAIN: &str = "def describe(items):\n    summary = {\"count\": len(items), \"sum\": 0}\n    for value in items:\n        summary[\"sum\"] += value\n    return summary\n\n\ndef fail(value):\n    if value > 2:\n        raise ValueError(value)\n    return value\n\n\ndef total(items):\n    return sum(items)\n\n\nif __name__ == \"__main__\":\n    numbers = [1, 2, 3, 4]\n    print(describe(numbers))\n    print(total(numbers))\n";
 
 fn repository(root: &Path) {
-    git(root, &["init", "-q", "-b", "main"]);
+    global_config();
+    git::testing::init(root);
     for (key, value) in [
         ("commit.gpgsign", "false"),
-        ("core.autocrlf", "false"),
         ("core.fsmonitor", "false"),
         ("user.name", "Test"),
         ("user.email", "test@example.invalid"),

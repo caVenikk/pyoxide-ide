@@ -62,12 +62,8 @@ fn temp() -> (tempfile::TempDir, PathBuf) {
 fn repository(identity: bool) -> (tempfile::TempDir, PathBuf) {
     global_config();
     let (tmp, dir) = temp();
-    git(&dir, &["init", "-q", "-b", "main"]);
-    for (key, value) in [
-        ("core.autocrlf", "false"),
-        ("core.fsmonitor", "false"),
-        ("commit.gpgsign", "false"),
-    ] {
+    git::testing::init(&dir);
+    for (key, value) in [("core.fsmonitor", "false"), ("commit.gpgsign", "false")] {
         git(&dir, &["config", key, value]);
     }
     for f in ["a.py", "b.py", "c.py", "notes.txt"] {

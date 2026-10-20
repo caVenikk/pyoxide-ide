@@ -331,6 +331,48 @@ fn changes_reach_a_running_session_and_stop_ends_it() {
     assert!(debugger.current_session().is_none());
 }
 
+/// The ids a `setBreakpoints` answer tells are recorded after a stop that
+/// hit one of them (the client runs a callback attached after its answer
+/// came on the caller's thread, after the events that followed the answer):
+/// the temporary breakpoint still goes. The adapter here sends the stop
+/// before the answer.
+#[test]
+fn a_late_breakpoints_answer_still_removes_the_temporary_breakpoint_it_hit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let util = root.join("util.py");
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.extend([
+        json!({"ignore": ["threads", "stackTrace"]}),
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "util.py"},
+            "breakpoints": [{"line": 5}]}}),
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1, "hitBreakpointIds": [42]}}),
+        json!({"respond": {"breakpoints": [{"verified": true, "line": 5, "id": 42}]}}),
+        // The temporary breakpoint is gone: the file's breakpoints again.
+        json!({"expect": "setBreakpoints", "arguments": {"source": {"name": "util.py"},
+            "breakpoints": []}}),
+        json!({"respond": {"breakpoints": []}}),
+        json!({"expect": "terminate"}),
+        json!({"respond": null}),
+        json!({"expect": "disconnect", "arguments": {"terminateDebuggee": true}}),
+        json!({"respond": null}),
+    ]);
+    let debugger = Debugger::open(root, Provider::with(Value::Array(script)));
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    wait_phase(&session, Phase::Running);
+    debugger.toggle_breakpoint(&util, 5, true);
+    wait_phase(&session, Phase::Suspended);
+    wait_until("the temporary breakpoint goes", || {
+        debugger.breakpoints().at(&util, 5).is_none()
+    });
+    assert!(debugger.breakpoints().at(&main, 3).is_some());
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
 /// Run to Cursor adds a breakpoint of the session on the line, Force Run to
 /// Cursor sends only that one and no exception filter; the next stop takes
 /// them back. Step Into My Code sends the product's request before the

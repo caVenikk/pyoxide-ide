@@ -25,7 +25,7 @@ fn git(dir: &Path, args: &[&str]) {
             "-c",
             "user.email=test@example.invalid",
         ])
-        .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
         .output()
@@ -79,7 +79,7 @@ fn open(cx: &mut TestAppContext, prepare: impl FnOnce(&Path)) -> (H<'_>, tempfil
     support::allow_processes(cx);
     let dir = tempfile::tempdir().unwrap();
     let root = native_path::canonicalize(dir.path()).unwrap();
-    git(&root, &["init", "-q", "-b", "main"]);
+    git::testing::init(&root);
     std::fs::write(root.join("a.py"), "a = 1\n").unwrap();
     git(&root, &["add", "a.py"]);
     git(&root, &["commit", "-q", "-m", "first"]);
