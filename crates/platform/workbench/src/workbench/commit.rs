@@ -5,7 +5,8 @@
 //! Name Is Not Defined" and "Commit in Detached HEAD" when they apply),
 //! the last commit for Amend, rollback ("Rollback Changes"), Add to VCS,
 //! opening a file or its diff. The commit message draft and the recent
-//! messages live in the personal project state (`[vcs]`, ADR 0009).
+//! messages live in the personal project state (`[vcs]`, ADR 0009),
+//! imported once from the reference's `.idea/workspace.xml`.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -39,6 +40,7 @@ const TABLE: &str = "vcs";
 const DRAFT_KEY: &str = "commit-message";
 const RECENT_KEY: &str = "recent-commit-messages";
 const SIGN_OFF_KEY: &str = "sign-off-commit";
+const IMPORTED_KEY: &str = "imported-from-idea";
 /// Edits of the message are written this long after the last one.
 const DRAFT_DELAY: Duration = Duration::from_millis(500);
 
@@ -79,8 +81,12 @@ pub(super) struct CommitUi {
     delete_added: bool,
     /// The `HEAD` whose last commit the view has.
     head: Option<String>,
-    _draft_save: Option<Task<()>>,
+    /// The draft written a moment after the last edit: the project's root
+    /// and the timer.
+    draft_save: Option<(PathBuf, Task<()>)>,
     _subscription: Subscription,
+    /// A draft not written yet is written before the app quits.
+    _quit: Subscription,
 }
 
 impl CommitUi {
@@ -116,13 +122,22 @@ impl CommitUi {
         let subscription = cx.subscribe_in(&view, window, |this, _, event, window, cx| {
             this.commit_event(event.clone(), window, cx)
         });
+        let quit = cx.on_app_quit(|this, cx| {
+            let write = this.flush_draft(cx);
+            async move {
+                if let Some(write) = write {
+                    write.await;
+                }
+            }
+        });
         Self {
             view,
             dialog: None,
             delete_added: false,
             head: None,
-            _draft_save: None,
+            draft_save: None,
             _subscription: subscription,
+            _quit: quit,
         }
     }
 }
@@ -144,6 +159,31 @@ fn detached_message(root: &Path) -> String {
          checkout a branch not to lose your work.\nOtherwise you risk losing your changes.",
         root.display()
     )
+}
+
+/// The draft of a project: its own, or once, the reference's unsent message
+/// with its recent messages (`.idea/workspace.xml`), which stay ours from
+/// then on. Blocking: called off the UI thread.
+fn load_draft(root: &Path) -> Option<String> {
+    use project::workspace as ws;
+    let draft = ws::load_value(root, TABLE, DRAFT_KEY).ok().flatten();
+    if ws::load_flag(root, TABLE, IMPORTED_KEY).unwrap_or(true) {
+        return draft;
+    }
+    let Some(theirs) = git::idea::commit_messages(root) else {
+        return draft;
+    };
+    let draft = draft.or(theirs.draft);
+    let _ = ws::save_value(root, TABLE, DRAFT_KEY, draft.as_deref());
+    if ws::load_list(root, TABLE, RECENT_KEY).is_ok_and(|r| r.is_empty())
+        && !theirs.recent.is_empty()
+    {
+        let mut recent = theirs.recent;
+        recent.truncate(RECENT_MESSAGES);
+        let _ = ws::save_list(root, TABLE, RECENT_KEY, Some(&recent));
+    }
+    let _ = ws::save_flag(root, TABLE, IMPORTED_KEY, true);
+    draft
 }
 
 /// The user's name for the user name dialog (`SystemProperties.getUserName`).
@@ -220,13 +260,16 @@ impl Workbench {
         .detach();
     }
 
-    /// A project was opened: its draft and Sign-off commit come back.
+    /// A project was opened: its draft and Sign-off commit come back (the
+    /// draft of the project before written first).
     pub(super) fn commit_project_opened(&mut self, root: &Path, cx: &mut Context<Self>) {
         let root = root.to_owned();
+        let written = self.flush_draft(cx);
         let load = cx.background_spawn(async move {
-            let draft = project::workspace::load_value(&root, TABLE, DRAFT_KEY)
-                .ok()
-                .flatten();
+            if let Some(written) = written {
+                written.await;
+            }
+            let draft = load_draft(&root);
             let sign_off = project::workspace::load_value(&root, TABLE, SIGN_OFF_KEY)
                 .ok()
                 .flatten();
@@ -271,19 +314,27 @@ impl Workbench {
         let Some(root) = self.file_sync_root().map(Path::to_path_buf) else {
             return;
         };
-        self.commit_ui._draft_save = Some(cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DRAFT_DELAY).await;
-            let Ok(text) =
-                this.update(cx, |this, cx| this.commit_ui.view.read(cx).message_text(cx))
-            else {
-                return;
-            };
-            cx.background_spawn(async move {
-                let value = (!text.is_empty()).then_some(text.as_str());
-                let _ = project::workspace::save_value(&root, TABLE, DRAFT_KEY, value);
-            })
-            .await;
-        }));
+            // The write outlives this timer, which the flush drops.
+            let _ = this.update(cx, |this, cx| {
+                if let Some(write) = this.flush_draft(cx) {
+                    write.detach();
+                }
+            });
+        });
+        self.commit_ui.draft_save = Some((root, task));
+    }
+
+    /// Writes the draft waiting for its moment now (the app quits, another
+    /// project opens); the task ends when it is written.
+    fn flush_draft(&mut self, cx: &mut Context<Self>) -> Option<Task<()>> {
+        let (root, _timer) = self.commit_ui.draft_save.take()?;
+        let text = self.commit_ui.view.read(cx).message_text(cx);
+        Some(cx.background_spawn(async move {
+            let value = (!text.is_empty()).then_some(text.as_str());
+            let _ = project::workspace::save_value(&root, TABLE, DRAFT_KEY, value);
+        }))
     }
 
     /// Writes the draft now (a commit cleared it) and puts messages first
@@ -293,7 +344,7 @@ impl Workbench {
         let Some(root) = self.file_sync_root().map(Path::to_path_buf) else {
             return Task::ready(());
         };
-        self.commit_ui._draft_save = None;
+        self.commit_ui.draft_save = None;
         let draft = self.commit_ui.view.read(cx).message_text(cx);
         cx.background_spawn(async move {
             let value = (!draft.is_empty()).then_some(draft.as_str());

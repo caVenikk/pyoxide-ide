@@ -105,6 +105,30 @@ pub fn save_toml_values(
     save_items(root, table, items)
 }
 
+/// The boolean value of `key` in `[table]` (a dotted path); `false` when
+/// the file, the table or the key is missing, or the value is not a
+/// boolean.
+pub fn load_flag(root: &Path, table: &str, key: &str) -> Result<bool, StoreError> {
+    let path = workspace_file(root);
+    let Some(doc) = read_document(&path)? else {
+        return Ok(false);
+    };
+    let Some(table) = find_table(&doc, table, &path)? else {
+        return Ok(false);
+    };
+    Ok(table.get(key).and_then(Item::as_bool).unwrap_or(false))
+}
+
+/// Sets `key` in `[table]` to `true`, or removes it with `false`, under
+/// the rules of [`save_value`] (a one-time import marks itself done so).
+pub fn save_flag(root: &Path, table: &str, key: &str, value: bool) -> Result<bool, StoreError> {
+    save_items(
+        root,
+        table,
+        vec![(key, value.then(|| toml_edit::value(true)))],
+    )
+}
+
 /// The list of strings under `key` in `[table]` (a dotted path); empty
 /// when the file, the table or the key is missing, values that are not
 /// strings left out.
@@ -360,6 +384,12 @@ mod tests {
         );
         assert!(save_list(root, "vcs", "recent", None).unwrap());
         assert!(load_list(root, "vcs", "recent").unwrap().is_empty());
+        // A flag.
+        assert!(!load_flag(root, "vcs", "imported").unwrap());
+        assert!(save_flag(root, "vcs", "imported", true).unwrap());
+        assert!(load_flag(root, "vcs", "imported").unwrap());
+        assert!(save_flag(root, "vcs", "imported", false).unwrap());
+        assert!(!load_flag(root, "vcs", "imported").unwrap());
     }
 
     #[test]

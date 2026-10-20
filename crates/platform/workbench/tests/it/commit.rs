@@ -636,3 +636,63 @@ fn the_draft_is_kept_and_a_folder_without_git_offers_one(cx: &mut TestAppContext
     let commit = h.wait("no repository", |c| c["state"] == "no_repository");
     assert_eq!(commit["message"], "");
 }
+
+/// The reference's personal state with an unsent message and two recent
+/// ones (`ChangeListManager`, `VcsManagerConfiguration`).
+const REFERENCE_WORKSPACE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="1" name="Changes" comment="Fix the parser&#10;&#10;Details" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="first" />
+    <MESSAGE value="second" />
+  </component>
+</project>
+"#;
+
+#[gpui::test]
+fn the_references_draft_is_imported_once_and_an_edit_survives_a_reopen(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, |root| {
+        repository(root, true);
+        write(root, ".idea/workspace.xml", REFERENCE_WORKSPACE);
+    });
+    h.wait("the reference's draft", |c| {
+        c["message"] == "Fix the parser\n\nDetails"
+    });
+    let root = h.root.clone();
+    let state = |key: &str| project::workspace::load_value(&root, "vcs", key).unwrap();
+    assert_eq!(
+        state("commit-message").as_deref(),
+        Some("Fix the parser\n\nDetails")
+    );
+    assert!(project::workspace::load_flag(&root, "vcs", "imported-from-idea").unwrap());
+    assert_eq!(
+        project::workspace::load_list(&root, "vcs", "recent-commit-messages").unwrap(),
+        ["second", "first"]
+    );
+
+    // An edit, and at once another project: the draft is written before
+    // the other one's comes.
+    h.invoke("vcs.commit.set-message", json!({ "text": "Ours" }));
+    let other = tempfile::tempdir().unwrap();
+    let other = native_path::canonicalize(other.path()).unwrap();
+    write(&other, "x.py", "x\n");
+    h.invoke(
+        "project.open-folder",
+        json!({ "path": other.display().to_string() }),
+    );
+    h.wait("no repository", |c| {
+        c["state"] == "no_repository" && c["message"] == ""
+    });
+    assert_eq!(state("commit-message").as_deref(), Some("Ours"));
+
+    // Back: ours, not the reference's again.
+    h.invoke(
+        "project.open-folder",
+        json!({ "path": root.display().to_string() }),
+    );
+    h.wait("our draft", |c| {
+        c["state"] == "ready" && c["message"] == "Ours"
+    });
+}
