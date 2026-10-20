@@ -717,6 +717,7 @@ impl Workbench {
                 "root": p.root().display().to_string(),
             })),
             "tree": self.panel.read(cx).state_json(cx),
+            "projects_and_files": self.panel.read(cx).welcome_state(cx),
             "tool_windows": self.tool_windows.state_json(),
             "tool_window_areas": self.tool_windows.areas_json(),
             "title_path": self.title_path(cx),
@@ -1827,6 +1828,9 @@ impl Workbench {
 
     fn render_project(&self, width: Pixels, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
+        // Without a project: the Welcome screen's "Projects and Files",
+        // whose header has no buttons.
+        let tree = self.panel.read(cx).project().is_some();
         let header_h = theme.metric(Metric::ToolWindowHeaderHeight);
         let action = |id: &'static str, icon: IconName, title: &'static str| {
             icon_button(id, icon, px(24.0), px(16.0), false, cx).tooltip(Tooltip::text(title, None))
@@ -1855,32 +1859,41 @@ impl Workbench {
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
                             .whitespace_nowrap()
-                            .child("Project"),
+                            .child(if tree {
+                                "Project"
+                            } else {
+                                crate::welcome::projects::TITLE
+                            }),
                     )
                     .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0))),
             )
-            .child(div().flex_1())
-            .child(
-                action("project-locate", IconName::LOCATE, "Select Opened File")
-                    .on_click(command(Box::new(LocateFile))),
-            )
-            .child(
-                action("project-expand", IconName::EXPAND_ALL, "Expand All")
-                    .on_click(command(Box::new(project_panel::ExpandAll))),
-            )
-            .child(
-                action("project-collapse", IconName::COLLAPSE_ALL, "Collapse All")
-                    .on_click(command(Box::new(project_panel::CollapseAll))),
-            )
-            .child(action(
-                "project-options",
-                IconName::MORE_VERTICAL,
-                "Options",
-            ))
-            .child(
-                action("project-hide", IconName::HIDE, "Hide")
-                    .on_click(command(Box::new(HideToolWindow))),
-            );
+            .child(div().flex_1());
+        let header = if !tree {
+            header
+        } else {
+            header
+                .child(
+                    action("project-locate", IconName::LOCATE, "Select Opened File")
+                        .on_click(command(Box::new(LocateFile))),
+                )
+                .child(
+                    action("project-expand", IconName::EXPAND_ALL, "Expand All")
+                        .on_click(command(Box::new(project_panel::ExpandAll))),
+                )
+                .child(
+                    action("project-collapse", IconName::COLLAPSE_ALL, "Collapse All")
+                        .on_click(command(Box::new(project_panel::CollapseAll))),
+                )
+                .child(action(
+                    "project-options",
+                    IconName::MORE_VERTICAL,
+                    "Options",
+                ))
+                .child(
+                    action("project-hide", IconName::HIDE, "Hide")
+                        .on_click(command(Box::new(HideToolWindow))),
+                )
+        };
         island(cx, UiRole::ToolWindow)
             .id("project-tool-window")
             .debug_selector(|| "project-tool-window".into())

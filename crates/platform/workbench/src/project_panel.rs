@@ -145,6 +145,9 @@ pub struct ProjectPanel {
     roots_dirty: bool,
     /// Version control statuses of the rows (#169).
     file_colors: vcs_ui::FileColors,
+    /// "Projects and Files", shown while no project is open (made when
+    /// first drawn).
+    welcome: Option<Entity<crate::welcome::projects::WelcomeProjects>>,
 }
 
 impl EventEmitter<PanelEvent> for ProjectPanel {}
@@ -181,6 +184,15 @@ impl ProjectPanel {
             rules: roots::ProductRules::default(),
             roots_dirty: false,
             file_colors: vcs_ui::FileColors::default(),
+            welcome: None,
+        }
+    }
+
+    /// "Projects and Files" while no project is open, for `workbench.state`.
+    pub fn welcome_state(&self, cx: &App) -> serde_json::Value {
+        match (&self.tree, &self.welcome) {
+            (None, Some(welcome)) => welcome.read(cx).state_json(cx),
+            _ => serde_json::Value::Null,
         }
     }
 
@@ -1022,8 +1034,6 @@ impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focused = self.focus.contains_focused(window, cx);
         self.focus_seen.set(focused);
-        let theme = cx.theme();
-        let muted = theme.color(UiRole::TextMuted);
         let count = self.tree.as_ref().map_or(0, |t| t.rows().len());
         let el = div()
             .id("project-tree")
@@ -1036,12 +1046,14 @@ impl Render for ProjectPanel {
             .pt(px(TREE_TOP));
         let el = Self::bind_actions(el, cx);
         if self.tree.is_none() {
-            return el
-                .items_center()
-                .justify_center()
-                .text_color(muted)
-                .child("No project is open")
-                .into_any_element();
+            // The reference's Welcome screen left panel.
+            let welcome = self
+                .welcome
+                .get_or_insert_with(|| {
+                    cx.new(|cx| crate::welcome::projects::WelcomeProjects::new(window, cx))
+                })
+                .clone();
+            return el.pt_0().child(welcome).into_any_element();
         }
         let mut rows = uniform_list(
             "project-rows",

@@ -181,3 +181,44 @@ fn the_welcome_tab_closes_and_comes_back(cx: &mut TestAppContext) {
     h.invoke("welcome.theme", json!(null));
     assert_eq!(h.welcome()["list"]["combo"], json!("theme"));
 }
+
+#[gpui::test]
+fn projects_and_files_shows_while_no_project_is_open(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    let panel = h.state()["projects_and_files"].clone();
+    assert_eq!(panel["title"], json!("Projects and Files"), "{panel}");
+    let buttons: Vec<(String, bool)> = panel["buttons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                b["label"].as_str().unwrap().to_owned(),
+                b["enabled"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        buttons,
+        [
+            ("Open\u{2026}".to_owned(), true),
+            ("New\u{2026}".to_owned(), false),
+            ("Clone Repository\u{2026}".to_owned(), false),
+        ]
+    );
+    assert_eq!(panel["search"], json!(""));
+    assert_eq!(panel["projects"], json!([]));
+    assert_eq!(panel["empty_text"], json!("No recent projects"));
+
+    // A project: the tree instead.
+    let project = h._dir.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("a.py"), "").unwrap();
+    h.invoke(
+        "project.open-folder",
+        json!({ "path": project.to_string_lossy() }),
+    );
+    let s = h.state();
+    assert_eq!(s["projects_and_files"], Value::Null, "{s}");
+    assert!(s["tree"]["rows"].is_array(), "{s}");
+}

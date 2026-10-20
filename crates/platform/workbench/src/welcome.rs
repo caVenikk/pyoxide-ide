@@ -28,6 +28,8 @@ use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
+pub mod projects;
+
 use crate::keymap::active::{self as keymaps, SwitchKeymap};
 use crate::tab_view::TabView;
 
