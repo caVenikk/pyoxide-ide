@@ -24,8 +24,13 @@ impl Sandbox {
     }
 
     fn pyoxide(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_pyoxide"))
-            .args(args)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pyoxide"));
+        // The developer's `UV_PYTHON`, `VIRTUAL_ENV` and the like must not
+        // decide which Python uv picks for a test project.
+        for name in py_env::process::steering_env() {
+            cmd.env_remove(name);
+        }
+        cmd.args(args)
             .current_dir(self.dir.path())
             .env("PYOXIDE_DB_PROFILES", self.path("profiles.toml"))
             .env("UV_OFFLINE", "1")

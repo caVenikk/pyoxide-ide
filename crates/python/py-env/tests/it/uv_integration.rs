@@ -40,6 +40,9 @@ fn config(cache: &Path, offline: bool) -> UvConfig {
         no_config: true,
         cache_dir: Some(cache.to_path_buf()),
         python_install_dir: None,
+        // The developer's `UV_PYTHON`, `VIRTUAL_ENV` and the like must not
+        // decide which Python uv picks for a test project.
+        hermetic: true,
     }
 }
 
@@ -763,6 +766,7 @@ async fn python_install_goes_to_the_configured_directory() {
         python_install_dir: Some(install.clone()),
         cache_dir: Some(dir.path().join("cache")),
         no_config: true,
+        hermetic: true,
         ..UvConfig::default()
     }) else {
         return;
