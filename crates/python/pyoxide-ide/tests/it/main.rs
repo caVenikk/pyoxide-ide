@@ -4,6 +4,7 @@
 //! `tests/`.
 
 mod debug_sessions;
+mod debugger_settings;
 mod interpreter;
 mod live_services;
 mod run_configurations;
