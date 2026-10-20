@@ -18,28 +18,59 @@ use crate::editor::Editor;
 const OUTER: f32 = 6.4;
 const NUMBERS_TO_TEXT: f32 = 46.0;
 const MIRRORED_NUMBERS_TO_TEXT: f32 = 42.0;
+/// One side alone has no action column: its text is this far after the
+/// numbers.
+const PLAIN_NUMBERS_TO_TEXT: f32 = 26.5;
 /// The action column (`>>`, the check boxes: 14 px icons) ends this far
 /// before the text; in a mirrored gutter it starts this far after it.
 pub const ACTION_SIZE: f32 = 14.0;
 const ACTION_TO_TEXT: f32 = 24.0;
 const MIRRORED_ACTION_FROM_TEXT: f32 = 19.0;
 
+/// The gutter of a diff's editor ([`Editor::set_diff_gutter`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiffGutter {
+    /// The editor's own gutter.
+    #[default]
+    Off,
+    /// One side shown alone (`SimpleOnesideDiffViewer`): the numbers and
+    /// the separator, no column of change actions.
+    Plain,
+    /// A side of a side-by-side diff: the numbers next to the divider and
+    /// the column of the changes' actions.
+    Actions,
+}
+
 /// Where a view scrolls once it is laid out, from its row height and its
 /// height ([`Editor::scroll_on_layout`]).
 pub type LayoutScroll = Box<dyn FnOnce(Pixels, Pixels) -> Option<Point<Pixels>>>;
 
-/// The diff gutter's width for `digits` digits of `number_width` each.
-pub(crate) fn diff_gutter_width(number_width: Pixels, digits: usize) -> Pixels {
-    px(OUTER + NUMBERS_TO_TEXT) + number_width * digits as f32
+/// The diff gutter's width for `digits` digits of `number_width` each,
+/// with the action column or without.
+pub(crate) fn diff_gutter_width(number_width: Pixels, digits: usize, actions: bool) -> Pixels {
+    px(OUTER + numbers_to_text(actions)) + number_width * digits as f32
+}
+
+fn numbers_to_text(actions: bool) -> f32 {
+    if actions {
+        NUMBERS_TO_TEXT
+    } else {
+        PLAIN_NUMBERS_TO_TEXT
+    }
 }
 
 /// Where the line numbers of a diff gutter go: the right edge (normal) or
 /// the left edge (mirrored), from the gutter's left edge `gutter_x`.
-pub(crate) fn diff_numbers_x(gutter_x: Pixels, gutter_width: Pixels, mirrored: bool) -> Pixels {
+pub(crate) fn diff_numbers_x(
+    gutter_x: Pixels,
+    gutter_width: Pixels,
+    mirrored: bool,
+    actions: bool,
+) -> Pixels {
     if mirrored {
         gutter_x + px(MIRRORED_NUMBERS_TO_TEXT)
     } else {
-        gutter_x + gutter_width - px(NUMBERS_TO_TEXT)
+        gutter_x + gutter_width - px(numbers_to_text(actions))
     }
 }
 
@@ -59,14 +90,14 @@ impl Editor {
     /// between them and the text, a separator line before the text, and
     /// the text right after it (no breakpoints, change markers or
     /// folding area).
-    pub fn set_diff_gutter(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.diff_gutter != on {
-            self.diff_gutter = on;
+    pub fn set_diff_gutter(&mut self, gutter: DiffGutter, cx: &mut Context<Self>) {
+        if self.diff_gutter != gutter {
+            self.diff_gutter = gutter;
             cx.notify();
         }
     }
 
-    pub fn has_diff_gutter(&self) -> bool {
+    pub fn diff_gutter(&self) -> DiffGutter {
         self.diff_gutter
     }
 
@@ -75,7 +106,10 @@ impl Editor {
     /// the first frame or without a diff gutter. A title above the editor
     /// puts its check box there.
     pub fn diff_action_offset(&self) -> Option<Pixels> {
-        let l = self.layout.as_ref().filter(|_| self.diff_gutter)?;
+        let l = self
+            .layout
+            .as_ref()
+            .filter(|_| self.diff_gutter == DiffGutter::Actions)?;
         Some(diff_action_x(l.text_x, l.text_end, self.mirrored) - l.bounds.left())
     }
 

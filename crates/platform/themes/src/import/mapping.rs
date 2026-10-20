@@ -89,6 +89,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Key("Table.hoverBackground"),
         ],
         Pressed => &[Key("ActionButton.pressedBackground")],
+        SegmentedSelected => &[Ui("SegmentedButton.selectedButtonColor")],
+        SegmentedSelectedBorder => &[Ui("SegmentedButton.selectedStartBorderColor")],
         Selection => &[
             Ui("List.selectionBackground"),
             Ui("Tree.selectionBackground"),

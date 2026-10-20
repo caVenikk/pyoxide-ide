@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use editor::side_by_side::DiffGutter;
 use editor::{
     Decoration, DiffHighlights, Editor, EditorConfig, EditorEvent, GutterFill, Highlighter,
 };
@@ -62,7 +63,7 @@ const SEPARATOR_ROOM: f32 = 3.5;
 const SEPARATOR_HEIGHT: f32 = 17.0;
 const FILES_GAP: f32 = 1.5;
 const STATUS_GAP: f32 = 15.0;
-const MODE_SIZE: (f32, f32) = (50.0, 24.0);
+const MODE_SIZE: (f32, f32) = (48.0, 26.0);
 const MODE_GAP: f32 = 8.0;
 /// The titles (`DiffContentPanel`, measured on the reference): their
 /// height above the tear line of 1 px; the room at their ends
@@ -194,7 +195,7 @@ impl DiffView {
             e.update(cx, |e, cx| {
                 e.set_caret_row_shown(false, cx);
                 e.set_room_after_end(Some(ROOM_AFTER_END), cx);
-                e.set_diff_gutter(true, cx);
+                e.set_diff_gutter(DiffGutter::Actions, cx);
             });
         }
         right.update(cx, |e, cx| {
@@ -267,6 +268,14 @@ impl DiffView {
             e.set_scroll_position(point(px(0.0), px(0.0)), cx);
             e.set_mirrored(one_side.is_none(), cx);
         });
+        let gutter = if one_side.is_some() {
+            DiffGutter::Plain
+        } else {
+            DiffGutter::Actions
+        };
+        for e in [&self.left, &self.right] {
+            e.update(cx, |e, cx| e.set_diff_gutter(gutter, cx));
+        }
         self.right.update(cx, |e, cx| {
             e.set_soft_wraps(false, cx);
             e.set_selections(SelectionSet::caret(0), cx);
@@ -813,15 +822,12 @@ impl DiffView {
     // ---- drawing --------------------------------------------------------------
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (muted, link, separator, pressed, mode_border, radius, background, island_border) = {
+        let (muted, link, separator, background, island_border) = {
             let theme = cx.theme();
             (
                 theme.color(UiRole::TextMuted),
                 theme.color(UiRole::TextLink),
                 theme.color(UiRole::Divider),
-                theme.color(UiRole::Pressed),
-                theme.color(UiRole::BorderInput),
-                theme.metric(themes::Metric::CornerRadius),
                 // The island's colours (`Editor.SearchField.*`).
                 theme.color(UiRole::SearchField),
                 theme.color(UiRole::SearchFieldBorder),
@@ -928,24 +934,17 @@ impl DiffView {
         let status = self.status_text();
         // The viewer's modes (`DiffToolChooser`): side by side is the one
         // there is.
-        let mode = |id: &'static str, icon: IconName, selected: bool, tooltip: &'static str| {
-            div()
-                .id(id)
-                .debug_selector(move || format!("diff-{id}"))
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .w(px(MODE_SIZE.0))
-                .h(px(MODE_SIZE.1))
-                .rounded(radius)
-                .when(selected, |d| {
-                    d.bg(pressed).border_1().border_color(mode_border)
-                })
-                .when(!selected, |d| d.opacity(ui::components::DISABLED_ALPHA))
-                .tooltip(Tooltip::text(tooltip, None))
-                .child(Icon::new(icon).size(px(ICON)))
-        };
+        let modes = ui::form::segmented_icons(
+            "diff-mode",
+            &[
+                (IconName::DIFF_SIDE_BY_SIDE, "Side-by-side viewer"),
+                (IconName::DIFF_UNIFIED, "Unified viewer"),
+            ],
+            Some(0),
+            (px(MODE_SIZE.0), px(MODE_SIZE.1)),
+            |_, _, _| {},
+            cx,
+        );
         let gear = icon_button(
             "settings",
             IconName::SETTINGS_SMALL,
@@ -955,6 +954,16 @@ impl DiffView {
             cx,
         )
         .debug_selector(|| "diff-settings".into())
+        .relative()
+        // A popup group: the corner arrow (`ActionButtonLook.paintDownArrow`:
+        // the arrow icon 1 px right of and below the icon).
+        .child(
+            div()
+                .absolute()
+                .left(px((BUTTON - ICON) / 2.0 + 1.0))
+                .top(px((BUTTON - ICON) / 2.0 + 1.0))
+                .child(Icon::new(IconName::DROPDOWN_CORNER).size(px(ICON))),
+        )
         .tooltip(Tooltip::text("Show Diff Settings", None))
         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
             this.show_settings(&ShowSettings, window, cx)
@@ -969,21 +978,9 @@ impl DiffView {
                     .debug_selector(|| "diff-status".into())
                     .mr(px(STATUS_GAP))
                     .whitespace_nowrap()
-                    .text_color(muted)
                     .child(status)
             }))
-            .child(mode(
-                "side-by-side",
-                IconName::DIFF_SIDE_BY_SIDE,
-                true,
-                "Side-by-side viewer",
-            ))
-            .child(mode(
-                "unified",
-                IconName::DIFF_UNIFIED,
-                false,
-                "Unified viewer",
-            ))
+            .child(modes)
             .child(div().w(px(MODE_GAP)))
             .child(div().relative().child(gear).child(gear_bounds));
         // The island (`DiffToolbarIslandPanelUI`).

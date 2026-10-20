@@ -208,6 +208,8 @@ report says which parent was missing.
 | `ui.focus` | `Component.focusColor`, `Button.default.focusColor` | Keyboard focus ring |
 | `ui.hover` | `ActionButton.hoverBackground`, `List.hoverBackground`, `Tree.hoverBackground`, `Table.hoverBackground` (UI theme or scheme color) | Background of a hovered row or button |
 | `ui.pressed` | `ActionButton.pressedBackground` (UI theme or scheme color) | Background of a pressed button |
+| `ui.segmented-selected` | `SegmentedButton.selectedButtonColor` | Background of the selected choice of a segmented button |
+| `ui.segmented-selected-border` | `SegmentedButton.selectedStartBorderColor` | Outline of the selected choice of a segmented button |
 | `ui.selection` | `List.selectionBackground`, `Tree.selectionBackground`, `Table.selectionBackground` | Background of the selected row in lists and trees |
 | `ui.selection-text` | `List.selectionForeground`, `Tree.selectionForeground` | Text on the selected row |
 | `ui.selection-inactive` | `List.selectionInactiveBackground`, `Tree.selectionInactiveBackground` | Selected row in a list that has no focus |
@@ -502,6 +504,8 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.status-bar-text`, `ui.selection-text` | `ui.text` |
 | `ui.selection-inactive` | `ui.selection` |
 | `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
+| `ui.segmented-selected` | `ui.pressed` |
+| `ui.segmented-selected-border` | `ui.border-input` |
 | `ui.text-disabled`, `ui.shortcut` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |
@@ -510,7 +514,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.gutter`, `ui.terminal-background` | `ui.editor-background` |
 | `ui.line-number-active` | `ui.line-number` |
 | `ui.caret`, `ui.terminal-foreground` | `ui.editor-text` |
-| `ui.indent-guide-active` | `ui.indent-guide` |
+| `ui.indent-guide-active`, `ui.tearline` | `ui.indent-guide` |
 | `ui.search-match-active`, `ui.search-match-stripe` | `ui.search-match` |
 | `ui.search-field` | `ui.editor-background` |
 | `ui.search-field-border` | `ui.border` |

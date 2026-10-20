@@ -263,6 +263,9 @@ pub(crate) struct Entry {
     pub range: Range<usize>,
     /// Between two lines (no lines of its own).
     pub between: bool,
+    /// Down to the end of the text, its empty last line included (a
+    /// range ending at the end of the text does not say that).
+    pub to_end: bool,
     pub decoration: Decoration,
 }
 
@@ -278,6 +281,11 @@ pub(crate) struct Decorations {
     /// Changes whenever the lines of the decorations may have changed.
     generation: u64,
     lines_cache: RefCell<Option<(u64, EntryLines)>>,
+}
+
+/// Lines `lines` reach the end of the text, its last line included.
+fn reaches_end(buffer: &Buffer, lines: &Range<usize>) -> bool {
+    !lines.is_empty() && lines.end >= buffer.len_lines()
 }
 
 /// The char range anchoring lines `lines` (end exclusive; empty: the
@@ -315,6 +323,7 @@ impl Decorations {
             id,
             group,
             between: lines.is_empty(),
+            to_end: reaches_end(buffer, &lines),
             range: anchor(buffer, lines),
             decoration,
         });
@@ -371,7 +380,7 @@ impl Decorations {
         let lines: EntryLines = Rc::new(
             self.entries
                 .iter()
-                .map(|e| entry_lines(buffer, &e.range, e.between))
+                .map(|e| entry_lines(buffer, &e.range, e.between, e.to_end))
                 .collect(),
         );
         *cache = Some((self.generation, lines.clone()));
@@ -422,7 +431,7 @@ impl Decorations {
                 None => {
                     let len = buffer.len_chars();
                     let r = e.range.start.min(len)..e.range.end.min(len);
-                    entry_lines(buffer, &r, e.between)
+                    entry_lines(buffer, &r, e.between, e.to_end)
                 }
             };
             let start = lines.start.min(count - 1);
@@ -431,6 +440,7 @@ impl Decorations {
             } else {
                 start..lines.end.min(count).max(start + 1)
             };
+            e.to_end = reaches_end(buffer, &lines);
             e.range = anchor(buffer, lines);
         }
         self.generation += 1;
@@ -438,10 +448,13 @@ impl Decorations {
 }
 
 /// The lines a decoration's anchor covers.
-fn entry_lines(buffer: &Buffer, range: &Range<usize>, between: bool) -> Range<usize> {
+fn entry_lines(buffer: &Buffer, range: &Range<usize>, between: bool, to_end: bool) -> Range<usize> {
     let first = buffer.char_to_line(range.start);
     if between {
         return first..first;
+    }
+    if to_end && range.end == buffer.len_chars() {
+        return first..buffer.len_lines().max(first + 1);
     }
     if range.is_empty() {
         // The empty last line.
@@ -850,6 +863,16 @@ mod tests {
         let end = b.line_start(2);
         apply(&mut b, &mut d, 0..end, "");
         assert_eq!(lines_of(&d, &b), vec![2..3]);
+    }
+
+    #[test]
+    fn lines_down_to_the_end_keep_the_empty_last_line() {
+        // A diff's one side alone: all of a text ending with a line break.
+        let b = Buffer::new("NEW = 1\n");
+        let mut d = Decorations::default();
+        d.add("t", 0..2, Decoration::default(), &b);
+        d.add("t", 0..1, Decoration::default(), &b);
+        assert_eq!(lines_of(&d, &b), vec![0..2, 0..1]);
     }
 
     #[test]

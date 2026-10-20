@@ -967,7 +967,10 @@ impl Element for EditorElement {
         // A mirrored editor has its gutter at the right and its scrollbar's
         // strip at the left, the text between them.
         let mirrored = self.editor.read(cx).mirrored && !single_line && !console;
-        let diff_gutter = self.editor.read(cx).diff_gutter && !single_line && !console;
+        let diff_gutter = self.editor.read(cx).diff_gutter;
+        let diff_actions = diff_gutter == crate::side_by_side::DiffGutter::Actions;
+        let diff_gutter =
+            diff_gutter != crate::side_by_side::DiffGutter::Off && !single_line && !console;
         let (gutter_width, text_left) = if single_line {
             (px(0.0), px(0.0))
         } else if console {
@@ -977,7 +980,7 @@ impl Element for EditorElement {
             // scrollbar's strip in a mirrored editor, as in any other).
             let text_left = if mirrored { px(TEXT_LEFT) } else { px(0.0) };
             (
-                crate::side_by_side::diff_gutter_width(m.number_width, digits),
+                crate::side_by_side::diff_gutter_width(m.number_width, digits, diff_actions),
                 text_left,
             )
         } else {
@@ -1523,12 +1526,13 @@ impl Element for EditorElement {
         // a gutter icon is drawn there.
         // A diff gutter's mirrored numbers are left-aligned (the
         // reference's flipped gutter).
-        let numbers_left = (diff_gutter && mirrored)
-            .then(|| crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, true));
+        let numbers_left = (diff_gutter && mirrored).then(|| {
+            crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, true, diff_actions)
+        });
         let numbers_right = if let Some(left) = numbers_left {
             left + m.number_width * digits as f32
         } else if diff_gutter {
-            crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, false)
+            crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, false, diff_actions)
         } else if mirrored {
             bounds.right() - px(GUTTER_LEFT)
         } else {
