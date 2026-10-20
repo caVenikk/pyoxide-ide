@@ -26,8 +26,10 @@
 //! Names are unique. A write reads the file again and applies only its
 //! changes to it, so two windows keep each other's; keys and comments
 //! Pyoxide does not know survive, and a file of a newer version is read
-//! and never rewritten. The reference IDE's interpreters are imported once,
-//! when the file does not exist yet.
+//! and never rewritten. The reference IDE's interpreters are imported once:
+//! from the snapshot of the settings import (`import`, `[import.applied]`
+//! of `settings.toml`), else, when the file does not exist yet, from the
+//! reference's own folder.
 //!
 //! Everything here is blocking file system access: run it off the UI
 //! thread.
@@ -579,22 +581,31 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
 /// The SDK type of Python interpreters in the reference IDE.
 const PYTHON_SDK: &str = "Python SDK";
 
+/// The file of the SDK table in a configuration folder or its snapshot.
+const SDK_TABLE: &str = "options/jdk.table.xml";
+
 /// The Python interpreters of the reference IDE's SDK table: from
 /// `options/jdk.table.xml` of the first (newest) folder of `config_dirs`
 /// that has one, those whose interpreter exists, with the folder's name.
 pub fn reference_entries(config_dirs: &[PathBuf]) -> Option<(String, Vec<Entry>)> {
-    let (dir, table) = config_dirs.iter().find_map(|dir| {
-        let file = dir.join("options").join("jdk.table.xml");
-        file.is_file()
-            .then(|| (dir, project::idea::read_sdk_table(&file)))
+    let (dir, file) = config_dirs.iter().find_map(|dir| {
+        let file = dir.join(SDK_TABLE);
+        file.is_file().then_some((dir, file))
     })?;
     let source = dir.file_name()?.to_string_lossy().into_owned();
+    Some((source, table_entries(&file)))
+}
+
+/// The Python interpreters of the SDK table file `file` whose interpreter
+/// exists.
+fn table_entries(file: &Path) -> Vec<Entry> {
+    let table = project::idea::read_sdk_table(file);
     let path = |key: &str, sdk: &project::idea::SdkEntry| {
         sdk.additional(key)
             .filter(|v| !v.is_empty())
             .and_then(project::idea::expand_user_home)
     };
-    let entries = table
+    table
         .iter()
         .filter(|sdk| sdk.type_id == PYTHON_SDK)
         .filter_map(|sdk| {
@@ -616,8 +627,7 @@ pub fn reference_entries(config_dirs: &[PathBuf]) -> Option<(String, Vec<Entry>)
                 python,
             })
         })
-        .collect();
-    Some((source, entries))
+        .collect()
 }
 
 /// Adds the reference IDE's interpreters ([`reference_entries`]) to the
@@ -627,6 +637,21 @@ pub fn import_reference(path: &Path, config_dirs: &[PathBuf]) -> Result<usize, S
     let Some((source, entries)) = reference_entries(config_dirs) else {
         return Ok(0);
     };
+    add_imported(path, source, entries)
+}
+
+/// Like [`import_reference`], from `options/jdk.table.xml` of the snapshot
+/// of an import (`snapshot_dir`) of the reference folder `source`
+/// (`PyCharm2026.2`); a snapshot without an SDK table adds nothing.
+pub fn import_snapshot(path: &Path, snapshot_dir: &Path, source: &str) -> Result<usize, String> {
+    let file = snapshot_dir.join(SDK_TABLE);
+    if !file.is_file() {
+        return Ok(0);
+    }
+    add_imported(path, source.to_owned(), table_entries(&file))
+}
+
+fn add_imported(path: &Path, source: String, entries: Vec<Entry>) -> Result<usize, String> {
     let before = Table::load(path)?;
     let added: Vec<Change> = entries
         .into_iter()

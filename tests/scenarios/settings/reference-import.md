@@ -27,7 +27,8 @@
   what could not.
 - Step 3: theme, scheme, font, ligatures, soft-wrap setting and keymap
   match the reference; only the interpreter that still exists is listed
-  (the configured interpreter list, #75, takes it from the snapshot).
+  (the configured interpreter list, #75, takes it from the snapshot's
+  `options/jdk.table.xml` with the importer `python-interpreters`, #243).
 - Step 4: `[import]` has `source`, `version`, `time` and
   `snapshot = "imported/<source>-<version>"`; `[import.applied]` lists the
   importers that ran. The snapshot holds the data files (`options/*.xml`,

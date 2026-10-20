@@ -30,6 +30,7 @@ mod add_dialog_tests;
 mod candidates;
 mod configuring;
 mod create;
+mod import;
 mod list;
 mod list_dialog;
 #[cfg(test)]
@@ -196,6 +197,7 @@ pub fn init(cx: &mut App) {
     ui::icons::register(cx, &add_dialog::ICONS);
     ui::icons::register(cx, &list_dialog::ICONS);
     widget::init(cx);
+    import::register(cx);
     list::ensure_loaded(cx);
 }
 

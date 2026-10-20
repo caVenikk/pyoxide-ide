@@ -38,6 +38,13 @@ static APP_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// One write at a time: each reads the file again before it writes.
 static WRITE: Mutex<()> = Mutex::new(());
 
+/// Runs `write` (a change of the file made off the UI thread) while no
+/// other write of the list runs.
+pub(super) fn exclusive<T>(write: impl FnOnce() -> T) -> T {
+    let _one = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    write()
+}
+
 /// Keeps the list in `interpreters.toml` of the configuration folder,
 /// importing the reference IDE's interpreters into it once. Called by the
 /// application before it starts; without it the list stays in memory.
@@ -93,12 +100,31 @@ pub(crate) fn ensure_loaded(cx: &mut App) {
     {
         return;
     }
+    read(true, cx);
+}
+
+/// Reads the list again after a file written elsewhere (the import from
+/// the snapshot of the reference's configuration). The reference IDE's
+/// folders are not imported from here: whatever wrote the file decided
+/// what it holds.
+pub(crate) fn reload(cx: &mut App) {
+    configure(cx);
+    read(false, cx);
+}
+
+/// Starts reading the list; `import` adds the reference IDE's interpreters
+/// to a file that does not exist yet.
+fn read(import: bool, cx: &mut App) {
     let list = cx.default_global::<Interpreters>();
     let Some(file) = list.file.clone() else {
         list.loaded = true;
         return;
     };
-    let reference = list.reference.clone();
+    let reference = if import {
+        list.reference.clone()
+    } else {
+        Vec::new()
+    };
     let generation = list.generation;
     let read = cx.background_spawn(async move { table::load_or_import(&file, &reference) });
     let task = cx.spawn(async move |cx| {
@@ -135,10 +161,7 @@ pub(crate) fn change(changes: Vec<Change>, cx: &mut App) -> Task<Result<Arc<Tabl
     let Some(file) = list.file.clone() else {
         return Task::ready(Ok(table));
     };
-    let write = cx.background_spawn(async move {
-        let _one = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-        table::save(&file, &changes)
-    });
+    let write = cx.background_spawn(async move { exclusive(|| table::save(&file, &changes)) });
     cx.spawn(async move |cx| {
         let written = write.await.map(Arc::new);
         match &written {
