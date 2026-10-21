@@ -23,6 +23,7 @@ use process::ExitStatus;
 use crate::input::{self, Key, Modifiers, MouseAction};
 use crate::io_loop::{self, LoopSender, Msg};
 use crate::prescan::MarkKind;
+use crate::running::CommandProbe;
 use crate::snapshot::{
     self, MAX_VISIBLE_MATCHES, Modes, Point, Rgb, Snapshot, Span, clip_span, to_grid,
 };
@@ -465,6 +466,7 @@ pub struct Session {
     loop_tx: LoopSender,
     pid: u32,
     id: u64,
+    probe: CommandProbe,
 }
 
 impl fmt::Debug for Session {
@@ -547,6 +549,7 @@ impl Session {
                 loop_tx,
                 pid,
                 id,
+                probe: CommandProbe::new(pid, &options.command.program),
             },
             events_rx,
         ))
@@ -555,6 +558,18 @@ impl Session {
     /// The shell's process id.
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// The question "does a command run in the shell?" for a background
+    /// thread: [`CommandProbe::has_running_commands`].
+    pub fn command_probe(&self) -> CommandProbe {
+        self.probe.clone()
+    }
+
+    /// Whether a command runs in the shell (it has a child process).
+    /// Reads the process table: call it off the UI thread.
+    pub fn has_running_commands(&self) -> bool {
+        self.probe.has_running_commands()
     }
 
     /// A number unique among the sessions of this process.

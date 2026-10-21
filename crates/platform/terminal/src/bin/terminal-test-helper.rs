@@ -15,6 +15,9 @@
 //! - `osc`: prints a prompt with OSC 133 marks, an OSC 7 working directory,
 //!   a title (OSC 2) and an OSC 7701 event, then `done`; waits for a line;
 //! - `sleep`: prints `ready` and sleeps;
+//! - `child`: starts a program that waits for its input to close as its
+//!   child, prints `ready` and sleeps (a shell with a command running);
+//! - `wait`: reads its input until it closes (the child of `child`);
 //! - `flood <bytes>`: prints numbered lines worth that many bytes, then
 //!   `flood done`; waits for a line.
 
@@ -108,6 +111,27 @@ fn main() {
             loop {
                 std::thread::sleep(Duration::from_secs(60));
             }
+        }
+        "child" => {
+            // The child ends when this program does: its input is a pipe
+            // this program holds.
+            #[allow(clippy::zombie_processes)]
+            let _child = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("wait")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            writeln!(out, "ready").unwrap();
+            out.flush().unwrap();
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        }
+        "wait" => {
+            let mut sink = Vec::new();
+            let _ = io::stdin().lock().read_to_end(&mut sink);
         }
         "flood" => {
             let total: usize = args.get(1).and_then(|n| n.parse().ok()).unwrap_or(1 << 20);
