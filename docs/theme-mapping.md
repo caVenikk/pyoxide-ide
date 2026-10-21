@@ -54,6 +54,12 @@ accent = "$rust"
 keyword = { fg = "$rust", bold = true }
 ```
 
+A key of `[ui]`, `[syntax]` or `[metrics]` that names no role of this build
+is skipped, so a file saved by a newer build that has more roles still loads
+here: the known keys keep their values and the log gets one warning per file
+that lists the skipped keys. Other errors (a bad colour, a misspelt field of a
+text style, broken TOML, a newer `format`) still leave the file out.
+
 ## Themes in the IDE
 
 The Theme list of Settings > Appearance & Behavior > Appearance, the Theme
