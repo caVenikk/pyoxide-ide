@@ -18,6 +18,7 @@ pub mod icons;
 pub mod session;
 pub mod variables;
 mod view;
+pub mod watches;
 
 pub use breakpoints::commands::{
     AddExceptionBreakpoint, EditBreakpoint, MuteBreakpoints, ToggleBreakpoint,

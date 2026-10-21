@@ -38,11 +38,12 @@ pub type Highlighters = Rc<dyn Fn(&Path) -> Option<Box<dyn editor::Highlighter>>
 /// What the debugger UI asks of the window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DebuggerViewEvent {
-    /// Open a file at a line (from 1): Jump to Source of the Breakpoints
-    /// dialog.
+    /// Open a file at a line and a column (from 1; 0: the line's start):
+    /// Jump to Source of the Breakpoints dialog and of the variables view.
     OpenAt {
         path: PathBuf,
         line: u32,
+        column: u32,
     },
     /// Show a line (from 1) where the program is suspended, without
     /// bringing the window to the front.
@@ -231,6 +232,7 @@ impl DebuggerView {
         self.tool_window.update(cx, |w, _| {
             w.root = Some(root);
             w.provider = Some(provider);
+            w.view_state_loaded(&debugger);
         });
         self.debugger = Some(debugger);
         self.sync_muted(cx);
@@ -262,6 +264,7 @@ impl DebuggerView {
                     }
                 }
                 DebuggerEvent::Console(id) => self.attach_console(*id, cx),
+                DebuggerEvent::WatchesChanged => self.watches_changed(cx),
                 DebuggerEvent::Output {
                     session,
                     category,
@@ -669,7 +672,11 @@ impl DebuggerView {
 
     /// Jump to Source: the window opens the file at the line.
     pub(crate) fn navigate(&mut self, path: PathBuf, line: u32, cx: &mut Context<Self>) {
-        cx.emit(DebuggerViewEvent::OpenAt { path, line });
+        cx.emit(DebuggerViewEvent::OpenAt {
+            path,
+            line,
+            column: 0,
+        });
     }
 
     // ---- drawing and state ----------------------------------------------------
@@ -952,12 +959,13 @@ fn forward_frame_actions<E: InteractiveElement>(el: E, view: Entity<DebuggerView
             })
         })
     });
-    let v = view;
-    el.on_action(move |a: &ExpandVariable, _, cx| {
+    let v = view.clone();
+    let el = el.on_action(move |a: &ExpandVariable, _, cx| {
         v.update(cx, |v, cx| {
             v.with_variables(cx, |t, cx| {
                 t.expand_names(&a.path, a.expanded, cx);
             })
         })
-    })
+    });
+    crate::watches::forward_watch_actions(el, view)
 }

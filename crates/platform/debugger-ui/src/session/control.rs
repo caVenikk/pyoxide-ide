@@ -649,11 +649,31 @@ impl DebuggerView {
         }
     }
 
+    /// Closes the hint below the frames for good (the reference keeps it
+    /// closed in its properties).
     pub(crate) fn close_frames_hint(&mut self, cx: &mut Context<Self>) {
+        if let Some(debugger) = &self.debugger {
+            debugger.close_frames_hint();
+        }
         self.tool_window.update(cx, |w, cx| {
             w.frames_hint_closed = true;
             cx.notify();
         });
+    }
+
+    /// The watches changed: every tab shows those of its configuration
+    /// type.
+    pub(crate) fn watches_changed(&mut self, cx: &mut Context<Self>) {
+        let views: Vec<_> = self
+            .tool_window
+            .read(cx)
+            .tabs
+            .iter()
+            .map(|t| t.variables.clone())
+            .collect();
+        for view in views {
+            view.update(cx, |v, cx| v.sync_watches(cx));
+        }
     }
 
     /// Runs `f` on the selected tab's variables view.

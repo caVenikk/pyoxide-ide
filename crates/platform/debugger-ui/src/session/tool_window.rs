@@ -174,6 +174,9 @@ pub struct DebugToolWindow {
     pub(crate) dragging_split: bool,
     /// The open list of threads.
     pub(crate) threads_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// The project's debugger: it keeps the frames' share and the closed
+    /// hint.
+    pub(crate) debugger: Option<debugger::Debugger>,
 }
 
 impl EventEmitter<DebugToolWindowEvent> for DebugToolWindow {}
@@ -196,7 +199,16 @@ impl DebugToolWindow {
             split_bounds: Rc::default(),
             dragging_split: false,
             threads_menu: None,
+            debugger: None,
         }
+    }
+
+    /// The project's debugger opened: the frames' share and the hint as
+    /// they were left.
+    pub(crate) fn view_state_loaded(&mut self, debugger: &debugger::Debugger) {
+        self.split = debugger.frames_split().unwrap_or(SPLIT);
+        self.frames_hint_closed = debugger.frames_hint_closed();
+        self.debugger = Some(debugger.clone());
     }
 
     /// The tab's session changed: its snapshot, the frames (the last stop
@@ -533,7 +545,8 @@ impl DebugToolWindow {
                     "toolbar": toolbar_state(s.phase),
                     "frames": s.frames.iter().map(frame_text).collect::<Vec<_>>(),
                     "frames_view": self.frames_json(i),
-                    "variables": t.variables.read(cx).state_json(),
+                    "variables": t.variables.read(cx).state_json(cx),
+                    "split": self.split,
                     "selected": self.selected() == Some(i),
                     "console": t.console.read(cx).state_json(cx),
                 })
@@ -1000,8 +1013,7 @@ impl DebugToolWindow {
                     .flex_1()
                     .min_w(px(0.0))
                     .h_full()
-                    .child(self.render_evaluate_hint(cx))
-                    .child(div().flex_1().min_h(px(0.0)).child(variables)),
+                    .child(variables),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 if !this.dragging_split {
@@ -1020,49 +1032,17 @@ impl DebugToolWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.dragging_split = false),
+                cx.listener(|this, _: &MouseUpEvent, _, _| {
+                    if std::mem::take(&mut this.dragging_split)
+                        && let Some(debugger) = &this.debugger
+                    {
+                        debugger.set_frames_split(this.split);
+                    }
+                }),
             )
-            .into_any_element()
-    }
-
-    /// The evaluate field's place above the variables, with its hint
-    /// (`debugger.evaluate.expression.or.add.a.watch.hint`), Add to
-    /// Watches and the history's chevron at the right.
-    fn render_evaluate_hint(&self, cx: &App) -> AnyElement {
-        let theme = cx.theme();
-        div()
-            .id("debug-evaluate")
-            .debug_selector(|| "debug-evaluate".into())
-            .flex_none()
-            .h(px(30.0))
-            .pl(px(8.0))
-            .pr(px(6.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .border_b_1()
-            .border_color(theme.color(UiRole::Border))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .font_family(theme.mono_family())
-                    .text_color(theme.color(UiRole::TextMuted))
-                    .child(EVALUATE_HINT),
-            )
-            .child(Icon::new(icons::ADD_TO_WATCHES).size(px(16.0)))
-            .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
             .into_any_element()
     }
 }
-
-/// The evaluate field's hint, with the keys of Evaluate (Enter) and Add to
-/// Watches (`XDebuggerBundle`).
-const EVALUATE_HINT: &str =
-    "Evaluate expression (\u{23ce}) or add a watch (\u{21e7}\u{2318}\u{23ce})";
 
 /// Which toolbar actions are enabled in a session's phase.
 pub(crate) fn toolbar_state(phase: Phase) -> Json {

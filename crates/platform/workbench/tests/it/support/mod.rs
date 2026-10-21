@@ -452,6 +452,15 @@ impl debugger::DebugAdapterProvider for TestDebug {
     fn exception_classes(&self) -> Vec<String> {
         ["KeyError", "ValueError"].map(str::to_owned).to_vec()
     }
+
+    /// The first `name =` of the file.
+    fn value_declaration(&self, text: &str, _line: u32, name: &str) -> Option<(u32, u32)> {
+        let assignment = format!("{name} =");
+        text.lines().enumerate().find_map(|(i, l)| {
+            l.find(&assignment)
+                .map(|column| (i as u32 + 1, column as u32 + 1))
+        })
+    }
 }
 
 pub fn debug_hook() -> workbench::DebugHook {

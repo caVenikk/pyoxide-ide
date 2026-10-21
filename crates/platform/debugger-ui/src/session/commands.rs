@@ -121,4 +121,60 @@ ui::ui_commands! {
     ExpandVariable { path: Vec<String>, expanded: Option<bool> } => "debug.variables.expand", "Expand Variable",
         "Expands (or with `expanded: false` collapses, without it toggles) a node of the variables view by its path of names; an ellipsis row shows the rest of its collection.",
         r#"{"path": ["items"], "expanded": true}"#;
+    /// Evaluate the expression of the evaluate field.
+    EvaluateField { expression: Option<String> } => "debug.variables.evaluate", "Evaluate",
+        "Evaluates the expression of the evaluate field above the variables (or `expression`, put into the field first) in the selected frame: the result is the first node of the variables view, `result`.",
+        r#"{"expression": "len(items)"}"#;
+    /// Add the evaluate field's expression to the watches.
+    WatchField { expression: Option<String> } => "debug.variables.watch-expression", "Add Expression to Watches",
+        "Adds the expression of the evaluate field (or `expression`, put into the field first) to the watches.",
+        r#"{"expression": "items[0]"}"#;
+    /// The evaluate field's history.
+    ShowEvaluateHistory => "debug.variables.history", "Show History",
+        "Opens the expressions evaluated or watched before, below the evaluate field; choosing one puts it into the field.";
+    /// Put an expression into the evaluate field.
+    SetFieldExpression { text: String } => "debug.variables.set-expression", "Set Expression",
+        "Puts an expression into the evaluate field and gives the field the focus.",
+        r#"{"text": "len(items)"}"#;
+    /// Evaluate Expression of a value.
+    EvaluateValue { expression: Option<String> } => "debug.evaluate-expression", "Evaluate Expression\u{2026}",
+        "Puts an expression (the selected value's without one) into the evaluate field and gives the field the focus.",
+        r#"{"expression": "items"}"#;
+    /// New Watch.
+    NewWatch { expression: Option<String> } => "debug.new-watch", "New Watch\u{2026}",
+        "Adds a watch after the selected one (at the end without one): `expression`, else an empty one edited in place.",
+        r#"{"expression": "len(items)"}"#;
+    /// Remove Watch.
+    RemoveWatch { expression: Option<String>, index: Option<usize> } => "debug.remove-watch", "Remove Watch",
+        "Removes the selected watch, or the one with an expression or at a zero-based index.",
+        r#"{"expression": "len(items)"}"#;
+    /// Edit a watch.
+    EditWatch { expression: Option<String> } => "debug.edit-watch", "Edit\u{2026}",
+        "Edits the selected watch in place, or sets its expression to `expression` (an empty one removes it).",
+        r#"{"expression": "len(items) + 1"}"#;
+    /// Add the selected value to the watches.
+    AddToWatches => "debug.add-to-watches", "Add to Watches",
+        "Adds the selected value's expression to the watches.";
+    /// Set Value.
+    SetValue { value: Option<String> } => "debug.variables.set-value", "Set Value\u{2026}",
+        "Edits the selected value in place (a watch's expression on a watch), or sets it to the value of `value`.",
+        r#"{"value": "5"}"#;
+    /// Apply the value or the watch edited in place.
+    CommitEdit => "debug.variables.commit-edit", "Apply",
+        "Applies the value or the watch expression edited in place in the variables view.";
+    /// Close the editor in a row without a change.
+    CancelEdit => "debug.variables.cancel-edit", "Cancel",
+        "Closes the editor of a value or a watch in the variables view without a change.";
+    /// Copy Value.
+    CopyValue => "debug.variables.copy-value", "Copy Value",
+        "Copies the selected value (the whole of it when the debugger can give it) to the clipboard.";
+    /// Copy Name.
+    CopyName => "debug.variables.copy-name", "Copy Name",
+        "Copies the selected value's name to the clipboard.";
+    /// Jump To Source.
+    JumpToValueSource => "debug.variables.jump-to-source", "Jump To Source",
+        "Opens the selected value's declaration in the frame's file.";
+    /// The variables view's context menu.
+    VariablesMenu => "debug.variables.context-menu", "Show Context Menu",
+        "Opens the context menu of the selected node of the variables view.";
 }
