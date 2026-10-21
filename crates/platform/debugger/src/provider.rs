@@ -209,8 +209,8 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     }
 
     /// Where `names`, variables of a frame stopped on line `line` of a
-    /// file, are declared (`XValue.computeSourcePosition`): a line (from
-    /// 1) and a column (from 0) per name; the editor shows each value
+    /// file, are declared (`XValue.computeSourcePosition`): a line from
+    /// line 1 and a column from 0 per name; the editor shows each value
     /// after its line. `None` for a file of another type. Blocking (parses
     /// the text): called off the UI thread.
     fn declarations(
