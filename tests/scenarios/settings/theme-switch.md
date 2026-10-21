@@ -6,6 +6,7 @@
 2. In the toolbar gear menu choose Theme…; move the selection with the
    arrow keys and wait; press Escape.
 3. Open the Theme popup again, move to another theme and press Enter.
+   Open it once more and press a digit key.
 4. Press Ctrl+` (Quick Switch Scheme) and choose Theme.
 5. Restart the IDE.
 6. Import a theme plugin with an icon colour palette (Monokai Pro) and
@@ -19,7 +20,10 @@
   imported ones) with "Import Theme…" at the end; it opens on the current
   theme. About half a second after the selection rests on a theme the IDE
   previews it; Escape restores the starting theme.
-- Step 3: the chosen theme stays.
+- Step 3: the chosen theme stays. The first ten rows of the popup have
+  the grey digits 1 to 9 and 0 in front of their names (the lines and the
+  rows after the tenth have none); the digit key chooses its row at once,
+  as Enter does (the Switch and Keymap popups are numbered the same way).
 - Step 4: a popup titled Switch lists Theme; choosing it opens the same
   Theme popup.
 - Step 5: the chosen theme is used; the settings file stores it.

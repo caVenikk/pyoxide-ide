@@ -331,6 +331,31 @@ fn a_theme_chosen_in_the_popup_stays(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_digit_key_chooses_a_row_of_the_theme_popup(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.invoke("settings.switch-theme", json!(null));
+    // The rows have digits, the lines none.
+    let popup = h.popup();
+    let digits: Vec<&str> = popup["levels"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["separator"] != json!(true))
+        .map(|i| i["number"].as_str().unwrap_or(""))
+        .collect();
+    // Four themes and "Import Theme…".
+    assert_eq!(digits, ["1", "2", "3", "4", "5"], "{popup}");
+    // 2 is the second theme: it is chosen and applied at once.
+    h.cx.simulate_input(h.window.into(), "2");
+    h.draw();
+    assert!(h.popup().is_null());
+    assert_eq!(h.shown(), "islands-light");
+    h.wait(1000);
+    assert_eq!(h.shown(), "islands-light");
+    assert_eq!(h.appearance()["theme"], json!("islands-light"));
+}
+
+#[gpui::test]
 fn the_gear_menu_and_quick_switch_open_the_theme_popup(cx: &mut TestAppContext) {
     let mut h = open(cx);
     // Gear: Settings…, a line, Theme…, Keymap….

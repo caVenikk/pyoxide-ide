@@ -204,6 +204,14 @@ const NEXT_STEP_GAP: f32 = 20.0;
 /// Tooltip of the button that opens a row's submenu in a list popup
 /// (`inline.actions.more.actions.text`).
 pub const MORE_ACTIONS: &str = "More Actions";
+/// The number of a numbered popup's row (`ActionSelectionAid.NUMBERING`):
+/// a muted digit with `ActionsList.mnemonicsBorderInsets` 8 before it and
+/// 6 after it, drawn in a column of this width in front of the rows' text.
+const NUMBER_COLUMN: f32 = 24.0;
+const NUMBER_LEFT: f32 = 8.0;
+/// The digits of the first ten rows of a numbered popup
+/// (`ActionStepBuilder`: 1 to 9, then 0).
+const NUMBERS: &str = "1234567890";
 /// The indent of a level of a row's label (`SchemesCombo`).
 const INDENT: f32 = 10.0;
 /// The gap before a secondary text (`emptyLeft(6)`) and before a shortcut.
@@ -711,6 +719,11 @@ pub struct PopupOptions {
     /// (`List.selectionInactiveBackground`), as a Jewel combo box's list
     /// shows it (the Welcome tab's Theme and Keymap lists).
     pub inactive_selection: bool,
+    /// The first ten rows show the digits 1 to 9 and 0 in front of their
+    /// text, and a digit key chooses its row (`QuickSwitchSchemeAction`'s
+    /// `ActionSelectionAid.NUMBERING`). With a speed search, the digit keys
+    /// choose a row only while nothing is typed.
+    pub numbered: bool,
 }
 
 /// The action chosen in a popup that has a window of its own
@@ -747,6 +760,7 @@ pub struct ContextMenu {
     row_height: Option<f32>,
     own_window: bool,
     inactive_selection: bool,
+    numbered: bool,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
     submenu_on_hover: bool,
@@ -839,6 +853,7 @@ impl ContextMenu {
                 row_height: options.row_height,
                 own_window: options.own_window,
                 inactive_selection: options.inactive_selection,
+                numbered: options.numbered,
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
                 aim_history: [None; AIM_HISTORY],
@@ -913,6 +928,26 @@ impl ContextMenu {
     /// matching rows, and a separator before a shown row when a shown row
     /// came before it (`ListPopupModel.rebuildLists`, leading and repeated
     /// separators dropped).
+    /// The digit of each row of the first level of a numbered popup: the
+    /// first ten rows (not lines and titles) get 1 to 9 and 0, in order,
+    /// whether they can be chosen or not. None while a speed search filters
+    /// the rows.
+    fn numbers(&self) -> Vec<Option<char>> {
+        let items = &self.items;
+        if !self.numbered || self.matcher.is_some() {
+            return vec![None; items.len()];
+        }
+        let mut digits = NUMBERS.chars();
+        items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Separator | MenuItem::Header(_) => None,
+                _ if item.is_hidden() => None,
+                _ => digits.next(),
+            })
+            .collect()
+    }
+
     fn shown(&self, level: usize) -> Vec<bool> {
         let items = self.level_items(level);
         if level > 0 || self.matcher.is_none() {
@@ -984,12 +1019,27 @@ impl ContextMenu {
 
     /// A typed char goes to the speed search, Backspace deletes the last
     /// one (`SpeedSearch.processKeyEvent`).
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.speed_search || self.innermost() > 0 {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.innermost() > 0 {
             return;
         }
         let k = &event.keystroke;
         if k.modifiers.control || k.modifiers.platform || k.modifiers.alt || k.modifiers.function {
+            return;
+        }
+        // A digit chooses the row with that number.
+        if self.numbered
+            && let Some(digit) = k.key_char.as_deref().and_then(|t| t.chars().next())
+            && let Some(ix) = self.numbers().iter().position(|n| *n == Some(digit))
+        {
+            if self.items[ix].selectable() {
+                self.select(0, ix, false, cx);
+                self.activate(0, ix, window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if !self.speed_search {
             return;
         }
         if k.key == "backspace" {
@@ -1332,6 +1382,7 @@ impl ContextMenu {
 
     /// The open levels with their rows, for tests and agents.
     pub fn state_json(&self) -> Json {
+        let numbers = self.numbers();
         let levels: Vec<Json> = (0..self.selected.len())
             .map(|level| {
                 let shown = self.shown(level);
@@ -1367,6 +1418,9 @@ impl ContextMenu {
                                 "description": description.as_ref().map(|d| d.as_ref()),
                             }),
                         };
+                        if let Some(Some(digit)) = numbers.get(ix).filter(|_| level == 0) {
+                            row["number"] = json!(digit.to_string());
+                        }
                         if let Some(extra) = item.extra() {
                             if extra.bold {
                                 row["bold"] = json!(true);
@@ -1427,6 +1481,8 @@ impl ContextMenu {
         let items = self.level_items(level);
         let shown = self.shown(level);
         let with_icons = items.iter().any(|i| i.icon_name().is_some());
+        let numbered = self.numbered && level == 0;
+        let numbers = self.numbers();
         let selected = self.selected[level];
         let open = self.selected.len() > level + 1;
         let selection = theme.color(if self.inactive_selection {
@@ -1659,6 +1715,18 @@ impl ContextMenu {
                             .rounded(px(m.radius))
                             .when(is_selected, |d| d.bg(selection))
                             .text_color(if enabled { text } else { disabled })
+                            .when(numbered, |d| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(NUMBER_COLUMN))
+                                        .pl(px(NUMBER_LEFT))
+                                        .text_color(muted)
+                                        .children(
+                                            numbers.get(ix).copied().flatten().map(String::from),
+                                        ),
+                                )
+                            })
                             .when(with_icons, |d| {
                                 d.child(
                                     div()
@@ -2506,6 +2574,102 @@ mod tests {
         assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "");
         cx.simulate_input("u v");
         assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "u v");
+    }
+
+    /// Twelve rows in three groups: "r1" to "r12", the actions cycling
+    /// through the test's three.
+    fn numbered_items() -> Vec<MenuItem> {
+        let mut items = Vec::new();
+        for n in 1..=12 {
+            if n == 3 || n == 8 {
+                items.push(MenuItem::separator());
+            }
+            let label = format!("r{n}");
+            items.push(match n % 3 {
+                0 => MenuItem::action(label, Third),
+                1 => MenuItem::action(label, First),
+                _ => MenuItem::action(label, Second),
+            });
+        }
+        items
+    }
+
+    fn numbered(
+        cx: &mut TestAppContext,
+    ) -> (Entity<Origin>, Entity<ContextMenu>, &mut VisualTestContext) {
+        open_with(cx, |window, cx| {
+            let options = PopupOptions {
+                title: Some("Numbers".into()),
+                speed_search: true,
+                numbered: true,
+                ..PopupOptions::default()
+            };
+            ContextMenu::popup(numbered_items(), options, window, cx)
+        })
+    }
+
+    /// The first ten rows of a numbered popup have the digits 1 to 9 and
+    /// 0; lines and the rows after the tenth have none.
+    #[gpui::test]
+    fn the_first_ten_rows_of_a_numbered_popup_have_digits(cx: &mut TestAppContext) {
+        let (_, menu, cx) = numbered(cx);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        let digits: Vec<String> = state["levels"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["number"].as_str().unwrap_or("").to_owned())
+            .collect();
+        assert_eq!(
+            digits,
+            [
+                "1", "2", "", "3", "4", "5", "6", "7", "", "8", "9", "0", "", ""
+            ]
+        );
+    }
+
+    #[gpui::test]
+    fn a_popup_is_not_numbered_unless_asked_for(cx: &mut TestAppContext) {
+        let (_, menu, cx) = popup(cx, None);
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert!(state["levels"][0]["items"][0].get("number").is_none());
+        // Its digits are speed search text.
+        cx.simulate_input("3");
+        assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "3");
+    }
+
+    #[gpui::test]
+    fn a_digit_key_chooses_its_row(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = numbered(cx);
+        // 5 is the fifth row ("r5": the second action of the cycle).
+        cx.simulate_input("5");
+        assert!(menu.read_with(cx, |m, _| m.dismissed));
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
+    }
+
+    #[gpui::test]
+    fn zero_chooses_the_tenth_row(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = numbered(cx);
+        // "r10": the first action of the cycle.
+        cx.simulate_input("0");
+        assert!(menu.read_with(cx, |m, _| m.dismissed));
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["first"]);
+    }
+
+    /// Once something is typed, digits are part of the speed search; a
+    /// digit of no row does nothing.
+    #[gpui::test]
+    fn digits_belong_to_the_speed_search_once_it_has_text(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = numbered(cx);
+        cx.simulate_input("r");
+        assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "r");
+        cx.simulate_input("2");
+        assert_eq!(menu.read_with(cx, |m, _| m.filter.clone()), "r2");
+        assert!(!menu.read_with(cx, |m, _| m.dismissed));
+        assert!(origin.read_with(cx, |o, _| o.got.is_empty()));
+        // The digits are gone from the rows while they are filtered.
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert!(state["levels"][0]["items"][0].get("number").is_none());
     }
 
     #[gpui::test]
