@@ -639,7 +639,7 @@ fn recent_files(cx: &mut TestAppContext) {
         assert_eq!(s["selected"], json!(1));
         assert_eq!(
             s["tool_windows"],
-            json!(["Project", "Commit", "Notifications"])
+            json!(["Project", "Commit", "Terminal", "Notifications"])
         );
         // Typing filters the lists.
         h.press("n o");

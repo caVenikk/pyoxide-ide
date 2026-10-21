@@ -373,7 +373,7 @@ impl TerminalToolWindow {
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
                     .whitespace_nowrap()
-                    .mr(px(12.0))
+                    .mr(px(16.0))
                     .child("Terminal"),
             )
             .child(

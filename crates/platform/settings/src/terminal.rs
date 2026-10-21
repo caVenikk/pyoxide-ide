@@ -72,9 +72,15 @@ mod tests {
             store.get("terminal.shell-integration"),
             Some(serde_json::json!(true))
         );
+        // The reference's defaults: tabs close with their session, a
+        // terminal overrides IDE shortcuts, Option types characters.
+        assert!(settings.close_session_on_exit);
+        assert!(settings.override_ide_shortcuts);
+        assert!(!settings.option_as_meta);
         let changed = TerminalSettings {
             shell_path: " /bin/zsh -l ".into(),
             shell_integration: false,
+            ..TerminalSettings::default()
         };
         assert!(store.set_section(&changed));
         assert_eq!(store.section::<TerminalSettings>(), changed);
