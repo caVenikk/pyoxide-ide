@@ -177,6 +177,8 @@ pub struct DebugToolWindow {
     /// The project's debugger: it keeps the frames' share and the closed
     /// hint.
     pub(crate) debugger: Option<debugger::Debugger>,
+    /// The colours of a file's language (the evaluate field's).
+    pub(crate) highlighters: Option<crate::Highlighters>,
 }
 
 impl EventEmitter<DebugToolWindowEvent> for DebugToolWindow {}
@@ -200,7 +202,19 @@ impl DebugToolWindow {
             dragging_split: false,
             threads_menu: None,
             debugger: None,
+            highlighters: None,
         }
+    }
+
+    /// A variables view of a session.
+    fn variables_view(&self, session: Session, cx: &mut Context<Self>) -> Entity<VariablesView> {
+        let provider = self.provider.clone();
+        let highlighters = self.highlighters.clone();
+        cx.new(|cx| {
+            let mut view = VariablesView::new(session, provider, cx);
+            view.highlighters = highlighters;
+            view
+        })
     }
 
     /// The project's debugger opened: the frames' share and the hint as
@@ -422,11 +436,7 @@ impl DebugToolWindow {
             }
         });
         self.next_id += 1;
-        let provider = self.provider.clone();
-        let variables = {
-            let session = session.clone();
-            cx.new(|cx| VariablesView::new(session, provider, cx))
-        };
+        let variables = self.variables_view(session.clone(), cx);
         self.tabs.push(SessionTab {
             id: self.next_id,
             title: session.name().to_owned(),
@@ -461,19 +471,17 @@ impl DebugToolWindow {
         request: DebugRequest,
         cx: &mut Context<Self>,
     ) {
-        let provider = self.provider.clone();
-        let Some(tab) = self.tabs.get_mut(index) else {
+        if index >= self.tabs.len() {
             return;
-        };
+        }
+        let variables = self.variables_view(session.clone(), cx);
+        let tab = &mut self.tabs[index];
         tab.title = session.name().to_owned();
         tab.snapshot = session.snapshot();
         tab.frozen = None;
         tab.frames_asked = None;
         tab._unfreeze = None;
-        tab.variables = {
-            let session = session.clone();
-            cx.new(|cx| VariablesView::new(session, provider, cx))
-        };
+        tab.variables = variables;
         tab.session = session;
         tab.request = request;
         tab.content = Content::Console;

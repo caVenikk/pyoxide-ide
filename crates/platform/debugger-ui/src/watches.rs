@@ -616,11 +616,17 @@ impl VariablesView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let field = self.ensure_field(window, cx);
+        // The expression in the colours of the frame's language
+        // (`XDebuggerExpressionComboBox.setSourcePosition`).
+        let file = self.frame.as_ref().and_then(|f| f.file.clone());
+        if let (Some(file), Some(highlighters)) = (file, &self.highlighters)
+            && self.highlighted.as_ref() != Some(&file)
+        {
+            let highlighter = highlighters(&file);
+            field.update(cx, |e, cx| e.set_highlighter(highlighter, cx));
+            self.highlighted = Some(file);
+        }
         let empty = field.read(cx).text().trim().is_empty();
-        let has_history = self
-            .session
-            .debugger()
-            .is_some_and(|d| !d.expression_history().is_empty());
         let focus = field.focus_handle(cx);
         let watch_keys = ui::keys::shortcut_in(&WatchField { expression: None }, &focus, window);
         let theme = cx.theme();
@@ -682,18 +688,13 @@ impl VariablesView {
                         })
                     }),
             )
+            // The combo box's arrow: enabled with an empty history too.
             .child(
-                button(
-                    "debug-evaluate-history",
-                    IconName::CHEVRON_DOWN,
-                    has_history,
-                )
-                .tooltip(Tooltip::text("Show History", None))
-                .when(has_history, |d| {
-                    d.on_click(|_, window, cx| {
+                button("debug-evaluate-history", IconName::CHEVRON_DOWN, true)
+                    .tooltip(Tooltip::text("Show History", None))
+                    .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(ShowEvaluateHistory), cx)
-                    })
-                }),
+                    }),
             )
             .into_any_element()
     }
@@ -791,16 +792,10 @@ impl VariablesView {
         if focused {
             window.focus(&self.focus);
         }
-        if edit.new_watch_at().is_some() {
-            self.state_select_none(cx);
+        if edit.new_watch_at().is_some() && self.selected_path() == Some(NEW) {
+            self.deselect(cx);
         }
         cx.notify();
-    }
-
-    fn state_select_none(&mut self, cx: &mut Context<Self>) {
-        if self.selected_path() == Some(NEW) {
-            self.select("", cx);
-        }
     }
 
     /// Set Value (F2): the selected value edited in its row; on a watch,
@@ -841,7 +836,9 @@ impl VariablesView {
     }
 
     pub(crate) fn render_inline_editor(&self, edit: &InlineEdit, cx: &App) -> AnyElement {
-        let row_h = cx.theme().metric(Metric::RowHeight);
+        let theme = cx.theme();
+        let row_h = theme.metric(Metric::RowHeight);
+        // The editor's own background over the row's selection.
         ui::components::input_frame(true, edit.error.is_some(), cx)
             .id("variables-editor")
             .debug_selector(|| "variables-editor".into())
@@ -849,10 +846,12 @@ impl VariablesView {
             .flex_1()
             .h(row_h - px(2.0))
             .px(px(4.0))
+            .bg(theme.color(UiRole::EditorBackground))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.0))
+                    .h(self.line_height)
                     .overflow_hidden()
                     .child(edit.editor.clone()),
             )
@@ -879,14 +878,20 @@ impl VariablesView {
     // ---- copy -------------------------------------------------------------------------
 
     /// Copy Value: the whole value when the adapter evaluates for the
-    /// clipboard, else the text the row shows (`XCopyValueAction`).
+    /// clipboard, else the text the row shows (`XCopyValueAction`). A
+    /// watch's or the result's own expression is not evaluated again (it
+    /// may change what it shows).
     pub(crate) fn copy_value(&mut self, cx: &mut Context<Self>) {
-        let Some(v) = self.selected_row(cx).and_then(|r| r.value().cloned()) else {
+        let Some(row) = self.selected_row(cx) else {
+            return;
+        };
+        let Some(v) = row.value().cloned() else {
             return;
         };
         let shown = v.variable.value.clone();
+        let again = matches!(row.kind, RowKind::Value(_));
         let whole = match (&v.variable.evaluate_name, self.frame_id()) {
-            (Some(name), Some(frame)) if self.session.evaluates_for_clipboard() => Some(
+            (Some(name), Some(frame)) if again && self.session.evaluates_for_clipboard() => Some(
                 self.session
                     .evaluate_in(name, Some(frame), EvaluateContext::Clipboard),
             ),
@@ -983,6 +988,8 @@ impl VariablesView {
 
     /// The context menu under the selected row (the command).
     pub(crate) fn menu_at_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The menu shows the keys of the tree.
+        window.focus(&self.focus);
         let rows = self.rows(cx);
         let index = self
             .selected_path()

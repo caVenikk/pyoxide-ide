@@ -27,8 +27,11 @@
 
 ## Commands
 `debug.evaluate {"expression": ...}`, `debug.quick-evaluate`,
+`debug.variables.evaluate {"expression": ...}` (the evaluate field),
+`debug.variables.watch-expression`, `debug.variables.history`,
 `debug.new-watch {"expression": ...}`, `debug.remove-watch`,
-`debug.state` (watches, results).
+`debug.edit-watch`, `debug.add-to-watches`,
+`debug.state` (watches, results, the field and its history).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/debug-tool-window-variables.html,

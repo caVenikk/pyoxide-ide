@@ -202,6 +202,8 @@ pub(crate) struct ShownFrame {
     /// Frames of the same function share their state (the reference's
     /// `XStackFrame.getEqualityObject`).
     key: String,
+    /// The frame's file: the evaluate field is coloured as its language.
+    pub(crate) file: Option<std::path::PathBuf>,
 }
 
 /// The variables of a debug session.
@@ -244,6 +246,12 @@ pub struct VariablesView {
     pub(crate) editing: Option<InlineEdit>,
     /// The context menu or the evaluate field's history.
     pub(crate) menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// How the evaluate field gets the colours of a frame's language, and
+    /// the file it has them for.
+    pub(crate) highlighters: Option<crate::Highlighters>,
+    pub(crate) highlighted: Option<std::path::PathBuf>,
+    /// The line height of an editor in a row, as last drawn.
+    pub(crate) line_height: Pixels,
 }
 
 impl VariablesView {
@@ -283,6 +291,9 @@ impl VariablesView {
             tree_bounds: Rc::default(),
             editing: None,
             menu: None,
+            highlighters: None,
+            highlighted: None,
+            line_height: px(16.0),
         }
     }
 
@@ -309,6 +320,7 @@ impl VariablesView {
                     id,
                     generation: snapshot.generation,
                     key: format!("{path}:{}", f.name),
+                    file: f.source.as_ref().and_then(|s| s.path.clone()),
                 })
             })
             .flatten();
@@ -486,6 +498,11 @@ impl VariablesView {
     /// The selected row's path.
     pub(crate) fn selected_path(&self) -> Option<&str> {
         self.state.selected.as_deref()
+    }
+
+    pub(crate) fn deselect(&mut self, cx: &mut Context<Self>) {
+        self.state.selected = None;
+        cx.notify();
     }
 
     /// The selected row, as built now.
@@ -1381,6 +1398,7 @@ impl Focusable for VariablesView {
 impl Render for VariablesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.rebuild(cx);
+        self.line_height = editor::field_line_height_for(false, window, cx);
         let rows = self.shown_rows();
         let focused = self.focus.contains_focused(window, cx);
         let count = rows.len();

@@ -229,9 +229,11 @@ impl DebuggerView {
             }
         }));
         let (root, provider) = (debugger.root().to_owned(), debugger.provider().clone());
+        let highlighters = self.highlighters.clone();
         self.tool_window.update(cx, |w, _| {
             w.root = Some(root);
             w.provider = Some(provider);
+            w.highlighters = highlighters;
             w.view_state_loaded(&debugger);
         });
         self.debugger = Some(debugger);

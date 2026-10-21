@@ -25,7 +25,10 @@
 - Step 7: functions, classes and modules appear among the variables.
 
 ## Commands
-`debug.set-value {"path": ..., "value": ...}`, `debug.copy-value`,
+`debug.set-value {"path": ..., "value": ...}`,
+`debug.variables.set-value {"value": ...}` (the selected value),
+`debug.variables.copy-value`, `debug.variables.copy-name`,
+`debug.variables.jump-to-source`, `debug.variables.context-menu`,
 `debug.state` (variables with children), `debug.settings`.
 
 ## Source
