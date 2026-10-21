@@ -210,6 +210,22 @@ impl IconName {
     /// The diff viewer's modes.
     pub const DIFF_SIDE_BY_SIDE: Self = Self("diff/sideBySide");
     pub const DIFF_UNIFIED: Self = Self("diff/unified");
+    /// The Welcome tab: Open File, and the Theme (dark or light) and
+    /// Keymap combo boxes (`AllIcons.General.Upload`,
+    /// `MeetNewUi.DarkTheme`, `MeetNewUi.LightTheme`, `General.Keyboard`).
+    pub const UPLOAD: Self = Self("general/upload");
+    pub const DARK_THEME: Self = Self("meetNewUi/darkTheme");
+    pub const LIGHT_THEME: Self = Self("meetNewUi/lightTheme");
+    pub const KEYBOARD: Self = Self("general/keyboard");
+    /// The Welcome tab's Learn and Plugins tiles (`AllIcons.General.Learn`,
+    /// `AllIcons.Nodes.Plugin`) and New Notebook's
+    /// (`AllIcons.FileTypes.JupyterNotebook`).
+    pub const LEARN: Self = Self("general/learn");
+    pub const PLUGIN: Self = Self("nodes/plugin");
+    pub const JUPYTER_NOTEBOOK: Self = Self("fileTypes/jupyterNotebook");
+    /// Config or Installation Directory of the import dialog's Other
+    /// Options (`StartupImportIcons.Icons.ConfigFile`, 20 by 20).
+    pub const CONFIG_FILE: Self = Self("startup/configFile");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -262,19 +278,22 @@ platform_icons! {
         "general/save", "general/scrollDown",
         "general/search@20x20", "general/warningDialog",
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
-        "general/showAsTree", "general/up", "general/vcs",
+        "general/showAsTree", "general/up", "general/upload", "general/vcs",
+        "general/keyboard", "general/learn",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",
         "json/object",
+        "meetNewUi/darkTheme", "meetNewUi/lightTheme",
         "nodes/class", "nodes/constant", "nodes/enum", "nodes/errorMark", "nodes/excludeRoot",
         "nodes/field",
         "nodes/folder", "nodes/function", "nodes/interface", "nodes/method", "nodes/module",
-        "nodes/package", "nodes/parameter", "nodes/property", "nodes/symlink", "nodes/template",
+        "nodes/package", "nodes/parameter", "nodes/plugin", "nodes/property", "nodes/symlink", "nodes/template",
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
-        "run/debug", "run/killProcess", "run/rerun", "run/run", "run/stop",
+        "run/debug", "run/killProcess",
+        "startup/configFile", "run/rerun", "run/run", "run/stop",
         "status/error", "status/info", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",

@@ -120,6 +120,8 @@ pub struct Product {
     /// variables and scripts to source, such as a virtual environment's
     /// activation.
     pub terminal: Option<TerminalHook>,
+    /// The product's icon and tiles of the Welcome tab.
+    pub welcome: crate::welcome::WelcomeHook,
 }
 
 /// Default size of the main window's content.
@@ -157,6 +159,7 @@ pub fn init(cx: &mut App, product: &Product) {
     vcs_ui::init(cx);
     debugger_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
+    ui::command::register(cx, crate::welcome::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
     crate::terminal::init(cx, product.terminal.clone());
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
@@ -345,6 +348,12 @@ fn app_menus(name: &'static str) -> Vec<Menu> {
                 )],
             })],
         },
+        // Welcome first, as the reference adds `OpenWelcome` to its Help
+        // menu.
+        Menu {
+            name: "Help".into(),
+            items: vec![MenuItem::action("Welcome", crate::welcome::OpenWelcome)],
+        },
     ]
 }
 
@@ -505,6 +514,13 @@ fn open_main(
         };
         workbench.set_sync_settings(sync);
     });
+    // Without a project or files the Welcome tab shows, as the reference's
+    // Welcome screen does (not in measurements).
+    if paths.is_empty() && env::bench().is_none() {
+        let _ = window.update(cx, |workbench, window, cx| {
+            workbench.open_welcome(window, cx);
+        });
+    }
     // A folder opens as the project, files open in tabs.
     for path in paths {
         let _ = window.update(cx, |workbench, window, cx| {

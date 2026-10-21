@@ -45,4 +45,5 @@ mod tool_windows;
 mod toolbar_layout;
 mod tree_rows;
 mod version_control;
+mod welcome;
 mod window_layout;

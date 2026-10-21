@@ -1,11 +1,11 @@
 //! The first-run window (tests/scenarios/settings/reference-import.md):
 //! with an empty configuration folder it offers the reference's newest
 //! configuration folder, imports its theme (from a theme plugin), font,
-//! soft wraps, autosave, file types and custom keymap, preselects them on
-//! Choose Theme and Choose Keymap and records the decision with a snapshot
-//! of the reference's data files (no secrets); an importer added later
-//! takes its part from the snapshot once; Skip Import keeps the defaults;
-//! with nothing to import it opens on Choose Theme.
+//! soft wraps, autosave, file types and custom keymap, records the
+//! decision with a snapshot of the reference's data files (no secrets) and
+//! closes; an importer added later takes its part from the snapshot once;
+//! Skip Import keeps the defaults; with nothing to import no window opens
+//! (the theme and the keymap are chosen on the Welcome tab).
 
 use std::cell::Cell;
 use std::fs::File;
@@ -234,7 +234,7 @@ fn open(cx: &mut TestAppContext, with_reference: bool) -> H<'_> {
 }
 
 #[gpui::test]
-fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestAppContext) {
+fn the_import_brings_the_reference_settings_and_closes_the_window(cx: &mut TestAppContext) {
     let mut h = open(cx, true);
     let s = h.state();
     assert_eq!(s["page"], json!("import"), "{s}");
@@ -245,10 +245,10 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     assert_eq!(s["decided"], Value::Null);
 
     h.invoke("first-run.import", json!({}));
-    let s = h.state();
-    assert_eq!(s["page"], json!("theme"), "{s}");
-    assert_eq!(s["kind"], json!("dark"));
-    // The plugin's theme is the theme, first among the custom ones.
+    // The import done, the window closes and the start-up goes on.
+    assert!(h.window().is_none());
+    assert!(h.done.get());
+    // The plugin's theme is the theme.
     let theme = h.cx.update(|cx| theme_switch::current_theme(cx));
     let name = h.cx.update(|cx| {
         theme_switch::catalog(cx)
@@ -257,11 +257,6 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
             .unwrap()
     });
     assert_eq!(name, "Nightfall");
-    assert_eq!(s["chosen"], json!(theme));
-    assert!(
-        s["cards"].as_array().unwrap().contains(&json!(theme)),
-        "{s}"
-    );
     assert_eq!(
         h.get("appearance.editor-scheme"),
         Value::Null,
@@ -300,6 +295,7 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     assert!(!snapshot.join("options/security.xml").exists());
     assert!(!snapshot.join("c.kdbx").exists());
     assert!(!snapshot.join("plugins").exists());
+    // The custom keymap is the keymap.
     assert_eq!(h.get("keymap.name"), json!("Mine"));
     let report = h.cx.update(first_run::take_report).expect("a balloon");
     assert_eq!(report.title.as_ref(), "Settings imported");
@@ -314,42 +310,6 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
     ] {
         assert!(report.content.contains(part), "{part}: {}", report.content);
     }
-
-    // Choose Keymap: the imported keymap is chosen, with its shortcut.
-    h.invoke("first-run.continue", json!(null));
-    let s = h.state();
-    assert_eq!(s["page"], json!("keymap"), "{s}");
-    assert_eq!(s["chosen"], json!("Mine"));
-    let cards = s["cards"].as_array().unwrap();
-    let card = |name: &str| cards.iter().find(|c| c["name"] == json!(name)).unwrap();
-    let go_to_file = |c: &Value| c["shortcuts"][2]["keys"].clone();
-    assert_eq!(card("Mine")["shortcuts"][2]["name"], json!("Go to File"));
-    let macos = cfg!(target_os = "macos");
-    assert_eq!(
-        go_to_file(card("Mine")),
-        json!(if macos {
-            "\u{21e7}\u{2318}P"
-        } else {
-            "Shift+Win+P"
-        }),
-        "{s}"
-    );
-    assert_ne!(
-        go_to_file(card("Mine")),
-        go_to_file(card(cards[0]["name"].as_str().unwrap()))
-    );
-    // Another card switches at once; Back and forward again keep it.
-    h.invoke("first-run.select-keymap", json!({"name": "VSCode"}));
-    assert_eq!(h.get("keymap.name"), json!("VSCode"));
-    h.invoke("first-run.back", json!(null));
-    assert_eq!(h.state()["page"], json!("theme"));
-    h.invoke("first-run.continue", json!(null));
-    assert_eq!(h.state()["chosen"], json!("VSCode"));
-
-    // Continue on the last page closes the window and goes on.
-    h.invoke("first-run.continue", json!(null));
-    assert!(h.window().is_none());
-    assert!(h.done.get());
     let text = std::fs::read_to_string(&h.file).unwrap();
     assert!(text.contains("[import]\n"), "{text}");
     assert!(text.contains("source = \"PyCharm\"\n"), "{text}");
@@ -362,34 +322,20 @@ fn the_import_brings_the_reference_settings_and_preselects_them(cx: &mut TestApp
 fn skip_import_keeps_the_defaults_and_records_the_choice(cx: &mut TestAppContext) {
     let mut h = open(cx, true);
     h.invoke("first-run.skip", json!(null));
-    let s = h.state();
-    assert_eq!(s["page"], json!("theme"), "{s}");
-    assert_eq!(
-        s["buttons"],
-        json!(["first-run-continue", "first-run-back"])
-    );
+    assert!(h.window().is_none());
+    assert!(h.done.get());
     assert_eq!(h.get("import.source"), json!("skipped"));
-    assert_eq!(s["chosen"], json!("islands-dark"));
+    assert_eq!(
+        h.cx.update(|cx| theme_switch::current_theme(cx)),
+        "islands-dark"
+    );
     assert_eq!(h.get("editor.font.size"), Value::Null);
     assert_eq!(h.cx.update(first_run::take_report).map(|n| n.title), None);
-    // Light shows the light themes and switches to the first; Dark back.
-    h.invoke("first-run.theme-kind", json!({"kind": "light"}));
-    let s = h.state();
-    assert_eq!(s["kind"], json!("light"));
-    assert_eq!(s["chosen"], json!("islands-light"));
-    assert_eq!(s["cards"], json!(["islands-light", "pyoxide-light"]));
-    h.invoke("first-run.select-theme", json!({"id": "pyoxide-light"}));
-    h.invoke("first-run.theme-kind", json!({"kind": "dark"}));
-    assert_eq!(h.state()["chosen"], json!("islands-dark"));
-    h.invoke("first-run.theme-kind", json!({"kind": "light"}));
-    assert_eq!(
-        h.state()["chosen"],
-        json!("pyoxide-light"),
-        "the last light one"
-    );
-    // Back goes to the import page; closing the window goes on.
-    h.invoke("first-run.back", json!(null));
-    assert_eq!(h.state()["page"], json!("import"));
+}
+
+#[gpui::test]
+fn closing_the_window_counts_as_skip_import(cx: &mut TestAppContext) {
+    let mut h = open(cx, true);
     h.invoke("first-run.cancel", json!(null));
     assert!(h.window().is_none());
     assert!(h.done.get());
@@ -397,17 +343,12 @@ fn skip_import_keeps_the_defaults_and_records_the_choice(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn without_reference_settings_the_window_opens_on_choose_theme(cx: &mut TestAppContext) {
+fn without_reference_settings_no_window_opens(cx: &mut TestAppContext) {
     let mut h = open(cx, false);
-    let s = h.state();
-    assert_eq!(s["page"], json!("theme"), "{s}");
-    assert_eq!(s["buttons"], json!(["first-run-continue"]), "no Back");
-    h.invoke("first-run.back", json!(null));
-    assert_eq!(h.state()["page"], json!("theme"));
-    h.invoke("first-run.continue", json!(null));
-    h.invoke("first-run.continue", json!(null));
-    assert!(h.done.get());
+    assert!(h.window().is_none(), "nothing to import: no window");
+    assert!(h.done.get(), "the start-up goes on at once");
     assert_eq!(h.get("import.source"), json!("skipped"));
+    assert!(!h.cx.update(|cx| first_run::undecided(cx)));
 }
 
 #[gpui::test]
@@ -433,8 +374,14 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
             "Local Settings",
             "Reference IDE 2025.1",
             "-",
-            "Config or Installation Directory\u{2026}"
+            "Config or Installation Directory"
         ],
+        "{popup}"
+    );
+    // The folder's row has two lines (`ProductChooserRenderer`).
+    let comment = popup["levels"][0]["items"][1]["comment"].clone();
+    assert!(
+        comment.as_str().is_some_and(|c| c.starts_with("Used ")),
         "{popup}"
     );
     // The popup takes the commands while it is open.
@@ -457,7 +404,7 @@ fn other_options_list_older_folders_and_refuse_other_folders(cx: &mut TestAppCon
     );
     // An older folder imports too.
     h.invoke("first-run.import", json!({"folder": "PyCharm2025.1"}));
-    assert_eq!(h.state()["page"], json!("theme"));
+    assert!(h.window().is_none());
     assert_eq!(h.get("import.source"), json!("PyCharm"));
     assert_eq!(h.get("import.version"), json!("2025.1"));
 }
@@ -482,8 +429,6 @@ fn later_importer(source: &first_run::Source) -> first_run::Applied {
 fn an_importer_added_later_takes_its_part_from_the_snapshot_once(cx: &mut TestAppContext) {
     let mut h = open(cx, true);
     h.invoke("first-run.import", json!({}));
-    h.invoke("first-run.continue", json!(null));
-    h.invoke("first-run.continue", json!(null));
     assert!(h.done.get());
     // Nothing is pending: every importer ran with the import.
     h.cx.update(first_run::pick_up);

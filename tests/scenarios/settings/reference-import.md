@@ -8,8 +8,7 @@
    custom keymap based on macOS and two interpreters (one of them deleted
    from disk).
 2. Choose the newest configuration ("Import Settings", the folder's button
-   names its version), then the preselected theme and keymap, and
-   Continue.
+   names its version).
 3. Look at the theme, an editor, soft wraps, a few shortcuts of the
    custom keymap and the interpreter list.
 4. Look at `settings.toml` and `imported/` in the configuration directory.
@@ -20,11 +19,13 @@
 - Step 1: the first-run window comes before the main window, modal, on
   "Import Settings": the newest configuration found, "Skip Import", and
   "Other Options" with the older ones and "Config or Installation
-  Directory…".
-- Step 2: "Importing settings…", then "Choose Theme" and "Choose Keymap"
-  preselect the imported values; Continue on "Choose Keymap" opens the
-  main window with a "Settings imported" balloon naming what came in and
-  what could not.
+  Directory" (each folder in two lines with an icon: the name over when
+  it was used; the list at least as wide as the button), over a teal and
+  olive glow. Without a configuration to offer no window comes (the
+  Welcome tab offers the theme and the keymap, see welcome.md).
+- Step 2: "Importing settings…", then the window closes and the main
+  window opens with a "Settings imported" balloon naming what came in and
+  what could not; its Welcome tab shows the imported theme and keymap.
 - Step 3: theme, scheme, font, ligatures, soft-wrap setting and keymap
   match the reference; only the interpreter that still exists is listed
   (the configured interpreter list, #75, takes it from the snapshot's
@@ -41,7 +42,7 @@
 
 ## Commands
 `first-run.state`, `first-run.import`, `first-run.skip`,
-`first-run.continue`, `settings.import-reference`, `settings.get`.
+`first-run.other-options`, `settings.import-reference`, `settings.get`.
 
 ## Source
 https://www.jetbrains.com/help/pycharm/sharing-your-ide-settings.html;

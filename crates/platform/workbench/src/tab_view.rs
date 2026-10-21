@@ -22,6 +22,11 @@ pub trait TabView: Render + Focusable {
     fn tab_state(&self, _: &App) -> serde_json::Value {
         serde_json::Value::Null
     }
+    /// The main toolbar shows the tab's title while it is active, as it
+    /// shows a file's path (not the Welcome tab's).
+    fn title_in_toolbar(&self, _: &App) -> bool {
+        true
+    }
 }
 
 /// A tab's view whatever its type.
@@ -34,6 +39,7 @@ pub(crate) trait AnyTabView {
     fn is_preview(&self, cx: &App) -> bool;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn state(&self, cx: &App) -> serde_json::Value;
+    fn title_in_toolbar(&self, cx: &App) -> bool;
     /// The entity, for the owner that knows its type.
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -69,6 +75,10 @@ impl<T: TabView + 'static> AnyTabView for Entity<T> {
 
     fn state(&self, cx: &App) -> serde_json::Value {
         self.read(cx).tab_state(cx)
+    }
+
+    fn title_in_toolbar(&self, cx: &App) -> bool {
+        self.read(cx).title_in_toolbar(cx)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
