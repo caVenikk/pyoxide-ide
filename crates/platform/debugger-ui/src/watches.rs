@@ -83,7 +83,7 @@ pub(crate) fn segment_name(segment: &str, watches: &[String]) -> String {
 pub(crate) enum Eval {
     Pending,
     Value {
-        variable: Variable,
+        variable: Box<Variable>,
         /// The size of a container.
         shape: Option<String>,
     },
@@ -121,7 +121,7 @@ pub enum WatchValue {
     /// The program runs: the expression only.
     None,
     Pending,
-    Value(ValueRow),
+    Value(Box<ValueRow>),
     Error(String),
 }
 
@@ -140,7 +140,10 @@ impl WatchValue {
 #[derive(Debug, Clone)]
 pub(crate) enum EditTarget {
     /// Set Value of a child of `parent` (a scope or a value).
-    SetValue { parent: i64, variable: Variable },
+    SetValue {
+        parent: i64,
+        variable: Box<Variable>,
+    },
     /// A watch's expression (an empty one removes it).
     Watch { index: usize },
     /// The result becomes a watch at the top.
@@ -218,7 +221,10 @@ async fn evaluate(
     } else {
         None
     };
-    Eval::Value { variable, shape }
+    Eval::Value {
+        variable: Box::new(variable),
+        shape,
+    }
 }
 
 impl VariablesView {
@@ -823,7 +829,7 @@ impl VariablesView {
         }
         let target = EditTarget::SetValue {
             parent: v.parent,
-            variable: v.variable.clone(),
+            variable: Box::new(v.variable.clone()),
         };
         self.start_edit(row.path.clone(), target, &v.variable.value, window, cx);
         if let Some(value) = value {

@@ -1057,7 +1057,7 @@ impl Builder<'_> {
                     _ => ValueKind::Primitive,
                 };
                 let expanded = variable.reference > 0 && view.state.expanded.contains(&path);
-                WatchValue::Value(ValueRow {
+                WatchValue::Value(Box::new(ValueRow {
                     name: name.clone(),
                     type_text: type_text(variable.type_name.as_deref(), shape.as_deref()),
                     shape: shape.clone(),
@@ -1065,8 +1065,8 @@ impl Builder<'_> {
                     expanded,
                     changed,
                     parent: 0,
-                    variable: variable.clone(),
-                })
+                    variable: (**variable).clone(),
+                }))
             }
         };
         let children = match &value {
