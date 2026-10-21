@@ -23,8 +23,8 @@ use editor::{Decoration, Editor, TextPiece};
 use gpui::{App, Context, Entity, Task};
 use themes::TextRole;
 
-use crate::DebuggerView;
 use crate::session::execution_point::ExecutionPoint;
+use crate::{DebuggerView, DebuggerViewEvent};
 
 /// The decorations' group in an editor.
 pub(crate) const GROUP: &str = "debugger-inline-values";
@@ -168,15 +168,28 @@ impl DebuggerView {
         }));
     }
 
-    /// Show Variable Values in Editor (`XDebugger.Inline`), on or off.
+    /// Show Variable Values in Editor (`XDebugger.Inline`), on or off. The
+    /// option is the application's: the window asks to store it
+    /// ([`DebuggerViewEvent::ShowValuesInline`]) and every window follows
+    /// the stored value ([`Self::set_inline_values_shown`]).
     pub(crate) fn toggle_inline_values(&mut self, on: Option<bool>, cx: &mut Context<Self>) {
         let on = on.unwrap_or(self.inline.disabled);
+        if self.set_inline_values_shown(on, cx) {
+            cx.emit(DebuggerViewEvent::ShowValuesInline(on));
+        }
+    }
+
+    /// The stored option (`XDebuggerDataViewSettings.isShowValuesInline`):
+    /// the editors show the values of the stop, or none. True when it
+    /// changed.
+    pub fn set_inline_values_shown(&mut self, on: bool, cx: &mut Context<Self>) -> bool {
         if on == !self.inline.disabled {
-            return;
+            return false;
         }
         self.inline.disabled = !on;
         self.update_inline_values(cx);
         cx.notify();
+        true
     }
 
     /// Values are shown after the lines (the menu's check mark).

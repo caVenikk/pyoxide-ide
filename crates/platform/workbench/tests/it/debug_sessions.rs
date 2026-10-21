@@ -4,12 +4,13 @@
 //! toolbar and console, the execution point in the editor, Stop and Rerun
 //! shared with Run, "Process 'x' Is Running", the run widget's Debug,
 //! Resume and Pause, the dropdown's and the Run/Debug Configurations
-//! dialog's Debug.
+//! dialog's Debug, and the stored option Show Variable Values in Editor.
 
 use crate::support;
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{AppContext as _, TestAppContext, WindowHandle};
 use serde_json::{Value, json};
@@ -147,21 +148,34 @@ fn python() -> FileType {
     FileType::plain("Python", &["py"], IconName::FILE_TEXT)
 }
 
-fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
-    support::allow_processes(cx);
-    let dir = tempfile::tempdir().unwrap();
-    let root = native_path::canonicalize(dir.path()).unwrap();
-    std::fs::write(root.join("main.py"), MAIN).unwrap();
-    std::fs::write(root.join("other.py"), "x = 1\n").unwrap();
-    let product = Product {
+fn product() -> Product {
+    Product {
         name: "Test IDE",
         file_types: vec![python()],
         run: Some(support::run_hook()),
         debug: Some(support::debug_hook()),
         ..Product::default()
-    };
+    }
+}
+
+fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
+    setup_with(cx, None)
+}
+
+/// A window on a project of two files; with `store`, the application's
+/// settings are read from and saved to that file.
+fn setup_with(cx: &mut TestAppContext, store: Option<PathBuf>) -> (H<'_>, tempfile::TempDir) {
+    support::allow_processes(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let root = native_path::canonicalize(dir.path()).unwrap();
+    std::fs::write(root.join("main.py"), MAIN).unwrap();
+    std::fs::write(root.join("other.py"), "x = 1\n").unwrap();
+    let product = product();
     let window = cx.update(|cx| {
         workbench::init(cx, &product);
+        if let Some(store) = store {
+            settings_ui::store::load(cx, store);
+        }
         workbench::open_main_window(cx, Rc::new(product))
     });
     let mut h = H {
@@ -799,4 +813,172 @@ fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
         "{v:#}"
     );
     h.invoke("debug.stop", json!(null));
+}
+
+/// The check mark of Show Variable Values in Editor in the Debug toolbar's
+/// More > Debugger Settings menu, which is closed again.
+fn inline_values_checked(h: &mut H) -> bool {
+    h.invoke("debug.more-actions", json!(null));
+    let label_at = |menu: &Value, level: usize, ix: Option<u64>| -> Value {
+        ix.map_or(Value::Null, |ix| {
+            menu["levels"][level]["items"][ix as usize]["label"].clone()
+        })
+    };
+    for _ in 0..10 {
+        let menu = h.run()["menu"].clone();
+        let selected = menu["levels"][0]["selected"].as_u64();
+        if label_at(&menu, 0, selected) == json!("Debugger Settings") {
+            break;
+        }
+        h.invoke("menu.down", json!(null));
+    }
+    h.invoke("menu.open-submenu", json!(null));
+    let menu = h.run()["menu"].clone();
+    let item = menu["levels"][1]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == json!("Show Variable Values in Editor"))
+        .cloned()
+        .unwrap_or_else(|| panic!("the setting's row: {menu:#}"));
+    assert_eq!(item["command"], json!("debug.toggle-inline-values"));
+    h.invoke("menu.cancel", json!(null));
+    h.invoke("menu.cancel", json!(null));
+    assert!(h.run()["menu"].is_null(), "the menu is closed");
+    item["checked"] == json!(true)
+}
+
+/// Show Variable Values in Editor is an option of the application
+/// (`XDebuggerDataViewSettings.showValuesInline`, `[debugger.data-views]`
+/// of `settings.toml`, on by default): the window starts with the stored
+/// choice, the toggle changes the file, turning it on shows the values of
+/// the stop after their lines and turning it off clears them, and the
+/// menu's check mark follows.
+#[gpui::test]
+fn show_variable_values_in_editor_is_stored_with_the_application_settings(cx: &mut TestAppContext) {
+    let config = tempfile::tempdir().unwrap();
+    let file = config.path().join("settings.toml");
+    std::fs::write(
+        &file,
+        "version = 1\n\n[debugger.data-views]\nshow-values-inline = false\n",
+    )
+    .unwrap();
+    let (mut h, _dir) = setup_with(cx, Some(file.clone()));
+    let file_text = |h: &mut H| {
+        h.cx.executor().advance_clock(Duration::from_secs(1));
+        h.cx.run_until_parked();
+        std::fs::read_to_string(&file).unwrap_or_default()
+    };
+    // The stored choice at the start: off.
+    assert_eq!(h.debug()["show_values_inline"], json!(false));
+
+    // A stop on line 3 of `f`: its variables, `a` (a parameter, no
+    // assignment) and `b` (assigned on line 2).
+    let main = h.file("main.py");
+    let mut script = support::debug_start_ignoring(
+        &h.root,
+        None,
+        &["setBreakpoints", "setExceptionBreakpoints", "source"],
+    );
+    script.extend(debug_stop(&main, 3, "breakpoint"));
+    script.extend([
+        json!({"expect": "scopes", "arguments": {"frameId": 103}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0},
+            {"name": "b", "value": "2", "type": "int", "variablesReference": 0}]}}),
+    ]);
+    push_debug_script(script);
+    h.invoke("debug.debug", json!(null));
+    let s = h.wait("the stop and its variables", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
+    });
+    assert_eq!(s["execution_point"]["line"], json!(3));
+    assert!(s["inline_values"].is_null(), "off at the start: {s}");
+    assert!(!inline_values_checked(&mut h));
+
+    // Turned on: the values of the stop show after their lines, the
+    // default is no key in the file.
+    h.invoke("debug.toggle-inline-values", json!({"on": true}));
+    let s = h.wait("the inline values", |s| !s["inline_values"].is_null());
+    assert_eq!(s["show_values_inline"], json!(true));
+    assert_eq!(
+        s["inline_values"]["values"],
+        json!([{"line": 2, "text": "b: 2", "changed": false}])
+    );
+    assert!(inline_values_checked(&mut h));
+    assert!(!file_text(&mut h).contains("show-values-inline"));
+
+    // Toggled off: the values go and the file keeps the choice.
+    h.invoke("debug.toggle-inline-values", json!(null));
+    let s = h.debug();
+    assert_eq!(s["show_values_inline"], json!(false));
+    assert!(s["inline_values"].is_null(), "cleared: {s}");
+    assert!(!inline_values_checked(&mut h));
+    let text = file_text(&mut h);
+    assert!(text.contains("[debugger.data-views]"), "{text}");
+    assert!(text.contains("show-values-inline = false"), "{text}");
+    // The stop is still there, and so is the editor's line.
+    assert_eq!(h.debug()["execution_point"]["line"], json!(3));
+
+    // The stored value is the application's: after a restart it is read
+    // again (the store of a new start).
+    let mut again = ::settings::Store::load(file.clone());
+    again.register::<::settings::DataViewSettings>();
+    assert!(
+        !again
+            .section::<::settings::DataViewSettings>()
+            .show_values_inline
+    );
+}
+
+/// The option belongs to the application, not to a window: every main
+/// window follows a change made in one of them, or by `settings.set`.
+#[gpui::test]
+fn every_window_follows_show_variable_values_in_editor(cx: &mut TestAppContext) {
+    let config = tempfile::tempdir().unwrap();
+    let file = config.path().join("settings.toml");
+    let (mut h, _dir) = setup_with(cx, Some(file));
+    let second =
+        h.cx.update(|cx| workbench::open_main_window(cx, Rc::new(product())));
+    h.draw();
+    let shown = |h: &mut H, window: WindowHandle<Workbench>| -> Value {
+        h.cx.update_window(window.into(), |_, window, cx| {
+            ui::command::invoke("debug.state", json!(null), window, cx)
+        })
+        .unwrap()
+        .unwrap()["show_values_inline"]
+            .clone()
+    };
+    let first = h.window;
+    assert_eq!(shown(&mut h, first), json!(true));
+    assert_eq!(shown(&mut h, second), json!(true));
+    // Switched in the first window.
+    h.invoke("debug.toggle-inline-values", json!({"on": false}));
+    assert_eq!(shown(&mut h, first), json!(false));
+    assert_eq!(shown(&mut h, second), json!(false));
+    // Switched from the command registry, in the second window.
+    h.cx.update_window(second.into(), |_, window, cx| {
+        ui::command::invoke(
+            "settings.set",
+            json!({"key": "debugger.data-views.show-values-inline", "value": true}),
+            window,
+            cx,
+        )
+    })
+    .unwrap()
+    .unwrap();
+    h.draw();
+    assert_eq!(shown(&mut h, first), json!(true));
+    assert_eq!(shown(&mut h, second), json!(true));
+    // A window opened later starts with the stored choice.
+    h.invoke("debug.toggle-inline-values", json!({"on": false}));
+    let third =
+        h.cx.update(|cx| workbench::open_main_window(cx, Rc::new(product())));
+    h.draw();
+    assert_eq!(shown(&mut h, third), json!(false));
 }

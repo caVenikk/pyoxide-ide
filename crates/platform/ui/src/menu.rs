@@ -1496,6 +1496,9 @@ impl ContextMenu {
                         if let Some(Some(digit)) = numbers.get(ix).filter(|_| level == 0) {
                             row["number"] = json!(digit.to_string());
                         }
+                        if item.icon_name() == Some(IconName::CHECKED) {
+                            row["checked"] = json!(true);
+                        }
                         if let Some(extra) = item.extra() {
                             if extra.bold {
                                 row["bold"] = json!(true);

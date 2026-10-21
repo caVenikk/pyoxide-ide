@@ -69,6 +69,10 @@ pub enum DebuggerViewEvent {
     MoreMenu(Option<gpui::Point<gpui::Pixels>>),
     /// A Rerun waits for the window ([`DebuggerView::restart_pending`]).
     Restart,
+    /// Show Variable Values in Editor was switched: the window stores the
+    /// application's option, and every window follows it
+    /// ([`DebuggerView::set_inline_values_shown`]).
+    ShowValuesInline(bool),
 }
 
 /// The debugger UI of a window.
@@ -709,7 +713,11 @@ impl DebuggerView {
     /// dialog.
     pub fn state_json(&self, cx: &App) -> Json {
         let Some(debugger) = &self.debugger else {
-            return json!({"loaded": false, "available": self.hook.is_some()});
+            return json!({
+                "loaded": false,
+                "available": self.hook.is_some(),
+                "show_values_inline": self.inline_values_shown(),
+            });
         };
         let mut state = debugger.state_json();
         let breakpoints = debugger.breakpoints();
@@ -762,6 +770,7 @@ impl DebuggerView {
         let (tool_window, execution_point) = self.sessions_json(cx);
         state["tool_window"] = tool_window;
         state["execution_point"] = execution_point;
+        state["show_values_inline"] = json!(self.inline_values_shown());
         state["inline_values"] = self.inline_values_json();
         state["starting"] = json!(self.starting.len());
         state

@@ -98,6 +98,7 @@ impl Workbench {
         let view = cx.new(|cx| {
             let mut view = DebuggerView::new(product.debug.clone(), cx);
             view.set_activate(!crate::env::background());
+            view.set_inline_values_shown(crate::settings::show_values_inline(cx), cx);
             view.set_highlighters(Rc::new(move |path: &Path| {
                 file_types
                     .for_path(path)
@@ -211,6 +212,9 @@ impl Workbench {
             DebuggerViewEvent::Restart => {
                 self.debugger
                     .update(cx, |v, cx| v.restart_pending(window, cx));
+            }
+            DebuggerViewEvent::ShowValuesInline(on) => {
+                crate::settings::set_show_values_inline(*on, cx);
             }
         }
         cx.notify();

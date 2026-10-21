@@ -47,9 +47,19 @@ const DEBUG_IGNORED: [&str; 5] = [
 /// configuration, then the program started with `runInTerminal` in `cwd`
 /// (`program`: the command and its arguments; none without).
 pub fn debug_start(cwd: &Path, program: Option<Vec<String>>) -> Vec<serde_json::Value> {
+    debug_start_ignoring(cwd, program, &DEBUG_IGNORED)
+}
+
+/// [`debug_start`] with the requests the adapter drops unanswered named
+/// (a test that answers `scopes` and `variables` itself leaves them out).
+pub fn debug_start_ignoring(
+    cwd: &Path,
+    program: Option<Vec<String>>,
+    ignored: &[&str],
+) -> Vec<serde_json::Value> {
     use serde_json::json;
     let mut steps = vec![
-        json!({"ignore": DEBUG_IGNORED}),
+        json!({"ignore": ignored}),
         json!({"expect": "initialize"}),
         json!({"respond": {"supportsConfigurationDoneRequest": true,
             "supportsTerminateRequest": true}}),
@@ -484,6 +494,30 @@ impl debugger::DebugAdapterProvider for TestDebug {
     fn parse_type_source(&self, value: &str) -> Option<(std::path::PathBuf, u32)> {
         let (path, line) = value.rsplit_once(':')?;
         Some((path.into(), line.parse().ok()?))
+    }
+
+    /// The line of a name's first assignment (`name = ...`) in `.py` files.
+    fn declarations(
+        &self,
+        file: &Path,
+        text: &str,
+        _line: u32,
+        names: &[String],
+    ) -> Option<Vec<Option<(u32, u32)>>> {
+        (file.extension().is_some_and(|e| e == "py")).then(|| {
+            names
+                .iter()
+                .map(|name| {
+                    text.split('\n').enumerate().find_map(|(i, l)| {
+                        let column = l.len() - l.trim_start().len();
+                        l.trim_start()
+                            .strip_prefix(name.as_str())
+                            .is_some_and(|rest| rest.trim_start().starts_with('='))
+                            .then_some((i as u32 + 1, column as u32))
+                    })
+                })
+                .collect()
+        })
     }
 }
 

@@ -15,6 +15,7 @@
 //! running application, its change events and the Settings window.
 
 mod appearance;
+mod debugger;
 mod editor;
 mod files;
 mod import;
@@ -25,6 +26,7 @@ mod terminal;
 use std::path::PathBuf;
 
 pub use appearance::{AppearanceSettings, themes_dir};
+pub use debugger::DataViewSettings;
 pub use editor::{DEFAULT_SOFT_WRAP_FILES, EditorFontSettings, SoftWrapSettings};
 pub use files::{SaveSettings, SyncSettings};
 pub use import::{FileTypeAssociation, FileTypeSettings, ImportSettings};
