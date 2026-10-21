@@ -16,16 +16,20 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, Corner, DismissEvent, Entity, Pixels, Point, Subscription, Window, point,
-    px,
+    AnyElement, App, Bounds, Context, Corner, DismissEvent, Entity, Hsla, Pixels, Point, Rgba,
+    Subscription, Window, div, linear_color_stop, linear_gradient, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
+use themes::{Controls, UiRole};
 use ui::avatar::Avatar;
 use ui::icons::IconName;
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
+use ui::theme::ThemeExt;
 
 use super::Workbench;
+use super::run_actions::PendingDialog;
 use crate::commands::OpenFolder;
+use crate::dialog::{Dialog, DialogButton};
 use crate::recent_projects::{self, COLORS};
 
 ui::ui_commands! {
@@ -37,6 +41,14 @@ ui::ui_commands! {
     OpenRecent { path: String } => "project.open-recent", "Open Recent Project",
         "Shows the window of a project open in the application, else opens the folder as the project in this window.",
         r#"{"path": "/path/to/project"}"#;
+    /// Copy a recent project's folder.
+    CopyRecentPath { path: String } => "project.copy-recent-path", "Copy Path",
+        "Copies the folder of a recent project to the clipboard (`WelcomeScreen.CopyProjectPath`).",
+        r#"{"path": "/path/to/project"}"#;
+    /// Take a project off the recent projects.
+    RemoveRecent { path: String } => "project.remove-recent", "Remove from Recent Projects\u{2026}",
+        "Asks, then takes a project off the recent projects (`WelcomeScreen.RemoveSelected`).",
+        r#"{"path": "/path/to/project"}"#;
     /// Describe the popup.
     State => "project-widget.state", "Project Widget State",
         "Returns whether the project widget's popup is open and its rows as JSON (labels, folders, avatars, headers, selection, filter).";
@@ -46,6 +58,8 @@ ui::ui_commands! {
 pub const OPEN: &str = "Open\u{2026}";
 /// `action.ProjectFromVersionControl.ProjectWidgetPopup.text`.
 pub const CLONE: &str = "Clone Repository\u{2026}";
+/// `dialog.title.remove.recent.project`.
+pub const REMOVE_TITLE: &str = "Remove Recent Project";
 /// `project.widget.open.projects`.
 pub const OPEN_PROJECTS: &str = "Open Projects";
 /// `project.widget.recent.projects`.
@@ -58,6 +72,22 @@ const MAX_ROWS: usize = 30;
 /// whose background is inset in its bounds; measured on the reference).
 const POPUP_LEFT: f32 = 5.0;
 const POPUP_BELOW: f32 = 4.0;
+
+/// The project's colour on the main toolbar (`ProjectWindowCustomizerService`,
+/// on by default: `UISettings.differentiateProjects`): the colour blended
+/// into the toolbar's (`saturation` 0.85) at the centre of the project's
+/// avatar, fading to the toolbar's colour on both sides. New UI themes
+/// (`IslandsGradientPainter`): from the window's left edge to 600 right of
+/// the centre (`RecentProject.MainToolbarGradient.width`), fading downwards
+/// to the toolbar's colour at 300 (`.height`). Other themes
+/// (`ProjectWindowCustomizerService.paint`): 300 on each side
+/// (`ide.colorful.toolbar.gradient.radius`).
+const SATURATION: f32 = 0.85;
+const NEW_UI_WIDTH: f32 = 600.0;
+const NEW_UI_HEIGHT: f32 = 300.0;
+const CLASSIC_RADIUS: f32 = 300.0;
+/// The centre before the widget was laid out (`DEFAULT_GRADIENT_OFFSET`).
+const DEFAULT_CENTER: f32 = 150.0;
 
 /// The widget's place and its open popup.
 #[derive(Default)]
@@ -115,6 +145,19 @@ fn fallback_color(path: &Path) -> u8 {
     (hash % u32::from(COLORS)) as u8
 }
 
+/// `a` and `b` mixed in RGB, `ratio` of `b` (`ColorUtil.blendColorsInRgb`).
+fn blend(a: Hsla, b: Hsla, ratio: f32) -> Hsla {
+    let (a, b) = (Rgba::from(a), Rgba::from(b));
+    let mix = |x: f32, y: f32| x + (y - x) * ratio;
+    Rgba {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: 1.0,
+    }
+    .into()
+}
+
 /// The popup's rows.
 fn items(rows: &[ProjectRow], cx: &App) -> Vec<MenuItem> {
     let mut items = vec![
@@ -147,6 +190,65 @@ impl Workbench {
         let color = recent_projects::color(project.root(), cx)
             .unwrap_or_else(|| fallback_color(project.root()));
         recent_projects::avatar(project.name(), color, cx)
+    }
+
+    /// The project's colour on the main toolbar, `height` high: layers
+    /// drawn before the toolbar's widgets (see [`SATURATION`]).
+    pub(super) fn toolbar_project_color(&self, height: Pixels, cx: &App) -> Vec<AnyElement> {
+        let Some(project) = self.project(cx) else {
+            return Vec::new();
+        };
+        let theme = cx.theme();
+        let main = theme.color(UiRole::Toolbar);
+        let index = recent_projects::color(project.root(), cx)
+            .unwrap_or_else(|| fallback_color(project.root()));
+        let color = recent_projects::toolbar_color(index, cx);
+        let blended = blend(main, color, SATURATION * color.a);
+        let anchor = self.project_widget.anchor.get();
+        let center = if anchor.size.width > px(0.0) {
+            f32::from(anchor.origin.x) + crate::chrome::PROJECT_AVATAR_CENTER
+        } else {
+            DEFAULT_CENTER
+        };
+        let new_ui = theme.controls() == Controls::New;
+        let (left, right) = if new_ui {
+            (0.0, NEW_UI_WIDTH)
+        } else {
+            ((center - CLASSIC_RADIUS).max(0.0), CLASSIC_RADIUS)
+        };
+        let band = |x: f32, width: f32| div().absolute().top_0().left(px(x)).w(px(width)).h(height);
+        let mut layers = vec![
+            band(left, center - left)
+                .debug_selector(|| "toolbar-project-color".into())
+                .bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(main, 0.0),
+                    linear_color_stop(blended, 1.0),
+                ))
+                .into_any_element(),
+            band(center, right)
+                .bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(blended, 0.0),
+                    linear_color_stop(main, 1.0),
+                ))
+                .into_any_element(),
+        ];
+        if new_ui {
+            // Down to the toolbar's colour at 300: the toolbar shows the
+            // top of it.
+            let bottom = (f32::from(height) / NEW_UI_HEIGHT).min(1.0);
+            layers.push(
+                band(0.0, center + right)
+                    .bg(linear_gradient(
+                        180.0,
+                        linear_color_stop(main.opacity(0.0), 0.0),
+                        linear_color_stop(main.opacity(bottom), 1.0),
+                    ))
+                    .into_any_element(),
+            );
+        }
+        layers
     }
 
     /// The projects open in the application's windows: this window's and
@@ -243,6 +345,53 @@ impl Workbench {
     /// combo button whose popup is shown: `ExpandableComboAction`).
     pub(super) fn project_widget_open(&self) -> bool {
         self.project_widget.popup.is_some()
+    }
+
+    /// `project.copy-recent-path`.
+    pub(super) fn copy_recent_path(
+        &mut self,
+        action: &CopyRecentPath,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = native_path::simplified(Path::new(&action.path));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+            path.to_string_lossy().into_owned(),
+        ));
+    }
+
+    /// `project.remove-recent`: "Remove Recent Project" asks first
+    /// (`RemoveSelectedProjectsAction.removeItems`).
+    pub(super) fn remove_recent_project(
+        &mut self,
+        action: &RemoveRecent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = PathBuf::from(&action.path);
+        let name = recent_projects::list(cx)
+            .get(&path)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| project::display_path(&path));
+        let dialog = cx.new(|cx| {
+            Dialog::new(
+                REMOVE_TITLE,
+                format!("Remove '{name}' from recent projects list?"),
+                vec![
+                    DialogButton {
+                        id: "cancel",
+                        label: "&Cancel".into(),
+                    },
+                    DialogButton {
+                        id: "remove",
+                        label: "&Remove".into(),
+                    },
+                ],
+                cx,
+            )
+            .with_icon(IconName::QUESTION_DIALOG)
+        });
+        self.open_dialog(dialog, PendingDialog::RemoveRecentProject(path), window, cx);
     }
 
     /// The open popup's rows, for `project-widget.state`.

@@ -229,6 +229,91 @@ fn the_list_is_read_from_the_configuration_folder(cx: &mut TestAppContext) {
     assert_eq!(rows[5].0, "old-app");
     assert_eq!(
         rows[5].1,
-        "/nonexistent/old-app".replace('/', std::path::MAIN_SEPARATOR_STR)
+        project::display_path(Path::new("/nonexistent/old-app"))
     );
+}
+
+#[gpui::test]
+fn the_welcome_list_shows_the_recent_projects(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config").join(recent_projects::FILE);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let here = dir.path().join("projects").join("my-app");
+    std::fs::create_dir_all(&here).unwrap();
+    let here = native_path::canonicalize(&here).unwrap();
+    let mut list = recent_projects::RecentProjects::default();
+    list.opened(Path::new("/nonexistent/old-app"), "old-app", 1, 0, |_| {
+        false
+    });
+    list.opened(&here, "my-app", 2, 0, |_| false);
+    std::fs::write(&file, list.to_toml()).unwrap();
+    let product = Product {
+        name: "Test IDE",
+        ..Product::default()
+    };
+    let window = cx.update(|cx| {
+        workbench::init(cx, &product);
+        recent_projects::load(cx, file.clone());
+        workbench::open_main_window(cx, Rc::new(product))
+    });
+    let mut h = H { cx, window, dir };
+    h.draw();
+    // Without a project: Projects and Files lists them, a gone folder
+    // greyed.
+    let panel = h.invoke("workbench.state", json!(null))["projects_and_files"].clone();
+    let rows: Vec<(String, String, bool)> = panel["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().to_owned(),
+                p["avatar"].as_str().unwrap().to_owned(),
+                p["gone"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("my-app".to_owned(), "MA".to_owned(), false),
+            ("old-app".to_owned(), "OA".to_owned(), true),
+        ],
+        "{panel}"
+    );
+
+    // Copy Path of the row's menu.
+    h.invoke(
+        "project.copy-recent-path",
+        json!({ "path": here.to_string_lossy() }),
+    );
+    let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied.as_deref(), Some(here.to_str().unwrap()));
+
+    // Remove from Recent Projects… asks first.
+    let old = Path::new("/nonexistent/old-app")
+        .to_string_lossy()
+        .into_owned();
+    h.invoke("project.remove-recent", json!({ "path": old }));
+    let s = h.invoke("workbench.state", json!(null));
+    assert_eq!(s["dialog"]["title"], json!("Remove Recent Project"), "{s}");
+    assert_eq!(
+        s["dialog"]["message"],
+        json!("Remove 'old-app' from recent projects list?")
+    );
+    h.invoke("dialog.cancel", json!(null));
+    assert_eq!(h.recent(), ["my-app", "old-app"]);
+    h.invoke("project.remove-recent", json!({ "path": old }));
+    h.invoke("dialog.choose", json!({ "button": "Remove" }));
+    assert_eq!(h.recent(), ["my-app"]);
+    let panel = h.invoke("workbench.state", json!(null))["projects_and_files"].clone();
+    assert_eq!(panel["projects"].as_array().unwrap().len(), 1, "{panel}");
+
+    // Open Selected opens it in the window.
+    h.invoke(
+        "project.open-recent",
+        json!({ "path": here.to_string_lossy() }),
+    );
+    let s = h.invoke("workbench.state", json!(null));
+    assert_eq!(s["project"]["root"], json!(here.to_string_lossy()));
 }

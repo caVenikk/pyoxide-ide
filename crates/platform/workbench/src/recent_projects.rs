@@ -196,6 +196,33 @@ const CLASSIC_LIGHT: [(u32, u32); 9] = [
     (0xE75371, 0xFF78B5),
 ];
 
+/// The main toolbar's colour of a project of colour `index`
+/// (`RecentProjectColorPalette.mainToolbarGradientStart`): the New UI dark
+/// themes' and the Islands Light theme's `RecentProject.ColorN.
+/// MainToolbarGradientStart`, the platform's defaults in other themes.
+pub fn toolbar_color(index: u8, cx: &App) -> Hsla {
+    let theme = cx.theme();
+    let ix = usize::from(index % COLORS);
+    let hex = match (theme.controls(), theme.is_dark()) {
+        (Controls::New, true) => TOOLBAR_NEW_UI_DARK[ix],
+        (Controls::New, false) => TOOLBAR_NEW_UI_LIGHT[ix],
+        (Controls::Classic, true) => CLASSIC_DARK[ix].0,
+        (Controls::Classic, false) => CLASSIC_LIGHT[ix].0,
+    };
+    rgb(hex)
+}
+
+/// `RecentProject.ColorN.MainToolbarGradientStart` of `expUI_dark.theme.json`.
+const TOOLBAR_NEW_UI_DARK: [u32; 9] = [
+    0x654B40, 0x534C33, 0x455038, 0x31515F, 0x344C7D, 0x5D354A, 0x4F3E65, 0x1D4744, 0x3E5540,
+];
+
+/// `RecentProject.ColorN.MainToolbarGradientStart` of
+/// `ManyIslandsLight.theme.json`.
+const TOOLBAR_NEW_UI_LIGHT: [u32; 9] = [
+    0xF7D7CB, 0xF5E6B8, 0xE2F2C9, 0xCBE4F7, 0xD4D2FC, 0xECD3F5, 0xE4D3F5, 0xCEF0E9, 0xCEEDD4,
+];
+
 /// The avatar of a project: its initials in its colours.
 pub fn avatar(name: &str, color: u8, cx: &App) -> ui::avatar::Avatar {
     let (start, end) = colors(color, cx);
@@ -214,7 +241,7 @@ enum Change {
 }
 
 /// The list of the running application and the file it is kept in.
-struct Store {
+pub struct Store {
     file: Option<PathBuf>,
     list: RecentProjects,
     /// The file was read (or there is none).

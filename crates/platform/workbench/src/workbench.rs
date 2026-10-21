@@ -1850,6 +1850,7 @@ impl Workbench {
             ],
         ];
         let width = window.viewport_size().width - left;
+        let project_color = self.toolbar_project_color(height, cx);
         div()
             .id("toolbar")
             .debug_selector(|| "toolbar".into())
@@ -1862,6 +1863,7 @@ impl Workbench {
                     window.titlebar_double_click();
                 }
             })
+            .children(project_color)
             .children(crate::main_toolbar::render(left, width, groups))
     }
 
@@ -2521,6 +2523,8 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::show_gear_menu))
             .on_action(cx.listener(Self::show_project_widget))
             .on_action(cx.listener(Self::open_recent_project))
+            .on_action(cx.listener(Self::copy_recent_path))
+            .on_action(cx.listener(Self::remove_recent_project))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))
             .on_action(cx.listener(Self::quick_switch))

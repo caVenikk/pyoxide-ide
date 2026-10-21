@@ -23,6 +23,11 @@ const CHEVRON: f32 = 16.0;
 /// between the project widget's parts.
 const BADGE: f32 = 20.0;
 const PROJECT_GAP: f32 = 6.0;
+/// The project widget's padding: `MainToolbar.Dropdown.borderInsets`
+/// (5, 10, 5, 6) of the New UI, 10 before the avatar and 6 after the
+/// chevron.
+const PROJECT_PADDING_LEFT: f32 = 10.0;
+const PROJECT_PADDING_RIGHT: f32 = 6.0;
 /// Size of the file widget's icon, its gap to the text and the text's gap
 /// to the chevron.
 const FILE_ICON: f32 = 16.0;
@@ -78,8 +83,15 @@ pub fn project_widget_chrome(has_project: bool) -> f32 {
     } else {
         0.0
     };
-    toolbar_widget_chrome(PROJECT_GAP) + badge
+    toolbar_widget_chrome(PROJECT_GAP) - 2.0 * WIDGET_PADDING
+        + PROJECT_PADDING_LEFT
+        + PROJECT_PADDING_RIGHT
+        + badge
 }
+
+/// The centre of the project's avatar from the project widget's left edge
+/// (where the toolbar's project colour is strongest).
+pub const PROJECT_AVATAR_CENTER: f32 = PROJECT_PADDING_LEFT + BADGE / 2.0;
 
 /// The project widget: the project's avatar (`ProjectWindowCustomizerService.
 /// getProjectIcon`), name, chevron; the name as the toolbar fitted it (see
@@ -92,6 +104,8 @@ pub fn project_widget(
 ) -> Stateful<Div> {
     toolbar_widget("project-widget", cx)
         .debug_selector(|| "project-widget".into())
+        .pl(px(PROJECT_PADDING_LEFT))
+        .pr(px(PROJECT_PADDING_RIGHT))
         .gap(px(PROJECT_GAP))
         .when_some(avatar.filter(|_| name.is_some()), |d, avatar| {
             d.child(avatar.render(BADGE))

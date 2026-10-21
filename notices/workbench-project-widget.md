@@ -1,5 +1,6 @@
 - crates/platform/workbench/src/workbench/project_widget.rs,
   crates/platform/workbench/src/recent_projects.rs,
+  crates/platform/workbench/src/welcome/projects.rs (the recent projects),
   crates/platform/workbench/src/chrome.rs (the project widget's avatar),
   crates/platform/ui/src/avatar.rs, crates/platform/ui/src/menu.rs (rows
   with an avatar, popups that scroll beyond a number of rows), the theme
@@ -16,7 +17,14 @@
   order, the projects open in windows, the folders kept when they are
   gone, the `~` paths), RecentProjectIconHelper.kt and
   ProjectWindowCustomizerService.kt (the palette, a new project's colour
-  after the last one given), platform/util/ui/src/com/intellij/util/ui/
+  after the last one given, the toolbar's project colour and its default)
+  with platform/platform-impl/src/com/intellij/openapi/application/impl/
+  islands/IslandsGradientPainter.kt (the colour's extent in the New UI),
+  platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/
+  recentProjects/RecentProjectFilteringTree.kt and projectActions/
+  RemoveSelectedProjectsAction.kt (the Welcome screen's recent project
+  rows, their buttons, menu and the question before removing),
+  platform/util/ui/src/com/intellij/util/ui/
   AvatarUtils.kt (the initials, the gradient, the corners and the font of
   an avatar), platform/platform-api/src/com/intellij/openapi/ui/popup/
   util/PopupUtil.java and platform/util/ui/src/com/intellij/util/ui/
@@ -25,6 +33,8 @@
   expUI/expUI_dark.theme.json and expUI_light.theme.json and
   `Plugins.lightSelectionBackground` of themes/islands/
   ManyIslandsDark.theme.json and ManyIslandsLight.theme.json, the action
-  texts of platform/platform-resources-en/src/messages/ActionsBundle.properties.
+  texts of platform/platform-resources-en/src/messages/ActionsBundle.properties
+  and platform/platform-api/resources/messages/IdeBundle.properties, the
+  toolbar insets `MainToolbar.Dropdown.borderInsets` of JBUI.java.
   Only behaviour, numbers, colours and texts are used; reimplemented in
   Rust with GPUI.
