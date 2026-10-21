@@ -35,7 +35,7 @@ ui::ui_commands! {
         "Starts a new terminal session in a new tab of the Terminal tool window and selects it.";
     /// Close the selected tab.
     CloseTab => "terminal.close-tab", "Close Tab",
-        "Closes the selected tab of the Terminal tool window and ends its session; the last tab closed hides the tool window.";
+        "Closes the selected tab of the Terminal tool window and ends its session, after a confirmation when a command runs in the shell; the last tab closed hides the tool window.";
     /// Rename the selected tab.
     RenameTab { name: Option<String> } => "terminal.rename-tab", "Rename Session",
         "Renames the selected tab of the Terminal tool window to `name`; an empty name is refused.",
@@ -46,4 +46,11 @@ ui::ui_commands! {
     /// Select the previous tab.
     PreviousTab => "terminal.previous-tab", "Select Previous Tab",
         "Selects the previous tab of the Terminal tool window (before the first, the last).";
+    /// Select a tab by its position.
+    SelectTab { index: Option<usize> } => "terminal.select-tab", "Select Tab",
+        "Selects the tab at `index` (counted from 0) of the Terminal tool window.",
+        r#"{"index": 1}"#;
+    /// Show the list of tabs.
+    ShowTabList => "terminal.show-tab-list", "Show List of Tabs",
+        "Opens the list of the tabs of the Terminal tool window under the selected tab (with a search by typing); choosing a row selects that tab. Needs more than one tab.";
 }

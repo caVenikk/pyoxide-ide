@@ -38,6 +38,9 @@ pub(super) enum PendingDialog {
     FileSync(super::file_sync::SyncDialog),
     /// "Are you sure you want to delete …?": Yes deletes it.
     DeleteConfiguration(run_config::ConfigKey),
+    /// Closing a Terminal tab (by id) whose shell runs a command: Terminate
+    /// closes it.
+    CloseTerminal(u64),
 }
 
 /// What closing a tab with a running process does
@@ -1184,6 +1187,9 @@ impl Workbench {
                 }
                 self.run_window
                     .update(cx, |w, cx| w.close(tab, terminate, cx));
+            }
+            (PendingDialog::CloseTerminal(id), button) => {
+                self.terminal_close_answered(id, button, checked, window, cx)
             }
             (PendingDialog::FileSync(pending), button) => {
                 self.sync_dialog_closed(pending, button, window, cx)

@@ -1,14 +1,16 @@
 //! The Terminal tool window of the main window (#158): registered in the
 //! bottom area at start, its sessions planned with the product's
-//! customizers (`crate::terminal::plan`), and its commands
-//! (`workbench.toggle-terminal`, `terminal.open`, `terminal.type`,
-//! `terminal.state`).
+//! customizers (`crate::terminal::plan`), the confirmation before a tab with
+//! a running command closes, and its commands (`workbench.toggle-terminal`,
+//! `terminal.open`, `terminal.type`, `terminal.state`).
 
 use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
 use terminal_ui::{SessionView, TerminalToolWindow, TerminalToolWindowEvent};
 use ui::icons::IconName;
 
 use super::Workbench;
+use super::run_actions::{CloseRunning, PendingDialog};
+use crate::dialog::{Dialog, DialogButton};
 use crate::tool_windows::{
     Area, ToolWindow, ToolWindowContent, ToolWindowSpec, ToolWindowView, ToolWindows,
 };
@@ -29,7 +31,7 @@ ui::ui_commands! {
         r#"{"text": "echo hi\r"}"#;
     /// The Terminal tool window's state.
     State => "terminal.state", "Terminal State",
-        "Returns the state of the Terminal tool window as JSON: the tabs (name, title, working directory, exit) and the selected one, and the selected session's size, visible lines, cursor, modes, selection, scrolling, title and exit.";
+        "Returns the state of the Terminal tool window as JSON: the tabs (name, title, working directory, exit) and the selected one, the open list of tabs (a menu's state, `null` while closed), and the selected session's size, visible lines, cursor, modes, selection, scrolling, title and exit.";
 }
 
 /// The Terminal tool window's id.
@@ -49,6 +51,8 @@ pub(super) struct TerminalUi {
     shell: Option<String>,
     /// A new tab's session is being planned.
     starting: bool,
+    /// The tabs (by id) whose closing is being checked or confirmed.
+    closing: Vec<u64>,
     _subscription: Subscription,
 }
 
@@ -79,6 +83,7 @@ impl TerminalUi {
             view,
             shell: None,
             starting: false,
+            closing: Vec::new(),
             _subscription: subscription,
         }
     }
@@ -132,6 +137,9 @@ impl Workbench {
             // editor is (`app.rs`, `observe_keystrokes`).
             TerminalToolWindowEvent::Redraw => crate::shot::draw_now(window),
             TerminalToolWindowEvent::NewTab => self.new_terminal_tab(None, window, cx),
+            TerminalToolWindowEvent::CloseRequested(id) => {
+                self.terminal_close_requested(*id, window, cx)
+            }
             TerminalToolWindowEvent::Hide | TerminalToolWindowEvent::Emptied => {
                 self.hide(TERMINAL, window, cx)
             }
@@ -178,6 +186,110 @@ impl Workbench {
             });
         })
         .detach();
+    }
+
+    /// A tab was asked to close (`TerminalTabCloseListener.closeQuery`): at
+    /// once when the shell has nothing running, or when "When closing a tool
+    /// window with a running process" is not Ask; otherwise
+    /// `TerminateRemoteProcessDialog` asks first. The check (does the shell
+    /// have a child process?) runs off the UI thread.
+    fn terminal_close_requested(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let view = self.terminal_ui.view.clone();
+        let Some(session) = view.read(cx).session_of(id).cloned() else {
+            return;
+        };
+        if self.terminal_ui.closing.contains(&id) {
+            return;
+        }
+        // Terminate, and Disconnect (a terminal has none), close without
+        // asking.
+        if self.run_settings.close_running != CloseRunning::Ask {
+            view.update(cx, |v, cx| v.close_tab_by_id(id, window, cx));
+            return;
+        }
+        self.terminal_ui.closing.push(id);
+        let running = session.read(cx).has_running_commands(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let running = running.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.terminal_close_checked(id, running, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// The check of a closing tab is done: a shell with nothing running
+    /// closes with its tab, one with a running command asks ("Process
+    /// 'Terminal Local' Is Running", Terminate or Cancel, no Disconnect).
+    fn terminal_close_checked(
+        &mut self,
+        id: u64,
+        running: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.terminal_ui.view.clone();
+        let tab = view
+            .read(cx)
+            .index_of(id)
+            .and_then(|i| view.read(cx).tabs().get(i))
+            .map(|t| t.name().to_string());
+        self.terminal_ui.closing.retain(|c| *c != id);
+        let Some(name) = tab else {
+            return;
+        };
+        if !running {
+            view.update(cx, |v, cx| v.close_tab_by_id(id, window, cx));
+            return;
+        }
+        // Another dialog is open: the request is dropped, as a Cancel.
+        if self.dialog.is_some() {
+            return;
+        }
+        self.terminal_ui.closing.push(id);
+        let session = format!("Terminal {name}");
+        let dialog = cx.new(|cx| {
+            Dialog::new(
+                format!("Process '{session}' Is Running"),
+                format!("Do you want to terminate the process '{session}'?"),
+                vec![
+                    DialogButton {
+                        id: "cancel",
+                        label: "Cancel".into(),
+                    },
+                    DialogButton {
+                        id: "terminate",
+                        label: "&Terminate".into(),
+                    },
+                ],
+                cx,
+            )
+            .with_icon(IconName::WARNING_DIALOG)
+            .with_option("Don't ask again")
+        });
+        self.open_dialog(dialog, PendingDialog::CloseTerminal(id), window, cx);
+    }
+
+    /// The confirmation of a closing tab was answered: Terminate closes the
+    /// tab (its session ends with it), and with "Don't ask again" the choice
+    /// is remembered; Cancel keeps it.
+    pub(super) fn terminal_close_answered(
+        &mut self,
+        id: u64,
+        button: Option<&'static str>,
+        remember: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_ui.closing.retain(|c| *c != id);
+        if button != Some("terminate") {
+            return;
+        }
+        if remember {
+            self.run_settings.close_running = CloseRunning::Terminate;
+        }
+        let view = self.terminal_ui.view.clone();
+        view.update(cx, |v, cx| v.close_tab_by_id(id, window, cx));
     }
 
     /// The reference's Terminal activation: hidden when it has the focus,

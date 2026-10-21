@@ -8,6 +8,13 @@ command = "workbench.hide-tool-window"
 contexts = ["ProjectTree", "RunToolWindow", "Terminal"]
 
 [[action]]
+id = "ShowContent"
+text = "Show List of Tabs"
+groups = ["Main Menu > Window > Active Tool Window"]
+command = "terminal.show-tab-list"
+context = "Terminal"
+
+[[action]]
 id = "NextTab"
 text = "Select Next Tab"
 groups = ["Main Menu > Window > Editor Tabs"]

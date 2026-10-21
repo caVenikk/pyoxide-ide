@@ -636,6 +636,20 @@ impl SessionView {
         self.exit
     }
 
+    /// Asks the shell, on a background thread, whether a command runs in it
+    /// (it has a child process): what a tab checks before it closes
+    /// (`TerminalTabCloseListenerImpl.shouldConfirmClosing`). `false` for a
+    /// session that did not start or has ended.
+    pub fn has_running_commands(&self, cx: &App) -> Task<bool> {
+        match (&self.session, self.exit) {
+            (Some(session), None) => {
+                let probe = session.command_probe();
+                cx.background_spawn(async move { probe.has_running_commands() })
+            }
+            _ => Task::ready(false),
+        }
+    }
+
     /// Why the session did not start.
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()

@@ -24,11 +24,13 @@ name = "Terminal"
 "shift-pageup" = "terminal.page-up"
 "shift-pagedown" = "terminal.page-down"
 # The tabs of the Terminal tool window (`Terminal.NewTab`,
-# `Terminal.CloseTab`, `NextTab`, `PreviousTab`) and Hide; Escape goes to
-# the shell. (Bound in the terminal's own context: a binding without a
-# context counts as one of the innermost context, see run.toml.)
+# `Terminal.CloseTab`, `NextTab`, `PreviousTab`, `ShowContent`) and Hide;
+# Escape goes to the shell. (Bound in the terminal's own context: a
+# binding without a context counts as one of the innermost context, see
+# run.toml.)
 "cmd-t" = "terminal.new-tab"
 "cmd-w" = "terminal.close-tab"
 "cmd-}" = "terminal.next-tab"
 "cmd-{" = "terminal.previous-tab"
+"ctrl-shift-down" = "terminal.show-tab-list"
 "shift-escape" = "workbench.hide-tool-window"

@@ -8,19 +8,23 @@
 //! ([`TerminalToolWindowEvent::NewTab`]), which plans the session with the
 //! product's customizers and hands it over with [`TerminalToolWindow::add_tab`].
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Point,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    canvas, div, point, prelude::FluentBuilder as _, px,
 };
 use serde_json::{Value, json};
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
+use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
 
-use crate::commands::{CloseTab, NewTab, NextTab, PreviousTab, RenameTab};
+use crate::commands::{CloseTab, NewTab, NextTab, PreviousTab, RenameTab, SelectTab, ShowTabList};
 use crate::{SessionView, SessionViewEvent};
 
 /// The key context of the tool window (its header and sessions).
@@ -36,6 +40,11 @@ const ICON: f32 = 16.0;
 pub enum TerminalToolWindowEvent {
     /// Start a new session in a new tab ("+", New Tab).
     NewTab,
+    /// The user asked to close the tab with this id ([`TerminalTab::id`],
+    /// the × of the tab, Close Tab): the owner may ask first when a command
+    /// runs in its shell ([`SessionView::has_running_commands`]), then
+    /// closes it with [`TerminalToolWindow::close_tab_by_id`].
+    CloseRequested(u64),
     /// Hide the tool window ("−").
     Hide,
     /// The last tab was closed: the tool window hides.
@@ -53,6 +62,11 @@ pub struct TerminalTab {
 }
 
 impl TerminalTab {
+    /// The tab's id: it stays while the tab is open, unlike its position.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn name(&self) -> &SharedString {
         &self.name
     }
@@ -70,6 +84,17 @@ pub struct TerminalToolWindow {
     next_id: u64,
     /// "Close session when it ends" (`TerminalOptionsProvider.closeSessionOnLogout`).
     close_on_exit: bool,
+    /// Where the selected tab was drawn: the list of tabs opens below it.
+    selected_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The open list of tabs.
+    tab_list: Option<OpenTabList>,
+}
+
+/// The open "Show List of Tabs" popup.
+struct OpenTabList {
+    menu: Entity<ContextMenu>,
+    position: Point<Pixels>,
+    _subscription: Subscription,
 }
 
 impl EventEmitter<TerminalToolWindowEvent> for TerminalToolWindow {}
@@ -102,6 +127,8 @@ impl TerminalToolWindow {
             focus: cx.focus_handle(),
             next_id: 0,
             close_on_exit: true,
+            selected_bounds: Rc::default(),
+            tab_list: None,
         }
     }
 
@@ -181,6 +208,24 @@ impl TerminalToolWindow {
         }
         cx.notify();
         index
+    }
+
+    /// The position of the tab with this id.
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    /// The session of the tab with this id.
+    pub fn session_of(&self, id: u64) -> Option<&Entity<SessionView>> {
+        self.tabs.iter().find(|t| t.id == id).map(|t| &t.session)
+    }
+
+    /// Closes the tab with this id (see [`TerminalToolWindow::close`]); a
+    /// tab that is gone already is left alone.
+    pub fn close_tab_by_id(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = self.index_of(id) {
+            self.close(index, window, cx);
+        }
     }
 
     /// Closes a tab; its session ends with it. The focus, when it was in
@@ -264,6 +309,12 @@ impl TerminalToolWindow {
             })
             .collect();
         state["selected"] = json!(self.selected);
+        // The open list of tabs, as a menu's state (its rows and the
+        // selected one).
+        state["tab_list"] = self
+            .tab_list
+            .as_ref()
+            .map_or(Value::Null, |open| open.menu.read(cx).state_json());
         state
     }
 
@@ -273,10 +324,54 @@ impl TerminalToolWindow {
         cx.emit(TerminalToolWindowEvent::NewTab);
     }
 
-    fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(s) = self.selected {
-            self.close(s, window, cx);
+    fn close_tab(&mut self, _: &CloseTab, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.selected.and_then(|s| self.tabs.get(s)) {
+            cx.emit(TerminalToolWindowEvent::CloseRequested(tab.id));
         }
+    }
+
+    fn select_tab(&mut self, action: &SelectTab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = action.index {
+            self.select(index, window, cx);
+        }
+    }
+
+    /// Show List of Tabs (`ShowContentAction`, enabled with more than one
+    /// tab): the tabs' names in a list popup with the speed search, the
+    /// selected tab preselected, under the selected tab; choosing a row
+    /// selects that tab (`SelectContentStep`).
+    fn show_tab_list(&mut self, _: &ShowTabList, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.len() < 2 {
+            return;
+        }
+        let items = self
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(i, tab)| MenuItem::action(tab.name.clone(), SelectTab { index: Some(i) }))
+            .collect();
+        let options = PopupOptions {
+            speed_search: true,
+            selected: self.selected,
+            ..PopupOptions::default()
+        };
+        let menu = ContextMenu::popup(items, options, window, cx);
+        let anchor = self.selected_bounds.get();
+        let position = if anchor.size.width > px(0.0) {
+            anchor.bottom_left()
+        } else {
+            point(px(0.0), cx.theme().metric(Metric::ToolWindowHeaderHeight))
+        };
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.tab_list = None;
+            cx.notify();
+        });
+        self.tab_list = Some(OpenTabList {
+            menu,
+            position,
+            _subscription: subscription,
+        });
+        cx.notify();
     }
 
     fn rename_tab(&mut self, action: &RenameTab, _: &mut Window, cx: &mut Context<Self>) {
@@ -313,9 +408,11 @@ impl TerminalToolWindow {
             .rounded(px(3.0))
             .hover(move |s| s.bg(hover))
             .child(Icon::new(IconName::CLOSE_SMALL))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();
-                this.close(index, window, cx);
+                if let Some(tab) = this.tabs.get(index) {
+                    cx.emit(TerminalToolWindowEvent::CloseRequested(tab.id));
+                }
             }));
         div()
             .id(("terminal-tab", index))
@@ -345,6 +442,17 @@ impl TerminalToolWindow {
                     .child(tab.name.clone()),
             )
             .child(close)
+            .when(selected, |d| {
+                // Where the list of tabs opens.
+                let bounds = self.selected_bounds.clone();
+                d.relative().child(
+                    canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                )
+            })
             .tooltip(Tooltip::text(tab.name.clone(), None))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.select(index, window, cx);
@@ -448,9 +556,13 @@ impl TerminalToolWindow {
 }
 
 impl Render for TerminalToolWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let header = self.render_header(cx).into_any_element();
         let body = self.selected_session().cloned();
+        let tab_list = self
+            .tab_list
+            .as_ref()
+            .map(|open| ui::menu::overlay(&open.menu, open.position, window));
         div()
             .id("terminal-tool-window-content")
             .key_context(KEY_CONTEXT)
@@ -460,6 +572,8 @@ impl Render for TerminalToolWindow {
             .on_action(cx.listener(Self::rename_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::select_tab))
+            .on_action(cx.listener(Self::show_tab_list))
             .flex()
             .flex_col()
             .size_full()
@@ -472,6 +586,7 @@ impl Render for TerminalToolWindow {
                     .min_h(px(0.0))
                     .children(body),
             )
+            .children(tab_list)
     }
 }
 
