@@ -461,10 +461,9 @@ impl ProjectPanel {
                     "excluded": n.entry.excluded,
                     "icon": self.icon(n).0,
                     "background": n.entry.excluded.then(|| UiRole::NonProjectFile.name()),
-                    "color": (!n.entry.excluded)
-                        .then(|| self.file_colors.role(&n.entry.path, n.entry.is_dir()))
-                        .flatten()
-                        .map(UiRole::name),
+                    "color": self.file_colors
+                        .name_color(&n.entry.path, n.entry.is_dir(), n.entry.excluded)
+                        .map(vcs_ui::NameColor::name),
                     "overflows": self.overflow_json(id),
                     "roots": self.row_roots_json(n),
                     "guides": guides.map(|g| {
@@ -812,14 +811,15 @@ impl ProjectPanel {
         })
     }
 
-    /// The colour of a row's name: its version control status's (#169),
-    /// except on an excluded row, which keeps its style.
+    /// The colour of a row's name: its version control status's (#169);
+    /// on an excluded row only an ignored name is coloured.
     fn row_text_color(&self, node: &Node, selected: bool, focused: bool, cx: &App) -> Hsla {
         let theme = cx.theme();
         let entry = &node.entry;
-        let status = (!entry.excluded)
-            .then(|| self.file_colors.color(&entry.path, entry.is_dir(), cx))
-            .flatten();
+        let status = self
+            .file_colors
+            .name_color(&entry.path, entry.is_dir(), entry.excluded)
+            .map(|c| c.color(cx));
         // Cut rows are greyed until Paste moves them.
         if selected && focused {
             status.unwrap_or(theme.color(UiRole::SelectionText))
@@ -857,8 +857,8 @@ impl ProjectPanel {
             theme.color(UiRole::SelectionInactive)
         };
         let hover = theme.color(UiRole::Hover);
-        // Excluded rows keep the normal text colour and get the background
-        // of non-project files across the whole row.
+        // Excluded rows get the background of non-project files across the
+        // whole row.
         let text_color = self.row_text_color(node, selected, focused, cx);
         // A row whose text runs past the selection's right end: its
         // selection and hover reach the tree's edge.

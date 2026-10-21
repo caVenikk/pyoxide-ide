@@ -384,10 +384,14 @@ fn names_have_the_colour_of_their_status(cx: &mut TestAppContext) {
         open_file(v, "a.py")["markers"]["base"] == true
     });
     assert_eq!(h.tree_row("b.py")["color"], "git-untracked");
-    assert_eq!(h.tree_row(".env")["color"], "git-ignored");
+    // Ignored names are grey in every theme.
+    assert_eq!(h.tree_row(".env")["color"], "ignored");
     // An ignored folder is coloured; others are not.
-    assert_eq!(h.tree_row("logs")["color"], "git-ignored");
+    assert_eq!(h.tree_row("logs")["color"], "ignored");
     assert_eq!(h.tree_row("a.py")["color"], Value::Null);
+    // Excluded and ignored: the scheme's colour of ignored files.
+    h.invoke("project.tree.mark-excluded", json!({"path": "logs"}));
+    assert_eq!(h.tree_row("logs")["color"], "git-ignored");
     assert_eq!(h.tab_color("a.py"), Value::Null);
 
     // Edited: modified at once, in the tree and the tab.

@@ -2,7 +2,9 @@
 //! names of files in the project tree, the editor tabs, Recent Files and
 //! Go to File are drawn in the colour of their status. Folders are not
 //! coloured, except an ignored folder (and everything below it, which is
-//! ignored too). An open document counts with its unsaved text: a clean
+//! ignored too). Ignored names are one grey in every theme, except in an
+//! excluded folder of the tree, where they take the scheme's colour of
+//! ignored files (orange in the Islands themes). An open document counts with its unsaved text: a clean
 //! tracked file is modified as soon as it is edited and is not modified
 //! again when its text equals the committed one (`FileStatusManagerImpl`).
 
@@ -31,13 +33,50 @@ pub fn status_role(status: FileStatus) -> Option<UiRole> {
     }
 }
 
-/// The colour role of a tree row or list entry: folders only when they
-/// are ignored.
-pub fn entry_role(status: FileStatus, is_dir: bool) -> Option<UiRole> {
-    if is_dir && status != FileStatus::Ignored {
-        return None;
+/// The colour of a name ignored by version control, outside excluded
+/// folders: one grey in every theme (the reference draws it with a fixed
+/// grey, not with the scheme's `FILESTATUS_IDEA_FILESTATUS_IGNORED`).
+pub const IGNORED_NAME: u32 = 0x80_80_80;
+
+/// How the name of a tree row or list entry is coloured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameColor {
+    /// The colour of a theme role.
+    Role(UiRole),
+    /// The grey of ignored names, [`IGNORED_NAME`].
+    Ignored,
+}
+
+impl NameColor {
+    /// The name the state dump shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Role(role) => role.name(),
+            Self::Ignored => "ignored",
+        }
     }
-    status_role(status)
+
+    pub fn color(self, cx: &App) -> Hsla {
+        match self {
+            Self::Role(role) => cx.theme().color(role),
+            Self::Ignored => gpui::rgb(IGNORED_NAME).into(),
+        }
+    }
+}
+
+/// The colour of a tree row or list entry: folders only when they are
+/// ignored. An ignored name is grey; one in an excluded folder takes the
+/// scheme's colour of ignored files instead, and an excluded name that is
+/// not ignored keeps the normal text colour.
+pub fn entry_color(status: FileStatus, is_dir: bool, excluded: bool) -> Option<NameColor> {
+    if excluded {
+        return (status == FileStatus::Ignored).then_some(NameColor::Role(UiRole::GitIgnored));
+    }
+    match status {
+        FileStatus::Ignored => Some(NameColor::Ignored),
+        _ if is_dir => None,
+        _ => status_role(status).map(NameColor::Role),
+    }
 }
 
 /// What is known of an open document.
@@ -120,14 +159,14 @@ impl FileColors {
         document_status(&snapshot.status, path, inner.open.get(path).copied())
     }
 
-    /// The colour role of a name.
-    pub fn role(&self, path: &Path, is_dir: bool) -> Option<UiRole> {
-        entry_role(self.status(path, is_dir), is_dir)
+    /// The colour of a name (`excluded`: it is in an excluded folder).
+    pub fn name_color(&self, path: &Path, is_dir: bool, excluded: bool) -> Option<NameColor> {
+        entry_color(self.status(path, is_dir), is_dir, excluded)
     }
 
     /// The colour of a name, `None` for the normal text colour.
     pub fn color(&self, path: &Path, is_dir: bool, cx: &App) -> Option<Hsla> {
-        self.role(path, is_dir).map(|r| cx.theme().color(r))
+        self.name_color(path, is_dir, false).map(|c| c.color(cx))
     }
 }
 
@@ -142,16 +181,39 @@ mod tests {
 
     #[test]
     fn folders_are_coloured_only_when_ignored() {
+        let role = |r| Some(NameColor::Role(r));
         assert_eq!(
-            entry_role(FileStatus::Modified, false),
-            Some(UiRole::GitModified)
+            entry_color(FileStatus::Modified, false, false),
+            role(UiRole::GitModified)
         );
-        assert_eq!(entry_role(FileStatus::Unversioned, true), None);
+        assert_eq!(entry_color(FileStatus::Unversioned, true, false), None);
         assert_eq!(
-            entry_role(FileStatus::Ignored, true),
-            Some(UiRole::GitIgnored)
+            entry_color(FileStatus::Ignored, true, false),
+            Some(NameColor::Ignored)
         );
-        assert_eq!(entry_role(FileStatus::NotChanged, false), None);
+        assert_eq!(entry_color(FileStatus::NotChanged, false, false), None);
+    }
+
+    #[test]
+    fn ignored_names_are_grey_and_excluded_ones_take_the_scheme_colour() {
+        // Outside excluded folders: one grey, whatever the theme says.
+        assert_eq!(
+            entry_color(FileStatus::Ignored, false, false),
+            Some(NameColor::Ignored)
+        );
+        assert_eq!(IGNORED_NAME, 0x808080);
+        // Inside: the colour of the scheme's ignored files.
+        assert_eq!(
+            entry_color(FileStatus::Ignored, false, true),
+            Some(NameColor::Role(UiRole::GitIgnored))
+        );
+        assert_eq!(
+            entry_color(FileStatus::Ignored, true, true),
+            Some(NameColor::Role(UiRole::GitIgnored))
+        );
+        // An excluded name that is not ignored keeps the text colour.
+        assert_eq!(entry_color(FileStatus::NotChanged, true, true), None);
+        assert_eq!(entry_color(FileStatus::Modified, false, true), None);
     }
 
     #[test]
@@ -202,7 +264,8 @@ mod tests {
     #[test]
     fn colors_follow_the_snapshot_and_the_documents() {
         let colors = FileColors::new();
-        assert_eq!(colors.role(&p("a.py"), false), None);
+        let role = |r| Some(NameColor::Role(r));
+        assert_eq!(colors.name_color(&p("a.py"), false, false), None);
         let mut map = StatusMap::new("/r");
         map.insert(p("b.py"), FileStatus::Added);
         map.insert_ignored_dir(p("logs"));
@@ -222,11 +285,21 @@ mod tests {
             status: map,
             generation: 1,
         })));
-        assert_eq!(colors.role(&p("b.py"), false), Some(UiRole::GitAdded));
-        assert_eq!(colors.role(&p("logs"), true), Some(UiRole::GitIgnored));
         assert_eq!(
-            colors.role(&p("logs/x.log"), false),
-            Some(UiRole::GitIgnored)
+            colors.name_color(&p("b.py"), false, false),
+            role(UiRole::GitAdded)
+        );
+        assert_eq!(
+            colors.name_color(&p("logs"), true, false),
+            Some(NameColor::Ignored)
+        );
+        assert_eq!(
+            colors.name_color(&p("logs/x.log"), false, false),
+            Some(NameColor::Ignored)
+        );
+        assert_eq!(
+            colors.name_color(&p("logs/x.log"), false, true),
+            role(UiRole::GitIgnored)
         );
         let doc = OpenDocument {
             unsaved: true,
@@ -234,8 +307,11 @@ mod tests {
         };
         assert!(colors.set_document(&p("a.py"), Some(doc)));
         assert!(!colors.set_document(&p("a.py"), Some(doc)));
-        assert_eq!(colors.role(&p("a.py"), false), Some(UiRole::GitModified));
+        assert_eq!(
+            colors.name_color(&p("a.py"), false, false),
+            role(UiRole::GitModified)
+        );
         assert!(colors.set_document(&p("a.py"), None));
-        assert_eq!(colors.role(&p("a.py"), false), None);
+        assert_eq!(colors.name_color(&p("a.py"), false, false), None);
     }
 }
