@@ -6,6 +6,7 @@
 //! menus and the UI command index. Keeping GPUI behind this layer keeps a later toolkit
 //! upgrade contained.
 
+pub mod avatar;
 pub mod command;
 pub mod components;
 pub mod dialog_window;

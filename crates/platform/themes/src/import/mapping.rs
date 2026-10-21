@@ -96,6 +96,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Ui("Tree.selectionBackground"),
             Ui("Table.selectionBackground"),
         ],
+        SelectionLight => &[Ui("Plugins.lightSelectionBackground")],
         SelectionText => &[
             Ui("List.selectionForeground"),
             Ui("Tree.selectionForeground"),

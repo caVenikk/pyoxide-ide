@@ -45,13 +45,14 @@ use gpui::{
     Action, AnyElement, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, Render,
-    SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task, Window,
-    anchored, deferred, div, point, prelude::*, px,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task,
+    Window, anchored, deferred, div, point, prelude::*, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 
+use crate::avatar::Avatar;
 use crate::icons::{Icon, IconName};
 use crate::pointer::PointerExt as _;
 use crate::theme::ThemeExt;
@@ -157,6 +158,16 @@ const FLEXIBLE_ROW_Y: f32 = 8.0;
 const FLEXIBLE_ICON_GAP: f32 = 8.0;
 /// The lines of such a row: 16 each (13 and 12 point text).
 const FLEXIBLE_LINE: f32 = 16.0;
+/// A row with an avatar, as the project widget's popup draws a project
+/// (`ProjectWidgetRenderer`): 6 above and below its content, each line 2
+/// above and below it (`UnscaledGaps(top = 2, bottom = 2)`), the name's
+/// line 17 high (a label of 13 point text), the path's 15 (12 point), the
+/// avatar of 20 at the top, 2 down, 8 before the text.
+const AVATAR_ROW_Y: f32 = 6.0;
+const AVATAR_LINE_GAP: f32 = 2.0;
+const AVATAR_NAME_LINE: f32 = 17.0;
+const AVATAR_PATH_LINE: f32 = 15.0;
+const AVATAR: f32 = 20.0;
 
 /// Radius of the selection background: `PopupMenu.Selection.arc` and
 /// `Popup.Selection.arc` 8 are diameters.
@@ -270,6 +281,12 @@ pub struct RowExtra {
     /// The icon drawn at this size, at the top of the row, 8 before the
     /// text (a product's icon of 20).
     pub icon_size: Option<f32>,
+    /// Coloured initials in place of the icon, and the row laid out as a
+    /// project's row of the project widget's popup (see [`AVATAR_ROW_Y`]),
+    /// selected in the light selection colour
+    /// (`Plugins.lightSelectionBackground`); the speed search finds it by
+    /// its comment (the project's folder) too.
+    pub avatar: Option<Avatar>,
 }
 
 impl RowExtra {
@@ -277,7 +294,7 @@ impl RowExtra {
     /// the list's row height (`PopupUtil.configListRendererFlexibleHeight`
     /// with `JBUI.Borders.empty(8, 0)`): with a comment or a large icon.
     fn flexible(&self) -> bool {
-        self.comment.is_some() || self.icon_size.is_some()
+        self.comment.is_some() || self.icon_size.is_some() || self.avatar.is_some()
     }
 }
 
@@ -286,6 +303,7 @@ impl Clone for RowExtra {
         Self {
             comment: self.comment.clone(),
             icon_size: self.icon_size,
+            avatar: self.avatar.clone(),
             secondary: self.secondary.clone(),
             secondary_small: self.secondary_small,
             icon_alpha: self.icon_alpha,
@@ -527,6 +545,14 @@ impl MenuItem {
         self
     }
 
+    /// Coloured initials in place of the icon ([`RowExtra::avatar`]).
+    pub fn avatar(mut self, avatar: Avatar) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.avatar = Some(avatar);
+        }
+        self
+    }
+
     /// Grey text appended to the label in a smaller font, with no gap
     /// ([`RowExtra::secondary_small`]).
     pub fn small_secondary(mut self, text: impl Into<SharedString>) -> Self {
@@ -724,6 +750,10 @@ pub struct PopupOptions {
     /// `ActionSelectionAid.NUMBERING`). With a speed search, the digit keys
     /// choose a row only while nothing is typed.
     pub numbered: bool,
+    /// The rows scroll beyond this many rows of the list's row height
+    /// (`ListPopupImpl`'s visible row count: a list of rows of their own
+    /// heights shows as many times the first row's height).
+    pub max_rows: Option<usize>,
 }
 
 /// The action chosen in a popup that has a window of its own
@@ -761,6 +791,9 @@ pub struct ContextMenu {
     own_window: bool,
     inactive_selection: bool,
     numbered: bool,
+    max_rows: Option<usize>,
+    /// The scrolled rows of the first level (with `max_rows`).
+    scroll: ScrollHandle,
     /// A submenu opens while its row is selected (context menus), else
     /// from its arrow, its button or Right (list popups).
     submenu_on_hover: bool,
@@ -854,6 +887,8 @@ impl ContextMenu {
                 own_window: options.own_window,
                 inactive_selection: options.inactive_selection,
                 numbered: options.numbered,
+                max_rows: options.max_rows,
+                scroll: ScrollHandle::new(),
                 submenu_on_hover: !list,
                 submenu_bounds: Rc::default(),
                 aim_history: [None; AIM_HISTORY],
@@ -917,9 +952,15 @@ impl ContextMenu {
     // ---- speed search -----------------------------------------------------
 
     fn matches(&self, item: &MenuItem) -> bool {
+        // A project's row is found by its folder too
+        // (`ProjectWidgetSpeedsearchFilter`).
+        let folder = item
+            .extra()
+            .filter(|e| e.avatar.is_some())
+            .and_then(|e| e.comment.as_ref());
         match (&self.matcher, item.label()) {
             (None, _) => true,
-            (Some(m), Some(label)) => m.matches(label),
+            (Some(m), Some(label)) => m.matches(label) || folder.is_some_and(|f| m.matches(f)),
             (Some(_), None) => false,
         }
     }
@@ -1013,6 +1054,7 @@ impl ContextMenu {
         self.selected[0] = best
             .filter(|&ix| self.items[ix].selectable())
             .or_else(|| self.first_selectable());
+        self.scroll_to_selected();
         self.highlight_changed(cx);
         cx.notify();
     }
@@ -1103,10 +1145,26 @@ impl ContextMenu {
             i = (i + delta).rem_euclid(n);
             if shown[i as usize] && items[i as usize].selectable() {
                 self.selected[level] = Some(i as usize);
+                if level == 0 {
+                    self.scroll_to_selected();
+                }
                 self.highlight_changed(cx);
                 cx.notify();
                 return;
             }
+        }
+    }
+
+    /// Scrolls the rows of a popup with `max_rows` so that the selected
+    /// row of the first level shows.
+    fn scroll_to_selected(&self) {
+        if self.max_rows.is_none() {
+            return;
+        }
+        if let Some(ix) = self.selected[0] {
+            // The rows drawn are the ones shown.
+            let child = self.shown(0)[..ix].iter().filter(|s| **s).count();
+            self.scroll.scroll_to_item(child);
         }
     }
 
@@ -1434,6 +1492,9 @@ impl ContextMenu {
                             if let Some(text) = &extra.comment {
                                 row["comment"] = json!(text.as_ref());
                             }
+                            if let Some(avatar) = &extra.avatar {
+                                row["avatar"] = json!(avatar.text.as_ref());
+                            }
                             if let Some(alpha) = extra.icon_alpha {
                                 row["icon_alpha"] = json!(alpha);
                             }
@@ -1480,7 +1541,9 @@ impl ContextMenu {
         let list = m.list;
         let items = self.level_items(level);
         let shown = self.shown(level);
-        let with_icons = items.iter().any(|i| i.icon_name().is_some());
+        let with_icons = items
+            .iter()
+            .any(|i| i.icon_name().is_some() || i.extra().is_some_and(|e| e.avatar.is_some()));
         let numbered = self.numbered && level == 0;
         let numbers = self.numbers();
         let selected = self.selected[level];
@@ -1490,6 +1553,7 @@ impl ContextMenu {
         } else {
             UiRole::Selection
         });
+        let light_selection = theme.color(UiRole::SelectionLight);
         let text = theme.color(UiRole::Text);
         let muted = theme.color(UiRole::TextMuted);
         let disabled = theme.color(UiRole::TextDisabled);
@@ -1512,6 +1576,7 @@ impl ContextMenu {
                     return div()
                         .id(id)
                         .debug_selector(move || selector.clone())
+                        .flex_none()
                         .flex()
                         .flex_col()
                         .px(px(m.separator_x))
@@ -1544,6 +1609,7 @@ impl ContextMenu {
                     let selector = format!("menu-separator-{level}-{ix}");
                     return div()
                         .id(id)
+                        .flex_none()
                         .flex()
                         .flex_col()
                         .h(px(SEPARATOR_HEIGHT))
@@ -1577,7 +1643,10 @@ impl ContextMenu {
                 let icon_alpha = extra.and_then(|e| e.icon_alpha).unwrap_or(1.0);
                 let comment = extra.and_then(|e| e.comment.clone());
                 let flexible = extra.is_some_and(RowExtra::flexible);
-                let icon_size = extra.and_then(|e| e.icon_size).unwrap_or(ICON);
+                let avatar = extra.and_then(|e| e.avatar.clone());
+                let icon_size = extra
+                    .and_then(|e| e.icon_size)
+                    .unwrap_or(if avatar.is_some() { AVATAR } else { ICON });
                 let icon_gap = if flexible {
                     FLEXIBLE_ICON_GAP
                 } else {
@@ -1670,6 +1739,11 @@ impl ContextMenu {
                             .child(text)
                     }));
                 let two_lines = comment.is_some();
+                let avatar_row = avatar.is_some();
+                // A project's row: each line 2 above and below it.
+                let label_row = label_row.when(avatar_row, |d| {
+                    d.py(px(AVATAR_LINE_GAP)).line_height(px(AVATAR_NAME_LINE))
+                });
                 let text_column = match comment {
                     None => label_row.into_any_element(),
                     Some(comment) => div()
@@ -1684,13 +1758,22 @@ impl ContextMenu {
                                 .overflow_hidden()
                                 .text_size(small)
                                 .text_color(muted)
+                                .when(avatar_row, |d| {
+                                    d.py(px(AVATAR_LINE_GAP)).line_height(px(AVATAR_PATH_LINE))
+                                })
                                 .child(comment),
                         )
                         .into_any_element(),
                 };
+                let selection = if avatar_row {
+                    light_selection
+                } else {
+                    selection
+                };
                 div()
                     .id(id)
                     .debug_selector(move || selector.clone())
+                    .flex_none()
                     .when(!flexible, |d| d.h(px(item_height)))
                     .px(px(m.selection_x))
                     .py(px(m.selection_y))
@@ -1707,9 +1790,10 @@ impl ContextMenu {
                             .flex_row()
                             .when(!two_lines, |d| d.items_center())
                             .when(two_lines, |d| d.items_start())
-                            .when(flexible, |d| {
+                            .when(flexible && !avatar_row, |d| {
                                 d.py(px(FLEXIBLE_ROW_Y)).line_height(px(FLEXIBLE_LINE))
                             })
+                            .when(avatar_row, |d| d.py(px(AVATAR_ROW_Y)))
                             .pl(px(m.content_x))
                             .pr(px(right))
                             .rounded(px(m.radius))
@@ -1736,7 +1820,10 @@ impl ContextMenu {
                                         .children(
                                             item.icon_name()
                                                 .map(|n| Icon::new(n).size(px(icon_size))),
-                                        ),
+                                        )
+                                        .children(avatar.as_ref().map(|a| {
+                                            div().mt(px(AVATAR_LINE_GAP)).child(a.render(icon_size))
+                                        })),
                                 )
                             })
                             .child(text_column)
@@ -1762,6 +1849,7 @@ impl ContextMenu {
         } else {
             (None, None)
         };
+        let max_rows = self.max_rows.filter(|_| level == 0);
         let title = (level == 0).then(|| self.title.clone()).flatten();
         let search = (level == 0 && !self.filter.is_empty()).then(|| {
             div()
@@ -1823,7 +1911,22 @@ impl ContextMenu {
                     .flex_col()
                     .when(!header, |d| d.pt(px(m.pad_top)))
                     .pb(px(m.pad_bottom))
-                    .children(rows)
+                    .map(|d| match max_rows {
+                        // Rows of their own heights scroll beyond the
+                        // height of that many rows.
+                        Some(n) => d.child(
+                            div()
+                                .id(("menu-rows", level))
+                                .debug_selector(|| "menu-rows".into())
+                                .flex()
+                                .flex_col()
+                                .max_h(px(n as f32 * item_height))
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll)
+                                .children(rows),
+                        ),
+                        None => d.children(rows),
+                    })
                     // The hand over a list popup's list (`ListPopupImpl`);
                     // the rows of a context menu keep the arrow.
                     .when(list, |d| d.pointing_hand()),

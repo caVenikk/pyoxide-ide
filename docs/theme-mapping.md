@@ -219,6 +219,7 @@ report says which parent was missing.
 | `ui.selection` | `List.selectionBackground`, `Tree.selectionBackground`, `Table.selectionBackground` | Background of the selected row in lists and trees |
 | `ui.selection-text` | `List.selectionForeground`, `Tree.selectionForeground` | Text on the selected row |
 | `ui.selection-inactive` | `List.selectionInactiveBackground`, `Tree.selectionInactiveBackground` | Selected row in a list that has no focus |
+| `ui.selection-light` | `Plugins.lightSelectionBackground` | Selected row of a list of rich rows (the projects of the project widget's popup) |
 | `ui.danger` | `Label.errorForeground`, `Component.errorFocusColor` | Errors and destructive actions |
 | `ui.warning` | `Label.warningForeground`, `Component.warningFocusColor` | Warnings |
 | `ui.success` | `Label.successForeground` | Success and completed states |
@@ -511,7 +512,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.tab-selected-inactive` | `ui.tab-active` |
 | `ui.tab-active-text`, `ui.tab-inactive-text` | `ui.text` |
 | `ui.status-bar-text`, `ui.selection-text` | `ui.text` |
-| `ui.selection-inactive` | `ui.selection` |
+| `ui.selection-inactive`, `ui.selection-light` | `ui.selection` |
 | `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
 | `ui.segmented-selected` | `ui.pressed` |
 | `ui.segmented-selected-border`, `ui.tab-underline-inactive` | `ui.border-input` |

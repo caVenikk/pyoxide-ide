@@ -15,37 +15,12 @@ use ui::theme::ThemeExt;
 /// Space kept free for the macOS window buttons at the left of the toolbar.
 pub const TRAFFIC_LIGHTS_INSET: f32 = 80.0;
 
-/// Initials for the project badge: the first letters of the first two
-/// words of the name (words split at `-`, `_`, `.` and spaces), upper case.
-pub fn initials(name: &str) -> String {
-    let mut words = name
-        .split(|c: char| c == '-' || c == '_' || c == '.' || c.is_whitespace())
-        .filter(|w| !w.is_empty());
-    let mut out = String::new();
-    if let Some(first) = words.next() {
-        let mut chars = first.chars();
-        out.extend(chars.next().map(|c| c.to_uppercase()).into_iter().flatten());
-        match words.next() {
-            Some(second) => out.extend(
-                second
-                    .chars()
-                    .next()
-                    .map(|c| c.to_uppercase())
-                    .into_iter()
-                    .flatten(),
-            ),
-            None => out.extend(chars.next().map(|c| c.to_uppercase()).into_iter().flatten()),
-        }
-    }
-    out
-}
-
 /// Horizontal padding of a dropdown-like widget of the main toolbar.
 const WIDGET_PADDING: f32 = 8.0;
 /// Size of the chevron after a widget's text.
 const CHEVRON: f32 = 16.0;
-/// Size of the project badge and the gap between the project widget's
-/// parts.
+/// Size of the project's avatar (`recentProjectAvatarIconSize`) and the gap
+/// between the project widget's parts.
 const BADGE: f32 = 20.0;
 const PROJECT_GAP: f32 = 6.0;
 /// Size of the file widget's icon, its gap to the text and the text's gap
@@ -106,26 +81,21 @@ pub fn project_widget_chrome(has_project: bool) -> f32 {
     toolbar_widget_chrome(PROJECT_GAP) + badge
 }
 
-/// The project widget: coloured badge with initials, name, chevron; the
-/// name as the toolbar fitted it (see [`project_label`]).
-pub fn project_widget(name: Option<&str>, label: &Fitted, cx: &App) -> Stateful<Div> {
-    let theme = cx.theme();
-    let badge = div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(BADGE))
-        .rounded(px(4.0))
-        .bg(theme.color(UiRole::Accent))
-        .text_color(theme.color(UiRole::OnAccent))
-        .text_size(px(10.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(initials(name.unwrap_or("?")));
+/// The project widget: the project's avatar (`ProjectWindowCustomizerService.
+/// getProjectIcon`), name, chevron; the name as the toolbar fitted it (see
+/// [`project_label`]).
+pub fn project_widget(
+    name: Option<&str>,
+    avatar: Option<&ui::avatar::Avatar>,
+    label: &Fitted,
+    cx: &App,
+) -> Stateful<Div> {
     toolbar_widget("project-widget", cx)
         .debug_selector(|| "project-widget".into())
         .gap(px(PROJECT_GAP))
-        .when(name.is_some(), |d| d.child(badge))
+        .when_some(avatar.filter(|_| name.is_some()), |d, avatar| {
+            d.child(avatar.render(BADGE))
+        })
         .child(
             widget_text(label)
                 .debug_selector(|| "project-widget-label".into())
@@ -395,19 +365,4 @@ pub fn status_metrics(cx: &App) -> (Pixels, Pixels) {
         theme.metric(Metric::StatusBarHeight),
         theme.ui_size() - px(1.0),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn initials_of_project_names() {
-        assert_eq!(initials("pyoxide-ide"), "PI");
-        assert_eq!(initials("flask"), "FL");
-        assert_eq!(initials("my_project.app"), "MP");
-        assert_eq!(initials("x"), "X");
-        assert_eq!(initials("ёлка дом"), "ЁД");
-        assert_eq!(initials(""), "");
-    }
 }
