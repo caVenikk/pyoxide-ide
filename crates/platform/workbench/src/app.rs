@@ -161,6 +161,7 @@ pub fn init(cx: &mut App, product: &Product) {
     debugger_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     ui::command::register(cx, crate::welcome::COMMANDS);
+    ui::command::register(cx, crate::welcome::projects::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
     crate::terminal::init(cx, product.terminal.clone());
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {

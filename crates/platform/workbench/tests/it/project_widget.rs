@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use gpui::{AppContext as _, TestAppContext, WindowHandle};
+use gpui::{AppContext as _, Focusable as _, TestAppContext, WindowHandle};
 use serde_json::{Value, json};
 use workbench::recent_projects;
 use workbench::{Product, Workbench};
@@ -316,4 +316,179 @@ fn the_welcome_list_shows_the_recent_projects(cx: &mut TestAppContext) {
     );
     let s = h.invoke("workbench.state", json!(null));
     assert_eq!(s["project"]["root"], json!(here.to_string_lossy()));
+}
+
+/// A window without a project, the recent projects `names` (folders that
+/// exist, the first name the one opened last) loaded from the
+/// configuration folder.
+fn open_listed<'a>(cx: &'a mut TestAppContext, names: &[&str]) -> (H<'a>, Vec<PathBuf>) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config").join(recent_projects::FILE);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let mut list = recent_projects::RecentProjects::default();
+    let mut folders = Vec::new();
+    for (ix, name) in names.iter().enumerate().rev() {
+        let path = dir.path().join("projects").join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        let path = native_path::canonicalize(&path).unwrap();
+        list.opened(&path, name, ix as u64, 0, |_| false);
+        folders.push(path);
+    }
+    folders.reverse();
+    std::fs::write(&file, list.to_toml()).unwrap();
+    let product = Product {
+        name: "Test IDE",
+        ..Product::default()
+    };
+    let window = cx.update(|cx| {
+        workbench::init(cx, &product);
+        recent_projects::load(cx, file);
+        workbench::open_main_window(cx, Rc::new(product))
+    });
+    let mut h = H { cx, window, dir };
+    h.draw();
+    (h, folders)
+}
+
+impl H<'_> {
+    /// Projects and Files, for `workbench.state`.
+    fn welcome(&mut self) -> Value {
+        let s = self.invoke("workbench.state", json!(null))["projects_and_files"].clone();
+        assert!(s.is_object(), "no Projects and Files: {s}");
+        s
+    }
+
+    /// The name of the selected row.
+    fn selected(&mut self) -> Option<String> {
+        let w = self.welcome();
+        let folder = w["selected"].as_str()?.to_owned();
+        w["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["path"] == json!(folder))
+            .map(|p| p["name"].as_str().unwrap().to_owned())
+    }
+
+    /// The tool window's focus (the list) or the search field's.
+    fn focus_welcome(&mut self, search: bool) {
+        let panel = self.workbench_panel();
+        let handle = self.cx.update(|cx| {
+            if search {
+                let field = panel.read(cx).welcome_search(cx).expect("the search field");
+                field.focus_handle(cx)
+            } else {
+                panel.focus_handle(cx)
+            }
+        });
+        self.cx
+            .update_window(self.window.into(), |_, window, _| window.focus(&handle))
+            .unwrap();
+        self.draw();
+    }
+
+    fn workbench_panel(&mut self) -> gpui::Entity<workbench::project_panel::ProjectPanel> {
+        self.window
+            .read_with(self.cx, |w, _| w.panel().clone())
+            .unwrap()
+    }
+
+    fn press(&mut self, keys: &str) {
+        self.cx.simulate_keystrokes(self.window.into(), keys);
+        self.draw();
+    }
+}
+
+#[gpui::test]
+fn the_search_field_selects_and_opens_with_the_keys(cx: &mut TestAppContext) {
+    let (mut h, folders) = open_listed(cx, &["alpha", "beta", "gamma"]);
+    // The first row is selected at the start.
+    assert_eq!(h.selected().as_deref(), Some("alpha"));
+    // Up and Down in the search field move the selection, without wrapping.
+    h.focus_welcome(true);
+    h.press("down");
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+    h.press("down down");
+    assert_eq!(h.selected().as_deref(), Some("gamma"), "no wrapping");
+    h.press("up");
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+    // The selection stays while it is listed; else the first row is
+    // selected.
+    h.press("b");
+    assert_eq!(h.welcome()["search"], json!("b"));
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+    h.press("backspace g a m m a");
+    assert_eq!(h.welcome()["search"], json!("gamma"));
+    assert_eq!(h.selected().as_deref(), Some("gamma"));
+    // Enter opens it.
+    h.press("enter");
+    let s = h.invoke("workbench.state", json!(null));
+    assert_eq!(
+        s["project"]["root"],
+        json!(folders[2].to_string_lossy()),
+        "{s}"
+    );
+}
+
+#[gpui::test]
+fn the_list_selects_and_removes_with_the_keys(cx: &mut TestAppContext) {
+    let (mut h, _) = open_listed(cx, &["alpha", "beta", "gamma"]);
+    h.focus_welcome(false);
+    h.press("end");
+    assert_eq!(h.selected().as_deref(), Some("gamma"));
+    h.press("home");
+    assert_eq!(h.selected().as_deref(), Some("alpha"));
+    h.press("down");
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+
+    // Delete asks first.
+    h.press("delete");
+    let s = h.invoke("workbench.state", json!(null));
+    assert_eq!(s["dialog"]["title"], json!("Remove Recent Project"), "{s}");
+    assert_eq!(
+        s["dialog"]["message"],
+        json!("Remove 'beta' from recent projects list?")
+    );
+    h.invoke("dialog.cancel", json!(null));
+    assert_eq!(h.recent(), ["alpha", "beta", "gamma"]);
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+    h.press("delete");
+    h.invoke("dialog.choose", json!({ "button": "Remove" }));
+    assert_eq!(h.recent(), ["alpha", "gamma"]);
+    // Nothing is selected then; Down selects the first row, Up the last.
+    assert_eq!(h.selected(), None);
+    h.press("down");
+    assert_eq!(h.selected().as_deref(), Some("alpha"));
+    h.press("home");
+    h.press("up");
+    assert_eq!(h.selected().as_deref(), Some("alpha"), "no wrapping");
+    h.press("end");
+    assert_eq!(h.selected().as_deref(), Some("gamma"));
+
+    // Escape in the search field clears its text, then moves to the list.
+    h.focus_welcome(true);
+    h.press("g");
+    assert_eq!(h.welcome()["search"], json!("g"));
+    h.press("escape");
+    assert_eq!(h.welcome()["search"], json!(""));
+    h.press("escape");
+    // The list has the focus now: Home selects the first row.
+    h.press("home");
+    assert_eq!(h.selected().as_deref(), Some("alpha"));
+}
+
+#[gpui::test]
+fn the_pointer_selects_the_row_it_is_over(cx: &mut TestAppContext) {
+    let (mut h, _) = open_listed(cx, &["alpha", "beta", "gamma"]);
+    let mut vcx = gpui::VisualTestContext::from_window(h.window.into(), h.cx);
+    let beta = vcx
+        .debug_bounds("welcome-project:beta")
+        .expect("the row")
+        .center();
+    vcx.simulate_mouse_move(beta, None, gpui::Modifiers::none());
+    assert_eq!(h.selected().as_deref(), Some("beta"));
+    // The keys go on from there.
+    h.focus_welcome(true);
+    h.press("down");
+    assert_eq!(h.selected().as_deref(), Some("gamma"));
 }

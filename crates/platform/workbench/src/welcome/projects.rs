@@ -18,6 +18,21 @@
 //! asking); such a row is greyed. A right click opens the menu too. The
 //! search field filters the rows by name and folder.
 //!
+//! The keyboard (`RecentProjectFilteringTree`, `FilteringTree`): one row is
+//! selected, as the reference's tree has it: the row under the pointer (the
+//! tree selects the row the pointer moves over and clears the selection
+//! when it leaves), the first row at the start, else the one the keys
+//! moved to; the selected row shows the gear. Up and Down move the
+//! selection, from the list and from the search field alike, without
+//! wrapping (Up with no selection goes to the last row, Down to the
+//! first); Home and End go to the first and the last row. Enter opens the
+//! selected project. Delete, Backspace and Command+Backspace (`$Delete`)
+//! in the list, Option+Delete in the search field, take it off the list
+//! after asking; the shortcut of Copy Paths copies its folder. Escape in
+//! the search field clears its text, and moves the focus to the list when
+//! the text is empty. When the search text changes, the selected row stays
+//! if it is still listed, else the first one is selected.
+//!
 //! Metrics of the reference: the buttons 34 high, 8 apart, 20 from the
 //! sides and 8 below the top, corners of 8, the icon 14 from the left and
 //! 12 before the label (`DisclosureButton`, `DarculaDisclosureButtonUI`);
@@ -29,9 +44,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, DismissEvent, Entity, Focusable as _, Hsla, IntoElement,
-    MouseButton, MouseDownEvent, Pixels, Point, Render, SharedString, Subscription, Window, div,
-    prelude::*, px,
+    AnyElement, App, ClickEvent, Context, DismissEvent, Entity, FocusHandle, Focusable as _, Hsla,
+    IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render, ScrollHandle, SharedString,
+    Subscription, Window, div, prelude::*, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
@@ -44,6 +59,34 @@ use ui::theme::ThemeExt;
 use crate::commands::OpenFolder;
 use crate::recent_projects::{self, RecentProject};
 use crate::workbench::project_widget::{CopyRecentPath, OpenRecent, RemoveRecent};
+
+ui::ui_commands! {
+    COMMANDS, scope = "Welcome";
+    /// The row above.
+    Up => "welcome-projects.up", "Up",
+        "Projects and Files: selects the recent project above (the last one when none is selected).";
+    /// The row below.
+    Down => "welcome-projects.down", "Down",
+        "Projects and Files: selects the recent project below (the first one when none is selected).";
+    /// The first row.
+    First => "welcome-projects.first", "First",
+        "Projects and Files: selects the first recent project.";
+    /// The last row.
+    Last => "welcome-projects.last", "Last",
+        "Projects and Files: selects the last recent project.";
+    /// Open the selected row.
+    OpenSelected => "welcome-projects.open", "Open Selected",
+        "Projects and Files: opens the selected recent project (`WelcomeScreen.OpenSelected`).";
+    /// Copy the selected row's folder.
+    CopySelectedPath => "welcome-projects.copy-path", "Copy Path",
+        "Projects and Files: copies the folder of the selected recent project (`WelcomeScreen.CopyProjectPath`).";
+    /// Remove the selected row.
+    RemoveSelected => "welcome-projects.remove", "Remove from Recent Projects\u{2026}",
+        "Projects and Files: asks, then takes the selected recent project off the list (`WelcomeScreen.RemoveSelected`).";
+    /// Escape in the search field.
+    Escape => "welcome-projects.escape", "Clear the Search",
+        "Projects and Files, in the search field: clears the text, or moves the focus to the list when the text is empty.";
+}
 
 /// `welcome.screen.project.view.title` (`NonModalWelcomeScreenBundle`).
 pub const TITLE: &str = "Projects and Files";
@@ -127,29 +170,181 @@ const BUTTONS: [Button; 3] = [
 
 pub struct WelcomeProjects {
     search: Entity<editor::Editor>,
+    /// The list's focus (the project tool window's: the panel hands it
+    /// over while it shows this list).
+    focus: FocusHandle,
+    scroll: ScrollHandle,
     /// The folders of the recent projects that are gone (looked at off the
     /// UI thread whenever the list changes).
     gone: HashSet<PathBuf>,
-    /// The row under the pointer.
-    hovered: Option<PathBuf>,
+    /// The selected row: the one under the pointer, or the one the keys
+    /// moved to (a folder that is no longer listed selects nothing).
+    selected: Option<PathBuf>,
+    /// The first row was selected (`selectLastOpenedProjectOrTheFirstInTree`).
+    initially_selected: bool,
+    /// The search field's text when the list was last filtered.
+    searched: String,
     /// A row's menu and where it opened.
     menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
 }
 
 impl WelcomeProjects {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The list takes `focus` as its own (the panel's, what the tool window
+    /// focuses).
+    pub fn new(focus: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = editor::field::new("", Some(SEARCH.into()), true, window, cx);
-        cx.observe(&search, |_, _, cx| cx.notify()).detach();
-        cx.observe_global::<recent_projects::Store>(|this, cx| this.check_folders(cx))
+        cx.observe(&search, |this, _, cx| this.search_changed(cx))
             .detach();
+        cx.observe_global::<recent_projects::Store>(|this, cx| {
+            this.list_changed(cx);
+            this.check_folders(cx);
+        })
+        .detach();
         let mut this = Self {
             search,
+            focus,
+            scroll: ScrollHandle::new(),
             gone: HashSet::new(),
-            hovered: None,
+            selected: None,
+            initially_selected: false,
+            searched: String::new(),
             menu: None,
         };
+        this.list_changed(cx);
         this.check_folders(cx);
         this
+    }
+
+    /// The search field (what the keys of the field go to).
+    pub fn search(&self) -> &Entity<editor::Editor> {
+        &self.search
+    }
+
+    /// The recent projects changed: the selection of a folder that is gone
+    /// from the list is dropped (the tree's selection model does that for a
+    /// removed node), and the first row is selected once there is one.
+    fn list_changed(&mut self, cx: &mut Context<Self>) {
+        let paths = self.paths(cx);
+        if self.selected_ix(&paths).is_none() {
+            self.selected = None;
+        }
+        if !self.initially_selected && !paths.is_empty() {
+            self.initially_selected = true;
+            self.selected = paths.first().cloned();
+        }
+        cx.notify();
+    }
+
+    /// The search text changed (`FilteringSpeedSearch.updateSelection`): the
+    /// selected row stays when it is still listed, else the first row is
+    /// selected.
+    fn search_changed(&mut self, cx: &mut Context<Self>) {
+        let text = self.search.read(cx).text();
+        if text != self.searched {
+            self.searched = text;
+            if !self.searched.trim().is_empty() {
+                let paths = self.paths(cx);
+                if self.selected_ix(&paths).is_none() {
+                    self.select(&paths, 0);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The folders of the rows shown, in order.
+    fn paths(&self, cx: &App) -> Vec<PathBuf> {
+        self.shown(cx).into_iter().map(|p| p.path).collect()
+    }
+
+    /// The selected row's place in `paths`.
+    fn selected_ix(&self, paths: &[PathBuf]) -> Option<usize> {
+        let selected = self.selected.as_ref()?;
+        paths.iter().position(|p| p == selected)
+    }
+
+    /// Selects row `ix` of `paths` and scrolls it into view.
+    fn select(&mut self, paths: &[PathBuf], ix: usize) {
+        if let Some(path) = paths.get(ix) {
+            self.selected = Some(path.clone());
+            self.scroll.scroll_to_item(ix);
+        }
+    }
+
+    /// The selected row's folder, as a string for the commands.
+    fn selected_folder(&self, cx: &App) -> Option<String> {
+        let paths = self.paths(cx);
+        let ix = self.selected_ix(&paths)?;
+        Some(paths[ix].to_string_lossy().into_owned())
+    }
+
+    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        let paths = self.paths(cx);
+        let ix = match self.selected_ix(&paths) {
+            Some(ix) => ix.saturating_sub(1),
+            None => paths.len().saturating_sub(1),
+        };
+        self.select(&paths, ix);
+        cx.notify();
+    }
+
+    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        let paths = self.paths(cx);
+        let ix = match self.selected_ix(&paths) {
+            Some(ix) => (ix + 1).min(paths.len() - 1),
+            None => 0,
+        };
+        self.select(&paths, ix);
+        cx.notify();
+    }
+
+    fn first(&mut self, _: &First, _: &mut Window, cx: &mut Context<Self>) {
+        let paths = self.paths(cx);
+        self.select(&paths, 0);
+        cx.notify();
+    }
+
+    fn last(&mut self, _: &Last, _: &mut Window, cx: &mut Context<Self>) {
+        let paths = self.paths(cx);
+        self.select(&paths, paths.len().saturating_sub(1));
+        cx.notify();
+    }
+
+    /// Enter (`activateItems`): what a click on the row does.
+    fn open_selected(&mut self, _: &OpenSelected, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = self.selected_folder(cx) {
+            window.dispatch_action(Box::new(OpenRecent { path }), cx);
+        }
+    }
+
+    /// Copy Paths: the selected row's folder (the tree's data provider has
+    /// no item in the search field, where the text is copied instead).
+    fn copy_path(&mut self, _: &CopySelectedPath, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.focus_handle(cx).is_focused(window) {
+            cx.propagate();
+            return;
+        }
+        if let Some(path) = self.selected_folder(cx) {
+            window.dispatch_action(Box::new(CopyRecentPath { path }), cx);
+        }
+    }
+
+    /// `removeItem`: asks first.
+    fn remove_selected(&mut self, _: &RemoveSelected, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = self.selected_folder(cx) {
+            window.dispatch_action(Box::new(RemoveRecent { path }), cx);
+        }
+    }
+
+    /// Escape in the search field: `ClearText` while there is text, else
+    /// the focus goes to the tree (`FilteringTree.installSearchField`).
+    fn escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.read(cx).text().is_empty() {
+            window.focus(&self.focus);
+        } else {
+            self.search
+                .update(cx, |search, cx| search.set_text_selected("", cx));
+        }
     }
 
     /// Looks for the recent projects' folders off the UI thread.
@@ -211,7 +406,9 @@ impl WelcomeProjects {
                 "avatar": ui::avatar::initials(&p.name),
                 "gone": self.gone.contains(&p.path),
             })).collect::<Vec<_>>(),
-            "hovered": self.hovered.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            "selected": self
+                .selected_folder(cx)
+                .map(|p| project::display_path(std::path::Path::new(&p))),
             "menu": self.menu.as_ref().map(|(m, _, _)| m.read(cx).state_json()),
             "empty_text": NO_RECENT,
         })
@@ -246,7 +443,7 @@ impl WelcomeProjects {
     fn render_row(&self, ix: usize, p: &RecentProject, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let gone = self.gone.contains(&p.path);
-        let hovered = self.hovered.as_ref() == Some(&p.path);
+        let selected = self.selected.as_ref() == Some(&p.path);
         let text = theme.color(if gone {
             UiRole::TextMuted
         } else {
@@ -277,7 +474,7 @@ impl WelcomeProjects {
                 window.dispatch_action(Box::new(OpenRecent { path: path.clone() }), cx)
             }
         };
-        let button = hovered.then(|| {
+        let button = selected.then(|| {
             let path = path.clone();
             let icon = if gone {
                 IconName::CLOSE_SMALL
@@ -320,13 +517,18 @@ impl WelcomeProjects {
             .flex_row()
             .items_start()
             .rounded(radius)
-            .when(hovered, |d| d.bg(hover))
+            .when(selected, |d| d.bg(hover))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                // Leaving a row clears the hover only if it is still that
-                // row's.
+                // The pointer selects the row it is over and, leaving it,
+                // clears the selection if it is still that row's (the
+                // tree's `ProjectActionMouseListener`; not while the
+                // row's menu is open).
+                if this.menu.is_some() {
+                    return;
+                }
                 let now = on.then(|| hover_path.clone());
-                if (*on || this.hovered.as_ref() == Some(&hover_path)) && this.hovered != now {
-                    this.hovered = now;
+                if (*on || this.selected.as_ref() == Some(&hover_path)) && this.selected != now {
+                    this.selected = now;
                     cx.notify();
                 }
             }))
@@ -465,6 +667,16 @@ impl Render for WelcomeProjects {
         div()
             .id("welcome-projects")
             .debug_selector(|| "welcome-projects".into())
+            .key_context("WelcomeProjects")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(Self::up))
+            .on_action(cx.listener(Self::down))
+            .on_action(cx.listener(Self::first))
+            .on_action(cx.listener(Self::last))
+            .on_action(cx.listener(Self::open_selected))
+            .on_action(cx.listener(Self::copy_path))
+            .on_action(cx.listener(Self::remove_selected))
+            .on_action(cx.listener(Self::escape))
             .flex()
             .flex_col()
             .size_full()
@@ -525,6 +737,7 @@ impl Render for WelcomeProjects {
                         .flex_1()
                         .min_h(px(0.0))
                         .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
                         .children(rows),
                 )
             })

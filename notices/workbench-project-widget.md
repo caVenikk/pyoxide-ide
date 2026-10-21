@@ -23,7 +23,16 @@
   platform/platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/
   recentProjects/RecentProjectFilteringTree.kt and projectActions/
   RemoveSelectedProjectsAction.kt (the Welcome screen's recent project
-  rows, their buttons, menu and the question before removing),
+  rows, their buttons, menu and the question before removing, and the
+  list's keyboard: the selection that follows the pointer, the first row
+  selected at the start, Enter, Option/Alt+Delete in the search field),
+  platform/platform-impl/src/com/intellij/ui/FilteringTree.java and
+  FilteringSpeedSearch.java (Up, Down and Escape in the search field, the
+  selection after the text changes), platform/platform-api/src/com/intellij/
+  util/ui/tree/TreeUtil.java (no cyclic scrolling by default),
+  platform/platform-resources/src/idea/PlatformActions.xml (the shortcuts
+  of `WelcomeScreenRecentProjectActionGroup`) with the keymaps' `$Delete`
+  and `CopyPaths` of platform/platform-resources/src/keymaps/,
   platform/util/ui/src/com/intellij/util/ui/
   AvatarUtils.kt (the initials, the gradient, the corners and the font of
   an avatar), platform/platform-api/src/com/intellij/openapi/ui/popup/

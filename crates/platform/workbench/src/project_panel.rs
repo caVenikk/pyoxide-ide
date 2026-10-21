@@ -196,6 +196,14 @@ impl ProjectPanel {
         }
     }
 
+    /// The search field of "Projects and Files", while no project is open.
+    pub fn welcome_search(&self, cx: &App) -> Option<Entity<editor::Editor>> {
+        match (&self.tree, &self.welcome) {
+            (None, Some(welcome)) => Some(welcome.read(cx).search().clone()),
+            _ => None,
+        }
+    }
+
     /// Shows or hides the indent guides (on by default).
     pub fn set_indent_guides(&mut self, on: bool, cx: &mut Context<Self>) {
         self.indent_guides = on;
@@ -1038,7 +1046,6 @@ impl Render for ProjectPanel {
         let el = div()
             .id("project-tree")
             .key_context("ProjectTree")
-            .track_focus(&self.focus)
             .flex()
             .flex_col()
             .flex_1()
@@ -1046,15 +1053,18 @@ impl Render for ProjectPanel {
             .pt(px(TREE_TOP));
         let el = Self::bind_actions(el, cx);
         if self.tree.is_none() {
-            // The reference's Welcome screen left panel.
+            // The reference's Welcome screen left panel; it has the panel's
+            // focus.
+            let focus = self.focus.clone();
             let welcome = self
                 .welcome
                 .get_or_insert_with(|| {
-                    cx.new(|cx| crate::welcome::projects::WelcomeProjects::new(window, cx))
+                    cx.new(|cx| crate::welcome::projects::WelcomeProjects::new(focus, window, cx))
                 })
                 .clone();
             return el.pt_0().child(welcome).into_any_element();
         }
+        let el = el.track_focus(&self.focus);
         let mut rows = uniform_list(
             "project-rows",
             count,

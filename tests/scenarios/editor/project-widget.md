@@ -11,6 +11,9 @@
    a project.
 5. In Projects and Files, point at the `alpha` row, click its gear; point
    at the `my-sample-app` row, click its cross.
+6. Without a project, press Command+1 (Alt+1), then Down, Down, Up, Enter;
+   then type `my` in the search field, press Up, Down, Option+Delete
+   (Alt+Delete), and Escape twice.
 
 ## Expected
 - The toolbar shows the project's avatar (its initials on a gradient in
@@ -28,13 +31,25 @@
   (a folder that is gone). The gear's menu has Open Selected, Copy Path
   and Remove from Recent Projects…; the cross asks "Remove 'my-sample-app'
   from recent projects list?" and Remove takes it off the list.
+- The first recent project is selected when the list shows (its row is
+  highlighted with the gear); the pointer selects the row it is over.
+  Up and Down move the selection from the list and from the search field,
+  without wrapping; Home and End go to the first and the last row; Enter
+  opens the selected project. Delete (Backspace, Command+Backspace) in the
+  list and Option+Delete (Alt+Delete) in the search field ask "Remove '…'
+  from recent projects list?"; Command+Shift+C (Ctrl+Shift+C) copies the
+  folder. Typing keeps the selected row if it still matches, else selects
+  the first match. Escape clears the search text, then moves to the list.
+  The selection scrolls into view.
 - The list is kept in `recent-projects.toml` of the configuration folder
   and survives a restart; a project keeps its colour.
 
 ## Commands
 `project-widget.show`, `project-widget.state`, `project.open-recent
 {"path": ...}`, `project.copy-recent-path {"path": ...}`,
-`project.remove-recent {"path": ...}`, `workbench.state`.
+`project.remove-recent {"path": ...}`, `welcome-projects.up`, `.down`,
+`.first`, `.last`, `.open`, `.copy-path`, `.remove`, `.escape`,
+`workbench.state` (`projects_and_files.selected`).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/opening-reopening-and-closing-projects.html,

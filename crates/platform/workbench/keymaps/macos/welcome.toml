@@ -1,0 +1,33 @@
+# Pyoxide keymap for macOS. Welcome: the Projects and Files list of the
+# Welcome screen (the recent projects while no project is open).
+# Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
+# NOTICE).
+
+# The list: Up, Down, Home and End select a project (no wrapping), Enter
+# opens it, Delete, Backspace and Cmd+Backspace ($Delete, the shortcut of
+# Remove from Recent Projects) take it off the list after asking,
+# Cmd+Shift+C (CopyPaths, the shortcut of Copy Path) copies its folder.
+[[context]]
+name = "WelcomeProjects"
+[context.bindings]
+"up" = "welcome-projects.up"
+"down" = "welcome-projects.down"
+"home" = "welcome-projects.first"
+"end" = "welcome-projects.last"
+"enter" = "welcome-projects.open"
+"delete" = "welcome-projects.remove"
+"backspace" = "welcome-projects.remove"
+"cmd-backspace" = "welcome-projects.remove"
+"cmd-shift-c" = "welcome-projects.copy-path"
+
+# The search field: Up and Down select a project of the list below it,
+# Enter opens the selected one, Option+Delete takes it off the list after
+# asking, Escape clears the text, or moves to the list when there is none.
+[[context]]
+name = "WelcomeProjects > Editor"
+[context.bindings]
+"up" = "welcome-projects.up"
+"down" = "welcome-projects.down"
+"enter" = "welcome-projects.open"
+"alt-delete" = "welcome-projects.remove"
+"escape" = "welcome-projects.escape"

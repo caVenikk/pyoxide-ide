@@ -88,6 +88,7 @@ areas! {
     settings,
     breakpoints,
     terminal,
+    welcome,
 }
 
 /// What the version control areas share.
@@ -733,12 +734,17 @@ fn check_area(
     area_text: &str,
     check: fn(&mut H, &Binding) -> bool,
 ) {
-    let keymap = Keymap::parse(area_text).unwrap();
     let (mut h, _dir) = setup(cx, keymap_text);
+    press_area(&mut h, area_text, check);
+}
+
+/// Presses the bindings of `area_text` in `h`.
+fn press_area(h: &mut H, area_text: &str, check: fn(&mut H, &Binding) -> bool) {
+    let keymap = Keymap::parse(area_text).unwrap();
     let mut missing = Vec::new();
     for b in &keymap.bindings {
         eprintln!("checking `{}` -> {}", b.keys, b.command);
-        if !check(&mut h, b) {
+        if !check(h, b) {
             missing.push(format!("`{}` -> {}", b.keys, b.command));
             continue;
         }
