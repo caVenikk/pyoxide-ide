@@ -4,7 +4,8 @@
 
 # The diff viewer (#171): Next and Previous Difference (pressed again at
 # the last or the first one: the next or the previous file), Compare Next
-# and Previous File, Select Opposite Diff Pane and Jump to Source.
+# and Previous File, Select Opposite Diff Pane and Jump to Source; Accept
+# Left Side (#248), the gutter's `>>` that reverts a change.
 [[context]]
 name = "Diff"
 [context.bindings]
@@ -15,3 +16,4 @@ name = "Diff"
 "ctrl-shift-tab" = "diff.focus-opposite"
 "cmd-down" = "diff.jump-to-source"
 "f4" = "diff.jump-to-source"
+"ctrl-cmd-right" = "diff.apply-left-side"

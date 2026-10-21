@@ -54,6 +54,17 @@ pub struct GutterIcon {
     pub tooltip: Option<SharedString>,
 }
 
+/// An icon in the diff gutter's column of change actions on a
+/// decoration's first line (the reference's `DiffGutterOperation`: the
+/// `>>` of a change, its include check box); a click on it is reported
+/// ([`crate::EditorEvent::GutterActionClicked`]). Drawn only with
+/// [`crate::side_by_side::DiffGutter::Actions`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct GutterAction {
+    pub icon: IconName,
+    pub tooltip: Option<SharedString>,
+}
+
 /// Where a gutter icon's badge goes from the icon's top left corner, and
 /// its size.
 pub const BADGE_OFFSET: (f32, f32) = (7.0, 6.0);
@@ -75,6 +86,22 @@ pub struct LineBackground {
     /// Drawn over the gutter too (the reference's diff highlighters paint
     /// the line numbers' background, `DiffLineMarkerRenderer`).
     pub over_gutter: bool,
+    /// How the gutter part is drawn when it differs from the text's (the
+    /// reference's gutter paint mode of a diff change); `None`: as the
+    /// text.
+    pub gutter: Option<GutterFill>,
+}
+
+/// The gutter part of a diff change's background
+/// (`DiffDrawUtil.PaintMode`): the colour or its faded variant, and for
+/// a change left out of the commit a line of the full colour along its
+/// top and bottom (`EXCLUDED_GUTTER`). It reaches up to the whitespace
+/// separator, three pixels short of the text (`getWhitespaceSeparatorOffset`);
+/// the text's background fills the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GutterFill {
+    pub faded: bool,
+    pub border: bool,
 }
 
 /// What changed in a decoration's lines, for its change marker.
@@ -158,6 +185,7 @@ pub struct StripeMark {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Decoration {
     pub gutter_icon: Option<GutterIcon>,
+    pub action: Option<GutterAction>,
     pub background: Option<LineBackground>,
     pub change: Option<ChangeKind>,
     pub after_text: Option<AfterLineText>,
@@ -171,6 +199,12 @@ impl Decoration {
             badge: None,
             tooltip,
         });
+        self
+    }
+
+    /// An icon in the diff gutter's action column (see [`GutterAction`]).
+    pub fn action(mut self, icon: IconName, tooltip: Option<SharedString>) -> Self {
+        self.action = Some(GutterAction { icon, tooltip });
         self
     }
 
@@ -188,6 +222,7 @@ impl Decoration {
             layer,
             faded: false,
             over_gutter: false,
+            gutter: None,
         });
         self
     }
@@ -205,6 +240,16 @@ impl Decoration {
     pub fn over_gutter(mut self) -> Self {
         if let Some(bg) = &mut self.background {
             bg.over_gutter = true;
+        }
+        self
+    }
+
+    /// The background drawn over the gutter in its own way (see
+    /// [`GutterFill`]).
+    pub fn gutter_fill(mut self, fill: GutterFill) -> Self {
+        if let Some(bg) = &mut self.background {
+            bg.over_gutter = true;
+            bg.gutter = Some(fill);
         }
         self
     }
@@ -236,6 +281,9 @@ pub(crate) struct Entry {
     pub range: Range<usize>,
     /// Between two lines (no lines of its own).
     pub between: bool,
+    /// Down to the end of the text, its empty last line included (a
+    /// range ending at the end of the text does not say that).
+    pub to_end: bool,
     pub decoration: Decoration,
 }
 
@@ -251,6 +299,11 @@ pub(crate) struct Decorations {
     /// Changes whenever the lines of the decorations may have changed.
     generation: u64,
     lines_cache: RefCell<Option<(u64, EntryLines)>>,
+}
+
+/// Lines `lines` reach the end of the text, its last line included.
+fn reaches_end(buffer: &Buffer, lines: &Range<usize>) -> bool {
+    !lines.is_empty() && lines.end >= buffer.len_lines()
 }
 
 /// The char range anchoring lines `lines` (end exclusive; empty: the
@@ -288,6 +341,7 @@ impl Decorations {
             id,
             group,
             between: lines.is_empty(),
+            to_end: reaches_end(buffer, &lines),
             range: anchor(buffer, lines),
             decoration,
         });
@@ -344,7 +398,7 @@ impl Decorations {
         let lines: EntryLines = Rc::new(
             self.entries
                 .iter()
-                .map(|e| entry_lines(buffer, &e.range, e.between))
+                .map(|e| entry_lines(buffer, &e.range, e.between, e.to_end))
                 .collect(),
         );
         *cache = Some((self.generation, lines.clone()));
@@ -395,7 +449,7 @@ impl Decorations {
                 None => {
                     let len = buffer.len_chars();
                     let r = e.range.start.min(len)..e.range.end.min(len);
-                    entry_lines(buffer, &r, e.between)
+                    entry_lines(buffer, &r, e.between, e.to_end)
                 }
             };
             let start = lines.start.min(count - 1);
@@ -404,6 +458,7 @@ impl Decorations {
             } else {
                 start..lines.end.min(count).max(start + 1)
             };
+            e.to_end = reaches_end(buffer, &lines);
             e.range = anchor(buffer, lines);
         }
         self.generation += 1;
@@ -411,10 +466,13 @@ impl Decorations {
 }
 
 /// The lines a decoration's anchor covers.
-fn entry_lines(buffer: &Buffer, range: &Range<usize>, between: bool) -> Range<usize> {
+fn entry_lines(buffer: &Buffer, range: &Range<usize>, between: bool, to_end: bool) -> Range<usize> {
     let first = buffer.char_to_line(range.start);
     if between {
         return first..first;
+    }
+    if to_end && range.end == buffer.len_chars() {
+        return first..buffer.len_lines().max(first + 1);
     }
     if range.is_empty() {
         // The empty last line.
@@ -585,6 +643,18 @@ impl Editor {
             .map(|a| a.bounds)
     }
 
+    /// Window bounds of a decoration's gutter action icon in the last frame
+    /// (`None` when it was not visible).
+    pub fn gutter_action_bounds(&self, id: DecorationId) -> Option<Bounds<Pixels>> {
+        let layout = self.layout.as_ref()?;
+        layout
+            .decorations
+            .actions
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.bounds)
+    }
+
     /// The decoration whose change marker the mouse is over.
     pub fn hovered_change_marker(&self) -> Option<DecorationId> {
         self.hovered_change
@@ -626,6 +696,10 @@ impl Editor {
         };
         let geometry = &layout.decorations;
         if button == MouseButton::Left {
+            if let Some(id) = geometry.action_at(position) {
+                cx.emit(EditorEvent::GutterActionClicked { id });
+                return true;
+            }
             if let Some(id) = geometry.change_at(position) {
                 cx.emit(EditorEvent::ChangeMarkerClicked { id, position });
                 return true;
@@ -765,6 +839,7 @@ impl Editor {
                         "lines": [l.start, l.end],
                         "gutter_icon": d.gutter_icon.as_ref().map(|g| g.icon.0),
                         "badge": d.gutter_icon.as_ref().and_then(|g| g.badge).map(|b| b.0),
+                        "action": d.action.as_ref().map(|a| a.icon.0),
                         "background": d.background.map(|b| b.layer),
                         "change": d.change.map(ChangeKind::name),
                         "after_text": d.after_text.as_ref().map(|a| a
@@ -823,6 +898,16 @@ mod tests {
         let end = b.line_start(2);
         apply(&mut b, &mut d, 0..end, "");
         assert_eq!(lines_of(&d, &b), vec![2..3]);
+    }
+
+    #[test]
+    fn lines_down_to_the_end_keep_the_empty_last_line() {
+        // A diff's one side alone: all of a text ending with a line break.
+        let b = Buffer::new("NEW = 1\n");
+        let mut d = Decorations::default();
+        d.add("t", 0..2, Decoration::default(), &b);
+        d.add("t", 0..1, Decoration::default(), &b);
+        assert_eq!(lines_of(&d, &b), vec![0..2, 0..1]);
     }
 
     #[test]

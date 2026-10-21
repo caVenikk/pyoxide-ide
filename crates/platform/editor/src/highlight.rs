@@ -91,6 +91,58 @@ pub trait Highlighter: 'static {
     }
 }
 
+/// The URLs of a line inside its strings and comments (chars from the
+/// start of the line), found with the console's URL filter
+/// (`URLUtil.URL_PATTERN`).
+fn line_urls(buffer: &Buffer, line: usize, spans: &[Span]) -> Vec<Range<usize>> {
+    use console::LinkFilter as _;
+    let literal = |role: TextRole| {
+        matches!(
+            role,
+            TextRole::String
+                | TextRole::StringEscape
+                | TextRole::Comment
+                | TextRole::Docstring
+                | TextRole::DocstringTag
+                | TextRole::Todo
+        )
+    };
+    let mut out = Vec::new();
+    if line >= buffer.len_lines() {
+        return out;
+    }
+    let text = buffer.line(line);
+    let len = text.len_chars();
+    let mut i = 0;
+    while i < spans.len() {
+        if !literal(spans[i].1) {
+            i += 1;
+            continue;
+        }
+        // A run of string and comment spans next to each other.
+        let start = spans[i].0.start;
+        let mut end = spans[i].0.end;
+        i += 1;
+        while i < spans.len() && literal(spans[i].1) && spans[i].0.start == end {
+            end = spans[i].0.end;
+            i += 1;
+        }
+        let (start, end) = (start.min(len), end.min(len));
+        if end <= start {
+            continue;
+        }
+        let piece = text.slice(start..end).to_string();
+        let mut links = Vec::new();
+        console::UrlFilter.links(&piece, &mut links);
+        for link in links {
+            let from = start + piece[..link.range.start].chars().count();
+            let to = from + piece[link.range].chars().count();
+            out.push(from..to);
+        }
+    }
+    out
+}
+
 /// Drops a value on a thread of its own, one value after another.
 fn drop_off_thread<T: Send + 'static>(value: T) {
     use std::sync::Mutex;
@@ -127,9 +179,10 @@ pub struct SyntaxHighlighter {
     edits_during_job: Vec<InputEdit>,
     /// Lexer state at the start of each line, as far as known.
     states: LineStates,
-    /// Spans and error marks of the prepared lines.
+    /// Spans, error marks and URLs of the prepared lines.
     cache: Vec<Vec<Span>>,
     errors: Vec<Vec<Range<usize>>>,
+    urls: Vec<Vec<Range<usize>>>,
     cache_start: usize,
     cache_valid: bool,
 }
@@ -145,6 +198,7 @@ impl SyntaxHighlighter {
             states: LineStates::default(),
             cache: Vec::new(),
             errors: Vec::new(),
+            urls: Vec::new(),
             cache_start: 0,
             cache_valid: false,
         }
@@ -257,6 +311,12 @@ impl Highlighter for SyntaxHighlighter {
             lines.clone(),
             &mut self.states,
         );
+        self.urls = h
+            .spans
+            .iter()
+            .enumerate()
+            .map(|(i, spans)| line_urls(buffer, lines.start + i, spans))
+            .collect();
         self.cache = h.spans;
         self.errors = h.errors;
         self.cache_start = lines.start;
@@ -281,6 +341,26 @@ impl Highlighter for SyntaxHighlighter {
         }
     }
 
+    /// URLs in strings and comments are underlined in their colour (the
+    /// reference's web references, `INACTIVE_HYPERLINK_ATTRIBUTES`).
+    fn line_styles(
+        &self,
+        line: usize,
+        _theme: &ui::theme::Theme,
+        out: &mut Vec<(Range<usize>, InlineStyle)>,
+    ) {
+        if let Some(urls) = line
+            .checked_sub(self.cache_start)
+            .and_then(|i| self.urls.get(i))
+        {
+            let underline = InlineStyle {
+                underline: Some(1.0),
+                ..InlineStyle::default()
+            };
+            out.extend(urls.iter().map(|r| (r.clone(), underline)));
+        }
+    }
+
     fn is_current(&self) -> bool {
         !self.dirty && self.running.is_none() && self.tree.is_some()
     }
@@ -295,5 +375,20 @@ impl Highlighter for SyntaxHighlighter {
             .into_iter()
             .map(|r| buffer.byte_to_char(r.start.min(len))..buffer.byte_to_char(r.end.min(len)))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn urls_are_found_in_strings_and_comments_only() {
+        let buffer =
+            Buffer::new("x = \"see https://example.com and\"  # www.example.org\nhttp://a.b\n");
+        let spans = [(4..33, TextRole::String), (35..53, TextRole::Comment)];
+        assert_eq!(line_urls(&buffer, 0, &spans), vec![9..28, 37..52]);
+        // Outside a string or a comment: no link.
+        assert!(line_urls(&buffer, 1, &[(0..4, TextRole::Keyword)]).is_empty());
     }
 }

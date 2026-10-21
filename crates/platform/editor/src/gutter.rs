@@ -42,6 +42,12 @@ const AFTER_TEXT_ICON: f32 = 16.0;
 /// How much of the editor's background a faded background is
 /// (`TextDiffTypeFactory.MIDDLE_COLOR_FACTOR`).
 const FADED_BACKGROUND: f32 = 0.6;
+/// The gutter's whitespace separator is this far from the text
+/// (`EditorGutterComponentImpl.getWhitespaceSeparatorOffset`, New UI); the
+/// separator line is drawn one pixel nearer the text on a screen scaled
+/// above 1, as the reference's Retina screens are.
+const WHITESPACE_SEPARATOR: f32 = 3.0;
+const SEPARATOR_LINE: f32 = 2.0;
 
 /// `a` mixed with `b`, `factor` of `b` (the reference's `ColorUtil.mix`).
 fn mix(a: Hsla, b: Hsla, factor: f32) -> Hsla {
@@ -97,9 +103,18 @@ pub(crate) struct DecorationGeometry {
     pub lanes: Lanes,
     pub changes: Vec<ChangeHit>,
     pub after_texts: Vec<AfterHit>,
+    /// The diff gutter's action icons.
+    pub actions: Vec<AfterHit>,
 }
 
 impl DecorationGeometry {
+    pub fn action_at(&self, position: gpui::Point<Pixels>) -> Option<DecorationId> {
+        self.actions
+            .iter()
+            .find(|a| a.bounds.contains(&position))
+            .map(|a| a.id)
+    }
+
     pub fn change_at(&self, position: gpui::Point<Pixels>) -> Option<DecorationId> {
         if !self.lanes.in_markers(position.x) {
             return None;
@@ -135,6 +150,9 @@ pub(crate) struct DecorationPaint {
     /// The line-number cells with an icon (hand pointer when the owner
     /// takes clicks there).
     pub icon_cells: Vec<Bounds<Pixels>>,
+    /// The diff gutter's separator line before the text
+    /// (`EditorGutterComponentImpl.paint`, `INDENT_GUIDE_COLOR`).
+    pub separator: Option<(Bounds<Pixels>, Hsla)>,
     /// Full-line backgrounds, the lowest layer first.
     pub backgrounds: Vec<(Bounds<Pixels>, Hsla)>,
     /// Change markers: rounded bars, the hovered ones last.
@@ -171,6 +189,11 @@ pub(crate) struct Frame<'a> {
     pub total_rows: usize,
     /// No gutter (a field or a console): nothing drawn there.
     pub gutter: bool,
+    /// The diff viewer's gutter ([`Editor::set_diff_gutter`]): a separator
+    /// line before the text.
+    pub diff_gutter: bool,
+    /// The diff gutter has the column of the changes' actions.
+    pub diff_actions: bool,
 }
 
 impl Frame<'_> {
@@ -211,6 +234,26 @@ impl Frame<'_> {
         }
     }
 
+    /// The gutter's whitespace separator: where a diff change's gutter part
+    /// ends and its text part begins.
+    fn outline_x(&self) -> Pixels {
+        if self.mirrored {
+            self.gutter_x + px(WHITESPACE_SEPARATOR)
+        } else {
+            self.gutter_x + self.gutter_width - px(WHITESPACE_SEPARATOR)
+        }
+    }
+
+    /// The gutter part (`true`) or the text part of a background drawn in
+    /// two parts ([`crate::GutterFill`]).
+    fn split_x(&self, gutter: bool) -> (Pixels, Pixels) {
+        let outline = self.outline_x();
+        match (gutter, self.mirrored) {
+            (true, false) | (false, true) => (self.bounds.left(), outline),
+            (false, false) | (true, true) => (outline, self.bounds.right()),
+        }
+    }
+
     /// Where a full-line background goes across: the text and a little of
     /// the gutter, or the whole width.
     fn background_x(&self, over_gutter: bool) -> (Pixels, Pixels) {
@@ -237,6 +280,20 @@ pub(crate) fn prepaint(
 ) -> (DecorationPaint, DecorationGeometry) {
     let lanes = frame.lanes();
     let mut paint = DecorationPaint::default();
+    if frame.gutter && frame.diff_gutter {
+        let x = if frame.mirrored {
+            frame.gutter_x + px(SEPARATOR_LINE)
+        } else {
+            frame.gutter_x + frame.gutter_width - px(SEPARATOR_LINE + 1.0)
+        };
+        paint.separator = Some((
+            Bounds::new(
+                point(x, frame.bounds.top()),
+                size(px(1.0), frame.bounds.size.height),
+            ),
+            theme.color(UiRole::IndentGuide),
+        ));
+    }
     let mut geometry = DecorationGeometry {
         lanes,
         ..Default::default()
@@ -280,10 +337,32 @@ pub(crate) fn prepaint(
             ),
         )
     };
+    // The action column of a diff gutter (`DiffGutterOperation`'s icons).
+    let action_x = crate::side_by_side::diff_action_x(frame.text_x, frame.gutter_x, frame.mirrored);
+    let action_size = px(crate::side_by_side::ACTION_SIZE);
     for (entry, lines) in decorations.entries().iter().zip(all_lines.iter()) {
         let d = &entry.decoration;
         let last_line = lines.end.max(lines.start + 1) - 1;
         let shown = lines.start < visible.end && last_line >= visible.start;
+        // On its first line, or the line below the boundary it stands on.
+        let action_line = lines.start.min(len_lines - 1);
+        if frame.gutter
+            && frame.diff_actions
+            && let Some(action) = &d.action
+            && visible.contains(&action_line)
+            && let Some(row) = frame.rows_of(action_line).find(|l| l.sub == 0)
+        {
+            let y = ((lh - action_size) / 2.0).floor();
+            let bounds = Bounds::new(
+                point(action_x, frame.top_of(row.row) + y),
+                size(action_size, action_size),
+            );
+            paint.icons.push((action.icon, bounds, 1.0));
+            geometry.actions.push(AfterHit {
+                id: entry.id,
+                bounds,
+            });
+        }
         if frame.gutter
             && let Some(icon) = &d.gutter_icon
             && visible.contains(&lines.start)
@@ -299,20 +378,60 @@ pub(crate) fn prepaint(
             paint.icon_cells.push(cell(row));
         }
         if shown && let Some(bg) = d.background {
-            let mut c = theme.color(bg.color);
-            if bg.faded {
-                c = mix(c, theme.color(UiRole::EditorBackground), FADED_BACKGROUND);
-            }
-            let (x0, x1) = frame.background_x(bg.over_gutter);
+            let full = theme.color(bg.color);
+            let faded = mix(
+                full,
+                theme.color(UiRole::EditorBackground),
+                FADED_BACKGROUND,
+            );
+            let c = if bg.faded { faded } else { full };
+            // A diff change's gutter part in its own paint mode
+            // (`DiffLineMarkerRenderer`): up to the whitespace separator,
+            // the text's colour after it.
+            let fill = bg.gutter.filter(|_| frame.gutter);
+            let parts = match fill {
+                Some(f) => [
+                    (frame.split_x(false), c),
+                    (frame.split_x(true), if f.faded { faded } else { full }),
+                ],
+                None => [(frame.background_x(bg.over_gutter), c); 2],
+            };
+            let parts = if fill.is_some() {
+                &parts[..]
+            } else {
+                &parts[..1]
+            };
             for line in lines.start.max(visible.start)..lines.end.min(visible.end) {
                 for row in frame.rows_of(line) {
+                    for &((x0, x1), c) in parts {
+                        backgrounds.push((
+                            bg.layer,
+                            Bounds::from_corners(
+                                point(x0, frame.top_of(row.row)),
+                                point(x1, frame.top_of(row.row) + lh),
+                            ),
+                            c,
+                        ));
+                    }
+                }
+            }
+            // A change left out of the commit: a line of the full colour
+            // along the top and the bottom of its gutter part
+            // (`EXCLUDED_GUTTER`, `drawChunkBorderLine`).
+            if fill.is_some_and(|f| f.border) && !lines.is_empty() {
+                let (x0, x1) = frame.split_x(true);
+                let row_top = |line: usize| {
+                    if line >= len_lines {
+                        frame.top_of(frame.total_rows)
+                    } else {
+                        frame.top_of(editor.line_row(line))
+                    }
+                };
+                for y in [row_top(lines.start), row_top(lines.end) - px(1.0)] {
                     backgrounds.push((
                         bg.layer,
-                        Bounds::from_corners(
-                            point(x0, frame.top_of(row.row)),
-                            point(x1, frame.top_of(row.row) + lh),
-                        ),
-                        c,
+                        Bounds::from_corners(point(x0, y), point(x1, y + px(1.0))),
+                        full,
                     ));
                 }
             }
@@ -526,13 +645,21 @@ pub(crate) fn insert_hitboxes(
                 .push(window.insert_hitbox(rect, HitboxBehavior::Normal));
         }
     }
-    for a in &geometry.after_texts {
+    for a in geometry.after_texts.iter().chain(&geometry.actions) {
         let rect = a.bounds.intersect(&bounds);
         if rect.size.width > px(0.0) {
             paint
                 .hand_hitboxes
                 .push(window.insert_hitbox(rect, HitboxBehavior::Normal));
         }
+    }
+}
+
+/// Paints the diff gutter's separator line (under the backgrounds: a
+/// change's background covers it).
+pub(crate) fn paint_separator(paint: &DecorationPaint, window: &mut Window) {
+    if let Some((b, c)) = paint.separator {
+        window.paint_quad(fill(b, c));
     }
 }
 

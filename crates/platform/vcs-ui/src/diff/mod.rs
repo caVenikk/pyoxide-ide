@@ -4,8 +4,9 @@
 //! file's document); changed lines and words highlighted, the divider
 //! joining the changes of both sides, synchronized scrolling, Next and
 //! Previous Difference, the next and previous file of a list, Jump to
-//! Source, Select Opposite Diff Pane, and the settings popup (Ignore
-//! Differences, Highlighting Differences).
+//! Source, Select Opposite Diff Pane, the changes' actions in the gutter
+//! (`>>` reverts a change, a check box includes it into the commit) and
+//! the settings popup (Ignore Differences, Highlighting Differences).
 //!
 //! - [`model`]: the differences and the computations on them (no UI).
 //! - [`view`]: the [`DiffView`] entity and its toolbar and titles.
@@ -55,6 +56,14 @@ ui::ui_commands! {
     SetHighlightPolicy { policy: String } => "diff.set-highlight-policy", "Highlighting Differences",
         "Sets how the diff highlights changes: lines, words (changed lines and the changed words in them) or none.",
         r#"{"policy": "lines"}"#;
+    /// The gutter's `>>` (`Diff.ApplyLeftSide`).
+    ApplyLeftSide { index: Option<usize> } => "diff.apply-left-side", "Accept Left Side",
+        "Replaces the right side's lines of a change with the left side's, as one undoable edit: in a diff of local changes it reverts the change (the gutter's >>). The change at index, else the change at the caret of the current side.",
+        r#"{"index": 0}"#;
+    /// The gutter's check box of a change (`Vcs.Diff.IncludeChangedLinesIntoCommit`).
+    IncludeChange { index: Option<usize>, included: Option<bool> } => "diff.include-change", "Include into Commit",
+        "Includes a change of the active diff into the commit or leaves it out (the gutter's check box; the commit then takes the file in part): the change at index, else the one at the caret of the current side; included sets it, else it toggles.",
+        r#"{"index": 0, "included": false}"#;
     /// The settings popup of the toolbar's gear.
     ShowSettings => "diff.settings", "Show Diff Settings Popup\u{2026}",
         "Opens the diff's settings popup: Ignore Differences and Highlighting Differences.";

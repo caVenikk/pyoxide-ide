@@ -510,6 +510,21 @@ impl CommitView {
         cx.notify();
     }
 
+    /// Includes or leaves out one change of a file (a diff's check box):
+    /// `change` and `all` are lines of the base text
+    /// ([`ChangesTree::set_change_included`]).
+    pub fn set_change_included(
+        &mut self,
+        path: &Path,
+        change: std::ops::Range<u32>,
+        all: &[std::ops::Range<u32>],
+        included: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.tree.set_change_included(path, change, all, included);
+        self.inclusion_changed(cx);
+    }
+
     /// Selects a file's row (Select Opened File).
     pub fn select_path(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
         let found = self.tree.select_path(path);
@@ -607,6 +622,7 @@ impl CommitView {
             sign_off: self.options.sign_off,
             run_hooks: self.options.run_hooks || !self.options.hooks,
             author: (!author.trim().is_empty()).then(|| author.trim().to_owned()),
+            partial: self.tree.partial_files(),
         };
         self.busy = true;
         self.close_options(window, cx);
@@ -645,11 +661,7 @@ impl CommitView {
     ) {
         let paths: Vec<PathBuf> = match &action.paths {
             Some(paths) => paths.iter().map(|p| self.resolve(p)).collect(),
-            None => {
-                let mut all = self.tree.files(Group::Changes);
-                all.extend(self.tree.files(Group::Unversioned));
-                all
-            }
+            None => self.tree.all_files(),
         };
         self.tree.set_included(&paths, action.included);
         self.inclusion_changed(cx);
@@ -989,6 +1001,7 @@ impl CommitView {
                         "origin": change.and_then(|c| tree::origin_text(c, root)),
                         "parent": tree::parent_text(p, root),
                         "included": self.tree.row_inclusion(row) == Inclusion::All,
+                        "inclusion": self.tree.row_inclusion(row).id(),
                         "selected": self.tree.is_selected(row),
                     })
                 }

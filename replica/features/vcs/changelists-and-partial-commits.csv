@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Changelists and partial commits (chunks, lines)",vcs,could,yes,no,Community
+"Changelists and partial commits (chunks, lines)",vcs,could,yes,partial,"partial commit of whole changes from the diff's check boxes (#248); no change lists, no single lines"

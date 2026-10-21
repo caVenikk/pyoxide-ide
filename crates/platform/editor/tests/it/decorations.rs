@@ -227,6 +227,61 @@ fn change_markers_widen_under_the_mouse_and_report_clicks(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn diff_gutter_actions_sit_before_the_text_and_report_clicks(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, TEXT);
+    let events = events(&editor, cx);
+    let action = |d: Decoration| d.action(ui::icons::IconName::DIFF_CHECKBOX, None);
+    let (changed, between) = editor.update(cx, |e, cx| {
+        let ids = e.set_decorations(
+            "diff",
+            vec![
+                (1..3, action(Decoration::default())),
+                (4..4, action(Decoration::default())),
+            ],
+            cx,
+        );
+        (ids[0], ids[1])
+    });
+    draw(cx);
+    // Without the diff gutter's action column nothing is drawn.
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.gutter_action_bounds(changed)),
+        None
+    );
+    editor.update(cx, |e, cx| {
+        e.set_diff_gutter(editor::side_by_side::DiffGutter::Actions, cx)
+    });
+    draw(cx);
+    let (first, second, offset, lh) = editor.read_with(cx, |e, _| {
+        (
+            e.gutter_action_bounds(changed).expect("drawn"),
+            e.gutter_action_bounds(between).expect("drawn"),
+            e.diff_action_offset().expect("laid out"),
+            e.text_geometry().unwrap().1,
+        )
+    });
+    // In the action column, on the first line (the line below a boundary).
+    let size = px(editor::side_by_side::ACTION_SIZE);
+    assert_eq!(first.size, gpui::size(size, size));
+    assert_eq!(second.left(), first.left());
+    // The editor fills the window: its left edge is the window's.
+    assert_eq!(first.left(), offset);
+    assert!((second.top() - first.top() - lh * 3.0).abs() < px(0.01));
+    press(cx, first.center(), MouseButton::Left, Modifiers::none());
+    press(cx, second.center(), MouseButton::Left, Modifiers::none());
+    let clicked: Vec<_> = events
+        .borrow()
+        .iter()
+        .filter_map(|e| match e {
+            EditorEvent::GutterActionClicked { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(clicked, vec![changed, between]);
+    assert_eq!(caret_line(&editor, cx), 0);
+}
+
+#[gpui::test]
 fn after_line_texts_follow_the_line_end_and_report_clicks(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, TEXT);
     let events = events(&editor, cx);

@@ -9,7 +9,9 @@
 //! the tab), or, without a tab, edits and saves its own document, which a
 //! tab opened later continues with. A file of the Commit tool window's
 //! list opens in the list's preview tab (`Commit: main.py`), with the
-//! list's other files a step away (Compare Next and Previous File).
+//! list's other files a step away (Compare Next and Previous File): all
+//! files of its groups in order, or the selected files; the counter counts
+//! the files of the shown file's group.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,6 +70,11 @@ impl TabView for DiffView {
         state["kind"] = "diff".into();
         state
     }
+
+    /// The toolbar's island takes the line's place.
+    fn tab_separator(&self, _: &App) -> bool {
+        false
+    }
 }
 
 /// The diff tabs of the window.
@@ -85,6 +92,9 @@ struct DiffTab {
     /// shown.
     files: Vec<PathBuf>,
     index: usize,
+    /// The files are the Commit tool window's selected ones (the counter
+    /// counts them, not a group).
+    selection: bool,
     /// The list is the Commit tool window's.
     commit: bool,
     /// The file being loaded: its base text and its document.
@@ -171,8 +181,8 @@ impl Workbench {
 
     /// Opens the diff of `path`. A file of the Commit tool window's list
     /// opens in the list's preview tab with the list (the selected files
-    /// when there are several, else the files of its group); another file
-    /// in a tab of its own.
+    /// when there are several, else the files of all groups in order);
+    /// another file in a tab of its own.
     pub(super) fn show_diff_of(
         &mut self,
         path: PathBuf,
@@ -182,18 +192,19 @@ impl Workbench {
     ) {
         let commit = self.commit_ui.view.read(cx);
         let tree = commit.tree();
-        let (files, index, commit_list) = match tree.group_of(&path) {
-            Some(group) => {
+        let (files, index, commit_list, selection) = match tree.group_of(&path) {
+            Some(_) => {
                 let selected = commit.selected_files();
-                let files = if selected.len() > 1 && selected.contains(&path) {
+                let selection = selected.len() > 1 && selected.contains(&path);
+                let files = if selection {
                     selected
                 } else {
-                    tree.files(group)
+                    tree.all_files()
                 };
                 let index = files.iter().position(|p| *p == path).unwrap_or(0);
-                (files, index, true)
+                (files, index, true, selection)
             }
-            None => (vec![path.clone()], 0, false),
+            None => (vec![path.clone()], 0, false, false),
         };
         // The list's preview tab, or the file's own diff tab.
         let existing = self.diff_tabs.tabs.iter().find_map(|(id, t)| {
@@ -213,6 +224,7 @@ impl Workbench {
             previous = t.files.get(t.index).cloned().filter(|p| *p != path);
             t.files = files;
             t.index = index;
+            t.selection = selection;
         }
         if let Some(previous) = previous {
             self.diff_forget_document(&previous, cx);
@@ -266,6 +278,7 @@ impl Workbench {
                 document,
                 files: Vec::new(),
                 index: 0,
+                selection: false,
                 commit,
                 loading: None,
                 _subscriptions: subscriptions,
@@ -448,15 +461,37 @@ impl Workbench {
         } else {
             SideTitle::default()
         };
+        // An added or unversioned file shows its text alone, a deleted one
+        // its base (`SimpleOnesideDiffViewer`); the current text's title
+        // alone names the file.
+        let deleted = self.diff_deleted(path);
+        let one_side = if deleted && has_base {
+            Some(vcs_ui::diff::Side::Left)
+        } else if !has_base {
+            Some(vcs_ui::diff::Side::Right)
+        } else {
+            None
+        };
         let renamed = base_path != path;
+        let named = renamed || one_side == Some(vcs_ui::diff::Side::Right);
         let right = SideTitle {
             label: CURRENT_VERSION.into(),
-            path: renamed.then(|| rel(path).into()),
-            tooltip: renamed.then(|| path.display().to_string().into()),
-            read_only: self.diff_deleted(path),
+            path: named.then(|| rel(path).into()),
+            tooltip: named.then(|| path.display().to_string().into()),
+            read_only: deleted,
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));
+        // The counter: the file in its group, or in the selected files.
+        let files = match tree.group_of(path).filter(|_| t.commit && !t.selection) {
+            Some(group) => {
+                let group = tree.files(group);
+                let index = group.iter().position(|p| p == path).unwrap_or(0);
+                (index, group.len())
+            }
+            None => (t.index, t.files.len()),
+        };
+        let excluded = tree.excluded_changes(path).to_vec();
         DiffRequest {
             path: path.to_owned(),
             title: if t.commit {
@@ -468,7 +503,10 @@ impl Workbench {
             left,
             right,
             included,
-            files: (t.index, t.files.len()),
+            excluded,
+            one_side,
+            files,
+            steps: (t.index > 0, t.index + 1 < t.files.len()),
             preview: t.commit,
         }
     }
@@ -517,6 +555,13 @@ impl Workbench {
                     cx,
                 );
             }
+            DiffEvent::SetChangeIncluded {
+                change,
+                all,
+                included,
+            } => self.commit_ui.view.update(cx, |v, cx| {
+                v.set_change_included(&path, change.clone(), all, *included, cx)
+            }),
             DiffEvent::Changed => self.diff_document_status(id, cx),
         }
     }
@@ -561,7 +606,8 @@ impl Workbench {
         self.load_diff(id, scroll, cx);
     }
 
-    /// The title's check box follows the file's inclusion.
+    /// The check boxes of the title and the changes follow the file's
+    /// inclusion.
     fn diff_sync_included(&mut self, id: EntityId, cx: &mut Context<Self>) {
         let Some(t) = self.diff_tab(id) else {
             return;
@@ -571,8 +617,9 @@ impl Workbench {
         };
         let tree = self.commit_ui.view.read(cx).tree();
         let included = tree.group_of(path).map(|_| tree.is_included(path));
+        let excluded = tree.excluded_changes(path).to_vec();
         let view = t.view.clone();
-        view.update(cx, |v, cx| v.set_included(included, cx));
+        view.update(cx, |v, cx| v.set_inclusion(included, excluded, cx));
     }
 
     /// The colour of a file the diff edits without a tab: modified at once

@@ -333,44 +333,99 @@ pub fn segmented_enabled(
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
-    let theme = cx.theme();
-    let radius = field_radius(cx);
     let on_select = std::rc::Rc::new(on_select);
     let segments = choices.iter().enumerate().map(|(ix, choice)| {
-        let chosen = selected == Some(ix);
         let enabled = enabled.get(ix).copied().unwrap_or(true);
         let on_select = on_select.clone();
-        div()
-            .id((id, ix))
-            .debug_selector(move || format!("{id}:{ix}"))
-            .flex_none()
+        segment(id, ix, selected == Some(ix), enabled, cx)
             .h_full()
             .px(px(14.0))
-            .flex()
-            .items_center()
-            .rounded(radius)
             .whitespace_nowrap()
-            .when(chosen, |d| {
-                d.bg(theme.color(UiRole::Pressed))
-                    .border_1()
-                    .border_color(theme.color(UiRole::BorderInput))
-            })
-            .when(!chosen && enabled, |d| d.pointing_hand())
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
             .child(choice.clone())
             .when(enabled, |d| {
                 d.on_click(move |_, window, cx| on_select(ix, window, cx))
             })
     });
+    segments_outline(cx)
+        .h(px(FIELD_HEIGHT))
+        .p(px(1.0))
+        .children(segments)
+}
+
+/// A segmented button of icons (`SegmentedButtonComponent` of a toolbar,
+/// as the diff viewer's modes): each choice `size` with its tooltip.
+pub fn segmented_icons(
+    id: &'static str,
+    choices: &[(IconName, &'static str)],
+    selected: Option<usize>,
+    size: (Pixels, Pixels),
+    on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Div {
+    let on_select = std::rc::Rc::new(on_select);
+    let segments = choices.iter().enumerate().map(|(ix, &(icon, tooltip))| {
+        let on_select = on_select.clone();
+        segment(id, ix, selected == Some(ix), true, cx)
+            .w(size.0)
+            .h(size.1)
+            .tooltip(Tooltip::text(tooltip, None))
+            .child(Icon::new(icon).size(px(16.0)))
+            .on_click(move |_, window, cx| on_select(ix, window, cx))
+    });
+    segments_outline(cx).p(px(1.0)).children(segments)
+}
+
+/// The outline around a segmented button's choices (`SegmentedButtonBorder`),
+/// under them: the selected choice's outline covers it.
+fn segments_outline(cx: &App) -> Div {
     div()
+        .relative()
         .flex()
         .flex_row()
+        .flex_none()
         .items_center()
-        .h(px(FIELD_HEIGHT))
-        .rounded(radius)
-        .border_1()
-        .border_color(theme.color(UiRole::BorderInput))
-        .children(segments)
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .rounded(field_radius(cx))
+                .border_1()
+                .border_color(cx.theme().color(UiRole::BorderInput)),
+        )
+}
+
+/// A choice of a segmented button: the selected one raised, its outline
+/// one pixel outside it over the button's outline
+/// (`SegmentedButtonComponent.paint`, `SegmentedButtonLook`).
+fn segment(id: &'static str, ix: usize, chosen: bool, enabled: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let radius = field_radius(cx);
+    div()
+        .id((id, ix))
+        .debug_selector(move || format!("{id}:{ix}"))
+        .relative()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .when(chosen, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top(px(-1.0))
+                    .left(px(-1.0))
+                    .right(px(-1.0))
+                    .bottom(px(-1.0))
+                    .rounded(radius)
+                    .border_1()
+                    .border_color(theme.color(UiRole::SegmentedSelectedBorder))
+                    .bg(theme.color(UiRole::SegmentedSelected)),
+            )
+        })
+        .when(!chosen && enabled, |d| d.pointing_hand())
 }
 
 /// The round "?" help button at the bottom left of a dialog; without an

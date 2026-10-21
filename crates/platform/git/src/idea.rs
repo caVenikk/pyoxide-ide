@@ -1,6 +1,8 @@
-//! The reference IDE's version control mapping of a project
-//! (`.idea/vcs.xml`, component `VcsDirectoryMappings`), read and never
-//! written.
+//! What the reference IDE keeps of a project's version control, read and
+//! never written: the mapping (`.idea/vcs.xml`, component
+//! `VcsDirectoryMappings`) and the commit messages (`.idea/workspace.xml`:
+//! the default changelist's description, the unsent message, and
+//! `VcsManagerConfiguration`'s recent messages).
 
 use std::path::Path;
 
@@ -56,6 +58,54 @@ fn parse(text: &str) -> Option<Mapping> {
     found
 }
 
+/// The commit messages of the reference's personal project state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommitMessages {
+    /// The unsent message (`ChangeListManager`: the default changelist's
+    /// `comment`, where `ChangesViewCommitMessagePolicy` keeps it).
+    pub draft: Option<String>,
+    /// The recent messages, the last one first (`VcsManagerConfiguration`'s
+    /// `MESSAGE` values, stored the last one last).
+    pub recent: Vec<String>,
+}
+
+/// The commit messages in `<root>/.idea/workspace.xml`; `None` when the
+/// file cannot be read.
+pub fn commit_messages(root: &Path) -> Option<CommitMessages> {
+    let text = std::fs::read_to_string(root.join(".idea").join("workspace.xml")).ok()?;
+    Some(parse_messages(&text))
+}
+
+fn parse_messages(text: &str) -> CommitMessages {
+    let mut reader = Reader::from_str(text);
+    let mut component = String::new();
+    let mut out = CommitMessages::default();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.name().as_ref() {
+                "component" => component = attr(&e, "name").unwrap_or_default(),
+                "list"
+                    if component == "ChangeListManager"
+                        && attr(&e, "default").as_deref() == Some("true") =>
+                {
+                    out.draft = attr(&e, "comment").filter(|c| !c.trim().is_empty());
+                }
+                "MESSAGE" if component == "VcsManagerConfiguration" => {
+                    if let Some(m) = attr(&e, "value").filter(|m| !m.trim().is_empty()) {
+                        out.recent.retain(|r| *r != m);
+                        out.recent.insert(0, m);
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::End(e)) if e.name().as_ref() == "component" => component.clear(),
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    out
+}
+
 fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
     e.attributes().flatten().find_map(|a| {
         (a.key.as_ref() == name)
@@ -87,5 +137,34 @@ mod tests {
         assert_eq!(parse(git), Some(Mapping::Vcs("Git".into())));
         let other = r#"<project><component name="Other"><mapping directory="" vcs="" /></component></project>"#;
         assert_eq!(parse(other), None);
+    }
+
+    #[test]
+    fn the_unsent_and_the_recent_messages_are_read() {
+        let text = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list id="1" name="Other" comment="not this" />
+    <list default="true" id="2" name="Changes" comment="Fix the parser&#10;&#10;Details">
+      <change afterPath="$PROJECT_DIR$/a.py" afterDir="false" />
+    </list>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="first" />
+    <MESSAGE value="second &amp; more" />
+    <option name="LAST_COMMIT_MESSAGE" value="second &amp; more" />
+  </component>
+  <component name="Other"><MESSAGE value="no" /></component>
+</project>"#;
+        assert_eq!(
+            parse_messages(text),
+            CommitMessages {
+                draft: Some("Fix the parser\n\nDetails".into()),
+                recent: vec!["second & more".into(), "first".into()],
+            }
+        );
+        let empty = r#"<project><component name="ChangeListManager">
+<list default="true" id="2" name="Changes" comment="" /></component></project>"#;
+        assert_eq!(parse_messages(empty), CommitMessages::default());
     }
 }

@@ -226,6 +226,13 @@ impl IconName {
     /// Config or Installation Directory of the import dialog's Other
     /// Options (`StartupImportIcons.Icons.ConfigFile`, 20 by 20).
     pub const CONFIG_FILE: Self = Self("startup/configFile");
+    /// A diff change's check box in the gutter and the title's
+    /// (`AllIcons.Diff.GutterCheckBox*`).
+    pub const DIFF_CHECKBOX: Self = Self("diff/gutterCheckBox@14x14");
+    pub const DIFF_CHECKBOX_SELECTED: Self = Self("diff/gutterCheckBoxSelected@14x14");
+    pub const DIFF_CHECKBOX_INDETERMINATE: Self = Self("diff/gutterCheckBoxIndeterminate@14x14");
+    /// Revert a diff change (`AllIcons.Diff.ArrowRight`, `>>`).
+    pub const DIFF_ARROW_RIGHT: Self = Self("diff/arrowRight@14x14");
 }
 
 /// Source of one icon: the light variant and, when it differs, the dark one.
@@ -258,6 +265,8 @@ platform_icons! {
         "actions/checked", "actions/inSelection", "actions/newFolder", "actions/shortcutFilter",
         "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
+        "diff/arrowRight@14x14", "diff/gutterCheckBox@14x14",
+        "diff/gutterCheckBoxIndeterminate@14x14", "diff/gutterCheckBoxSelected@14x14",
         "diff/sideBySide", "diff/unified",
         "fileTypes/archive", "fileTypes/binaryData", "fileTypes/css", "fileTypes/csv",
         "fileTypes/docker", "fileTypes/dockerCompose", "fileTypes/dockerIgnore",

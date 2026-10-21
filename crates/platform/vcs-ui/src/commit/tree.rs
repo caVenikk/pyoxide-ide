@@ -7,12 +7,16 @@
 //! Inclusion follows the reference's partial commit model: changes are
 //! included when the window first gets them and by Commit (⌘K); a change
 //! that appears later is included while every other change is;
-//! unversioned files are included only by hand.
+//! unversioned files are included only by hand. Of an included file some
+//! changes may be left out (the diff's check boxes,
+//! `PartialLocalLineStatusTracker.setExcludedFromCommit`): its check box
+//! is then partly ticked and the commit takes the rest only.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use vcs::{Change, FileStatus};
+use vcs::{Change, FileStatus, PartialFile};
 
 /// A group of the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,6 +86,9 @@ pub struct ChangesTree {
     changes: Vec<Change>,
     unversioned: Vec<PathBuf>,
     included: HashSet<PathBuf>,
+    /// Changes of included files left out of the commit, by their lines in
+    /// the base text.
+    excluded: HashMap<PathBuf, Vec<Range<u32>>>,
     /// Changes were given at least once.
     loaded: bool,
     expanded_changes: bool,
@@ -102,6 +109,7 @@ impl Default for ChangesTree {
             changes: Vec::new(),
             unversioned: Vec::new(),
             included: HashSet::new(),
+            excluded: HashMap::new(),
             loaded: false,
             expanded_changes: true,
             // The reference expands the default change list only.
@@ -149,6 +157,8 @@ impl ChangesTree {
             .chain(unversioned.iter().map(PathBuf::as_path))
             .collect();
         self.included.retain(|p| paths.contains(p.as_path()));
+        let changed: HashSet<&Path> = changes.iter().map(|c| c.path.as_path()).collect();
+        self.excluded.retain(|p, _| changed.contains(p.as_path()));
         for c in &changes {
             let new = !old.contains(&c.path);
             if first || (new && all_included) {
@@ -208,6 +218,14 @@ impl ChangesTree {
             Group::Changes => self.changes.iter().map(|c| c.path.clone()).collect(),
             Group::Unversioned => self.unversioned.clone(),
         }
+    }
+
+    /// The files of all groups in their order (Changes, then Unversioned
+    /// Files).
+    pub fn all_files(&self) -> Vec<PathBuf> {
+        let mut out = self.files(Group::Changes);
+        out.extend(self.files(Group::Unversioned));
+        out
     }
 
     pub fn is_expanded(&self, group: Group) -> bool {
@@ -283,10 +301,23 @@ impl ChangesTree {
     pub fn inclusion(&self, group: Group) -> Inclusion {
         let files = self.files(group);
         let n = files.iter().filter(|p| self.included.contains(*p)).count();
+        let partly = files.iter().any(|p| self.excluded.contains_key(p));
         match n {
             0 => Inclusion::None,
-            n if n == files.len() => Inclusion::All,
+            n if n == files.len() && !partly => Inclusion::All,
             _ => Inclusion::Some,
+        }
+    }
+
+    /// The check box of a file: partly ticked when some of its changes are
+    /// left out.
+    pub fn file_inclusion(&self, path: &Path) -> Inclusion {
+        if !self.included.contains(path) {
+            Inclusion::None
+        } else if self.excluded.contains_key(path) {
+            Inclusion::Some
+        } else {
+            Inclusion::All
         }
     }
 
@@ -294,9 +325,66 @@ impl ChangesTree {
     pub fn row_inclusion(&self, row: &Row) -> Inclusion {
         match row {
             Row::Group(g) => self.inclusion(*g),
-            Row::File(p) if self.included.contains(p) => Inclusion::All,
-            Row::File(_) => Inclusion::None,
+            Row::File(p) => self.file_inclusion(p),
         }
+    }
+
+    /// The changes of an included file left out of the commit, by their
+    /// lines in the base text (none: all of them go in).
+    pub fn excluded_changes(&self, path: &Path) -> &[Range<u32>] {
+        self.excluded.get(path).map_or(&[], Vec::as_slice)
+    }
+
+    /// Includes or leaves out one change of a file (`change`: its lines in
+    /// the base text; `all`: the lines of every change of the file). The
+    /// file goes into the commit with its first change and out with its
+    /// last one.
+    pub fn set_change_included(
+        &mut self,
+        path: &Path,
+        change: Range<u32>,
+        all: &[Range<u32>],
+        included: bool,
+    ) {
+        if self.group_of(path) != Some(Group::Changes) || !all.contains(&change) {
+            return;
+        }
+        let mut excluded: Vec<Range<u32>> = if self.included.contains(path) {
+            self.excluded_changes(path).to_vec()
+        } else {
+            all.to_vec()
+        };
+        excluded.retain(|r| *r != change && all.contains(r));
+        if !included {
+            excluded.push(change);
+        }
+        if excluded.len() == all.len() {
+            self.included.remove(path);
+            self.excluded.remove(path);
+            return;
+        }
+        self.included.insert(path.to_owned());
+        if excluded.is_empty() {
+            self.excluded.remove(path);
+        } else {
+            excluded.sort_by_key(|r| (r.start, r.end));
+            self.excluded.insert(path.to_owned(), excluded);
+        }
+    }
+
+    /// The included files committed in part.
+    pub fn partial_files(&self) -> Vec<PartialFile> {
+        let mut out: Vec<PartialFile> = self
+            .excluded
+            .iter()
+            .filter(|(p, _)| self.included.contains(*p))
+            .map(|(p, e)| PartialFile {
+                path: p.clone(),
+                excluded: e.clone(),
+            })
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
     }
 
     /// The files of rows: a group stands for its files.
@@ -324,6 +412,7 @@ impl ChangesTree {
             } else {
                 self.included.remove(p);
             }
+            self.excluded.remove(p);
         }
     }
 
@@ -332,7 +421,9 @@ impl ChangesTree {
     /// all excluded.
     pub fn toggle(&mut self, rows: &[Row]) {
         let files = self.files_of(rows);
-        let any_excluded = files.iter().any(|p| !self.included.contains(p));
+        let any_excluded = files
+            .iter()
+            .any(|p| self.file_inclusion(p) != Inclusion::All);
         self.set_included(&files, any_excluded);
     }
 
@@ -669,5 +760,46 @@ mod tests {
         );
         assert_eq!(file_count(1), "1 file");
         assert_eq!(file_count(7), "7 files");
+    }
+
+    #[test]
+    fn changes_of_a_file_are_left_out_one_by_one() {
+        let mut t = tree();
+        let main = root().join("main.py");
+        let (modified, inserted) = (1..2, 4..4);
+        let all = [modified.clone(), inserted.clone()];
+        t.set_change_included(&main, inserted.clone(), &all, false);
+        assert_eq!(t.file_inclusion(&main), Inclusion::Some);
+        assert_eq!(t.inclusion(Group::Changes), Inclusion::Some);
+        assert_eq!(t.excluded_changes(&main), std::slice::from_ref(&inserted));
+        assert_eq!(
+            t.partial_files(),
+            [PartialFile {
+                path: main.clone(),
+                excluded: all[1..].to_vec(),
+            }]
+        );
+        // The last one out: the file is out.
+        t.set_change_included(&main, modified.clone(), &all, false);
+        assert_eq!(t.file_inclusion(&main), Inclusion::None);
+        assert!(t.partial_files().is_empty());
+        // One in: the file is in with the other one left out.
+        t.set_change_included(&main, inserted, &all, true);
+        assert_eq!(t.file_inclusion(&main), Inclusion::Some);
+        assert_eq!(t.excluded_changes(&main), std::slice::from_ref(&modified));
+        // Its check box includes all of it.
+        t.toggle(&[Row::File(main.clone())]);
+        assert_eq!(t.file_inclusion(&main), Inclusion::All);
+        assert!(t.excluded_changes(&main).is_empty());
+        // An unversioned file has no changes to leave out.
+        let untracked = root().join("untracked.py");
+        let start = 0..0;
+        t.set_change_included(
+            &untracked,
+            start.clone(),
+            std::slice::from_ref(&start),
+            false,
+        );
+        assert_eq!(t.file_inclusion(&untracked), Inclusion::None);
     }
 }

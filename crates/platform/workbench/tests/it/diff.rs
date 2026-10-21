@@ -182,6 +182,38 @@ impl H<'_> {
         self.focus(|w, cx| w.commit_view().read(cx).tree_focus());
     }
 
+    /// Clicks a change's action in a side's gutter (`>>`, the check box).
+    fn click_action(&mut self, side: Side, index: usize) {
+        let at = self
+            .window
+            .update(self.cx, |w, _, cx| {
+                w.active_diff()
+                    .expect("a diff")
+                    .read(cx)
+                    .action_bounds(side, index, cx)
+            })
+            .unwrap()
+            .unwrap_or_else(|| panic!("the action of change {index} is drawn"))
+            .center();
+        let mut vcx = gpui::VisualTestContext::from_window(self.window.into(), self.cx);
+        vcx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+        vcx.simulate_click(at, gpui::Modifiers::none());
+        self.draw();
+    }
+
+    fn right_text(&mut self) -> String {
+        self.window
+            .update(self.cx, |w, _, cx| {
+                w.active_diff()
+                    .expect("a diff")
+                    .read(cx)
+                    .editor(Side::Right)
+                    .read(cx)
+                    .text()
+            })
+            .unwrap()
+    }
+
     fn right_caret(&mut self) -> u64 {
         self.diff()["right"]["caret"][0].as_u64().unwrap()
     }
@@ -253,8 +285,8 @@ fn the_commit_window_opens_a_preview_diff_of_its_list(cx: &mut TestAppContext) {
     assert_eq!(
         d["changes"],
         json!([
-            { "left": [9, 10], "right": [9, 10], "kind": "modified", "words": 1 },
-            { "left": [21, 21], "right": [21, 22], "kind": "inserted", "words": null },
+            { "left": [9, 10], "right": [9, 10], "kind": "modified", "words": 1, "excluded": false },
+            { "left": [21, 21], "right": [21, 22], "kind": "inserted", "words": null, "excluded": false },
         ])
     );
     // The changed word on both sides.
@@ -332,6 +364,165 @@ fn differences_files_and_sides_are_navigated(cx: &mut TestAppContext) {
     assert_eq!(state["editor"]["caret"]["line"], 1, "{:#}", state["editor"]);
     // The diff tab stays.
     assert_eq!(state["tabs"].as_array().unwrap().len(), 2);
+}
+
+#[gpui::test]
+fn next_difference_goes_on_to_the_unversioned_files(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, |root| {
+        repository(root);
+        change(root);
+        write(root, "new.py", "new = 1\n");
+    });
+    h.wait_commit("the unversioned file", |c| {
+        c["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["group"] == "unversioned"))
+    });
+    h.focus_commit_tree();
+    h.invoke("commit-tree.select", json!({ "path": "main.py" }));
+    h.invoke("commit-tree.open", Value::Null);
+    let d = h.wait_diff("main.py");
+    // The counter counts the Changes; the files after them are a step away.
+    assert_eq!(d["files"], json!([1, 2]));
+    assert_eq!(d["files_text"], "2/2 files");
+    assert_eq!(d["steps"], json!([true, true]));
+
+    // F7 at the last difference: the hint, then the unversioned file.
+    h.focus_diff(Side::Right);
+    h.invoke("diff.next", Value::Null);
+    assert_eq!(h.right_caret(), 21);
+    h.invoke("diff.next", Value::Null);
+    assert_eq!(h.diff()["hint"], "Press again to go to the next file");
+    h.invoke("diff.next", Value::Null);
+    let d = h.wait_diff("new.py");
+    assert_eq!(d["one_side"], "right");
+    assert_eq!(d["files"], json!([0, 1]));
+    assert_eq!(d["files_text"], "1 file");
+    assert_eq!(d["steps"], json!([true, false]));
+    // The Commit tool window selects it (its group expanded).
+    let commit = h.commit();
+    let selected: Vec<&Value> = commit["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["selected"] == true)
+        .map(|r| &r["path"])
+        .collect();
+    assert_eq!(selected, [&json!("new.py")]);
+
+    // Compare Previous File: back to the last of the Changes.
+    h.invoke("diff.previous-file", Value::Null);
+    let d = h.wait_diff("main.py");
+    assert_eq!(d["files"], json!([1, 2]));
+    assert_eq!(d["steps"], json!([true, true]));
+}
+
+#[gpui::test]
+fn the_gutters_arrow_reverts_a_change_as_one_edit(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, |root| {
+        repository(root);
+        change(root);
+    });
+    h.invoke("vcs.show-diff", json!({ "path": "main.py" }));
+    let d = h.wait_diff("main.py");
+    assert_eq!(d["revert"], true);
+    assert_eq!(d["changes"].as_array().unwrap().len(), 2);
+    // `>>` of the first change: its left lines replace the right ones.
+    h.click_action(Side::Left, 0);
+    let d = h.wait("one difference", |h| {
+        let d = h.diff();
+        (d["status"] == "1 difference").then_some(d)
+    });
+    assert_eq!(d["changes"][0]["kind"], "inserted");
+    let changed =
+        MAIN.replace("raise ValueError(value)", "raise ValueError(\"too big\")") + "# changed\n";
+    assert_eq!(h.right_text(), MAIN.to_owned() + "# changed\n");
+    // One undo brings it back.
+    h.focus_diff(Side::Right);
+    h.invoke("editor.undo", Value::Null);
+    h.wait("two differences", |h| {
+        (h.diff()["status"] == "2 differences").then_some(())
+    });
+    assert_eq!(h.right_text(), changed);
+    // Accept Left Side at the caret: the change there.
+    h.invoke("diff.next", Value::Null);
+    assert_eq!(h.right_caret(), 21);
+    h.invoke("diff.apply-left-side", Value::Null);
+    h.wait("one difference", |h| {
+        (h.diff()["status"] == "1 difference").then_some(())
+    });
+    assert_eq!(
+        h.right_text(),
+        MAIN.replace("raise ValueError(value)", "raise ValueError(\"too big\")")
+    );
+}
+
+#[gpui::test]
+fn a_change_left_out_by_its_check_box_stays_out_of_the_commit(cx: &mut TestAppContext) {
+    let (mut h, _dir) = open(cx, |root| {
+        repository(root);
+        change(root);
+    });
+    h.focus_commit_tree();
+    h.invoke("commit-tree.select", json!({ "path": "main.py" }));
+    h.invoke("commit-tree.open", Value::Null);
+    let d = h.wait_diff("main.py");
+    assert_eq!(d["status"], "2 differences");
+    assert_eq!(d["included"], true);
+    // The second change's check box: left out, the file partly included.
+    h.click_action(Side::Right, 1);
+    let d = h.wait("one included", |h| {
+        let d = h.diff();
+        (d["status"] == "2 differences, 1 included").then_some(d)
+    });
+    assert_eq!(d["changes"][0]["excluded"], false);
+    assert_eq!(d["changes"][1]["excluded"], true);
+    let row = |c: &Value, path: &str| {
+        c["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["path"] == path)
+            .cloned()
+            .unwrap()
+    };
+    let commit = h.commit();
+    assert_eq!(row(&commit, "main.py")["inclusion"], "some");
+    assert_eq!(row(&commit, "b.py")["inclusion"], "all");
+    // Both out, then the first one in again by the command.
+    h.invoke(
+        "diff.include-change",
+        json!({ "index": 0, "included": false }),
+    );
+    h.wait("none included", |h| {
+        (h.diff()["status"] == "2 differences, 0 included").then_some(())
+    });
+    assert_eq!(row(&h.commit(), "main.py")["inclusion"], "none");
+    h.invoke(
+        "diff.include-change",
+        json!({ "index": 0, "included": true }),
+    );
+    h.wait("one included", |h| {
+        (h.diff()["status"] == "2 differences, 1 included").then_some(())
+    });
+
+    // The commit takes the first change of main.py and all of b.py; the
+    // second change stays a local change.
+    h.invoke("vcs.commit.run", json!({ "message": "Part" }));
+    let root = h.root.clone();
+    h.wait("the commit", move |_| {
+        (git(&root, &["log", "-1", "--format=%s"]) == "Part").then_some(())
+    });
+    let first = MAIN.replace("raise ValueError(value)", "raise ValueError(\"too big\")");
+    // (`git` trims what it prints.)
+    assert_eq!(git(&h.root, &["show", "HEAD:main.py"]), first.trim_end());
+    assert_eq!(git(&h.root, &["show", "HEAD:b.py"]), "b = 1\nc = 3");
+    assert_eq!(
+        std::fs::read_to_string(h.root.join("main.py")).unwrap(),
+        first.clone() + "# changed\n"
+    );
+    assert_eq!(git(&h.root, &["diff", "--name-only"]), "main.py");
+    assert_eq!(git(&h.root, &["diff", "--cached", "--name-only"]), "");
 }
 
 #[gpui::test]

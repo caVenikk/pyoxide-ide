@@ -964,19 +964,31 @@ impl Element for EditorElement {
         }
         colors.text = text_color;
         let digits = len_lines.to_string().len().max(2);
+        // A mirrored editor has its gutter at the right and its scrollbar's
+        // strip at the left, the text between them.
+        let mirrored = self.editor.read(cx).mirrored && !single_line && !console;
+        let diff_gutter = self.editor.read(cx).diff_gutter;
+        let diff_actions = diff_gutter == crate::side_by_side::DiffGutter::Actions;
+        let diff_gutter =
+            diff_gutter != crate::side_by_side::DiffGutter::Off && !single_line && !console;
         let (gutter_width, text_left) = if single_line {
             (px(0.0), px(0.0))
         } else if console {
             (px(CONSOLE_GUTTER), px(0.0))
+        } else if diff_gutter {
+            // The text starts at the diff gutter's edge (after the
+            // scrollbar's strip in a mirrored editor, as in any other).
+            let text_left = if mirrored { px(TEXT_LEFT) } else { px(0.0) };
+            (
+                crate::side_by_side::diff_gutter_width(m.number_width, digits, diff_actions),
+                text_left,
+            )
         } else {
             (
                 px(GUTTER_LEFT + GUTTER_RIGHT) + m.number_width * digits as f32,
                 px(TEXT_LEFT),
             )
         };
-        // A mirrored editor has its gutter at the right and its scrollbar's
-        // strip at the left, the text between them.
-        let mirrored = self.editor.read(cx).mirrored && !single_line && !console;
         let (gutter_x, text_x) = if mirrored {
             (
                 bounds.right() - gutter_width,
@@ -1020,6 +1032,13 @@ impl Element for EditorElement {
             };
             if std::mem::take(&mut e.scroll_to_end) {
                 e.scroll.y = max_y;
+            }
+            if let Some(to) = e
+                .layout_scroll
+                .take()
+                .and_then(|f| f(lh, bounds.size.height))
+            {
+                e.scroll = to;
             }
             if let Some(pos) = e.reveal.take() {
                 // A search match goes to the middle of the view when hidden.
@@ -1505,7 +1524,16 @@ impl Element for EditorElement {
 
         // Line numbers, right-aligned, on the first row of each line, unless
         // a gutter icon is drawn there.
-        let numbers_right = if mirrored {
+        // A diff gutter's mirrored numbers are left-aligned (the
+        // reference's flipped gutter).
+        let numbers_left = (diff_gutter && mirrored).then(|| {
+            crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, true, diff_actions)
+        });
+        let numbers_right = if let Some(left) = numbers_left {
+            left + m.number_width * digits as f32
+        } else if diff_gutter {
+            crate::side_by_side::diff_numbers_x(gutter_x, gutter_width, false, diff_actions)
+        } else if mirrored {
             bounds.right() - px(GUTTER_LEFT)
         } else {
             bounds.left() + px(GUTTER_LEFT) + m.number_width * digits as f32
@@ -1528,6 +1556,8 @@ impl Element for EditorElement {
                 lines: &lines,
                 total_rows,
                 gutter: !single_line && !console,
+                diff_gutter,
+                diff_actions: diff_gutter && diff_actions,
             },
             theme,
             window,
@@ -1558,7 +1588,8 @@ impl Element for EditorElement {
                 let shaped = window
                     .text_system()
                     .shape_line(label, m.number_size, &[run], None);
-                let origin = point(numbers_right - shaped.width, top_of(l.row));
+                let x = numbers_left.unwrap_or(numbers_right - shaped.width);
+                let origin = point(x, top_of(l.row));
                 (shaped, origin)
             })
             .collect();
@@ -1882,6 +1913,7 @@ impl Element for EditorElement {
             for (r, c) in &p.diff_lines {
                 window.paint_quad(fill(*r, *c));
             }
+            gutter::paint_separator(&p.decorations, window);
             gutter::paint_backgrounds(&p.decorations, window);
             for (shaped, origin) in &p.numbers {
                 let _ = shaped.paint(*origin, lh, window, cx);

@@ -2,7 +2,10 @@
 //! Jump to Source, the previous and next file with the files counter; the
 //! count of differences, the viewer's mode and the settings), the titles of
 //! both sides, the two editors and the divider (`SimpleDiffViewer`,
-//! `TwosideTextDiffViewer`, `DiffRequestProcessor`'s toolbar).
+//! `TwosideTextDiffViewer`, `DiffRequestProcessor`'s toolbar), and the
+//! changes' actions in the gutters: `>>` by the left numbers reverts a
+//! change, a check box by the right ones includes it into the commit
+//! (`SimpleDiffChangeUi`, `LocalTrackerDiffUtil.createCheckboxToggle`).
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -11,7 +14,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use editor::{Decoration, DiffHighlights, Editor, EditorConfig, EditorEvent, Highlighter};
+use editor::side_by_side::DiffGutter;
+use editor::{
+    Decoration, DecorationId, DiffHighlights, Editor, EditorConfig, EditorEvent, GutterFill,
+    Highlighter,
+};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
@@ -20,9 +27,9 @@ use gpui::{
     canvas, deferred, div, point, px,
 };
 use serde_json::{Value as Json, json};
-use text::{Buffer, Selection, SelectionSet};
+use text::{Buffer, CaretPlacement, EditKind, Selection, SelectionSet};
 use themes::UiRole;
-use ui::components::{Tooltip, checkbox, icon_button};
+use ui::components::{Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt as _;
@@ -32,8 +39,8 @@ use super::model::{
     self, ChangeKind, DiffChange, DiffSettings, HighlightPolicy, IgnorePolicy, Side,
 };
 use super::{
-    CONTEXT, FocusOpposite, JumpToSource, NextDifference, NextFile, PreviousDifference,
-    PreviousFile, SetHighlightPolicy, SetIgnorePolicy, ShowSettings,
+    ApplyLeftSide, CONTEXT, FocusOpposite, IncludeChange, JumpToSource, NextDifference, NextFile,
+    PreviousDifference, PreviousFile, SetHighlightPolicy, SetIgnorePolicy, ShowSettings,
 };
 
 /// The decorations' group in both editors.
@@ -42,32 +49,44 @@ const GROUP: &str = "diff";
 const ROOM_AFTER_END: usize = 5;
 /// Edits of the current text are compared again after this long.
 const REDIFF_DELAY: Duration = Duration::from_millis(50);
-/// The toolbar (`DiffRequestProcessor`'s, measured on the reference): its
-/// height and the room at its ends; the New UI's buttons of 26 px with
-/// icons of 16; the separators, 1 px with room at both sides; the gap
-/// between the count of differences and the viewer's modes, whose
-/// segments are 50 x 24, and the gap after them.
-const TOOLBAR_HEIGHT: f32 = 34.0;
-const TOOLBAR_LEFT: f32 = 4.5;
+/// The toolbar (`DiffRequestProcessor`'s, measured on the reference): an
+/// island (`DiffToolbarIslandPanelUI`: the search field's colours, corners
+/// of 6 px) with room at its sides, its height with the borders, and the
+/// room inside at its ends; the New UI's buttons of 26 px with icons of
+/// 16; the separators, 1 px with room at both sides; the gap between the
+/// count of differences and the viewer's modes, whose segments are 50 x 24,
+/// and the gap after them.
+const ISLAND_SIDE: f32 = 5.0;
+const ISLAND_HEIGHT: f32 = 43.0;
+const ISLAND_RADIUS: f32 = 6.0;
+const TOOLBAR_LEFT: f32 = 5.5;
 const TOOLBAR_RIGHT: f32 = 5.5;
 const BUTTON: f32 = 26.0;
 const ICON: f32 = 16.0;
 const SEPARATOR_ROOM: f32 = 3.5;
 const SEPARATOR_HEIGHT: f32 = 17.0;
 const FILES_GAP: f32 = 1.5;
-const STATUS_GAP: f32 = 15.0;
-const MODE_SIZE: (f32, f32) = (50.0, 24.0);
-const MODE_GAP: f32 = 8.0;
-/// The titles (`DiffContentPanel`): their height above a border of 1 px;
-/// the lock's room at the left; the gap between a revision and its path
-/// (`ipadx` 8 and the label's own); the right title's check box where the
-/// reference has the gutter's check boxes, and the gap after it.
-const TITLE_HEIGHT: f32 = 19.0;
-const TITLE_LEFT: f32 = 2.5;
-const LOCK_ROOM: f32 = 16.5;
+const STATUS_GAP: f32 = 13.5;
+const MODE_SIZE: (f32, f32) = (48.0, 26.0);
+const MODE_GAP: f32 = 10.5;
+/// The titles (`DiffContentPanel`, measured on the reference): their
+/// height above the tear line of 1 px; the room at their ends
+/// (`Diff.ContentTitle.insets`) and the lock's; the gap between a revision
+/// and its path (`ipadx` 8 and the label's own); the right title's check
+/// box over the gutter's action column, its label this far before the
+/// text.
+const TITLE_HEIGHT: f32 = 30.0;
+const TITLE_LEFT: f32 = 4.0;
+const LOCK_ROOM: f32 = 16.0;
 const PATH_GAP: f32 = 9.0;
-const CHECKBOX_LEFT: f32 = 30.0;
-const CHECKBOX_GAP: f32 = 12.5;
+const LABEL_AFTER_CHECKBOX: f32 = 27.3;
+/// The check box's place before the editor has been laid out (two-digit
+/// line numbers).
+const CHECKBOX_FALLBACK: f32 = 30.0;
+/// The tooltips of the gutter's actions (`action.presentation.diff.revert.text`,
+/// `action.presentation.diff.include.into.commit.text`).
+const REVERT: &str = "Revert";
+const INCLUDE: &str = "Include into commit";
 
 /// The title of a side (`DiffEditorTitleDetails`): a revision or a name,
 /// then the file's path in grey.
@@ -92,10 +111,24 @@ pub struct DiffRequest {
     pub left: SideTitle,
     pub right: SideTitle,
     /// The right title's check box: the file goes into the commit (`None`:
-    /// no check box).
+    /// not in the commit's list, no check boxes).
     pub included: Option<bool>,
-    /// The file's index in the list and the list's length.
+    /// The changes left out of the commit while the file goes in (it is
+    /// committed in part), by their lines in the base text.
+    pub excluded: Vec<Range<u32>>,
+    /// The only side shown (`SimpleOnesideDiffViewer`): the current text of
+    /// an added or unversioned file, the base of a deleted one; `None`:
+    /// both sides.
+    pub one_side: Option<Side>,
+    /// The file's index in its group of the Commit tool window's tree (or
+    /// in the selected files) and the group's length: the files counter
+    /// (`iterateChangesInSameGroup`).
     pub files: (usize, usize),
+    /// Compare Previous and Next File can go on: the files before and
+    /// after this one in the list the diff steps through, all groups of
+    /// the Commit tool window's tree in order or the selected files
+    /// (`getSelectionStrategy`).
+    pub steps: (bool, bool),
     /// Shown in a preview tab (grey title, the next diff of the list
     /// takes its place).
     pub preview: bool,
@@ -126,6 +159,14 @@ pub enum DiffEvent {
     },
     /// The right title's check box was clicked.
     SetIncluded(bool),
+    /// A change's check box was clicked: the change, by its lines in the
+    /// base text, goes into the commit or not; `all` are the lines of
+    /// every change of the file.
+    SetChangeIncluded {
+        change: Range<u32>,
+        all: Vec<Range<u32>>,
+        included: bool,
+    },
     /// The differences were computed again (after an edit).
     Changed,
 }
@@ -157,9 +198,14 @@ pub struct DiffView {
     /// Next or Previous Difference at the end: the hint shows and the same
     /// command goes to the next file.
     file_jump: Option<FileJump>,
+    /// Both sides on their way to a change.
+    animation: Option<Task<()>>,
     settings_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
     /// The gear's position (where the settings popup opens).
     gear_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The changes' decorations on the left and the right side, by change
+    /// (their gutter actions report these).
+    actions: [Vec<DecorationId>; 2],
     _subscriptions: Vec<Subscription>,
 }
 
@@ -175,11 +221,12 @@ impl DiffView {
             e
         });
         // The reference's diff editors: no caret row, no page below the
-        // text (`DiffUtil.createEditor`).
+        // text (`DiffUtil.createEditor`), the diff gutter.
         for e in [&left, &right] {
             e.update(cx, |e, cx| {
                 e.set_caret_row_shown(false, cx);
                 e.set_room_after_end(Some(ROOM_AFTER_END), cx);
+                e.set_diff_gutter(DiffGutter::Actions, cx);
             });
         }
         right.update(cx, |e, cx| {
@@ -216,8 +263,10 @@ impl DiffView {
             current: Side::Right,
             pending_scroll: None,
             file_jump: None,
+            animation: None,
             settings_menu: None,
             gear_bounds: Rc::new(Cell::new(None)),
+            actions: [Vec::new(), Vec::new()],
             _subscriptions: subscriptions,
         }
     }
@@ -235,6 +284,11 @@ impl DiffView {
         scroll: ScrollTo,
         cx: &mut Context<Self>,
     ) {
+        // One side alone is laid out as any editor (not mirrored).
+        let one_side = request.one_side;
+        if let Some(side) = one_side {
+            self.current = side;
+        }
         self.left.update(cx, |e, cx| {
             let mut buffer = Buffer::new(base.as_deref().unwrap_or(""));
             buffer.set_read_only(true);
@@ -245,7 +299,16 @@ impl DiffView {
             e.set_highlighter(highlighter, cx);
             e.set_selections(SelectionSet::caret(0), cx);
             e.set_scroll_position(point(px(0.0), px(0.0)), cx);
+            e.set_mirrored(one_side.is_none(), cx);
         });
+        let gutter = if one_side.is_some() {
+            DiffGutter::Plain
+        } else {
+            DiffGutter::Actions
+        };
+        for e in [&self.left, &self.right] {
+            e.update(cx, |e, cx| e.set_diff_gutter(gutter, cx));
+        }
         self.right.update(cx, |e, cx| {
             e.set_soft_wraps(false, cx);
             e.set_selections(SelectionSet::caret(0), cx);
@@ -260,13 +323,20 @@ impl DiffView {
         cx.notify();
     }
 
-    /// Updates the titles and the list position (the base stays).
-    pub fn set_included(&mut self, included: Option<bool>, cx: &mut Context<Self>) {
+    /// The file's inclusion in the commit changed: the check boxes of the
+    /// title and the changes follow.
+    pub fn set_inclusion(
+        &mut self,
+        included: Option<bool>,
+        excluded: Vec<Range<u32>>,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(r) = &mut self.request
-            && r.included != included
+            && (r.included != included || r.excluded != excluded)
         {
             r.included = included;
-            cx.notify();
+            r.excluded = excluded;
+            self.decorate(cx);
         }
     }
 
@@ -314,6 +384,7 @@ impl DiffView {
                 self.rediff(REDIFF_DELAY, cx);
             }
             EditorEvent::Scrolled => self.scrolled(side, cx),
+            EditorEvent::GutterActionClicked { id } => self.gutter_action(side, *id, cx),
             EditorEvent::SelectionsChanged => {
                 let moved = self.file_jump.take().is_some();
                 if moved {
@@ -353,21 +424,176 @@ impl DiffView {
 
     /// Shows computed differences in both editors.
     fn apply(&mut self, changes: Vec<DiffChange>, version: u64, cx: &mut Context<Self>) {
-        for side in [Side::Left, Side::Right] {
-            let (lines, ranges) =
-                decorations(&changes, side, self.editor(side).read(cx).buffer(), cx);
-            self.editor(side).update(cx, |e, cx| {
-                e.set_decorations(GROUP, lines, cx);
-                e.set_diff_highlights(ranges, cx);
-            });
-        }
         self.changes = Rc::new(changes);
+        self.decorate(cx);
         self.computed_for = Some(version);
         if let Some(scroll) = self.pending_scroll {
             self.apply_scroll(scroll, cx);
         }
         cx.emit(DiffEvent::Changed);
         cx.notify();
+    }
+
+    /// The changes' highlights in both editors: each side's lines and
+    /// words, in the gutter as included in the commit or not; one side
+    /// alone is all inserted or deleted (`SimpleOnesideDiffViewer`).
+    fn decorate(&mut self, cx: &mut Context<Self>) {
+        let one_side = self.one_side();
+        let excluded = self.excluded_changes();
+        // `>>` while the right side can be edited, the check boxes while the
+        // file is in the commit's list.
+        let revert = self.can_revert(cx);
+        let checkboxes = self.request.as_ref().is_some_and(|r| r.included.is_some());
+        for side in [Side::Left, Side::Right] {
+            let action = |i: usize| match side {
+                Side::Left => revert.then_some((IconName::DIFF_ARROW_RIGHT, REVERT)),
+                Side::Right => checkboxes.then(|| {
+                    let icon = if excluded.get(i).copied().unwrap_or(false) {
+                        IconName::DIFF_CHECKBOX
+                    } else {
+                        IconName::DIFF_CHECKBOX_SELECTED
+                    };
+                    (icon, INCLUDE)
+                }),
+            };
+            let buffer = self.editor(side).read(cx).buffer();
+            let (lines, ranges) = match one_side {
+                Some(shown) if shown == side => (vec![one_side_decoration(side, buffer)], None),
+                Some(_) => (Vec::new(), None),
+                None => decorations(&self.changes, &excluded, side, buffer, &action, cx),
+            };
+            let ids = self.editor(side).update(cx, |e, cx| {
+                e.set_diff_highlights(ranges, cx);
+                e.set_decorations(GROUP, lines, cx)
+            });
+            self.actions[side.select(0, 1)] = if one_side.is_none() { ids } else { Vec::new() };
+        }
+        cx.notify();
+    }
+
+    /// The right side can be edited: a change can be reverted.
+    fn can_revert(&self, cx: &App) -> bool {
+        self.one_side().is_none()
+            && self.request.as_ref().is_some_and(|r| !r.right.read_only)
+            && !self.right.read(cx).buffer().is_read_only()
+    }
+
+    /// A change's action in a gutter was clicked: `>>` on the left, the
+    /// check box on the right.
+    fn gutter_action(&mut self, side: Side, id: DecorationId, cx: &mut Context<Self>) {
+        let Some(index) = self.actions[side.select(0, 1)]
+            .iter()
+            .position(|a| *a == id)
+        else {
+            return;
+        };
+        match side {
+            Side::Left => self.revert_change(index, cx),
+            Side::Right => self.set_change_included(index, None, cx),
+        }
+    }
+
+    /// Replaces the right lines of change `index` with its left lines as
+    /// one undoable edit (`SimpleDiffViewer.replaceChange`, "Replace
+    /// change"); the caret goes to where the change was.
+    pub fn revert_change(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.can_revert(cx) || !self.is_computed(cx) {
+            return;
+        }
+        let Some(c) = self.changes.get(index).cloned() else {
+            return;
+        };
+        let base = self.left.read(cx).buffer().rope().to_string();
+        let base_lines: Vec<&str> = vcs::split_lines(&base).collect();
+        let range = vcs::Range::new(c.right.start, c.right.end, c.left.start, c.left.end);
+        self.right.update(cx, |e, cx| {
+            let buffer = e.buffer();
+            let edit = crate::markers::rollback_edit(buffer, &base_lines, &range);
+            let line = (c.right.start as usize).min(buffer.len_lines() - 1);
+            let at = buffer.line_start(line);
+            let place = CaretPlacement::Explicit(SelectionSet::caret(at));
+            e.edit(vec![edit], EditKind::Other, place, cx);
+        });
+    }
+
+    /// Includes change `index` into the commit or leaves it out (`None`:
+    /// the other way than now); the owner keeps the state
+    /// ([`DiffEvent::SetChangeIncluded`]).
+    pub fn set_change_included(
+        &mut self,
+        index: usize,
+        included: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.request.as_ref().and_then(|r| r.included).is_none() {
+            return;
+        }
+        let excluded = self.excluded_changes();
+        let Some(c) = self.changes.get(index) else {
+            return;
+        };
+        cx.emit(DiffEvent::SetChangeIncluded {
+            change: c.left.clone(),
+            all: self.changes.iter().map(|c| c.left.clone()).collect(),
+            included: included.unwrap_or(excluded[index]),
+        });
+    }
+
+    /// Window bounds of a change's action in a side's gutter in the last
+    /// frame (`>>` on the left, the check box on the right).
+    pub fn action_bounds(&self, side: Side, index: usize, cx: &App) -> Option<Bounds<Pixels>> {
+        let id = *self.actions[side.select(0, 1)].get(index)?;
+        self.editor(side).read(cx).gutter_action_bounds(id)
+    }
+
+    /// The change at the caret of the current side.
+    fn change_at_caret(&self, cx: &App) -> Option<usize> {
+        let side = self.current;
+        model::change_at(&self.changes, side, self.caret_line(side, cx))
+    }
+
+    fn apply_left_side(&mut self, a: &ApplyLeftSide, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = a.index.or_else(|| self.change_at_caret(cx)) {
+            self.revert_change(i, cx);
+        }
+    }
+
+    fn include_change(&mut self, a: &IncludeChange, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = a.index.or_else(|| self.change_at_caret(cx)) {
+            self.set_change_included(i, a.included, cx);
+        }
+    }
+
+    /// The side shown alone, if any.
+    pub fn one_side(&self) -> Option<Side> {
+        self.request.as_ref().and_then(|r| r.one_side)
+    }
+
+    /// Whether each change is left out of the commit (`isExcluded`): all
+    /// of a file whose check box is off, the ones left out of a file
+    /// committed in part.
+    fn excluded_changes(&self) -> Vec<bool> {
+        let n = self.changes.len();
+        match self
+            .request
+            .as_ref()
+            .and_then(|r| Some((r.included?, &r.excluded)))
+        {
+            Some((false, _)) => vec![true; n],
+            Some((true, excluded)) => self
+                .changes
+                .iter()
+                .map(|c| excluded.contains(&c.left))
+                .collect(),
+            None => vec![false; n],
+        }
+    }
+
+    /// The changes going into the commit, when the file is in the commit's
+    /// list.
+    fn included_count(&self) -> Option<usize> {
+        self.request.as_ref()?.included?;
+        Some(self.excluded_changes().iter().filter(|e| !**e).count())
     }
 
     fn line_counts(&self, cx: &App) -> (u32, u32) {
@@ -382,6 +608,8 @@ impl DiffView {
     /// One side scrolled: the other follows (`SyncScrollSupport`).
     fn scrolled(&mut self, side: Side, cx: &mut Context<Self>) {
         self.file_jump = None;
+        // Scrolled by hand: the way to a change ends here.
+        self.animation = None;
         let master = self.editor(side).read(cx);
         let Some((line_height, view_height)) = master.view_metrics() else {
             return;
@@ -405,21 +633,47 @@ impl DiffView {
     }
 
     /// Scrolls both sides to show a change, its first line a third down,
-    /// and puts both carets at its start (`scrollToChange`).
+    /// and puts both carets at its start (`scrollToChange`): animated, the
+    /// sides together (`SyncScrollSupport.doMakeVisible` with its anchor).
     fn scroll_to_change(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(change) = self.changes.get(index).cloned() else {
             return;
         };
+        self.animation = None;
         for side in [Side::Left, Side::Right] {
             let line = change.lines(side).start as usize;
             self.editor(side).update(cx, |e, cx| {
                 let line = line.min(e.buffer().len_lines() - 1);
                 let at = e.buffer().line_start(line);
-                e.set_selections(SelectionSet::single(Selection::new(at, at)), cx);
+                e.set_selections_in_place(SelectionSet::single(Selection::new(at, at)), cx);
             });
         }
         let (l, r) = (self.left.read(cx), self.right.read(cx));
         let (Some((lh, h1)), Some((_, h2))) = (l.view_metrics(), r.view_metrics()) else {
+            // Not laid out yet (a diff just opened): each view scrolls in
+            // its first layout, both of the same height.
+            let counts = self.line_counts(cx);
+            for side in [Side::Left, Side::Right] {
+                let lines = [change.left.clone(), change.right.clone()];
+                self.editor(side).update(cx, |e, cx| {
+                    e.scroll_on_layout(
+                        Box::new(move |lh, height| {
+                            let (lh, h) = (f32::from(lh), f32::from(height));
+                            let max_top = |rows: u32| {
+                                (lh * (rows as usize + ROOM_AFTER_END) as f32 - h).max(0.0)
+                            };
+                            let tops = model::target_tops(
+                                lines,
+                                lh,
+                                [h, h],
+                                [max_top(counts.0), max_top(counts.1)],
+                            );
+                            Some(point(px(0.0), px(side.select(tops[0], tops[1]))))
+                        }),
+                        cx,
+                    )
+                });
+            }
             return;
         };
         let tops = model::target_tops(
@@ -428,18 +682,64 @@ impl DiffView {
             [f32::from(h1), f32::from(h2)],
             [f32::from(l.max_scroll_top()), f32::from(r.max_scroll_top())],
         );
-        let x = [l.scroll_position().x, r.scroll_position().x];
-        for (i, side) in [Side::Left, Side::Right].into_iter().enumerate() {
-            self.editor(side).update(cx, |e, cx| {
-                e.set_scroll_position(point(x[i], px(tops[i])), cx)
-            });
-        }
+        let from = [
+            f32::from(l.scroll_position().y),
+            f32::from(r.scroll_position().y),
+        ];
+        let master = self.current.select(0, 1);
+        let duration = model::scroll_duration(tops[master] - from[master], f32::from(lh));
+        self.animate_scroll(from, tops, duration, cx);
     }
 
-    /// The initial scroll, once the differences are known and the views
-    /// have been laid out.
+    /// Moves both sides from `from` to `to` (tops in pixels, the text at
+    /// its left edge) in `duration`, eased out (`ScrollingModelImpl`'s
+    /// animated scrolling, every 4 ms).
+    fn animate_scroll(
+        &mut self,
+        from: [f32; 2],
+        to: [f32; 2],
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        if duration.is_zero() {
+            self.set_tops(to, cx);
+            return;
+        }
+        let executor = cx.background_executor().clone();
+        let started = std::time::Instant::now();
+        self.animation = Some(cx.spawn(async move |this, cx| {
+            loop {
+                executor.timer(Duration::from_millis(4)).await;
+                let t = started.elapsed().as_secs_f32() / duration.as_secs_f32();
+                let k = model::ease_out(t);
+                let tops = [
+                    from[0] + (to[0] - from[0]) * k,
+                    from[1] + (to[1] - from[1]) * k,
+                ];
+                let done = t >= 1.0;
+                let tops = if done { to } else { tops };
+                let alive = this.update(cx, |this, cx| this.set_tops(tops, cx)).is_ok();
+                if done || !alive {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Both sides' tops in pixels, the text at its left edge.
+    fn set_tops(&mut self, tops: [f32; 2], cx: &mut Context<Self>) {
+        for (i, side) in [Side::Left, Side::Right].into_iter().enumerate() {
+            self.editor(side).update(cx, |e, cx| {
+                e.set_scroll_position(point(px(0.0), px(tops[i])), cx)
+            });
+        }
+        cx.notify();
+    }
+
+    /// The initial scroll, once the differences are known (views not laid
+    /// out yet scroll in their first layout).
     fn apply_scroll(&mut self, scroll: ScrollTo, cx: &mut Context<Self>) {
-        if self.computed_for.is_none() || self.right.read(cx).view_metrics().is_none() {
+        if self.computed_for.is_none() {
             return;
         }
         self.pending_scroll = None;
@@ -470,8 +770,8 @@ impl DiffView {
 
     fn has_file(&self, next: bool) -> bool {
         self.request.as_ref().is_some_and(|r| {
-            let (index, count) = r.files;
-            if next { index + 1 < count } else { index > 0 }
+            let (previous, following) = r.steps;
+            if next { following } else { previous }
         })
     }
 
@@ -546,6 +846,9 @@ impl DiffView {
 
     /// Select Opposite Diff Pane.
     pub fn focus_opposite(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.one_side().is_some() {
+            return;
+        }
         let other = self.current.other();
         self.current = other;
         window.focus(&self.editor(other).focus_handle(cx));
@@ -690,16 +993,20 @@ impl DiffView {
             "right_title": self.request.as_ref().map(|r| title(&r.right)),
             "included": self.request.as_ref().and_then(|r| r.included),
             "files": self.request.as_ref().map(|r| json!([r.files.0, r.files.1])),
+            "steps": self.request.as_ref().map(|r| json!([r.steps.0, r.steps.1])),
             "preview": self.request.as_ref().is_some_and(|r| r.preview),
             "files_text": self.files_text(),
-            "status": model::status_text(self.changes.len()),
+            "status": self.status_text(),
+            "one_side": self.one_side().map(|s| s.name()),
             "computed": self.is_computed(cx),
-            "changes": self.changes.iter().map(|c| json!({
+            "changes": self.changes.iter().zip(self.excluded_changes()).map(|(c, excluded)| json!({
                 "left": [c.left.start, c.left.end],
                 "right": [c.right.start, c.right.end],
                 "kind": c.kind().name(),
                 "words": c.words.as_ref().map(|w| w.len()),
+                "excluded": excluded,
             })).collect::<Vec<_>>(),
+            "revert": self.can_revert(cx),
             "current_side": self.current.name(),
             "left": side(Side::Left),
             "right": side(Side::Right),
@@ -712,9 +1019,12 @@ impl DiffView {
         })
     }
 
+    /// The files counter: for a list of several files, or of the Commit
+    /// tool window's even with one.
     fn files_text(&self) -> Option<String> {
-        let (index, count) = self.request.as_ref()?.files;
-        (count > 1).then(|| model::files_text(index, count))
+        let r = self.request.as_ref()?;
+        let (index, count) = r.files;
+        (count > 1 || r.preview).then(|| model::files_text(index, count))
     }
 
     /// "Press again to go to the next file" (`DiffBundle`).
@@ -728,17 +1038,15 @@ impl DiffView {
     // ---- drawing --------------------------------------------------------------
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (muted, link, separator, pressed, mode_border, radius, background) = {
+        let (muted, link, separator, background, island_border) = {
             let theme = cx.theme();
             (
                 theme.color(UiRole::TextMuted),
                 theme.color(UiRole::TextLink),
                 theme.color(UiRole::Divider),
-                theme.color(UiRole::Pressed),
-                theme.color(UiRole::BorderInput),
-                theme.metric(themes::Metric::CornerRadius),
-                // A panel above the editors (`Panel.background`).
-                theme.color(UiRole::Surface),
+                // The island's colours (`Editor.SearchField.*`).
+                theme.color(UiRole::SearchField),
+                theme.color(UiRole::SearchFieldBorder),
             )
         };
         let shortcut = |action: &dyn gpui::Action| {
@@ -807,6 +1115,8 @@ impl DiffView {
                 |this, _, cx| this.jump_to_source(cx),
             ));
         if let Some(files) = self.files_text() {
+            // One file: no list to show, the counter is grey.
+            let several = self.request.as_ref().is_some_and(|r| r.files.1 > 1);
             left = left
                 .child(vertical_separator())
                 .child(button(
@@ -823,7 +1133,7 @@ impl DiffView {
                         .debug_selector(|| "diff-files".into())
                         .px(px(FILES_GAP))
                         .whitespace_nowrap()
-                        .text_color(link)
+                        .text_color(if several { link } else { muted })
                         .child(files),
                 )
                 .child(button(
@@ -836,27 +1146,21 @@ impl DiffView {
                     |this, window, cx| this.next_file(&NextFile, window, cx),
                 ));
         }
-        let status = model::status_text(self.changes.len());
+        // One side alone has no status (`SimpleOnesideDiffViewer`).
+        let status = self.status_text();
         // The viewer's modes (`DiffToolChooser`): side by side is the one
         // there is.
-        let mode = |id: &'static str, icon: IconName, selected: bool, tooltip: &'static str| {
-            div()
-                .id(id)
-                .debug_selector(move || format!("diff-{id}"))
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .w(px(MODE_SIZE.0))
-                .h(px(MODE_SIZE.1))
-                .rounded(radius)
-                .when(selected, |d| {
-                    d.bg(pressed).border_1().border_color(mode_border)
-                })
-                .when(!selected, |d| d.opacity(ui::components::DISABLED_ALPHA))
-                .tooltip(Tooltip::text(tooltip, None))
-                .child(Icon::new(icon).size(px(ICON)))
-        };
+        let modes = ui::form::segmented_icons(
+            "diff-mode",
+            &[
+                (IconName::DIFF_SIDE_BY_SIDE, "Side-by-side viewer"),
+                (IconName::DIFF_UNIFIED, "Unified viewer"),
+            ],
+            Some(0),
+            (px(MODE_SIZE.0), px(MODE_SIZE.1)),
+            |_, _, _| {},
+            cx,
+        );
         let gear = icon_button(
             "settings",
             IconName::SETTINGS_SMALL,
@@ -866,6 +1170,16 @@ impl DiffView {
             cx,
         )
         .debug_selector(|| "diff-settings".into())
+        .relative()
+        // A popup group: the corner arrow (`ActionButtonLook.paintDownArrow`:
+        // the arrow icon 1 px right of and below the icon).
+        .child(
+            div()
+                .absolute()
+                .left(px((BUTTON - ICON) / 2.0 + 1.0))
+                .top(px((BUTTON - ICON) / 2.0 + 1.0))
+                .child(Icon::new(IconName::DROPDOWN_CORNER).size(px(ICON))),
+        )
         .tooltip(Tooltip::text("Show Diff Settings", None))
         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
             this.show_settings(&ShowSettings, window, cx)
@@ -875,40 +1189,45 @@ impl DiffView {
             .flex()
             .flex_row()
             .items_center()
-            .child(
+            .children(status.map(|status| {
                 div()
                     .debug_selector(|| "diff-status".into())
                     .mr(px(STATUS_GAP))
                     .whitespace_nowrap()
-                    .text_color(muted)
-                    .child(status),
-            )
-            .child(mode(
-                "side-by-side",
-                IconName::DIFF_SIDE_BY_SIDE,
-                true,
-                "Side-by-side viewer",
-            ))
-            .child(mode(
-                "unified",
-                IconName::DIFF_UNIFIED,
-                false,
-                "Unified viewer",
-            ))
+                    .child(status)
+            }))
+            .child(modes)
             .child(div().w(px(MODE_GAP)))
             .child(div().relative().child(gear).child(gear_bounds));
-        div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .justify_between()
-            .h(px(TOOLBAR_HEIGHT))
-            .pl(px(TOOLBAR_LEFT))
-            .pr(px(TOOLBAR_RIGHT))
-            .bg(background)
-            .child(left)
-            .child(right)
+        // The island (`DiffToolbarIslandPanelUI`).
+        div().flex_none().px(px(ISLAND_SIDE)).child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .h(px(ISLAND_HEIGHT))
+                .pl(px(TOOLBAR_LEFT))
+                .pr(px(TOOLBAR_RIGHT))
+                .rounded(px(ISLAND_RADIUS))
+                .border_1()
+                .border_color(island_border)
+                .bg(background)
+                .child(left)
+                .child(right),
+        )
+    }
+
+    /// The status text: the differences, how many go into the commit;
+    /// none for one side alone.
+    fn status_text(&self) -> Option<String> {
+        if self.one_side().is_some() {
+            return None;
+        }
+        Some(model::status_text_included(
+            self.changes.len(),
+            self.included_count(),
+        ))
     }
 
     /// Remembers where the gear is drawn (the settings popup opens there).
@@ -930,10 +1249,12 @@ impl DiffView {
         let muted = theme.color(UiRole::TextMuted);
         let mut row = div()
             .debug_selector(move || format!("diff-title-{}", side.name()))
+            .relative()
             .flex()
             .flex_row()
             .flex_1()
             .min_w(px(0.0))
+            .h_full()
             .items_center()
             .pl(px(TITLE_LEFT))
             .pr(px(TITLE_LEFT))
@@ -947,22 +1268,48 @@ impl DiffView {
                     .child(Icon::new(IconName::LOCKED).size(px(ICON))),
             );
         }
+        // The check box of the file's changes over the gutter's check
+        // boxes, the label after it (`ExcludeAllCheckboxPanel`): ticked,
+        // partly ticked or not as the changes are; not for one side alone.
         if side == Side::Right
+            && request.one_side.is_none()
             && let Some(included) = request.included
         {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .pl(px(CHECKBOX_LEFT - TITLE_LEFT))
-                    .pr(px(CHECKBOX_GAP))
-                    .child(
-                        checkbox("diff-included", included, cx)
-                            .debug_selector(|| "diff-included".into())
-                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                cx.emit(DiffEvent::SetIncluded(!included))
-                            })),
-                    ),
-            );
+            let x = self
+                .right
+                .read(cx)
+                .diff_action_offset()
+                .map_or(CHECKBOX_FALLBACK, f32::from);
+            let partly = included && self.excluded_changes().contains(&true);
+            let icon = if partly {
+                IconName::DIFF_CHECKBOX_INDETERMINATE
+            } else if included {
+                IconName::DIFF_CHECKBOX_SELECTED
+            } else {
+                IconName::DIFF_CHECKBOX
+            };
+            let included = included && !partly;
+            let size = editor::side_by_side::ACTION_SIZE;
+            row = row
+                .child(
+                    div()
+                        .id("diff-included")
+                        .debug_selector(|| "diff-included".into())
+                        .absolute()
+                        .left(px(x))
+                        .top(px((TITLE_HEIGHT - size) / 2.0))
+                        .size(px(size))
+                        .child(Icon::new(icon).size(px(size)))
+                        .tooltip(Tooltip::text("Include into commit", None))
+                        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                            cx.emit(DiffEvent::SetIncluded(!included))
+                        })),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(x + LABEL_AFTER_CHECKBOX - TITLE_LEFT)),
+                );
         }
         row = row.child(div().flex_none().child(title.label.clone()));
         if let Some(path) = &title.path {
@@ -1013,35 +1360,66 @@ impl DiffView {
     }
 }
 
+/// The error stripe's colour of a change.
+fn stripe_role(kind: ChangeKind) -> UiRole {
+    match kind {
+        ChangeKind::Inserted => UiRole::StripeAdded,
+        ChangeKind::Deleted => UiRole::StripeDeleted,
+        ChangeKind::Modified => UiRole::StripeModified,
+    }
+}
+
+/// One side shown alone: all of its lines inserted (the current text) or
+/// deleted (the base), the gutter as the text (`DiffDrawUtil.createHighlighter`
+/// over the whole document).
+fn one_side_decoration(side: Side, buffer: &Buffer) -> (Range<usize>, Decoration) {
+    let kind = side.select(ChangeKind::Deleted, ChangeKind::Inserted);
+    let d = Decoration::default()
+        .background(change_role(kind), editor::decorations::layer::DIFF)
+        .gutter_fill(GutterFill {
+            faded: false,
+            border: false,
+        })
+        .stripe(stripe_role(kind), false);
+    (0..buffer.len_lines(), d)
+}
+
 /// The decorations of one side: changed lines (faded where their words
 /// are highlighted, a line on the boundary for an empty side) with their
-/// error stripe marks, and the changed words (an empty one is a bar).
+/// error stripe marks, the gutter in the full colour, or faded between
+/// two lines of it for a change left out of the commit
+/// (`LineHighlighterBuilder.withExcludedInGutter`); and the changed words
+/// (an empty one is a bar).
 fn decorations(
     changes: &[DiffChange],
+    excluded: &[bool],
     side: Side,
     buffer: &Buffer,
+    action: &dyn Fn(usize) -> Option<(IconName, &'static str)>,
     cx: &App,
 ) -> (Vec<(Range<usize>, Decoration)>, Option<DiffHighlights>) {
     let theme = cx.theme();
     let mut lines = Vec::with_capacity(changes.len());
     let mut words = Vec::new();
     let line_count = buffer.len_lines();
-    for c in changes {
+    for (i, c) in changes.iter().enumerate() {
         let kind = c.kind();
         let role = change_role(kind);
-        let stripe = match kind {
-            ChangeKind::Inserted => UiRole::StripeAdded,
-            ChangeKind::Deleted => UiRole::StripeDeleted,
-            ChangeKind::Modified => UiRole::StripeModified,
-        };
         let r = c.lines(side);
         let range = r.start as usize..r.end as usize;
+        let excluded = excluded.get(i).copied().unwrap_or(false);
         let mut d = Decoration::default()
             .background(role, editor::decorations::layer::DIFF)
-            .over_gutter()
-            .stripe(stripe, false);
+            .gutter_fill(GutterFill {
+                faded: excluded,
+                border: excluded,
+            })
+            .stripe(stripe_role(kind), false);
         if c.words.is_some() {
             d = d.faded();
+        }
+        if let Some((icon, tooltip)) = action(i) {
+            d = d.action(icon, Some(tooltip.into()));
         }
         lines.push((range, d));
         let Some(fragments) = &c.words else {
@@ -1099,63 +1477,60 @@ diff_actions! {
     SetIgnorePolicy => set_ignore_policy,
     SetHighlightPolicy => set_highlight_policy,
     ShowSettings => show_settings,
+    ApplyLeftSide => apply_left_side,
+    IncludeChange => include_change,
 }
 
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(scroll) = self.pending_scroll {
-            self.apply_scroll(scroll, cx);
-            if self.pending_scroll.is_some() && self.computed_for.is_some() {
-                // Laid out in this frame: scrolled in the next.
-                cx.on_next_frame(window, |_, _, cx| cx.notify());
-            }
-        }
-        let (background, border, family, size) = {
+        let (background, tearline, family, size) = {
             let theme = cx.theme();
             (
                 theme.color(UiRole::EditorBackground),
-                theme.color(UiRole::Border),
+                theme.color(UiRole::Tearline),
                 theme.ui_family(),
                 theme.ui_size(),
             )
         };
         let toolbar = self.render_toolbar(window, cx).into_any_element();
-        let titles = div()
+        let one_side = self.one_side();
+        let mut titles = div()
             .flex()
             .flex_row()
             .flex_none()
             .h(px(TITLE_HEIGHT + 1.0))
             .border_b_1()
-            .border_color(border)
-            .child(self.render_title(Side::Left, cx))
-            .child(div().flex_none().w(px(divider::WIDTH)))
-            .child(self.render_title(Side::Right, cx));
-        let content = div()
-            .flex()
-            .flex_row()
-            .flex_1()
-            .min_h(px(0.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .debug_selector(|| "diff-left".into())
-                    .child(self.left.clone()),
-            )
-            .child(divider::render(
-                &self.left,
-                &self.right,
-                self.changes.clone(),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .debug_selector(|| "diff-right".into())
-                    .child(self.right.clone()),
-            );
+            .border_color(tearline);
+        let side_view = |side: Side, view: Entity<Editor>| {
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .h_full()
+                .debug_selector(move || format!("diff-{}", side.name()))
+                .child(view)
+        };
+        let mut content = div().flex().flex_row().flex_1().min_h(px(0.0));
+        match one_side {
+            Some(side) => {
+                titles = titles.child(self.render_title(side, cx));
+                content = content.child(side_view(side, self.editor(side).clone()));
+            }
+            None => {
+                titles = titles
+                    .child(self.render_title(Side::Left, cx))
+                    .child(div().flex_none().w(px(divider::WIDTH)))
+                    .child(self.render_title(Side::Right, cx));
+                content = content
+                    .child(side_view(Side::Left, self.left.clone()))
+                    .child(divider::render(
+                        &self.left,
+                        &self.right,
+                        self.changes.clone(),
+                        Rc::new(self.excluded_changes()),
+                    ))
+                    .child(side_view(Side::Right, self.right.clone()));
+            }
+        }
         let menu = self
             .settings_menu
             .as_ref()

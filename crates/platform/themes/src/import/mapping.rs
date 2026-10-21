@@ -89,6 +89,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Key("Table.hoverBackground"),
         ],
         Pressed => &[Key("ActionButton.pressedBackground")],
+        SegmentedSelected => &[Ui("SegmentedButton.selectedButtonColor")],
+        SegmentedSelectedBorder => &[Ui("SegmentedButton.selectedStartBorderColor")],
         Selection => &[
             Ui("List.selectionBackground"),
             Ui("Tree.selectionBackground"),
@@ -250,6 +252,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         IndentGuide => &[Color("INDENT_GUIDE")],
         IndentGuideActive => &[Color("SELECTED_INDENT_GUIDE")],
         RightMargin => &[Color("RIGHT_MARGIN_COLOR")],
+        Tearline => &[Color("TEARLINE_COLOR")],
         Whitespace => &[Color("WHITESPACES")],
         SoftWrapSign => &[Color("SOFT_WRAP_SIGN_COLOR")],
         CompletionPopup => &[Color("LOOKUP_COLOR")],

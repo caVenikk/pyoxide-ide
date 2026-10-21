@@ -234,6 +234,9 @@ pub enum EditorEvent {
         modifiers: Modifiers,
         position: gpui::Point<Pixels>,
     },
+    /// A click on a decoration's icon in the diff gutter's action column
+    /// ([`crate::Decoration::action`]).
+    GutterActionClicked { id: DecorationId },
     /// A press on a decoration's change marker.
     ChangeMarkerClicked {
         id: DecorationId,
@@ -399,6 +402,10 @@ pub struct Editor {
     pub(crate) mirrored: bool,
     /// The caret's row is highlighted ([`Editor::set_caret_row_shown`]).
     pub(crate) caret_row_shown: bool,
+    /// The diff viewer's gutter ([`Editor::set_diff_gutter`]).
+    pub(crate) diff_gutter: crate::side_by_side::DiffGutter,
+    /// A scroll for the next layout ([`Editor::scroll_on_layout`]).
+    pub(crate) layout_scroll: Option<crate::side_by_side::LayoutScroll>,
     /// Rows of room below the last one instead of a view's height
     /// ([`Editor::set_room_after_end`]).
     pub(crate) room_after_end: Option<usize>,
@@ -501,6 +508,8 @@ impl Editor {
             diff_highlights: None,
             mirrored: false,
             caret_row_shown: true,
+            diff_gutter: Default::default(),
+            layout_scroll: None,
             room_after_end: None,
             _subscriptions: subscriptions,
         }
