@@ -223,6 +223,36 @@ impl H<'_> {
     }
 }
 
+/// "Override IDE shortcuts": a focused terminal takes the key of an IDE
+/// shortcut whose action is not allowed (macOS Ctrl+V, the VCS Operations
+/// popup, goes to the shell), and leaves it to the IDE when the option is
+/// off.
+#[gpui::test]
+fn a_focused_terminal_takes_the_keys_of_ide_shortcuts(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx, keymap::MACOS);
+    h.open_terminal(None);
+    h.press("ctrl-v");
+    let dispatched = h.dispatched.borrow().clone();
+    assert!(
+        !dispatched.iter().any(|a| a == "vcs.operations-popup"),
+        "the key went to the shell: {dispatched:?}"
+    );
+    // An allowed shortcut stays the IDE's.
+    h.press("alt-f12");
+    assert!(!h.terminal_visible(), "Alt+F12 hides the terminal");
+    h.invoke(
+        "settings.set",
+        json!({"key": "terminal.override-ide-shortcuts", "value": false}),
+    );
+    h.open_terminal(None);
+    h.press("ctrl-v");
+    let dispatched = h.dispatched.borrow().clone();
+    assert!(
+        dispatched.iter().any(|a| a == "vcs.operations-popup"),
+        "without the option the IDE takes the key: {dispatched:?}"
+    );
+}
+
 /// Checks one binding; returns `false` when there is no check for its
 /// command.
 fn check(h: &mut H, b: &Binding) -> bool {

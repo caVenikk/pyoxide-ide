@@ -471,7 +471,7 @@ fn toggle_tool_window_by_id(cx: &mut TestAppContext) {
         cx,
         window,
         "workbench.activate-tool-window",
-        json!({"id": "terminal"}),
+        json!({"id": "problems"}),
     );
     let after = invoke(cx, window, "workbench.state", json!(null))["tool_window_areas"].clone();
     assert_eq!(before, after);

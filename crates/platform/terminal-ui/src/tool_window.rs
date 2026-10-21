@@ -20,7 +20,7 @@ use ui::components::{Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 
-use crate::commands::{CloseTab, NewTab, NextTab, PreviousTab};
+use crate::commands::{CloseTab, NewTab, NextTab, PreviousTab, RenameTab};
 use crate::{SessionView, SessionViewEvent};
 
 /// The key context of the tool window (its header and sessions).
@@ -279,6 +279,12 @@ impl TerminalToolWindow {
         }
     }
 
+    fn rename_tab(&mut self, action: &RenameTab, _: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(s), Some(name)) = (self.selected, &action.name) {
+            self.rename(s, name, cx);
+        }
+    }
+
     fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.select_relative(1, window, cx);
     }
@@ -451,6 +457,7 @@ impl Render for TerminalToolWindow {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::new_tab))
             .on_action(cx.listener(Self::close_tab))
+            .on_action(cx.listener(Self::rename_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
             .flex()

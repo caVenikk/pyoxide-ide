@@ -246,6 +246,9 @@ impl Workbench {
         self.tool_windows.show(id);
         self.tool_windows.set_last_active(id);
         window.focus(&focus);
+        if id == super::terminal_window::TERMINAL {
+            self.terminal_activated(window, cx);
+        }
         cx.notify();
     }
 

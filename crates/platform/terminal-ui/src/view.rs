@@ -731,16 +731,26 @@ impl SessionView {
     }
 
     fn key_down(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        let Some((key, mods)) = keys::session_key(&e.keystroke, self.options.option_as_meta) else {
-            return;
-        };
-        if session.send_key(key, mods) {
+        if self.send_keystroke(&e.keystroke, cx) {
             cx.stop_propagation();
+        }
+    }
+
+    /// Sends a key to the session as the view's key handler does (the key
+    /// routing of the Terminal tool window hands it the keys of IDE
+    /// shortcuts); `false` when the session takes no such key.
+    pub fn send_keystroke(&mut self, keystroke: &gpui::Keystroke, cx: &mut Context<Self>) -> bool {
+        let Some(session) = &self.session else {
+            return false;
+        };
+        let Some((key, mods)) = keys::session_key(keystroke, self.options.option_as_meta) else {
+            return false;
+        };
+        let sent = session.send_key(key, mods);
+        if sent {
             self.after_input(cx);
         }
+        sent
     }
 
     // ---- commands -------------------------------------------------------

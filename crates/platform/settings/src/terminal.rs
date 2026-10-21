@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Section;
 
-/// How new terminal sessions start (the reference's
-/// `TerminalOptionsProvider`: `myShellPath`, `myShellIntegration`).
+/// How new terminal sessions start and how they take keys (the reference's
+/// `TerminalOptionsProvider`: `myShellPath`, `myShellIntegration`,
+/// `closeSessionOnLogout`, `overrideIdeShortcuts`, `useOptionAsMetaKey`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct TerminalSettings {
@@ -20,6 +21,16 @@ pub struct TerminalSettings {
     /// scripts (a virtual environment's `activate`) are sourced before the
     /// first prompt. The reference activates no environment without it.
     pub shell_integration: bool,
+    /// "Close session when it ends": the tab of a session whose shell
+    /// exited closes.
+    pub close_session_on_exit: bool,
+    /// "Override IDE shortcuts": a focused terminal takes the keys of IDE
+    /// shortcuts, except those of the allowed actions (tool windows, Search
+    /// Everywhere, the terminal's own).
+    pub override_ide_shortcuts: bool,
+    /// "Use Option as Meta key" (macOS): Option with a key sends Escape
+    /// and the key instead of the character Option types.
+    pub option_as_meta: bool,
 }
 
 impl Default for TerminalSettings {
@@ -27,6 +38,9 @@ impl Default for TerminalSettings {
         Self {
             shell_path: String::new(),
             shell_integration: true,
+            close_session_on_exit: true,
+            override_ide_shortcuts: true,
+            option_as_meta: false,
         }
     }
 }

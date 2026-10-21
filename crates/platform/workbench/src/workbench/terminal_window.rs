@@ -47,6 +47,8 @@ pub(super) struct TerminalUi {
     /// The shell of new tabs (`terminal.open {shell}`), instead of the
     /// Terminal settings' one.
     shell: Option<String>,
+    /// A new tab's session is being planned.
+    starting: bool,
     _subscription: Subscription,
 }
 
@@ -76,6 +78,7 @@ impl TerminalUi {
         Self {
             view,
             shell: None,
+            starting: false,
             _subscription: subscription,
         }
     }
@@ -148,16 +151,30 @@ impl Workbench {
         if let Some(shell) = &self.terminal_ui.shell {
             request.shell_path = Some(shell.clone());
         }
+        let settings: crate::terminal::TerminalSettings = settings_ui::store::get(cx);
         let plan = crate::terminal::plan(request, cx);
         let view = self.terminal_ui.view.clone();
-        cx.spawn_in(window, async move |_, cx| {
+        self.terminal_ui.starting = true;
+        cx.spawn_in(window, async move |this, cx| {
             let plan = plan.await;
-            let _ = cx.update(|window, cx| {
-                let session = cx.new(|cx| SessionView::new(plan.options, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.terminal_ui.starting = false;
+                let session = cx.new(|cx| {
+                    let mut session = SessionView::new(plan.options, window, cx);
+                    let options = terminal_ui::TerminalOptions {
+                        option_as_meta: settings.option_as_meta,
+                        ..session.options().clone()
+                    };
+                    session.set_options(options, cx);
+                    session
+                });
                 if let Some(input) = &input {
                     session.update(cx, |s, cx| s.type_text(input, cx));
                 }
-                view.update(cx, |v, cx| v.add_tab(session, None, window, cx));
+                view.update(cx, |v, cx| {
+                    v.set_close_on_exit(settings.close_session_on_exit);
+                    v.add_tab(session, None, window, cx)
+                });
             });
         })
         .detach();
@@ -178,6 +195,14 @@ impl Workbench {
         }
     }
 
+    /// The Terminal tool window was activated (its key, its stripe button,
+    /// `workbench.activate-tool-window`): a new tab when it has none.
+    pub(super) fn terminal_activated(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_session(cx).is_none() && !self.terminal_ui.starting {
+            self.new_terminal_tab(None, window, cx);
+        }
+    }
+
     /// Shows and focuses the Terminal tool window; a new tab when it has
     /// none, with `input` typed into the selected session.
     fn show_terminal(
@@ -186,15 +211,16 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.activate_tool_window(TERMINAL, window, cx);
         match self.terminal_session(cx) {
             Some(session) => {
                 if let Some(input) = &input {
                     session.update(cx, |s, cx| s.type_text(input, cx));
                 }
             }
-            None => self.new_terminal_tab(input, window, cx),
+            None if !self.terminal_ui.starting => self.new_terminal_tab(input, window, cx),
+            None => {}
         }
+        self.activate_tool_window(TERMINAL, window, cx);
     }
 
     pub(crate) fn open_terminal(

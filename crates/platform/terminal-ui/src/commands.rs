@@ -36,6 +36,10 @@ ui::ui_commands! {
     /// Close the selected tab.
     CloseTab => "terminal.close-tab", "Close Tab",
         "Closes the selected tab of the Terminal tool window and ends its session; the last tab closed hides the tool window.";
+    /// Rename the selected tab.
+    RenameTab { name: Option<String> } => "terminal.rename-tab", "Rename Session",
+        "Renames the selected tab of the Terminal tool window to `name`; an empty name is refused.",
+        r#"{"name": "build"}"#;
     /// Select the next tab.
     NextTab => "terminal.next-tab", "Select Next Tab",
         "Selects the next tab of the Terminal tool window (after the last, the first).";
