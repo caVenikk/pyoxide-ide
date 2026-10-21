@@ -373,6 +373,7 @@ impl DebuggerView {
             .read(cx)
             .selected_tab()
             .and_then(|t| ExecutionPoint::of(&t.snapshot));
+        self.update_inline_values(cx);
         if point == self.execution {
             return;
         }

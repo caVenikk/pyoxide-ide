@@ -633,6 +633,9 @@ the token.
 | `syntax.console-error` | `CONSOLE_ERROR_OUTPUT` | Error output in the run console |
 | `syntax.console-input` | `CONSOLE_USER_INPUT` | User input in the run console |
 | `syntax.console-system` | `CONSOLE_SYSTEM_OUTPUT` | The IDE's own lines in the run console (command line, exit code) |
+| `syntax.debugger-inlined-values` | `DEBUGGER_INLINED_VALUES` | Values of variables shown after the lines while debugging |
+| `syntax.debugger-inlined-values-modified` | `DEBUGGER_INLINED_VALUES_MODIFIED` | Values shown after the lines that changed since the last stop |
+| `syntax.debugger-inlined-values-execution-line` | `DEBUGGER_INLINED_VALUES_EXECUTION_LINE` | Values shown after the line the program is suspended on |
 
 ### Fallback roles for text roles
 

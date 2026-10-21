@@ -9,12 +9,15 @@
 //!   clicks, icons by state, line backgrounds, stripe marks, tooltips),
 //!   the breakpoint properties popup and the Breakpoints dialog;
 //! - [`icons`]: the breakpoint icons;
+//! - `inline`: the values of the selected frame after the lines of its
+//!   file;
 //! - [`DebugHook`]: what a product supplies (its debug adapter provider).
 
 pub mod breakpoints;
 pub mod frames;
 mod hook;
 pub mod icons;
+mod inline;
 pub mod session;
 pub mod variables;
 mod view;

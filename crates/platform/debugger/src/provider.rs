@@ -208,6 +208,22 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// Where `names`, variables of a frame stopped on line `line` of a
+    /// file, are declared (`XValue.computeSourcePosition`): a line (from
+    /// 1) and a column (from 0) per name; the editor shows each value
+    /// after its line. `None` for a file of another type. Blocking (parses
+    /// the text): called off the UI thread.
+    fn declarations(
+        &self,
+        file: &Path,
+        text: &str,
+        line: u32,
+        names: &[String],
+    ) -> Option<Vec<Option<(u32, u32)>>> {
+        let _ = (file, text, line, names);
+        None
+    }
+
     /// Line breakpoints can be put in a file of this type (its stoppable
     /// lines are known), going by its path.
     fn line_breakpoint_file(&self, file: &Path) -> bool {

@@ -375,6 +375,9 @@ roles! {
         ConsoleError => ("console-error", "Editor decoration", "Error output in the run console"),
         ConsoleInput => ("console-input", "Editor decoration", "User input in the run console"),
         ConsoleSystem => ("console-system", "Editor decoration", "The IDE's own lines in the run console (command line, exit code)"),
+        DebuggerInlinedValues => ("debugger-inlined-values", "Editor decoration", "Values of variables shown after the lines while debugging"),
+        DebuggerInlinedValuesModified => ("debugger-inlined-values-modified", "Editor decoration", "Values shown after the lines that changed since the last stop"),
+        DebuggerInlinedValuesExecutionLine => ("debugger-inlined-values-execution-line", "Editor decoration", "Values shown after the line the program is suspended on"),
     }
 }
 

@@ -231,6 +231,17 @@ impl DebugAdapterProvider for PythonDebugProvider {
         breakpoints::stoppable_lines(file, text)
     }
 
+    fn declarations(
+        &self,
+        file: &Path,
+        text: &str,
+        line: u32,
+        names: &[String],
+    ) -> Option<Vec<Option<(u32, u32)>>> {
+        breakpoints::is_python_file(file)
+            .then(|| crate::declarations::declarations(text, line, names))
+    }
+
     fn exception_breakpoint_type(&self) -> Option<ExceptionBreakpointType> {
         Some(breakpoints::exception_type())
     }

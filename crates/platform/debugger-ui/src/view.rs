@@ -105,6 +105,8 @@ pub struct DebuggerView {
     pub(crate) starting: Vec<Option<String>>,
     /// A Rerun to start once its session ended.
     pub(crate) pending_restart: Option<crate::session::control::PendingRestart>,
+    /// The selected frame's values after the lines.
+    pub(crate) inline: crate::inline::InlineValues,
     _tool_window_events: gpui::Subscription,
 }
 
@@ -150,6 +152,7 @@ impl DebuggerView {
             navigated: None,
             starting: Vec::new(),
             pending_restart: None,
+            inline: Default::default(),
             _tool_window_events: tool_window_events,
         }
     }
@@ -318,6 +321,7 @@ impl DebuggerView {
             .insert(editor.entity_id(), Gutter::new(editor.clone(), events));
         self.refresh_editor(editor.entity_id(), cx);
         self.show_execution_point_in(editor, cx);
+        self.show_inline_values_in(editor, cx);
     }
 
     /// A tab was closed.
@@ -758,6 +762,7 @@ impl DebuggerView {
         let (tool_window, execution_point) = self.sessions_json(cx);
         state["tool_window"] = tool_window;
         state["execution_point"] = execution_point;
+        state["inline_values"] = self.inline_values_json();
         state["starting"] = json!(self.starting.len());
         state
     }

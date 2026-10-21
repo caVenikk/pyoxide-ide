@@ -546,6 +546,9 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         ConsoleError => &["CONSOLE_ERROR_OUTPUT"],
         ConsoleInput => &["CONSOLE_USER_INPUT"],
         ConsoleSystem => &["CONSOLE_SYSTEM_OUTPUT"],
+        DebuggerInlinedValues => &["DEBUGGER_INLINED_VALUES"],
+        DebuggerInlinedValuesModified => &["DEBUGGER_INLINED_VALUES_MODIFIED"],
+        DebuggerInlinedValuesExecutionLine => &["DEBUGGER_INLINED_VALUES_EXECUTION_LINE"],
     }
 }
 
