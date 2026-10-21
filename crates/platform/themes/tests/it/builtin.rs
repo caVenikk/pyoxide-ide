@@ -84,6 +84,47 @@ fn every_syntax_token_sets_a_style_or_is_plain_on_purpose() {
 }
 
 #[test]
+fn islands_themes_have_the_file_status_colours_of_the_reference_schemes() {
+    // `FILESTATUS_*` of the reference's Islands schemes (dark, light). The
+    // ignored colour is orange there: names ignored outside excluded
+    // folders are not drawn with it (they are grey, see `vcs-ui`).
+    let expected = [
+        (
+            ThemeKind::Dark,
+            [
+                (UiRole::GitAdded, "#73bd79"),
+                (UiRole::GitModified, "#70aeff"),
+                (UiRole::GitDeleted, "#6f737a"),
+                (UiRole::GitRenamed, "#70aeff"),
+                (UiRole::GitUntracked, "#e88f89"),
+                (UiRole::GitIgnored, "#d69a6b"),
+                (UiRole::GitConflict, "#de6a66"),
+                (UiRole::GitMerged, "#cf84cf"),
+            ],
+        ),
+        (
+            ThemeKind::Light,
+            [
+                (UiRole::GitAdded, "#067d17"),
+                (UiRole::GitModified, "#0033b3"),
+                (UiRole::GitDeleted, "#6c707e"),
+                (UiRole::GitRenamed, "#0033b3"),
+                (UiRole::GitUntracked, "#b23247"),
+                (UiRole::GitIgnored, "#8c4f00"),
+                (UiRole::GitConflict, "#de1b2e"),
+                (UiRole::GitMerged, "#643cb8"),
+            ],
+        ),
+    ];
+    for (kind, roles) in expected {
+        let theme = builtin::default_theme(kind);
+        for (role, hex) in roles {
+            assert_eq!(theme.ui[role].to_hex(), hex, "{} {role:?}", theme.id);
+        }
+    }
+}
+
+#[test]
 fn generated_themes_underline_only_with_an_effect_colour() {
     // The reference paints an effect only when the scheme gives it a colour;
     // the islands themes come from its schemes, so every underline in them

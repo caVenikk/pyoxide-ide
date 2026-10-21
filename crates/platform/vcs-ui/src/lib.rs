@@ -35,7 +35,7 @@ pub use marker_popup::{
     MarkerPopup, PopupAction, PopupText, doc_highlights, popup_text, render_popup,
 };
 pub use markers::{Computed, LineStatus, LineStatusEvent, Part};
-pub use status_colors::{FileColors, OpenDocument, entry_role, status_role};
+pub use status_colors::{FileColors, NameColor, OpenDocument, entry_color, status_role};
 
 ui::ui_commands! {
     COMMANDS, scope = "Editor";

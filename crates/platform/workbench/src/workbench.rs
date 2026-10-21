@@ -730,8 +730,8 @@ impl Workbench {
                         "deleted": self.is_deleted_on_disk(path),
                     });
                     // Only a coloured tab has the key.
-                    if let Some(role) = self.vcs_file_colors().role(path, false) {
-                        tab["color"] = json!(role.name());
+                    if let Some(color) = self.vcs_file_colors().name_color(path, false, false) {
+                        tab["color"] = json!(color.name());
                     }
                     tab
                 }
