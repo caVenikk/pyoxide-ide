@@ -20,7 +20,7 @@ use crate::import::{
     ImportError, ImportReport, Imported, SourceKind, import_path, import_plugin_theme,
     import_scheme_named,
 };
-use crate::model::{Theme, ThemeFile, ThemeKind};
+use crate::model::{Theme, ThemeFile, ThemeKind, skipped_warning};
 use crate::registry::{Registry, ThemeError};
 use crate::roles::UiRole;
 
@@ -124,8 +124,10 @@ impl Catalog {
     /// The built-in themes and the `*.toml` files of `dir` (imported
     /// themes). A file that cannot be read or resolved, or that takes the
     /// id of a built-in theme, is left out and named in the messages
-    /// returned. A missing folder holds no themes. Reads files: call it at
-    /// start-up or off the UI thread.
+    /// returned. A file with keys that name no role of this version (saved
+    /// by a newer one) loads without them and has one message listing them.
+    /// A missing folder holds no themes. Reads files: call it at start-up or
+    /// off the UI thread.
     pub fn load(dir: &Path) -> (Self, Vec<String>) {
         let mut catalog = Self::builtin();
         let mut problems = Vec::new();
@@ -148,7 +150,13 @@ impl Catalog {
                     path: path.clone(),
                     source,
                 })
-                .and_then(|text| ThemeFile::from_toml(&text, &origin));
+                .and_then(|text| ThemeFile::parse_toml(&text, &origin))
+                .map(|(file, skipped)| {
+                    if !skipped.is_empty() {
+                        problems.push(skipped_warning(&origin, &skipped));
+                    }
+                    file
+                });
             match file.and_then(|f| catalog.add(f, Some(path.clone()))) {
                 Ok(_) => {}
                 Err(e) => problems.push(format!("{origin}: {e}")),

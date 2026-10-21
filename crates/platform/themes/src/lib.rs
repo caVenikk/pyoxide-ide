@@ -28,7 +28,7 @@ pub use catalog::{Catalog, CatalogEntry, ThemeGroup};
 pub use color::{ColorParseError, ColorRef, Rgba, contrast_ratio};
 pub use model::{
     Controls, FORMAT_VERSION, FontPatch, Fonts, Metrics, TextStyle, TextStyles, Theme, ThemeFile,
-    ThemeHeader, ThemeKind, UiColors, UnderlineStyle,
+    ThemeHeader, ThemeKind, UiColors, UnderlineStyle, skipped_warning,
 };
 pub use registry::{Registry, ThemeError};
 pub use roles::{Metric, TextRole, TextRoleKind, UiRole};

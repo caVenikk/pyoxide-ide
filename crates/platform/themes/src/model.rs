@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+use std::fmt;
+use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
-use serde::{Deserialize, Serialize};
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::color::{ColorRef, Rgba};
 use crate::roles::{Metric, TextRole, UiRole};
@@ -474,8 +477,13 @@ pub struct ThemeHeader {
 /// [syntax]
 /// keyword = { fg = "$rust", bold = true }
 /// ```
+///
+/// A key of `[ui]`, `[syntax]` or `[metrics]` that names no role of this
+/// build is skipped, so a file saved by a newer build that knows more roles
+/// still loads; [`ThemeFile::parse_toml`] returns the skipped keys. Anything
+/// else that does not parse is an error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "RawThemeFile")]
 pub struct ThemeFile {
     pub theme: ThemeHeader,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -494,13 +502,134 @@ fn font_patch_is_empty(patch: &FontPatch) -> bool {
     *patch == FontPatch::default()
 }
 
+/// A theme role looked up by the name used in theme files.
+trait RoleKey: Ord + Sized {
+    fn from_name(name: &str) -> Option<Self>;
+}
+
+macro_rules! role_key {
+    ($($role:ident),*) => {$(
+        impl RoleKey for $role {
+            fn from_name(name: &str) -> Option<Self> {
+                $role::from_name(name)
+            }
+        }
+    )*};
+}
+
+role_key!(UiRole, TextRole, Metric);
+
+/// A table of a theme file keyed by role names: the entries of the roles this
+/// build knows and the keys it does not (their values are not looked at).
+struct RoleTable<K, V> {
+    entries: BTreeMap<K, V>,
+    skipped: Vec<String>,
+}
+
+impl<K, V> Default for RoleTable<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            skipped: Vec::new(),
+        }
+    }
+}
+
+impl<'de, K: RoleKey, V: Deserialize<'de>> Deserialize<'de> for RoleTable<K, V> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct RoleVisitor<K, V>(PhantomData<(K, V)>);
+
+        impl<'de, K: RoleKey, V: Deserialize<'de>> Visitor<'de> for RoleVisitor<K, V> {
+            type Value = RoleTable<K, V>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a table of roles")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut table = RoleTable::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    match K::from_name(&key) {
+                        Some(role) => {
+                            table.entries.insert(role, map.next_value()?);
+                        }
+                        None => {
+                            map.next_value::<IgnoredAny>()?;
+                            table.skipped.push(key);
+                        }
+                    }
+                }
+                Ok(table)
+            }
+        }
+
+        deserializer.deserialize_map(RoleVisitor(PhantomData))
+    }
+}
+
+/// A [`ThemeFile`] as read: the role tables still list the keys that name no
+/// role.
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawThemeFile {
+    theme: ThemeHeader,
+    palette: BTreeMap<String, Rgba>,
+    ui: RoleTable<UiRole, ColorRef>,
+    syntax: RoleTable<TextRole, TextStyle<ColorRef>>,
+    font: FontPatch,
+    metrics: RoleTable<Metric, f32>,
+}
+
+impl RawThemeFile {
+    /// The file and the skipped keys, each as `table.key`.
+    fn split(self) -> (ThemeFile, Vec<String>) {
+        let mut skipped = Vec::new();
+        let mut note = |table: &str, keys: Vec<String>| {
+            skipped.extend(keys.into_iter().map(|key| format!("{table}.{key}")));
+        };
+        note("ui", self.ui.skipped);
+        note("syntax", self.syntax.skipped);
+        note("metrics", self.metrics.skipped);
+        let file = ThemeFile {
+            theme: self.theme,
+            palette: self.palette,
+            ui: self.ui.entries,
+            syntax: self.syntax.entries,
+            font: self.font,
+            metrics: self.metrics.entries,
+        };
+        (file, skipped)
+    }
+}
+
+impl From<RawThemeFile> for ThemeFile {
+    fn from(raw: RawThemeFile) -> Self {
+        raw.split().0
+    }
+}
+
 impl ThemeFile {
-    /// Reads a theme file; `origin` names it in error messages.
+    /// Reads a theme file; `origin` names it in error messages. The keys
+    /// that were skipped (see [`ThemeFile`]) are written to the log in one
+    /// warning.
     pub fn from_toml(text: &str, origin: &str) -> Result<Self, crate::ThemeError> {
-        let file: ThemeFile = toml::from_str(text).map_err(|e| crate::ThemeError::Parse {
+        let (file, skipped) = Self::parse_toml(text, origin)?;
+        if !skipped.is_empty() {
+            eprintln!("themes: {}", skipped_warning(origin, &skipped));
+        }
+        Ok(file)
+    }
+
+    /// Reads a theme file and returns, apart from it, the keys of `[ui]`,
+    /// `[syntax]` and `[metrics]` that were skipped because they name no
+    /// role of this build, each as `table.key`; [`skipped_warning`] words
+    /// them for the log.
+    pub fn parse_toml(text: &str, origin: &str) -> Result<(Self, Vec<String>), crate::ThemeError> {
+        let raw: RawThemeFile = toml::from_str(text).map_err(|e| crate::ThemeError::Parse {
             origin: origin.to_owned(),
             message: e.to_string(),
         })?;
+        let (file, skipped) = raw.split();
         if let Some(format) = file.theme.format
             && format > FORMAT_VERSION
         {
@@ -509,12 +638,23 @@ impl ThemeFile {
                 format,
             });
         }
-        Ok(file)
+        Ok((file, skipped))
     }
 
     pub fn to_toml(&self) -> String {
         toml::to_string_pretty(self).expect("a theme file is always serializable")
     }
+}
+
+/// The one log line about the keys [`ThemeFile::parse_toml`] skipped in the
+/// file `origin`.
+pub fn skipped_warning(origin: &str, skipped: &[String]) -> String {
+    format!(
+        "{origin}: skipped {} key{} that name no role of this version (saved by a newer one?): {}",
+        skipped.len(),
+        if skipped.len() == 1 { "" } else { "s" },
+        skipped.join(", ")
+    )
 }
 
 #[cfg(test)]
@@ -577,9 +717,32 @@ mod tests {
     }
 
     #[test]
-    fn unknown_role_in_a_theme_file_is_an_error() {
-        let err = ThemeFile::from_toml("[ui]\nnot-a-role = \"#000000\"\n", "x.toml").unwrap_err();
-        assert!(err.to_string().contains("not-a-role"), "{err}");
+    fn unknown_roles_are_skipped_and_listed() {
+        let text = "[ui]\nnot-a-role = \"#000000\"\naccent = \"#112233\"\n\
+                    [syntax]\nnot-a-token = { fg = \"#000000\", future-attribute = 1 }\n\
+                    [metrics]\nnot-a-metric = 3.0\n";
+        let (file, skipped) = ThemeFile::parse_toml(text, "x.toml").unwrap();
+        assert_eq!(
+            skipped,
+            [
+                "ui.not-a-role",
+                "syntax.not-a-token",
+                "metrics.not-a-metric"
+            ]
+        );
+        assert_eq!(file.ui.len(), 1);
+        assert_eq!(
+            file.ui[&UiRole::Accent],
+            ColorRef::Rgba(Rgba::rgb(0x11, 0x22, 0x33))
+        );
+        assert!(file.syntax.is_empty() && file.metrics.is_empty());
+    }
+
+    #[test]
+    fn a_bad_value_of_a_known_role_is_still_an_error() {
+        let err = ThemeFile::from_toml("[ui]\naccent = \"nonsense\"\n", "x.toml").unwrap_err();
+        assert!(err.to_string().contains("nonsense"), "{err}");
+        assert!(ThemeFile::from_toml("[ui]\naccent = \n", "x.toml").is_err());
     }
 
     #[test]

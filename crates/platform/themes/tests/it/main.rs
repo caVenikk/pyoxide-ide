@@ -6,3 +6,4 @@
 mod builtin;
 mod import;
 mod local;
+mod unknown_roles;
