@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"First-run window (import, choose theme, choose keymap)",settings,should,yes,yes,"Community; import from the newest reference config, Skip Import, Choose Theme / Keymap, report balloon (#155); theme cards show code instead of pictures"
+"First-run window (import, choose theme, choose keymap)",settings,should,yes,yes,"Community; import page only (newest reference config, Skip Import, Other Options with two-line rows), report balloon (#155); theme and keymap chosen on the Welcome tab (#267)"
