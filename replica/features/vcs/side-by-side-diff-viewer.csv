@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,yes,"Community; diff tab from the Commit window, marker popup and Project view, word highlights, synced scroll, F7 / Shift+F7, Compare Next / Previous File, Jump to Source, settings popup (#171)"
+"Side-by-side diff viewer (Commit: <file> tab, word highlights, F7 navigation, editable right side)",vcs,must,yes,yes,"Community; diff tab from the Commit window, marker popup and Project view, word highlights, synced scroll, F7 / Shift+F7, Compare Next / Previous File, Jump to Source, settings popup (#171); one side for added / deleted files, >> revert, include check boxes, F7 across groups (#248)"
