@@ -911,6 +911,10 @@ fn forward_session_actions<E: InteractiveElement>(
     });
     let v = view.clone();
     let el = el.on_action(move |a: &TypeInput, _, cx| v.update(cx, |v, cx| v.type_input(a, cx)));
+    let v = view.clone();
+    let el = el.on_action(move |a: &ToggleInlineValues, _, cx| {
+        v.update(cx, |v, cx| v.toggle_inline_values(a.on, cx))
+    });
     forward_frame_actions(el, view)
 }
 

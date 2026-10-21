@@ -98,6 +98,10 @@ ui::ui_commands! {
     /// The frame below the selected one.
     NextFrame => "debug.next-frame", "Next Frame",
         "Selects the frame below the selected one in the frames list (its caller).";
+    /// Show the selected frame's values after the lines in the editor.
+    ToggleInlineValues { on: Option<bool> } => "debug.toggle-inline-values", "Show Variable Values in Editor",
+        "Shows the values of the selected frame's variables after the lines that declare them while the program is suspended, or stops showing them (with `on` set, as given).",
+        r#"{"on": false}"#;
     /// Close the hint below the frames.
     CloseFramesHint => "debug.close-frames-hint", "Close Frames Hint",
         "Closes the hint about switching frames below the frames list.";

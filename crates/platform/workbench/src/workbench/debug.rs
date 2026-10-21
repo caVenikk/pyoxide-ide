@@ -219,7 +219,9 @@ impl Workbench {
     /// The Debug toolbar's More menu (`XDebugger.ToolWindow.TopToolbar3.Extra`
     /// without the actions to come, and Debugger Settings).
     fn debug_more_items(&self, window: &Window, cx: &App) -> Vec<MenuItem> {
-        use debugger_ui::session::commands::{ForceRunToCursor, RunToCursor, ShowExecutionPoint};
+        use debugger_ui::session::commands::{
+            ForceRunToCursor, RunToCursor, ShowExecutionPoint, ToggleInlineValues,
+        };
         let keys = |action: &dyn gpui::Action| {
             ui::keys::shortcut_in(action, &self.focus, window).unwrap_or_default()
         };
@@ -255,8 +257,17 @@ impl Workbench {
                 vec![
                     MenuItem::action("Open Files in Preview Tab", ShowExecutionPoint)
                         .enabled(false),
-                    MenuItem::action("Show Variable Values in Editor", ShowExecutionPoint)
-                        .enabled(false),
+                    {
+                        let item = MenuItem::action(
+                            "Show Variable Values in Editor",
+                            ToggleInlineValues { on: None },
+                        );
+                        if self.debugger.read(cx).inline_values_shown() {
+                            item.icon(IconName::CHECKED)
+                        } else {
+                            item
+                        }
+                    },
                     MenuItem::separator(),
                     MenuItem::action("Sort Variables Alphabetically", ShowExecutionPoint)
                         .enabled(false),

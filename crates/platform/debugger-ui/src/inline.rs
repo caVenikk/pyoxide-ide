@@ -168,6 +168,22 @@ impl DebuggerView {
         }));
     }
 
+    /// Show Variable Values in Editor (`XDebugger.Inline`), on or off.
+    pub(crate) fn toggle_inline_values(&mut self, on: Option<bool>, cx: &mut Context<Self>) {
+        let on = on.unwrap_or(self.inline.disabled);
+        if on == !self.inline.disabled {
+            return;
+        }
+        self.inline.disabled = !on;
+        self.update_inline_values(cx);
+        cx.notify();
+    }
+
+    /// Values are shown after the lines (the menu's check mark).
+    pub fn inline_values_shown(&self) -> bool {
+        !self.inline.disabled
+    }
+
     /// The values of the frame: their decorations, remembered for the
     /// changed ones.
     fn set_inline_values(
