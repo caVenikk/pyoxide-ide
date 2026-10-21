@@ -256,6 +256,10 @@ impl DebugAdapterProvider for PythonDebugProvider {
     fn first_scope_only(&self) -> bool {
         true
     }
+
+    fn value_declaration(&self, text: &str, line: u32, name: &str) -> Option<(u32, u32)> {
+        crate::declaration::declaration(text, line, name)
+    }
 }
 
 #[cfg(test)]

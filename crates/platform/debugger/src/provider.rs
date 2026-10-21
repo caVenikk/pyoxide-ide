@@ -252,6 +252,16 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     fn first_scope_only(&self) -> bool {
         false
     }
+
+    /// Where a value of a frame is declared, for Jump To Source
+    /// (`XValue.computeSourcePosition`): the line and the column (from 1)
+    /// of the declaration of `name` in `text`, the file of a frame
+    /// suspended on `line`; `None` when the product does not find it.
+    /// Blocking (one pass over the text): called off the UI thread.
+    fn value_declaration(&self, text: &str, line: u32, name: &str) -> Option<(u32, u32)> {
+        let _ = (text, line, name);
+        None
+    }
 }
 
 /// A product's type of line breakpoints, as the reference presents it

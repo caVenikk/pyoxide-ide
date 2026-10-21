@@ -471,6 +471,30 @@ impl Session {
         &self.inner.watches_key
     }
 
+    /// The debugger of the project the session belongs to (its watches
+    /// and the expression history), while it is open.
+    pub fn debugger(&self) -> Option<crate::Debugger> {
+        self.inner
+            .debugger
+            .upgrade()
+            .map(crate::Debugger::from_inner)
+    }
+
+    /// The adapter can set values (`setVariable` or `setExpression`).
+    pub fn can_set_values(&self) -> bool {
+        self.client().is_some_and(|c| {
+            let capabilities = c.capabilities();
+            capabilities.set_variable || capabilities.set_expression
+        })
+    }
+
+    /// The adapter evaluates in the clipboard context (the whole value of
+    /// a variable for Copy Value).
+    pub fn evaluates_for_clipboard(&self) -> bool {
+        self.client()
+            .is_some_and(|c| c.capabilities().clipboard_context)
+    }
+
     pub fn phase(&self) -> Phase {
         lock(&self.inner.data).phase
     }

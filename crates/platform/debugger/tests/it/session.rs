@@ -633,6 +633,14 @@ fn breakpoints_and_watches_are_stored_and_imported_once() {
     assert!(debugger.remove_breakpoint(ten));
     debugger.add_watch("python", "x", None);
     debugger.set_muted(true);
+    // Threads & Variables: the expression history (the latest first, no
+    // doubles), the frames' share and the closed hint.
+    debugger.remember_expression("len(items)");
+    debugger.remember_expression(" x + 1 ");
+    debugger.remember_expression("len(items)");
+    debugger.remember_expression("");
+    debugger.set_frames_split(0.25);
+    debugger.close_frames_hint();
     debugger.flush();
     let text = std::fs::read_to_string(project::workspace::workspace_file(root)).unwrap();
     assert!(text.contains("imported-from-idea = true"), "{text}");
@@ -644,6 +652,9 @@ fn breakpoints_and_watches_are_stored_and_imported_once() {
     assert!(b.at(&main, 10).is_none());
     assert_eq!(debugger.watches("python"), ["len(items)", "x"]);
     assert!(debugger.is_muted());
+    assert_eq!(debugger.expression_history(), ["len(items)", "x + 1"]);
+    assert_eq!(debugger.frames_split(), Some(0.25));
+    assert!(debugger.frames_hint_closed());
     // `.idea` is only read.
     assert!(
         std::fs::read_to_string(root.join(".idea").join("workspace.xml"))

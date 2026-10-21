@@ -81,7 +81,7 @@ pub fn is_stoppable(text: &str, line: u32) -> bool {
 }
 
 /// Marks the bytes of tokens that make a line stoppable.
-fn classify(bytes: &[u8]) -> Vec<bool> {
+pub(crate) fn classify(bytes: &[u8]) -> Vec<bool> {
     let mut lexer = Lexer {
         s: bytes,
         i: 0,
