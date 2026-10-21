@@ -126,6 +126,35 @@ fn descendants_deepest_first(root: libc::pid_t) -> Vec<libc::pid_t> {
     out
 }
 
+/// The direct children of the process `pid`, as the reference lists them
+/// for a terminal's shell (`ps -e -o ppid,pid`, the processes whose parent
+/// is the shell).
+pub(crate) fn child_pids(pid: u32) -> Vec<u32> {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return Vec::new();
+    };
+    direct_children(pid)
+        .into_iter()
+        .filter_map(|p| u32::try_from(p).ok())
+        .collect()
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn direct_children(pid: libc::pid_t) -> Vec<libc::pid_t> {
+    children_map(pid).remove(&pid).unwrap_or_default()
+}
+
+#[cfg(target_vendor = "apple")]
+fn direct_children(pid: libc::pid_t) -> Vec<libc::pid_t> {
+    list_children(pid)
+}
+
+/// Other Unix systems: no process table walk (see [`children_map`]).
+#[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+fn direct_children(_pid: libc::pid_t) -> Vec<libc::pid_t> {
+    Vec::new()
+}
+
 /// Parent to children for the processes below `root`.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn children_map(_root: libc::pid_t) -> HashMap<libc::pid_t, Vec<libc::pid_t>> {

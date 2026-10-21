@@ -206,22 +206,12 @@ fn descendants(root: u32, root_created: u64) -> Vec<u32> {
     let mut i = 0;
     while i < found.len() {
         let parent = found[i];
-        for &(pid, ppid) in &entries {
+        for entry in &entries {
+            let (pid, ppid) = (entry.pid, entry.parent);
             if ppid == 0 || pid == parent || ppid != parent || seen.contains(&pid) {
                 continue;
             }
-            // SAFETY: a handle opened, used and closed here.
-            let created = unsafe {
-                let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-                if h.is_null() {
-                    None
-                } else {
-                    let t = creation_time(h);
-                    CloseHandle(h);
-                    t
-                }
-            };
-            if created.is_some_and(|t| t >= root_created) {
+            if creation_time_of(pid).is_some_and(|t| t >= root_created) {
                 seen.insert(pid);
                 found.push(pid);
             }
@@ -232,8 +222,51 @@ fn descendants(root: u32, root_created: u64) -> Vec<u32> {
     found
 }
 
-/// (pid, parent pid) of every process.
-fn snapshot() -> Vec<(u32, u32)> {
+/// The direct children of `pid` created at or after it (a parent id is not
+/// updated when the parent exits, so an id may have been reused), without
+/// the console hosts a pseudo-console starts.
+pub(crate) fn child_pids(pid: u32) -> Vec<u32> {
+    let Some(created) = creation_time_of(pid) else {
+        return Vec::new();
+    };
+    snapshot()
+        .into_iter()
+        .filter(|e| e.parent == pid && e.pid != pid && !is_console_host(&e.exe))
+        .filter(|e| creation_time_of(e.pid).is_some_and(|t| t >= created))
+        .map(|e| e.pid)
+        .collect()
+}
+
+/// The programs that host a console and are not commands of their own.
+fn is_console_host(exe: &str) -> bool {
+    exe.eq_ignore_ascii_case("conhost.exe") || exe.eq_ignore_ascii_case("OpenConsole.exe")
+}
+
+/// When the process was created (`FILETIME` ticks), `None` when it cannot
+/// be opened (it ended, or access is denied).
+fn creation_time_of(pid: u32) -> Option<u64> {
+    // SAFETY: a handle opened, used and closed here.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if h.is_null() {
+            return None;
+        }
+        let created = creation_time(h);
+        CloseHandle(h);
+        created
+    }
+}
+
+/// A process of the snapshot.
+struct Entry {
+    pid: u32,
+    parent: u32,
+    /// The program's file name.
+    exe: String,
+}
+
+/// Every process.
+fn snapshot() -> Vec<Entry> {
     let mut out = Vec::new();
     // SAFETY: the snapshot handle is closed below; the entry has its size set.
     unsafe {
@@ -245,7 +278,13 @@ fn snapshot() -> Vec<(u32, u32)> {
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         if Process32FirstW(snap, &mut entry) != 0 {
             loop {
-                out.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                let name = &entry.szExeFile;
+                let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+                out.push(Entry {
+                    pid: entry.th32ProcessID,
+                    parent: entry.th32ParentProcessID,
+                    exe: String::from_utf16_lossy(&name[..len]),
+                });
                 if Process32NextW(snap, &mut entry) == 0 {
                     break;
                 }
@@ -254,4 +293,16 @@ fn snapshot() -> Vec<(u32, u32)> {
         CloseHandle(snap);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_console_host;
+
+    #[test]
+    fn console_hosts_are_not_commands() {
+        assert!(is_console_host("conhost.exe"));
+        assert!(is_console_host("OpenConsole.EXE"));
+        assert!(!is_console_host("python.exe"));
+    }
 }
