@@ -319,6 +319,8 @@ impl Workbench {
             title: Some(title.into()),
             speed_search: true,
             selected,
+            // The switchers number their rows (`QuickSwitchSchemeAction`).
+            numbered: true,
             ..PopupOptions::default()
         };
         let menu = ContextMenu::popup(items, options, window, cx);
