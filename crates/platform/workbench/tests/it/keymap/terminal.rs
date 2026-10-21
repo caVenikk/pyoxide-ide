@@ -47,7 +47,7 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
                 })
             });
             // Leave a clean prompt.
-            h.invoke("terminal.dev-session", json!({"input": "\r"}));
+            h.invoke("terminal.open", json!({"input": "\r"}));
         }
         "terminal.select-all" => {
             h.terminal_with_history();
@@ -97,21 +97,86 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
     }
 }
 
+/// The keys of the Terminal tool window and its tabs.
+fn check_tool_window(h: &mut H, command: &str, keys: &str, what: &str) {
+    let tabs = |s: &Value| s["tabs"].as_array().map_or(0, Vec::len);
+    match command {
+        "workbench.toggle-terminal" => {
+            h.open_terminal(None);
+            h.press(keys);
+            assert!(!h.terminal_visible(), "{what}: hides the focused terminal");
+            h.press(keys);
+            assert!(h.terminal_visible(), "{what}: shows it again");
+            assert!(h.terminal_focused(), "{what}: with the focus");
+        }
+        "workbench.hide-tool-window" => {
+            h.open_terminal(None);
+            h.press(keys);
+            assert!(!h.terminal_visible(), "{what}");
+            assert!(h.editor_focused(), "{what}: the focus goes to the editor");
+        }
+        "terminal.new-tab" => {
+            let before = tabs(&h.open_terminal(None));
+            h.press(keys);
+            let s = h.wait_terminal(what, |s| tabs(s) == before + 1);
+            assert_eq!(s["selected"], json!(before), "{what}: the new tab is selected");
+            assert!(h.terminal_focused(), "{what}: with the focus");
+        }
+        "terminal.close-tab" => {
+            let before = tabs(&h.open_terminal(None));
+            h.invoke("terminal.new-tab", json!(null));
+            h.wait_terminal("a second tab", |s| tabs(s) == before + 1);
+            h.press(keys);
+            h.wait_terminal(what, |s| tabs(s) == before);
+        }
+        "terminal.next-tab" | "terminal.previous-tab" => {
+            let before = tabs(&h.open_terminal(None));
+            h.invoke("terminal.new-tab", json!(null));
+            let s = h.wait_terminal("a second tab", |s| tabs(s) == before + 1);
+            let n = tabs(&s) as u64;
+            let selected = s["selected"].as_u64().unwrap();
+            h.press(keys);
+            let expected = if command == "terminal.next-tab" {
+                (selected + 1) % n
+            } else {
+                (selected + n - 1) % n
+            };
+            h.wait_terminal(what, |s| s["selected"] == json!(expected));
+        }
+        _ => unreachable!("{command}"),
+    }
+}
+
 /// The number of scrollback lines in a terminal state.
 fn history(s: &Value) -> u64 {
     s["history"].as_u64().unwrap()
 }
 
 impl H<'_> {
-    /// The development terminal's state (`null` before it is shown).
+    /// The Terminal tool window's state.
     fn terminal(&mut self) -> Value {
         self.cx.run_until_parked();
         self.cx
             .update_window(self.window.into(), |_, window, cx| {
-                ui::command::invoke("terminal.dev-state", json!(null), window, cx)
+                ui::command::invoke("terminal.state", json!(null), window, cx)
             })
             .unwrap()
             .unwrap_or(Value::Null)
+    }
+
+    fn terminal_visible(&mut self) -> bool {
+        self.cx.run_until_parked();
+        self.state()["tool_windows"]["terminal"]["visible"] == json!(true)
+    }
+
+    /// The focus is in the Terminal tool window.
+    fn terminal_focused(&mut self) -> bool {
+        let view = self.workbench(|w, _| w.terminal_window().clone());
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                view.focus_handle(cx).contains_focused(window, cx)
+            })
+            .unwrap()
     }
 
     /// Waits (at most about 20 s) for a terminal state that `f` accepts;
@@ -133,7 +198,7 @@ impl H<'_> {
     /// typing `input`, and waits for the shell's prompt.
     fn open_terminal(&mut self, input: Option<&str>) -> Value {
         self.invoke(
-            "terminal.dev-session",
+            "terminal.open",
             json!({"shell": TEST_SHELL, "input": input}),
         );
         self.wait_terminal("the shell's prompt", |s| {
@@ -173,6 +238,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "terminal.line-down"
         | "terminal.page-up"
         | "terminal.page-down" => check_terminal(h, &b.command, keys, &what),
+        "workbench.toggle-terminal"
+        | "workbench.hide-tool-window"
+        | "terminal.new-tab"
+        | "terminal.close-tab"
+        | "terminal.next-tab"
+        | "terminal.previous-tab" => check_tool_window(h, &b.command, keys, &what),
         _ => return false,
     }
     true

@@ -27,3 +27,19 @@ ui::ui_commands! {
     /// Scroll one page down.
     PageDown => "terminal.page-down", "Page Down", "Scrolls the terminal one page down.";
 }
+
+ui::ui_commands! {
+    TAB_COMMANDS, scope = "Terminal";
+    /// Open a new tab.
+    NewTab => "terminal.new-tab", "New Tab",
+        "Starts a new terminal session in a new tab of the Terminal tool window and selects it.";
+    /// Close the selected tab.
+    CloseTab => "terminal.close-tab", "Close Tab",
+        "Closes the selected tab of the Terminal tool window and ends its session; the last tab closed hides the tool window.";
+    /// Select the next tab.
+    NextTab => "terminal.next-tab", "Select Next Tab",
+        "Selects the next tab of the Terminal tool window (after the last, the first).";
+    /// Select the previous tab.
+    PreviousTab => "terminal.previous-tab", "Select Previous Tab",
+        "Selects the previous tab of the Terminal tool window (before the first, the last).";
+}

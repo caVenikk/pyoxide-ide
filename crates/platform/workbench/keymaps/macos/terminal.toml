@@ -1,6 +1,12 @@
-# Pyoxide keymap for macOS. Terminal: the keys of a focused terminal.
+# Pyoxide keymap for macOS. Terminal: the Terminal tool window and the keys
+# of a focused terminal.
 # Keystrokes follow the reference IDE's macOS keymap (Apache-2.0, see
 # NOTICE).
+
+# The Terminal tool window (`ActivateTerminalToolWindow`).
+[[context]]
+[context.bindings]
+"alt-f12" = "workbench.toggle-terminal"
 
 # A focused terminal (the reference's `Terminal.*` actions): Copy only
 # with a selection (without one the key goes on), Paste (bracketed when
@@ -17,3 +23,12 @@ name = "Terminal"
 "cmd-down" = "terminal.line-down"
 "shift-pageup" = "terminal.page-up"
 "shift-pagedown" = "terminal.page-down"
+# The tabs of the Terminal tool window (`Terminal.NewTab`,
+# `Terminal.CloseTab`, `NextTab`, `PreviousTab`) and Hide; Escape goes to
+# the shell. (Bound in the terminal's own context: a binding without a
+# context counts as one of the innermost context, see run.toml.)
+"cmd-t" = "terminal.new-tab"
+"cmd-w" = "terminal.close-tab"
+"cmd-}" = "terminal.next-tab"
+"cmd-{" = "terminal.previous-tab"
+"shift-escape" = "workbench.hide-tool-window"

@@ -130,3 +130,17 @@ text = "Show Search History"
 groups = ["Other"]
 command = "find.show-history"
 contexts = ["FindBar > Editor", "FindInFiles > Editor"]
+
+[[action]]
+id = "Terminal.NewTab"
+text = "New Tab"
+groups = ["Other"]
+command = "terminal.new-tab"
+context = "Terminal"
+
+[[action]]
+id = "Terminal.CloseTab"
+text = "Close Tab"
+groups = ["Other"]
+command = "terminal.close-tab"
+context = "Terminal"

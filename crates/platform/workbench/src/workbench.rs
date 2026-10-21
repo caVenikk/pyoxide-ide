@@ -47,7 +47,7 @@ mod file_sync;
 mod history;
 mod remote;
 mod run_actions;
-pub(crate) mod terminal_dev;
+pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
 mod welcome;
@@ -285,6 +285,8 @@ pub struct Workbench {
     debugger: Entity<debugger_ui::DebuggerView>,
     /// The Commit tool window and its dialogs.
     commit_ui: commit::CommitUi,
+    /// The Terminal tool window (`terminal_window.rs`).
+    terminal_ui: terminal_window::TerminalUi,
     /// The diff tabs (`diff.rs`).
     diff_tabs: diff::DiffTabs,
     _subscriptions: Vec<Subscription>,
@@ -419,6 +421,7 @@ impl Workbench {
         let mut tool_windows =
             tool_window_areas::default_tool_windows(&product, &run_window, &notifications_window);
         let commit_ui = commit::CommitUi::new(file_types.clone(), &mut tool_windows, window, cx);
+        let terminal_ui = terminal_window::TerminalUi::new(&mut tool_windows, window, cx);
         Self::register_debug_tool_window(&mut tool_windows, &debugger, cx);
         // Names are coloured by their version control status (#169).
         let version_control = version_control::VersionControl::default();
@@ -470,6 +473,7 @@ impl Workbench {
             remote_ui: Default::default(),
             debugger,
             commit_ui,
+            terminal_ui,
             diff_tabs: Default::default(),
             _subscriptions: subscriptions,
         }
@@ -2484,7 +2488,6 @@ impl Render for Workbench {
             .on_action(crate::simulate::simulate_mouse)
             .on_action(cx.listener(Self::toggle_project))
             .on_action(cx.listener(Self::toggle_run))
-            .on_action(cx.listener(Self::open_dev_terminal))
             .on_action(cx.listener(Self::activate_tool_window_action))
             .on_action(cx.listener(Self::toggle_tool_window_action))
             .on_action(cx.listener(Self::focus_editor))
@@ -2608,6 +2611,7 @@ impl Render for Workbench {
         root = self.remote_actions(root, cx);
         root = self.debug_actions(root, cx);
         root = self.commit_actions(root, cx);
+        root = self.terminal_actions(root, cx);
         root = self.diff_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);

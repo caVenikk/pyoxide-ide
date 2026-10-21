@@ -13,6 +13,12 @@ groups = ["Main Menu > View > Tool Windows"]
 command = "workbench.toggle-run"
 
 [[action]]
+id = "ActivateTerminalToolWindow"
+text = "Terminal"
+groups = ["Main Menu > View > Tool Windows"]
+command = "workbench.toggle-terminal"
+
+[[action]]
 id = "QuickChangeScheme"
 text = "Quick Switch Scheme…"
 groups = ["Main Menu > View"]

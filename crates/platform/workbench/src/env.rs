@@ -15,9 +15,9 @@
 //! | `PYOXIDE_BENCH=find-in-files:<query>` | search the open project for a query with Find in Files (5 runs), print the times to the first row and to the end of the search, quit |
 //! | `PYOXIDE_BENCH=go-to-file:<query>` | type a query into Go to File char by char (5 runs), print the index build time and key-to-rows times, quit |
 //! | `PYOXIDE_BENCH=completion[:<ms>]` | with a service that answers after `ms` (50) with 200 items, type `.` 30 times at the end of the open file, print key-to-popup and answer-to-popup times (with `PYOXIDE_SHOT`: a picture of the popup), quit |
-//! | `PYOXIDE_BENCH=terminal-typing` | type 3 x 200 keys into `cat` in the development terminal, print key-to-frame times of the echo, quit |
-//! | `PYOXIDE_BENCH=terminal-flood[:<MiB>]` | `cat` a generated file (64 MiB) in the development terminal, print the time to its last line and the frames, quit |
-//! | `PYOXIDE_BENCH=terminal-scroll` | scroll the development terminal's scrollback with the wheel for 6 s, print frame times and gaps, quit |
+//! | `PYOXIDE_BENCH=terminal-typing` | type 3 x 200 keys into `cat` in the Terminal tool window, print key-to-frame times of the echo, quit |
+//! | `PYOXIDE_BENCH=terminal-flood[:<MiB>]` | `cat` a generated file (64 MiB) in the Terminal tool window, print the time to its last line and the frames, quit |
+//! | `PYOXIDE_BENCH=terminal-scroll` | scroll the Terminal tool window's scrollback with the wheel for 6 s, print frame times and gaps, quit |
 //! | `PYOXIDE_BENCH_FLOOD=1` | with `typing`: a terminal prints without pause while the editor is typed in |
 //! | `PYOXIDE_BENCH=cursor` | move the mouse (synthetic events) over text, gutter, splitter and toolbar, print the system cursor shown, quit |
 //! | `PYOXIDE_DEBUG_CURSOR=1` | print the system cursor after every mouse move |

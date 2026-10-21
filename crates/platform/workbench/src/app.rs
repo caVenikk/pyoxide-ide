@@ -154,7 +154,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::navigation::init(cx);
     crate::run::init(cx);
     terminal_ui::init(cx);
-    crate::workbench::terminal_dev::init(cx);
+    crate::workbench::terminal_window::init(cx);
     code_intel_ui::init(cx);
     vcs_ui::init(cx);
     debugger_ui::init(cx);

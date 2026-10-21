@@ -13,7 +13,8 @@
 //! - [`colors`]: the theme's terminal colours with the reference's rules
 //!   for inverse and dim text and its minimum contrast.
 //!
-//! The Terminal tool window (tabs, key routing) builds on these.
+//! - [`tool_window`]: the Terminal tool window, its tabs and their
+//!   commands.
 
 pub mod colors;
 pub mod commands;
@@ -21,6 +22,7 @@ mod element;
 mod ime;
 pub mod keys;
 pub mod plan;
+pub mod tool_window;
 mod view;
 
 pub use element::{
@@ -28,6 +30,7 @@ pub use element::{
     cell_metrics, grid_layout,
 };
 pub use terminal::StartRequest;
+pub use tool_window::{TerminalToolWindow, TerminalToolWindowEvent};
 pub use view::{
     BLINK_INTERVAL, FLOOD_AFTER, FLOOD_FRAME, FRAME, FrameRecord, Geometry, KEY_CONTEXT,
     ScrollbarGeometry, SessionView, SessionViewEvent, TerminalOptions,
@@ -36,4 +39,5 @@ pub use view::{
 /// Registers the Terminal commands.
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, commands::COMMANDS);
+    ui::command::register(cx, commands::TAB_COMMANDS);
 }
