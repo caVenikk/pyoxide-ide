@@ -1,5 +1,6 @@
 //! The pre-scan of the PTY output for the sequences the emulator ignores
-//! (ADR 0014): OSC 7 (working directory), OSC 133 (prompt and command
+//! (ADR 0014): OSC 1 (the icon name, a title as the reference's emulator
+//! takes it), OSC 7 (working directory), OSC 133 (prompt and command
 //! marks, FinalTerm / iTerm2 style) and Pyoxide's own integration events.
 //! The bytes still go to the emulator unchanged; the scanner only reports
 //! where a recognised sequence ends, so the session can note the cursor
@@ -18,6 +19,10 @@ const MAX_OSC: usize = 4096;
 /// A recognised sequence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sequence {
+    /// OSC 1: the icon name, which the reference's emulator takes as the
+    /// title like OSC 0 and 2 (JediTerm's `doProcessOsc`); shells set it
+    /// to the running command's name after the command line (OSC 2).
+    IconName(String),
     /// OSC 7: the shell's working directory.
     WorkingDirectory(PathBuf),
     /// OSC 133.
@@ -144,6 +149,7 @@ impl Scanner {
         let text = std::str::from_utf8(&self.osc).ok()?;
         let (number, rest) = text.split_once(';').unwrap_or((text, ""));
         match number {
+            "1" => Some(Sequence::IconName(rest.to_owned())),
             "7" => parse_osc7(rest, self.windows).map(Sequence::WorkingDirectory),
             "133" => parse_osc133(rest).map(Sequence::Mark),
             OWN_OSC => Some(Sequence::Own(rest.to_owned())),
@@ -288,6 +294,10 @@ mod tests {
     fn ignores_other_and_broken_sequences() {
         let mut s = Scanner::new(false);
         assert!(scan_all(&mut s, b"\x1b]0;title\x07\x1b]133;Z\x07\x1b]133;A\x18\x07").is_empty());
+        assert_eq!(
+            scan_all(&mut s, b"\x1b]2;sleep 100\x07\x1b]1;sleep\x07"),
+            [(24, Sequence::IconName("sleep".into()))]
+        );
         let long = format!("\x1b]{OWN_OSC};{}\x07", "x".repeat(MAX_OSC + 1));
         assert!(scan_all(&mut s, long.as_bytes()).is_empty());
         let own = format!("\x1b]{OWN_OSC};event=1\x07");

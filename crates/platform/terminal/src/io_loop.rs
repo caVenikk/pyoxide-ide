@@ -326,6 +326,10 @@ impl IoLoop {
                     }));
                 }
                 Sequence::Own(payload) => notifier.send(SessionEvent::Integration(payload)),
+                Sequence::IconName(title) => {
+                    notifier.info().title = Some(title.clone());
+                    notifier.send(SessionEvent::Title(Some(title)));
+                }
             }
         }
         self.parser.advance(&mut state.term, bytes);
