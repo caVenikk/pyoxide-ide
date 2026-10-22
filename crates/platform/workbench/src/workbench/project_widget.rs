@@ -8,8 +8,13 @@
 //! home folder). The list scrolls beyond 30 rows of the list's row height
 //! (`ListPopupImpl`'s visible row count) and filters as one types.
 //!
+//! A row shows the branch of the project's Git work tree below the folder
+//! as the branches were last looked at (the reference's cache: the popup
+//! does not wait for them, opening it looks again for the next time).
+//!
 //! Choosing an open project shows its window, choosing a recent one opens
-//! it in this window.
+//! it in this window; a folder that is gone asks "Reopen Project" whether
+//! to take it off the list.
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -38,8 +43,12 @@ ui::ui_commands! {
     Show => "project-widget.show", "Project Widget",
         "Opens the project widget's popup (Open…, Clone Repository…, the open and the recent projects); closes it when it is open.";
     /// Open a recent project.
-    OpenRecent { path: String } => "project.open-recent", "Open Recent Project",
-        "Shows the window of a project open in the application, else opens the folder as the project in this window.",
+    OpenRecent { path: String, welcome: Option<bool> } => "project.open-recent", "Open Recent Project",
+        "Shows the window of a project open in the application, else opens the folder as the project in this window; a folder that is gone asks \"Reopen Project\" whether to take it off the list (`welcome`: the Welcome tab's question, Cancel or Remove From List; else the popup's, Remove From List or OK).",
+        r#"{"path": "/path/to/project"}"#;
+    /// Show a recent project's folder in the file manager.
+    RevealRecent { path: String } => "project.reveal-recent", "Show Recent Project in File Manager",
+        "Selects the folder of a recent project in the file manager (`WelcomeScreen.RevealIn`: Reveal in Finder, Show in Explorer).",
         r#"{"path": "/path/to/project"}"#;
     /// Copy a recent project's folder.
     CopyRecentPath { path: String } => "project.copy-recent-path", "Copy Path",
@@ -60,6 +69,26 @@ pub const OPEN: &str = "Open\u{2026}";
 pub const CLONE: &str = "Clone Repository\u{2026}";
 /// `dialog.title.remove.recent.project`.
 pub const REMOVE_TITLE: &str = "Remove Recent Project";
+/// `dialog.title.reopen.project`.
+pub const REOPEN_TITLE: &str = "Reopen Project";
+/// `button.remove.from.list`.
+pub const REMOVE_FROM_LIST: &str = "&Remove From List";
+/// `RevealFileAction.getActionName()`: `action.RevealIn.name.mac`, else
+/// `action.RevealIn.name.other` with the file manager's name.
+#[cfg(target_os = "macos")]
+pub const REVEAL: &str = "Reveal in Finder";
+#[cfg(windows)]
+pub const REVEAL: &str = "Show in Explorer";
+#[cfg(not(any(target_os = "macos", windows)))]
+pub const REVEAL: &str = "Show in File Manager";
+
+/// `message.the.path.0.does.not.exist.maybe.on.remote`.
+pub fn missing_folder_message(path: &Path) -> String {
+    format!(
+        "The path {} does not exist.\nIf it is on a removable or network drive, please make sure that the drive is connected.",
+        native_path::simplified(path).display()
+    )
+}
 /// `project.widget.open.projects`.
 pub const OPEN_PROJECTS: &str = "Open Projects";
 /// `project.widget.recent.projects`.
@@ -165,11 +194,25 @@ fn items(rows: &[ProjectRow], cx: &App) -> Vec<MenuItem> {
         // No clone dialog yet.
         MenuItem::unavailable(CLONE).icon(IconName::VCS),
     ];
+    // The branches as last looked at: the popup does not wait for them
+    // (`GitRecentProjectsBranchesService.getCurrentBranch` answers from
+    // its cache).
+    let folders = recent_projects::folders(cx);
     let row = |r: &ProjectRow| {
         let path = r.path.to_string_lossy().into_owned();
-        MenuItem::action(r.name.clone(), OpenRecent { path })
-            .avatar(recent_projects::avatar(&r.name, r.color, cx))
-            .comment(project::display_path(&r.path))
+        let item = MenuItem::action(
+            r.name.clone(),
+            OpenRecent {
+                path,
+                welcome: None,
+            },
+        )
+        .avatar(recent_projects::avatar(&r.name, r.color, cx))
+        .comment(project::display_path(&r.path));
+        match folders.branches.get(&r.path) {
+            Some(branch) => item.branch(branch.clone()),
+            None => item,
+        }
     };
     let (open, recent): (Vec<_>, Vec<_>) = rows.iter().partition(|r| r.open);
     if !open.is_empty() {
@@ -287,6 +330,8 @@ impl Workbench {
             return;
         }
         let rows = project_rows(&recent_projects::list(cx), &self.open_projects(window, cx));
+        // For the next time (the reference's cache fills as it is asked).
+        recent_projects::check_folders(cx);
         let menu = ContextMenu::popup(
             items(&rows, cx),
             PopupOptions {
@@ -338,7 +383,67 @@ impl Workbench {
             let _ = other.update(cx, |_, window, _| window.activate_window());
             return;
         }
+        // `RecentProjectItem.openProject`, `ReopenProjectAction`: a folder
+        // that is gone asks first (`open_folder` looks at it on this thread
+        // too).
+        if !path.is_dir() {
+            self.ask_reopen_missing(path, action.welcome == Some(true), window, cx);
+            return;
+        }
         self.open_folder(path, window, cx);
+    }
+
+    /// "Reopen Project" for a folder that is gone (`showReopenDialog`):
+    /// Remove From List takes it off the list. The Welcome tab asks with
+    /// Cancel and Remove From List, the default (`showYesNoDialog`); the
+    /// popup with Remove From List and OK, the default (`showDialog`, the
+    /// buttons in the macOS order).
+    fn ask_reopen_missing(
+        &mut self,
+        path: PathBuf,
+        welcome: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let message = missing_folder_message(&path);
+        let buttons = if welcome {
+            vec![
+                DialogButton {
+                    id: "cancel",
+                    label: "&Cancel".into(),
+                },
+                DialogButton {
+                    id: "remove",
+                    label: REMOVE_FROM_LIST.into(),
+                },
+            ]
+        } else {
+            vec![
+                DialogButton {
+                    id: "remove",
+                    label: REMOVE_FROM_LIST.into(),
+                },
+                DialogButton {
+                    id: "ok",
+                    label: "OK".into(),
+                },
+            ]
+        };
+        let dialog = cx.new(|cx| {
+            Dialog::new(REOPEN_TITLE, message, buttons, cx).with_icon(IconName::ERROR_DIALOG)
+        });
+        self.open_dialog(dialog, PendingDialog::ReopenMissing(path), window, cx);
+    }
+
+    /// `project.reveal-recent`: the folder selected in the file manager
+    /// (`RevealFileAction.openFile`).
+    pub(super) fn reveal_recent_project(
+        &mut self,
+        action: &RevealRecent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.reveal_path(Path::new(&action.path));
     }
 
     /// The popup is open (the widget shows its hover background, as a

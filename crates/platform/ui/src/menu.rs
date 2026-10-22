@@ -168,6 +168,11 @@ const AVATAR_LINE_GAP: f32 = 2.0;
 const AVATAR_NAME_LINE: f32 = 17.0;
 const AVATAR_PATH_LINE: f32 = 15.0;
 const AVATAR: f32 = 20.0;
+/// The branch's line below the path: a label with the branch icon (16, 4
+/// before the text) in the comment's colour, 16 high.
+const AVATAR_BRANCH_LINE: f32 = 16.0;
+const BRANCH_ICON: f32 = 16.0;
+const BRANCH_ICON_GAP: f32 = 4.0;
 
 /// Radius of the selection background: `PopupMenu.Selection.arc` and
 /// `Popup.Selection.arc` 8 are diameters.
@@ -287,6 +292,9 @@ pub struct RowExtra {
     /// (`Plugins.lightSelectionBackground`); the speed search finds it by
     /// its comment (the project's folder) too.
     pub avatar: Option<Avatar>,
+    /// A project's branch on a third line, after the branch icon (a row
+    /// with an avatar: `ProjectWidgetRenderer`'s branch row).
+    pub branch: Option<SharedString>,
 }
 
 impl RowExtra {
@@ -304,6 +312,7 @@ impl Clone for RowExtra {
             comment: self.comment.clone(),
             icon_size: self.icon_size,
             avatar: self.avatar.clone(),
+            branch: self.branch.clone(),
             secondary: self.secondary.clone(),
             secondary_small: self.secondary_small,
             icon_alpha: self.icon_alpha,
@@ -549,6 +558,14 @@ impl MenuItem {
     pub fn avatar(mut self, avatar: Avatar) -> Self {
         if let Some(extra) = self.extra_mut() {
             extra.avatar = Some(avatar);
+        }
+        self
+    }
+
+    /// A project's branch below its folder ([`RowExtra::branch`]).
+    pub fn branch(mut self, name: impl Into<SharedString>) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.branch = Some(name.into());
         }
         self
     }
@@ -1495,6 +1512,9 @@ impl ContextMenu {
                             if let Some(avatar) = &extra.avatar {
                                 row["avatar"] = json!(avatar.text.as_ref());
                             }
+                            if let Some(branch) = &extra.branch {
+                                row["branch"] = json!(branch.as_ref());
+                            }
                             if let Some(alpha) = extra.icon_alpha {
                                 row["icon_alpha"] = json!(alpha);
                             }
@@ -1656,7 +1676,17 @@ impl ContextMenu {
                 let indent = extra.map_or(0, |e| e.indent);
                 let more = !self.submenu_on_hover && item.is_final_group();
                 let buttons = extra.map_or(0, |e| e.inline.len()) + usize::from(more);
-                let arrow = item.has_submenu() && !more;
+                // A group with nothing in it yet keeps its arrow, greyed
+                // with the row (Move to Group without groups).
+                let empty_group =
+                    matches!(item, MenuItem::Submenu { items, enabled: false, .. } if items.is_empty());
+                let arrow = (item.has_submenu() || empty_group) && !more;
+                let arrow_icon = || {
+                    div()
+                        .flex_none()
+                        .when(!enabled, |d| d.opacity(crate::components::DISABLED_ALPHA))
+                        .child(Icon::new(IconName::CHEVRON_RIGHT))
+                };
                 let shortcut_color = if enabled { muted } else { disabled };
                 let shortcut = shortcut.map(|s| {
                     div()
@@ -1672,13 +1702,7 @@ impl ContextMenu {
                 let end: Option<AnyElement> = if buttons > 0 {
                     Some(self.render_buttons(level, ix, more, is_selected, inner_height, cx))
                 } else if list && arrow {
-                    Some(
-                        div()
-                            .flex_none()
-                            .pl(px(NEXT_STEP_GAP))
-                            .child(Icon::new(IconName::CHEVRON_RIGHT))
-                            .into_any_element(),
-                    )
+                    Some(arrow_icon().pl(px(NEXT_STEP_GAP)).into_any_element())
                 } else if list {
                     shortcut
                 } else {
@@ -1693,7 +1717,7 @@ impl ContextMenu {
                             .items_center()
                             .justify_end()
                             .children(shortcut)
-                            .when(arrow, |d| d.child(Icon::new(IconName::CHEVRON_RIGHT)))
+                            .when(arrow, |d| d.child(arrow_icon()))
                             .into_any_element(),
                     )
                 };
@@ -1740,6 +1764,30 @@ impl ContextMenu {
                     }));
                 let two_lines = comment.is_some();
                 let avatar_row = avatar.is_some();
+                let branch = extra
+                    .and_then(|e| e.branch.clone())
+                    .filter(|_| avatar_row)
+                    .map(|branch| {
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(BRANCH_ICON_GAP))
+                            .py(px(AVATAR_LINE_GAP))
+                            .h(px(AVATAR_BRANCH_LINE + 2.0 * AVATAR_LINE_GAP))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_size(small)
+                            .text_color(muted)
+                            .child(
+                                div().flex_none().child(
+                                    Icon::new(IconName::VCS)
+                                        .size(px(BRANCH_ICON))
+                                        .tint(muted),
+                                ),
+                            )
+                            .child(branch)
+                    });
                 // A project's row: each line 2 above and below it.
                 let label_row = label_row.when(avatar_row, |d| {
                     d.py(px(AVATAR_LINE_GAP)).line_height(px(AVATAR_NAME_LINE))
@@ -1763,6 +1811,7 @@ impl ContextMenu {
                                 })
                                 .child(comment),
                         )
+                        .children(branch)
                         .into_any_element(),
                 };
                 let selection = if avatar_row {

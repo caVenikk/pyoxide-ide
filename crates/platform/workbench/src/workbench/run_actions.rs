@@ -43,6 +43,9 @@ pub(super) enum PendingDialog {
     CloseTerminal(u64),
     /// "Remove Recent Project": Remove takes it off the list.
     RemoveRecentProject(PathBuf),
+    /// "Reopen Project" of a folder that is gone: Remove From List takes
+    /// it off the list.
+    ReopenMissing(PathBuf),
 }
 
 /// What closing a tab with a running process does
@@ -1172,7 +1175,10 @@ impl Workbench {
                 }
                 self.stop_and_launch(launch, window, cx);
             }
-            (PendingDialog::RemoveRecentProject(path), Some("remove")) => {
+            (
+                PendingDialog::RemoveRecentProject(path) | PendingDialog::ReopenMissing(path),
+                Some("remove"),
+            ) => {
                 crate::recent_projects::remove(cx, &path);
             }
             (PendingDialog::DeleteConfiguration(key), Some("yes")) => {

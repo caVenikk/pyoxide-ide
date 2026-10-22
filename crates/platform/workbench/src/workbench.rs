@@ -2525,6 +2525,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::open_recent_project))
             .on_action(cx.listener(Self::copy_recent_path))
             .on_action(cx.listener(Self::remove_recent_project))
+            .on_action(cx.listener(Self::reveal_recent_project))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))
             .on_action(cx.listener(Self::quick_switch))

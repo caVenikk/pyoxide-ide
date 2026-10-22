@@ -44,6 +44,19 @@
   ManyIslandsDark.theme.json and ManyIslandsLight.theme.json, the action
   texts of platform/platform-resources-en/src/messages/ActionsBundle.properties
   and platform/platform-api/resources/messages/IdeBundle.properties, the
-  toolbar insets `MainToolbar.Dropdown.borderInsets` of JBUI.java.
+  toolbar insets `MainToolbar.Dropdown.borderInsets` of JBUI.java;
+  plugins/git4idea/backend/src/repo/GitRecentProjectsBranchesProvider.kt
+  with its default in intellij.vcs.git.backend.xml (the branch of a
+  recent project's work tree, shown for every project), platform/
+  platform-impl/src/com/intellij/openapi/wm/impl/welcomeScreen/
+  recentProjects/RecentProjectTreeItem.kt, platform/platform-impl/src/com/
+  intellij/ide/ReopenProjectAction.kt and platform/platform-impl/src/com/
+  intellij/ui/messages/AlertMessagesManager.kt (the "Reopen Project"
+  question for a folder that is gone, its buttons in the macOS order),
+  projectActions/RevealProjectDirAction.kt and platform/platform-impl/src/
+  com/intellij/ide/actions/RevealFileAction.java (Reveal in Finder and its
+  names), platform/core-ui/src/util/IconUtil.kt (`desaturate`),
+  `Table.lightSelectionBackground` and the "more" icon mapped from
+  `Ide.Notification.Gear` in platform/icons/src/PlatformIconMappings.json.
   Only behaviour, numbers, colours and texts are used; reimplemented in
   Rust with GPUI.

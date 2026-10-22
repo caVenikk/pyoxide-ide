@@ -492,3 +492,176 @@ fn the_pointer_selects_the_row_it_is_over(cx: &mut TestAppContext) {
     h.press("down");
     assert_eq!(h.selected().as_deref(), Some("gamma"));
 }
+
+/// Writes a work tree's `HEAD` (no git needed).
+fn work_tree(root: &Path, head: &str) {
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git").join("HEAD"), head).unwrap();
+}
+
+impl H<'_> {
+    /// The open dialog: title, message, buttons, default.
+    fn dialog(&mut self) -> Value {
+        self.invoke("workbench.state", json!(null))["dialog"].clone()
+    }
+}
+
+#[gpui::test]
+fn rows_show_the_branch_and_a_gone_folder_asks_before_it_opens(cx: &mut TestAppContext) {
+    let (mut h, folders) = open_listed(cx, &["on-branch", "detached", "plain"]);
+    work_tree(&folders[0], "ref: refs/heads/main\n");
+    work_tree(&folders[1], "376912943768808b0ac3f0bf3c5f4a6db2beda1c\n");
+    // A folder that is gone below the first work tree.
+    let gone = folders[0].join("gone-app");
+    h.cx.update(|cx| recent_projects::opened(cx, &gone, "gone-app"));
+    h.draw();
+    let w = h.welcome();
+    let rows: Vec<(String, Value, bool)> = w["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().to_owned(),
+                p["branch"].clone(),
+                p["gone"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("gone-app".to_owned(), json!("main"), true),
+            ("on-branch".to_owned(), json!("main"), false),
+            ("detached".to_owned(), json!(null), false),
+            ("plain".to_owned(), json!(null), false),
+        ],
+        "{w}"
+    );
+
+    // Opening it from the list (Enter, a click): "Reopen Project", Cancel
+    // or Remove From List (the default), which removes it without asking
+    // again.
+    let message = format!(
+        "The path {} does not exist.\nIf it is on a removable or network drive, please make sure that the drive is connected.",
+        gone.display()
+    );
+    h.focus_welcome(false);
+    h.press("home enter");
+    let d = h.dialog();
+    assert_eq!(d["title"], json!("Reopen Project"), "{d}");
+    assert_eq!(d["message"], json!(message));
+    assert_eq!(d["buttons"], json!(["Cancel", "Remove From List"]));
+    assert_eq!(d["default"], json!("Remove From List"));
+    h.invoke("dialog.cancel", json!(null));
+    assert_eq!(h.recent(), ["gone-app", "on-branch", "detached", "plain"]);
+    assert_eq!(
+        h.invoke("workbench.state", json!(null))["project"],
+        json!(null)
+    );
+    h.invoke(
+        "project.open-recent",
+        json!({ "path": gone.to_string_lossy(), "welcome": true }),
+    );
+    h.invoke("dialog.confirm", json!(null));
+    assert_eq!(h.dialog(), json!(null));
+    assert_eq!(h.recent(), ["on-branch", "detached", "plain"]);
+
+    // From the popup: Remove From List or OK (the default), which keeps it.
+    h.cx.update(|cx| recent_projects::opened(cx, &gone, "gone-app"));
+    h.open(&folders[2]);
+    h.invoke(
+        "project.open-recent",
+        json!({ "path": gone.to_string_lossy() }),
+    );
+    let d = h.dialog();
+    assert_eq!(d["title"], json!("Reopen Project"), "{d}");
+    assert_eq!(d["buttons"], json!(["Remove From List", "OK"]));
+    assert_eq!(d["default"], json!("OK"));
+    h.invoke("dialog.confirm", json!(null));
+    assert_eq!(h.recent(), ["plain", "gone-app", "on-branch", "detached"]);
+    let s = h.invoke("workbench.state", json!(null));
+    assert_eq!(s["project"]["root"], json!(folders[2].to_string_lossy()));
+
+    // The popup shows the branches as last looked at.
+    h.invoke("project-widget.show", json!(null));
+    let s = h.invoke("project-widget.state", json!(null));
+    let branches: Vec<(String, Value)> = s["popup"]["levels"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["avatar"].is_string())
+        .map(|i| (i["label"].as_str().unwrap().to_owned(), i["branch"].clone()))
+        .collect();
+    assert_eq!(
+        branches,
+        [
+            ("plain".to_owned(), json!(null)),
+            ("gone-app".to_owned(), json!("main")),
+            ("on-branch".to_owned(), json!("main")),
+            ("detached".to_owned(), json!(null)),
+        ],
+        "{s}"
+    );
+}
+
+#[gpui::test]
+fn a_row_menu_has_the_reference_actions(cx: &mut TestAppContext) {
+    let (mut h, folders) = open_listed(cx, &["alpha", "beta"]);
+    let mut vcx = gpui::VisualTestContext::from_window(h.window.into(), h.cx);
+    let beta = vcx
+        .debug_bounds("welcome-project:beta")
+        .expect("the row")
+        .center();
+    vcx.simulate_mouse_move(beta, None, gpui::Modifiers::none());
+    // The selected row's button (a folder that exists: "more").
+    let button = vcx
+        .debug_bounds("welcome-project-button")
+        .expect("the row's button")
+        .center();
+    vcx.simulate_click(button, gpui::Modifiers::none());
+    let w = h.welcome();
+    let items = w["menu"]["levels"][0]["items"].as_array().unwrap().clone();
+    let rows: Vec<(String, bool)> = items
+        .iter()
+        .map(|i| match i["label"].as_str() {
+            Some(label) => (label.to_owned(), i["enabled"].as_bool().unwrap()),
+            None => ("-".to_owned(), false),
+        })
+        .collect();
+    let reveal = if cfg!(target_os = "macos") {
+        "Reveal in Finder"
+    } else if cfg!(windows) {
+        "Show in Explorer"
+    } else {
+        "Show in File Manager"
+    };
+    assert_eq!(
+        rows,
+        [
+            ("Open Selected".to_owned(), true),
+            (reveal.to_owned(), true),
+            ("Copy Path".to_owned(), true),
+            ("-".to_owned(), false),
+            ("New Project Group".to_owned(), false),
+            ("Move to Group".to_owned(), false),
+            ("-".to_owned(), false),
+            ("Set Custom Project Icon\u{2026}".to_owned(), false),
+            ("-".to_owned(), false),
+            ("Remove from Recent Projects\u{2026}".to_owned(), true),
+        ],
+        "{w}"
+    );
+    // The list's shortcuts: Copy Paths and `$Delete`.
+    assert!(items[2]["shortcut"].is_string(), "{w}");
+    assert!(items[9]["shortcut"].is_string(), "{w}");
+    // Copy Path copies the folder of the row.
+    for _ in 0..3 {
+        h.invoke("menu.down", json!(null));
+    }
+    assert_eq!(h.welcome()["menu"]["levels"][0]["selected"], json!(2));
+    h.invoke("menu.confirm", json!(null));
+    assert_eq!(h.welcome()["menu"], json!(null));
+    let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied.as_deref(), Some(folders[1].to_str().unwrap()));
+}

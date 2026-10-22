@@ -219,7 +219,7 @@ report says which parent was missing.
 | `ui.selection` | `List.selectionBackground`, `Tree.selectionBackground`, `Table.selectionBackground` | Background of the selected row in lists and trees |
 | `ui.selection-text` | `List.selectionForeground`, `Tree.selectionForeground` | Text on the selected row |
 | `ui.selection-inactive` | `List.selectionInactiveBackground`, `Tree.selectionInactiveBackground` | Selected row in a list that has no focus |
-| `ui.selection-light` | `Plugins.lightSelectionBackground` | Selected row of a list of rich rows (the projects of the project widget's popup) |
+| `ui.selection-light` | `Plugins.lightSelectionBackground`, `Table.lightSelectionBackground` | Selected row of a list of rich rows (the projects of the project widget's popup and of the Welcome tab) |
 | `ui.danger` | `Label.errorForeground`, `Component.errorFocusColor` | Errors and destructive actions |
 | `ui.warning` | `Label.warningForeground`, `Component.warningFocusColor` | Warnings |
 | `ui.success` | `Label.successForeground` | Success and completed states |

@@ -219,16 +219,15 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(h.welcome_selected().as_deref(), Some("gone-b"), "{what}");
         }
         "welcome-projects.open" => {
-            // A folder that is gone stays in the window, with a message.
+            // A folder that is gone asks "Reopen Project" first.
             let name = if in_field { "gone-b" } else { "gone-a" };
             h.welcome_select(name);
             focus(h);
             h.press(keys);
-            let message = h.state()["message"].as_str().map(str::to_owned);
-            assert!(
-                message.is_some_and(|m| m.ends_with(&format!("{name} is not a folder"))),
-                "{what}"
-            );
+            let s = h.state();
+            assert_eq!(s["dialog"]["title"], json!("Reopen Project"), "{what}");
+            let message = s["dialog"]["message"].as_str().unwrap_or_default();
+            assert!(message.contains(&format!("{name} does not exist.")), "{what}: {s}");
         }
         "welcome-projects.remove" => {
             h.welcome_select("beta");

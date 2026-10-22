@@ -10,7 +10,13 @@
 //! got, from a random one at the first (`ProjectWindowCustomizerService.
 //! nextColorIndex`), and keeps it. The file is read and written off the
 //! UI thread; what changes before it is read is applied to it then.
+//!
+//! The folders are looked at off the UI thread too ([`check_folders`]):
+//! which are gone, and the branch of each one's Git work tree, from its
+//! `HEAD` (`GitRecentProjectsBranchesService`, shown for every project:
+//! `git.recent.projects.show.branch` is `ALWAYS` by default).
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -395,6 +401,78 @@ pub fn file() -> Option<PathBuf> {
     ::settings::config_dir().map(|d| d.join(FILE))
 }
 
+/// What the recent projects' folders showed when they were last looked at
+/// ([`check_folders`], off the UI thread): the folders that are gone (the
+/// Welcome tab greys them) and the branch of each one's Git work tree.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Folders {
+    pub gone: HashSet<PathBuf>,
+    pub branches: HashMap<PathBuf, String>,
+}
+
+/// The global that holds the last look at the folders (observe it to hear
+/// of a change), and which look's result is the latest.
+#[derive(Default)]
+pub struct FolderState {
+    folders: Folders,
+    generation: u64,
+}
+
+impl Global for FolderState {}
+
+/// The recent projects' folders as last looked at (nothing before the
+/// first look: the reference's branch cache starts empty too).
+pub fn folders(cx: &App) -> Folders {
+    cx.try_global::<FolderState>()
+        .map(|s| s.folders.clone())
+        .unwrap_or_default()
+}
+
+/// Looks at the recent projects' folders off the UI thread; observers of
+/// [`FolderState`] hear of a change.
+pub fn check_folders(cx: &mut App) {
+    let paths: Vec<PathBuf> = list(cx).projects.into_iter().map(|p| p.path).collect();
+    let generation = {
+        let state = cx.default_global::<FolderState>();
+        state.generation += 1;
+        state.generation
+    };
+    let look = cx.background_executor().spawn(async move {
+        let mut folders = Folders::default();
+        for path in paths {
+            if !path.is_dir() {
+                folders.gone.insert(path.clone());
+            }
+            if let Some(branch) = branch_at(&path) {
+                folders.branches.insert(path, branch);
+            }
+        }
+        folders
+    });
+    cx.spawn(async move |cx| {
+        let folders = look.await;
+        let _ = cx.update(|cx| {
+            let state = cx.global::<FolderState>();
+            if state.generation == generation && state.folders != folders {
+                cx.global_mut::<FolderState>().folders = folders;
+            }
+        });
+    })
+    .detach();
+}
+
+/// The branch the Git work tree at `path` or above it is on
+/// (`GitRecentProjectsBranchesService.loadBranch`: its `HEAD`; none when
+/// it names a commit, or when the refs are in a reftable). The folder
+/// itself may be gone: the work tree above it still counts.
+pub fn branch_at(path: &Path) -> Option<String> {
+    let repo = git::Repository::detect(path)?;
+    if repo.uses_reftable(&repo.config()) {
+        return None;
+    }
+    repo.read_head()?.branch().map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +546,45 @@ mod tests {
         assert_eq!(paths(&list), ["/nonexistent/beta"]);
         let read = RecentProjects::parse(&list.to_toml());
         assert_eq!(read, list);
+    }
+
+    /// A work tree at `root` whose `HEAD` says `head`, without git.
+    fn work_tree(root: &Path, head: &str) {
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git").join("HEAD"), head).unwrap();
+    }
+
+    #[test]
+    fn the_branch_is_the_head_of_the_work_tree_at_the_folder_or_above() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let repo = root.join("repo");
+        work_tree(&repo, "ref: refs/heads/feature/x\n");
+        assert_eq!(branch_at(&repo).as_deref(), Some("feature/x"));
+        // A folder in it, and one that is gone: the work tree above.
+        std::fs::create_dir_all(repo.join("app")).unwrap();
+        assert_eq!(branch_at(&repo.join("app")).as_deref(), Some("feature/x"));
+        assert_eq!(branch_at(&repo.join("gone")).as_deref(), Some("feature/x"));
+        // A commit checked out: no branch.
+        let detached = root.join("detached");
+        work_tree(&detached, "376912943768808b0ac3f0bf3c5f4a6db2beda1c\n");
+        assert_eq!(branch_at(&detached), None);
+        // A linked work tree: the folder its `.git` file names.
+        let linked = root.join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        let git_dir = root
+            .join("repo")
+            .join(".git")
+            .join("worktrees")
+            .join("linked");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/fix\n").unwrap();
+        std::fs::write(
+            linked.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+        assert_eq!(branch_at(&linked).as_deref(), Some("fix"));
     }
 
     #[test]

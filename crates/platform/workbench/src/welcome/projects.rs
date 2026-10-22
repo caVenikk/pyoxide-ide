@@ -7,22 +7,34 @@
 //! (`RecentProjectFilteringTree`; without any, "No recent projects" a
 //! third of the way down, where `StatusText` puts it).
 //!
+//! The list starts 10 below the line (6 below the line's row, 4 of the
+//! tree's border); its rows are 12 in from the sides (`Tree.border`).
+//!
 //! A recent project's row (`RecentProjectComponent`): a border of 4, the
 //! avatar 6 in from it (top and left) and 8 before the name panel, which
-//! has 4 around it, the name and below it, 4 apart, the folder in the
-//! comment colour. A click opens the project. The pointer over a row
-//! shows a button of 22, 20 from the row's right end: a gear with the
-//! row's menu (`WelcomeScreenRecentProjectActionGroup`, the actions there
-//! are here: Open Selected, Copy Path, Remove from Recent Projects…), or
-//! for a folder that is gone a cross that takes it off the list (after
-//! asking); such a row is greyed. A right click opens the menu too. The
+//! has 4 around it, the name and below it, 4 apart, the folder and the
+//! branch of its Git work tree (after the branch icon, 4 before the text)
+//! in the comment colour. A click opens the project; one on a folder that
+//! is gone asks "Reopen Project" whether to take it off the list. The
+//! selected row (light selection, `Table.lightSelectionBackground`) shows
+//! a button of 22 centred on its right end, 12 in from the selection's
+//! edge (the renderer spans to the tree's edge, 12 beyond the selection,
+//! less its border of 4 and the button's gap of 20): the "more" icon with
+//! the row's menu (`WelcomeScreenRecentProjectActionGroup`: Open Selected,
+//! Reveal in Finder, Copy Path, New Project Group, Move to Group, Set
+//! Custom Project Icon…, Remove from Recent Projects…; groups and custom
+//! icons are not here yet, their rows are greyed), or for a folder that is
+//! gone a cross (`Welcome.RecentProjects.Remove`) that takes it off the
+//! list after asking; the button keeps its hover background while its
+//! menu is open. A gone folder's row is greyed, its avatar desaturated. A
+//! right click opens the menu too. The pointer over a row is a hand. The
 //! search field filters the rows by name and folder.
 //!
 //! The keyboard (`RecentProjectFilteringTree`, `FilteringTree`): one row is
 //! selected, as the reference's tree has it: the row under the pointer (the
 //! tree selects the row the pointer moves over and clears the selection
 //! when it leaves), the first row at the start, else the one the keys
-//! moved to; the selected row shows the gear. Up and Down move the
+//! moved to; the selected row shows its button. Up and Down move the
 //! selection, from the list and from the search field alike, without
 //! wrapping (Up with no selection goes to the last row, Down to the
 //! first); Home and End go to the first and the last row. Enter opens the
@@ -37,10 +49,9 @@
 //! sides and 8 below the top, corners of 8, the icon 14 from the left and
 //! 12 before the label (`DisclosureButton`, `DarculaDisclosureButtonUI`);
 //! their background white at 7 % (dark themes) or black at 4 %, 5 % more
-//! under the mouse. The line 27 below the last button, the search row 38
-//! high.
+//! under the mouse. The line 26 below the last button, the search row 42
+//! high (measured in the reference).
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use gpui::{
@@ -54,11 +65,14 @@ use themes::{Metric, UiRole};
 use ui::components::Tooltip;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
+use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt;
 
 use crate::commands::OpenFolder;
 use crate::recent_projects::{self, RecentProject};
-use crate::workbench::project_widget::{CopyRecentPath, OpenRecent, RemoveRecent};
+use crate::workbench::project_widget::{
+    CopyRecentPath, OpenRecent, REVEAL, RemoveRecent, RevealRecent,
+};
 
 ui::ui_commands! {
     COMMANDS, scope = "Welcome";
@@ -110,10 +124,13 @@ const BUTTONS_X: f32 = 20.0;
 const BUTTONS_TOP: f32 = 8.0;
 const BUTTON_ICON_X: f32 = 14.0;
 const BUTTON_ICON_GAP: f32 = 12.0;
-const LINE_TOP: f32 = 27.0;
-const SEARCH_HEIGHT: f32 = 38.0;
+const LINE_TOP: f32 = 26.0;
+const SEARCH_HEIGHT: f32 = 42.0;
 const SEARCH_ICON_X: f32 = 26.0;
 const SEARCH_ICON_GAP: f32 = 8.0;
+/// The list's top and bottom (see the module's notes).
+const LIST_TOP: f32 = 10.0;
+const LIST_BOTTOM: f32 = 4.0;
 /// A project's row (see the module's notes) and the selection's inset
 /// from the panel's sides (the tree's, as in the project tree).
 const ROW_BORDER: f32 = 4.0;
@@ -123,10 +140,19 @@ const ROW_TEXT: f32 = 4.0;
 const ROW_LINE_GAP: f32 = 4.0;
 const ROW_NAME_LINE: f32 = 17.0;
 const ROW_PATH_LINE: f32 = 15.0;
+/// The branch's line: a label with a 16 icon, 4 before the text.
+const ROW_BRANCH_LINE: f32 = 16.0;
+const BRANCH_ICON: f32 = 16.0;
+const BRANCH_ICON_GAP: f32 = 4.0;
 const AVATAR: f32 = 20.0;
 const ROW_BUTTON: f32 = 22.0;
-const ROW_BUTTON_RIGHT: f32 = 20.0;
 const ROW_INSET: f32 = 12.0;
+/// The button's right end from the selection's (see the module's notes).
+const ROW_BUTTON_RIGHT: f32 = 20.0 + ROW_BORDER - ROW_INSET;
+/// The button's corners (`ActionsButton.selectionArc` 6 is a diameter).
+const ROW_BUTTON_RADIUS: f32 = 3.0;
+/// The cross's size (a 10 by 10 icon).
+const REMOVE_ICON: f32 = 10.0;
 /// `recent.project.unavailable`, after a gone folder in its tooltip.
 pub const UNAVAILABLE: &str = "(unavailable)";
 /// `action.presentation.OpenSelectedProjectsAction.text.open.selected`.
@@ -135,6 +161,12 @@ pub const OPEN_SELECTED: &str = "Open Selected";
 pub const COPY_PATH: &str = "Copy Path";
 /// `action.WelcomeScreen.RemoveSelected.text`.
 pub const REMOVE: &str = "Remove from Recent Projects\u{2026}";
+/// `action.WelcomeScreen.NewGroup.text`.
+pub const NEW_GROUP: &str = "New Project Group";
+/// `group.WelcomeScreen.MoveToGroup.text`.
+pub const MOVE_TO_GROUP: &str = "Move to Group";
+/// `action.WelcomeScreen.ChangeProjectIcon.text`.
+pub const CHANGE_ICON: &str = "Set Custom Project Icon\u{2026}";
 
 /// A button of the column: its label, icon and what it runs (none yet:
 /// drawn disabled, with [`NOT_AVAILABLE`] as its tooltip).
@@ -168,15 +200,21 @@ const BUTTONS: [Button; 3] = [
     },
 ];
 
+/// Opening a recent project from the list (a folder that is gone asks
+/// the Welcome tab's question).
+fn open_action(path: String) -> OpenRecent {
+    OpenRecent {
+        path,
+        welcome: Some(true),
+    }
+}
+
 pub struct WelcomeProjects {
     search: Entity<editor::Editor>,
     /// The list's focus (the project tool window's: the panel hands it
     /// over while it shows this list).
     focus: FocusHandle,
     scroll: ScrollHandle,
-    /// The folders of the recent projects that are gone (looked at off the
-    /// UI thread whenever the list changes).
-    gone: HashSet<PathBuf>,
     /// The selected row: the one under the pointer, or the one the keys
     /// moved to (a folder that is no longer listed selects nothing).
     selected: Option<PathBuf>,
@@ -186,6 +224,13 @@ pub struct WelcomeProjects {
     searched: String,
     /// A row's menu and where it opened.
     menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// The menu was opened from the row's button (which keeps its hover
+    /// background meanwhile).
+    menu_from_button: bool,
+    /// The row pressed last has no tooltip until the pointer leaves it (a
+    /// press hides the tooltip, `IdeTooltipManager`; one waiting to show
+    /// would otherwise come up over the dialog or the project).
+    pressed: Option<PathBuf>,
 }
 
 impl WelcomeProjects {
@@ -197,21 +242,32 @@ impl WelcomeProjects {
             .detach();
         cx.observe_global::<recent_projects::Store>(|this, cx| {
             this.list_changed(cx);
-            this.check_folders(cx);
+            recent_projects::check_folders(cx);
+        })
+        .detach();
+        cx.observe_global::<recent_projects::FolderState>(|_, cx| cx.notify())
+            .detach();
+        // The folders are looked at again when the window comes to the
+        // front (the branches' cache refreshes on activation).
+        cx.observe_window_activation(window, |_, window, cx| {
+            if window.is_window_active() {
+                recent_projects::check_folders(cx);
+            }
         })
         .detach();
         let mut this = Self {
             search,
             focus,
             scroll: ScrollHandle::new(),
-            gone: HashSet::new(),
             selected: None,
             initially_selected: false,
             searched: String::new(),
             menu: None,
+            menu_from_button: false,
+            pressed: None,
         };
         this.list_changed(cx);
-        this.check_folders(cx);
+        recent_projects::check_folders(cx);
         this
     }
 
@@ -313,7 +369,7 @@ impl WelcomeProjects {
     /// Enter (`activateItems`): what a click on the row does.
     fn open_selected(&mut self, _: &OpenSelected, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = self.selected_folder(cx) {
-            window.dispatch_action(Box::new(OpenRecent { path }), cx);
+            window.dispatch_action(Box::new(open_action(path)), cx);
         }
     }
 
@@ -347,31 +403,6 @@ impl WelcomeProjects {
         }
     }
 
-    /// Looks for the recent projects' folders off the UI thread.
-    fn check_folders(&mut self, cx: &mut Context<Self>) {
-        let paths: Vec<PathBuf> = recent_projects::list(cx)
-            .projects()
-            .iter()
-            .map(|p| p.path.clone())
-            .collect();
-        let check = cx.background_spawn(async move {
-            paths
-                .into_iter()
-                .filter(|p| !p.is_dir())
-                .collect::<HashSet<_>>()
-        });
-        cx.spawn(async move |this, cx| {
-            let gone = check.await;
-            let _ = this.update(cx, |this, cx| {
-                if this.gone != gone {
-                    this.gone = gone;
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     /// The recent projects the search field lets through, by name or
     /// folder (`*` and the text, case ignored, as the speed search does).
     fn shown(&self, cx: &App) -> Vec<RecentProject> {
@@ -393,6 +424,7 @@ impl WelcomeProjects {
 
     /// What the panel shows, for `workbench.state`.
     pub fn state_json(&self, cx: &App) -> Json {
+        let folders = recent_projects::folders(cx);
         json!({
             "title": TITLE,
             "buttons": BUTTONS.iter().map(|b| json!({
@@ -404,7 +436,8 @@ impl WelcomeProjects {
                 "name": p.name,
                 "path": project::display_path(&p.path),
                 "avatar": ui::avatar::initials(&p.name),
-                "gone": self.gone.contains(&p.path),
+                "gone": folders.gone.contains(&p.path),
+                "branch": folders.branches.get(&p.path),
             })).collect::<Vec<_>>(),
             "selected": self
                 .selected_folder(cx)
@@ -414,35 +447,67 @@ impl WelcomeProjects {
         })
     }
 
-    /// The row's menu (`WelcomeScreenRecentProjectActionGroup`, what works
-    /// here) at `position`.
+    /// The row's menu at `position` (`WelcomeScreenRecentProjectActionGroup`:
+    /// the custom actions of other providers are none; groups and custom
+    /// icons are not here yet). The shortcuts are the list's (Copy Paths,
+    /// `$Delete`).
     fn open_menu(
         &mut self,
         path: PathBuf,
         position: Point<Pixels>,
+        from_button: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let path = path.to_string_lossy().into_owned();
+        let shortcut = |item: MenuItem, action: &dyn gpui::Action| match ui::keys::shortcut_in(
+            action,
+            &self.focus,
+            window,
+        ) {
+            Some(text) => item.shortcut(text),
+            None => item,
+        };
         let items = vec![
-            MenuItem::action(OPEN_SELECTED, OpenRecent { path: path.clone() }),
-            MenuItem::action(COPY_PATH, CopyRecentPath { path: path.clone() }),
+            MenuItem::action(OPEN_SELECTED, open_action(path.clone())),
+            MenuItem::action(REVEAL, RevealRecent { path: path.clone() }),
+            shortcut(
+                MenuItem::action(COPY_PATH, CopyRecentPath { path: path.clone() }),
+                &CopySelectedPath,
+            ),
             MenuItem::separator(),
-            MenuItem::action(REMOVE, RemoveRecent { path }),
+            MenuItem::unavailable(NEW_GROUP),
+            MenuItem::submenu(MOVE_TO_GROUP, Vec::new()).enabled(false),
+            MenuItem::separator(),
+            MenuItem::unavailable(CHANGE_ICON),
+            MenuItem::separator(),
+            shortcut(
+                MenuItem::action(REMOVE, RemoveRecent { path }),
+                &RemoveSelected,
+            ),
         ];
         let menu = ContextMenu::build(items, window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
+            this.menu_from_button = false;
             cx.notify();
         });
         self.menu = Some((menu, position, subscription));
+        self.menu_from_button = from_button;
         cx.notify();
     }
 
     /// A recent project's row.
-    fn render_row(&self, ix: usize, p: &RecentProject, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(
+        &self,
+        ix: usize,
+        p: &RecentProject,
+        folders: &recent_projects::Folders,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme();
-        let gone = self.gone.contains(&p.path);
+        let gone = folders.gone.contains(&p.path);
+        let branch = folders.branches.get(&p.path).cloned();
         let selected = self.selected.as_ref() == Some(&p.path);
         let text = theme.color(if gone {
             UiRole::TextMuted
@@ -450,13 +515,13 @@ impl WelcomeProjects {
             UiRole::Text
         });
         let muted = theme.color(UiRole::TextMuted);
-        let hover = theme.color(UiRole::Hover);
+        let selection = theme.color(UiRole::SelectionLight);
         let button_hover = theme.color(UiRole::ListButtonHover);
         let radius = theme.metric(Metric::CornerRadius);
         let small = theme.ui_size() - px(1.0);
         let mut avatar = recent_projects::avatar(&p.name, p.color, cx);
         if gone {
-            // `IconUtil.desaturate`.
+            // `IconUtil.desaturate`: the lightness of each colour.
             avatar.start = avatar.start.grayscale();
             avatar.end = avatar.end.grayscale();
         }
@@ -471,29 +536,55 @@ impl WelcomeProjects {
         let open = {
             let path = path.to_string_lossy().into_owned();
             move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                window.dispatch_action(Box::new(OpenRecent { path: path.clone() }), cx)
+                window.dispatch_action(Box::new(open_action(path.clone())), cx)
             }
         };
+        let pressed = selected && self.menu_from_button && self.menu.is_some();
         let button = selected.then(|| {
             let path = path.clone();
-            let icon = if gone {
-                IconName::CLOSE_SMALL
+            let (icon, hover_icon, size) = if gone {
+                (
+                    IconName::RECENT_PROJECT_REMOVE,
+                    IconName::RECENT_PROJECT_REMOVE_HOVER,
+                    REMOVE_ICON,
+                )
             } else {
-                IconName::SETTINGS_SMALL
+                (IconName::MORE_VERTICAL, IconName::MORE_VERTICAL, 16.0)
             };
             div()
                 .id(("welcome-project-button", ix))
                 .debug_selector(|| "welcome-project-button".into())
+                .group("welcome-project-button")
                 .absolute()
                 .right(px(ROW_BUTTON_RIGHT))
-                .top(px((52.0 - ROW_BUTTON) / 2.0))
-                .size(px(ROW_BUTTON))
+                .top_0()
+                .bottom_0()
                 .flex()
                 .items_center()
-                .justify_center()
-                .rounded(radius)
-                .hover(move |s| s.bg(button_hover))
-                .child(Icon::new(icon).size(px(16.0)))
+                .child(
+                    div()
+                        .size(px(ROW_BUTTON))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(ROW_BUTTON_RADIUS))
+                        .when(pressed, |d| d.bg(button_hover))
+                        .hover(move |s| s.bg(button_hover))
+                        .child(
+                            div()
+                                .group_hover("welcome-project-button", |s| s.invisible())
+                                .when(pressed, |d| d.invisible())
+                                .child(Icon::new(icon).size(px(size))),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .invisible()
+                                .group_hover("welcome-project-button", |s| s.visible())
+                                .when(pressed, |d| d.visible())
+                                .child(Icon::new(hover_icon).size(px(size))),
+                        ),
+                )
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
                     cx.stop_propagation();
@@ -501,9 +592,27 @@ impl WelcomeProjects {
                         let path = path.to_string_lossy().into_owned();
                         window.dispatch_action(Box::new(RemoveRecent { path }), cx);
                     } else {
-                        this.open_menu(path.clone(), e.position(), window, cx);
+                        this.open_menu(path.clone(), e.position(), true, window, cx);
                     }
                 }))
+        });
+        let branch = branch.map(|branch| {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(BRANCH_ICON_GAP))
+                .h(px(ROW_BRANCH_LINE))
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_size(small)
+                .text_color(muted)
+                .child(
+                    div()
+                        .flex_none()
+                        .child(Icon::new(IconName::VCS).size(px(BRANCH_ICON)).tint(muted)),
+                )
+                .child(branch)
         });
         let hover_path = path.clone();
         div()
@@ -517,12 +626,15 @@ impl WelcomeProjects {
             .flex_row()
             .items_start()
             .rounded(radius)
-            .when(selected, |d| d.bg(hover))
+            .when(selected, |d| d.bg(selection))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                 // The pointer selects the row it is over and, leaving it,
                 // clears the selection if it is still that row's (the
                 // tree's `ProjectActionMouseListener`; not while the
                 // row's menu is open).
+                if !*on && this.pressed.as_ref() == Some(&hover_path) {
+                    this.pressed = None;
+                }
                 if this.menu.is_some() {
                     return;
                 }
@@ -532,15 +644,24 @@ impl WelcomeProjects {
                     cx.notify();
                 }
             }))
-            // No tooltip over the row's menu.
-            .when(self.menu.is_none(), |d| {
-                d.tooltip(Tooltip::text(tooltip, None))
+            // No tooltip over the row's menu, nor after a press.
+            .when(
+                self.menu.is_none() && self.pressed.as_ref() != Some(&p.path),
+                |d| d.tooltip(Tooltip::text(tooltip, None)),
+            )
+            .on_mouse_down(MouseButton::Left, {
+                let path = path.clone();
+                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    this.pressed = Some(path.clone());
+                    cx.notify();
+                })
             })
             .on_click(open)
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                    this.open_menu(path.clone(), e.position, window, cx);
+                    this.pressed = Some(path.clone());
+                    this.open_menu(path.clone(), e.position, false, window, cx);
                 }),
             )
             .child(
@@ -559,7 +680,16 @@ impl WelcomeProjects {
                     .min_w(px(0.0))
                     .p(px(ROW_TEXT))
                     .gap(px(ROW_LINE_GAP))
-                    .pr(px(ROW_BUTTON + ROW_BUTTON_RIGHT))
+                    // Up to the button, else to the renderer's end (the
+                    // tree's, 12 beyond the selection) less its border:
+                    // past the selection's end.
+                    .map(|d| {
+                        if selected {
+                            d.mr(px(ROW_BUTTON + ROW_BUTTON_RIGHT - ROW_BORDER))
+                        } else {
+                            d.mr(px(-ROW_INSET))
+                        }
+                    })
                     .child(
                         div()
                             .line_height(px(ROW_NAME_LINE))
@@ -578,9 +708,11 @@ impl WelcomeProjects {
                             .text_ellipsis()
                             .text_color(muted)
                             .child(shown_path),
-                    ),
+                    )
+                    .children(branch),
             )
             .children(button)
+            .pointing_hand()
             .into_any_element()
     }
 
@@ -655,10 +787,11 @@ impl Render for WelcomeProjects {
         let search_focus = self.search.focus_handle(cx);
         let empty: SharedString = NO_RECENT.into();
         let projects = self.shown(cx);
+        let folders = recent_projects::folders(cx);
         let rows: Vec<AnyElement> = projects
             .iter()
             .enumerate()
-            .map(|(ix, p)| self.render_row(ix, p, cx))
+            .map(|(ix, p)| self.render_row(ix, p, &folders, cx))
             .collect();
         let menu = self
             .menu
@@ -715,7 +848,7 @@ impl Render for WelcomeProjects {
                         div()
                             .flex_none()
                             .text_color(muted)
-                            .child(Icon::new(IconName::SEARCH).size(px(16.0))),
+                            .child(Icon::new(IconName::SEARCH_SMALL).size(px(16.0))),
                     )
                     .child(
                         div()
@@ -736,6 +869,8 @@ impl Render for WelcomeProjects {
                         .flex_col()
                         .flex_1()
                         .min_h(px(0.0))
+                        .pt(px(LIST_TOP))
+                        .pb(px(LIST_BOTTOM))
                         .overflow_y_scroll()
                         .track_scroll(&self.scroll)
                         .children(rows),

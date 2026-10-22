@@ -100,7 +100,7 @@ roles! {
         Selection => ("selection", "General", "Background of the selected row in lists and trees"),
         SelectionText => ("selection-text", "General", "Text on the selected row"),
         SelectionInactive => ("selection-inactive", "General", "Selected row in a list that has no focus"),
-        SelectionLight => ("selection-light", "General", "Selected row of a list of rich rows (the projects of the project widget's popup)"),
+        SelectionLight => ("selection-light", "General", "Selected row of a list of rich rows (the projects of the project widget's popup and of the Welcome tab)"),
         Danger => ("danger", "General", "Errors and destructive actions"),
         Warning => ("warning", "General", "Warnings"),
         Success => ("success", "General", "Success and completed states"),

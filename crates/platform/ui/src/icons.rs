@@ -46,6 +46,9 @@ impl IconName {
     pub const MORE_HORIZONTAL: Self = Self("general/moreHorizontal");
     pub const SHOW_AS_TREE: Self = Self("general/showAsTree");
     pub const SEARCH: Self = Self("general/search@20x20");
+    /// The 16 by 16 search icon (`AllIcons.Actions.Search`: the Welcome
+    /// tab's search field).
+    pub const SEARCH_SMALL: Self = Self("general/search");
     pub const SETTINGS: Self = Self("general/settings@20x20");
     pub const RUN: Self = Self("run/run");
     pub const DEBUG: Self = Self("run/debug");
@@ -66,6 +69,12 @@ impl IconName {
     pub const SCROLL_DOWN: Self = Self("general/scrollDown");
     pub const QUESTION_DIALOG: Self = Self("general/questionDialog");
     pub const WARNING_DIALOG: Self = Self("general/warningDialog");
+    pub const ERROR_DIALOG: Self = Self("general/errorDialog");
+    /// The cross of a recent project whose folder is gone, and under the
+    /// pointer (`AllIcons.Welcome.RecentProjects.Remove`, `RemoveHover`:
+    /// 10 by 10, no New UI icon of their own).
+    pub const RECENT_PROJECT_REMOVE: Self = Self("welcome/recentProjects/remove");
+    pub const RECENT_PROJECT_REMOVE_HOVER: Self = Self("welcome/recentProjects/remove-hover");
     pub const BRANCH: Self = Self("vcs/branch");
     /// Rollback and Show Diff of the popup of a change marker (the New
     /// UI's `AllIcons.Actions.Rollback` and `Diff`).
@@ -285,7 +294,7 @@ platform_icons! {
         "general/previewHorizontally", "general/print", "general/projectConfigurable",
         "general/questionDialog", "general/questionMark", "general/refresh", "general/remove", "general/right",
         "general/save", "general/scrollDown",
-        "general/search@20x20", "general/warningDialog",
+        "general/search", "general/search@20x20", "general/warningDialog", "general/errorDialog",
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
         "general/showAsTree", "general/up", "general/upload", "general/vcs",
         "general/keyboard", "general/learn",
@@ -313,6 +322,7 @@ platform_icons! {
         "vcs/changesPush@12x12", "vcs/changesUpdate@12x12", "vcs/commitInline",
         "vcs/commit", "vcs/currentBranchFavoriteLabel", "vcs/currentBranchLabel", "vcs/diff",
         "vcs/fetch", "vcs/push", "vcs/revert", "vcs/shelve", "vcs/update", "vcs/vendors/github",
+        "welcome/recentProjects/remove", "welcome/recentProjects/remove-hover",
         "windows/close", "windows/maximize", "windows/minimize", "windows/restore",
     ],
     light_only: [
