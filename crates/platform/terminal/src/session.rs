@@ -330,6 +330,8 @@ pub(crate) struct Notifier {
     window_size: Mutex<WindowSize>,
     palette: Mutex<Palette>,
     loop_tx: LoopSender,
+    /// The shell exited; shared with the [`CommandProbe`]s.
+    pub(crate) exited: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -521,6 +523,7 @@ impl Session {
             window_size: Mutex::new(size.window_size()),
             palette: Mutex::new(Palette::default()),
             loop_tx: loop_tx.clone(),
+            exited: Arc::new(AtomicBool::new(false)),
         });
         let scrollback = match options.scrollback_lines {
             0 => DEFAULT_SCROLLBACK,
@@ -536,6 +539,7 @@ impl Session {
             },
             ..term::Config::default()
         };
+        let notifier_exited = notifier.exited.clone();
         let term = Term::new(config, &size, Listener(notifier.clone()));
         let shared = Arc::new(Shared {
             state: FairMutex::new(State { term, search: None }),
@@ -549,7 +553,7 @@ impl Session {
                 loop_tx,
                 pid,
                 id,
-                probe: CommandProbe::new(pid, &options.command.program),
+                probe: CommandProbe::new(pid, &options.command.program, notifier_exited),
             },
             events_rx,
         ))
