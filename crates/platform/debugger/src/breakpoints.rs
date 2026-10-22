@@ -291,10 +291,15 @@ impl Breakpoints {
 
 /// Watch expressions by key: the reference keeps them per run
 /// configuration type (`XDebugSessionData`, keyed by the configuration
-/// type's id), so every configuration of a type shares them.
+/// type's id), so every configuration of a type shares them. A watch can be
+/// paused (`XWatch.isPaused`, Pause Watch): it keeps its expression and is
+/// not evaluated until it is resumed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Watches {
     by_key: BTreeMap<String, Vec<String>>,
+    /// The paused flag of each watch of a key, in step with `by_key`; a key
+    /// without paused watches has no entry.
+    paused: BTreeMap<String, Vec<bool>>,
 }
 
 impl Watches {
@@ -306,6 +311,33 @@ impl Watches {
         self.by_key.iter()
     }
 
+    /// The paused flags of a key's watches, in their order.
+    pub fn paused(&self, key: &str) -> Vec<bool> {
+        let n = self.get(key).len();
+        let mut flags = self.paused.get(key).cloned().unwrap_or_default();
+        flags.resize(n, false);
+        flags
+    }
+
+    /// Pauses or resumes the watch at `index`.
+    pub fn set_paused(&mut self, key: &str, index: usize, paused: bool) -> bool {
+        if index >= self.get(key).len() || self.paused(key)[index] == paused {
+            return false;
+        }
+        let mut flags = self.paused(key);
+        flags[index] = paused;
+        self.store_paused(key, flags);
+        true
+    }
+
+    fn store_paused(&mut self, key: &str, flags: Vec<bool>) {
+        if flags.iter().any(|p| *p) {
+            self.paused.insert(key.to_owned(), flags);
+        } else {
+            self.paused.remove(key);
+        }
+    }
+
     /// Adds a watch at `index` (the end with `None`); an empty expression
     /// is not added.
     pub fn add(&mut self, key: &str, expression: &str, index: Option<usize>) -> bool {
@@ -313,13 +345,17 @@ impl Watches {
         if expression.is_empty() {
             return false;
         }
+        let mut flags = self.paused(key);
         let list = self.by_key.entry(key.to_owned()).or_default();
         let at = index.unwrap_or(list.len()).min(list.len());
         list.insert(at, expression.to_owned());
+        flags.insert(at, false);
+        self.store_paused(key, flags);
         true
     }
 
     pub fn remove(&mut self, key: &str, index: usize) -> Option<String> {
+        let mut flags = self.paused(key);
         let list = self.by_key.get_mut(key)?;
         if index >= list.len() {
             return None;
@@ -328,7 +364,15 @@ impl Watches {
         if list.is_empty() {
             self.by_key.remove(key);
         }
+        flags.remove(index);
+        self.store_paused(key, flags);
         Some(removed)
+    }
+
+    /// Removes every watch of a key (Remove All Watches).
+    pub fn clear(&mut self, key: &str) -> bool {
+        self.paused.remove(key);
+        self.by_key.remove(key).is_some()
     }
 
     /// Replaces a watch; an empty expression removes it.
@@ -347,6 +391,7 @@ impl Watches {
     }
 
     pub fn set(&mut self, key: &str, expressions: Vec<String>) {
+        self.paused.remove(key);
         if expressions.is_empty() {
             self.by_key.remove(key);
         } else {
@@ -434,5 +479,32 @@ mod tests {
         assert!(w.edit("python", 0, ""));
         assert_eq!(w.get("python"), ["y + 1"]);
         assert_eq!(w.remove("python", 5), None);
+    }
+
+    #[test]
+    fn paused_watches_follow_their_watch() {
+        let mut w = Watches::default();
+        w.add("python", "a", None);
+        w.add("python", "b", None);
+        assert!(w.set_paused("python", 1, true));
+        assert!(!w.set_paused("python", 1, true));
+        assert!(!w.set_paused("python", 7, true));
+        // A watch added before it moves the flag with it.
+        w.add("python", "first", Some(0));
+        assert_eq!(w.paused("python"), [false, false, true]);
+        assert!(w.edit("python", 2, "b + 1"));
+        assert_eq!(w.paused("python"), [false, false, true]);
+        assert_eq!(w.remove("python", 0).as_deref(), Some("first"));
+        assert_eq!(w.paused("python"), [false, true]);
+        assert!(w.set_paused("python", 1, false));
+        assert_eq!(w, {
+            let mut plain = Watches::default();
+            plain.set("python", vec!["a".into(), "b + 1".into()]);
+            plain
+        });
+        w.set_paused("python", 0, true);
+        assert!(w.clear("python"));
+        assert!(w.get("python").is_empty() && w.paused("python").is_empty());
+        assert!(!w.clear("python"));
     }
 }

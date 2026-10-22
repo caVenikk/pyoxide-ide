@@ -25,6 +25,18 @@ use crate::storage::{self, Stored};
 /// `debugger.max.recent.expressions`).
 pub const HISTORY: usize = 50;
 
+/// The editors whose expressions are remembered, each with a history of
+/// its own (the history ids of `XDebuggerHistoryManager`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryKind {
+    /// The evaluate field of Threads & Variables (`evaluateExpression`).
+    Evaluate,
+    /// The editor of a watch (`watch`).
+    Watch,
+    /// The editor of Set Value (`setValue`).
+    SetValue,
+}
+
 /// What changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebuggerEvent {
@@ -537,24 +549,61 @@ impl Debugger {
         self.edit_watches(|w| w.edit(key, index, expression))
     }
 
+    /// Remove All Watches.
+    pub fn remove_all_watches(&self, key: &str) -> bool {
+        self.edit_watches(|w| w.clear(key))
+    }
+
+    /// The paused flags of a key's watches, in their order.
+    pub fn watches_paused(&self, key: &str) -> Vec<bool> {
+        self.inner.state().stored.watches.paused(key)
+    }
+
+    /// Pause Watch and Resume Watch.
+    pub fn set_watch_paused(&self, key: &str, index: usize, paused: bool) -> bool {
+        self.edit_watches(|w| w.set_paused(key, index, paused))
+    }
+
     // ---- Threads & Variables -----------------------------------------------------
 
     /// The expressions evaluated last, the latest first
     /// (`XDebuggerHistoryManager`).
     pub fn expression_history(&self) -> Vec<String> {
-        self.inner.state().stored.view.history.clone()
+        self.history(HistoryKind::Evaluate)
     }
 
     /// An expression was evaluated or watched: it goes first in the
     /// history, which keeps [`HISTORY`] of them.
     pub fn remember_expression(&self, expression: &str) {
+        self.remember(HistoryKind::Evaluate, expression);
+    }
+
+    /// The expressions typed last into an editor, the latest first.
+    pub fn history(&self, kind: HistoryKind) -> Vec<String> {
+        let state = self.inner.state();
+        let view = &state.stored.view;
+        match kind {
+            HistoryKind::Evaluate => view.history.clone(),
+            HistoryKind::Watch => view.watch_history.clone(),
+            HistoryKind::SetValue => view.set_value_history.clone(),
+        }
+    }
+
+    /// An expression was applied in an editor: it goes first in the
+    /// editor's history, which keeps [`HISTORY`] of them.
+    pub fn remember(&self, kind: HistoryKind, expression: &str) {
         let expression = expression.trim();
         if expression.is_empty() || expression.len() > 100_000 {
             return;
         }
         {
             let mut state = self.inner.state();
-            let history = &mut state.stored.view.history;
+            let view = &mut state.stored.view;
+            let history = match kind {
+                HistoryKind::Evaluate => &mut view.history,
+                HistoryKind::Watch => &mut view.watch_history,
+                HistoryKind::SetValue => &mut view.set_value_history,
+            };
             if history.first().is_some_and(|e| e == expression) {
                 return;
             }

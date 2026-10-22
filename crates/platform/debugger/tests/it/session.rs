@@ -9,7 +9,7 @@ use commands::Registry;
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugError, DebugRequest, Debugger,
     DebuggerEvent, EvaluateContext, ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting,
-    IdeaTypes, LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
+    HistoryKind, IdeaTypes, LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
 };
 use futures::executor::block_on;
 use run_config::{RunConfiguration, Storage};
@@ -639,6 +639,11 @@ fn breakpoints_and_watches_are_stored_and_imported_once() {
     debugger.remember_expression(" x + 1 ");
     debugger.remember_expression("len(items)");
     debugger.remember_expression("");
+    // Each editor has a history of its own.
+    debugger.remember(HistoryKind::Watch, "items[0]");
+    debugger.remember(HistoryKind::SetValue, "5");
+    // A paused watch stays paused.
+    assert!(debugger.set_watch_paused("python", 1, true));
     debugger.set_frames_split(0.25);
     debugger.close_frames_hint();
     debugger.flush();
@@ -653,6 +658,12 @@ fn breakpoints_and_watches_are_stored_and_imported_once() {
     assert_eq!(debugger.watches("python"), ["len(items)", "x"]);
     assert!(debugger.is_muted());
     assert_eq!(debugger.expression_history(), ["len(items)", "x + 1"]);
+    assert_eq!(debugger.history(HistoryKind::Watch), ["items[0]"]);
+    assert_eq!(debugger.history(HistoryKind::SetValue), ["5"]);
+    assert_eq!(debugger.watches_paused("python"), [false, true]);
+    assert!(debugger.remove_all_watches("python"));
+    assert!(debugger.watches("python").is_empty());
+    assert!(!debugger.remove_all_watches("python"));
     assert_eq!(debugger.frames_split(), Some(0.25));
     assert!(debugger.frames_hint_closed());
     // `.idea` is only read.
