@@ -1199,3 +1199,243 @@ drafts and live apply, runtime keymap switching (menus, gestures), search
 highlights on pages, monospaced font detection, theme ids of plugin
 themes, several main windows in sync. Size: L (first version about 32 to
 39 agent-hours; packages table, File Types and first run about 10 more).
+
+---
+
+## Area: db-gui (Database tool window, SQL console, data grid)
+
+Scope: the user interface on top of the database engine (area `db`, ADR
+0002 to 0004): data sources and their dialog, the Database tool window with
+the object tree, SQL consoles and SQL files bound to a data source, result
+tabs and the output log, the data grid (paging, sorting, filters, value
+display), copy and export, import from a file, and later editing of data and
+of objects. PostgreSQL, Oracle and SQLite only. Database tools are a
+Professional-edition feature of the reference.
+Date: 2026-10-22. Reference: PyCharm 2026.2.3 (Professional), observed
+behaviour and public documentation; no Community source exists for the
+database tools.
+
+### Sources
+
+| # | source | URL | notes |
+|---|---|---|---|
+| 1 | Data sources and drivers dialog | https://www.jetbrains.com/help/pycharm/data-sources-and-drivers-dialog.html | General, Options, SSH/SSL, Schemas, Advanced |
+| 2 | Configure connections | https://www.jetbrains.com/help/pycharm/configuring-database-connections.html | test connection, password save modes |
+| 3 | Run queries | https://www.jetbrains.com/help/pycharm/run-a-query.html | execute, cancel, what runs at the caret |
+| 4 | Rows and paging | https://www.jetbrains.com/help/pycharm/rows.html | page size, counting rows |
+| 5 | Sessions | https://www.jetbrains.com/help/pycharm/managing-connection-sessions.html | one session per console, transaction mode |
+| 6 | Query results | https://www.jetbrains.com/help/pycharm/viewing-query-results.html | result tabs, output |
+| 7 | Database tool window and table editor | https://www.jetbrains.com/help/pycharm/database-tool-window.html | tree, toolbar, view options |
+| 8 | Query consoles | https://www.jetbrains.com/help/pycharm/query-consoles.html | consoles are files, history |
+| 9 | Export and import data | https://www.jetbrains.com/help/pycharm/export-data.html | dump and import dialogs |
+| 10 | PostgreSQL system catalogs and `EXPLAIN` | https://www.postgresql.org/docs/current/catalogs.html | introspection, plans |
+| 11 | Observed behaviour of a licensed copy of the reference: what a user sees and what the database server sees (statements in the server log, `pg_stat_activity`) | local notes, not published | page SQL, connection counts, savepoints, row identity; open questions below |
+| 12 | DataCraft, MIT OR Apache-2.0, https://github.com/javy-fernandez/datacraft | logic only | see ADR 0021; its UI, theme, icons and strings are not used |
+
+The help pages were listed from the documentation index and their text was
+not re-read for this pass. Details marked "verify" need a reference
+screenshot or an observation (the DB shot list covers them).
+
+### Core loop
+Open the Database tool window, add a data source and connect, expand
+tables from the tree, double-click a table to look at its rows, open a
+console, run a query with Cmd/Ctrl+Enter and read the result in a grid, then
+export what is on screen. Editing rows comes after reading them well.
+
+### Screens
+
+| ID | screen | how to reach | purpose | key components | states |
+|---|---|---|---|---|---|
+| S-DG01 | Database tool window | stripe button on the right, View > Tool Windows | the data sources and their objects | header with toolbar (New, Refresh, Console, Table Editor, Stop, filter, options); tree; speed search; empty state with a link to create a data source | no data source, disconnected, connecting, connected, loading, error node, filtered |
+| S-DG02 | Data Sources dialog | New (+) > Data Source, Properties on a node, Cmd/Ctrl+; | define a connection | list of data sources on the left; tabs General (name, host, port, database/service, user, password and save mode, authentication, URL, Test Connection), Options (read-only, transaction mode, keep-alive, auto-disconnect, startup script, time zone), SSH/SSL, Schemas, Advanced | new, edited, testing, test ok (server and driver version), test failed (message and hint), unsaved changes |
+| S-DG03 | Tree node context menus | right-click on data source, database, schema, group, table, column, routine | actions on objects | Refresh, New > Console, Open Data, Copy DDL, SQL Scripts, Modify, Drop, Truncate, Properties, Copy Reference, Jump to Source | per node kind; a read-only data source disables the writing items |
+| S-DG04 | SQL console tab | New > Console, Jump to Query Console, or a bound `.sql` file | write and run SQL | editor; toolbar: Execute, Stop, data source and schema switchers, transaction mode, Commit, Rollback, History, Explain; run marks in the gutter | idle, running, cancelling, transaction open (pending count), disconnected, syntax error |
+| S-DG05 | Statement picker popup | Execute with the caret in nested statements | choose what to run | small list: innermost, outer statement, whole script, from caret | shown, dismissed |
+| S-DG06 | Parameters dialog | Execute a statement with `?`, `:name`, `$1` or a `${name}` pattern | ask for values | table of names and values, remembered values, Execute | filled, empty, cancelled |
+| S-DG07 | Dangerous statement confirmation | `DELETE` or `UPDATE` without `WHERE` | prevent accidents | message, Execute, Skip, Cancel | shown |
+| S-DG08 | Output and results panel | below the console, or a Services-like tool window (verify) | show what each statement did | Output log: one line per statement with echoed schema, rows or affected count, time; result tabs (numbered, pinned, renamed); server notices | empty, one result, many, error with position, running |
+| S-DG09 | Data grid | double-click a table, a result tab | read rows | page bar (first, previous, next, last, page size, row range, count), WHERE and ORDER BY fields, column headers with type, PK and FK marks, NULL marker, row numbers, status line | loading, page, last page, empty, error, truncated values, filtered, sorted |
+| S-DG10 | Value editor panel | View Value on a cell (verify the key) | read and edit a long cell | text area, format switch (text, JSON, hex), Save to file, Load full value | text, json, binary, truncated |
+| S-DG11 | Grid view modes | grid toolbar | other views of the page | transposed record view, text view (ASCII table, CSV...), aggregates of the selection (count, sum, avg, min, max, median) | each mode |
+| S-DG12 | Export dialog | grid toolbar Export, tree: Export Data | write rows to a file | format, destination, options per format, "re-run without paging" | CSV, TSV, JSON, SQL INSERT, Markdown, HTML; progress; done |
+| S-DG13 | Import from file dialog | table context menu > Import | load a CSV into a table | file, delimiter, header row, quote, NULL text, column mapping table, preview of rows, error policy | mapped, mismatched, running, finished with a report |
+| S-DG14 | DDL viewer and SQL scripts | tree: DDL, Copy DDL, SQL Scripts submenu | see and reuse definitions | read-only SQL editor tab or clipboard | table, view, routine, index |
+| S-DG15 | Settings > Database | Settings page | defaults of query execution and data views | Query Execution (what runs at the caret, confirm dangerous statements, query timeout), Data Views (page size, fetch size, date and number formats, NULL text, LOB limits), General (introspection, tree options) | defaults, modified |
+| S-DG16 | Explain plan | Explain action in the console | plan of a statement | tree with node, cost, rows, time; raw text | plan, analyze, error |
+| S-DG17 | Transaction prompts | close a console, disconnect, close the IDE with an open transaction | protect pending work | Commit, Rollback, Cancel | shown |
+| S-DG18 | Introspection progress | Refresh or first connect | show background loading | status bar progress with database and schema, cancel | running, cancelled, done |
+| S-DG19 (later) | Pending edits in the grid | edit a cell, Add Row, Delete Row | stage changes | changed cell colour, deleted row struck through, new row mark, Submit, Revert, Preview SQL | clean, dirty, submitting, conflict |
+| S-DG20 (later) | Modify and Create object dialogs | tree: Modify Table, New > Table | change objects through generated DDL | columns, keys, indexes tabs; SQL preview; Execute | new, modified |
+
+### Flows
+
+```
+F-DG01 Add a data source and connect                      (clicks: about 8)
+    S-DG01 empty -> New > Data Source > pick the engine -> S-DG02 General:
+    host, port, database, user, password -> Test Connection (result in S-DG02)
+    -> OK -> connect on first expansion or the Connect button -> tree loads
+    edge: wrong password, unreachable host, TLS required, missing Oracle
+          client, a SQLite file that does not exist, password mode "ask"
+
+F-DG02 Look at a table                          (clicks: 4 from a loaded tree)
+    S-DG01 expand data source > schema > Tables (instant, from the model)
+    -> double-click the table -> S-DG09 first page (500 rows) -> sort by a
+    header click, type a WHERE condition, Enter -> next page
+    edge: table with millions of rows (count on demand), no rows, wide
+          values, a permission error, a table dropped meanwhile
+
+F-DG03 Run a query in a console                           (clicks: 3)
+    New > Console (S-DG04) -> type SQL -> Cmd/Ctrl+Enter -> S-DG08 line plus
+    S-DG09 in a result tab -> run another statement: an unpinned tab is reused
+    edge: several statements selected, a function body that contains
+          semicolons, a statement without rows, a long query: Stop, two result
+          sets, an error with a cursor position
+
+F-DG04 Run a script with an error
+    select text -> Execute -> statements run one by one -> one fails ->
+    choice: continue, skip, stop -> the rest runs or not
+    edge: an error inside a transaction in manual mode (savepoint, S-DG17)
+
+F-DG05 Parameterised and risky queries
+    query with ":name" -> S-DG06 -> values remembered next time;
+    DELETE without WHERE -> S-DG07
+
+F-DG06 Switch the schema of a console
+    schema chip -> list -> the session's search path changes; typing
+    "set search_path" by hand updates the chip
+
+F-DG07 Refresh and DDL changes
+    tree Refresh (incremental), full refresh, invalidate cache;
+    CREATE, ALTER and DROP in a console update the affected nodes alone
+    edge: object dropped elsewhere, server restarted, no catalog privileges,
+          cancel during refresh keeps the old model
+
+F-DG08 Export what is on screen                           (clicks: 4)
+    S-DG09 Export -> S-DG12 -> format and options -> file written; the whole
+    result re-run without the page limit; copy of a selection in a format
+    edge: huge result (streamed, cancellable), NULL and binary values,
+          characters that break spreadsheets
+
+F-DG09 Import a CSV into a table
+    table menu > Import -> S-DG13 -> pick the file, adjust delimiter and
+    mapping -> run in one transaction -> report
+    edge: wrong types, extra columns, encoding, 1 million rows (streamed)
+
+F-DG10 Open DDL, generate SQL
+    tree DDL / Copy DDL / SQL Scripts: generated CREATE, SELECT, INSERT,
+    UPDATE, DELETE for the selected object into a console or the clipboard
+
+F-DG11 Transactions (manual mode)
+    switch mode -> statements stay in a transaction with a visible pending
+    indicator -> Commit / Rollback; a failed statement does not poison the
+    transaction (rollback to a savepoint); closing asks
+
+F-DG12 (later) Edit rows
+    edit a cell, add and delete rows -> pending marks -> Preview SQL ->
+    Submit (DML in a fixed order) -> page reloaded; Revert drops the edits
+    edge: no primary key (identify by all comparable columns, or by the
+          physical row id on PostgreSQL), 0 or 2 rows affected -> warning and
+          rollback, read-only data source, computed columns
+```
+
+### Components
+
+| component | variants | states | used on |
+|---|---|---|---|
+| Tool window with toolbar and tree | Database (right stripe) | idle, hover, selected, loading spinner, error | S-DG01 |
+| Tree row | data source, database, schema, group, object, column, key, index, routine | collapsed, expanded, selected, filtered, disabled, with badges (PK, FK, NOT NULL), with detail text (type) | S-DG01 |
+| Form dialog with a left list | Data Sources | clean, dirty, error | S-DG02 |
+| Combo or chip | data source, schema, transaction mode, page size | open, disabled | S-DG04, S-DG09 |
+| Code editor with a run gutter | console, bound file | as in area `editor` | S-DG04 |
+| Result tabs | pinned, renamed, numbered | selected, running, error | S-DG08 |
+| Output log | echo line, status line, notice line, error line with a link | - | S-DG08 |
+| Data grid | table, record, text | cell and range selection, editing, pending change, NULL, truncated, sort arrow, column resize and reorder | S-DG09, S-DG11 |
+| Page bar | buttons, row range, count link | enabled, disabled, loading | S-DG09 |
+| Filter fields with completion | WHERE, ORDER BY | empty, valid, error | S-DG09 |
+| Value editor | text, JSON, binary | read-only, editable | S-DG10 |
+| Popups and menus | statement picker, context menus, history list | - | S-DG03, S-DG05 |
+| Dialogs | parameters, confirmations, export, import | - | S-DG06, S-DG07, S-DG12, S-DG13 |
+
+### Inferred data model
+
+```
+DataSource       id (uuid), name, backend (postgres | oracle-thin | oracle-odpi |
+                 sqlite), connection (host, port, database | service | sid |
+                 dsn | path), user, secret mode (keychain | session | ask), tls,
+                 read_only, tx_mode (auto | manual), isolation, keep_alive,
+                 auto_disconnect, startup_script, time_zone, introspection
+                 scope (databases, schemas, patterns, level per schema);
+                 a shared part (may be committed) and a personal part
+                 evidence: S-DG02, sources 1, 2, 11     confidence: high
+Session          data source, connection, tx state (open, pending count),
+                 current schema or search path, running statement, last activity;
+                 one per console by default; metadata refresh uses its own
+                 short-lived connection
+                 evidence: sources 5, 11               confidence: high
+Console          id, data source, bound schema, file path (a .sql file),
+                 history of executed statements (text, time, duration)
+                 evidence: source 8                    confidence: high
+SqlFileBinding   file path -> data source, schema
+                 evidence: sources 8, 11               confidence: medium
+MetadataModel    per data source: a tree of nodes (database > schema > object >
+                 children), each with id, kind, name, parent, comment and
+                 kind-specific fields (column type, nullability, default,
+                 identity; key columns; FK targets and actions; index method,
+                 uniqueness), a state number per object for incremental
+                 refresh, the loaded level per schema, source text loaded
+                 lazily; stored on disk per data source, usable before connecting
+                 evidence: S-DG01, sources 7, 11       confidence: high
+ResultTab        id, console, title, pinned, renamed, query text, columns,
+                 current page, page size, row range, total (known or not),
+                 WHERE and ORDER BY text, sort, view mode
+                 evidence: S-DG08, S-DG09, source 6    confidence: high
+GridPage         rows of typed values (db_core::Value), has_more, truncated cells
+                 evidence: source 4                    confidence: high
+PendingEdits     changed cells (row key, column, old, new), deleted row keys,
+                 new rows; applied in a fixed order (delete, update, insert)
+                 evidence: S-DG19, source 11           confidence: medium
+ExportJob        source (tab or table), format, options, target, re-run flag
+ImportJob        file, delimiter, header, quote, NULL text, column map, policy
+                 evidence: S-DG12, S-DG13, source 9    confidence: medium
+DbSettings       page size, fetch size, LOB limit, NULL text, date and number
+                 formats, confirm dangerous statements, what runs at the caret,
+                 query timeout, introspection options
+                 evidence: S-DG15                      confidence: medium
+```
+
+Pyoxide mapping: `DataSource` is an ADR 0004 profile plus GUI options;
+`Session` is a `db_core::Connection`; `GridPage` comes from
+`Cursor::next_page`; `MetadataModel` is new (ADR 0021). Console files,
+histories and bindings live in the personal project state and the
+configuration folder (ADR 0009); the committable part of a data source goes
+to `.oxide/` (ADR 0008).
+
+### Feature matrix
+See `replica/features/`, areas `db-gui` (this area, one file per feature)
+and `database` (the engine).
+
+### Out of scope or deferred
+- JDBC drivers and engines beyond PostgreSQL, Oracle and SQLite; SSH
+  tunnels (planned after the first version).
+- Diagrams, schema comparison, data comparison, test data generation,
+  database refactorings, code generation, NoSQL, cloud connectors, AI
+  assistant.
+- Editing data and objects (S-DG19, S-DG20) come after the read-only
+  milestone; they have their own rows.
+- Open questions to settle by observation: the keep-alive query and
+  interval, the object count at which the tree loads names only, whether a
+  page asks for one extra row, the SQL of a submit on a table without a
+  key, how many connections several consoles hold, defaults of
+  Settings > Database.
+
+### Size
+Screens 20, flows 12, entities 10. Hard parts: a virtualized grid that
+stays smooth with wide values; a tree on tens of thousands of objects
+served from a model; cancellation on every driver (the thin Oracle driver
+cannot cancel: it reconnects); a statement splitter that understands dollar
+quotes, PL/SQL blocks and comments; incremental metadata refresh on
+PostgreSQL; transactions with savepoints; editing rows safely without a
+key. Size: XL as a whole. Milestone M6 first version (data sources, tree,
+console, read-only grid, export and import): about 190 agent-hours of
+work, about 90 on the critical path with three or four agents in parallel;
+incremental refresh, editing and object dialogs about 45 more.

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Execute: the selection or the whole script, statement by statement, continue, skip or stop on error",db-gui,must,yes,no,Pro

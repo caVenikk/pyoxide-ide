@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"NULL marker, truncated long values, load the full value, save to file",db-gui,must,yes,no,Pro; engine row large-values-capped-fetch-of-lob-json-long-text

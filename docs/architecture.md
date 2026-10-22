@@ -382,6 +382,17 @@ once, before or with its first user:
 The editor's context menu does not exist yet; the debugger's and git's
 entries in it (Run to Cursor, Add to Watches, Git) follow when it is added.
 
+## Database GUI (M6, ADR 0021, proposed)
+Planned crates, all in `crates/platform/`: `sql-text` (SQL lexing, statement
+splitting, formatting; no toolkit, no database), `db-model` (the metadata
+model, its disk cache and completion; no toolkit), `db-session` (runtime,
+data source handles, sessions, query jobs, paged results, refresh, export and
+import jobs; no toolkit) and `db-ui` (Database tool window, console, grid,
+dialogs on GPUI). `db-service` stays the only place that knows drivers and
+gives `db-session` its connections through a `db-core` trait; `db-ui` never
+depends on drivers, `db-service` or `tokio`. Rules for
+`scripts/check-layers.py` come with the first crate.
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded

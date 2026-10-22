@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Export options per format (delimiter, quotes, NULL text, header)",db-gui,should,yes,no,Pro

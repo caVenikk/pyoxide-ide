@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Data source Options tab (read-only, transaction mode, keep-alive, auto-disconnect, startup script, time zone)",db-gui,should,yes,no,Pro; engine rows in area database; S-DG02

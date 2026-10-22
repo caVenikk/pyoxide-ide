@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Explorer: groups per object kind, empty groups hidden, partitions under their parent",db-gui,should,yes,no,Pro

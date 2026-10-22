@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Prompt to commit or roll back when closing a console or disconnecting,db-gui,should,yes,no,Pro

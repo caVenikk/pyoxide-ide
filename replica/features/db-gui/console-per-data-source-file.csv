@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Console is a file kept between runs, one folder per data source",db-gui,must,yes,no,Pro

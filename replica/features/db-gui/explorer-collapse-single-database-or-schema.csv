@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Explorer: collapse the level when a data source has one database or schema,db-gui,could,yes,no,Pro; tree option

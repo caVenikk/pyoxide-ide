@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Schema switcher sets the session search path and follows a manual SET,db-gui,should,yes,no,Pro

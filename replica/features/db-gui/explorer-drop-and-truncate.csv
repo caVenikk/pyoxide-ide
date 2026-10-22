@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Explorer: Drop and Truncate with confirmation,db-gui,could,yes,no,Pro; needs a writable data source

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Reload the page and stop a running fetch,db-gui,should,yes,no,Pro
