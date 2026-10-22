@@ -610,8 +610,10 @@ impl TerminalToolWindow {
             MenuItem::submenu(
                 "Terminal Engine",
                 vec![
+                    // The reference says "Reworked 2025"; the year is left
+                    // out here.
                     MenuItem::action(
-                        "Reworked 2025",
+                        "Reworked",
                         SelectEngine {
                             engine: Some("reworked".into()),
                         },
