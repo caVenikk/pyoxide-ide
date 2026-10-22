@@ -12,16 +12,21 @@
 //! .computeVariablePresentationWithChanges`). The values are shown at
 //! every stop and frame change and taken away when the program runs on
 //! (after the variables view's clear delay, so a step does not flicker).
+//! Under the mouse a value is a link (`REFERENCE_HYPERLINK_COLOR`, the
+//! editor's text colour on the execution line) with the drop-down
+//! triangle after it; a click opens its tree in a popup under it
+//! ([`crate::value_hint`]).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use debugger::values::{ValueRole, value_text};
-use debugger::{Phase, Session, SessionId};
-use editor::{Decoration, Editor, TextPiece};
-use gpui::{App, Context, Entity, Task};
+use debugger::values::{ValueKind, ValueRole, value_text};
+use debugger::{Phase, Session, SessionId, Variable};
+use editor::{AfterTextHover, Decoration, DecorationId, Editor, TextPiece};
+use gpui::{App, Context, Entity, EntityId, Task};
 use themes::TextRole;
+use ui::icons::IconName;
 
 use crate::session::execution_point::ExecutionPoint;
 use crate::{DebuggerView, DebuggerViewEvent};
@@ -66,8 +71,13 @@ pub(crate) struct InlineValues {
     /// Show values inline (`XDebuggerDataViewSettings.isShowValuesInline`).
     pub disabled: bool,
     shown: Option<Shown>,
-    /// The file and its decorations, for the editors opened later.
+    /// The file and its decorations, for the editors opened later, with
+    /// the values they show.
     items: Option<(PathBuf, Vec<(usize, Decoration)>)>,
+    values: Vec<InlineValue>,
+    /// The decorations of the values in each editor, with the index of
+    /// the value each shows.
+    ids: HashMap<EntityId, Vec<(DecorationId, usize)>>,
     /// Values by file, name and line, for the changed ones.
     history: HashMap<(PathBuf, String, u32), History>,
     task: Option<Task<()>>,
@@ -81,6 +91,21 @@ pub(crate) struct InlineValue {
     /// From 1.
     pub line: u32,
     pub column: u32,
+    pub variable: Variable,
+    /// The size of a container.
+    pub shape: Option<String>,
+    pub kind: ValueKind,
+    /// The scope the variable is in.
+    pub parent: i64,
+}
+
+/// A variable of a frame as the variables view shows it.
+struct FrameValue {
+    name: String,
+    variable: Variable,
+    shape: Option<String>,
+    kind: ValueKind,
+    parent: i64,
 }
 
 impl DebuggerView {
@@ -109,6 +134,7 @@ impl DebuggerView {
                     let _ = this.update(cx, |this, cx| {
                         if this.inline.shown.is_none() {
                             this.inline.items = None;
+                            this.inline.values.clear();
                             this.show_inline_values_everywhere(cx);
                         }
                     });
@@ -139,19 +165,23 @@ impl DebuggerView {
                         Some(text) => text,
                         None => std::fs::read_to_string(&path).ok()?,
                     };
-                    let keys: Vec<String> = names.iter().map(|(n, _)| n.clone()).collect();
+                    let keys: Vec<String> = names.iter().map(|v| v.name.clone()).collect();
                     let positions = provider.declarations(&path, &text, line, &keys)?;
                     Some(
                         names
                             .into_iter()
                             .zip(positions)
-                            .filter_map(|((name, value), pos)| {
+                            .filter_map(|(v, pos)| {
                                 let (line, column) = pos?;
                                 Some(InlineValue {
-                                    name,
-                                    value,
+                                    name: v.name,
+                                    value: value_text(&v.variable.value),
                                     line,
                                     column,
+                                    variable: v.variable,
+                                    shape: v.shape,
+                                    kind: v.kind,
+                                    parent: v.parent,
                                 })
                             })
                             .collect::<Vec<_>>(),
@@ -207,7 +237,7 @@ impl DebuggerView {
     ) {
         values.sort_by_key(|v| (v.line, v.column));
         let mut items = Vec::with_capacity(values.len());
-        for v in values {
+        for v in &values {
             let key = (point.path.clone(), v.name.clone(), v.line);
             let history = self
                 .inline
@@ -224,12 +254,21 @@ impl DebuggerView {
                 });
             let execution_line = point.top && v.line == point.line;
             let pieces = presentation(&v.name, history, execution_line);
+            // Under the mouse: a link, on the execution line in the
+            // execution point's colour (the scheme's text colour).
+            let hover = AfterTextHover {
+                role: (!execution_line).then_some(TextRole::ReferenceLink),
+                icon: Some(IconName::CHEVRON_DOWN),
+            };
             items.push((
                 v.line as usize - 1,
-                Decoration::default().after_text(pieces, true),
+                Decoration::default()
+                    .after_text(pieces, true)
+                    .after_text_hover(hover),
             ));
         }
         self.inline.items = Some((point.path.clone(), items));
+        self.inline.values = values;
         self.show_inline_values_everywhere(cx);
     }
 
@@ -242,23 +281,65 @@ impl DebuggerView {
     }
 
     /// An editor shows the values when it shows their file.
-    pub(crate) fn show_inline_values_in(&self, editor: &Entity<Editor>, cx: &mut App) {
+    pub(crate) fn show_inline_values_in(&mut self, editor: &Entity<Editor>, cx: &mut App) {
         let items = self.inline.items.as_ref().and_then(|(path, items)| {
             let shows = editor.read(cx).path().is_some_and(|p| p == path);
             shows.then(|| items.clone())
         });
-        editor.update(cx, |e, cx| match items {
+        let ids = editor.update(cx, |e, cx| match items {
             Some(items) => {
                 let last = e.buffer().len_lines().saturating_sub(1);
-                let items = items
+                // A value after a line past the end of the text is not
+                // shown; the others keep their index.
+                let (indices, shown): (Vec<usize>, Vec<_>) = items
                     .into_iter()
-                    .filter(|(line, _)| *line <= last)
-                    .map(|(line, d)| (line..line + 1, d))
-                    .collect();
-                e.set_decorations(GROUP, items, cx);
+                    .enumerate()
+                    .filter(|(_, (line, _))| *line <= last)
+                    .map(|(i, (line, d))| (i, (line..line + 1, d)))
+                    .unzip();
+                let ids = e.set_decorations(GROUP, shown, cx);
+                ids.into_iter().zip(indices).collect()
             }
-            None => e.clear_decorations(GROUP, cx),
+            None => {
+                e.clear_decorations(GROUP, cx);
+                Vec::new()
+            }
         });
+        if ids.is_empty() {
+            self.inline.ids.remove(&editor.entity_id());
+        } else {
+            self.inline.ids.insert(editor.entity_id(), ids);
+        }
+    }
+
+    /// The decoration of the value after line `line` (from 1) of an
+    /// editor, the one of `name` or the first.
+    pub(crate) fn inline_value_id(
+        &self,
+        editor: EntityId,
+        line: u32,
+        name: Option<&str>,
+    ) -> Option<DecorationId> {
+        let ids = self.inline.ids.get(&editor)?;
+        ids.iter()
+            .find(|(_, i)| {
+                self.inline
+                    .values
+                    .get(*i)
+                    .is_some_and(|v| v.line == line && name.is_none_or(|n| n == v.name))
+            })
+            .map(|(id, _)| *id)
+    }
+
+    /// The value a decoration of an editor shows.
+    pub(crate) fn inline_value_of(
+        &self,
+        editor: EntityId,
+        id: DecorationId,
+    ) -> Option<&InlineValue> {
+        let ids = self.inline.ids.get(&editor)?;
+        let (_, index) = ids.iter().find(|(d, _)| *d == id)?;
+        self.inline.values.get(*index)
     }
 
     /// The values shown, for `debug.state`.
@@ -288,30 +369,35 @@ impl DebuggerView {
     }
 }
 
-/// The names and value texts of a frame's variables, as the variables
-/// view shows them at its root (the first scope's values for a product
-/// that shows only those, else every scope's); `None` when the stop is
-/// over.
+/// The variables of a frame, as the variables view shows them at its
+/// root (the first scope's values for a product that shows only those,
+/// else every scope's); `None` when the stop is over.
 async fn frame_values(
     session: &Session,
     provider: &std::sync::Arc<dyn debugger::DebugAdapterProvider>,
     frame: i64,
-) -> Option<Vec<(String, String)>> {
+) -> Option<Vec<FrameValue>> {
     let scopes = session.scopes(frame).await.ok()?;
     let scopes: Vec<_> = if provider.first_scope_only() {
         scopes.into_iter().take(1).collect()
     } else {
         scopes.into_iter().filter(|s| !s.expensive).collect()
     };
-    let mut out: Vec<(String, String)> = Vec::new();
+    let mut out: Vec<FrameValue> = Vec::new();
     for scope in scopes {
         let children = session.children(scope.reference).await.ok()?;
-        for variable in &children.items {
+        for (i, variable) in children.items.iter().enumerate() {
             let node = provider.present_value(variable);
-            if let ValueRole::Value(_) = node.role
-                && !out.iter().any(|(n, _)| *n == node.name)
+            if let ValueRole::Value(kind) = node.role
+                && !out.iter().any(|v| v.name == node.name)
             {
-                out.push((node.name, value_text(&variable.value)));
+                out.push(FrameValue {
+                    name: node.name,
+                    variable: variable.clone(),
+                    shape: children.shape(i).map(str::to_owned),
+                    kind,
+                    parent: scope.reference,
+                });
             }
         }
     }

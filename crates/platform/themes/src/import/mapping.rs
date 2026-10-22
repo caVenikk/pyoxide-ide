@@ -549,6 +549,11 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         DebuggerInlinedValues => &["DEBUGGER_INLINED_VALUES"],
         DebuggerInlinedValuesModified => &["DEBUGGER_INLINED_VALUES_MODIFIED"],
         DebuggerInlinedValuesExecutionLine => &["DEBUGGER_INLINED_VALUES_EXECUTION_LINE"],
+        DebuggerEvaluatedExpression => &["EVALUATED_EXPRESSION_ATTRIBUTES"],
+        DebuggerEvaluatedExpressionExecutionLine => {
+            &["EVALUATED_EXPRESSION_EXECUTION_LINE_ATTRIBUTES"]
+        }
+        ReferenceLink => &["CTRL_CLICKABLE"],
     }
 }
 

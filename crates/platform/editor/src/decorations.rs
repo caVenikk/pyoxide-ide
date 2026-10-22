@@ -170,6 +170,18 @@ impl TextPiece {
 pub struct AfterLineText {
     pub pieces: Vec<TextPiece>,
     pub clickable: bool,
+    /// How a clickable text looks under the mouse; `None`: as a link.
+    pub hover: Option<AfterTextHover>,
+}
+
+/// A clickable after-line text under the mouse (`InlineDebugRendererBase`):
+/// all of it in one colour, then an icon.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AfterTextHover {
+    /// The colour's text role; `None`: the editor's text colour.
+    pub role: Option<TextRole>,
+    /// Drawn after the text (the drop-down triangle).
+    pub icon: Option<IconName>,
 }
 
 /// A mark on the error stripe from a decoration's first to its last line.
@@ -260,7 +272,19 @@ impl Decoration {
     }
 
     pub fn after_text(mut self, pieces: Vec<TextPiece>, clickable: bool) -> Self {
-        self.after_text = Some(AfterLineText { pieces, clickable });
+        self.after_text = Some(AfterLineText {
+            pieces,
+            clickable,
+            hover: None,
+        });
+        self
+    }
+
+    /// How the after-line text looks under the mouse.
+    pub fn after_text_hover(mut self, hover: AfterTextHover) -> Self {
+        if let Some(after) = &mut self.after_text {
+            after.hover = Some(hover);
+        }
         self
     }
 

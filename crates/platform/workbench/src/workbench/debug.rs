@@ -216,6 +216,16 @@ impl Workbench {
             DebuggerViewEvent::ShowValuesInline(on) => {
                 crate::settings::set_show_values_inline(*on, cx);
             }
+            DebuggerViewEvent::MouseHoverPopups(on) => {
+                if let Some(code_intel) = self.code_intel.clone() {
+                    code_intel.update(cx, |c, cx| c.set_hover_popups(*on, cx));
+                }
+            }
+            DebuggerViewEvent::ShowInfoTooltip { editor, offset } => {
+                if let Some(code_intel) = self.code_intel.clone() {
+                    code_intel.update(cx, |c, cx| c.show_hover_at(editor, *offset, cx));
+                }
+            }
         }
         cx.notify();
     }

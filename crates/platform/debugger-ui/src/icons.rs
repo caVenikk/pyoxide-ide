@@ -130,6 +130,9 @@ pub const ADD_TO_WATCHES: IconName = IconName("values/addToWatch");
 /// New UI's `run/evaluateExpression`) and Evaluate Expression.
 pub const EVALUATION_RESULT: IconName = IconName("values/evaluateExpression");
 pub const EVALUATE_EXPRESSION: IconName = EVALUATION_RESULT;
+/// Documentation and Problems of the value under the mouse
+/// (`AllIcons.Ide.FatalErrorRead`, the New UI's `status/errorOutline`).
+pub const DOCUMENTATION_AND_PROBLEMS: IconName = IconName("values/errorOutline");
 
 macro_rules! value_icons {
     ($($name:literal),* $(,)?) => {
@@ -154,6 +157,7 @@ value_icons![
     "watch",
     "addToWatch",
     "evaluateExpression",
+    "errorOutline",
 ];
 
 /// Registers the icons (the platform's light-only breakpoint icon gets its

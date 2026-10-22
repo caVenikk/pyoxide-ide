@@ -224,6 +224,16 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// The expression whose value the debugger shows under the mouse at
+    /// byte `offset` of a file's text (`XDebuggerEvaluator
+    /// .getExpressionRangeAtOffset` with no side effects allowed): a byte
+    /// range of the text, `None` where there is nothing to evaluate.
+    /// Blocking (parses the text): called off the UI thread.
+    fn expression_at(&self, file: &Path, text: &str, offset: usize) -> Option<Range<usize>> {
+        let _ = (file, text, offset);
+        None
+    }
+
     /// Line breakpoints can be put in a file of this type (its stoppable
     /// lines are known), going by its path.
     fn line_breakpoint_file(&self, file: &Path) -> bool {

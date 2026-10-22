@@ -36,7 +36,7 @@ use crate::session::execution_point::ExecutionPoint;
 pub type Highlighters = Rc<dyn Fn(&Path) -> Option<Box<dyn editor::Highlighter>>>;
 
 /// What the debugger UI asks of the window.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub enum DebuggerViewEvent {
     /// Open a file at a line and a column (from 1; 0: the line's start):
     /// Jump to Source of the Breakpoints dialog and of the variables view.
@@ -73,6 +73,17 @@ pub enum DebuggerViewEvent {
     /// application's option, and every window follows it
     /// ([`DebuggerView::set_inline_values_shown`]).
     ShowValuesInline(bool),
+    /// The editors' own popups under the mouse are off while the program
+    /// is suspended, the debugger shows values there
+    /// (`EditorMouseHoverPopupControl.disablePopups`), and on again after.
+    MouseHoverPopups(bool),
+    /// Show the editor's own popup (documentation and problems) at a char
+    /// offset, where the debugger has no value to show
+    /// (`EditorMouseHoverPopupManager.showInfoTooltip`).
+    ShowInfoTooltip {
+        editor: Entity<Editor>,
+        offset: usize,
+    },
 }
 
 /// The debugger UI of a window.
@@ -111,6 +122,8 @@ pub struct DebuggerView {
     pub(crate) pending_restart: Option<crate::session::control::PendingRestart>,
     /// The selected frame's values after the lines.
     pub(crate) inline: crate::inline::InlineValues,
+    /// Values under the mouse and their popups.
+    pub(crate) hints: crate::value_hint::ValueHints,
     _tool_window_events: gpui::Subscription,
 }
 
@@ -157,6 +170,7 @@ impl DebuggerView {
             starting: Vec::new(),
             pending_restart: None,
             inline: Default::default(),
+            hints: Default::default(),
             _tool_window_events: tool_window_events,
         }
     }
@@ -331,6 +345,14 @@ impl DebuggerView {
     /// A tab was closed.
     pub fn editor_closed(&mut self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
         self.gutters.remove(&editor.entity_id());
+        if self
+            .hints
+            .shown
+            .as_ref()
+            .is_some_and(|s| s.editor == *editor)
+        {
+            self.close_value_hint(cx);
+        }
         if self.popup.as_ref().is_some_and(|p| p.editor == *editor) {
             self.popup = None;
         }
@@ -693,12 +715,15 @@ impl DebuggerView {
 
     /// The popup and the gutter tooltip over the active editor.
     pub fn render_overlay(
-        &self,
+        &mut self,
         active: Option<&Entity<Editor>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut out = Vec::new();
+        if let Some(element) = self.render_value_hint(active, window, cx) {
+            out.push(element);
+        }
         if let Some(element) = self.render_tooltip(active, window, cx) {
             out.push(element);
         }
@@ -772,6 +797,7 @@ impl DebuggerView {
         state["execution_point"] = execution_point;
         state["show_values_inline"] = json!(self.inline_values_shown());
         state["inline_values"] = self.inline_values_json();
+        state["value_hint"] = self.value_hint_json(cx);
         state["starting"] = json!(self.starting.len());
         state
     }
@@ -846,6 +872,7 @@ pub fn forward_actions<E: InteractiveElement>(
     let el = el.on_action(move |a: &AddExceptionBreakpoint, window, cx| {
         v.update(cx, |v, cx| v.add_exception_action(a, window, cx))
     });
+    let el = crate::value_hint::forward_actions(el, view.clone(), active.clone());
     forward_session_actions(el, view, active)
 }
 

@@ -87,7 +87,18 @@ impl DebuggerView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            EditorEvent::Edited(_) | EditorEvent::Reloaded => self.follow_edits(editor, cx),
+            EditorEvent::Edited(_) | EditorEvent::Reloaded => {
+                self.value_hint_editor_changed(editor, false, cx);
+                self.follow_edits(editor, cx)
+            }
+            EditorEvent::SelectionsChanged => self.value_hint_editor_changed(editor, true, cx),
+            EditorEvent::Scrolled => self.value_hint_editor_changed(editor, false, cx),
+            EditorEvent::Hovered {
+                offset, modifiers, ..
+            } => self.value_hovered(editor, *offset, *modifiers, cx),
+            EditorEvent::AfterLineTextClicked { id, .. } => {
+                self.inline_value_clicked(editor, *id, window, cx)
+            }
             EditorEvent::GutterHovered { line } => {
                 if let Some(g) = self.gutters.get_mut(&editor.entity_id()) {
                     g.hovered = *line;

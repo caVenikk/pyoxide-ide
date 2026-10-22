@@ -496,6 +496,35 @@ impl debugger::DebugAdapterProvider for TestDebug {
         Some((path.into(), line.parse().ok()?))
     }
 
+    /// The identifier at the offset in `.py` files (an expression for the
+    /// value under the mouse); nothing on `def`, `for` and `in`.
+    fn expression_at(
+        &self,
+        file: &Path,
+        text: &str,
+        offset: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        if file.extension().is_none_or(|e| e != "py") {
+            return None;
+        }
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        if !text[offset..].chars().next().is_some_and(word) {
+            return None;
+        }
+        let start = text[..offset]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| word(*c))
+            .last()
+            .map_or(offset, |(i, _)| i);
+        let end = text[offset..]
+            .char_indices()
+            .find(|(_, c)| !word(*c))
+            .map_or(text.len(), |(i, _)| offset + i);
+        let range = start..end;
+        (!["def", "for", "in"].contains(&&text[range.clone()])).then_some(range)
+    }
+
     /// The line of a name's first assignment (`name = ...`) in `.py` files.
     fn declarations(
         &self,

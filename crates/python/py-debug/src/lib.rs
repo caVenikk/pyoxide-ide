@@ -32,6 +32,7 @@ mod declaration;
 pub mod declarations;
 mod expressions;
 pub mod helper;
+pub mod hover;
 pub mod launch;
 pub mod lines;
 mod provider;

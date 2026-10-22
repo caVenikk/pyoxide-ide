@@ -982,3 +982,137 @@ fn every_window_follows_show_variable_values_in_editor(cx: &mut TestAppContext) 
     h.draw();
     assert_eq!(shown(&mut h, third), json!(false));
 }
+
+/// debugger-values-in-editor.md: the mouse resting on `b` of `return b`
+/// (the execution line) shows its value under it, with the expression's
+/// background; a click shows its tree; Escape closes it. A click on the
+/// value after line 2 shows its tree under it with the caret at the
+/// line's end; the mouse elsewhere leaves it. Where there is nothing to
+/// evaluate, the editor's own popup is asked for.
+#[gpui::test]
+fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    let main = h.file("main.py");
+    let mut script = support::debug_start_ignoring(
+        &h.root,
+        None,
+        &["setBreakpoints", "setExceptionBreakpoints", "source"],
+    );
+    script.extend(debug_stop(&main, 3, "breakpoint"));
+    let children = |reference: i64| {
+        vec![
+            json!({"expect": "variables", "arguments": {"variablesReference": reference}}),
+            json!({"respond": {"variables": [
+                {"name": "0", "value": "2", "type": "int", "variablesReference": 0}]}}),
+        ]
+    };
+    script.extend([
+        json!({"expect": "scopes", "arguments": {"frameId": 103}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0},
+            {"name": "b", "value": "[2]", "type": "list", "variablesReference": 7}]}}),
+        json!({"expect": "evaluate", "arguments": {"expression": "b", "context": "hover"}}),
+        json!({"respond": {"result": "[2]", "type": "list", "variablesReference": 8}}),
+    ]);
+    script.extend(children(8));
+    script.extend(children(7));
+    push_debug_script(script);
+    h.invoke("debug.debug", json!(null));
+    h.wait("the values after the lines", |s| {
+        !s["inline_values"].is_null()
+    });
+    let editor = h
+        .window
+        .read_with(h.cx, |w, _| w.active_editor().cloned())
+        .unwrap()
+        .unwrap();
+    let view = h
+        .window
+        .read_with(h.cx, |w, _| w.debugger_view().clone())
+        .unwrap();
+    let infos = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let _events = h.cx.update(|cx| {
+        let infos = infos.clone();
+        cx.subscribe(&view, move |_, event, _| {
+            if let debugger_ui::DebuggerViewEvent::ShowInfoTooltip { offset, .. } = event {
+                infos.borrow_mut().push(*offset);
+            }
+        })
+    });
+    let hover = |h: &mut H, offset: usize| {
+        h.cx.update(|cx| {
+            editor.update(cx, |_, cx| {
+                cx.emit(editor::EditorEvent::Hovered {
+                    offset: Some(offset),
+                    position: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                    modifiers: gpui::Modifiers::default(),
+                })
+            })
+        });
+        h.cx.executor().advance_clock(Duration::from_millis(800));
+        h.draw();
+    };
+    let b = MAIN.find("return b").unwrap() + "return ".len();
+    hover(&mut h, b);
+    let s = h.wait("the value of b", |s| {
+        s["value_hint"]["kind"] == json!("value")
+    });
+    let hint = &s["value_hint"];
+    assert_eq!(hint["expression"], json!("b"), "{hint}");
+    assert_eq!(hint["text"], json!("{list} [2]"), "{hint}");
+    assert_eq!(hint["expandable"], json!(true), "{hint}");
+    assert_eq!(hint["range"], json!([b, b + 1]), "{hint}");
+    let marked = h.cx.update(|cx| editor.read(cx).range_background());
+    assert_eq!(marked, Some(b..b + 1));
+    // A click: the tree, its root expanded.
+    h.invoke("debug.value-hint.expand", json!(null));
+    let s = h.wait("the tree of b", |s| {
+        s["value_hint"]["tree"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.len() == 2)
+    });
+    let rows: Vec<Value> = s["value_hint"]["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["text"].clone())
+        .collect();
+    assert_eq!(rows, vec![json!("b = {list} [2]"), json!("0 = {int} 2")]);
+    assert_eq!(s["value_hint"]["tree"]["selected"], json!(["b"]));
+    // The tree's popup takes the keys of the variables view.
+    h.invoke("debug.variables.down", json!(null));
+    assert_eq!(
+        h.debug()["value_hint"]["tree"]["selected"],
+        json!(["b", "0"])
+    );
+    h.invoke("debug.value-popup.close", json!(null));
+    assert!(h.debug()["value_hint"].is_null());
+    assert_eq!(h.cx.update(|cx| editor.read(cx).range_background()), None);
+    // The value after line 2: its tree under it, the caret at the line's
+    // end.
+    h.invoke("debug.inline-value.open", json!({"line": 2, "name": "b"}));
+    let s = h.wait("the tree of the value after line 2", |s| {
+        s["value_hint"]["tree"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.len() == 2)
+    });
+    assert_eq!(s["value_hint"]["inline"], json!(true));
+    let line_end = MAIN.find("    return").unwrap() - 1;
+    let caret =
+        h.cx.update(|cx| editor.read(cx).selections().primary().head);
+    assert_eq!(caret, line_end);
+    // The mouse elsewhere leaves it.
+    hover(&mut h, b);
+    assert_eq!(h.debug()["value_hint"]["kind"], json!("tree"));
+    h.invoke("debug.value-popup.close", json!(null));
+    // Nothing to evaluate on `def`: the editor's own popup.
+    hover(&mut h, 1);
+    h.wait("no value", |s| s["value_hint"].is_null());
+    for _ in 0..20 {
+        tick(h.cx);
+    }
+    assert_eq!(*infos.borrow(), vec![1]);
+}

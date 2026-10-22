@@ -97,3 +97,15 @@ name = "DebugValueEditor > Editor"
 [context.bindings]
 "enter" = "debug.variables.commit-edit"
 "escape" = "debug.variables.cancel-edit"
+
+# Values in the editor (#167): Quick Evaluate Expression
+# (`QuickEvaluateExpression`) shows the value at the caret in a popup with
+# its tree; Escape closes the popup (`XDebuggerTreePopup`).
+[[context]]
+[context.bindings]
+"cmd-alt-f8" = "debug.quick-evaluate"
+
+[[context]]
+name = "DebugValuePopup"
+[context.bindings]
+"escape" = "debug.value-popup.close"

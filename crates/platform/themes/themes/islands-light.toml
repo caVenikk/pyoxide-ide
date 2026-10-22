@@ -433,6 +433,15 @@ italic = true
 fg = "#a9b7d6"
 italic = true
 
+[syntax.debugger-evaluated-expression]
+bg = "#e5e5e5"
+
+[syntax.debugger-evaluated-expression-execution-line]
+bg = "#bfbfbf"
+
+[syntax.reference-link]
+fg = "#006dcc"
+
 [font]
 ui-family = [
     "Inter",

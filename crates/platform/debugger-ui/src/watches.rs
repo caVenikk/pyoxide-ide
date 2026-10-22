@@ -259,7 +259,7 @@ fn error_text(error: &DebugError) -> String {
 }
 
 /// Evaluates an expression in a frame, with the size of a container.
-async fn evaluate(
+pub(crate) async fn evaluate(
     session: Session,
     provider: Option<Arc<dyn DebugAdapterProvider>>,
     frame: i64,
@@ -362,6 +362,11 @@ impl VariablesView {
             RowKind::Watch(w) => w.index.map(Some),
             _ => None,
         }
+    }
+
+    /// Adds a watch at the end (Add as Inline Watch of a value popup).
+    pub(crate) fn add_watch_expression(&mut self, expression: &str, cx: &mut Context<Self>) {
+        self.add_watch(expression, None, cx);
     }
 
     /// Adds a watch and selects it.

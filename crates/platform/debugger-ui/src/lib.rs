@@ -11,6 +11,8 @@
 //! - [`icons`]: the breakpoint icons;
 //! - `inline`: the values of the selected frame after the lines of its
 //!   file;
+//! - [`value_hint`]: values under the mouse and the popups with their
+//!   trees;
 //! - [`DebugHook`]: what a product supplies (its debug adapter provider).
 
 pub mod breakpoints;
@@ -19,6 +21,7 @@ mod hook;
 pub mod icons;
 mod inline;
 pub mod session;
+pub mod value_hint;
 pub mod variables;
 mod view;
 pub mod watches;
@@ -39,4 +42,5 @@ pub fn init(cx: &mut gpui::App) {
     icons::register(cx);
     breakpoints::commands::register(cx);
     ui::command::register(cx, session::commands::COMMANDS);
+    ui::command::register(cx, value_hint::COMMANDS);
 }
