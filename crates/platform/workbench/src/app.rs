@@ -151,6 +151,7 @@ pub fn init(cx: &mut App, product: &Product) {
     crate::file_preview::init(cx);
     crate::simulate::init(cx);
     crate::recent_files::init(cx);
+    crate::workbench::project_widget::init(cx);
     crate::navigation::init(cx);
     crate::run::init(cx);
     terminal_ui::init(cx);
@@ -160,6 +161,7 @@ pub fn init(cx: &mut App, product: &Product) {
     debugger_ui::init(cx);
     ui::command::register(cx, crate::dialog::COMMANDS);
     ui::command::register(cx, crate::welcome::COMMANDS);
+    ui::command::register(cx, crate::welcome::projects::COMMANDS);
     crate::settings::init(cx, &product.settings_pages);
     crate::terminal::init(cx, product.terminal.clone());
     fn workbench(window: &mut gpui::Window) -> Result<gpui::Entity<Workbench>, CommandError> {
@@ -432,6 +434,10 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         crate::keymap::active::load(cx, ::settings::keymaps_dir());
         if let Some(dir) = ::settings::config_dir() {
             settings_ui::window_state::load(cx, dir.join(settings_ui::window_state::FILE));
+        }
+        // The recent projects, read off the UI thread.
+        if let Some(file) = crate::recent_projects::file() {
+            crate::recent_projects::load(cx, file);
         }
         if let Some(file) = crate::find_in_files::settings_file() {
             crate::find_in_files::load_settings(cx, file);

@@ -41,6 +41,11 @@ pub(super) enum PendingDialog {
     /// Closing a Terminal tab (by id) whose shell runs a command: Terminate
     /// closes it.
     CloseTerminal(u64),
+    /// "Remove Recent Project": Remove takes it off the list.
+    RemoveRecentProject(PathBuf),
+    /// "Reopen Project" of a folder that is gone: Remove From List takes
+    /// it off the list.
+    ReopenMissing(PathBuf),
 }
 
 /// What closing a tab with a running process does
@@ -1169,6 +1174,12 @@ impl Workbench {
                     self.run_settings.confirm_rerun = false;
                 }
                 self.stop_and_launch(launch, window, cx);
+            }
+            (
+                PendingDialog::RemoveRecentProject(path) | PendingDialog::ReopenMissing(path),
+                Some("remove"),
+            ) => {
+                crate::recent_projects::remove(cx, &path);
             }
             (PendingDialog::DeleteConfiguration(key), Some("yes")) => {
                 if checked {

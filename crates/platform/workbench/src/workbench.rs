@@ -45,6 +45,7 @@ mod diff;
 mod file_events;
 mod file_sync;
 mod history;
+pub(crate) mod project_widget;
 mod remote;
 mod run_actions;
 pub(crate) mod terminal_window;
@@ -279,6 +280,8 @@ pub struct Workbench {
     version_control: version_control::VersionControl,
     /// The VCS widget's popups and dialogs.
     branch_ui: branches::BranchUi,
+    /// The project widget's popup.
+    project_widget: project_widget::ProjectWidgetUi,
     /// Push, Update Project and the VCS Operations popup.
     remote_ui: remote::RemoteUi,
     /// Breakpoints and the debugger (`debug.rs`).
@@ -470,6 +473,7 @@ impl Workbench {
             notifications,
             version_control,
             branch_ui: Default::default(),
+            project_widget: Default::default(),
             remote_ui: Default::default(),
             debugger,
             commit_ui,
@@ -795,6 +799,7 @@ impl Workbench {
         }
         self.run_project_opened(&path, cx);
         self.debug_project_opened(&path, window, cx);
+        crate::recent_projects::opened(cx, &path, Project::new(path.clone()).name());
         cx.emit(WorkbenchEvent::ProjectOpened(path));
         cx.notify();
     }
@@ -1775,13 +1780,26 @@ impl Workbench {
             FontWeight::SEMIBOLD,
             Cut::End,
         );
+        let avatar = project.as_ref().map(|p| self.project_avatar(p, cx));
+        let anchor = self.project_widget.anchor.clone();
+        let popup_open = self.project_widget_open();
         let project_widget = Widget::text(
             chrome::project_widget_chrome(name.is_some()),
             label,
             move |label| {
-                chrome::project_widget(name.as_deref(), &label, cx)
+                chrome::project_widget(name.as_deref(), avatar.as_ref(), &label, cx)
+                    // Highlighted while its popup is open.
+                    .when(popup_open, |d| d.bg(cx.theme().color(UiRole::Hover)))
+                    .relative()
+                    .child(
+                        canvas(move |bounds, _, _| anchor.set(bounds), |_, _, _, _| {})
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                    )
                     .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(OpenFolder { path: None }), cx)
+                        window.dispatch_action(Box::new(project_widget::Show), cx)
                     })
                     .into_any_element()
             },
@@ -1832,6 +1850,7 @@ impl Workbench {
             ],
         ];
         let width = window.viewport_size().width - left;
+        let project_color = self.toolbar_project_color(height, cx);
         div()
             .id("toolbar")
             .debug_selector(|| "toolbar".into())
@@ -1844,6 +1863,7 @@ impl Workbench {
                     window.titlebar_double_click();
                 }
             })
+            .children(project_color)
             .children(crate::main_toolbar::render(left, width, groups))
     }
 
@@ -2501,6 +2521,11 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::welcome_keymap))
             .on_action(cx.listener(Self::new_script))
             .on_action(cx.listener(Self::show_gear_menu))
+            .on_action(cx.listener(Self::show_project_widget))
+            .on_action(cx.listener(Self::open_recent_project))
+            .on_action(cx.listener(Self::copy_recent_path))
+            .on_action(cx.listener(Self::remove_recent_project))
+            .on_action(cx.listener(Self::reveal_recent_project))
             .on_action(cx.listener(Self::switch_theme))
             .on_action(cx.listener(Self::switch_keymap))
             .on_action(cx.listener(Self::quick_switch))
@@ -2660,6 +2685,7 @@ impl Render for Workbench {
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_branch_overlays(window, cx))
+            .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())
             .children(self.render_remote_overlays(window))
             .children(self.render_switch_popup(window))

@@ -31,6 +31,7 @@ mod notifications;
 mod pointer;
 mod popup_frame;
 mod project;
+mod project_widget;
 mod remote;
 mod run;
 mod run_configurations;
