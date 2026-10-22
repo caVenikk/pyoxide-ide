@@ -550,9 +550,12 @@ fn a_tab_shows_the_program_title_while_a_command_runs(cx: &mut TestAppContext) {
     let (mut h, _dir) = setup(cx, keymap::MACOS);
     h.open_terminal(None);
     let name = h.selected_tab_name();
-    // The command prints the mark C and the titles, then runs for a while;
-    // the next prompt ends it (/bin/sh's integration marks only prompts).
-    let run = |titles: &str| format!("printf '\\033]133;C\\007{titles}'; sleep 5\r");
+    // The command prints the mark C and the titles, runs for a moment and
+    // prints the mark D itself: /bin/sh is dash on Linux, which marks
+    // nothing, so the test does not wait for the shell's own marks.
+    let run = |titles: &str| {
+        format!("printf '\\033]133;C\\007{titles}'; sleep 3; printf '\\033]133;D;0\\007'\r")
+    };
     h.invoke(
         "terminal.type",
         json!({"text": run("\\033]2;sleep 100\\007\\033]1;sleep\\007")}),
