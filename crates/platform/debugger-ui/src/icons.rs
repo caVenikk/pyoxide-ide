@@ -116,7 +116,7 @@ action_icons![
 /// (`ThreadCurrent`), values (`Db_primitive`, `Db_array`, `Value`), the
 /// Special Variables and Return Values groups (`SpecialVar`,
 /// `WatchLastReturnValue`), watches (`Watch`, `AddToWatch`) and the
-/// evaluate field's result (`EvaluationResult`).
+/// evaluate field's result (`run/evaluateExpression`).
 pub const FRAME: IconName = IconName("values/frame");
 pub const THREAD_CURRENT: IconName = IconName("values/threadCurrent");
 pub const PRIMITIVE: IconName = IconName("values/dbPrimitive");
@@ -126,7 +126,10 @@ pub const SPECIAL_VARIABLES: IconName = IconName("values/specialVar");
 pub const RETURN_VALUES: IconName = IconName("values/watchLastReturnValue");
 pub const WATCH: IconName = IconName("values/watch");
 pub const ADD_TO_WATCHES: IconName = IconName("values/addToWatch");
-pub const EVALUATION_RESULT: IconName = IconName("values/evaluationResult");
+/// The evaluate field's result (`AllIcons.Debugger.Db_evaluateNode`, the
+/// New UI's `run/evaluateExpression`) and Evaluate Expression.
+pub const EVALUATION_RESULT: IconName = IconName("values/evaluateExpression");
+pub const EVALUATE_EXPRESSION: IconName = EVALUATION_RESULT;
 
 macro_rules! value_icons {
     ($($name:literal),* $(,)?) => {
@@ -150,7 +153,7 @@ value_icons![
     "watchLastReturnValue",
     "watch",
     "addToWatch",
-    "evaluationResult",
+    "evaluateExpression",
 ];
 
 /// Registers the icons (the platform's light-only breakpoint icon gets its

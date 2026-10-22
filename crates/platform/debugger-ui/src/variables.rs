@@ -41,6 +41,7 @@ use themes::{Metric, UiRole};
 use ui::icons::{Icon, IconName};
 use ui::menu::ContextMenu;
 use ui::theme::ThemeExt;
+use ui::tree_guides::TreeGuides;
 
 use crate::icons;
 use crate::watches::{Eval, InlineEdit, WatchRow, WatchValue};
@@ -50,13 +51,19 @@ pub const KEY_CONTEXT: &str = "DebugVariables";
 /// How long the rows of a frame stay after the program moved on
 /// (`XDebugView`'s clear alarm).
 const CLEAR_DELAY: Duration = Duration::from_millis(100);
-/// Space before a top-level row's chevron, one level, the chevron's and
-/// the icon's room.
-const ROW_LEFT: f32 = 4.0;
-const INDENT: f32 = 16.0;
+/// The rows' inset from the tree's edges (where the selection starts and
+/// ends), the space before a top-level row's chevron, one level, the
+/// chevron's and the icon's room (measured on the reference's New UI tree:
+/// the chevron's centre 19.5 from the edge, the icon at 33, the name at
+/// 52.5, a level 19).
+pub(crate) const ROW_INSET: f32 = 12.0;
+const ROW_LEFT: f32 = 0.0;
+const INDENT: f32 = 19.0;
 const CHEVRON: f32 = 16.0;
-const CHEVRON_ROOM: f32 = 18.0;
-const ICON_ROOM: f32 = 20.0;
+const CHEVRON_ROOM: f32 = 21.0;
+pub(crate) const ICON_ROOM: f32 = 18.5;
+/// Space above the first row.
+const TREE_TOP: f32 = 4.0;
 /// The separator of path segments.
 pub(crate) const SEP: char = '\u{1}';
 
@@ -111,6 +118,9 @@ pub struct ValueRow {
     /// The scope or value the variable is a child of.
     pub parent: i64,
     pub variable: Variable,
+    /// The renderer View as chose and the value's text as it shows it.
+    pub renderer: Option<String>,
+    pub shown: Option<String>,
 }
 
 impl Row {
@@ -158,7 +168,7 @@ impl ValueRow {
             &self.name,
             self.variable.type_name.as_deref(),
             self.shape.as_deref(),
-            &self.variable.value,
+            self.shown.as_deref().unwrap_or(&self.variable.value),
         )
     }
 }
@@ -204,6 +214,8 @@ pub(crate) struct ShownFrame {
     key: String,
     /// The frame's file: the evaluate field is coloured as its language.
     pub(crate) file: Option<std::path::PathBuf>,
+    /// The frame's line (from 1).
+    pub(crate) line: u32,
 }
 
 /// The variables of a debug session.
@@ -230,18 +242,37 @@ pub struct VariablesView {
     /// The rows of the frame shown before, while the new one loads.
     frozen: Option<Rc<Vec<Row>>>,
     _unfreeze: Option<Task<()>>,
-    /// The watch expressions of the session's configuration type.
+    /// The watch expressions of the session's configuration type, and
+    /// which of them are paused.
     pub(crate) watches: Vec<String>,
+    pub(crate) paused: Vec<bool>,
     /// The watches' values at the frame shown, by expression.
     pub(crate) evaluations: HashMap<String, Eval>,
     /// The evaluate field's result: its expression and value.
     pub(crate) result: Option<(String, Eval)>,
+    /// What the result showed before it was evaluated last: its name is in
+    /// the changed colour unless the value is the same (the reference's
+    /// restorer marks the new result node changed).
+    pub(crate) result_before: Option<String>,
+    /// The renderer View as chose for a value, by path.
+    pub(crate) renderers: HashMap<String, String>,
+    /// The open history list of the evaluate field or of a row's editor.
+    pub(crate) history: Option<crate::watches::HistoryList>,
+    /// The names of the field's expression the frame does not declare
+    /// (char ranges), and the frame's source they were looked up in.
+    pub(crate) unresolved: Vec<std::ops::Range<usize>>,
+    pub(crate) source: Option<(std::path::PathBuf, Arc<str>)>,
+    /// The lookups of the names of the field and of a row's editor under
+    /// way.
+    pub(crate) check: Option<Task<()>>,
+    pub(crate) check_editor: Option<Task<()>>,
     /// The evaluate field, made when it is first drawn.
     pub(crate) field: Option<Entity<Editor>>,
-    /// Where the evaluate field and the tree were laid out (the history
-    /// and the context menu open there).
+    /// Where the evaluate field, the tree and a row's editor were laid out
+    /// (the histories and the context menu open there).
     pub(crate) field_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) tree_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) editor_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// A value or a watch edited in its row.
     pub(crate) editing: Option<InlineEdit>,
     /// The context menu or the evaluate field's history.
@@ -261,9 +292,14 @@ impl VariablesView {
         cx: &mut Context<Self>,
     ) -> Self {
         let phase = session.phase();
-        let watches = session
+        let (watches, paused) = session
             .debugger()
-            .map(|d| d.watches(session.watches_key()))
+            .map(|d| {
+                (
+                    d.watches(session.watches_key()),
+                    d.watches_paused(session.watches_key()),
+                )
+            })
             .unwrap_or_default();
         Self {
             session,
@@ -284,11 +320,20 @@ impl VariablesView {
             frozen: None,
             _unfreeze: None,
             watches,
+            paused,
             evaluations: HashMap::new(),
             result: None,
+            result_before: None,
+            renderers: HashMap::new(),
+            history: None,
+            unresolved: Vec::new(),
+            source: None,
+            check: None,
+            check_editor: None,
             field: None,
             field_bounds: Rc::default(),
             tree_bounds: Rc::default(),
+            editor_bounds: Rc::default(),
             editing: None,
             menu: None,
             highlighters: None,
@@ -321,6 +366,7 @@ impl VariablesView {
                     generation: snapshot.generation,
                     key: format!("{path}:{}", f.name),
                     file: f.source.as_ref().and_then(|s| s.path.clone()),
+                    line: f.line,
                 })
             })
             .flatten();
@@ -342,6 +388,7 @@ impl VariablesView {
         self.evaluations.clear();
         self.result = None;
         self.editing = None;
+        self.history = None;
         self.previous = frame.as_ref().and_then(|f| self.saved.get(&f.key).cloned());
         self.state = TreeState {
             values: HashMap::new(),
@@ -356,6 +403,8 @@ impl VariablesView {
             self.load_scopes(f.id, cx);
         }
         self.frame = frame;
+        // The field's names are looked up in the new frame's code.
+        self.check_field(cx);
         cx.notify();
     }
 
@@ -368,8 +417,13 @@ impl VariablesView {
         self.loading.clear();
         self.errors.clear();
         // The watches are evaluated again; the result keeps its value
-        // (`WatchesRootNode.copyEvaluationResultFromOldRoot`).
+        // (`WatchesRootNode.copyEvaluationResultFromOldRoot`) and is
+        // compared with it.
         self.evaluations.clear();
+        self.result_before = self
+            .previous
+            .as_ref()
+            .and_then(|p| p.values.get(crate::watches::RESULT).cloned());
         self.freeze(cx);
         self.dirty = true;
         cx.notify();
@@ -652,9 +706,11 @@ impl VariablesView {
             "frame": self.frame.as_ref().map(|f| f.id),
             "selected": selected.map(|p| self.names(p)),
             "watches": self.watches,
+            "paused": self.paused,
             "evaluate": self.field_json(cx),
             "editing": self.editing_json(cx),
             "menu": self.menu.as_ref().map(|(m, _, _)| m.read(cx).state_json()),
+            "history": self.history_json(),
             "rows": rows.iter().map(|r| {
                 let mut row = json!({
                     "path": self.names(&r.path),
@@ -666,10 +722,13 @@ impl VariablesView {
                     row["kind"] = json!(v.kind.as_str());
                     row["name"] = json!(v.name);
                     row["type"] = json!(v.type_text);
-                    row["value"] = json!(value_text(&v.variable.value));
+                    row["value"] = json!(v.shown.clone().unwrap_or_else(|| value_text(&v.variable.value)));
                     row["expandable"] = json!(v.variable.reference > 0);
                     row["expanded"] = json!(v.expanded);
                     row["changed"] = json!(v.changed);
+                    if let Some(renderer) = &v.renderer {
+                        row["renderer"] = json!(renderer);
+                    }
                 };
                 match &r.kind {
                     RowKind::Value(v) => value(&mut row, v),
@@ -682,6 +741,7 @@ impl VariablesView {
                         row["expression"] = json!(w.expression);
                         row["watch"] = json!(w.index);
                         row["state"] = json!(w.value.as_str());
+                        row["paused"] = json!(w.paused);
                         if let WatchValue::Error(e) = &w.value {
                             row["error"] = json!(e);
                         }
@@ -708,6 +768,15 @@ impl VariablesView {
     }
 
     // ---- drawing -----------------------------------------------------------------
+
+    /// Where the chevrons are, for the indent guides.
+    fn guides() -> TreeGuides {
+        TreeGuides {
+            first: px(ROW_INSET + ROW_LEFT),
+            indent: px(INDENT),
+            control: px(CHEVRON),
+        }
+    }
 
     fn render_row(&self, row: &Row, focused: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
@@ -740,10 +809,10 @@ impl VariablesView {
                 }))
         });
         let content_left = left + px(CHEVRON_ROOM);
-        let icon = |name: IconName| {
+        let icon = |name: IconName, room: f32| {
             div()
                 .flex_none()
-                .w(px(ICON_ROOM))
+                .w(px(room))
                 .child(Icon::new(name).size(px(16.0)))
         };
         let name_div = |name: &str, role: UiRole| {
@@ -766,7 +835,13 @@ impl VariablesView {
                             .child(format!("{{{t}}}\u{a0}")),
                     )
                 })
-                .child(div().text_color(text).child(value_text(&v.variable.value)))
+                .child(
+                    div().text_color(text).child(
+                        v.shown
+                            .clone()
+                            .unwrap_or_else(|| value_text(&v.variable.value)),
+                    ),
+                )
         };
         let kind_icon = |v: &ValueRow| match v.kind {
             ValueKind::Primitive => icons::PRIMITIVE,
@@ -781,25 +856,24 @@ impl VariablesView {
             }
         };
         // The editor of the row, when it is edited in place: after the
-        // icon (a watch) or after `name =` (Set Value).
-        let editor = self
-            .editing
-            .as_ref()
-            .filter(|e| e.path == row.path)
-            .map(|e| self.render_inline_editor(e, cx));
+        // icon (a watch) or after `name = ` (Set Value).
+        let edit = self.editing.as_ref().filter(|e| e.path == row.path);
+        let editor = edit.map(|e| self.render_inline_editor(e, cx));
         let content: AnyElement = match (&row.kind, editor) {
             (RowKind::Value(v), Some(editor)) => div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .w_full()
-                .child(icon(kind_icon(v)))
+                .child(icon(kind_icon(v), ICON_ROOM))
                 .child(name_div(&v.name, name_role(v)))
                 .child(eq())
                 .child(editor)
                 .into_any_element(),
             (RowKind::Watch(w), Some(editor)) => {
                 let i = match &w.value {
+                    _ if w.result => icons::EVALUATION_RESULT,
+                    _ if w.paused => icons::PAUSE,
                     WatchValue::Value(v) => kind_icon(v),
                     _ => icons::WATCH,
                 };
@@ -808,7 +882,7 @@ impl VariablesView {
                     .flex_row()
                     .items_center()
                     .w_full()
-                    .child(icon(i))
+                    .child(icon(i, 16.0))
                     .child(editor)
                     .into_any_element()
             }
@@ -816,68 +890,17 @@ impl VariablesView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .child(icon(kind_icon(v)))
+                .child(icon(kind_icon(v), ICON_ROOM))
                 .child(name_div(&v.name, name_role(v)))
                 .child(eq())
                 .child(value_tail(v))
                 .into_any_element(),
-            (RowKind::Watch(w), None) => {
-                let row_icon = |i: IconName| {
-                    if w.result {
-                        icons::EVALUATION_RESULT
-                    } else {
-                        i
-                    }
-                };
-                match &w.value {
-                    WatchValue::Value(v) => div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .child(icon(row_icon(kind_icon(v))))
-                        .child(name_div(&w.name, name_role(v)))
-                        .child(eq())
-                        .child(value_tail(v))
-                        .into_any_element(),
-                    WatchValue::Pending => div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .child(name_div(&w.name, UiRole::DebuggerValueName))
-                        .child(eq())
-                        .child(
-                            div()
-                                .text_color(theme.color(UiRole::DebuggerCollectingData))
-                                .child(COLLECTING_DATA),
-                        )
-                        .into_any_element(),
-                    WatchValue::Error(message) => div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .child(icon(IconName::ERROR))
-                        .child(name_div(&w.name, UiRole::DebuggerValueName))
-                        .child(eq())
-                        .child(
-                            div()
-                                .text_color(theme.color(UiRole::DebuggerErrorMessage))
-                                .child(value_text(message)),
-                        )
-                        .into_any_element(),
-                    WatchValue::None => div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .child(icon(row_icon(icons::WATCH)))
-                        .child(name_div(&w.name, UiRole::DebuggerValueName))
-                        .into_any_element(),
-                }
-            }
+            (RowKind::Watch(w), None) => self.render_watch_content(w, cx),
             (RowKind::Group { title, icon: i, .. }, _) => div()
                 .flex()
                 .flex_row()
                 .items_center()
-                .child(icon(*i))
+                .child(icon(*i, ICON_ROOM))
                 .child(div().text_color(text).child(title.clone()))
                 .into_any_element(),
             (
@@ -891,7 +914,7 @@ impl VariablesView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .when_some(*i, |d, i| d.child(icon(i)))
+                .when_some(*i, |d, i| d.child(icon(i, ICON_ROOM)))
                 .child(div().text_color(theme.color(*role)).child(message.clone()))
                 .into_any_element(),
             (RowKind::More { text: message }, _) => div()
@@ -903,7 +926,16 @@ impl VariablesView {
         let expandable = row.expandable();
         let expanded = row.expanded();
         let menu_path = row.path.clone();
-        let edited = self.editing.as_ref().is_some_and(|e| e.path == row.path);
+        let edited = edit.is_some();
+        // A new watch's row is not selected while it is typed
+        // (`WatchesRootNode.editWatch`).
+        let new_watch = edit.is_some_and(|e| e.new_watch_at().is_some());
+        let guides = Self::guides().row(
+            row.depth,
+            expandable && expanded,
+            row_h,
+            theme.color(UiRole::TreeIndentGuide),
+        );
         div()
             .id(SharedString::from(format!("variables-row-{}", row.path)))
             .debug_selector({
@@ -913,19 +945,24 @@ impl VariablesView {
             .relative()
             .h(row_h)
             .w_full()
-            .px(px(4.0))
+            .px(px(ROW_INSET))
+            .children(guides)
             .child(
                 div()
+                    .relative()
                     .size_full()
                     .rounded(theme.metric(Metric::CornerRadius))
-                    .when(selected, |d| d.bg(selection))
+                    .when(selected && !new_watch, |d| d.bg(selection))
                     .child(
                         div()
                             .absolute()
                             .left(content_left)
                             .top_0()
                             .h(row_h)
-                            .when(edited, |d| d.right(px(4.0)))
+                            // The editor reaches nearly to the tree's edge.
+                            .when(edited, |d| {
+                                d.right(px(crate::watches::EDITOR_RIGHT - ROW_INSET))
+                            })
                             .flex()
                             .items_center()
                             .whitespace_nowrap()
@@ -980,21 +1017,24 @@ struct Builder<'a> {
 impl Builder<'_> {
     /// The evaluate field's result and the watches, before the frame's
     /// values (`WatchesRootNode.getChildren`); while the program runs the
-    /// watches show their expressions only.
+    /// watches show their expressions only. A paused watch is not
+    /// evaluated (`WatchNodeImpl.XWatchValue.computePresentation`).
     fn watches(&mut self) {
         let view = self.view;
         let frame = view.frame.is_some() && view.phase == Phase::Suspended;
         if let Some((expression, eval)) = &view.result {
             let eval = frame.then_some(eval);
-            self.watch(crate::watches::RESULT, expression, None, true, eval);
+            self.watch(crate::watches::RESULT, expression, None, true, false, eval);
         }
         let new = view.editing.as_ref().and_then(InlineEdit::new_watch_at);
         for (i, expression) in view.watches.iter().enumerate() {
             if new == Some(i) {
-                self.watch(crate::watches::NEW, "", None, false, None);
+                self.watch(crate::watches::NEW, "", None, false, false, None);
             }
+            let paused = view.paused.get(i).copied().unwrap_or(false);
             let eval = match view.evaluations.get(expression) {
                 Some(eval) => Some(eval),
+                None if frame && paused => Some(&Eval::Paused),
                 None if frame => {
                     if !self.evaluate.contains(expression) {
                         self.evaluate.push(expression.clone());
@@ -1009,11 +1049,12 @@ impl Builder<'_> {
                 expression,
                 Some(i),
                 false,
+                paused,
                 eval,
             );
         }
         if new.is_some_and(|i| i >= view.watches.len()) {
-            self.watch(crate::watches::NEW, "", None, false, None);
+            self.watch(crate::watches::NEW, "", None, false, false, None);
         }
     }
 
@@ -1023,6 +1064,7 @@ impl Builder<'_> {
         expression: &str,
         index: Option<usize>,
         result: bool,
+        paused: bool,
         eval: Option<&Eval>,
     ) {
         let view = self.view;
@@ -1038,14 +1080,25 @@ impl Builder<'_> {
                 self.complete = false;
                 WatchValue::Pending
             }
-            Some(Eval::Error(message)) => WatchValue::Error(message.clone()),
+            Some(Eval::Paused) => WatchValue::Paused,
+            Some(Eval::Error(message)) => WatchValue::Error(match &view.provider {
+                Some(p) => p.evaluation_error(message).shown(),
+                None => message.clone(),
+            }),
             Some(Eval::Value { variable, shape }) => {
                 let shown = value_text(&variable.value);
-                let changed = view
-                    .previous
-                    .as_ref()
-                    .and_then(|p| p.values.get(&path))
-                    .is_some_and(|old| *old != shown);
+                // The result is new each time it is evaluated: changed
+                // unless it shows what it showed before.
+                let changed = if result {
+                    view.result_before.as_deref() != Some(shown.as_str())
+                } else {
+                    !paused
+                        && view
+                            .previous
+                            .as_ref()
+                            .and_then(|p| p.values.get(&path))
+                            .is_some_and(|old| *old != shown)
+                };
                 self.values.insert(path.clone(), shown);
                 let kind = match view
                     .provider
@@ -1057,6 +1110,7 @@ impl Builder<'_> {
                     _ => ValueKind::Primitive,
                 };
                 let expanded = variable.reference > 0 && view.state.expanded.contains(&path);
+                let (renderer, rendered) = self.rendered(&path, variable);
                 WatchValue::Value(Box::new(ValueRow {
                     name: name.clone(),
                     type_text: type_text(variable.type_name.as_deref(), shape.as_deref()),
@@ -1066,6 +1120,8 @@ impl Builder<'_> {
                     changed,
                     parent: 0,
                     variable: (**variable).clone(),
+                    renderer,
+                    shown: rendered,
                 }))
             }
         };
@@ -1081,6 +1137,7 @@ impl Builder<'_> {
                 expression: expression.to_owned(),
                 index,
                 result,
+                paused,
                 value,
             })),
         });
@@ -1102,6 +1159,28 @@ impl Builder<'_> {
                 Some(IconName::ERROR),
             );
         }
+    }
+
+    /// The renderer View as chose for the value at `path` (or the type's
+    /// default when it has a choice) and the value's text as it shows it.
+    fn rendered(&self, path: &str, variable: &Variable) -> (Option<String>, Option<String>) {
+        let Some(provider) = &self.view.provider else {
+            return (None, None);
+        };
+        let (renderers, default) =
+            provider.value_renderers(variable.type_name.as_deref().unwrap_or(""));
+        if renderers.is_empty() {
+            return (None, None);
+        }
+        let renderer = self
+            .view
+            .renderers
+            .get(path)
+            .filter(|r| renderers.contains(&r.as_str()))
+            .cloned()
+            .unwrap_or_else(|| default.to_owned());
+        let shown = provider.render_value(&renderer, &variable.value);
+        (Some(renderer), shown)
     }
 
     fn message(
@@ -1354,6 +1433,7 @@ impl Builder<'_> {
             });
         self.values.insert(path.clone(), shown);
         let expanded = variable.reference > 0 && view.state.expanded.contains(&path);
+        let (renderer, rendered) = self.rendered(&path, variable);
         self.rows.push(Row {
             path: path.clone(),
             depth,
@@ -1366,6 +1446,8 @@ impl Builder<'_> {
                 changed,
                 parent,
                 variable: variable.clone(),
+                renderer,
+                shown: rendered,
             })),
         });
         // Set Value failed: the message under the row.
@@ -1424,7 +1506,8 @@ impl Render for VariablesView {
             .flex_1()
             .min_h(px(0.0))
             .w_full()
-            .py(px(2.0))
+            .pt(px(TREE_TOP))
+            .pb(px(2.0))
             .child(
                 canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
                     .absolute()
@@ -1444,12 +1527,14 @@ impl Render for VariablesView {
                     }
                 }),
             );
+        let history = self.render_history(window, cx);
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(field)
             .child(tree)
+            .children(history)
             .children(
                 self.menu
                     .as_ref()

@@ -7,37 +7,48 @@
 //!   value as the first node, `result`; Add to Watches (its button and
 //!   ⇧⌘Enter) adds the expression to the watches; the chevron lists the
 //!   expressions evaluated before (`XDebuggerHistoryManager`, kept per
-//!   project);
+//!   project) in the combo box's list; names the frame's code does not
+//!   declare are marked and outline the field in red
+//!   (`XDebuggerExpressionComboBox`'s error outline);
 //! - the watches after the result and before the frame's values, each
 //!   evaluated in the frame shown, kept per run configuration type in the
-//!   personal project state; New Watch, Remove Watch and Edit change them,
-//!   a watch is edited in its row (`WatchInplaceEditor`);
-//! - Set Value in the row of a value (`SetValueInplaceEditor`), Copy Value
+//!   personal project state; New Watch, Remove Watch, Remove All Watches,
+//!   Edit and Pause Watch change them, a watch is edited in its row
+//!   (`WatchInplaceEditor`); a paused watch is not evaluated at the next
+//!   stops (`XPauseWatchAction`);
+//! - Set Value in the row of a value (`SetValueInplaceEditor`); the editors
+//!   of the rows are combo boxes with a history of their own; Copy Value
 //!   (`XCopyValueAction`, the whole value in the clipboard context), Copy
 //!   Name, Add to Watches, Evaluate Expression (into the field), Jump To
-//!   Source (`XJumpToSourceAction`, the product finds the declaration) and
-//!   the context menu with them (`XDebugger.Watches.Tree.Popup`).
+//!   Source (`XJumpToSourceAction`, the product finds the declaration),
+//!   Jump To Type Source (the running program finds the type), View as (the
+//!   product's renderers) and the context menu with them
+//!   (`XDebugger.Watches.Tree.Popup`, `XDebugger.ValueGroup`).
 
+use std::ops::Range;
 use std::sync::Arc;
 
-use debugger::values::ValueRole;
-use debugger::{DebugAdapterProvider, DebugError, EvaluateContext, Phase, Session, Variable};
-use editor::{Editor, EditorEvent};
+use debugger::values::{ValueRole, value_text};
+use debugger::{
+    DebugAdapterProvider, DebugError, EvaluateContext, HistoryKind, Phase, Session, Variable,
+};
+use editor::{DiagnosticMark, Editor, EditorEvent, MarkMessage, MarkSeverity};
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Point, Styled, Subscription, Window, canvas, div, prelude::*, px,
+    AnyElement, App, Bounds, ClipboardItem, Context, Entity, Focusable, InteractiveElement,
+    IntoElement, KeystrokeEvent, MouseButton, ParentElement, Pixels, Point, Styled, Subscription,
+    Window, anchored, canvas, deferred, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip};
 use ui::icons::{Icon, IconName};
-use ui::menu::{ContextMenu, MenuItem, PopupOptions};
+use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt;
 
 use crate::DebuggerView;
 use crate::icons;
 use crate::session::commands::*;
-use crate::variables::{Row, RowKind, ValueRow, VariablesView, parent_of};
+use crate::variables::{ICON_ROOM, Row, RowKind, ValueRow, VariablesView};
 
 /// The path segment of the evaluate field's result and its name
 /// (`debugger.result.node.name`).
@@ -52,11 +63,37 @@ pub const EDITOR_CONTEXT: &str = "DebugValueEditor";
 /// Watches (`debugger.evaluate.expression.or.add.a.watch.hint`).
 const HINT_MACOS: &str = "Evaluate expression (\u{23ce}) or add a watch (\u{21e7}\u{2318}\u{23ce})";
 const HINT_OTHERS: &str = "Evaluate expression (Enter) or add a watch (Ctrl+Shift+Enter)";
-/// The height of the evaluate field's row.
-const FIELD_HEIGHT: f32 = 30.0;
+/// The evaluate field (measured on the reference): 32 high over its bottom
+/// line, the text's first pixel 12 from the left, the chevron's centre 18
+/// from the right and Add to Watches' 51.
+const FIELD_HEIGHT: f32 = 33.0;
+const FIELD_LEFT: f32 = 11.0;
+const FIELD_RIGHT: f32 = 7.0;
+const FIELD_BUTTON: f32 = 22.0;
+const FIELD_GAP: f32 = 11.0;
+/// The ring of a focused combo box (or of one whose expression has an
+/// error), drawn inside it.
+const RING: f32 = 2.0;
+/// The editor of a row: 30 high, centred on its row, 2 after the name's
+/// `=` or the icon, reaching this far from the tree's right edge, with the
+/// text 8 after the ring and the arrow's part 26 wide after a line.
+const EDITOR_HEIGHT: f32 = 30.0;
+pub(crate) const EDITOR_RIGHT: f32 = 3.0;
+const EDITOR_LEFT: f32 = 2.0;
+const EDITOR_TEXT: f32 = 8.0;
+const EDITOR_ARROW: f32 = 26.0;
+/// The list of a combo box's history: rows 24 high, the text 7.5 after
+/// the border, at most ten rows shown (`setMaximumRowCount(10)`).
+const HISTORY_ROW: f32 = 24.0;
+const HISTORY_TEXT: f32 = 7.5;
+const HISTORY_ROWS: usize = 10;
 /// How the result is evaluated: as the debug console does, so that a
 /// statement runs too.
 const RESULT_CONTEXT: EvaluateContext = EvaluateContext::Repl;
+/// A paused watch at a stop (`xdebugger.watch.is.paused.message`) and its
+/// link (`xdebugger.evaluate.paused.watch`).
+const PAUSED: &str = "The watch is paused";
+const EVALUATE_PAUSED: &str = "\u{2026} Evaluate";
 
 /// The path segment of the watch at an index.
 pub(crate) fn watch_segment(index: usize) -> String {
@@ -82,11 +119,14 @@ pub(crate) fn segment_name(segment: &str, watches: &[String]) -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Eval {
     Pending,
+    /// A paused watch, not evaluated at this stop.
+    Paused,
     Value {
         variable: Box<Variable>,
         /// The size of a container.
         shape: Option<String>,
     },
+    /// The adapter's message.
     Error(String),
 }
 
@@ -99,6 +139,7 @@ pub struct WatchRow {
     /// The watch's index; `None` for the result and a new watch.
     pub index: Option<usize>,
     pub result: bool,
+    pub paused: bool,
     pub value: WatchValue,
 }
 
@@ -109,6 +150,7 @@ impl WatchRow {
             WatchValue::Pending => {
                 format!("{} = {}", self.name, crate::variables::COLLECTING_DATA)
             }
+            WatchValue::Paused => format!("{} {PAUSED}", self.name),
             WatchValue::Value(v) => v.text(),
             WatchValue::Error(e) => format!("{} = {e}", self.name),
         }
@@ -121,7 +163,10 @@ pub enum WatchValue {
     /// The program runs: the expression only.
     None,
     Pending,
+    /// Paused and not evaluated at this stop.
+    Paused,
     Value(Box<ValueRow>),
+    /// The error as the product shows it (`{NameError}NameError(…)`).
     Error(String),
 }
 
@@ -130,6 +175,7 @@ impl WatchValue {
         match self {
             WatchValue::None => "none",
             WatchValue::Pending => "pending",
+            WatchValue::Paused => "paused",
             WatchValue::Value(_) => "value",
             WatchValue::Error(_) => "error",
         }
@@ -152,6 +198,16 @@ pub(crate) enum EditTarget {
     NewWatch { at: usize },
 }
 
+impl EditTarget {
+    /// The history of the editor (`setValue`, `watch`).
+    fn history(&self) -> HistoryKind {
+        match self {
+            EditTarget::SetValue { .. } => HistoryKind::SetValue,
+            _ => HistoryKind::Watch,
+        }
+    }
+}
+
 /// A value or a watch edited in its row (`XDebuggerTreeInplaceEditor`).
 pub(crate) struct InlineEdit {
     /// The edited row.
@@ -162,7 +218,10 @@ pub(crate) struct InlineEdit {
     pub error: Option<String>,
     /// An Apply waits for the debugger.
     pub applying: bool,
+    /// The names of its expression the frame does not declare.
+    pub unresolved: Vec<Range<usize>>,
     _blur: Subscription,
+    _edited: Subscription,
 }
 
 impl InlineEdit {
@@ -173,6 +232,19 @@ impl InlineEdit {
             _ => None,
         }
     }
+}
+
+/// The open list of a combo box's history: the evaluate field's or the
+/// editor of a row (`ComboPopup`). The field keeps the focus; Up, Down,
+/// Enter and Escape act on the list while it is open.
+pub(crate) struct HistoryList {
+    /// The evaluate field's list, else the row editor's.
+    pub field: bool,
+    pub items: Vec<String>,
+    pub highlighted: Option<usize>,
+    /// The combo box the list opens under.
+    pub bounds: Bounds<Pixels>,
+    _keys: Subscription,
 }
 
 /// The text of an evaluation's error: the last line of a traceback.
@@ -240,13 +312,17 @@ impl VariablesView {
 
     /// The watches of the configuration type changed (here or elsewhere).
     pub fn sync_watches(&mut self, cx: &mut Context<Self>) {
-        let watches = self
+        let (watches, paused) = self
             .session
             .debugger()
-            .map(|d| d.watches(self.session.watches_key()))
+            .map(|d| {
+                let key = self.session.watches_key();
+                (d.watches(key), d.watches_paused(key))
+            })
             .unwrap_or_default();
-        if watches != self.watches {
+        if watches != self.watches || paused != self.paused {
             self.watches = watches;
+            self.paused = paused;
             self.dirty = true;
             cx.notify();
         }
@@ -361,6 +437,60 @@ impl VariablesView {
         }
     }
 
+    /// Remove All Watches: the watches and the result
+    /// (`WatchesRootNode.removeAllChildren`).
+    pub(crate) fn remove_all_watches(&mut self, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
+        if let Some(debugger) = self.session.debugger() {
+            debugger.remove_all_watches(self.session.watches_key());
+        }
+        self.result = None;
+        self.dirty = true;
+        self.sync_watches(cx);
+        cx.notify();
+    }
+
+    /// Pause Watch, or Resume Watch of a paused one: the selected watch or
+    /// the one at `index`. A paused watch keeps the value it shows; a
+    /// resumed one is evaluated again (`XPauseWatchAction`).
+    pub(crate) fn pause_watch(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
+        let index = match index {
+            Some(i) => Some(i),
+            None => self.selected_watch(cx).flatten(),
+        };
+        let Some(i) = index.filter(|i| *i < self.watches.len()) else {
+            return;
+        };
+        // A watch being evaluated cannot be paused (the evaluation cannot
+        // be cancelled).
+        let expression = self.watches[i].clone();
+        if self.evaluations.get(&expression) == Some(&Eval::Pending) {
+            return;
+        }
+        let paused = self.paused.get(i).copied().unwrap_or(false);
+        let Some(debugger) = self.session.debugger() else {
+            return;
+        };
+        if debugger.set_watch_paused(self.session.watches_key(), i, !paused) {
+            if paused {
+                self.evaluations.remove(&expression);
+            }
+            self.dirty = true;
+            self.sync_watches(cx);
+        }
+    }
+
+    /// "… Evaluate" of a paused watch: evaluated once, it stays paused.
+    pub(crate) fn evaluate_paused_watch(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(expression) = self.watches.get(index).cloned() {
+            self.evaluate_watch(expression, cx);
+            self.dirty = true;
+            cx.notify();
+        }
+    }
+
     /// Edit: the selected watch in place, or its expression set to
     /// `expression` (the result becomes a watch).
     pub(crate) fn edit_watch(
@@ -419,13 +549,11 @@ impl VariablesView {
         }
     }
 
-    /// Add to Watches: the selected value's expression, at the end
-    /// (`DebuggerUIUtil.addToWatches`).
-    pub(crate) fn add_to_watches(&mut self, cx: &mut Context<Self>) {
-        let Some(row) = self.selected_row(cx) else {
-            return;
-        };
-        let expression = match &row.kind {
+    /// The expression of the selected row: a watch's own, else the
+    /// value's.
+    fn selected_expression(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        let row = self.selected_row(cx)?;
+        match &row.kind {
             RowKind::Watch(w) => Some(w.expression.clone()),
             _ => row.value().map(|v| {
                 v.variable
@@ -433,9 +561,35 @@ impl VariablesView {
                     .clone()
                     .unwrap_or_else(|| v.variable.name.clone())
             }),
-        };
-        if let Some(expression) = expression.filter(|e| !e.trim().is_empty()) {
+        }
+        .filter(|e| !e.trim().is_empty())
+    }
+
+    /// Add to Watches: the selected value's expression, at the end
+    /// (`DebuggerUIUtil.addToWatches`).
+    pub(crate) fn add_to_watches(&mut self, cx: &mut Context<Self>) {
+        if let Some(expression) = self.selected_expression(cx) {
             self.add_watch(&expression, None, cx);
+        }
+    }
+
+    /// View as: the selected value shown by a renderer of its type.
+    pub(crate) fn view_as(&mut self, renderer: &str, cx: &mut Context<Self>) {
+        let Some(row) = self.selected_row(cx) else {
+            return;
+        };
+        let Some(v) = row.value() else {
+            return;
+        };
+        let Some(provider) = &self.provider else {
+            return;
+        };
+        let (renderers, _) =
+            provider.value_renderers(v.variable.type_name.as_deref().unwrap_or(""));
+        if renderers.contains(&renderer) {
+            self.renderers.insert(row.path.clone(), renderer.to_owned());
+            self.dirty = true;
+            cx.notify();
         }
     }
 
@@ -452,8 +606,9 @@ impl VariablesView {
         };
         let field = editor::field::new("", Some(hint.into()), false, window, cx);
         field.update(cx, |e, _| e.set_placeholder_unfocused(true));
-        cx.subscribe(&field, |_, _, event: &EditorEvent, cx| {
+        cx.subscribe(&field, |this, _, event: &EditorEvent, cx| {
             if matches!(event, EditorEvent::Edited(_)) {
+                this.check_field(cx);
                 cx.notify();
             }
         })
@@ -469,41 +624,172 @@ impl VariablesView {
             .unwrap_or_default()
     }
 
-    /// Puts a text into the field (selected) and gives it the focus.
+    /// Puts a text into the field, the caret at its end.
+    fn put_field_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let field = self.ensure_field(window, cx);
+        field.update(cx, |e, cx| put_text(e, text, cx));
+        self.check_field(cx);
+    }
+
+    /// Puts a text into the field and gives it the focus.
     pub(crate) fn set_field_text(
         &mut self,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let field = self.ensure_field(window, cx);
-        field.update(cx, |e, cx| e.set_text_selected(text, cx));
-        window.focus(&field.focus_handle(cx));
+        self.put_field_text(text, window, cx);
+        if let Some(field) = &self.field {
+            window.focus(&field.focus_handle(cx));
+        }
         self.close_menu(cx);
+        self.history = None;
+        cx.notify();
+    }
+
+    /// Looks up the names of the field's expression in the frame's code,
+    /// off the UI thread; the field marks those it does not declare
+    /// (`Unresolved reference`) and is outlined in red while there are
+    /// any.
+    pub(crate) fn check_field(&mut self, cx: &mut Context<Self>) {
+        if let Some(field) = self.field.clone() {
+            self.check_names(field, true, cx);
+        }
+    }
+
+    /// [`Self::check_field`] for the editor of a row.
+    fn check_row_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editing.as_ref().map(|e| e.editor.clone()) {
+            self.check_names(editor, false, cx);
+        }
+    }
+
+    fn check_names(&mut self, editor: Entity<Editor>, field: bool, cx: &mut Context<Self>) {
+        let expression = editor.read(cx).text();
+        let frame = self
+            .frame
+            .as_ref()
+            .filter(|_| self.phase == Phase::Suspended)
+            .and_then(|f| Some((f.file.clone()?, f.line)));
+        let (Some(provider), Some((file, line))) = (self.provider.clone(), frame) else {
+            self.set_unresolved(&editor, field, Vec::new(), cx);
+            return;
+        };
+        if expression.trim().is_empty() {
+            self.set_unresolved(&editor, field, Vec::new(), cx);
+            return;
+        }
+        let cached = self
+            .source
+            .as_ref()
+            .filter(|(path, _)| *path == file)
+            .map(|(_, text)| text.clone());
+        let task = cx.background_spawn(async move {
+            let text: Arc<str> = match cached {
+                Some(text) => text,
+                None => std::fs::read_to_string(&file).ok()?.into(),
+            };
+            let ranges = provider.unresolved_names(&text, line, &expression);
+            Some((file, text, expression, ranges))
+        });
+        let check = cx.spawn(async move |this, cx| {
+            let Some((file, text, expression, ranges)) = task.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if editor.read(cx).text() == expression {
+                    this.source = Some((file, text));
+                    this.set_unresolved(&editor, field, ranges, cx);
+                }
+            });
+        });
+        if field {
+            self.check = Some(check);
+        } else {
+            self.check_editor = Some(check);
+        }
+    }
+
+    fn set_unresolved(
+        &mut self,
+        editor: &Entity<Editor>,
+        field: bool,
+        ranges: Vec<Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        let shown = if field {
+            &self.unresolved
+        } else {
+            match &self.editing {
+                Some(edit) if edit.editor == *editor => &edit.unresolved,
+                _ => return,
+            }
+        };
+        if ranges == *shown {
+            return;
+        }
+        let text: Vec<char> = editor.read(cx).text().chars().collect();
+        let marks = ranges
+            .iter()
+            .map(|r| {
+                let name: String = text
+                    .get(r.clone())
+                    .map(|c| c.iter().collect())
+                    .unwrap_or_default();
+                DiagnosticMark {
+                    range: r.clone(),
+                    severity: MarkSeverity::Error,
+                    unnecessary: false,
+                    deprecated: false,
+                    messages: vec![MarkMessage {
+                        severity: MarkSeverity::Error,
+                        text: format!("Unresolved reference '{name}'").into(),
+                        source: None,
+                        code: None,
+                        href: None,
+                    }],
+                }
+            })
+            .collect();
+        editor.update(cx, |e, cx| e.set_diagnostics(marks, cx));
+        if field {
+            self.unresolved = ranges;
+        } else if let Some(edit) = &mut self.editing {
+            edit.unresolved = ranges;
+        }
         cx.notify();
     }
 
     /// Enter in the field: the expression's value becomes the result node,
-    /// selected (`XWatchesViewImpl.addExpressionResultNode`).
+    /// selected (`XWatchesViewImpl.addExpressionResultNode`). With the
+    /// history open, Enter only closes it.
     pub(crate) fn evaluate_field(
         &mut self,
         expression: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if expression.is_none() && self.history.as_ref().is_some_and(|h| h.field) {
+            self.close_history(cx);
+            return;
+        }
         if let Some(text) = &expression {
-            let field = self.ensure_field(window, cx);
-            field.update(cx, |e, cx| e.set_text_selected(text, cx));
+            self.put_field_text(text, window, cx);
         }
         let expression = self.field_text(cx).trim().to_owned();
         if expression.is_empty() {
             return;
         }
         if let Some(debugger) = self.session.debugger() {
-            debugger.remember_expression(&expression);
+            debugger.remember(HistoryKind::Evaluate, &expression);
         }
         let Some(frame) = self.frame_id() else {
             return;
+        };
+        // What the result showed: the new one is compared with it.
+        self.result_before = match &self.result {
+            Some((_, Eval::Value { variable, .. })) => Some(value_text(&variable.value)),
+            _ => None,
         };
         self.result = Some((expression.clone(), Eval::Pending));
         self.dirty = true;
@@ -543,16 +829,16 @@ impl VariablesView {
         cx: &mut Context<Self>,
     ) {
         if let Some(text) = &expression {
-            let field = self.ensure_field(window, cx);
-            field.update(cx, |e, cx| e.set_text_selected(text, cx));
+            self.put_field_text(text, window, cx);
         }
         let expression = self.field_text(cx).trim().to_owned();
         if expression.is_empty() {
             return;
         }
         if let Some(debugger) = self.session.debugger() {
-            debugger.remember_expression(&expression);
+            debugger.remember(HistoryKind::Evaluate, &expression);
         }
+        self.close_history(cx);
         self.add_watch(&expression, None, cx);
     }
 
@@ -563,59 +849,22 @@ impl VariablesView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let expression = expression.or_else(|| {
-            let row = self.selected_row(cx)?;
-            match &row.kind {
-                RowKind::Watch(w) => Some(w.expression.clone()),
-                _ => row.value().map(|v| {
-                    v.variable
-                        .evaluate_name
-                        .clone()
-                        .unwrap_or_else(|| v.variable.name.clone())
-                }),
-            }
-        });
+        let expression = expression.or_else(|| self.selected_expression(cx));
         self.set_field_text(&expression.unwrap_or_default(), window, cx);
-    }
-
-    /// The expressions evaluated before, below the field.
-    pub(crate) fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let history = self
-            .session
-            .debugger()
-            .map(|d| d.expression_history())
-            .unwrap_or_default();
-        if history.is_empty() {
-            return;
-        }
-        let field = self.ensure_field(window, cx);
-        window.focus(&field.focus_handle(cx));
-        let items = history
-            .into_iter()
-            .map(|e| MenuItem::action(e.clone(), SetFieldExpression { text: e }))
-            .collect();
-        let bounds = self.field_bounds.get();
-        let menu = ContextMenu::popup(
-            items,
-            PopupOptions {
-                min_width: Some(f32::from(bounds.size.width)),
-                ..PopupOptions::default()
-            },
-            window,
-            cx,
-        );
-        self.show_menu(menu, bounds.bottom_left(), window, cx);
     }
 
     pub(crate) fn field_json(&self, cx: &App) -> Json {
         json!({
             "text": self.field_text(cx),
-            "history": self.session.debugger().map(|d| d.expression_history()),
+            "history": self.session.debugger().map(|d| d.history(HistoryKind::Evaluate)),
+            "unresolved": self.unresolved.iter().map(|r| [r.start, r.end]).collect::<Vec<_>>(),
         })
     }
 
     /// The evaluate field's row: the editor with its hint, Add to Watches
-    /// and the history's chevron (`XDebuggerEmbeddedComboBox`).
+    /// and the history's chevron (`XDebuggerEmbeddedComboBox`), the ring
+    /// while it has the focus (or its list is open), red while its
+    /// expression has a name the frame does not declare.
     pub(crate) fn render_field(
         &mut self,
         window: &mut Window,
@@ -634,8 +883,16 @@ impl VariablesView {
         }
         let empty = field.read(cx).text().trim().is_empty();
         let focus = field.focus_handle(cx);
+        let focused = focus.is_focused(window) || self.history.as_ref().is_some_and(|h| h.field);
         let watch_keys = ui::keys::shortcut_in(&WatchField { expression: None }, &focus, window);
         let theme = cx.theme();
+        let ring = if !self.unresolved.is_empty() {
+            Some(theme.color(UiRole::Danger))
+        } else if focused {
+            Some(theme.color(UiRole::Focus))
+        } else {
+            None
+        };
         let line = editor::field_line_height_for(false, window, cx);
         let bounds = self.field_bounds.clone();
         let button = |id: &'static str, icon: IconName, enabled: bool| {
@@ -646,7 +903,7 @@ impl VariablesView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(22.0))
+                .size(px(FIELD_BUTTON))
                 .rounded(theme.metric(Metric::ButtonRadius))
                 .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
                 .when(enabled, |d| {
@@ -662,12 +919,12 @@ impl VariablesView {
             .relative()
             .flex_none()
             .h(px(FIELD_HEIGHT))
-            .pl(px(8.0))
-            .pr(px(6.0))
+            .pl(px(FIELD_LEFT))
+            .pr(px(FIELD_RIGHT))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(2.0))
+            .gap(px(FIELD_GAP))
             .border_b_1()
             .border_color(theme.color(UiRole::Border))
             .child(
@@ -677,6 +934,20 @@ impl VariablesView {
                     .left_0()
                     .size_full(),
             )
+            // The ring, square, inside the field above its bottom line.
+            .when_some(ring, |d, ring| {
+                d.child(
+                    div()
+                        .debug_selector(|| "debug-evaluate-ring".into())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .border(px(RING))
+                        .border_color(ring),
+                )
+            })
             .child(
                 div()
                     .flex_1()
@@ -705,6 +976,242 @@ impl VariablesView {
             .into_any_element()
     }
 
+    // ---- the histories -------------------------------------------------------------
+
+    /// The evaluate field's history below it; open, it closes.
+    pub(crate) fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.as_ref().is_some_and(|h| h.field) {
+            self.close_history(cx);
+            return;
+        }
+        let items = self
+            .session
+            .debugger()
+            .map(|d| d.history(HistoryKind::Evaluate))
+            .unwrap_or_default();
+        let field = self.ensure_field(window, cx);
+        window.focus(&field.focus_handle(cx));
+        self.close_menu(cx);
+        let bounds = self.field_bounds.get();
+        self.open_history(true, items, bounds, window, cx);
+    }
+
+    /// The history of the editor of a row below it; open, it closes.
+    pub(crate) fn show_editor_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.as_ref().is_some_and(|h| !h.field) {
+            self.close_history(cx);
+            return;
+        }
+        let Some(edit) = &self.editing else {
+            return;
+        };
+        let kind = edit.target.history();
+        window.focus(&edit.editor.focus_handle(cx));
+        let items = self
+            .session
+            .debugger()
+            .map(|d| d.history(kind))
+            .unwrap_or_default();
+        let bounds = self.editor_bounds.get();
+        self.open_history(false, items, bounds, window, cx);
+    }
+
+    fn open_history(
+        &mut self,
+        field: bool,
+        items: Vec<String>,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The keys of the list, before the field's own bindings.
+        let view = cx.entity().downgrade();
+        let handle = window.window_handle();
+        let keys = cx.intercept_keystrokes(move |event: &KeystrokeEvent, window, cx| {
+            if window.window_handle() != handle {
+                return;
+            }
+            let k = &event.keystroke;
+            if k.modifiers.modified() {
+                return;
+            }
+            let key = k.key.clone();
+            if !matches!(key.as_str(), "up" | "down" | "enter" | "escape") {
+                return;
+            }
+            let handled = view
+                .update(cx, |this, cx| this.history_key(&key, window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        });
+        self.history = Some(HistoryList {
+            field,
+            items,
+            highlighted: None,
+            bounds,
+            _keys: keys,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn close_history(&mut self, cx: &mut Context<Self>) {
+        if self.history.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Up, Down, Enter and Escape while a history is open.
+    fn history_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(list) = &mut self.history else {
+            return false;
+        };
+        let n = list.items.len();
+        match key {
+            "down" if n > 0 => {
+                list.highlighted = Some(list.highlighted.map_or(0, |i| (i + 1).min(n - 1)));
+            }
+            "up" if n > 0 => {
+                list.highlighted = Some(list.highlighted.map_or(0, |i| i.saturating_sub(1)));
+            }
+            "enter" => match list.highlighted {
+                Some(i) => self.choose_history(i, window, cx),
+                None => self.close_history(cx),
+            },
+            "escape" => self.close_history(cx),
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+
+    /// An expression of the open history goes into its field.
+    pub(crate) fn choose_history(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(list) = self.history.take() else {
+            return;
+        };
+        let Some(text) = list.items.get(index).cloned() else {
+            return;
+        };
+        if list.field {
+            self.set_field_text(&text, window, cx);
+        } else if let Some(edit) = &self.editing {
+            let editor = edit.editor.clone();
+            editor.update(cx, |e, cx| put_text(e, &text, cx));
+            window.focus(&editor.focus_handle(cx));
+            self.check_row_editor(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn history_json(&self) -> Json {
+        match &self.history {
+            None => Json::Null,
+            Some(list) => json!({
+                "of": if list.field { "field" } else { "editor" },
+                "items": list.items,
+                "highlighted": list.highlighted,
+            }),
+        }
+    }
+
+    /// The open history: the combo box's list right under it, as wide as
+    /// it, no row highlighted until the pointer or a key moves there.
+    pub(crate) fn render_history(&self, window: &Window, cx: &Context<Self>) -> Option<AnyElement> {
+        let list = self.history.as_ref()?;
+        let theme = cx.theme();
+        let b = list.bounds;
+        // The field's list covers its bottom line.
+        let top = if list.field {
+            b.bottom() - px(1.0)
+        } else {
+            b.bottom()
+        };
+        let radius = theme.metric(Metric::CornerRadius);
+        let selection = theme.color(UiRole::Selection);
+        let rows = list.items.iter().enumerate().map(|(i, item)| {
+            div()
+                .id(("debug-history-row", i))
+                .debug_selector(move || format!("debug-history-row-{i}"))
+                .flex_none()
+                .h(px(HISTORY_ROW))
+                .px(px(HISTORY_TEXT))
+                .flex()
+                .items_center()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .when(list.highlighted == Some(i), |d| d.bg(selection))
+                .child(item.clone())
+                .on_mouse_move(cx.listener(move |this, _, _, cx| {
+                    if let Some(list) = &mut this.history
+                        && list.highlighted != Some(i)
+                    {
+                        list.highlighted = Some(i);
+                        cx.notify();
+                    }
+                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.choose_history(i, window, cx);
+                    }),
+                )
+        });
+        let popup = div()
+            .id("debug-history")
+            .debug_selector(|| "debug-history".into())
+            .occlude()
+            .w(b.size.width)
+            .max_h(px(HISTORY_ROW * HISTORY_ROWS as f32 + 2.0))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .border_1()
+            .border_color(theme.color(UiRole::PopupBorder))
+            .rounded_b(radius)
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .shadow(ui::components::popup_shadow())
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
+            .children(rows);
+        let size = window.viewport_size();
+        Some(
+            deferred(
+                anchored().position(point(px(0.0), px(0.0))).child(
+                    div()
+                        .id("debug-history-backdrop")
+                        .w(size.width)
+                        .h(size.height)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| this.close_history(cx)),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(|this, _, _, cx| this.close_history(cx)),
+                        )
+                        .child(
+                            anchored()
+                                .position(point(b.left(), top))
+                                .snap_to_window_with_margin(px(4.0))
+                                .child(popup),
+                        ),
+                ),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
+    }
+
     // ---- editing in a row ----------------------------------------------------------
 
     fn start_edit(
@@ -715,32 +1222,71 @@ impl VariablesView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The text with the caret at its end (what the reference shows once
+        // the editor's document is ready).
         let editor = editor::field::new(text, None, false, window, cx);
-        editor.update(cx, |e, cx| e.set_text_selected(text, cx));
+        editor.update(cx, |e, cx| put_text(e, text, cx));
+        // The expression in the colours of the frame's language.
+        if let (Some(file), Some(highlighters)) = (
+            self.frame.as_ref().and_then(|f| f.file.clone()),
+            &self.highlighters,
+        ) {
+            let highlighter = highlighters(&file);
+            editor.update(cx, |e, cx| e.set_highlighter(highlighter, cx));
+        }
+        let edited = cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
+            if matches!(event, EditorEvent::Edited(_)) {
+                this.check_row_editor(cx);
+            }
+        });
         let focus = editor.focus_handle(cx);
         let blur = cx.on_blur(&focus, window, |this, window, cx| {
-            // A click elsewhere closes the editor without a change.
+            // A click elsewhere closes the editor without a change; its
+            // history keeps it open.
+            if this.history.as_ref().is_some_and(|h| !h.field) {
+                return;
+            }
             if this.editing.as_ref().is_some_and(|e| !e.applying) {
                 this.cancel_edit(window, cx);
             }
         });
         self.close_menu(cx);
+        self.history = None;
+        let new = matches!(target, EditTarget::NewWatch { .. });
         self.editing = Some(InlineEdit {
             path: path.clone(),
             target,
             editor,
             error: None,
             applying: false,
+            unresolved: Vec::new(),
             _blur: blur,
+            _edited: edited,
         });
         self.dirty = true;
-        self.select(&path, cx);
+        if new {
+            // The new watch's row is not selected (`editWatch`).
+            self.deselect(cx);
+        } else {
+            self.select(&path, cx);
+        }
         window.focus(&focus);
+        self.check_row_editor(cx);
         cx.notify();
     }
 
-    /// Enter in the row's editor.
+    /// Enter in the row's editor (with its history open, the highlighted
+    /// expression goes into it first, `doPopupOKAction`).
     pub(crate) fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = self
+            .history
+            .as_ref()
+            .filter(|h| !h.field)
+            .and_then(|h| h.highlighted)
+        {
+            self.choose_history(i, window, cx);
+        }
+        self.history = None;
         let Some(edit) = &mut self.editing else {
             return;
         };
@@ -749,6 +1295,9 @@ impl VariablesView {
         }
         let text = edit.editor.read(cx).text();
         let target = edit.target.clone();
+        if let Some(debugger) = self.session.debugger() {
+            debugger.remember(target.history(), &text);
+        }
         match target {
             EditTarget::SetValue { parent, variable } => {
                 edit.applying = true;
@@ -793,6 +1342,7 @@ impl VariablesView {
         let Some(edit) = self.editing.take() else {
             return;
         };
+        self.history = None;
         let focused = edit.editor.focus_handle(cx).is_focused(window);
         self.dirty = true;
         if focused {
@@ -841,25 +1391,75 @@ impl VariablesView {
         }
     }
 
-    pub(crate) fn render_inline_editor(&self, edit: &InlineEdit, cx: &App) -> AnyElement {
+    /// The editor of a row (`XDebuggerExpressionComboBox` in the tree): a
+    /// combo box 30 high centred on the row, its ring, the expression,
+    /// and its history's arrow after a line.
+    pub(crate) fn render_inline_editor(&self, edit: &InlineEdit, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let row_h = theme.metric(Metric::RowHeight);
-        // The editor's own background over the row's selection.
-        ui::components::input_frame(true, edit.error.is_some(), cx)
+        let radius = theme.metric(Metric::CornerRadius) * 1.5;
+        let ring = if edit.error.is_some() || !edit.unresolved.is_empty() {
+            theme.color(UiRole::Danger)
+        } else {
+            theme.color(UiRole::Focus)
+        };
+        let bounds = self.editor_bounds.clone();
+        div()
             .id("variables-editor")
             .debug_selector(|| "variables-editor".into())
             .key_context(EDITOR_CONTEXT)
+            .relative()
             .flex_1()
-            .h(row_h - px(2.0))
-            .px(px(4.0))
-            .bg(theme.color(UiRole::EditorBackground))
+            .min_w(px(0.0))
+            .h(px(EDITOR_HEIGHT))
+            .ml(px(EDITOR_LEFT))
+            .flex()
+            .flex_row()
+            .items_center()
+            .rounded(radius)
+            .border(px(RING))
+            .border_color(ring)
+            .bg(theme.color(UiRole::Input))
+            .child(
+                canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.0))
+                    .pl(px(EDITOR_TEXT))
                     .h(self.line_height)
                     .overflow_hidden()
                     .child(edit.editor.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h_full()
+                    .bg(theme.color(UiRole::BorderInput)),
+            )
+            .child(
+                div()
+                    .id("variables-editor-history")
+                    .debug_selector(|| "variables-editor-history".into())
+                    .flex_none()
+                    .w(px(EDITOR_ARROW - RING))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(Icon::new(IconName::CHEVRON_DOWN).size(px(16.0)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.show_editor_history(window, cx);
+                        }),
+                    ),
             )
             .into_any_element()
     }
@@ -878,7 +1478,137 @@ impl VariablesView {
             },
             "text": edit.editor.read(cx).text(),
             "error": edit.error,
+            "unresolved": edit.unresolved.iter().map(|r| [r.start, r.end]).collect::<Vec<_>>(),
         })
+    }
+
+    // ---- the rows of the watches -------------------------------------------------------
+
+    /// A watch's or the result's row: its icon (the result's, a paused
+    /// watch's), its name (the result's in the changed colour when it
+    /// shows something new), and its value, error, "Collecting data…" or
+    /// paused message.
+    pub(crate) fn render_watch_content(&self, w: &WatchRow, cx: &Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let text = theme.color(UiRole::Text);
+        let icon = |name: IconName| {
+            div()
+                .flex_none()
+                .w(px(ICON_ROOM))
+                .child(Icon::new(name).size(px(16.0)))
+        };
+        let name_div = |role: UiRole| {
+            div()
+                .flex_none()
+                .text_color(theme.color(role))
+                .child(w.name.clone())
+        };
+        let eq = || div().flex_none().text_color(text).child("\u{a0}=\u{a0}");
+        let row = || div().flex().flex_row().items_center();
+        match &w.value {
+            WatchValue::Value(v) => {
+                let kind_icon = match v.kind {
+                    debugger::values::ValueKind::Primitive => icons::PRIMITIVE,
+                    debugger::values::ValueKind::Array => icons::ARRAY,
+                    debugger::values::ValueKind::Object => icons::OBJECT,
+                };
+                let i = if w.result {
+                    icons::EVALUATION_RESULT
+                } else if w.paused {
+                    icons::PAUSE
+                } else {
+                    kind_icon
+                };
+                let role = if v.changed {
+                    UiRole::DebuggerChangedValue
+                } else {
+                    UiRole::DebuggerValueName
+                };
+                row()
+                    .child(icon(i))
+                    .child(name_div(role))
+                    .child(eq())
+                    .when_some(v.type_text.clone(), |d, t| {
+                        d.child(
+                            div()
+                                .text_color(theme.color(UiRole::DebuggerType))
+                                .child(format!("{{{t}}}\u{a0}")),
+                        )
+                    })
+                    .child(
+                        div().text_color(text).child(
+                            v.shown
+                                .clone()
+                                .unwrap_or_else(|| value_text(&v.variable.value)),
+                        ),
+                    )
+                    .into_any_element()
+            }
+            WatchValue::Pending => row()
+                .child(icon(if w.result {
+                    icons::EVALUATION_RESULT
+                } else {
+                    icons::WATCH
+                }))
+                .child(name_div(UiRole::DebuggerValueName))
+                .child(eq())
+                .child(
+                    div()
+                        .text_color(theme.color(UiRole::DebuggerCollectingData))
+                        .child(crate::variables::COLLECTING_DATA),
+                )
+                .into_any_element(),
+            WatchValue::Paused => {
+                let index = w.index;
+                row()
+                    .child(icon(icons::PAUSE))
+                    .child(name_div(UiRole::DebuggerValueName))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme.color(UiRole::TextMuted))
+                            .child(format!("\u{a0}{PAUSED}")),
+                    )
+                    .child(
+                        div()
+                            .id("variables-evaluate-paused")
+                            .flex_none()
+                            .cursor_pointer()
+                            .text_color(theme.color(UiRole::TextLink))
+                            .child(format!("\u{a0}{EVALUATE_PAUSED}"))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(i) = index {
+                                        this.evaluate_paused_watch(i, cx);
+                                    }
+                                }),
+                            ),
+                    )
+                    .into_any_element()
+            }
+            WatchValue::Error(message) => row()
+                .child(icon(IconName::ERROR))
+                .child(name_div(UiRole::DebuggerValueName))
+                .child(eq())
+                .child(
+                    div()
+                        .text_color(theme.color(UiRole::DebuggerErrorMessage))
+                        .child(value_text(message)),
+                )
+                .into_any_element(),
+            WatchValue::None => row()
+                .child(icon(if w.result {
+                    icons::EVALUATION_RESULT
+                } else if w.paused {
+                    icons::PAUSE
+                } else {
+                    icons::WATCH
+                }))
+                .child(name_div(UiRole::DebuggerValueName))
+                .into_any_element(),
+        }
     }
 
     // ---- copy -------------------------------------------------------------------------
@@ -939,20 +1669,35 @@ impl VariablesView {
     ) -> Option<(std::path::PathBuf, u32, String)> {
         let frame = self.frame_id()?;
         let row = self.selected_row(cx)?;
-        let RowKind::Value(v) = &row.kind else {
-            return None;
+        // A value of the frame (a child of one of its scopes) by its name;
+        // a watch by its expression (the product finds a plain name).
+        let name = match &row.kind {
+            RowKind::Value(v) => {
+                let top = self
+                    .session
+                    .loaded_scopes(frame)
+                    .is_some_and(|scopes| scopes.iter().any(|s| s.reference == v.parent));
+                if !top {
+                    return None;
+                }
+                v.variable.name.clone()
+            }
+            RowKind::Watch(w) if !w.result => w.expression.trim().to_owned(),
+            _ => return None,
         };
-        let top = self
-            .session
-            .loaded_scopes(frame)
-            .is_some_and(|scopes| scopes.iter().any(|s| s.reference == v.parent));
-        if !top {
-            return None;
-        }
         let snapshot = self.session.snapshot();
         let f = snapshot.frames.iter().find(|f| f.id == frame)?;
         let path = f.source.as_ref()?.path.clone()?;
-        Some((path, f.line, v.variable.name.clone()))
+        Some((path, f.line, name))
+    }
+
+    /// The frame and the expression of the selected value whose type Jump
+    /// To Type Source looks for.
+    pub(crate) fn type_source_target(&mut self, cx: &mut Context<Self>) -> Option<(i64, String)> {
+        let frame = self.frame_id()?;
+        let row = self.selected_row(cx)?;
+        row.value()?.variable.type_name.as_ref()?;
+        Some((frame, self.selected_expression(cx)?))
     }
 
     // ---- the context menu -------------------------------------------------------------
@@ -968,6 +1713,7 @@ impl VariablesView {
             this.menu = None;
             cx.notify();
         });
+        self.history = None;
         self.menu = Some((menu, position, dismissed));
         cx.notify();
     }
@@ -979,7 +1725,7 @@ impl VariablesView {
     }
 
     /// The context menu of the selected row (`XDebugger.Watches.Tree.Popup`
-    /// with the subset of `XDebugger.ValueGroup` Pyoxide has).
+    /// with `XDebugger.ValueGroup`).
     pub(crate) fn open_menu(
         &mut self,
         position: Point<Pixels>,
@@ -987,7 +1733,8 @@ impl VariablesView {
         cx: &mut Context<Self>,
     ) {
         let row = self.selected_row(cx);
-        let items = self.menu_items(row.as_ref(), cx);
+        let rows = !self.rows(cx).is_empty();
+        let items = self.menu_items(row.as_ref(), rows);
         let menu = ContextMenu::build(items, window, cx);
         self.show_menu(menu, position, window, cx);
     }
@@ -1007,31 +1754,64 @@ impl VariablesView {
         self.open_menu(position, window, cx);
     }
 
-    fn menu_items(&self, row: Option<&Row>, _cx: &App) -> Vec<MenuItem> {
+    /// The items, as the reference shows them for a value and a watch:
+    /// the watches' actions, a line, the value's group (Customize Data View
+    /// and Show Referring Objects where the product's values have them,
+    /// Inspect and Compare Value with Clipboard, which Pyoxide does not
+    /// offer yet, shown disabled), View as for a type with renderers.
+    fn menu_items(&self, row: Option<&Row>, rows: bool) -> Vec<MenuItem> {
         let watch = row.and_then(|r| match &r.kind {
-            RowKind::Watch(w) => Some(w.as_ref()),
+            RowKind::Watch(w) if w.index.is_some() || w.result => Some(w.as_ref()),
             _ => None,
         });
         let value = row.and_then(Row::value);
         let suspended = self.frame_id().is_some();
-        let mut items = vec![MenuItem::action(
-            "New Watch\u{2026}",
-            NewWatch { expression: None },
-        )];
+        let extras = self
+            .provider
+            .as_ref()
+            .map(|p| p.extra_value_actions())
+            .unwrap_or_default();
+        let mut items = vec![
+            MenuItem::action("New Watch\u{2026}", NewWatch { expression: None })
+                .icon(IconName::ADD),
+        ];
         if watch.is_some() {
-            items.push(MenuItem::action(
-                "Remove Watch",
-                RemoveWatch {
-                    expression: None,
-                    index: None,
-                },
-            ));
-            items.push(MenuItem::action(
-                "Edit\u{2026}",
-                EditWatch { expression: None },
-            ));
+            items.push(
+                MenuItem::action(
+                    "Remove Watch",
+                    RemoveWatch {
+                        expression: None,
+                        index: None,
+                    },
+                )
+                .icon(IconName::REMOVE),
+            );
+        }
+        items.push(MenuItem::action("Remove All Watches", RemoveAllWatches).enabled(rows));
+        if let Some(w) = watch {
+            // Edit has the key of Set Value (`use-shortcut-of`).
+            items.push(MenuItem::action("Edit\u{2026}", SetValue { value: None }));
+            if !w.result {
+                let computed = !matches!(w.value, WatchValue::Pending);
+                let (label, icon) = if w.paused {
+                    ("Resume Watch", IconName::RUN)
+                } else {
+                    ("Pause Watch", icons::PAUSE)
+                };
+                items.push(
+                    MenuItem::action(label, PauseWatch { index: None })
+                        .icon(icon)
+                        .enabled(computed),
+                );
+            }
         }
         items.push(MenuItem::separator());
+        if value.is_some() && extras.contains(&debugger::ExtraValueAction::CustomizeDataView) {
+            items.push(MenuItem::unavailable("Customize Data View"));
+        }
+        if row.is_some_and(|r| r.value().is_some()) {
+            items.push(MenuItem::unavailable("Inspect\u{2026}"));
+        }
         if watch.is_none() {
             let settable = matches!(row.map(|r| &r.kind), Some(RowKind::Value(_)))
                 && suspended
@@ -1041,6 +1821,7 @@ impl VariablesView {
             );
         }
         items.push(MenuItem::action("Copy Value", CopyValue).enabled(value.is_some()));
+        items.push(MenuItem::unavailable("Compare Value with Clipboard"));
         items.push(
             MenuItem::action("Copy Name", CopyName).enabled(value.is_some() || watch.is_some()),
         );
@@ -1050,21 +1831,68 @@ impl VariablesView {
                 "Evaluate Expression\u{2026}",
                 EvaluateValue { expression: None },
             )
+            .icon(icons::EVALUATE_EXPRESSION)
             .enabled(suspended),
         );
         items.push(
             MenuItem::action("Add to Watches", AddToWatches)
+                .icon(icons::ADD_TO_WATCHES)
                 .enabled(value.is_some() || watch.is_some()),
         );
+        if value.is_some() && extras.contains(&debugger::ExtraValueAction::ShowReferringObjects) {
+            items.push(MenuItem::unavailable("Show Referring Objects\u{2026}"));
+        }
         items.push(MenuItem::separator());
-        let top_value = matches!(row.map(|r| &r.kind), Some(RowKind::Value(_)))
-            && row.is_some_and(|r| {
-                let parent = parent_of(&r.path);
-                parent.is_empty() || !parent.contains(crate::variables::SEP)
-            });
-        items.push(MenuItem::action("Jump To Source", JumpToValueSource).enabled(top_value));
+        // Enabled for every value as in the reference
+        // (`XValue.canNavigateToSource`); the product finds a frame's
+        // values and the watches that are a name.
+        items.push(
+            MenuItem::action("Jump To Source", JumpToValueSource)
+                .enabled(suspended && (value.is_some() || watch.is_some())),
+        );
+        let typed = value.is_some_and(|v| v.variable.type_name.is_some());
+        items.push(
+            MenuItem::action("Jump To Type Source", JumpToTypeSource).enabled(typed && suspended),
+        );
+        // View as: the renderers of the value's type, the one shown checked
+        // (`ViewAsGroup`, hidden without renderers).
+        if let (Some(v), Some(provider)) = (value, &self.provider) {
+            let (renderers, _) =
+                provider.value_renderers(v.variable.type_name.as_deref().unwrap_or(""));
+            if !renderers.is_empty() {
+                let current = v.renderer.clone().unwrap_or_default();
+                let choices = renderers
+                    .iter()
+                    .map(|r| {
+                        let item = MenuItem::action(
+                            *r,
+                            ViewAs {
+                                renderer: (*r).to_owned(),
+                            },
+                        );
+                        if *r == current {
+                            item.icon(IconName::CHECKED)
+                        } else {
+                            item
+                        }
+                    })
+                    .collect();
+                items.push(MenuItem::separator());
+                items.push(MenuItem::submenu("View as", choices));
+            }
+        }
         items
     }
+}
+
+/// Puts a text into a field, the caret at its end.
+fn put_text(e: &mut Editor, text: &str, cx: &mut Context<Editor>) {
+    e.set_text_selected(text, cx);
+    let end = text.chars().count();
+    e.set_selections(
+        text::SelectionSet::single(text::Selection::new(end, end)),
+        cx,
+    );
 }
 
 /// The commands of the evaluate field, the watches and the values, at the
@@ -1090,6 +1918,10 @@ pub(crate) fn forward_watch_actions<E: InteractiveElement>(el: E, view: Entity<D
     ));
     let el = on!(el, ShowEvaluateHistory, |t, _a, window, cx| t
         .show_history(window, cx));
+    let el = on!(el, ShowEditorHistory, |t, _a, window, cx| t
+        .show_editor_history(window, cx));
+    let el = on!(el, ChooseHistory, |t, a, window, cx| t
+        .choose_history(a.index, window, cx));
     let el = on!(el, SetFieldExpression, |t, a, window, cx| t
         .set_field_text(&a.text, window, cx));
     let el = on!(el, EvaluateValue, |t, a, window, cx| t.evaluate_value(
@@ -1107,6 +1939,12 @@ pub(crate) fn forward_watch_actions<E: InteractiveElement>(el: E, view: Entity<D
         a.index,
         cx
     ));
+    let el = on!(el, RemoveAllWatches, |t, _a, _window, cx| t
+        .remove_all_watches(cx));
+    let el = on!(el, PauseWatch, |t, a, _window, cx| t
+        .pause_watch(a.index, cx));
+    let el = on!(el, EvaluatePausedWatch, |t, a, _window, cx| t
+        .evaluate_paused_watch(a.index, cx));
     let el = on!(el, EditWatch, |t, a, window, cx| t.edit_watch(
         a.expression.clone(),
         window,
@@ -1124,12 +1962,15 @@ pub(crate) fn forward_watch_actions<E: InteractiveElement>(el: E, view: Entity<D
         .cancel_edit(window, cx));
     let el = on!(el, CopyValue, |t, _a, _window, cx| t.copy_value(cx));
     let el = on!(el, CopyName, |t, _a, _window, cx| t.copy_name(cx));
+    let el = on!(el, ViewAs, |t, a, _window, cx| t.view_as(&a.renderer, cx));
     let el = on!(el, VariablesMenu, |t, _a, window, cx| t
         .menu_at_selection(window, cx));
-    let v = view;
-    el.on_action(move |_: &JumpToValueSource, _, cx| {
+    let v = view.clone();
+    let el = el.on_action(move |_: &JumpToValueSource, _, cx| {
         v.update(cx, |v, cx| v.jump_to_value_source(cx))
-    })
+    });
+    let v = view;
+    el.on_action(move |_: &JumpToTypeSource, _, cx| v.update(cx, |v, cx| v.jump_to_type_source(cx)))
 }
 
 impl DebuggerView {
@@ -1157,6 +1998,44 @@ impl DebuggerView {
                     cx.emit(crate::DebuggerViewEvent::OpenAt { path, line, column })
                 });
             }
+        })
+        .detach();
+    }
+
+    /// Jump To Type Source of the selected value: the running program says
+    /// where its type is declared (the product's expression, evaluated in
+    /// the frame); nothing opens for a type without a source (a builtin).
+    pub(crate) fn jump_to_type_source(&mut self, cx: &mut Context<Self>) {
+        let Some(provider) = self.debugger.as_ref().map(|d| d.provider().clone()) else {
+            return;
+        };
+        let mut target = None;
+        let mut session = None;
+        self.with_variables(cx, |t, cx| {
+            target = t.type_source_target(cx);
+            session = Some(t.session().clone());
+        });
+        let (Some((frame, expression)), Some(session)) = (target, session) else {
+            return;
+        };
+        let Some(asked) = provider.type_source_expression(&expression) else {
+            return;
+        };
+        let pending = session.evaluate_in(&asked, Some(frame), EvaluateContext::Watch);
+        cx.spawn(async move |this, cx| {
+            let Ok(value) = pending.await else {
+                return;
+            };
+            let Some((path, line)) = provider.parse_type_source(&value.value) else {
+                return;
+            };
+            let _ = this.update(cx, |_, cx| {
+                cx.emit(crate::DebuggerViewEvent::OpenAt {
+                    path,
+                    line,
+                    column: 1,
+                })
+            });
         })
         .detach();
     }
