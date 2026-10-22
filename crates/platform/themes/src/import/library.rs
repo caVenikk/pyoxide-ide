@@ -494,11 +494,13 @@ impl Library {
             }
         }
         let controls = Some(controls_of(&ui_layers));
+        let islands = descends_from_islands(&ui_layers);
         let imported = convert(Inputs {
             name: theme.name.clone(),
             kind: SourceKind::UiTheme,
             author: ui_layers.iter().find_map(|l| l.author.clone()),
             dark,
+            islands,
             controls,
             ui_layers,
             scheme_layers,
@@ -527,6 +529,7 @@ impl Library {
             kind: SourceKind::Scheme,
             author: None,
             dark,
+            islands: false,
             controls: None,
             ui_layers: Vec::new(),
             scheme_layers,
@@ -690,6 +693,20 @@ fn controls_of(layers: &[&UiThemeData]) -> Controls {
     } else {
         Controls::Classic
     }
+}
+
+/// Whether an ancestor of the first theme in `layers` is an islands theme:
+/// some theme of the chain names `Islands Dark` or `Islands Light` as its
+/// `parentTheme`, or such a theme is among the layers (the first one is the
+/// imported theme itself and does not count). The bundled islands themes
+/// are the base of such an import.
+fn descends_from_islands(layers: &[&UiThemeData]) -> bool {
+    let islands = |id: &str| id == "Islands Dark" || id == "Islands Light";
+    layers
+        .iter()
+        .filter_map(|l| l.parent.as_deref())
+        .any(islands)
+        || layers.iter().skip(1).any(|l| islands(&l.name))
 }
 
 /// Whether the scheme paints a dark editor background, from its `TEXT`
