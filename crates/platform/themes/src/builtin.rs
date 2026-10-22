@@ -4,8 +4,9 @@
 //!   UI with islands, generated from the IntelliJ Platform Community theme
 //!   files (Apache-2.0, see NOTICE) by the `builtin_islands` example.
 //! - `pyoxide-dark` and `pyoxide-light`: colours original to this project.
-//!   They define every role and are the base of every import (also of the
-//!   islands themes), so metrics and fonts are kept here.
+//!   They define every role and are the base of an import (also of the
+//!   islands themes), so metrics and fonts are kept here. An import whose
+//!   `parentTheme` chain names an islands theme takes that theme as its base.
 
 use crate::model::{Theme, ThemeFile, ThemeKind};
 use crate::registry::Registry;
@@ -47,6 +48,21 @@ pub const fn default_id_for(kind: ThemeKind) -> &'static str {
         ThemeKind::Dark => ISLANDS_DARK_ID,
         ThemeKind::Light => ISLANDS_LIGHT_ID,
     }
+}
+
+/// Id of the base theme of an import for a kind: the islands theme when the
+/// imported theme descends from one, else the original base theme.
+pub const fn import_id_for(kind: ThemeKind, islands: bool) -> &'static str {
+    if islands {
+        default_id_for(kind)
+    } else {
+        id_for(kind)
+    }
+}
+
+/// The base theme of an import, fully resolved (see [`import_id_for`]).
+pub fn import_base(kind: ThemeKind, islands: bool) -> Theme {
+    resolve(import_id_for(kind, islands))
 }
 
 /// The base theme for a kind, fully resolved.

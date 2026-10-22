@@ -84,8 +84,8 @@ to that theme's own scheme.
 |---|---|---|
 | `islands-dark` | Islands Dark | default dark theme, generated from the IntelliJ Platform Community New UI files |
 | `islands-light` | Islands Light | default light theme, generated the same way |
-| `pyoxide-dark` | Pyoxide Dark | original colours; base of every import |
-| `pyoxide-light` | Pyoxide Light | original colours; base of every import |
+| `pyoxide-dark` | Pyoxide Dark | original colours; base of an import (not under an islands theme) |
+| `pyoxide-light` | Pyoxide Light | original colours; base of an import (not under an islands theme) |
 
 The islands themes are produced by this importer from the IntelliJ Platform
 Community repository (Apache-2.0, see NOTICE): the Islands UI themes with
@@ -183,7 +183,13 @@ brightness (`Darcula` for dark, `Default` for light) when it is among the inputs
    `pyoxide-light` (chosen by `dark`; a scheme alone is dark when its editor
    background is dark, else by the name of its base scheme) and is listed in
    the report as taken from the base theme. A text role that a scheme defines
-   replaces the base style completely; it is not merged with it.
+   replaces the base style completely; it is not merged with it. A theme
+   whose `parentTheme` chain names `Islands Dark` or `Islands Light` (also
+   through themes among the inputs) takes the bundled `islands-dark` or
+   `islands-light` instead (by `dark`), since the parent chain it lacks
+   would have set those roles. Under an islands base, steps 6 and 7 apply
+   only to roles that follow a value of the colour scheme (the gutter follows
+   the editor background); other roles take the islands value.
 
 The base schemes of the IDE (`Default`, `Darcula`) and the base themes are not
 shipped here. When they are among the inputs (pass the folder or archive of an

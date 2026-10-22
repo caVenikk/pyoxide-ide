@@ -1216,3 +1216,88 @@ fn a_plugin_theme_is_imported_by_its_entry_with_its_scheme() {
     assert!(scheme.file.theme.scheme_only);
     assert!(themes::catalog::import_scheme_into("Nope", &[jar], &target).is_err());
 }
+
+// ---- base theme of an import ------------------------------------------
+
+fn import_leaf(parent: &str, dark: Option<bool>) -> Imported {
+    let dark = dark.map_or(String::new(), |d| format!(r#""dark": {d}, "#));
+    let text = format!(
+        r##"{{"name": "Leaf", {dark}"parentTheme": "{parent}", "ui": {{"Panel": {{"background": "#101a22"}}}}}}"##
+    );
+    let mut library = Library::new();
+    library
+        .add_ui_theme_json(&text, "inline-leaf", "themes/leaf.theme.json", true)
+        .unwrap();
+    library.import_all().remove(0)
+}
+
+#[test]
+fn a_child_of_islands_dark_keeps_its_values_for_unset_roles() {
+    let item = import_leaf("Islands Dark", None);
+    let islands = themes::builtin::default_theme(ThemeKind::Dark);
+    let pyoxide = themes::builtin::dark();
+    assert_eq!(item.report.base, "islands-dark");
+    assert_eq!(item.theme.kind, ThemeKind::Dark);
+    // Set by the theme.
+    assert_eq!(item.theme.ui[UiRole::Surface], rgba("#101a22"));
+    // Not set: the roles come from Islands Dark, which differs from the
+    // original base on them.
+    for role in [UiRole::TreeText, UiRole::NotificationText] {
+        assert_eq!(item.theme.ui[role], islands.ui[role]);
+        assert_ne!(item.theme.ui[role], pyoxide.ui[role]);
+    }
+    assert_eq!(item.theme.ui[UiRole::Accent], islands.ui[UiRole::Accent]);
+    assert_eq!(
+        item.theme.text[TextRole::Keyword],
+        islands.text[TextRole::Keyword]
+    );
+}
+
+#[test]
+fn a_child_of_islands_light_uses_the_light_islands_theme() {
+    let item = import_leaf("Islands Light", None);
+    let islands = themes::builtin::default_theme(ThemeKind::Light);
+    assert_eq!(item.report.base, "islands-light");
+    assert_eq!(item.theme.kind, ThemeKind::Light);
+    assert_eq!(
+        item.theme.ui[UiRole::TreeText],
+        islands.ui[UiRole::TreeText]
+    );
+    assert_eq!(item.theme.ui[UiRole::Accent], islands.ui[UiRole::Accent]);
+}
+
+#[test]
+fn an_islands_ancestor_further_up_the_chain_selects_the_islands_base() {
+    let mut library = Library::new();
+    library
+        .add_ui_theme_json(
+            r##"{"name": "Middle", "parentTheme": "Islands Dark", "ui": {}}"##,
+            "inline-middle",
+            "themes/middle.theme.json",
+            false,
+        )
+        .unwrap();
+    library
+        .add_ui_theme_json(
+            r##"{"name": "Leaf", "parentTheme": "Middle", "ui": {}}"##,
+            "inline-leaf",
+            "themes/leaf.theme.json",
+            true,
+        )
+        .unwrap();
+    let item = library.import_all().remove(0);
+    assert_eq!(item.report.base, "islands-dark");
+}
+
+#[test]
+fn other_parents_keep_the_original_base() {
+    for parent in ["Darcula", "IntelliJ", "ExperimentalDark", "Unknown Theme"] {
+        let item = import_leaf(parent, Some(parent != "IntelliJ"));
+        let expected = if parent == "IntelliJ" {
+            "pyoxide-light"
+        } else {
+            "pyoxide-dark"
+        };
+        assert_eq!(item.report.base, expected, "{parent}");
+    }
+}

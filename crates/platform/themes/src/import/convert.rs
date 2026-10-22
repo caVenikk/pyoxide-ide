@@ -34,6 +34,10 @@ pub(crate) struct Inputs<'a> {
     pub kind: SourceKind,
     pub author: Option<String>,
     pub dark: bool,
+    /// The theme descends from an islands theme (`parentTheme` names
+    /// `Islands Dark` or `Islands Light`): the roles the sources do not set
+    /// come from the bundled islands theme, not from the original base.
+    pub islands: bool,
     /// The look of the controls: classic for a UI theme that is not based
     /// on a New UI theme; `None` for a scheme alone (the base theme's).
     pub controls: Option<Controls>,
@@ -52,13 +56,14 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
     } else {
         ThemeKind::Light
     };
-    let base = builtin::theme(base_kind);
+    let base = builtin::import_base(base_kind, inputs.islands);
     let mut palette = BTreeMap::new();
     for layer in inputs.ui_layers.iter().rev() {
         palette.extend(layer.palette.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
     let mut cx = Converter {
         kind: base_kind,
+        islands: inputs.islands,
         controls: inputs.controls,
         ui_layers: inputs.ui_layers,
         chain: SchemeChain {
@@ -69,7 +74,7 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
             name: inputs.name.clone(),
             kind: inputs.kind,
             sources: inputs.sources,
-            base: builtin::id_for(base_kind).to_owned(),
+            base: builtin::import_id_for(base_kind, inputs.islands).to_owned(),
             warnings: inputs.warnings,
             ..ImportReport::default()
         },
@@ -138,6 +143,8 @@ fn code_default(role: UiRole, dark: bool) -> Option<Rgba> {
 
 struct Converter<'a> {
     kind: ThemeKind,
+    /// The base theme is an islands theme (see [`Inputs::islands`]).
+    islands: bool,
     controls: Option<Controls>,
     ui_layers: Vec<&'a UiThemeData>,
     chain: SchemeChain<'a>,
@@ -365,6 +372,8 @@ impl<'a> Converter<'a> {
 
     fn fill_ui(&mut self, out: &mut UiColors, base: &UiColors, dark: bool) {
         let mut direct: Vec<Option<Rgba>> = vec![None; UiRole::COUNT];
+        // Roles that a colour scheme sets, as opposed to the UI theme.
+        let mut from_scheme = vec![false; UiRole::COUNT];
         for &role in UiRole::ALL {
             let target = format!("ui.{role}");
             // A key the theme sets for this very component beats a wildcard
@@ -391,6 +400,10 @@ impl<'a> Converter<'a> {
                 let used = Some(i) == winner;
                 if used {
                     direct[role.index()] = Some(hit.color);
+                    from_scheme[role.index()] = matches!(
+                        hit.source,
+                        KeySource::SchemeColor | KeySource::SchemeAttribute
+                    );
                 }
                 self.report.mapped.push(MappedKey {
                     source: hit.source,
@@ -404,6 +417,40 @@ impl<'a> Converter<'a> {
             let target = format!("ui.{role}");
             if let Some(color) = direct[role.index()] {
                 out[role] = color;
+                continue;
+            }
+            // A theme under an islands theme: the parent chain that the
+            // inputs lack sets the other roles, and the bundled islands
+            // theme holds their values; a stand-in or a colour derived from
+            // a UI theme role would only be a guess. What the editor scheme
+            // sets still drives the roles that follow it (the gutter
+            // follows the editor background).
+            if self.islands {
+                let mut ancestor = role.fallback();
+                let mut derived = None;
+                while let Some(from) = ancestor {
+                    if from_scheme[from.index()]
+                        && let Some(color) = direct[from.index()]
+                    {
+                        derived = Some((from, color));
+                        break;
+                    }
+                    ancestor = from.fallback();
+                }
+                match derived {
+                    Some((from, color)) => {
+                        out[role] = color;
+                        self.report.approximations.push(Approximation {
+                            key: format!("ui.{from}"),
+                            target,
+                            note: format!("no key sets it; takes the colour of ui.{from}"),
+                        });
+                    }
+                    None => {
+                        out[role] = base[role];
+                        self.report.defaulted.push(Defaulted { target });
+                    }
+                }
                 continue;
             }
             if let Some(color) = code_default(role, dark) {

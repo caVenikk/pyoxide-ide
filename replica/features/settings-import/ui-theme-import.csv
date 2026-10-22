@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; icon colour palette, run widget, tree, check box and button colours and sizes from the theme (#222, #225)"
+UI theme import (.theme.json),settings-import,must,yes,partial,"themes crate: theme.json and plugin jars (data files only), report; icon colour palette, run widget, tree, check box and button colours and sizes from the theme (#222, #225); a theme under Islands Dark / Islands Light fills unset roles from the bundled islands theme (#288)"
