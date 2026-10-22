@@ -86,6 +86,9 @@ const EVALUATING: &str = "Evaluating\u{2026}";
 /// label's own), the separator's height, the toolbar button's insets
 /// around its 16 icon, the popup's corner radius.
 const TIP_TOP: f32 = 10.0;
+/// The tooltip's height inside its border (measured: insets of 10 around a
+/// row of 22; the separator and the button reach into the insets).
+const TIP_HEIGHT: f32 = 42.0;
 const TIP_LEFT: f32 = 11.0;
 const TIP_TEXT_RIGHT: f32 = 24.0;
 const TIP_SEPARATOR: f32 = 24.0;
@@ -757,7 +760,7 @@ impl DebuggerView {
             .flex()
             .flex_row()
             .items_center()
-            .py(px(TIP_TOP))
+            .h(px(TIP_HEIGHT + 2.0))
             .child(text)
             .child(
                 div()
