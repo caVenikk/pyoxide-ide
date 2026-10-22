@@ -99,7 +99,7 @@ pub(crate) fn init(cx: &mut App) {
                 ui::command::CommandError::new("not_available", "not a main window")
             })?;
             let view = workbench.read(cx).terminal_ui.view.clone();
-            Ok(view.read(cx).state_json(cx))
+            Ok(view.read(cx).state_json(window, cx))
         }),
     );
 }
@@ -143,6 +143,25 @@ impl Workbench {
             TerminalToolWindowEvent::Hide | TerminalToolWindowEvent::Emptied => {
                 self.hide(TERMINAL, window, cx)
             }
+            // Remove from Sidebar (`RemoveStripeButtonAction`): hidden and
+            // its button gone; activating it brings the button back.
+            TerminalToolWindowEvent::RemoveFromSidebar => {
+                if self.is_visible(TERMINAL) {
+                    self.hide(TERMINAL, window, cx);
+                }
+                self.tool_windows.set_registered(TERMINAL, false);
+                cx.notify();
+            }
+            // The reference opens Tools > Terminal, a page Pyoxide does not
+            // have yet: the Settings window opens.
+            TerminalToolWindowEvent::Settings => self.open_settings(
+                &settings_ui::commands::OpenSettings {
+                    page: None,
+                    filter: None,
+                },
+                window,
+                cx,
+            ),
         }
     }
 
@@ -229,11 +248,9 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         let view = self.terminal_ui.view.clone();
-        let tab = view
-            .read(cx)
-            .index_of(id)
-            .and_then(|i| view.read(cx).tabs().get(i))
-            .map(|t| t.name().to_string());
+        // The process is named after the tab's title, which follows the
+        // running program ("Terminal sleep").
+        let tab = view.read(cx).title_of(id, cx).map(|t| t.to_string());
         self.terminal_ui.closing.retain(|c| *c != id);
         let Some(name) = tab else {
             return;

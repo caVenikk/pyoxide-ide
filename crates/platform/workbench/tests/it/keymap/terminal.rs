@@ -191,6 +191,40 @@ fn check_tool_window(h: &mut H, command: &str, keys: &str, what: &str) {
     }
 }
 
+/// The keys of the rename balloon: Enter renames (an empty name is refused
+/// with an error outline, the balloon stays), Escape cancels; the focus
+/// goes back to the session.
+fn check_rename(h: &mut H, command: &str, keys: &str, what: &str) {
+    let name = |s: &Value| {
+        let i = s["selected"].as_u64().unwrap() as usize;
+        s["tabs"][i]["name"].as_str().unwrap().to_owned()
+    };
+    let before = name(&h.open_terminal(None));
+    h.invoke("terminal.rename-tab", json!(null));
+    let s = h.terminal();
+    assert_eq!(s["rename"]["text"], json!(before), "{what}: the balloon has the name");
+    if command == "terminal.rename-confirm" {
+        h.invoke("editor.select-all", json!(null));
+        h.invoke("editor.backspace", json!(null));
+        h.press(keys);
+        assert_eq!(h.terminal()["rename"]["error"], json!(true), "{what}: empty");
+        h.invoke("editor.type", json!({"text": "build"}));
+        assert_eq!(h.terminal()["rename"]["error"], json!(false), "{what}: typed");
+        h.press(keys);
+        let s = h.terminal();
+        assert!(s["rename"].is_null(), "{what}: the balloon closes");
+        assert_eq!(name(&s), "build", "{what}");
+        h.invoke("terminal.rename-tab", json!({"name": before}));
+    } else {
+        h.invoke("editor.type", json!({"text": "other"}));
+        h.press(keys);
+        let s = h.terminal();
+        assert!(s["rename"].is_null(), "{what}: the balloon closes");
+        assert_eq!(name(&s), before, "{what}: the name stays");
+    }
+    assert!(h.terminal_focused(), "{what}: the focus is in the tool window");
+}
+
 /// The number of scrollback lines in a terminal state.
 fn history(s: &Value) -> u64 {
     s["history"].as_u64().unwrap()
@@ -489,7 +523,126 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "terminal.next-tab"
         | "terminal.previous-tab"
         | "terminal.show-tab-list" => check_tool_window(h, &b.command, keys, &what),
+        "terminal.rename-confirm" | "terminal.rename-cancel" => {
+            check_rename(h, &b.command, keys, &what)
+        }
         _ => return false,
     }
     true
+}
+
+impl H<'_> {
+    /// The selected tab's title in the header.
+    fn selected_tab_name(&mut self) -> String {
+        let s = self.terminal();
+        let i = s["selected"].as_u64().unwrap() as usize;
+        s["tabs"][i]["name"].as_str().unwrap().to_owned()
+    }
+}
+
+/// While a command runs (the shell integration's marks C to D) a tab shows
+/// the title the program set, OSC 1 included (the reference's emulator
+/// takes the icon name as the title), cut to 30 characters in the middle;
+/// afterwards its name again. A name the user gave stays.
+#[gpui::test]
+#[cfg_attr(windows, ignore = "cmd.exe has no printf")]
+fn a_tab_shows_the_program_title_while_a_command_runs(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx, keymap::MACOS);
+    h.open_terminal(None);
+    let name = h.selected_tab_name();
+    // The command prints the mark C and the titles, then runs for a while;
+    // the next prompt ends it (/bin/sh's integration marks only prompts).
+    let run = |titles: &str| format!("printf '\\033]133;C\\007{titles}'; sleep 5\r");
+    h.invoke(
+        "terminal.type",
+        json!({"text": run("\\033]2;sleep 100\\007\\033]1;sleep\\007")}),
+    );
+    h.wait_terminal("the program's title", |s| s["tabs"][0]["name"] == json!("sleep"));
+    h.wait_terminal("the name again", |s| s["tabs"][0]["name"] == json!(name));
+    let long = "python -m http.server 8000 --bind 127.0.0.1";
+    h.invoke(
+        "terminal.type",
+        json!({"text": run(&format!("\\033]0;{long}\\007"))}),
+    );
+    let s = h.wait_terminal("the long title", |s| s["tabs"][0]["full_title"] == json!(long));
+    assert_eq!(s["tabs"][0]["name"], json!("python -m http…-bind 127.0.0.1"));
+    h.wait_terminal("the name again", |s| s["tabs"][0]["name"] == json!(name));
+    // A renamed tab keeps its name.
+    h.invoke("terminal.rename-tab", json!({"name": "build"}));
+    h.invoke("terminal.type", json!({"text": run("\\033]1;vim\\007")}));
+    let s = h.wait_terminal("the program's title set", |s| {
+        s["tabs"][0]["command_running"] == json!(true) && s["tabs"][0]["title"] == json!("vim")
+    });
+    assert_eq!(s["tabs"][0]["name"], json!("build"));
+}
+
+/// The header's ⋮ menu has the reference's items in its order (without
+/// the AI agents' toggle); Group Tabs shows once there were several tabs
+/// and groups them; Close All closes every tab; Remove from Sidebar hides
+/// the tool window and its button, which comes back with the tool window.
+#[gpui::test]
+fn the_options_menu(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx, keymap::MACOS);
+    h.open_terminal(None);
+    let items = |h: &mut H| -> Vec<(String, bool)> {
+        h.terminal()["options_menu"]["levels"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["hidden"] != json!(true))
+            .map(|r| {
+                let label = if r["separator"] == json!(true) {
+                    "-".to_owned()
+                } else {
+                    r["label"].as_str().unwrap().to_owned()
+                };
+                (label, r["enabled"] == json!(true))
+            })
+            .collect()
+    };
+    h.invoke("terminal.options-menu", json!(null));
+    let one_tab = items(&mut h);
+    let labels: Vec<&str> = one_tab.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Terminal Engine",
+            "Settings",
+            "-",
+            "Close All",
+            "View Mode",
+            "Move to",
+            "Resize",
+            "-",
+            "Remove from Sidebar",
+        ]
+    );
+    h.invoke("menu.cancel", json!(null));
+    assert!(h.terminal()["options_menu"].is_null());
+    let tabs = |s: &Value| s["tabs"].as_array().map_or(0, Vec::len);
+    h.invoke("terminal.new-tab", json!(null));
+    h.wait_terminal("a second tab", |s| tabs(s) == 2);
+    h.wait_idle_shell();
+    h.invoke("terminal.options-menu", json!(null));
+    let labels: Vec<String> = items(&mut h).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels[4], "Group Tabs", "{labels:?}");
+    h.invoke("menu.cancel", json!(null));
+    h.invoke("terminal.group-tabs", json!(null));
+    assert_eq!(h.terminal()["grouped"], json!(true));
+    h.invoke("terminal.group-tabs", json!(null));
+    assert_eq!(h.terminal()["grouped"], json!(false));
+    // Close All: idle shells close at once; the tool window hides.
+    h.invoke("terminal.close-all-tabs", json!(null));
+    h.wait_terminal("no tab", |s| tabs(s) == 0);
+    assert!(!h.terminal_visible());
+    // Remove from Sidebar.
+    h.open_terminal(None);
+    h.invoke("terminal.remove-from-sidebar", json!(null));
+    let terminal = h.state()["tool_windows"]["terminal"].clone();
+    assert_eq!(terminal["visible"], json!(false), "{terminal}");
+    assert_eq!(terminal["registered"], json!(false), "{terminal}");
+    h.invoke("workbench.toggle-terminal", json!(null));
+    let terminal = h.state()["tool_windows"]["terminal"].clone();
+    assert_eq!(terminal["visible"], json!(true), "{terminal}");
+    assert_eq!(terminal["registered"], json!(true), "{terminal}");
 }

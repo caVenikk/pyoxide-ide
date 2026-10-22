@@ -26,3 +26,27 @@
   Changes: reimplemented in
   Rust on GPUI; the allowed actions are mapped to Pyoxide commands through
   the action table, and every `terminal.*` command is allowed.
+  The header and its tabs (2026.2.3 as well): the header 41 high with its
+  line and its buttons shown only while the tool window is active, has a
+  popup or is hovered (platform-impl toolWindow/ToolWindowHeader.kt,
+  InternalDecoratorImpl.kt updateActiveAndHoverState), the tab pills and
+  their colours focused and unfocused (application/impl/islands/
+  IslandsTabPainter.kt, IslandsUICustomization.kt toolWindowTabPainter,
+  JBUI.java ToolWindow insets), the list of tabs under the selected tab
+  (openapi/wm/impl/content/TabContentLayout.java, ComboContentLayout.java),
+  the rename balloon (ide/actions/ToolWindowTabRenameActionBase.kt), the
+  tab title of a running program (platform/execution-impl terminal/
+  TerminalTitle.kt with StringUtil.trimMiddle, plugins/terminal frontend
+  toolwindow/impl/TerminalTitleUpdating.kt, TerminalOptionsProvider
+  showApplicationTitle, util/TerminalTitleUtils.kt), the ⋮ menu's items
+  and order (openapi/wm/impl/ToolWindowImpl.kt GearActionGroup,
+  ToolWindowMoveAction.java, plugins/terminal/frontend/resources/
+  intellij.terminal.frontend.xml Terminal.ToolWindowActions,
+  TerminalChangeEngineAction.kt, texts of ActionsBundle.properties,
+  UIBundle.properties and TerminalBundle.properties). That OSC 1 sets a
+  terminal's title as OSC 0 and 2 do follows JediTerm
+  (https://github.com/JetBrains/jediterm, Apache-2.0 under its dual
+  licence), core/src/com/jediterm/terminal/emulator/JediEmulator.java
+  doProcessOsc; crates/platform/terminal/src/prescan.rs reports it.
+  Changes: drawn with GPUI; the view modes, moving and resizing of tool
+  windows are shown but not available.

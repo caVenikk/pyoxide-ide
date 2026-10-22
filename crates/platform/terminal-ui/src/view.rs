@@ -22,8 +22,8 @@ use gpui::{
 };
 use serde_json::{Value, json};
 use terminal::{
-    ExitStatus, Modifiers, MouseAction, MouseButton, MouseMode, Point, Scroll, SelectionKind,
-    Session, SessionEvent, SessionOptions, Side, Snapshot, TerminalSize,
+    ExitStatus, MarkKind, Modifiers, MouseAction, MouseButton, MouseMode, Point, Scroll,
+    SelectionKind, Session, SessionEvent, SessionOptions, Side, Snapshot, TerminalSize,
 };
 use themes::UiRole;
 use ui::theme::ThemeExt;
@@ -95,6 +95,8 @@ pub enum SessionViewEvent {
     /// (the workbench's `draw_now`). The view is already notified.
     Redraw,
     TitleChanged(Option<String>),
+    /// A command started or finished in the shell (shell integration).
+    CommandRunningChanged(bool),
     WorkingDirectoryChanged(PathBuf),
     Bell,
     Exited(ExitStatus),
@@ -196,6 +198,9 @@ pub struct SessionView {
     exit: Option<ExitStatus>,
     title: Option<String>,
     working_directory: Option<PathBuf>,
+    /// The shell runs a command: between its integration's marks C (the
+    /// command runs) and D or A (it finished, the next prompt).
+    command_running: bool,
     focus: FocusHandle,
     options: TerminalOptions,
     pub(crate) snapshot: Snapshot,
@@ -323,6 +328,7 @@ impl SessionView {
             exit: None,
             title: None,
             working_directory: None,
+            command_running: false,
             focus,
             options: TerminalOptions::default(),
             snapshot: Snapshot::default(),
@@ -422,7 +428,18 @@ impl SessionView {
                 self.working_directory = Some(dir.clone());
                 cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
             }
-            SessionEvent::Mark(_) | SessionEvent::Integration(_) => {}
+            SessionEvent::Mark(mark) => {
+                let running = match mark.kind {
+                    MarkKind::CommandExecuted => true,
+                    MarkKind::CommandFinished { .. } | MarkKind::PromptStart => false,
+                    MarkKind::CommandStart => self.command_running,
+                };
+                if running != self.command_running {
+                    self.command_running = running;
+                    cx.emit(SessionViewEvent::CommandRunningChanged(running));
+                }
+            }
+            SessionEvent::Integration(_) => {}
             SessionEvent::Exited(status) => {
                 self.exit = Some(status);
                 self.show_now(cx);
@@ -632,6 +649,13 @@ impl SessionView {
         self.working_directory.as_ref()
     }
 
+    /// The shell reported that a command runs (its integration's marks):
+    /// the reference shows the program's title in the tab only then
+    /// (`TerminalTitleUpdating.isCommandRunning`).
+    pub fn command_running(&self) -> bool {
+        self.command_running && self.exit.is_none()
+    }
+
     pub fn exit_status(&self) -> Option<ExitStatus> {
         self.exit
     }
@@ -704,6 +728,7 @@ impl SessionView {
             "history": s.history_size,
             "title": self.title,
             "working_directory": self.working_directory,
+            "command_running": self.command_running(),
             "exit_code": self.exit.and_then(|e| e.code),
             "exited": self.exit.is_some(),
         })

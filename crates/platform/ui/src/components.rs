@@ -51,6 +51,47 @@ pub fn icon_button(
         .child(Icon::new(icon).size(icon_size))
 }
 
+/// Height of a tab in a tool window's header (`IslandsTabPainter`: 28, 24
+/// in compact mode).
+pub const HEADER_TAB_HEIGHT: f32 = 28.0;
+
+/// A tab of a tool window's header (the reference's `ContentTabLabel` as
+/// `IslandsTabPainter` draws it): a rounded pill. The selected tab is
+/// filled and outlined in the focus colours while the tool window is
+/// active, in grey otherwise; a hovered tab takes the hover colour (the
+/// selected one only while the tool window is not active). Children go in
+/// a row.
+pub fn header_tab(
+    id: impl Into<ElementId>,
+    selected: bool,
+    active: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.color(UiRole::TabHover);
+    let tab = div()
+        .id(id)
+        .flex()
+        .flex_row()
+        .flex_none()
+        .items_center()
+        .h(px(HEADER_TAB_HEIGHT))
+        .rounded(theme.metric(Metric::ButtonRadius))
+        .border_1();
+    match (selected, active) {
+        (true, true) => tab
+            .bg(theme.color(UiRole::TabActive))
+            .border_color(theme.color(UiRole::TabUnderline)),
+        (true, false) => tab
+            .bg(theme.color(UiRole::TabSelectedInactive))
+            .border_color(theme.color(UiRole::TabUnderlineInactive))
+            .hover(move |s| s.bg(hover)),
+        (false, _) => tab
+            .border_color(gpui::transparent_black())
+            .hover(move |s| s.bg(hover)),
+    }
+}
+
 /// Size of the small buttons inside bars and fields (find bar arrows,
 /// option toggles) and of their icons.
 pub const SMALL_BUTTON: f32 = 22.0;

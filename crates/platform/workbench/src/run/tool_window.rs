@@ -726,7 +726,7 @@ impl RunToolWindow {
 
     // ---- drawing ---------------------------------------------------------------
 
-    fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_tab(&self, index: usize, active: bool, cx: &mut Context<Self>) -> AnyElement {
         let tab = &self.tabs[index];
         let theme = cx.theme();
         let selected = self.selected == Some(index);
@@ -763,26 +763,13 @@ impl RunToolWindow {
                 window.dispatch_action(Box::new(CloseTab { index: Some(index) }), cx);
             }));
         let tooltip = tab.pid().map(|pid| format!("Process ID: {pid}"));
-        div()
-            .id(("run-tab", index))
+        // The tab's look is shared with the other tool windows' header tabs.
+        ui::components::header_tab(("run-tab", index), selected, active, cx)
             .debug_selector(move || format!("run-tab-{index}"))
             .group(group)
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .h(px(26.0))
             .pl(px(6.0))
             .pr(px(4.0))
             .gap(px(4.0))
-            .rounded(theme.metric(Metric::ButtonRadius))
-            .border_1()
-            .when(selected, |d| {
-                d.bg(theme.color(UiRole::TabActive))
-                    .border_color(theme.color(UiRole::TabUnderline))
-            })
-            .when(!selected, |d| d.border_color(gpui::transparent_black()))
-            .when(!selected, |d| d.hover(move |s| s.bg(hover)))
             .child(icon)
             .child(
                 div()
@@ -806,9 +793,9 @@ impl RunToolWindow {
             .into_any_element()
     }
 
-    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_header(&self, active: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let tabs: Vec<AnyElement> = (0..self.tabs.len())
-            .map(|i| self.render_tab(i, cx))
+            .map(|i| self.render_tab(i, active, cx))
             .collect();
         let theme = cx.theme();
         div()
@@ -1130,7 +1117,8 @@ impl Focusable for RunToolWindow {
 
 impl Render for RunToolWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let header = self.render_header(cx).into_any_element();
+        let active = self.focus.contains_focused(window, cx);
+        let header = self.render_header(active, cx).into_any_element();
         let body = match self.selected {
             Some(index) if index < self.tabs.len() => {
                 let toolbar = self.render_toolbar(index, window, cx).into_any_element();

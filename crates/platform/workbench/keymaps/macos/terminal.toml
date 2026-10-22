@@ -34,3 +34,11 @@ name = "Terminal"
 "cmd-{" = "terminal.previous-tab"
 "ctrl-shift-down" = "terminal.show-tab-list"
 "shift-escape" = "workbench.hide-tool-window"
+
+# The rename balloon of a tab (`ToolWindowTabRenameActionBase`): Enter
+# renames (an empty name is refused), Escape cancels.
+[[context]]
+name = "TerminalRename > Editor"
+[context.bindings]
+"enter" = "terminal.rename-confirm"
+"escape" = "terminal.rename-cancel"
