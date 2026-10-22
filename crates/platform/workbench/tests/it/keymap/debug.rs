@@ -132,12 +132,14 @@ const VIEW_COMMANDS: [&str; 6] = [
 ];
 
 /// The keys of the watches, the values and the evaluate field (#166).
-const WATCH_COMMANDS: [&str; 9] = [
+const WATCH_COMMANDS: [&str; 11] = [
     "debug.new-watch",
     "debug.remove-watch",
     "debug.variables.set-value",
     "debug.variables.copy-value",
+    "debug.evaluate-expression",
     "debug.variables.jump-to-source",
+    "debug.variables.jump-to-type-source",
     "debug.variables.evaluate",
     "debug.variables.watch-expression",
     "debug.variables.commit-edit",
@@ -267,13 +269,22 @@ fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: 
 
 /// The keys of the watches, the values and the evaluate field with a
 /// scripted adapter ([`views_script`]); the watches of an earlier check are
-/// removed first. The adapter answers `a + 1` with 2; other evaluations
-/// fail (the script has ended).
+/// removed first. The adapter answers `a + 1` with 2 (Jump To Type Source:
+/// where the type of `a` is); other evaluations fail (the script has
+/// ended).
 fn check_debug_watches(h: &mut H, command: &str, keys: &str, what: &str) {
-    let after = vec![
-        json!({"expect": "evaluate", "arguments": {"expression": "a + 1"}}),
-        json!({"respond": {"result": "2", "type": "int", "variablesReference": 0}}),
-    ];
+    let after = if command == "debug.variables.jump-to-type-source" {
+        let source = format!("{}:2", h.root.join("a.py").display());
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": "type_source(a)"}}),
+            json!({"respond": {"result": source, "type": "str", "variablesReference": 0}}),
+        ]
+    } else {
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": "a + 1"}}),
+            json!({"respond": {"result": "2", "type": "int", "variablesReference": 0}}),
+        ]
+    };
     start_views(h, after);
     let variables = |h: &mut H| h.debug()["tool_window"]["tabs"][0]["variables"].clone();
     while variables(h)["watches"]
@@ -323,8 +334,15 @@ fn check_debug_watches(h: &mut H, command: &str, keys: &str, what: &str) {
             let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
             assert_eq!(copied.as_deref(), Some("[1]"), "{what}");
         }
-        "debug.variables.jump-to-source" => {
-            // From another file: a.py opens at the declaration.
+        "debug.evaluate-expression" => {
+            h.focus(tree);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+            h.press(keys);
+            assert_eq!(variables(h)["evaluate"]["text"], json!("b"), "{what}");
+        }
+        "debug.variables.jump-to-source" | "debug.variables.jump-to-type-source" => {
+            // From another file: a.py opens at the declaration (of the
+            // value, of its type).
             h.invoke("tabs.select", json!({"index": 1}));
             h.focus(tree);
             h.invoke("debug.variables.select", json!({"path": ["Locals", "a"]}));

@@ -414,20 +414,66 @@ fn evaluate_and_watches_at_a_stop(cx: &mut TestAppContext) {
     );
     let count = h.row(json!(["result", "'count'"]));
     assert_eq!(count["text"], json!("'count' = {int} 4"), "{count:#}");
-    // An error.
+    // An error, as pydevd shows it; the field marks the name the frame
+    // does not declare.
     h.invoke(
         "debug.variables.evaluate",
         json!({"expression": "undefined_name"}),
     );
     let result = h.row(json!(["result"]));
     assert_eq!(result["state"], json!("error"), "{result:#}");
-    let error = result["error"].as_str().unwrap();
-    assert!(error.contains("undefined_name"), "{error}");
+    assert_eq!(
+        result["error"],
+        json!("{NameError}NameError(\"name 'undefined_name' is not defined\")"),
+        "{result:#}"
+    );
+    let field = h.wait("the field's unresolved name", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["evaluate"]["unresolved"] == json!([[0, 14]])
+    });
+    let field = &field["tool_window"]["tabs"][0]["variables"]["evaluate"];
+    assert_eq!(field["text"], json!("undefined_name"), "{field:#}");
+    // Jump To Type Source: where the running program has the type.
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "__import__('fractions').Fraction(1, 3)"}),
+    );
+    h.row(json!(["result"]));
+    h.invoke("debug.variables.select", json!({"path": ["result"]}));
+    h.invoke("debug.variables.jump-to-type-source", json!(null));
+    let mut editor = Value::Null;
+    for _ in 0..200 {
+        h.cx.executor().advance_clock(Duration::from_millis(20));
+        editor = h.invoke("workbench.state", json!(null))["editor"].clone();
+        if editor["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("fractions.py"))
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        editor["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("fractions.py")),
+        "{editor:#}"
+    );
+    h.invoke("project.open-file", json!({"path": "main.py"}));
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "undefined_name"}),
+    );
+    h.row(json!(["result"]));
     // The history keeps the expressions, the latest first.
     let field = h.tab()["variables"]["evaluate"].clone();
     assert_eq!(
         field["history"],
-        json!(["undefined_name", "summary", "len(items)"]),
+        json!([
+            "undefined_name",
+            "__import__('fractions').Fraction(1, 3)",
+            "summary",
+            "len(items)"
+        ]),
         "{field:#}"
     );
     // Watches: from the field and New Watch.
@@ -441,6 +487,12 @@ fn evaluate_and_watches_at_a_stop(cx: &mut TestAppContext) {
     );
     let first = h.row(json!(["items[0]"]));
     assert_eq!(first["text"], json!("items[0] = {int} 1"), "{first:#}");
+    // View as: an integer in hex, then as before.
+    h.invoke("debug.variables.select", json!({"path": ["items[0]"]}));
+    h.invoke("debug.variables.view-as", json!({"renderer": "Hex"}));
+    let first = h.row(json!(["items[0]"]));
+    assert_eq!(first["text"], json!("items[0] = {int} 0x1"), "{first:#}");
+    h.invoke("debug.variables.view-as", json!({"renderer": "Decimal"}));
     let sum = h.row(json!(["summary['sum'] + 1"]));
     assert_eq!(
         sum["text"],

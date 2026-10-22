@@ -461,6 +461,30 @@ impl debugger::DebugAdapterProvider for TestDebug {
                 .map(|column| (i as u32 + 1, column as u32 + 1))
         })
     }
+
+    /// Integers in hex as well.
+    fn value_renderers(&self, type_name: &str) -> (&'static [&'static str], &'static str) {
+        if type_name == "int" {
+            (&["Decimal", "Hex"], "Decimal")
+        } else {
+            (&[], "")
+        }
+    }
+
+    fn render_value(&self, renderer: &str, value: &str) -> Option<String> {
+        let n: i64 = value.parse().ok()?;
+        (renderer == "Hex").then(|| format!("{n:#x}"))
+    }
+
+    /// `type_source(<expression>)`, answered `<path>:<line>`.
+    fn type_source_expression(&self, expression: &str) -> Option<String> {
+        Some(format!("type_source({expression})"))
+    }
+
+    fn parse_type_source(&self, value: &str) -> Option<(std::path::PathBuf, u32)> {
+        let (path, line) = value.rsplit_once(':')?;
+        Some((path.into(), line.parse().ok()?))
+    }
 }
 
 pub fn debug_hook() -> workbench::DebugHook {
