@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Project widget popup and recent projects (Open…, Open Projects, Recent Projects, project colours)",editor,must,yes,partial,"Community; popup with Open…, Open Projects and Recent Projects (avatars, paths, branches, speed search), recent-projects store shared with the Welcome list, project colour on the toolbar (#272); one window only, so Open Projects lists the current project (#282); Clone Repository… disabled (#283); project colour extras (#285)"
