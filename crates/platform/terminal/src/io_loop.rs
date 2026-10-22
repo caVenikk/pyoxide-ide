@@ -234,6 +234,10 @@ impl IoLoop {
         );
         self.shared.state.lock().term.exit();
         self.shared.notifier.info().exit = Some(status);
+        self.shared
+            .notifier
+            .exited
+            .store(true, std::sync::atomic::Ordering::Release);
         self.shared.notifier.wake();
         self.shared.notifier.send(SessionEvent::Exited(status));
     }
