@@ -60,7 +60,7 @@ ui::ui_commands! {
         "Hides the Terminal tool window and removes its button from the sidebar; activating the tool window brings the button back.";
     /// Choose the terminal engine.
     SelectEngine { engine: Option<String> } => "terminal.select-engine", "Terminal Engine",
-        "Chooses the terminal engine. Only the reworked engine (`reworked`, \"Reworked 2025\") exists, and it is in use.",
+        "Chooses the terminal engine. Only the reworked engine (`reworked`, \"Reworked\") exists, and it is in use.",
         r#"{"engine": "reworked"}"#;
     /// The Terminal settings.
     ShowSettings => "terminal.settings", "Settings",
