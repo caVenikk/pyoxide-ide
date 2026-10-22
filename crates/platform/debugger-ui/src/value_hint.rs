@@ -36,6 +36,7 @@ use gpui::{
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
 use ui::icons::Icon;
+use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt as _;
 
 use crate::DebuggerViewEvent;
@@ -121,7 +122,7 @@ pub(crate) enum Content {
         visible: bool,
     },
     /// The value, collapsed.
-    Value(PopupRoot),
+    Value(Box<PopupRoot>),
     /// The value's tree.
     Tree(Entity<VariablesView>),
 }
@@ -383,7 +384,7 @@ impl DebuggerView {
                 shown.content = Content::Tree(view);
             }
         } else if let Some(shown) = &mut self.hints.shown {
-            shown.content = Content::Value(root);
+            shown.content = Content::Value(Box::new(root));
         }
         cx.notify();
     }
@@ -496,7 +497,7 @@ impl DebuggerView {
             Some(Shown {
                 content: Content::Value(root),
                 ..
-            }) if root.variable.reference > 0 => root.clone(),
+            }) if root.variable.reference > 0 => (**root).clone(),
             _ => return,
         };
         let view = self.popup_tree(root, cx);
@@ -716,7 +717,8 @@ impl DebuggerView {
             .pr(px(TIP_TEXT_RIGHT))
             .whitespace_nowrap()
             .when(expandable, |d| {
-                d.cursor_pointer()
+                d.relative()
+                    .pointing_hand()
                     .child(
                         div()
                             .flex_none()
@@ -748,7 +750,6 @@ impl DebuggerView {
             .mr(px(TIP_BUTTON_RIGHT - 3.0))
             .p(px(3.0))
             .rounded(px(4.0))
-            .cursor_pointer()
             .hover(|s| s.bg(theme.color(UiRole::Hover)))
             .child(Icon::new(icons::DOCUMENTATION_AND_PROBLEMS).size(px(16.0)))
             .tooltip(ui::components::Tooltip::text(
@@ -807,10 +808,11 @@ impl DebuggerView {
                 .pl(px(ACTION_LEFT))
                 .child(
                     div()
-                        .cursor_pointer()
+                        .relative()
                         .text_color(link)
                         .pr(px(ACTION_RIGHT))
-                        .child(label),
+                        .child(label)
+                        .pointing_hand(),
                 )
                 .when_some(keys, |d, k| {
                     d.child(
