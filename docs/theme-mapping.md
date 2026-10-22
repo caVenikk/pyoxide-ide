@@ -246,6 +246,8 @@ report says which parent was missing.
 | `ui.tab-active-text` | `EditorTabs.underlinedTabForeground`, `EditorTabs.selectedForeground`, `DefaultTabs.underlinedTabForeground` | Title of the selected tab |
 | `ui.tab-inactive-text` | `EditorTabs.foreground`, `TabbedPane.foreground` | Title of other tabs |
 | `ui.tab-underline` | `EditorTabs.underlinedBorderColor`, `EditorTabs.underlineColor`, `DefaultTabs.underlineColor`, `TabbedPane.underlineColor` | Indicator of the selected tab (the outline of its rounded background in the New UI with islands) |
+| `ui.tab-selected-inactive` | `EditorTabs.inactiveUnderlinedTabBackground` | Selected tab of a tab strip without the focus: the editor tabs, a tool window's header tabs (`IslandsTabPainter`) |
+| `ui.tab-underline-inactive` | `EditorTabs.inactiveUnderlinedTabBorderColor`, `EditorTabs.inactiveUnderlineColor`, `DefaultTabs.inactiveUnderlineColor` | Outline of that tab |
 | `ui.scrollbar` | `ScrollBar.thumbColor` (UI theme or scheme color), `ScrollBar.Transparent.thumbColor` (UI theme or scheme color), `ScrollBar.Mac.thumbColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.thumbColor` (UI theme or scheme color) | Scrollbar thumb |
 | `ui.scrollbar-hover` | `ScrollBar.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Transparent.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Mac.hoverThumbColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.hoverThumbColor` (UI theme or scheme color) | Hovered scrollbar thumb |
 | `ui.scrollbar-track` | `ScrollBar.trackColor` (UI theme or scheme color), `ScrollBar.Transparent.trackColor` (UI theme or scheme color), `ScrollBar.Mac.trackColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.trackColor` (UI theme or scheme color) | Scrollbar track |
@@ -506,12 +508,13 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.tool-window-header`, `ui.tool-window-stripe` | `ui.tool-window` |
 | `ui.tab-inactive` | `ui.tab-bar` |
 | `ui.tab-active` | `ui.editor-background` |
+| `ui.tab-selected-inactive` | `ui.tab-active` |
 | `ui.tab-active-text`, `ui.tab-inactive-text` | `ui.text` |
 | `ui.status-bar-text`, `ui.selection-text` | `ui.text` |
 | `ui.selection-inactive` | `ui.selection` |
 | `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
 | `ui.segmented-selected` | `ui.pressed` |
-| `ui.segmented-selected-border` | `ui.border-input` |
+| `ui.segmented-selected-border`, `ui.tab-underline-inactive` | `ui.border-input` |
 | `ui.text-disabled`, `ui.shortcut` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |
