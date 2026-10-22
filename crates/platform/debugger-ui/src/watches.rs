@@ -1570,21 +1570,22 @@ impl VariablesView {
                             .child(format!("\u{a0}{PAUSED}")),
                     )
                     .child(
-                        div()
-                            .id("variables-evaluate-paused")
-                            .flex_none()
-                            .cursor_pointer()
-                            .text_color(theme.color(UiRole::TextLink))
-                            .child(format!("\u{a0}{EVALUATE_PAUSED}"))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(i) = index {
-                                        this.evaluate_paused_watch(i, cx);
-                                    }
-                                }),
-                            ),
+                        ui::link::link(
+                            ("variables-evaluate-paused", index.unwrap_or(0)),
+                            EVALUATE_PAUSED,
+                            cx,
+                        )
+                        .flex_none()
+                        .ml(px(3.5))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(i) = index {
+                                    this.evaluate_paused_watch(i, cx);
+                                }
+                            }),
+                        ),
                     )
                     .into_any_element()
             }

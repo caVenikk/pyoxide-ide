@@ -54,8 +54,8 @@ const CLEAR_DELAY: Duration = Duration::from_millis(100);
 /// The rows' inset from the tree's edges (where the selection starts and
 /// ends), the space before a top-level row's chevron, one level, the
 /// chevron's and the icon's room (measured on the reference's New UI tree:
-/// the chevron's centre 19.5 from the edge, the icon at 33, the name at
-/// 52.5, a level 19).
+/// the chevron's centre 19.5 from the edge, the icon at 33, the name's
+/// first pixel at 52.5, a level 19).
 pub(crate) const ROW_INSET: f32 = 12.0;
 const ROW_LEFT: f32 = 0.0;
 const INDENT: f32 = 19.0;
