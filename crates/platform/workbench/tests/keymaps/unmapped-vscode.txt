@@ -1,6 +1,5 @@
 ActivateDebugToolWindow
 ActivateProblemsViewToolWindow
-ActivateTerminalToolWindow
 ActivateVersionControlToolWindow
 BraceOrQuoteOut
 BuildSolutionAction

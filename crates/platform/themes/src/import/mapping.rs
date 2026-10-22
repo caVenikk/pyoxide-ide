@@ -158,6 +158,15 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
             Ui("DefaultTabs.underlineColor"),
             Ui("TabbedPane.underlineColor"),
         ],
+        // The Islands tab painter (`IslandsTabPainter.getColors`) draws the
+        // selected tab of a strip that has no focus, editor tabs and tool
+        // window header tabs alike, with these.
+        TabSelectedInactive => &[Ui("EditorTabs.inactiveUnderlinedTabBackground")],
+        TabUnderlineInactive => &[
+            Ui("EditorTabs.inactiveUnderlinedTabBorderColor"),
+            Ui("EditorTabs.inactiveUnderlineColor"),
+            Ui("DefaultTabs.inactiveUnderlineColor"),
+        ],
         Scrollbar => &[
             Key("ScrollBar.thumbColor"),
             Key("ScrollBar.Transparent.thumbColor"),

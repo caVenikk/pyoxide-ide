@@ -3,6 +3,11 @@
 # Keystrokes follow the reference IDE's default keymap (Apache-2.0, see
 # NOTICE).
 
+# The Terminal tool window (`ActivateTerminalToolWindow`).
+[[context]]
+[context.bindings]
+"alt-f12" = "workbench.toggle-terminal"
+
 # A focused terminal (the reference's `Terminal.*` actions): Copy only
 # with a selection (without one Ctrl+C goes to the shell), Paste
 # (bracketed when the program asked for it), Line Up and Down, Page Up
@@ -18,3 +23,22 @@ name = "Terminal"
 "ctrl-down" = "terminal.line-down"
 "shift-pageup" = "terminal.page-up"
 "shift-pagedown" = "terminal.page-down"
+# The tabs of the Terminal tool window (`Terminal.NewTab`,
+# `Terminal.CloseTab`, `NextTab`, `PreviousTab`, `ShowContent`) and Hide;
+# Escape goes to the shell. (Bound in the terminal's own context: a
+# binding without a context counts as one of the innermost context, see
+# run.toml.)
+"ctrl-shift-t" = "terminal.new-tab"
+"ctrl-f4" = "terminal.close-tab"
+"alt-right" = "terminal.next-tab"
+"alt-left" = "terminal.previous-tab"
+"alt-down" = "terminal.show-tab-list"
+"shift-escape" = "workbench.hide-tool-window"
+
+# The rename balloon of a tab (`ToolWindowTabRenameActionBase`): Enter
+# renames (an empty name is refused), Escape cancels.
+[[context]]
+name = "TerminalRename > Editor"
+[context.bindings]
+"enter" = "terminal.rename-confirm"
+"escape" = "terminal.rename-cancel"

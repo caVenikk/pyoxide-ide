@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+editor.workspace = true
 flume.workspace = true
 gpui.workspace = true
 serde_json.workspace = true

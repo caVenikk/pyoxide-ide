@@ -1,6 +1,5 @@
 ActivateDebugToolWindow
 ActivateProblemsViewToolWindow
-ActivateTerminalToolWindow
 ActivateVersionControlToolWindow
 Arrangement.Alias.Rule.Remove
 Arrangement.Rule.Remove

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,no,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89)"
+"Terminal tool window (Alt+F12, stripe button, Hide)",terminal,must,yes,yes,"Community (Reworked engine, the 2026.2 default); ADR 0014 (#89); tool window with header, tab pills in the focus colours, + and the new-session chevron, ⋮ options menu, Hide; Alt+F12 toggles (#158); View Mode / Move to / Resize not available yet"

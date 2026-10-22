@@ -53,8 +53,14 @@ impl H<'_> {
         out
     }
 
+    /// Keys go to the window that has them: a dialog's window while one
+    /// is open.
     fn press(&mut self, keys: &str) {
-        self.cx.simulate_keystrokes(self.window.into(), keys);
+        let window = self.window.into();
+        let target = self
+            .cx
+            .update(|cx| ui::dialog_window::innermost(window, cx));
+        self.cx.simulate_keystrokes(target, keys);
         self.draw();
     }
 

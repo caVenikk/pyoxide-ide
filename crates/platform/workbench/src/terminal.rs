@@ -46,6 +46,7 @@ impl Global for Hook {}
 pub(crate) fn init(cx: &mut App, hook: Option<TerminalHook>) {
     settings_ui::store::register::<TerminalSettings>(cx);
     cx.set_global(Hook(hook));
+    route_keys(cx);
 }
 
 /// The product's customizers of a session in the project at
@@ -78,4 +79,123 @@ pub fn plan(request: StartRequest, cx: &App) -> Task<StartPlan> {
         let customizers: Vec<&dyn ShellCustomizer> = customizers.iter().map(|c| &**c).collect();
         plan_session(&request, &customizers)
     })
+}
+
+/// The reference's actions whose shortcuts a focused terminal leaves to the
+/// IDE while "Override IDE shortcuts" is on
+/// (`TerminalEventDispatcher.ALLOWED_ACTION_IDS`); the terminal's own
+/// commands are allowed as well.
+pub const ALLOWED_ACTION_IDS: &[&str] = &[
+    "ActivateTerminalToolWindow",
+    "ActivateProjectToolWindow",
+    "ActivateFavoritesToolWindow",
+    "ActivateBookmarksToolWindow",
+    "ActivateFindToolWindow",
+    "ActivateRunToolWindow",
+    "ActivateDebugToolWindow",
+    "ActivateProblemsViewToolWindow",
+    "ActivateTODOToolWindow",
+    "ActivateStructureToolWindow",
+    "ActivateHierarchyToolWindow",
+    "ActivateServicesToolWindow",
+    "ActivateCommitToolWindow",
+    "ActivateVersionControlToolWindow",
+    "HideActiveWindow",
+    "HideAllWindows",
+    "NextWindow",
+    "PreviousWindow",
+    "NextProjectWindow",
+    "PreviousProjectWindow",
+    "ShowBookmarks",
+    "ShowTypeBookmarks",
+    "FindInPath",
+    "GotoBookmark0",
+    "GotoBookmark1",
+    "GotoBookmark2",
+    "GotoBookmark3",
+    "GotoBookmark4",
+    "GotoBookmark5",
+    "GotoBookmark6",
+    "GotoBookmark7",
+    "GotoBookmark8",
+    "GotoBookmark9",
+    "GotoAction",
+    "GotoFile",
+    "GotoClass",
+    "GotoSymbol",
+    "Vcs.Push",
+    "ShowSettings",
+    "RecentFiles",
+    "Switcher",
+    "ResizeToolWindowLeft",
+    "ResizeToolWindowRight",
+    "ResizeToolWindowUp",
+    "ResizeToolWindowDown",
+    "MaximizeToolWindow",
+    "NextTab",
+    "PreviousTab",
+    "ShowContent",
+];
+
+/// A command whose keys a focused terminal leaves to the IDE: one of the
+/// [`ALLOWED_ACTION_IDS`] (through the action table) or a terminal command.
+pub fn is_allowed_command(command: &str) -> bool {
+    static ALLOWED: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    command.starts_with("terminal.")
+        || ALLOWED
+            .get_or_init(|| {
+                let table = crate::keymap::actions::ActionTable::builtin();
+                ALLOWED_ACTION_IDS
+                    .iter()
+                    .filter_map(|id| table.get(id))
+                    .flat_map(|a| a.targets.iter().map(|t| t.command.clone()))
+                    .collect()
+            })
+            .contains(command)
+}
+
+/// The key routing of a focused terminal (`TerminalEventDispatcher`): with
+/// "Override IDE shortcuts" on, a key whose binding runs a command that is
+/// not allowed goes to the shell instead (Ctrl+R to the shell's history
+/// search rather than Run). Keys without a binding reach the session's own
+/// key handler anyway.
+pub(crate) fn route_keys(cx: &mut App) {
+    cx.intercept_keystrokes(|event, window, cx| {
+        if !event
+            .context_stack
+            .iter()
+            .any(|c| c.contains(terminal_ui::KEY_CONTEXT))
+        {
+            return;
+        }
+        let settings: TerminalSettings = settings_ui::store::get(cx);
+        if !settings.override_ide_shortcuts {
+            return;
+        }
+        let (bindings, _) = cx
+            .key_bindings()
+            .borrow()
+            .bindings_for_input(std::slice::from_ref(&event.keystroke), &event.context_stack);
+        let Some(binding) = bindings.first() else {
+            return;
+        };
+        if is_allowed_command(binding.action().name()) {
+            return;
+        }
+        let Some(session) = window
+            .root::<crate::workbench::Workbench>()
+            .flatten()
+            .and_then(|w| w.read(cx).terminal_session(cx))
+        else {
+            return;
+        };
+        if !gpui::Focusable::focus_handle(session.read(cx), cx).is_focused(window) {
+            return;
+        }
+        if session.update(cx, |s, cx| s.send_keystroke(&event.keystroke, cx)) {
+            cx.stop_propagation();
+        }
+    })
+    .detach();
 }

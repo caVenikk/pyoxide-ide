@@ -309,6 +309,31 @@ fn kill_ends_the_shell() {
     }
 }
 
+/// A tab asks before it closes whether a command runs in its shell: the
+/// shell has a child process.
+#[test]
+fn a_shell_with_a_child_has_a_running_command() {
+    let mut idle = spawn(&["sleep"]);
+    idle.wait_text("ready");
+    assert!(!idle.session().has_running_commands());
+    assert!(!idle.session().command_probe().has_running_commands());
+
+    let mut busy = spawn(&["child"]);
+    busy.wait_text("ready");
+    assert!(busy.session().has_running_commands());
+    // The probe works on another thread, as the tab's check does.
+    let probe = busy.session().command_probe();
+    assert!(
+        std::thread::spawn(move || probe.has_running_commands())
+            .join()
+            .unwrap()
+    );
+    // A shell that ended runs nothing.
+    busy.session().kill();
+    busy.wait_exit();
+    assert!(!busy.session().has_running_commands());
+}
+
 #[test]
 fn dropping_the_session_ends_the_shell() {
     let mut h = spawn(&["sleep"]);

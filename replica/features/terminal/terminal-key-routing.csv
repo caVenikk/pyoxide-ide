@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,partial,"Community (#89); keys, Option as Meta, bracketed paste and mouse reporting with Shift selecting in the grid view (#157); Override IDE shortcuts and allowed actions with the Terminal settings page"
+"Terminal key routing (Override IDE shortcuts, allowed IDE actions, Option as Meta)",terminal,must,yes,yes,"Community (#89); keys, Option as Meta, bracketed paste and mouse reporting with Shift selecting in the grid view (#157); Override IDE shortcuts with the reference's allowed actions and the Terminal settings (#158)"

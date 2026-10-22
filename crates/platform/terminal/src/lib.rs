@@ -29,6 +29,7 @@ pub mod input;
 pub mod integration;
 mod io_loop;
 pub mod prescan;
+mod running;
 mod session;
 pub mod shells;
 mod snapshot;
@@ -42,6 +43,7 @@ pub use customizer::{
 pub use input::{Key, Modifiers, MouseAction, MouseButton};
 pub use prescan::{MarkKind, OWN_OSC};
 pub use process::ExitStatus;
+pub use running::CommandProbe;
 pub use session::{
     DEFAULT_SCROLLBACK, MatchCount, Palette, Screen, Scroll, SearchDirection, SearchError,
     SearchQuery, SelectionKind, Session, SessionEvent, SessionOptions, ShellMark, Side, SpawnError,

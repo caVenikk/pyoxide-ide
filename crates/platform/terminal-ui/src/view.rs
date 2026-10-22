@@ -22,8 +22,8 @@ use gpui::{
 };
 use serde_json::{Value, json};
 use terminal::{
-    ExitStatus, Modifiers, MouseAction, MouseButton, MouseMode, Point, Scroll, SelectionKind,
-    Session, SessionEvent, SessionOptions, Side, Snapshot, TerminalSize,
+    ExitStatus, MarkKind, Modifiers, MouseAction, MouseButton, MouseMode, Point, Scroll,
+    SelectionKind, Session, SessionEvent, SessionOptions, Side, Snapshot, TerminalSize,
 };
 use themes::UiRole;
 use ui::theme::ThemeExt;
@@ -95,6 +95,8 @@ pub enum SessionViewEvent {
     /// (the workbench's `draw_now`). The view is already notified.
     Redraw,
     TitleChanged(Option<String>),
+    /// A command started or finished in the shell (shell integration).
+    CommandRunningChanged(bool),
     WorkingDirectoryChanged(PathBuf),
     Bell,
     Exited(ExitStatus),
@@ -196,6 +198,9 @@ pub struct SessionView {
     exit: Option<ExitStatus>,
     title: Option<String>,
     working_directory: Option<PathBuf>,
+    /// The shell runs a command: between its integration's marks C (the
+    /// command runs) and D or A (it finished, the next prompt).
+    command_running: bool,
     focus: FocusHandle,
     options: TerminalOptions,
     pub(crate) snapshot: Snapshot,
@@ -323,6 +328,7 @@ impl SessionView {
             exit: None,
             title: None,
             working_directory: None,
+            command_running: false,
             focus,
             options: TerminalOptions::default(),
             snapshot: Snapshot::default(),
@@ -422,7 +428,18 @@ impl SessionView {
                 self.working_directory = Some(dir.clone());
                 cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
             }
-            SessionEvent::Mark(_) | SessionEvent::Integration(_) => {}
+            SessionEvent::Mark(mark) => {
+                let running = match mark.kind {
+                    MarkKind::CommandExecuted => true,
+                    MarkKind::CommandFinished { .. } | MarkKind::PromptStart => false,
+                    MarkKind::CommandStart => self.command_running,
+                };
+                if running != self.command_running {
+                    self.command_running = running;
+                    cx.emit(SessionViewEvent::CommandRunningChanged(running));
+                }
+            }
+            SessionEvent::Integration(_) => {}
             SessionEvent::Exited(status) => {
                 self.exit = Some(status);
                 self.show_now(cx);
@@ -632,8 +649,29 @@ impl SessionView {
         self.working_directory.as_ref()
     }
 
+    /// The shell reported that a command runs (its integration's marks):
+    /// the reference shows the program's title in the tab only then
+    /// (`TerminalTitleUpdating.isCommandRunning`).
+    pub fn command_running(&self) -> bool {
+        self.command_running && self.exit.is_none()
+    }
+
     pub fn exit_status(&self) -> Option<ExitStatus> {
         self.exit
+    }
+
+    /// Asks the shell, on a background thread, whether a command runs in it
+    /// (it has a child process): what a tab checks before it closes
+    /// (`TerminalTabCloseListenerImpl.shouldConfirmClosing`). `false` for a
+    /// session that did not start or has ended.
+    pub fn has_running_commands(&self, cx: &App) -> Task<bool> {
+        match (&self.session, self.exit) {
+            (Some(session), None) => {
+                let probe = session.command_probe();
+                cx.background_spawn(async move { probe.has_running_commands() })
+            }
+            _ => Task::ready(false),
+        }
     }
 
     /// Why the session did not start.
@@ -690,6 +728,7 @@ impl SessionView {
             "history": s.history_size,
             "title": self.title,
             "working_directory": self.working_directory,
+            "command_running": self.command_running(),
             "exit_code": self.exit.and_then(|e| e.code),
             "exited": self.exit.is_some(),
         })
@@ -731,16 +770,26 @@ impl SessionView {
     }
 
     fn key_down(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = &self.session else {
-            return;
-        };
-        let Some((key, mods)) = keys::session_key(&e.keystroke, self.options.option_as_meta) else {
-            return;
-        };
-        if session.send_key(key, mods) {
+        if self.send_keystroke(&e.keystroke, cx) {
             cx.stop_propagation();
+        }
+    }
+
+    /// Sends a key to the session as the view's key handler does (the key
+    /// routing of the Terminal tool window hands it the keys of IDE
+    /// shortcuts); `false` when the session takes no such key.
+    pub fn send_keystroke(&mut self, keystroke: &gpui::Keystroke, cx: &mut Context<Self>) -> bool {
+        let Some(session) = &self.session else {
+            return false;
+        };
+        let Some((key, mods)) = keys::session_key(keystroke, self.options.option_as_meta) else {
+            return false;
+        };
+        let sent = session.send_key(key, mods);
+        if sent {
             self.after_input(cx);
         }
+        sent
     }
 
     // ---- commands -------------------------------------------------------

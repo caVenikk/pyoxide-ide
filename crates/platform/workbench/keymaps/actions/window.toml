@@ -5,19 +5,32 @@ id = "HideActiveWindow"
 text = "Hide Active Tool Window"
 groups = ["Main Menu > Window > Active Tool Window"]
 command = "workbench.hide-tool-window"
-contexts = ["ProjectTree", "RunToolWindow"]
+contexts = ["ProjectTree", "RunToolWindow", "Terminal"]
+
+[[action]]
+id = "ShowContent"
+text = "Show List of Tabs"
+groups = ["Main Menu > Window > Active Tool Window"]
+command = "terminal.show-tab-list"
+context = "Terminal"
 
 [[action]]
 id = "NextTab"
 text = "Select Next Tab"
 groups = ["Main Menu > Window > Editor Tabs"]
-command = "tabs.next"
+commands = [
+  { command = "tabs.next" },
+  { command = "terminal.next-tab", contexts = ["Terminal"] },
+]
 
 [[action]]
 id = "PreviousTab"
 text = "Select Previous Tab"
 groups = ["Main Menu > Window > Editor Tabs"]
-command = "tabs.previous"
+commands = [
+  { command = "tabs.previous" },
+  { command = "terminal.previous-tab", contexts = ["Terminal"] },
+]
 
 [[action]]
 id = "CloseContent"

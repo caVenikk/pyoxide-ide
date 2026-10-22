@@ -1,5 +1,5 @@
-//! Measurements of the terminal view (#157), in the development terminal
-//! (`terminal.dev-session`) until the Terminal tool window exists:
+//! Measurements of the terminal view (#157), in the Terminal tool window
+//! (`terminal.open`):
 //!
 //! - `terminal-typing`: keys typed into `cat` (which echoes them through
 //!   the terminal's line discipline, as a shell's prompt does), the time
@@ -30,9 +30,9 @@ use super::{
 };
 use crate::env;
 use crate::workbench::Workbench;
-use crate::workbench::terminal_dev::OpenDevTerminal;
+use crate::workbench::terminal_window::OpenTerminal;
 
-/// Shows the development terminal running `shell` (a command line) and
+/// Shows the Terminal tool window running `shell` (a command line) and
 /// waits for it to start.
 async fn open(
     window: WindowHandle<Workbench>,
@@ -41,12 +41,12 @@ async fn open(
     cx: &mut AsyncApp,
 ) -> Option<Entity<SessionView>> {
     let _ = window.update(cx, |w, window, cx| {
-        w.open_dev_terminal(&OpenDevTerminal { input, shell }, window, cx)
+        w.open_terminal(&OpenTerminal { input, shell }, window, cx)
     });
     let until = Instant::now() + Duration::from_secs(20);
     while Instant::now() < until {
         let view = window
-            .read_with(cx, |w, cx| w.dev_terminal_session(cx))
+            .read_with(cx, |w, cx| w.terminal_session(cx))
             .ok()
             .flatten();
         if let Some(view) = view

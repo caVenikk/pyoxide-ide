@@ -7274,6 +7274,7 @@ dependencies = [
 name = "terminal-ui"
 version = "0.0.1"
 dependencies = [
+ "editor",
  "flume",
  "gpui",
  "serde_json",
