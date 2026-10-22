@@ -17,12 +17,17 @@
 //!   Debugger) in the personal project state, imported once from the
 //!   reference's `workspace.xml`;
 //! - how the variables view shows Python values (groups, return values,
-//!   container sizes);
+//!   container sizes, View as for integers, failed evaluations), where
+//!   Jump To Source finds a value's declaration, which names of an
+//!   expression the frame does not declare and where Jump To Type Source
+//!   finds a type;
 //! - [`PythonDebugProvider`]: the product's [`debugger::DebugAdapterProvider`],
 //!   given the product's [`RunResolver`] (which interpreter a request runs
 //!   with).
 
 pub mod breakpoints;
+mod declaration;
+mod expressions;
 pub mod helper;
 pub mod launch;
 pub mod lines;

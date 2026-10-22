@@ -3,21 +3,22 @@
 //! debugpy adapter and its `launch`, the Python breakpoint types and how
 //! Python values are shown.
 
-use std::sync::RwLock;
-
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use debugger::values::ValueNode;
 use debugger::{
-    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpoint,
-    ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting, IdeaTypes, LaunchKind,
-    LineBreakpointType, StepIntoMyCode, Variable,
+    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, EvaluationError,
+    ExceptionBreakpoint, ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting,
+    ExtraValueAction, IdeaTypes, LaunchKind, LineBreakpointType, StepIntoMyCode, Variable,
 };
 use py_run::PythonRun;
 use py_run::config::{LaunchContext, PythonOptions};
 use run_config::RunConfiguration;
 
 use crate::breakpoints;
+use crate::expressions;
 use crate::helper::Helper;
 use crate::launch::{self, DebugOptions};
 use crate::settings;
@@ -255,6 +256,57 @@ impl DebugAdapterProvider for PythonDebugProvider {
 
     fn first_scope_only(&self) -> bool {
         true
+    }
+
+    fn value_declaration(&self, text: &str, line: u32, name: &str) -> Option<(u32, u32)> {
+        crate::declaration::declaration(text, line, name)
+    }
+
+    fn evaluation_error(&self, message: &str) -> EvaluationError {
+        match expressions::evaluation_error(message) {
+            Some((type_name, text)) => EvaluationError {
+                type_name: Some(type_name),
+                text,
+            },
+            None => EvaluationError {
+                type_name: None,
+                text: message.trim().to_owned(),
+            },
+        }
+    }
+
+    fn value_renderers(&self, type_name: &str) -> (&'static [&'static str], &'static str) {
+        if type_name == "int" {
+            (
+                &expressions::INTEGER_RENDERERS,
+                expressions::DEFAULT_RENDERER,
+            )
+        } else {
+            (&[], "")
+        }
+    }
+
+    fn render_value(&self, renderer: &str, value: &str) -> Option<String> {
+        expressions::render_integer(renderer, value)
+    }
+
+    fn unresolved_names(&self, text: &str, line: u32, expression: &str) -> Vec<Range<usize>> {
+        expressions::unresolved_names(text, line, expression)
+    }
+
+    fn extra_value_actions(&self) -> Vec<ExtraValueAction> {
+        vec![
+            ExtraValueAction::CustomizeDataView,
+            ExtraValueAction::ShowReferringObjects,
+        ]
+    }
+
+    fn type_source_expression(&self, expression: &str) -> Option<String> {
+        Some(expressions::type_source_expression(expression))
+    }
+
+    fn parse_type_source(&self, value: &str) -> Option<(PathBuf, u32)> {
+        expressions::parse_type_source(value)
     }
 }
 

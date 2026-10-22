@@ -21,6 +21,22 @@ use crate::provider::{
 use crate::session::{BreakpointStatus, Phase, Session, SessionId};
 use crate::storage::{self, Stored};
 
+/// How many expressions the history keeps (the reference's
+/// `debugger.max.recent.expressions`).
+pub const HISTORY: usize = 50;
+
+/// The editors whose expressions are remembered, each with a history of
+/// its own (the history ids of `XDebuggerHistoryManager`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryKind {
+    /// The evaluate field of Threads & Variables (`evaluateExpression`).
+    Evaluate,
+    /// The editor of a watch (`watch`).
+    Watch,
+    /// The editor of Set Value (`setValue`).
+    SetValue,
+}
+
 /// What changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebuggerEvent {
@@ -240,6 +256,10 @@ impl Debugger {
             debugger.save();
         }
         debugger
+    }
+
+    pub(crate) fn from_inner(inner: Arc<Inner>) -> Self {
+        Self { inner }
     }
 
     pub fn root(&self) -> &Path {
@@ -527,6 +547,105 @@ impl Debugger {
 
     pub fn edit_watch(&self, key: &str, index: usize, expression: &str) -> bool {
         self.edit_watches(|w| w.edit(key, index, expression))
+    }
+
+    /// Remove All Watches.
+    pub fn remove_all_watches(&self, key: &str) -> bool {
+        self.edit_watches(|w| w.clear(key))
+    }
+
+    /// The paused flags of a key's watches, in their order.
+    pub fn watches_paused(&self, key: &str) -> Vec<bool> {
+        self.inner.state().stored.watches.paused(key)
+    }
+
+    /// Pause Watch and Resume Watch.
+    pub fn set_watch_paused(&self, key: &str, index: usize, paused: bool) -> bool {
+        self.edit_watches(|w| w.set_paused(key, index, paused))
+    }
+
+    // ---- Threads & Variables -----------------------------------------------------
+
+    /// The expressions evaluated last, the latest first
+    /// (`XDebuggerHistoryManager`).
+    pub fn expression_history(&self) -> Vec<String> {
+        self.history(HistoryKind::Evaluate)
+    }
+
+    /// An expression was evaluated or watched: it goes first in the
+    /// history, which keeps [`HISTORY`] of them.
+    pub fn remember_expression(&self, expression: &str) {
+        self.remember(HistoryKind::Evaluate, expression);
+    }
+
+    /// The expressions typed last into an editor, the latest first.
+    pub fn history(&self, kind: HistoryKind) -> Vec<String> {
+        let state = self.inner.state();
+        let view = &state.stored.view;
+        match kind {
+            HistoryKind::Evaluate => view.history.clone(),
+            HistoryKind::Watch => view.watch_history.clone(),
+            HistoryKind::SetValue => view.set_value_history.clone(),
+        }
+    }
+
+    /// An expression was applied in an editor: it goes first in the
+    /// editor's history, which keeps [`HISTORY`] of them.
+    pub fn remember(&self, kind: HistoryKind, expression: &str) {
+        let expression = expression.trim();
+        if expression.is_empty() || expression.len() > 100_000 {
+            return;
+        }
+        {
+            let mut state = self.inner.state();
+            let view = &mut state.stored.view;
+            let history = match kind {
+                HistoryKind::Evaluate => &mut view.history,
+                HistoryKind::Watch => &mut view.watch_history,
+                HistoryKind::SetValue => &mut view.set_value_history,
+            };
+            if history.first().is_some_and(|e| e == expression) {
+                return;
+            }
+            history.retain(|e| e != expression);
+            history.insert(0, expression.to_owned());
+            history.truncate(HISTORY);
+        }
+        self.save();
+    }
+
+    /// The frames' share of the width of Threads & Variables, once it was
+    /// dragged.
+    pub fn frames_split(&self) -> Option<f32> {
+        self.inner.state().stored.view.frames_split
+    }
+
+    pub fn set_frames_split(&self, split: f32) {
+        let split = split.clamp(0.05, 0.95);
+        let changed = {
+            let mut state = self.inner.state();
+            let changed = state.stored.view.frames_split != Some(split);
+            state.stored.view.frames_split = Some(split);
+            changed
+        };
+        if changed {
+            self.save();
+        }
+    }
+
+    /// The hint below the frames was closed.
+    pub fn frames_hint_closed(&self) -> bool {
+        self.inner.state().stored.view.frames_hint_closed
+    }
+
+    pub fn close_frames_hint(&self) {
+        let changed = {
+            let mut state = self.inner.state();
+            !std::mem::replace(&mut state.stored.view.frames_hint_closed, true)
+        };
+        if changed {
+            self.save();
+        }
     }
 
     // ---- sessions --------------------------------------------------------------

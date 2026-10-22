@@ -6,6 +6,7 @@
 //! shown.
 
 use std::any::Any;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -251,6 +252,103 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// frames show their locals); otherwise every scope is a group.
     fn first_scope_only(&self) -> bool {
         false
+    }
+
+    /// Where a value of a frame is declared, for Jump To Source
+    /// (`XValue.computeSourcePosition`): the line and the column (from 1)
+    /// of the declaration of `name` in `text`, the file of a frame
+    /// suspended on `line`; `None` when the product does not find it.
+    /// Blocking (one pass over the text): called off the UI thread.
+    fn value_declaration(&self, text: &str, line: u32, name: &str) -> Option<(u32, u32)> {
+        let _ = (text, line, name);
+        None
+    }
+
+    /// How an evaluation that failed with the adapter's `message` is shown
+    /// in a watch's or the evaluate field's row: the error's type and its
+    /// text (the reference's Python rows show `{NameError}NameError("…")`).
+    /// The message is shown as it is by default.
+    fn evaluation_error(&self, message: &str) -> EvaluationError {
+        EvaluationError {
+            type_name: None,
+            text: message.to_owned(),
+        }
+    }
+
+    /// The renderers View as offers for a value of a type, in their order
+    /// (the reference's Python integers: Binary, Decimal, Hex), and the
+    /// one shown by default; empty when there is no choice.
+    fn value_renderers(&self, type_name: &str) -> (&'static [&'static str], &'static str) {
+        let _ = type_name;
+        (&[], "")
+    }
+
+    /// A value's text as a renderer of [`Self::value_renderers`] shows it;
+    /// `None` keeps the adapter's text.
+    fn render_value(&self, renderer: &str, value: &str) -> Option<String> {
+        let _ = (renderer, value);
+        None
+    }
+
+    /// The names of an expression that the frame's code does not declare
+    /// (the reference marks them as unresolved references in the
+    /// expression's editor and outlines the evaluate field in red): char
+    /// ranges in `expression`, which is evaluated in the frame suspended on
+    /// `line` of `text`. Blocking (one pass over the text): called off the
+    /// UI thread.
+    fn unresolved_names(&self, text: &str, line: u32, expression: &str) -> Vec<Range<usize>> {
+        let _ = (text, line, expression);
+        Vec::new()
+    }
+
+    /// Actions of the context menu of the product's values that Pyoxide
+    /// does not offer yet: the menu shows them disabled where the
+    /// reference shows them.
+    fn extra_value_actions(&self) -> Vec<ExtraValueAction> {
+        Vec::new()
+    }
+
+    /// An expression that evaluates, in a frame, to where the type of the
+    /// value of `expression` is declared (Jump To Type Source); `None`
+    /// when the product cannot tell.
+    fn type_source_expression(&self, expression: &str) -> Option<String> {
+        let _ = expression;
+        None
+    }
+
+    /// The file and the line (from 1) read from the value of
+    /// [`Self::type_source_expression`].
+    fn parse_type_source(&self, value: &str) -> Option<(PathBuf, u32)> {
+        let _ = value;
+        None
+    }
+}
+
+/// An action of a value's context menu that a product's values have in
+/// the reference ([`DebugAdapterProvider::extra_value_actions`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtraValueAction {
+    /// Customize Data View (the Python type renderers).
+    CustomizeDataView,
+    /// Show Referring Objects….
+    ShowReferringObjects,
+}
+
+/// A failed evaluation as a row shows it ([`DebugAdapterProvider::evaluation_error`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvaluationError {
+    /// Shown in braces before the text, as a value's type.
+    pub type_name: Option<String>,
+    pub text: String,
+}
+
+impl EvaluationError {
+    /// The row's text after `name = `.
+    pub fn shown(&self) -> String {
+        match &self.type_name {
+            Some(t) => format!("{{{t}}}{}", self.text),
+            None => self.text.clone(),
+        }
     }
 }
 

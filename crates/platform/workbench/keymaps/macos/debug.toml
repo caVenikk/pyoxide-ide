@@ -60,3 +60,40 @@ name = "DebugVariables"
 "down" = "debug.variables.down"
 "left" = "debug.variables.left"
 "right" = "debug.variables.right"
+# The watches and the values (#166): New Watch (`XDebugger.NewWatch`),
+# Remove Watch (`$Delete`), Set Value and Edit of a watch
+# (`XDebugger.SetValue`), Copy Value (`$Copy`), Evaluate Expression
+# (`EvaluateExpression`), Jump To Source (`EditSource`) and Jump To Type
+# Source (`XDebugger.JumpToTypeSource`).
+"insert" = "debug.new-watch"
+"backspace" = "debug.remove-watch"
+"delete" = "debug.remove-watch"
+"f2" = "debug.variables.set-value"
+"cmd-c" = "debug.variables.copy-value"
+"alt-f8" = "debug.evaluate-expression"
+"f4" = "debug.variables.jump-to-source"
+"shift-f4" = "debug.variables.jump-to-type-source"
+
+# Cmd+Down of Jump To Source on its own, after F4: a menu shows the binding
+# added last, Cmd+Down as the reference (a block's bindings are added in
+# the order of their keys).
+[[context]]
+name = "DebugVariables"
+[context.bindings]
+"cmd-down" = "debug.variables.jump-to-source"
+
+# The evaluate field above the variables: Enter evaluates, Shift+Cmd+Enter
+# adds the expression to the watches (`XWatchesViewImpl.createTopPanel`,
+# `XDebuggerEvaluationDialog.getAddWatchKeystroke`).
+[[context]]
+name = "DebugEvaluate > Editor"
+[context.bindings]
+"enter" = "debug.variables.evaluate"
+"cmd-shift-enter" = "debug.variables.watch-expression"
+
+# A value or a watch edited in its row: Enter applies, Escape cancels.
+[[context]]
+name = "DebugValueEditor > Editor"
+[context.bindings]
+"enter" = "debug.variables.commit-edit"
+"escape" = "debug.variables.cancel-edit"

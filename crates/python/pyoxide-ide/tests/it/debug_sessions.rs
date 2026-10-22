@@ -350,6 +350,259 @@ fn frames_and_variables_at_a_stop(cx: &mut TestAppContext) {
     });
 }
 
+impl H<'_> {
+    /// The variables view's row with these names, once its value is there.
+    fn row(&mut self, names: Value) -> Value {
+        let s = self.wait(&format!("the row {names}"), |s| {
+            s["tool_window"]["tabs"][0]["variables"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| {
+                    r["path"] == names
+                        && r["kind"] != json!("loading")
+                        && r["state"] != "pending"
+                        && r["state"] != "none"
+                })
+        });
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["path"] == names)
+            .unwrap()
+            .clone()
+    }
+}
+
+/// The evaluate field, the watches, Set Value, Copy Value and Jump To
+/// Source against debugpy (tests/scenarios/run-debug/debugger-evaluate-
+/// watches.md, debugger-variables.md): Enter's result is the first node,
+/// an error shows as one; watches are evaluated at every stop, changed
+/// values marked; a set value shows in the tree and the watches; the
+/// watches are there again in the next session of the configuration type.
+#[gpui::test]
+#[ignore = "needs Python and the debugpy helper (scripts/fetch-debugpy.py)"]
+fn evaluate_and_watches_at_a_stop(cx: &mut TestAppContext) {
+    let (_dir, root) = project_with(VARIABLES);
+    let mut h = open(cx, &root);
+    h.invoke(
+        "debug.toggle-breakpoint",
+        json!({"file": "main.py", "line": 4}),
+    );
+    h.invoke("debug.debug", json!(null));
+    h.wait_line(4);
+    h.variables();
+    // Enter in the evaluate field: the result node, first.
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "len(items)"}),
+    );
+    let result = h.row(json!(["result"]));
+    assert_eq!(result["text"], json!("result = {int} 4"), "{result:#}");
+    assert_eq!(h.variables()[0]["path"], json!(["result"]));
+    h.invoke("debug.variables.evaluate", json!({"expression": "summary"}));
+    let result = h.row(json!(["result"]));
+    assert_eq!(
+        result["text"],
+        json!("result = {dict: 2} {'count': 4, 'sum': 0}"),
+        "{result:#}"
+    );
+    h.invoke(
+        "debug.variables.expand",
+        json!({"path": ["result"], "expanded": true}),
+    );
+    let count = h.row(json!(["result", "'count'"]));
+    assert_eq!(count["text"], json!("'count' = {int} 4"), "{count:#}");
+    // An error, as pydevd shows it; the field marks the name the frame
+    // does not declare.
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "undefined_name"}),
+    );
+    let result = h.row(json!(["result"]));
+    assert_eq!(result["state"], json!("error"), "{result:#}");
+    assert_eq!(
+        result["error"],
+        json!("{NameError}NameError(\"name 'undefined_name' is not defined\")"),
+        "{result:#}"
+    );
+    let field = h.wait("the field's unresolved name", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["evaluate"]["unresolved"] == json!([[0, 14]])
+    });
+    let field = &field["tool_window"]["tabs"][0]["variables"]["evaluate"];
+    assert_eq!(field["text"], json!("undefined_name"), "{field:#}");
+    // Jump To Type Source: where the running program has the type.
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "__import__('fractions').Fraction(1, 3)"}),
+    );
+    h.row(json!(["result"]));
+    h.invoke("debug.variables.select", json!({"path": ["result"]}));
+    h.invoke("debug.variables.jump-to-type-source", json!(null));
+    let mut editor = Value::Null;
+    for _ in 0..200 {
+        h.cx.executor().advance_clock(Duration::from_millis(20));
+        editor = h.invoke("workbench.state", json!(null))["editor"].clone();
+        if editor["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("fractions.py"))
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        editor["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("fractions.py")),
+        "{editor:#}"
+    );
+    h.invoke("project.open-file", json!({"path": "main.py"}));
+    h.invoke(
+        "debug.variables.evaluate",
+        json!({"expression": "undefined_name"}),
+    );
+    h.row(json!(["result"]));
+    // The history keeps the expressions, the latest first.
+    let field = h.tab()["variables"]["evaluate"].clone();
+    assert_eq!(
+        field["history"],
+        json!([
+            "undefined_name",
+            "__import__('fractions').Fraction(1, 3)",
+            "summary",
+            "len(items)"
+        ]),
+        "{field:#}"
+    );
+    // Watches: from the field and New Watch.
+    h.invoke(
+        "debug.variables.watch-expression",
+        json!({"expression": "items[0]"}),
+    );
+    h.invoke(
+        "debug.new-watch",
+        json!({"expression": "summary['sum'] + 1"}),
+    );
+    let first = h.row(json!(["items[0]"]));
+    assert_eq!(first["text"], json!("items[0] = {int} 1"), "{first:#}");
+    // View as: an integer in hex, then as before.
+    h.invoke("debug.variables.select", json!({"path": ["items[0]"]}));
+    h.invoke("debug.variables.view-as", json!({"renderer": "Hex"}));
+    let first = h.row(json!(["items[0]"]));
+    assert_eq!(first["text"], json!("items[0] = {int} 0x1"), "{first:#}");
+    h.invoke("debug.variables.view-as", json!({"renderer": "Decimal"}));
+    let sum = h.row(json!(["summary['sum'] + 1"]));
+    assert_eq!(
+        sum["text"],
+        json!("summary['sum'] + 1 = {int} 1"),
+        "{sum:#}"
+    );
+    let rows = h.variables();
+    let order: Vec<&Value> = rows.iter().take(3).map(|r| &r["path"][0]).collect();
+    assert_eq!(
+        order,
+        [
+            &json!("result"),
+            &json!("items[0]"),
+            &json!("summary['sum'] + 1")
+        ]
+    );
+    // A step: the result goes, the watches are evaluated again, the
+    // changed one marked.
+    h.step("debug.step-over");
+    h.wait_line(3);
+    let sum = h.row(json!(["summary['sum'] + 1"]));
+    assert_eq!(
+        sum["text"],
+        json!("summary['sum'] + 1 = {int} 2"),
+        "{sum:#}"
+    );
+    assert_eq!(sum["changed"], json!(true), "{sum:#}");
+    assert!(
+        !h.variables().iter().any(|r| r["path"] == json!(["result"])),
+        "the result goes at a step"
+    );
+    // Set Value: the tree and the watches show it.
+    h.invoke("debug.variables.select", json!({"path": ["items"]}));
+    h.invoke(
+        "debug.variables.expand",
+        json!({"path": ["items"], "expanded": true}),
+    );
+    h.variables();
+    h.invoke("debug.variables.select", json!({"path": ["items", "0"]}));
+    h.invoke("debug.variables.set-value", json!({"value": "7"}));
+    h.wait("the value set", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["text"] == json!("items[0] = {int} 7"))
+    });
+    let zero = h.row(json!(["items", "0"]));
+    assert_eq!(zero["text"], json!("0 = {int} 7"), "{zero:#}");
+    // Copy Value: the whole value.
+    h.invoke("debug.variables.select", json!({"path": ["summary"]}));
+    h.invoke("debug.variables.copy-value", json!(null));
+    let mut copied = None;
+    for _ in 0..200 {
+        h.cx.executor().advance_clock(Duration::from_millis(20));
+        h.cx.run_until_parked();
+        copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+        if copied.as_deref().is_some_and(|c| c.starts_with('{')) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(copied.as_deref(), Some("{'count': 4, 'sum': 1}"));
+    // Jump To Source: the declaration of summary in describe.
+    h.invoke("debug.variables.jump-to-source", json!(null));
+    let mut editor = Value::Null;
+    for _ in 0..200 {
+        h.cx.executor().advance_clock(Duration::from_millis(20));
+        editor = h.invoke("workbench.state", json!(null))["editor"].clone();
+        if editor["caret"] == json!({"line": 1, "column": 4}) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        editor["caret"],
+        json!({"line": 1, "column": 4}),
+        "{editor:#}"
+    );
+    assert!(editor["path"].as_str().unwrap().ends_with("main.py"));
+    // Remove Watch.
+    h.invoke("debug.remove-watch", json!({"expression": "items[0]"}));
+    assert_eq!(
+        h.tab()["variables"]["watches"],
+        json!(["summary['sum'] + 1"])
+    );
+    // The next session of the configuration type has the watches.
+    h.invoke("run.stop", json!(null));
+    h.wait("the end", |s| {
+        s["tool_window"]["tabs"][0]["state"] == json!("ended")
+    });
+    h.invoke("debug.close-tab", json!({"index": 0}));
+    h.invoke("debug.debug", json!(null));
+    h.wait_line(4);
+    let sum = h.row(json!(["summary['sum'] + 1"]));
+    assert_eq!(
+        sum["text"],
+        json!("summary['sum'] + 1 = {int} 1"),
+        "{sum:#}"
+    );
+    h.invoke("run.stop", json!(null));
+    h.wait("the end", |s| {
+        s["tool_window"]["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["state"] == json!("ended"))
+    });
+}
+
 #[cfg(unix)]
 fn alive(pid: u64) -> bool {
     std::process::Command::new("kill")

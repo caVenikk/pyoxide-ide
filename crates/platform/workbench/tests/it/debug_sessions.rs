@@ -533,3 +533,270 @@ fn the_console_sends_input_to_the_program(cx: &mut TestAppContext) {
             .is_some_and(|l| l.iter().any(|l| l["text"] == json!("got:hi")))
     });
 }
+
+/// A scripted session for the watches: a stop on line 2 of main.py with
+/// the locals `a = 1` and `b = 2`, the watches `a` and `b` evaluated, Step
+/// Over to line 3 (`b = 3`), where only `b` is evaluated (`a` is paused),
+/// then `a` once more ("… Evaluate") and the evaluate field's `a`.
+fn watches_script(root: &std::path::Path) -> Vec<Value> {
+    let main = root.join("main.py");
+    let frame = |id: i64, line: u32| json!({"id": id, "name": "f", "line": line, "column": 1, "source": {"path": main}});
+    let locals = |frame: i64, reference: i64, b: &str| {
+        vec![
+            json!({"expect": "scopes", "arguments": {"frameId": frame}}),
+            json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": reference,
+                "expensive": false}]}}),
+            json!({"expect": "variables", "arguments": {"variablesReference": reference}}),
+            json!({"respond": {"variables": [
+                {"name": "a", "value": "1", "type": "int", "variablesReference": 0,
+                    "evaluateName": "a"},
+                {"name": "b", "value": b, "type": "int", "variablesReference": 0,
+                    "evaluateName": "b"}]}}),
+        ]
+    };
+    let answer = |expression: &str, value: &str| {
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": expression}}),
+            json!({"respond": {"result": value, "type": "int", "variablesReference": 0}}),
+        ]
+    };
+    let stop = |line: u32| {
+        vec![
+            json!({"event": "stopped", "body": {"reason": "step", "threadId": 1}}),
+            json!({"expect": "threads"}),
+            json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+            json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+            json!({"respond": {"stackFrames": [frame(100 + i64::from(line), line)],
+                "totalFrames": 1}}),
+        ]
+    };
+    let mut script = vec![
+        json!({"ignore": ["setBreakpoints", "setExceptionBreakpoints", "source"]}),
+        json!({"expect": "initialize"}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true,
+            "supportsTerminateRequest": true, "supportsSetVariable": true}}),
+        json!({"expect": "launch"}),
+        json!({"event": "initialized"}),
+        json!({"expect": "configurationDone"}),
+        json!({"respond": null}),
+        json!({"respond": null, "to": "launch"}),
+    ];
+    script.extend(stop(2));
+    script.extend(locals(102, 5, "2"));
+    script.extend(answer("a", "1"));
+    script.extend(answer("b", "2"));
+    script.extend(debug_answer("next"));
+    script.extend(stop(3));
+    script.extend(locals(103, 7, "3"));
+    script.extend(answer("b", "3"));
+    script.extend(answer("a", "1"));
+    script.extend(answer("a", "1"));
+    script
+}
+
+impl H<'_> {
+    fn variables(&mut self) -> Value {
+        self.tab()["variables"].clone()
+    }
+
+    fn watch_row(&mut self, name: &str) -> Value {
+        self.variables()["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == json!("watch") && r["name"] == json!(name))
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    fn press(&mut self, keys: &str) {
+        self.cx.simulate_keystrokes(self.window.into(), keys);
+        self.draw();
+    }
+
+    /// The labels of the open context menu, `-` for a line, disabled ones
+    /// in brackets, with the shortcut after a tab.
+    fn menu(&mut self) -> Vec<String> {
+        let menu = self.variables()["menu"].clone();
+        menu["levels"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| {
+                if i["separator"] == json!(true) {
+                    return "-".to_owned();
+                }
+                let label = i["label"].as_str().unwrap().to_owned();
+                let label = if i["enabled"] == json!(true) {
+                    label
+                } else {
+                    format!("({label})")
+                };
+                match i["shortcut"].as_str() {
+                    Some(s) => format!("{label}\t{s}"),
+                    None => label,
+                }
+            })
+            .collect()
+    }
+}
+
+/// debugger-evaluate-watches.md: Pause Watch keeps a watch's value and
+/// leaves it out at the next stop ("… Evaluate" evaluates it once), View as
+/// renders a value, Remove All Watches; the evaluate field's history list
+/// and its keys; the context menus of a value and of a watch.
+#[gpui::test]
+fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    push_debug_script(watches_script(&h.root));
+    h.invoke(
+        "debug.toggle-breakpoint",
+        json!({"file": "main.py", "line": 2}),
+    );
+    h.invoke("debug.debug", json!(null));
+    h.wait("the values of the stop", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
+    });
+    h.invoke("debug.new-watch", json!({"expression": "a"}));
+    h.invoke("debug.new-watch", json!({"expression": "b"}));
+    h.wait("the watches' values", |s| {
+        let rows = &s["tool_window"]["tabs"][0]["variables"]["rows"];
+        rows[0]["state"] == json!("value") && rows[1]["state"] == json!("value")
+    });
+    // The menus: a watch's and a value's, as the reference shows them.
+    h.invoke("debug.variables.select", json!({"path": ["a"]}));
+    h.invoke("debug.variables.context-menu", json!(null));
+    let watch_menu = h.menu();
+    let expected = [
+        "New Watch…",
+        "Remove Watch",
+        "Remove All Watches",
+        "Edit…",
+        "Pause Watch",
+        "-",
+        "(Inspect…)",
+        "Copy Value",
+        "(Compare Value with Clipboard)",
+        "Copy Name",
+        "-",
+        "Evaluate Expression…",
+        "Add to Watches",
+        "-",
+        "Jump To Source",
+        "Jump To Type Source",
+        "-",
+        "View as",
+    ];
+    let labels: Vec<&str> = watch_menu
+        .iter()
+        .map(|l| l.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(labels, expected, "{watch_menu:#?}");
+    h.invoke("menu.cancel", json!(null));
+    h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+    h.invoke("debug.variables.context-menu", json!(null));
+    let value_menu = h.menu();
+    let labels: Vec<&str> = value_menu
+        .iter()
+        .map(|l| l.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "New Watch…",
+            "Remove All Watches",
+            "-",
+            "(Inspect…)",
+            "Set Value…",
+            "Copy Value",
+            "(Compare Value with Clipboard)",
+            "Copy Name",
+            "-",
+            "Evaluate Expression…",
+            "Add to Watches",
+            "-",
+            "Jump To Source",
+            "Jump To Type Source",
+            "-",
+            "View as",
+        ],
+        "{value_menu:#?}"
+    );
+    h.invoke("menu.cancel", json!(null));
+    // View as: the value in hex, the renderer remembered for the row.
+    h.invoke("debug.variables.view-as", json!({"renderer": "Hex"}));
+    let b = h.variables()["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["path"] == json!(["Locals", "b"]))
+        .cloned()
+        .unwrap();
+    assert_eq!(b["text"], json!("b = {int} 0x2"), "{b:#}");
+    assert_eq!(b["renderer"], json!("Hex"), "{b:#}");
+    // Pause Watch: the value stays, the watch is paused (and stays so).
+    h.invoke("debug.pause-watch", json!({"index": 0}));
+    let a = h.watch_row("a");
+    assert_eq!(a["paused"], json!(true), "{a:#}");
+    assert_eq!(a["text"], json!("a = {int} 1"), "{a:#}");
+    assert_eq!(h.variables()["paused"], json!([true, false]));
+    h.invoke("debug.variables.select", json!({"path": ["a"]}));
+    h.invoke("debug.variables.context-menu", json!(null));
+    assert!(
+        h.menu().iter().any(|l| l == "Resume Watch"),
+        "{:#?}",
+        h.menu()
+    );
+    h.invoke("menu.cancel", json!(null));
+    // The next stop: only `b` is evaluated.
+    h.invoke("debug.step-over", json!(null));
+    h.wait("the next stop's watches", |s| {
+        let rows = &s["tool_window"]["tabs"][0]["variables"]["rows"];
+        rows[1]["text"] == json!("b = {int} 3")
+    });
+    let a = h.watch_row("a");
+    assert_eq!(a["state"], json!("paused"), "{a:#}");
+    assert_eq!(a["text"], json!("a The watch is paused"), "{a:#}");
+    // "… Evaluate": once, the watch stays paused.
+    h.invoke("debug.evaluate-paused-watch", json!({"index": 0}));
+    h.wait("the paused watch evaluated", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"][0]["state"] == json!("value")
+    });
+    assert_eq!(h.watch_row("a")["paused"], json!(true));
+    // The evaluate field: the result, then the history list and its keys.
+    h.invoke("debug.variables.evaluate", json!({"expression": "a"}));
+    h.wait("the result", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"][0]["state"] == json!("value")
+            && s["tool_window"]["tabs"][0]["variables"]["rows"][0]["kind"] == json!("result")
+    });
+    h.invoke("debug.variables.set-expression", json!({"text": ""}));
+    h.invoke("debug.variables.history", json!(null));
+    let history = h.variables()["history"].clone();
+    assert_eq!(history["of"], json!("field"), "{history:#}");
+    assert_eq!(history["items"], json!(["a"]), "{history:#}");
+    assert_eq!(history["highlighted"], json!(null), "{history:#}");
+    h.press("down");
+    assert_eq!(h.variables()["history"]["highlighted"], json!(0));
+    h.press("enter");
+    let v = h.variables();
+    assert_eq!(v["history"], json!(null), "{v:#}");
+    assert_eq!(v["evaluate"]["text"], json!("a"), "{v:#}");
+    h.invoke("debug.variables.history", json!(null));
+    h.press("escape");
+    assert_eq!(h.variables()["history"], json!(null));
+    // Remove All Watches: the watches and the result go.
+    h.invoke("debug.remove-all-watches", json!(null));
+    let v = h.variables();
+    assert_eq!(v["watches"], json!([]), "{v:#}");
+    assert!(
+        !v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == json!("watch") || r["kind"] == json!("result")),
+        "{v:#}"
+    );
+    h.invoke("debug.stop", json!(null));
+}

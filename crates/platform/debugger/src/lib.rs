@@ -35,12 +35,12 @@ pub use dap_client::{
     EvaluateContext, Evaluated, ExceptionInfo, FramePresentation, Presentation, Scope, Source,
     StackFrame, Thread, Transport, Variable,
 };
-pub use debugger::{Debugger, DebuggerEvent};
+pub use debugger::{Debugger, DebuggerEvent, HistoryKind};
 pub use idea::IdeaTypes;
 pub use provider::{
-    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, ExceptionBreakpointType,
-    ExceptionFilter, ExceptionFilterSetting, ExceptionOption, LaunchKind, LineBreakpointType,
-    StepIntoMyCode,
+    Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, EvaluationError,
+    ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting, ExceptionOption,
+    ExtraValueAction, LaunchKind, LineBreakpointType, StepIntoMyCode,
 };
 pub use session::{
     BreakpointStatus, Children, DebugError, FRAME_PAGE, Pending, Phase, STOP_TIMEOUT, Session,

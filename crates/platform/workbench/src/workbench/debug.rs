@@ -145,11 +145,11 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         match event {
-            DebuggerViewEvent::OpenAt { path, line } => {
+            DebuggerViewEvent::OpenAt { path, line, column } => {
                 window.activate_window();
                 let point = text::Point {
                     line: line.saturating_sub(1) as usize,
-                    column: 0,
+                    column: column.saturating_sub(1) as usize,
                 };
                 self.open_file_at(path.clone(), point, None, window, cx);
             }

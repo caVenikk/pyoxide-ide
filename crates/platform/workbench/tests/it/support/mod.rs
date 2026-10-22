@@ -452,6 +452,39 @@ impl debugger::DebugAdapterProvider for TestDebug {
     fn exception_classes(&self) -> Vec<String> {
         ["KeyError", "ValueError"].map(str::to_owned).to_vec()
     }
+
+    /// The first `name =` of the file.
+    fn value_declaration(&self, text: &str, _line: u32, name: &str) -> Option<(u32, u32)> {
+        let assignment = format!("{name} =");
+        text.lines().enumerate().find_map(|(i, l)| {
+            l.find(&assignment)
+                .map(|column| (i as u32 + 1, column as u32 + 1))
+        })
+    }
+
+    /// Integers in hex as well.
+    fn value_renderers(&self, type_name: &str) -> (&'static [&'static str], &'static str) {
+        if type_name == "int" {
+            (&["Decimal", "Hex"], "Decimal")
+        } else {
+            (&[], "")
+        }
+    }
+
+    fn render_value(&self, renderer: &str, value: &str) -> Option<String> {
+        let n: i64 = value.parse().ok()?;
+        (renderer == "Hex").then(|| format!("{n:#x}"))
+    }
+
+    /// `type_source(<expression>)`, answered `<path>:<line>`.
+    fn type_source_expression(&self, expression: &str) -> Option<String> {
+        Some(format!("type_source({expression})"))
+    }
+
+    fn parse_type_source(&self, value: &str) -> Option<(std::path::PathBuf, u32)> {
+        let (path, line) = value.rsplit_once(':')?;
+        Some((path.into(), line.parse().ok()?))
+    }
 }
 
 pub fn debug_hook() -> workbench::DebugHook {

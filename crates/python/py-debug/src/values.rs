@@ -97,13 +97,20 @@ fn remaining(range: &str) -> Option<usize> {
 /// One Python expression for the sizes of several values: a tuple with the
 /// length of each value that has one (`__len__` on its type, not a string
 /// or bytes), `None` for the others, as a string (debugpy shows at most
-/// about 60 items of a tuple, all of a string).
+/// about 60 items of a tuple, all of a string). The expression of a value
+/// is evaluated again, so one with a call (a watch such as `items.pop()`)
+/// gets no size rather than being called again.
 pub(crate) fn sizes_expression(expressions: &[&str]) -> Option<String> {
-    if expressions.is_empty() {
+    let calls = |e: &&str| e.contains('(');
+    if expressions.iter().all(calls) {
         return None;
     }
     let mut out = String::from("str((");
     for e in expressions {
+        if calls(e) {
+            out.push_str("None, ");
+            continue;
+        }
         out.push_str(&format!(
             "len({e}) if hasattr(type({e}), '__len__') and not isinstance({e}, (str, bytes, bytearray)) else None, "
         ));
@@ -195,6 +202,10 @@ mod tests {
         assert!(e.contains("len(d['a']) if"));
         assert!(e.ends_with(", ))"));
         assert_eq!(sizes_expression(&[]), None);
+        // A call is not made again for its size.
+        assert_eq!(sizes_expression(&["items.pop()"]), None);
+        let e = sizes_expression(&["f(x)", "items"]).unwrap();
+        assert!(e.starts_with("str((None, len(items) if"), "{e}");
         assert_eq!(
             parse_sizes("'(1000, None)'", 2),
             vec![Some("1000".into()), None]

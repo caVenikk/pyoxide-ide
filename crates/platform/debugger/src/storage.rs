@@ -23,7 +23,22 @@
 //! [[debugger.watches]]
 //! key = "python"
 //! expressions = ["x", "len(items)"]
+//! paused = ["len(items)"]
+//!
+//! [debugger.view]
+//! expression-history = ["len(items)", "x + 1"]
+//! watch-history = ["x"]
+//! set-value-history = ["5"]
+//! frames-split = 0.3
+//! frames-hint-closed = true
 //! ```
+//!
+//! `paused` lists the paused watches of a key by their expressions.
+//! `[debugger.view]` keeps what Threads & Variables remembers: the
+//! expressions typed last into the evaluate field, a watch's editor and
+//! Set Value's editor (the reference keeps them per project and editor,
+//! `XDebuggerHistoryManager`), the frames' share of the width once it was
+//! dragged and the closed hint below the frames.
 //!
 //! Blocking file I/O: callers run it off the UI thread.
 
@@ -43,7 +58,7 @@ pub const TABLE: &str = "debugger";
 pub const IMPORTED_KEY: &str = "imported-from-idea";
 
 /// What is stored.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Stored {
     pub imported: bool,
     pub muted: bool,
@@ -55,6 +70,26 @@ pub struct Stored {
     /// What new breakpoints of a type suspend when Make Default chose
     /// another policy than the type's, by type id.
     pub suspend_defaults: BTreeMap<String, SuspendPolicy>,
+    pub view: ViewState,
+}
+
+/// What Threads & Variables remembers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ViewState {
+    /// The expressions evaluated last, the latest first.
+    pub history: Vec<String>,
+    /// The expressions typed last into a watch's editor and Set Value's.
+    pub watch_history: Vec<String>,
+    pub set_value_history: Vec<String>,
+    /// The frames' share of the width, once it was dragged.
+    pub frames_split: Option<f32>,
+    pub frames_hint_closed: bool,
+}
+
+impl ViewState {
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -72,6 +107,23 @@ struct Table {
     exception_breakpoints: Option<Vec<Exception>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     watches: Vec<WatchList>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    view: Option<View>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+struct View {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    expression_history: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    watch_history: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    set_value_history: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frames_split: Option<f32>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    frames_hint_closed: bool,
 }
 
 fn yes() -> bool {
@@ -134,6 +186,8 @@ struct WatchList {
     key: String,
     #[serde(default)]
     expressions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    paused: Vec<String>,
 }
 
 /// A stored path: relative to the root with `/`, or absolute.
@@ -214,7 +268,33 @@ pub fn load(root: &Path) -> Result<Option<Stored>, StoreError> {
         });
     }
     for list in table.watches {
-        out.watches.set(&list.key, list.expressions);
+        let expressions = list.expressions;
+        let mut paused = list.paused;
+        let flags: Vec<bool> = expressions
+            .iter()
+            .map(|e| match paused.iter().position(|p| p == e) {
+                Some(i) => {
+                    paused.remove(i);
+                    true
+                }
+                None => false,
+            })
+            .collect();
+        out.watches.set(&list.key, expressions);
+        for (i, _) in flags.iter().enumerate().filter(|(_, p)| **p) {
+            out.watches.set_paused(&list.key, i, true);
+        }
+    }
+    if let Some(view) = table.view {
+        out.view = ViewState {
+            history: view.expression_history,
+            watch_history: view.watch_history,
+            set_value_history: view.set_value_history,
+            frames_split: view
+                .frames_split
+                .filter(|s| s.is_finite() && *s > 0.0 && *s < 1.0),
+            frames_hint_closed: view.frames_hint_closed,
+        };
     }
     Ok(Some(out))
 }
@@ -268,8 +348,21 @@ pub fn save(root: &Path, stored: &Stored) -> Result<bool, StoreError> {
             .map(|(key, expressions)| WatchList {
                 key: key.clone(),
                 expressions: expressions.clone(),
+                paused: expressions
+                    .iter()
+                    .zip(stored.watches.paused(key))
+                    .filter(|(_, p)| *p)
+                    .map(|(e, _)| e.clone())
+                    .collect(),
             })
             .collect(),
+        view: (!stored.view.is_empty()).then(|| View {
+            expression_history: stored.view.history.clone(),
+            watch_history: stored.view.watch_history.clone(),
+            set_value_history: stored.view.set_value_history.clone(),
+            frames_split: stored.view.frames_split,
+            frames_hint_closed: stored.view.frames_hint_closed,
+        }),
     };
     let text = toml::to_string(&table).map_err(|e| StoreError::Invalid {
         path: project::workspace::workspace_file(root),
@@ -324,9 +417,17 @@ mod tests {
         stored.breakpoints.add_exception(any);
         stored.watches.add("python", "x", None);
         stored.watches.add("python", "len(items)", None);
+        stored.watches.set_paused("python", 1, true);
         stored
             .suspend_defaults
             .insert("python-line".into(), SuspendPolicy::All);
+        stored.view = ViewState {
+            history: vec!["len(items)".into(), "x + 1".into()],
+            watch_history: vec!["x".into()],
+            set_value_history: vec!["5".into()],
+            frames_split: Some(0.25),
+            frames_hint_closed: true,
+        };
         assert!(save(root, &stored).unwrap());
 
         let text = std::fs::read_to_string(project::workspace::workspace_file(root)).unwrap();
@@ -345,10 +446,14 @@ mod tests {
         let any = &loaded.breakpoints.exception()[0];
         assert!(any.default && any.flag("notifyOnTerminate"));
         assert_eq!(loaded.watches.get("python"), ["x", "len(items)"]);
+        assert_eq!(loaded.watches.paused("python"), [false, true]);
+        assert!(text.contains("paused = [\"len(items)\"]"), "{text}");
         assert_eq!(
             loaded.suspend_defaults.get("python-line"),
             Some(&SuspendPolicy::All)
         );
+        assert!(text.contains("[debugger.view]"), "{text}");
+        assert_eq!(loaded.view, stored.view);
 
         // Everything removed: the table goes.
         assert!(save(root, &Stored::default()).unwrap());

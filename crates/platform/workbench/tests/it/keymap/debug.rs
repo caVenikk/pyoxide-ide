@@ -131,16 +131,32 @@ const VIEW_COMMANDS: [&str; 6] = [
     "debug.variables.right",
 ];
 
-/// The keys of the frames list and the variables view with a scripted
-/// adapter: a stop in `a.py` with two frames whose first frame has a
-/// Locals scope (`a = 1`, `b = [1]`).
-fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: Option<&str>) {
+/// The keys of the watches, the values and the evaluate field (#166).
+const WATCH_COMMANDS: [&str; 11] = [
+    "debug.new-watch",
+    "debug.remove-watch",
+    "debug.variables.set-value",
+    "debug.variables.copy-value",
+    "debug.evaluate-expression",
+    "debug.variables.jump-to-source",
+    "debug.variables.jump-to-type-source",
+    "debug.variables.evaluate",
+    "debug.variables.watch-expression",
+    "debug.variables.commit-edit",
+    "debug.variables.cancel-edit",
+];
+
+/// A stop in `a.py` with two frames whose first frame has a Locals scope
+/// (`a = 1`, `b = [1]`), for the views of Threads & Variables; `after`
+/// follows the values.
+fn views_script(h: &H, after: Vec<Value>) -> Vec<Value> {
     let a = h.root.join("a.py");
     let frame = |id: i64, name: &str, line: u32| json!({"id": id, "name": name, "line": line, "column": 1, "source": {"path": a}});
-    let script = vec![
+    let mut script = vec![
         json!({"ignore": ["setBreakpoints", "setExceptionBreakpoints", "source"]}),
         json!({"expect": "initialize"}),
-        json!({"respond": {"supportsConfigurationDoneRequest": true}}),
+        json!({"respond": {"supportsConfigurationDoneRequest": true,
+            "supportsSetVariable": true}}),
         json!({"expect": "launch"}),
         json!({"event": "initialized"}),
         json!({"expect": "configurationDone"}),
@@ -160,14 +176,27 @@ fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: 
             {"name": "a", "value": "1", "type": "int", "variablesReference": 0},
             {"name": "b", "value": "[1]", "type": "list", "variablesReference": 6}]}}),
     ];
+    script.extend(after);
+    script
+}
+
+/// Debugs a.py with [`views_script`] and waits for the values.
+fn start_views(h: &mut H, after: Vec<Value>) {
+    let script = views_script(h, after);
     support::push_debug_script(script);
     h.invoke("debug.debug", json!(null));
-    let variables = |s: &Value| s["tool_window"]["tabs"][0]["variables"].clone();
     h.wait_debug("the stop and its values", |s| {
-        variables(s)["rows"]
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
             .as_array()
             .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
     });
+}
+
+/// The keys of the frames list and the variables view with a scripted
+/// adapter ([`views_script`]).
+fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: Option<&str>) {
+    start_views(h, Vec::new());
+    let variables = |s: &Value| s["tool_window"]["tabs"][0]["variables"].clone();
     let view = h.workbench(|w, _| w.debugger_view().clone());
     let tool_window = h.cx.update(|cx| view.read(cx).tool_window().clone());
     let selected_frame =
@@ -235,6 +264,133 @@ fn check_debug_views(h: &mut H, command: &str, keys: &str, what: &str, context: 
                 _ => panic!("{what}: no check"),
             }
         }
+    }
+}
+
+/// The keys of the watches, the values and the evaluate field with a
+/// scripted adapter ([`views_script`]); the watches of an earlier check are
+/// removed first. The adapter answers `a + 1` with 2 (Jump To Type Source:
+/// where the type of `a` is); other evaluations fail (the script has
+/// ended).
+fn check_debug_watches(h: &mut H, command: &str, keys: &str, what: &str) {
+    let after = if command == "debug.variables.jump-to-type-source" {
+        let source = format!("{}:2", h.root.join("a.py").display());
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": "type_source(a)"}}),
+            json!({"respond": {"result": source, "type": "str", "variablesReference": 0}}),
+        ]
+    } else {
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": "a + 1"}}),
+            json!({"respond": {"result": "2", "type": "int", "variablesReference": 0}}),
+        ]
+    };
+    start_views(h, after);
+    let variables = |h: &mut H| h.debug()["tool_window"]["tabs"][0]["variables"].clone();
+    while variables(h)["watches"]
+        .as_array()
+        .is_some_and(|w| !w.is_empty())
+    {
+        h.invoke("debug.remove-watch", json!({"index": 0}));
+    }
+    let view = h.workbench(|w, _| w.debugger_view().clone());
+    let tool_window = h.cx.update(|cx| view.read(cx).tool_window().clone());
+    let tree = h.cx.update(|cx| {
+        tool_window
+            .read(cx)
+            .selected_variables()
+            .unwrap()
+            .focus_handle(cx)
+    });
+    let watches = |h: &mut H| variables(h)["watches"].clone();
+    let editing = |h: &mut H| variables(h)["editing"].clone();
+    match command {
+        "debug.new-watch" => {
+            h.focus(tree);
+            h.press(keys);
+            assert_eq!(editing(h)["target"], json!("new-watch"), "{what}");
+            h.invoke("debug.variables.cancel-edit", json!(null));
+        }
+        "debug.remove-watch" => {
+            h.invoke("debug.new-watch", json!({"expression": "a"}));
+            assert_eq!(watches(h), json!(["a"]), "{what}");
+            h.focus(tree);
+            h.press(keys);
+            assert_eq!(watches(h), json!([]), "{what}");
+        }
+        "debug.variables.set-value" => {
+            h.focus(tree);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "a"]}));
+            h.press(keys);
+            let edit = editing(h);
+            assert_eq!(edit["target"], json!("value"), "{what}: {edit}");
+            assert_eq!(edit["text"], json!("1"), "{what}: {edit}");
+            h.invoke("debug.variables.cancel-edit", json!(null));
+        }
+        "debug.variables.copy-value" => {
+            h.focus(tree);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+            h.press(keys);
+            let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+            assert_eq!(copied.as_deref(), Some("[1]"), "{what}");
+        }
+        "debug.evaluate-expression" => {
+            h.focus(tree);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+            h.press(keys);
+            assert_eq!(variables(h)["evaluate"]["text"], json!("b"), "{what}");
+        }
+        "debug.variables.jump-to-source" | "debug.variables.jump-to-type-source" => {
+            // From another file: a.py opens at the declaration (of the
+            // value, of its type).
+            h.invoke("tabs.select", json!({"index": 1}));
+            h.focus(tree);
+            h.invoke("debug.variables.select", json!({"path": ["Locals", "a"]}));
+            h.press(keys);
+            for _ in 0..200 {
+                support::tick(h.cx);
+                let path = h.state()["editor"]["path"].as_str().unwrap_or_default().to_owned();
+                if path.ends_with("a.py") {
+                    return;
+                }
+            }
+            panic!("{what}: a.py was not opened");
+        }
+        "debug.variables.evaluate" => {
+            h.invoke("debug.variables.set-expression", json!({"text": "a + 1"}));
+            h.press(keys);
+            let s = h.wait_debug("the result", |s| {
+                s["tool_window"]["tabs"][0]["variables"]["rows"][0]["state"] == json!("value")
+            });
+            let row = &s["tool_window"]["tabs"][0]["variables"]["rows"][0];
+            assert_eq!(row["text"], json!("result = {int} 2"), "{what}: {row}");
+            assert_eq!(row["path"], json!(["result"]), "{what}: {row}");
+        }
+        "debug.variables.watch-expression" => {
+            h.invoke("debug.variables.set-expression", json!({"text": "b"}));
+            h.press(keys);
+            assert_eq!(watches(h), json!(["b"]), "{what}");
+        }
+        "debug.variables.commit-edit" => {
+            h.focus(tree);
+            h.invoke("debug.new-watch", json!(null));
+            h.cx.simulate_input(h.window.into(), "b");
+            h.draw();
+            assert_eq!(editing(h)["text"], json!("b"), "{what}");
+            h.press(keys);
+            assert_eq!(watches(h), json!(["b"]), "{what}");
+            assert!(editing(h).is_null(), "{what}");
+        }
+        "debug.variables.cancel-edit" => {
+            h.focus(tree);
+            h.invoke("debug.new-watch", json!(null));
+            h.cx.simulate_input(h.window.into(), "b");
+            h.draw();
+            h.press(keys);
+            assert!(editing(h).is_null(), "{what}");
+            assert_eq!(watches(h), json!([]), "{what}");
+        }
+        _ => panic!("{what}: no check"),
     }
 }
 
@@ -341,6 +497,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
         c if VIEW_COMMANDS.contains(&c) => {
             check_debug_views(h, c, keys, &what, b.context.as_deref())
         }
+        c if WATCH_COMMANDS.contains(&c) => check_debug_watches(h, c, keys, &what),
         _ => return false,
     }
     true
