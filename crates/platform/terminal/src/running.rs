@@ -2,6 +2,9 @@
 //! it closes (the reference's `TerminalUtil.hasRunningCommands`): the shell
 //! has a child process.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// The question for one shell, detached from its [`crate::Session`] so that
 /// it can be asked on a background thread.
 #[derive(Debug, Clone)]
@@ -10,13 +13,17 @@ pub struct CommandProbe {
     /// The shell is a launcher that starts the real shell as its only
     /// child (Git for Windows' `bin\bash.exe`).
     launcher: bool,
+    /// Set when the shell exits: Windows keeps an orphan's parent id, so a
+    /// child that outlived the shell still names it.
+    exited: Arc<AtomicBool>,
 }
 
 impl CommandProbe {
-    pub(crate) fn new(pid: u32, program: &str) -> Self {
+    pub(crate) fn new(pid: u32, program: &str, exited: Arc<AtomicBool>) -> Self {
         Self {
             pid,
             launcher: cfg!(windows) && names_launcher(program),
+            exited,
         }
     }
 
@@ -24,6 +31,9 @@ impl CommandProbe {
     /// process. Reads the process table (a few milliseconds): call it off the
     /// UI thread. `false` for a shell that ended.
     pub fn has_running_commands(&self) -> bool {
+        if self.exited.load(Ordering::Acquire) {
+            return false;
+        }
         let mut shell = self.pid;
         if self.launcher
             && let [inner] = process::child_processes(shell)[..]
