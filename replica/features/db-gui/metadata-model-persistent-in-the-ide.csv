@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Metadata model kept on disk per data source, tree usable before connecting",db-gui,should,yes,no,Pro; engine row persistent-schema-cache-across-restarts; ADR 0021

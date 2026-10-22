@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Model updated after CREATE, ALTER, DROP run in a console",db-gui,should,yes,no,Pro

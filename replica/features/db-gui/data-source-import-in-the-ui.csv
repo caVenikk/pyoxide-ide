@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Import data sources from a PyCharm project in the UI,db-gui,should,yes,no,engine import exists (pyoxide-db import pycharm); this is the UI entry; feedback

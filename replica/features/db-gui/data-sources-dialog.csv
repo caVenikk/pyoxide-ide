@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Data Sources dialog: list, General tab, Test Connection",db-gui,must,yes,no,Pro; ADR 0004 profiles plus GUI options; S-DG02

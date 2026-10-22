@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Rows identified without a primary key (all comparable columns, or the physical row id)",db-gui,could,yes,no,Pro; later; affected-rows check

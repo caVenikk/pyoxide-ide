@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Statements split by a SQL lexer (dollar quotes, PL/SQL blocks, comments, strings)",db-gui,must,yes,no,"Pro; own implementation, ADR 0021"

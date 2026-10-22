@@ -42,6 +42,7 @@ with the skill loop described in [agent-workflow.md](agent-workflow.md).
       terminal, DAP client for debugpy
 - [ ] **M5 Version control**: git status, diff, blame, commit UI
 - [ ] **M6 Database GUI**: schema tree, SQL console, data grid, export
+      (architecture: ADR 0021; recon: `replica/recon.md`, area `db-gui`)
 - [ ] **M7 Integrations**: Docker, settings import (keymaps, code styles, live
       templates, colour schemes `.icls`, UI themes `.theme.json`; data files
       only), packaging for macOS/Windows/Linux, WASM plugin API. Colour scheme

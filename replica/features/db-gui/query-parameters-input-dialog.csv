@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Input dialog for query parameters, values remembered",db-gui,should,yes,no,Pro; engine row bind-parameters

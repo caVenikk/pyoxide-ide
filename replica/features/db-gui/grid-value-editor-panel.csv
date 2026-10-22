@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Value editor side panel for the current cell (text, JSON, hex)",db-gui,should,yes,no,Pro

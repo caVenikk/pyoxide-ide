@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Query history per data source with search,db-gui,should,yes,no,Pro; part of sql-console-with-history

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Edits in the grid stay local until Submit; Revert drops them,db-gui,could,yes,no,Pro; later milestone

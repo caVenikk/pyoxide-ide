@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Data source storage split: shared part in the project, personal part per user",db-gui,should,yes,no,Pro; ADR 0021

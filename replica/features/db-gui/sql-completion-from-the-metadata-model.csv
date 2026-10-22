@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"SQL completion of tables, columns, aliases and schemas from the model",db-gui,should,yes,no,Pro
