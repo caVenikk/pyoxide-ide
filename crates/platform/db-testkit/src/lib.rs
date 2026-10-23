@@ -336,7 +336,9 @@ impl Hooks {
                     ),
                     format!("CREATE INDEX {p}_lbl ON {p}_chi (UPPER(label), qty DESC)"),
                     format!("CREATE VIEW {p}_v AS SELECT id, label FROM {p}_chi"),
-                    format!("CREATE SEQUENCE {p}_seq START WITH 5 INCREMENT BY 2 CACHE 10 CYCLE"),
+                    format!(
+                        "CREATE SEQUENCE {p}_seq START WITH 5 INCREMENT BY 2 MAXVALUE 1000 CACHE 10 CYCLE"
+                    ),
                     format!(
                         "CREATE FUNCTION {p}_add(a IN NUMBER, b IN NUMBER DEFAULT 1) \
                          RETURN NUMBER DETERMINISTIC IS BEGIN RETURN a + b; END;"
