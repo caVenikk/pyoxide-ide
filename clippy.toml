@@ -5,8 +5,13 @@
 # root reaches the UI. `native_path::canonicalize` is the one way to
 # canonicalize; it gives `C:\x` and is compared in one form everywhere
 # (issues #240, #245).
+#
+# GPUI aborts the process when a deferred element is drawn inside another
+# one; `ui::deferred` is safe to nest and the only way to defer a draw.
 disallowed-methods = [
     { path = "std::fs::canonicalize", reason = "returns the verbatim `\\\\?\\` form on Windows: use `native_path::canonicalize`" },
     { path = "std::path::Path::canonicalize", reason = "returns the verbatim `\\\\?\\` form on Windows: use `native_path::canonicalize`" },
     { path = "dunce::canonicalize", reason = "use `native_path::canonicalize`, which also simplifies the network form" },
+    { path = "gpui::deferred", reason = "aborts the process when drawn inside another deferred element: use `ui::deferred`" },
+    { path = "gpui::Window::defer_draw", reason = "aborts the process when called while deferred elements are drawn: use `ui::deferred`" },
 ]

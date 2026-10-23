@@ -14,9 +14,10 @@ use code_intel::{ActionTrigger, CodeAction, CodeActionContext, Severity};
 use editor::{Editor, EditorEvent};
 use gpui::{
     AnyElement, App, Context, Entity, EntityId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Styled, Task, WeakEntity, Window, anchored, deferred, div, point, px,
+    ParentElement, Styled, Task, WeakEntity, Window, anchored, div, point, px,
 };
 use serde_json::{Value as Json, json};
+use ui::deferred;
 use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName};
 

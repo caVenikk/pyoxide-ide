@@ -36,11 +36,12 @@ use editor::{DiagnosticMark, Editor, EditorEvent, MarkMessage, MarkSeverity};
 use gpui::{
     AnyElement, App, Bounds, ClipboardItem, Context, Entity, Focusable, InteractiveElement,
     IntoElement, KeystrokeEvent, MouseButton, ParentElement, Pixels, Point, Styled, Subscription,
-    Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    Window, anchored, canvas, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt;

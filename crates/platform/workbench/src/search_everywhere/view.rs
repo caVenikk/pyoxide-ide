@@ -10,12 +10,12 @@ use std::ops::Range;
 use file_index::{qualifier_matcher, sanitized_pattern};
 use gpui::{
     AnyElement, ClickEvent, Context, FontWeight, HighlightStyle, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, Render, SharedString, StyledText, Window, deferred, div, px,
-    uniform_list,
+    MouseDownEvent, ParentElement, Render, SharedString, StyledText, Window, div, px, uniform_list,
 };
 use name_match::{Matcher, MatchingMode};
 use themes::{Metric, UiRole};
 use ui::components::{SMALL_BUTTON, Tooltip, checkbox, small_icon_button, spinner, toggle_button};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt;

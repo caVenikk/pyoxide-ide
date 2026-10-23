@@ -18,13 +18,14 @@
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, Context, Corner, DismissEvent, Entity, FocusHandle,
     Focusable, Hsla, IntoElement, MouseButton, Render, SharedString, Subscription, Window,
-    anchored, deferred, div, point, prelude::*, px,
+    anchored, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use settings_ui::commands::SwitchTheme;
 use settings_ui::theme_switch;
 use themes::UiRole;
 use ui::components::Tooltip;
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;

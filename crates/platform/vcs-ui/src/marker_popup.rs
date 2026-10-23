@@ -26,13 +26,13 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Action, AnyElement, App, AppContext as _, Context, Div, Entity, EventEmitter, Focusable as _,
     Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, Rgba,
-    SharedString, StatefulInteractiveElement, Styled, TextRun, Window, anchored, deferred, div,
-    point, px,
+    SharedString, StatefulInteractiveElement, Styled, TextRun, Window, anchored, div, point, px,
 };
 use imara_diff::{Algorithm, Diff, InternedInput, Interner};
 use text::{AppliedEdit, Buffer};
 use themes::UiRole;
 use ui::components::{SMALL_BUTTON, Tooltip, input_frame, small_icon_button};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 use vcs::{Range, split_lines};

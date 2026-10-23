@@ -22,12 +22,12 @@ use std::path::{Path, PathBuf};
 
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, Focusable as _, IntoElement,
-    ParentElement as _, Pixels, Point, Styled as _, Subscription, Window, anchored, deferred, div,
-    point, px,
+    ParentElement as _, Pixels, Point, Styled as _, Subscription, Window, anchored, div, point, px,
 };
 use project::fs_ops::{self, FsChange, NewKind};
 use project::{Entry, EntryKind, FileTree, NodeId};
 use themes::Metric;
+use ui::deferred;
 use ui::icons::IconName;
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;

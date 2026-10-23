@@ -8,9 +8,10 @@
 
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, PathBuilder,
-    Styled as _, Subscription, anchored, canvas, deferred, div, point, px,
+    Styled as _, Subscription, anchored, canvas, div, point, px,
 };
 use themes::UiRole;
+use ui::deferred;
 use ui::theme::ThemeExt as _;
 
 use crate::Editor;

@@ -24,12 +24,13 @@ use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render,
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, anchored,
-    canvas, deferred, div, point, px,
+    canvas, div, point, px,
 };
 use serde_json::{Value as Json, json};
 use text::{Buffer, CaretPlacement, EditKind, Selection, SelectionSet};
 use themes::UiRole;
 use ui::components::{Tooltip, icon_button};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt as _;

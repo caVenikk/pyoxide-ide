@@ -9,10 +9,11 @@ use gpui::{
     AnyElement, App, Bounds, ClickEvent, Context, Corner, Entity, FocusHandle, Focusable as _,
     FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
     Pixels, Point, Render, SharedString, StatefulInteractiveElement as _, Styled, Window, anchored,
-    canvas, deferred, div, point, prelude::*, px, uniform_list,
+    canvas, div, point, prelude::*, px, uniform_list,
 };
 use themes::{Metric, UiRole};
 use ui::components::{Tooltip, checkbox, icon_button, popup_shadow};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;

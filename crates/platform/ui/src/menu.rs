@@ -41,12 +41,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::deferred;
 use gpui::{
     Action, AnyElement, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, Render,
     ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Task,
-    Window, anchored, deferred, div, point, prelude::*, px,
+    Window, anchored, div, point, prelude::*, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};

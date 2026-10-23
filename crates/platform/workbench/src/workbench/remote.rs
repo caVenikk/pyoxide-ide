@@ -21,9 +21,10 @@ use git::{FetchResult, GitRepo, RemoteFetch, UpdateResult};
 use gpui::{
     AnyElement, App, AppContext as _, Context, DismissEvent, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, Subscription, Window,
-    anchored, deferred, div, point, px,
+    anchored, div, point, px,
 };
 use serde_json::{Value as Json, json};
+use ui::deferred;
 use ui::icons::IconName;
 use ui::menu::{ContextMenu, PopupOptions};
 use ui::notification::{Notification, NotificationKind};

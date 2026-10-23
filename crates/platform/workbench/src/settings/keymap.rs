@@ -21,14 +21,15 @@ use editor::{Editor, EditorEvent};
 use gpui::{
     AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, FocusHandle,
     Focusable as _, FontWeight, IntoElement, Keystroke, Modifiers, Pixels, Render, SharedString,
-    Subscription, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred, div,
-    point, prelude::*, px, uniform_list,
+    Subscription, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, div, point,
+    prelude::*, px, uniform_list,
 };
 use serde_json::{Value as Json, json};
 use settings_ui::commands::EditField;
 use settings_ui::{PageContext, SettingsPage};
 use themes::UiRole;
 use ui::components::{Tooltip, input_frame, popup_shadow, small_icon_button};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;

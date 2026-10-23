@@ -22,9 +22,10 @@ use gpui::{
     Action, AnyElement, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, MouseButton,
     ParentElement, PathPromptOptions, Pixels, Point, StatefulInteractiveElement, Styled,
-    Subscription, Task, Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    Subscription, Task, Window, anchored, canvas, div, point, prelude::*, px,
 };
 use ui::components::Tooltip;
+use ui::deferred;
 
 use crate::main_toolbar::{Cut, Measure, Widget};
 use serde_json::{Value as Json, json};

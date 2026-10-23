@@ -13,13 +13,14 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Entity, IntoElement, MouseButton,
-    Pixels, Subscription, Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    Pixels, Subscription, Window, anchored, canvas, div, point, prelude::*, px,
 };
 use settings_ui::commands::{OpenSettings, QuickSwitch, SwitchTheme};
 use settings_ui::pages::{appearance, font, general};
 use settings_ui::theme_switch;
 use settings_ui::{OpenRequest, PageContext, PageSpec, Scope};
 use ui::components::{Tooltip, icon_button};
+use ui::deferred;
 use ui::icons::IconName;
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::notification::Notification;

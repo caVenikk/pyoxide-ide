@@ -12,12 +12,13 @@ use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, anchored, canvas, deferred, div, point, prelude::FluentBuilder, px,
+    WeakEntity, Window, anchored, canvas, div, point, prelude::FluentBuilder, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
 use ui::components::Tooltip;
+use ui::deferred;
 use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName, ThemeExt};
 
