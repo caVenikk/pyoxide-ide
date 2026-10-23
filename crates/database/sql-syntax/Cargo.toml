@@ -1,0 +1,9 @@
+[package]
+name = "sql-syntax"
+description = "SQL text layer of Pyoxide IDE: dialect tables, a lossless lexer with a hole token, statement splitting, classification, parameter scan and the explain wrapper. No toolkit, no database dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
