@@ -9,5 +9,6 @@ mod bench;
 mod conformance;
 mod cursor;
 mod introspection;
+mod load;
 mod session;
 mod types;

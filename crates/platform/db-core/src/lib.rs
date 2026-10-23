@@ -17,6 +17,7 @@ pub mod oracle_net;
 mod params;
 mod render;
 pub mod schema;
+mod source;
 pub mod timeout;
 pub mod transaction;
 mod value;
@@ -29,4 +30,5 @@ pub use connection::{
 pub use error::{Error, ErrorKind, Result};
 pub use params::{Backend, ConnectParams, Dialect, Secret, TlsMode, TlsParams, TxMode, opt};
 pub use render::render_table;
+pub use source::{ConnectionSource, DataSourceId, Purpose};
 pub use value::{Value, ValueKind};

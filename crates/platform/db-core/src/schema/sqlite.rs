@@ -1,10 +1,14 @@
 //! SQLite introspection over sqlite_schema and the table-valued PRAGMA functions, written from the public SQLite documentation.
 
+mod load;
+
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, ObjectInfo, ObjectKind,
-    SchemaInfo, fetch_all, opt_text, text, wants,
+    ColumnInfo, ConstraintInfo, ConstraintKind, GeneratedColumn, IndexInfo, Introspector, Level,
+    ObjectInfo, ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
 };
 use crate::{Connection, Error, Result};
 
@@ -37,7 +41,7 @@ const INDEX_XINFO: &str = "\
 SELECT seqno, cid, name FROM pragma_index_xinfo(?1, ?2) WHERE key = 1 ORDER BY seqno";
 
 const FOREIGN_KEYS: &str = "\
-SELECT id, seq, \"table\", \"from\", \"to\", on_delete \
+SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete \
 FROM pragma_foreign_key_list(?1, ?2) ORDER BY id, seq";
 
 /// `SQLite` quotes identifiers with double quotes, doubling embedded quotes.
@@ -144,6 +148,7 @@ impl Introspector for SqliteIntrospector<'_> {
                     is_current: name == MAIN,
                     is_system: false,
                     name,
+                    ..SchemaInfo::default()
                 }
             })
             .collect();
@@ -154,6 +159,7 @@ impl Introspector for SqliteIntrospector<'_> {
                     name: MAIN.to_owned(),
                     is_system: false,
                     is_current: true,
+                    ..SchemaInfo::default()
                 },
             );
         }
@@ -190,7 +196,7 @@ impl Introspector for SqliteIntrospector<'_> {
                 name: text(&row[1]),
                 kind,
                 parent: has_parent.then(|| text(&row[2])),
-                comment: None,
+                ..ObjectInfo::default()
             });
         }
         Ok(out)
@@ -212,22 +218,7 @@ impl Introspector for SqliteIntrospector<'_> {
                 rowid_alias = Some(only.cid);
             }
         }
-        Ok(raw
-            .iter()
-            .filter(|c| c.hidden != 1)
-            .map(|c| {
-                let alias = rowid_alias == Some(c.cid);
-                ColumnInfo {
-                    name: c.name.clone(),
-                    position: u32::try_from(c.cid + 1).unwrap_or(0),
-                    data_type: c.declared.clone(),
-                    nullable: !c.not_null && !alias,
-                    default: c.default.clone(),
-                    auto_increment: alias,
-                    comment: None,
-                }
-            })
-            .collect())
+        Ok(column_infos(&raw, rowid_alias, None))
     }
 
     async fn indexes(&self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
@@ -246,6 +237,7 @@ impl Introspector for SqliteIntrospector<'_> {
                 columns: self.index_columns(&schema, &name).await?,
                 method: None,
                 name,
+                ..IndexInfo::default()
             });
         }
         Ok(out)
@@ -259,31 +251,6 @@ impl Introspector for SqliteIntrospector<'_> {
             .await?
             .map(|s| sql_text::parse_table(&s))
             .unwrap_or_default();
-        let named = |kind: ConstraintKind, columns: &[String]| -> Option<String> {
-            parsed
-                .constraints
-                .iter()
-                .find(|c| c.kind == kind && same_names(&c.columns, columns))
-                .and_then(|c| c.name.clone())
-        };
-        let mut out = Vec::new();
-
-        let mut pk: Vec<&RawColumn> = raw.iter().filter(|c| c.pk > 0).collect();
-        pk.sort_by_key(|c| c.pk);
-        if !pk.is_empty() {
-            let columns: Vec<String> = pk.iter().map(|c| c.name.clone()).collect();
-            out.push(ConstraintInfo {
-                name: named(ConstraintKind::PrimaryKey, &columns)
-                    .unwrap_or_else(|| format!("{table}_pk")),
-                kind: ConstraintKind::PrimaryKey,
-                columns,
-                ref_schema: None,
-                ref_table: None,
-                ref_columns: Vec::new(),
-                on_delete: None,
-                check: None,
-            });
-        }
 
         let list = fetch_all(
             self.conn,
@@ -291,22 +258,14 @@ impl Introspector for SqliteIntrospector<'_> {
             &[table.into(), schema.as_str().into()],
         )
         .await?;
+        let mut unique = Vec::new();
         for row in &list {
             if text(&row[2]) != "u" {
                 continue;
             }
             let index = text(&row[0]);
             let columns = self.index_columns(&schema, &index).await?;
-            out.push(ConstraintInfo {
-                name: named(ConstraintKind::Unique, &columns).unwrap_or(index),
-                kind: ConstraintKind::Unique,
-                columns,
-                ref_schema: None,
-                ref_table: None,
-                ref_columns: Vec::new(),
-                on_delete: None,
-                check: None,
-            });
+            unique.push((index, columns));
         }
 
         let fks = fetch_all(
@@ -315,79 +274,37 @@ impl Introspector for SqliteIntrospector<'_> {
             &[table.into(), schema.as_str().into()],
         )
         .await?;
-        let mut groups: Vec<ForeignKey> = Vec::new();
-        for row in &fks {
-            let id = row[0].as_i64().unwrap_or(0);
-            if groups.last().is_none_or(|g| g.id != id) {
-                groups.push(ForeignKey {
-                    id,
-                    table: text(&row[2]),
-                    from: Vec::new(),
-                    to: Vec::new(),
-                    on_delete: opt_text(&row[5]),
-                });
+        let groups = foreign_key_groups(fks.iter().map(|row| {
+            (
+                row[0].as_i64().unwrap_or(0),
+                text(&row[2]),
+                text(&row[3]),
+                opt_text(&row[4]),
+                opt_text(&row[5]),
+                opt_text(&row[6]),
+            )
+        }));
+        // `REFERENCES parent` without columns means parent's primary key.
+        let mut parent_pks = HashMap::new();
+        for group in &groups {
+            if group.to.iter().all(Option::is_some) || parent_pks.contains_key(&group.table) {
+                continue;
             }
-            let group = groups.last_mut().expect("a group was just pushed");
-            group.from.push(text(&row[3]));
-            group.to.push(opt_text(&row[4]));
+            let parent = self.raw_columns(&schema, &group.table).await?;
+            parent_pks.insert(group.table.clone(), primary_key(&parent));
         }
-        // SQLite numbers foreign keys in reverse order of declaration.
-        groups.sort_by_key(|g| std::cmp::Reverse(g.id));
-        for group in groups {
-            let ref_columns = if group.to.iter().all(Option::is_some) {
-                group.to.iter().flatten().cloned().collect()
-            } else {
-                // `REFERENCES parent` without columns means parent's primary key.
-                let mut parent = self.raw_columns(&schema, &group.table).await?;
-                parent.retain(|c| c.pk > 0);
-                parent.sort_by_key(|c| c.pk);
-                parent.into_iter().map(|c| c.name).collect()
-            };
-            let name = parsed
-                .constraints
-                .iter()
-                .find(|c| {
-                    c.kind == ConstraintKind::ForeignKey
-                        && same_names(&c.columns, &group.from)
-                        && c.ref_table
-                            .as_deref()
-                            .is_some_and(|t| t.eq_ignore_ascii_case(&group.table))
-                })
-                .and_then(|c| c.name.clone())
-                .unwrap_or_else(|| format!("{table}_fk{}", group.id));
-            out.push(ConstraintInfo {
-                name,
-                kind: ConstraintKind::ForeignKey,
-                columns: group.from,
-                ref_schema: Some(schema.clone()),
-                ref_table: Some(group.table),
-                ref_columns,
-                on_delete: group.on_delete,
-                check: None,
-            });
-        }
-
-        let checks = parsed
-            .constraints
-            .iter()
-            .filter(|c| c.kind == ConstraintKind::Check);
-        for (n, c) in checks.enumerate() {
-            let position = n + 1;
-            out.push(ConstraintInfo {
-                name: c
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| format!("{table}_check{position}")),
-                kind: ConstraintKind::Check,
-                columns: Vec::new(),
-                ref_schema: None,
-                ref_table: None,
-                ref_columns: Vec::new(),
-                on_delete: None,
-                check: c.check.clone(),
-            });
-        }
-        Ok(out)
+        Ok(build_constraints(
+            &TableFacts {
+                schema: &schema,
+                table,
+                raw: &raw,
+                parsed: &parsed,
+                unique: &unique,
+                groups: &groups,
+                parent_pks: &parent_pks,
+            },
+            false,
+        ))
     }
 
     async fn source(&self, schema: &str, name: &str, kind: ObjectKind) -> Result<Option<String>> {
@@ -401,6 +318,10 @@ impl Introspector for SqliteIntrospector<'_> {
         let schema = self.schema_name(schema).await?;
         self.object_sql(&schema, stored, name).await
     }
+
+    async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
+        load::load(self, scope, level).await
+    }
 }
 
 /// A foreign key as `pragma_foreign_key_list` reports it, one row per column.
@@ -410,6 +331,193 @@ struct ForeignKey {
     from: Vec<String>,
     to: Vec<Option<String>>,
     on_delete: Option<String>,
+    on_update: Option<String>,
+}
+
+/// Group the rows of `pragma_foreign_key_list` (id, referenced table, from,
+/// to, on_update, on_delete; ordered by id and column) into keys.
+fn foreign_key_groups(
+    rows: impl Iterator<
+        Item = (
+            i64,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+    >,
+) -> Vec<ForeignKey> {
+    let mut groups: Vec<ForeignKey> = Vec::new();
+    for (id, table, from, to, on_update, on_delete) in rows {
+        if groups.last().is_none_or(|g| g.id != id) {
+            groups.push(ForeignKey {
+                id,
+                table,
+                from: Vec::new(),
+                to: Vec::new(),
+                on_delete,
+                on_update,
+            });
+        }
+        let group = groups.last_mut().expect("a group was just pushed");
+        group.from.push(from);
+        group.to.push(to);
+    }
+    groups
+}
+
+/// The primary key columns of a table, in key order.
+fn primary_key(raw: &[RawColumn]) -> Vec<String> {
+    let mut pk: Vec<&RawColumn> = raw.iter().filter(|c| c.pk > 0).collect();
+    pk.sort_by_key(|c| c.pk);
+    pk.into_iter().map(|c| c.name.clone()).collect()
+}
+
+/// What SQLite tells about one table, gathered by the per-object reads and
+/// by the bulk load alike.
+struct TableFacts<'a> {
+    schema: &'a str,
+    table: &'a str,
+    raw: &'a [RawColumn],
+    parsed: &'a sql_text::Table,
+    /// Indexes that back a `UNIQUE` constraint: name and key columns.
+    unique: &'a [(String, Vec<String>)],
+    groups: &'a [ForeignKey],
+    parent_pks: &'a HashMap<String, Vec<String>>,
+}
+
+/// Constraints in the order the per-object read returns them: primary key,
+/// unique, foreign keys, checks. SQLite does not store constraint names, so
+/// they come from the `CREATE TABLE` text, or are made up (`<table>_pk`).
+/// `extended` adds the optional fields.
+fn build_constraints(f: &TableFacts<'_>, extended: bool) -> Vec<ConstraintInfo> {
+    let TableFacts {
+        schema,
+        table,
+        raw,
+        parsed,
+        ..
+    } = *f;
+    let named = |kind: ConstraintKind, columns: &[String]| -> Option<String> {
+        parsed
+            .constraints
+            .iter()
+            .find(|c| c.kind == kind && same_names(&c.columns, columns))
+            .and_then(|c| c.name.clone())
+    };
+    let mut out = Vec::new();
+
+    let columns = primary_key(raw);
+    if !columns.is_empty() {
+        out.push(ConstraintInfo {
+            name: named(ConstraintKind::PrimaryKey, &columns)
+                .unwrap_or_else(|| format!("{table}_pk")),
+            kind: ConstraintKind::PrimaryKey,
+            columns,
+            ..ConstraintInfo::default()
+        });
+    }
+
+    for (index, columns) in f.unique {
+        out.push(ConstraintInfo {
+            name: named(ConstraintKind::Unique, columns).unwrap_or_else(|| index.clone()),
+            kind: ConstraintKind::Unique,
+            columns: columns.clone(),
+            ..ConstraintInfo::default()
+        });
+    }
+
+    // SQLite numbers foreign keys in reverse order of declaration.
+    let mut groups: Vec<&ForeignKey> = f.groups.iter().collect();
+    groups.sort_by_key(|g| std::cmp::Reverse(g.id));
+    for group in groups {
+        let ref_columns = if group.to.iter().all(Option::is_some) {
+            group.to.iter().flatten().cloned().collect()
+        } else {
+            f.parent_pks.get(&group.table).cloned().unwrap_or_default()
+        };
+        let name = parsed
+            .constraints
+            .iter()
+            .find(|c| {
+                c.kind == ConstraintKind::ForeignKey
+                    && same_names(&c.columns, &group.from)
+                    && c.ref_table
+                        .as_deref()
+                        .is_some_and(|t| t.eq_ignore_ascii_case(&group.table))
+            })
+            .and_then(|c| c.name.clone())
+            .unwrap_or_else(|| format!("{table}_fk{}", group.id));
+        out.push(ConstraintInfo {
+            name,
+            kind: ConstraintKind::ForeignKey,
+            columns: group.from.clone(),
+            ref_schema: Some(schema.to_owned()),
+            ref_table: Some(group.table.clone()),
+            ref_columns,
+            on_delete: group.on_delete.clone(),
+            on_update: if extended {
+                group.on_update.clone()
+            } else {
+                None
+            },
+            ..ConstraintInfo::default()
+        });
+    }
+
+    let checks = parsed
+        .constraints
+        .iter()
+        .filter(|c| c.kind == ConstraintKind::Check);
+    for (n, c) in checks.enumerate() {
+        let position = n + 1;
+        out.push(ConstraintInfo {
+            name: c
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("{table}_check{position}")),
+            kind: ConstraintKind::Check,
+            check: c.check.clone(),
+            ..ConstraintInfo::default()
+        });
+    }
+    out
+}
+
+/// Columns from the rows of `pragma_table_xinfo`; hidden columns of virtual
+/// tables are left out. `generated` (the generated columns of the `CREATE
+/// TABLE` text) adds the optional fields.
+fn column_infos(
+    raw: &[RawColumn],
+    rowid_alias: Option<i64>,
+    generated: Option<&[sql_text::Generated]>,
+) -> Vec<ColumnInfo> {
+    raw.iter()
+        .filter(|c| c.hidden != 1)
+        .map(|c| {
+            let alias = rowid_alias == Some(c.cid);
+            ColumnInfo {
+                name: c.name.clone(),
+                position: u32::try_from(c.cid + 1).unwrap_or(0),
+                data_type: c.declared.clone(),
+                nullable: !c.not_null && !alias,
+                default: c.default.clone(),
+                auto_increment: alias,
+                generated: generated.and_then(|all| {
+                    // 2: generated and virtual, 3: generated and stored.
+                    (c.hidden >= 2).then(|| GeneratedColumn {
+                        expression: all
+                            .iter()
+                            .find(|g| g.column.eq_ignore_ascii_case(&c.name))
+                            .map(|g| g.expression.clone()),
+                        stored: c.hidden == 3,
+                    })
+                }),
+                ..ColumnInfo::default()
+            }
+        })
+        .collect()
 }
 
 fn same_names(a: &[String], b: &[String]) -> bool {
@@ -611,9 +719,18 @@ mod sql_text {
         pub check: Option<String>,
     }
 
+    /// A generated column as the `CREATE TABLE` text spells it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(super) struct Generated {
+        pub column: String,
+        pub expression: String,
+        pub stored: bool,
+    }
+
     #[derive(Debug, Default)]
     pub(super) struct Table {
         pub constraints: Vec<Constraint>,
+        pub generated: Vec<Generated>,
         pub without_rowid: bool,
     }
 
@@ -643,7 +760,7 @@ mod sql_text {
             if table_level {
                 table_constraint(sql, item, &mut table.constraints);
             } else {
-                column_constraints(sql, item, &mut table.constraints);
+                column_constraints(sql, item, &mut table.constraints, &mut table.generated);
             }
         }
         let options = &tokens[close + 1..];
@@ -727,7 +844,12 @@ mod sql_text {
     }
 
     /// Column-level `PRIMARY KEY`, `UNIQUE`, `CHECK` and `REFERENCES`.
-    fn column_constraints(sql: &str, item: &[Token], out: &mut Vec<Constraint>) {
+    fn column_constraints(
+        sql: &str,
+        item: &[Token],
+        out: &mut Vec<Constraint>,
+        generated: &mut Vec<Generated>,
+    ) {
         let Some(column) = item[0].name().map(str::to_owned) else {
             return;
         };
@@ -735,6 +857,21 @@ mod sql_text {
         let mut i = 1;
         while i < item.len() {
             let t = &item[i];
+            if t.is_word("AS")
+                && item.get(i + 1).is_some_and(|n| n.is_punct('('))
+                && let Some(close) = closing(item, i + 1)
+            {
+                // `[GENERATED ALWAYS] AS (expr) [STORED | VIRTUAL]`.
+                let stored = item.get(close + 1).is_some_and(|n| n.is_word("STORED"));
+                generated.push(Generated {
+                    column: column.clone(),
+                    expression: sql[item[i + 1].end..item[close].start].trim().to_owned(),
+                    stored,
+                });
+                pending = None;
+                i = close + 1;
+                continue;
+            }
             if t.is_punct('(') {
                 // Type sizes, DEFAULT (...), AS (...): nothing to read inside.
                 i = closing(item, i).map_or(item.len(), |c| c + 1);
@@ -779,6 +916,92 @@ mod sql_text {
             }
             i += 1;
         }
+    }
+
+    /// `CREATE VIRTUAL TABLE ...`.
+    pub(super) fn is_virtual_table(sql: &str) -> bool {
+        let tokens = tokenize(sql);
+        tokens.first().is_some_and(|t| t.is_word("CREATE"))
+            && tokens.get(1).is_some_and(|t| t.is_word("VIRTUAL"))
+    }
+
+    /// The condition of a partial index: the text after the `WHERE` that
+    /// follows the column list of `CREATE INDEX`.
+    pub(super) fn index_predicate(sql: &str) -> Option<String> {
+        let tokens = tokenize(sql);
+        let on = tokens.iter().position(|t| t.is_word("ON"))?;
+        let open = on + tokens[on..].iter().position(|t| t.is_punct('('))?;
+        let close = closing(&tokens, open)?;
+        let at = close
+            + 1
+            + tokens[close + 1..]
+                .iter()
+                .position(|t| t.is_word("WHERE"))?;
+        let text = sql[tokens[at].end..].trim().trim_end_matches(';').trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    }
+
+    /// What `CREATE TRIGGER` says about when the trigger fires.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    pub(super) struct Trigger {
+        pub timing: Option<String>,
+        pub events: Vec<String>,
+        pub condition: Option<String>,
+    }
+
+    /// `CREATE [TEMP] TRIGGER [IF NOT EXISTS] name [BEFORE | AFTER | INSTEAD
+    /// OF] DELETE | INSERT | UPDATE [OF columns] ON table [FOR EACH ROW]
+    /// [WHEN expr] BEGIN ... END`. A trigger without a time is a `BEFORE`
+    /// trigger.
+    pub(super) fn parse_trigger(sql: &str) -> Trigger {
+        let tokens = tokenize(sql);
+        let mut out = Trigger::default();
+        let Some(at) = tokens.iter().position(|t| t.is_word("TRIGGER")) else {
+            return out;
+        };
+        let mut i = at + 1;
+        if tokens.get(i).is_some_and(|t| t.is_word("IF")) {
+            i += 3; // IF NOT EXISTS
+        }
+        // Skip the (possibly schema-qualified) name.
+        i += 1;
+        if tokens.get(i).is_some_and(|t| t.is_punct('.')) {
+            i += 2;
+        }
+        let mut timing = "BEFORE";
+        match tokens.get(i) {
+            Some(t) if t.is_word("BEFORE") => i += 1,
+            Some(t) if t.is_word("AFTER") => {
+                timing = "AFTER";
+                i += 1;
+            }
+            Some(t) if t.is_word("INSTEAD") => {
+                timing = "INSTEAD OF";
+                i += 2;
+            }
+            _ => {}
+        }
+        out.timing = Some(timing.to_owned());
+        let i = i.min(tokens.len());
+        if let Some(t) = tokens.get(i)
+            && let Kind::Word(w) = &t.kind
+        {
+            out.events.push(w.to_ascii_uppercase());
+        }
+        // A `WHEN` in the body (`CASE WHEN`) is not the trigger's condition.
+        let begin = tokens[i..]
+            .iter()
+            .position(|t| t.is_word("BEGIN"))
+            .map_or(tokens.len(), |p| i + p);
+        if let Some(when) = tokens[i..begin].iter().position(|t| t.is_word("WHEN")) {
+            let from = tokens[i + when].end;
+            let to = tokens.get(begin).map_or(sql.len(), |t| t.start);
+            let text = sql[from..to].trim();
+            if !text.is_empty() {
+                out.condition = Some(text.to_owned());
+            }
+        }
+        out
     }
 
     /// The comma-separated items between the parentheses of `CREATE INDEX`,
