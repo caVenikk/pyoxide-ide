@@ -97,6 +97,53 @@ pub struct LexRules {
     pub hash_in_words: bool,
 }
 
+/// Grammar flags of a dialect: one parser serves every dialect and a flag
+/// turns a construct on. `Generic` has the union of the constructs and is
+/// lenient where the engines differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Grammar {
+    /// `LATERAL` before a subquery or a function in `FROM`.
+    pub lateral: bool,
+    /// `SELECT DISTINCT ON (..)`.
+    pub distinct_on: bool,
+    /// `ILIKE`.
+    pub ilike: bool,
+    /// `LIMIT n [OFFSET m]`, `LIMIT m, n`.
+    pub limit: bool,
+    /// `OFFSET n ROWS FETCH FIRST m ROWS ONLY`.
+    pub fetch_first: bool,
+    /// `START WITH .. CONNECT BY [NOCYCLE] ..`, `PRIOR`, `CONNECT_BY_ROOT`.
+    pub connect_by: bool,
+    /// The outer join mark `(+)`.
+    pub outer_join_mark: bool,
+    /// `PIVOT` and `UNPIVOT` after a table.
+    pub pivot: bool,
+    /// `MINUS` as a set operation.
+    pub minus: bool,
+    /// `expr::type`.
+    pub double_colon_cast: bool,
+    /// `ARRAY[..]`, `ARRAY(subquery)` and subscripts `a[1]`, `a[1:2]`.
+    pub arrays: bool,
+    /// `GLOB`, `REGEXP` and `MATCH` operators.
+    pub sqlite_operators: bool,
+    /// `ISNULL`, `NOTNULL` and `NOT NULL` after an expression.
+    pub null_postfix: bool,
+    /// `SELECT UNIQUE`.
+    pub select_unique: bool,
+    /// A join other than `CROSS` and `NATURAL` needs `ON` or `USING`.
+    pub join_requires_condition: bool,
+    /// `SELECT` with no select list (`SELECT FROM t`).
+    pub empty_select_list: bool,
+    /// `CROSS APPLY` and `OUTER APPLY`.
+    pub apply_joins: bool,
+    /// `TABLE name` as a query, and `ONLY name` in `FROM`.
+    pub table_statement: bool,
+    /// `FILTER (WHERE ..)` after an aggregate.
+    pub filter_clause: bool,
+    /// `WITHIN GROUP (ORDER BY ..)` after an aggregate.
+    pub within_group: bool,
+}
+
 const GENERIC: LexRules = LexRules {
     nested_comments: false,
     dollar_quotes: true,
@@ -188,6 +235,93 @@ impl Dialect {
             Dialect::Postgres => &POSTGRES,
             Dialect::Oracle => &ORACLE,
             Dialect::Sqlite => &SQLITE,
+        }
+    }
+
+    /// The grammar flags of the parser for this dialect.
+    pub fn grammar(self) -> Grammar {
+        let all = Grammar {
+            lateral: true,
+            distinct_on: true,
+            ilike: true,
+            limit: true,
+            fetch_first: true,
+            connect_by: true,
+            outer_join_mark: true,
+            pivot: true,
+            minus: true,
+            double_colon_cast: true,
+            arrays: true,
+            sqlite_operators: true,
+            null_postfix: true,
+            select_unique: true,
+            join_requires_condition: false,
+            empty_select_list: true,
+            apply_joins: true,
+            table_statement: true,
+            filter_clause: true,
+            within_group: true,
+        };
+        let none = Grammar {
+            lateral: false,
+            distinct_on: false,
+            ilike: false,
+            limit: false,
+            fetch_first: false,
+            connect_by: false,
+            outer_join_mark: false,
+            pivot: false,
+            minus: false,
+            double_colon_cast: false,
+            arrays: false,
+            sqlite_operators: false,
+            null_postfix: false,
+            select_unique: false,
+            join_requires_condition: false,
+            empty_select_list: false,
+            apply_joins: false,
+            table_statement: false,
+            filter_clause: false,
+            within_group: false,
+        };
+        match self {
+            Dialect::Generic => all,
+            Dialect::Postgres => Grammar {
+                lateral: true,
+                distinct_on: true,
+                ilike: true,
+                limit: true,
+                fetch_first: true,
+                double_colon_cast: true,
+                arrays: true,
+                null_postfix: true,
+                join_requires_condition: true,
+                empty_select_list: true,
+                table_statement: true,
+                filter_clause: true,
+                within_group: true,
+                ..none
+            },
+            Dialect::Oracle => Grammar {
+                lateral: true,
+                fetch_first: true,
+                connect_by: true,
+                outer_join_mark: true,
+                pivot: true,
+                minus: true,
+                select_unique: true,
+                join_requires_condition: true,
+                apply_joins: true,
+                within_group: true,
+                ..none
+            },
+            Dialect::Sqlite => Grammar {
+                limit: true,
+                sqlite_operators: true,
+                null_postfix: true,
+                filter_clause: true,
+                ..none
+            },
         }
     }
 

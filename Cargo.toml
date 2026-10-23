@@ -94,6 +94,9 @@ imara-diff = "0.2"
 gpui = "=0.2.2"
 # Same major version as GPUI uses, for colour icons at device scale.
 resvg = { version = "0.45", default-features = false }
+# Test oracle of the SQL parser (ADR 0022, Apache-2.0): a development
+# dependency of `sql-syntax` only, never linked into the application.
+sqlparser = { version = "0.63", default-features = false, features = ["std"] }
 code-intel = { path = "crates/platform/code-intel" }
 code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }

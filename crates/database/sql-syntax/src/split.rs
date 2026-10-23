@@ -30,24 +30,59 @@ pub struct Statement {
 pub fn split(script: &str, dialect: Dialect) -> Vec<Statement> {
     let toks = lex(script, dialect);
     let sig: Vec<Token> = toks.iter().copied().filter(|t| !t.is_trivia()).collect();
-    let mode = match dialect {
-        Dialect::Oracle => Mode::Oracle,
-        Dialect::Postgres => Mode::Postgres,
-        Dialect::Generic | Dialect::Sqlite => Mode::Sql,
-    };
     // Start of every `/` line, to know whether a block has one ahead.
     let slashes: Vec<usize> = sig
         .iter()
         .filter(|t| t.kind == TokenKind::SlashLine)
         .map(|t| t.start)
         .collect();
+    let slash_ahead = |start: usize| slashes.partition_point(|&p| p < start) < slashes.len();
+    let (spans, _) = statement_spans(script, &sig, dialect, &slash_ahead);
+    spans
+        .into_iter()
+        .map(|(first, last)| {
+            let toks = &sig[first..=last];
+            let range = toks[0].start..toks[toks.len() - 1].end;
+            let Classification {
+                kind,
+                writes,
+                danger,
+                ddl,
+            } = classify(script, toks, dialect);
+            Statement {
+                text: script[range.clone()].to_string(),
+                range,
+                kind,
+                writes,
+                danger,
+                ddl,
+            }
+        })
+        .collect()
+}
 
+/// The statements of the significant tokens `sig` of `script`, as the
+/// indices of their first and last token, and whether the last statement
+/// was closed (by a terminator) rather than cut by the end of `sig`.
+/// `slash_ahead(offset)`: a `/` line follows `offset` somewhere in the
+/// script (Oracle: a PL/SQL block then runs to it).
+pub(crate) fn statement_spans(
+    script: &str,
+    sig: &[Token],
+    dialect: Dialect,
+    slash_ahead: &dyn Fn(usize) -> bool,
+) -> (Vec<(usize, usize)>, bool) {
+    let mode = match dialect {
+        Dialect::Oracle => Mode::Oracle,
+        Dialect::Postgres => Mode::Postgres,
+        Dialect::Generic | Dialect::Sqlite => Mode::Sql,
+    };
     let mut out = Vec::new();
     let mut cur = Pending::default();
     for (i, tok) in sig.iter().enumerate() {
         match tok.kind {
             TokenKind::SlashLine => {
-                cur.flush(script, &sig, dialect, &mut out);
+                cur.flush(&mut out);
                 continue;
             }
             TokenKind::Semicolon => {
@@ -56,8 +91,7 @@ pub fn split(script: &str, dialect: Dialect) -> Vec<Statement> {
                 {
                     let start = sig[first].start;
                     cur.blocks.token(";", false, mode, None);
-                    let slash_ahead = mode == Mode::Oracle
-                        && slashes.partition_point(|&p| p < start) < slashes.len();
+                    let slash_ahead = mode == Mode::Oracle && slash_ahead(start);
                     if slash_ahead || !cur.blocks.stack.is_empty() {
                         cur.extend(i);
                         continue;
@@ -67,7 +101,7 @@ pub fn split(script: &str, dialect: Dialect) -> Vec<Statement> {
                         cur.extend(i);
                     }
                 }
-                cur.flush(script, &sig, dialect, &mut out);
+                cur.flush(&mut out);
                 continue;
             }
             _ => {}
@@ -93,8 +127,9 @@ pub fn split(script: &str, dialect: Dialect) -> Vec<Statement> {
             .map(|t| t.text(script));
         cur.blocks.token(&up, is_word, mode, next_word);
     }
-    cur.flush(script, &sig, dialect, &mut out);
-    out
+    let closed = cur.first.is_none();
+    cur.flush(&mut out);
+    (out, closed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,24 +159,9 @@ impl Pending {
         self.last = i;
     }
 
-    fn flush(&mut self, script: &str, sig: &[Token], dialect: Dialect, out: &mut Vec<Statement>) {
+    fn flush(&mut self, out: &mut Vec<(usize, usize)>) {
         if let Some(first) = self.first {
-            let toks = &sig[first..=self.last];
-            let range = toks[0].start..toks[toks.len() - 1].end;
-            let Classification {
-                kind,
-                writes,
-                danger,
-                ddl,
-            } = classify(script, toks, dialect);
-            out.push(Statement {
-                text: script[range.clone()].to_string(),
-                range,
-                kind,
-                writes,
-                danger,
-                ddl,
-            });
+            out.push((first, self.last));
         }
         *self = Pending::default();
     }
