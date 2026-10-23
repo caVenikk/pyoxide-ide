@@ -95,6 +95,24 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 | 2026-10-11 | mac-1 | oracle-thin (Free 23) | 39.1 ms | 2.7 ms | 276.6 ms | 0.36 M | PL/SQL wrapper and REF CURSOR fetch around oracle-rs bugs; 64 KiB packets |
 | | | oracle-odpi | | | | | needs Oracle Instant Client |
 
+### SQL parser
+`cargo bench -p sql-syntax` (`crates/database/sql-syntax/benches/parse.rs`):
+a generated script of queries (joins, CTEs, window functions, subqueries,
+set operations, about ten lines per statement), lexed and parsed whole, then
+re-parsed after one character typed into a name in the middle of the script
+(and after its removal). Median and worst of 30 runs (parse) and 300 runs
+(re-parse, `expected_at`). Release build, Rust 1.99.0. The machine was busy
+with other builds (load average 30-50), so the numbers are upper bounds.
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-24 | mac-1 | lex, 5000 lines (141 KB) | 1.3 ms (max 2.0) | 5 ms | PostgreSQL dialect |
+| 2026-10-24 | mac-1 | parse, 5000 lines (141 KB, 500 statements) | 12.2 ms (max 19.0) | 40 ms | generic: 12.4 ms |
+| 2026-10-24 | mac-1 | parse, 8810 lines (250 KB, 881 statements) | 19.7 ms (max 24.1) | 40 ms | the size ADR 0022 assumes for 5000 lines; generic: 20.2 ms |
+| 2026-10-24 | mac-1 | re-parse after a keystroke, 250 KB script | 0.09 ms (max 0.67) | 1 ms | one or two statements re-lexed and re-parsed, the rest shared |
+| 2026-10-24 | mac-1 | `expected_at` (completion context) | 0.003 ms | | parses the statement up to the caret |
+| 2026-10-24 | mac-1 | memory of the trees, 141 KB / 250 KB | 3.7 MB / 6.6 MB | 30 MB | estimate from the vectors' capacities |
+
 ### Editor and shell
 Measured with `python3 scripts/perf/pyoxide_bench.py --work <dir> --runs 3` on
 the files `pycharm_baseline.py` generates (the same as the reference runs). It

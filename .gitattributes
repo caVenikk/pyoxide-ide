@@ -1,3 +1,7 @@
 # Shell scripts keep LF on every checkout: bash, also the one of Git for
 # Windows that CI's Windows job runs them with, fails on CRLF.
 *.sh text eol=lf
+# Test fixtures compared or split by line: LF on every checkout, so a
+# Windows checkout does not turn "\n\n" block separators into CRLF.
+*.sql text eol=lf
+crates/**/tests/**/*.txt text eol=lf

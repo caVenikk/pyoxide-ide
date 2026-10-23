@@ -1,11 +1,14 @@
 mod candidates;
 mod classify;
+mod corpus;
 mod dialect;
 mod explain;
 mod lexer;
 mod params;
 mod soup;
 mod split;
+mod tree;
+mod tree_props;
 
 use sql_syntax::{Dialect, Statement};
 

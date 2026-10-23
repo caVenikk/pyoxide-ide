@@ -172,6 +172,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Starts at byte `pos` of the text, a token boundary; the tokens keep
+    /// offsets into the whole text, and the rules that look back (a `/` line,
+    /// a subscript `[`) see the text before `pos`.
+    pub(crate) fn starting_at(mut self, pos: usize) -> Self {
+        self.pos = pos.min(self.src.len());
+        self
+    }
+
     fn peek(&self, off: usize) -> Option<u8> {
         self.bytes.get(self.pos + off).copied()
     }

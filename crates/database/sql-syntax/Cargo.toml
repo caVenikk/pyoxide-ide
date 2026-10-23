@@ -1,9 +1,16 @@
 [package]
 name = "sql-syntax"
-description = "SQL text layer of Pyoxide IDE: dialect tables, a lossless lexer with a hole token, statement splitting, classification, parameter scan and the explain wrapper. No toolkit, no database dependency"
+description = "SQL text layer of Pyoxide IDE: dialect tables, a lossless lexer with a hole token, statement splitting, classification, parameter scan, the error-tolerant syntax tree with statement-level reparse, and the explain wrapper. No toolkit, no database dependency"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+sqlparser.workspace = true
+
+[[bench]]
+name = "parse"
+harness = false
