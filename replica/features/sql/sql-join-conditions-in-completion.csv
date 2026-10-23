@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Completion offers join conditions built from foreign keys,sql,could,yes,no,Pro; ADR 0022

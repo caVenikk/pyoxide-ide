@@ -222,10 +222,25 @@ Python product (`crates/python/`):
 
 The application shell and editor are described in ADR 0007.
 
-## Platform and products
-One repository, one Cargo workspace: a language-agnostic platform layer and
-one product layer per language, composed at compile time into one binary per
-product (ADR 0005). Pyoxide is the Python product.
+## Platform, modules and products
+One repository, one Cargo workspace: a language-agnostic platform layer, one
+product layer per language, and reusable modules between them, composed at
+compile time into one binary per product (ADR 0005, 0022). Pyoxide is the
+Python product.
+
+- `crates/platform/`: knows no language and no product or module.
+- `crates/<module>/` (first: `crates/database/`, the database interface and
+  the SQL language): a reusable set of crates, the equivalent of a plugin
+  that several products share. Depends on platform crates only; never on a
+  product or on another module. A product includes a module with
+  `Product::with_module` and gives it what only a product can (for the
+  database module: the connection source and the runtime).
+- `crates/<product>/` (first: `crates/python/`): language crates and the
+  product binary. Depends on platform crates and modules, not on other
+  products.
+
+`scripts/check-layers.py` checks these rules from `cargo metadata` and has
+a self-test.
 
 ## Language services (M3, ADR 0010, 0011)
 First version done (#82-#87): `lsp-client` (framing over `process`,
@@ -382,16 +397,26 @@ once, before or with its first user:
 The editor's context menu does not exist yet; the debugger's and git's
 entries in it (Run to Cursor, Add to Watches, Git) follow when it is added.
 
-## Database GUI (M6, ADR 0021, proposed)
-Planned crates, all in `crates/platform/`: `sql-text` (SQL lexing, statement
-splitting, formatting; no toolkit, no database), `db-model` (the metadata
-model, its disk cache and completion; no toolkit), `db-session` (runtime,
-data source handles, sessions, query jobs, paged results, refresh, export and
-import jobs; no toolkit) and `db-ui` (Database tool window, console, grid,
-dialogs on GPUI). `db-service` stays the only place that knows drivers and
-gives `db-session` its connections through a `db-core` trait; `db-ui` never
-depends on drivers, `db-service` or `tokio`. Rules for
-`scripts/check-layers.py` come with the first crate.
+## Database GUI and SQL language (M6, ADR 0021 and 0022, proposed)
+Planned crates, in the module `crates/database/` (see "Platform, modules and
+products"): `sql-syntax` (SQL lexing per dialect, statement splitting, the
+error-tolerant syntax tree, formatting; no toolkit, no database), `db-model`
+(the metadata model and its disk cache; no toolkit), `sql-intel` (the SQL
+language over the model: resolution, completion, inspections, documentation,
+navigation, injection engine; an implementation of the `CodeIntel` trait; no
+toolkit), `db-session` (runtime, data source handles, sessions, query jobs,
+paged results, refresh, export and import jobs; no toolkit) and `db-ui`
+(Database tool window, console, grid, dialogs, the SQL editor glue, on
+GPUI). The engine stays in the platform: `db-service` is the only place
+that knows drivers and gives `db-session` its connections through a
+`db-core` trait; the module never depends on drivers, `db-service` or
+`tokio` (in `db-ui`). The product builds the connection source and the
+runtime and hands them to the module, which registers itself with the
+workbench as a `workbench::Module`. Documents are routed to code
+intelligence providers by language id (`code-intel::RoutedCodeIntel`), and
+SQL inside Python strings is served through virtual documents with an
+offset map (ADR 0022). Rules for `scripts/check-layers.py` come with the
+first crates; the module rules are in the script already.
 
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,

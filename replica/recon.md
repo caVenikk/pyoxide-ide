@@ -1356,6 +1356,100 @@ F-DG12 (later) Edit rows
 | Popups and menus | statement picker, context menus, history list | - | S-DG03, S-DG05 |
 | Dialogs | parameters, confirmations, export, import | - | S-DG06, S-DG07, S-DG12, S-DG13 |
 
+### SQL language
+Scope: SQL as a language of the editor, in consoles, in `.sql` files of the
+project and inside strings of other languages (ADR 0022). The same support
+is part of the reference's database plugin in the Python IDE and in its
+database IDE. PostgreSQL, Oracle (SQL and PL/SQL), SQLite and a generic
+dialect. Features: highlighting, syntax errors, completion, resolution and
+unresolved-name inspections with quick fixes, quick documentation, parameter
+info, go to declaration, usages and rename inside a file, structure,
+formatting by a code style, SQL in Python strings. Feature rows are in
+`replica/features/sql/`.
+Date: 2026-10-23. Reference: PyCharm 2026.2.3 (Professional), public help.
+
+Sources (public pages; not re-read for this pass because the machine had no
+network access to the help site, so every item marked "verify" needs the
+page or a reference screenshot before its issue is closed):
+
+| # | source | where | notes |
+|---|---|---|---|
+| S1 | SQL dialects | help page "SQL dialects" | global, project and per-path dialect; consoles take the data source's |
+| S2 | SQL resolution scopes | help page "SQL resolution scopes" | mapping files and folders to data sources and schemas |
+| S3 | Code completion in SQL | help pages on code completion in SQL and in the database tools | tables, columns, aliases, joins, keywords |
+| S4 | SQL inspections | help page on SQL inspections | list, severities, suppress |
+| S5 | Language injections | help page on language injections | `language=` comments, injection by call or pattern, temporary injection |
+| S6 | SQL code style | help page "Code Style. SQL" | formatter options |
+| S7 | IntelliJ Community, Python injection (Apache-2.0, tag `pycharm/2026.2.3`) | `python/src/com/jetbrains/python/codeInsight/PyInjectionUtil.java`, `PyInjectorBase.java`, `python/IntelliLang-python/` | which literal shapes are one injection (concatenation, `%`, `.format`, f-strings), placeholders for substitutions, non-strict ("frankenstein") injections |
+| S8 | Parser candidates, cloned and run on sample statements | tree-sitter-sql (MIT), sqlparser-rs (Apache-2.0), libpg_query (BSD-3-Clause), postgres-language-server (MIT) | evidence in ADR 0022 |
+
+#### Behaviour to match (own words; "verify" = needs a page or a shot)
+| id | feature | what the user sees |
+|---|---|---|
+| SQ01 | Dialect per file | a status bar widget names the dialect of the file; it can be set for a file, a folder or the project; a console uses its data source's dialect (verify the widget's place and popup) |
+| SQ02 | Resolution scope | a `.sql` file can be attached to a data source and schema, or a folder mapped to one; names then resolve against that data source's stored metadata; a file with no scope is not checked for unresolved names (verify) |
+| SQ03 | Highlighting | keywords, strings, numbers, comments, parameters; table, column, alias names in their own colours (verify the colour scheme keys) |
+| SQ04 | Syntax errors | red marks on tokens that do not fit, with a message listing what was expected (verify the wording) |
+| SQ05 | Unresolved references | a table or column that does not exist in the scope is marked; the default severity and look need a shot (verify) |
+| SQ06 | Quick fixes | Alt+Enter on a mark offers fixes: change to a similar name, qualify an ambiguous column, add a missing `WHERE`, `IS NULL` instead of `= NULL`, remove an unused CTE; a suppress entry adds a `noinspection` comment (verify the list and texts) |
+| SQ07 | Completion | after `select`: columns of the tables in `FROM` even when `FROM` is typed after the caret; after `alias.`: that table's columns; after `from` and `join`: tables, views, schemas, CTEs; after `on`: join conditions from foreign keys; in `insert` and `update`: the target's columns; keywords valid at that place; works before connecting (verify join conditions and auto alias) |
+| SQ08 | Quick documentation | Ctrl+Q (F1 on macOS) on a table, column or routine: kind, type, comment, columns, key marks (verify) |
+| SQ09 | Parameter info | Ctrl+P in a routine call: signature, active parameter |
+| SQ10 | Go to declaration | Ctrl/Cmd+click or Cmd+B: alias, CTE, column alias in the same statement; a database object selects it in the Database tool window (verify: tree versus DDL) |
+| SQ11 | Usages and rename | highlight and Shift+F6 for aliases, CTEs and variables in a file |
+| SQ12 | Structure | the file structure lists statements and procedure members |
+| SQ13 | Reformat | Cmd/Ctrl+Alt+L formats the file or selection per the SQL code style (keyword case, indent, line breaks, comma and join layout); comments and string contents unchanged (verify the options) |
+| SQ14 | SQL in strings | a string in a Python file marked `# language=SQL`, or passed to a database call, gets SQL colours, completion, errors; `{}` / `%s` substitutions do not break it; an intention turns the injection on or off for one string (verify the detection rules; the plugin's own heuristics are not documented) |
+
+#### Flows
+```
+F-SQ01 Complete a column                                  (keystrokes: 3)
+    console or bound file, type "select c." before an existing FROM clause
+    -> popup lists the columns of the aliased table, with types
+    edge: schema loaded to names only (no column items, no false errors),
+          mixed-case quoted names inserted quoted, two tables with the
+          same column name, alias defined in a CTE
+
+F-SQ02 Fix an unresolved name                             (clicks: 2)
+    table name typo -> mark -> Alt+Enter -> "Change to 'customers'"
+    edge: no scope (no mark at all), the object exists in another schema,
+          a hole in an injected string
+
+F-SQ03 Set the dialect and scope of a folder
+    status bar dialect widget or Settings > SQL Dialects / SQL Resolution
+    Scopes -> map "migrations/" to PostgreSQL and a data source and schema
+    -> open a file in it: dialect widget, highlighting, completion follow
+
+F-SQ04 Reformat a script
+    Reformat Code on a file with several statements, a function body with
+    $$ and a comment -> statements laid out by the code style
+    edge: a statement with a syntax error stays as it was
+
+F-SQ05 SQL in a Python string
+    query = "select id from users where name = %s"; cursor.execute(query)
+    -> SQL colours, completion for "users" columns, no false errors with
+    f-string {holes}; "Don't inject" intention switches it off
+```
+
+#### Components
+Completion popup, quick documentation popup, parameter info popup, intention
+popup, dialect and scope widget (status bar), Settings pages (SQL Dialects,
+SQL Resolution Scopes, Code Style > SQL, Inspections > SQL), structure view.
+All except the dialect and scope widget and the SQL pages exist or are
+planned for other languages (area python-intel); the SQL work reuses them
+through `CodeIntel`.
+
+#### Out of scope or deferred
+Dialects beyond the three engines and generic; database refactorings;
+cross-file usages of database objects; a Problems tool window for SQL;
+type inference of expressions; reformat inside injected fragments; the
+text-to-SQL assistant.
+
+#### Size
+Parser and tree with three dialects and PL/SQL: L. Resolution, completion,
+inspections: L. Formatter: M. Injection mechanism with routing: M. Python
+detection: S. About 150 agent-hours in eight issues.
+
 ### Inferred data model
 
 ```

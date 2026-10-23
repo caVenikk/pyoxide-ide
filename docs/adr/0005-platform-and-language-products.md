@@ -49,3 +49,14 @@ releases).
   check placement.
 - The repository may be renamed once the platform has a name; GitHub keeps
   redirects for the old URL.
+
+## Update: modules (ADR 0022)
+Between the platform and the products there is a third kind of layer, a
+**module**: a reusable set of crates in its own directory of `crates/`
+(first: `crates/database/`) that several products can include. A module
+depends on platform crates only, products depend on platform crates and
+modules, the platform never depends on a module, and a module never depends
+on a product or on another module. `scripts/check-layers.py` enforces it.
+The language extension point this ADR deferred (routing a document to the
+code intelligence of its language) arrived with the second language, SQL;
+it is specified in ADR 0022.

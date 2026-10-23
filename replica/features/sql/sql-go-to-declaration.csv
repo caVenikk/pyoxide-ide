@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Go to declaration of aliases, CTEs and database objects from SQL",sql,should,yes,no,Pro; ADR 0022; needs object targets in code-intel

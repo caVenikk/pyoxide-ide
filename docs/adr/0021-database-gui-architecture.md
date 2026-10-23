@@ -1,6 +1,6 @@
 # 0021. Database GUI architecture
 
-- Status: proposed
+- Status: proposed (crate placement and the SQL language amended by ADR 0022)
 - Date: 2026-10-22
 
 ## Context
@@ -23,7 +23,8 @@ The interface needs things the engine does not have yet:
   consistent when a refresh is cancelled and that is available right after
   start-up, before any connection.
 - Splitting a script into statements by a lexer (dollar quotes, PL/SQL blocks,
-  comments), not by searching for `;`.
+  comments), not by searching for `;`. SQL is also a language of the editor
+  (highlighting, completion, inspections, formatting): ADR 0022.
 - Layering (AGENTS.md, ADR 0005): UI crates depend on traits, not on drivers;
   platform crates know no language; `scripts/check-layers.py` checks it.
 
@@ -42,7 +43,10 @@ transaction does not abort the transaction.
 2. Put sessions and model into `db-service`. It depends on every driver, so
    a UI crate would depend on drivers, against AGENTS.md.
 3. New toolkit-free crates for text, model and sessions; a UI crate on top;
-   `db-service` stays the only place that knows drivers. Chosen.
+   `db-service` stays the only place that knows drivers. Chosen. The new
+   crates form a reusable module between the platform and the products
+   (ADR 0022), not part of the platform: a database client is not needed by
+   every product, and SQL is a language.
 
 **Paging.**
 - A. Cursor only: fast and exact for one forward reader, but only one cursor
@@ -68,26 +72,35 @@ Revisit if a driver proves to crash.
 
 ## Decision
 ### Crates
-All under `crates/platform/`; none depends on a language product.
+The engine stays in `crates/platform/`: it is a connection layer, it knows
+no language. The interface and the SQL language are a reusable module in
+`crates/database/` (ADR 0022): it depends on platform crates only; products
+depend on it; the platform never does.
 
-| crate | toolkit | role |
-|---|---|---|
-| `db-core` (exists) | no | traits, values, errors, per-dialect catalog SQL. Gains bulk introspection and change tokens (below). No driver dependencies. |
-| `sql-text` (new) | no | SQL lexing per dialect, statement splitting, statement at a position, statements in a range, parameter scan, statement classification (kind, `DELETE`/`UPDATE` without `WHERE`, DDL target), explain wrapper, formatting. No database dependency; its `Dialect` is its own enum. |
-| `db-model` (new) | no | the metadata model: node arena, kinds, stable ids, merge of snapshots and deltas, name search, the on-disk cache format, completion and reference resolution over the model. Depends on `db-core` (types) and `sql-text`. No tokio. |
-| `db-session` (new) | no | the asynchronous layer: runtime, data source handles, sessions, query jobs, the pager, refresh jobs, export and import jobs, console files and history. Depends on `db-core`, `db-model`, `sql-text`, `tokio`. |
-| `db-service` (exists) | no | profiles, secrets and driver dispatch; implements `db_core::ConnectionSource` for `db-session`. Remains the only crate (besides the CLI) that depends on drivers. |
-| `db-ui` (new) | GPUI | explorer tool window, data source dialog, console tab, results panel, grid element, value panel, export and import dialogs, settings page. Depends on `db-session`, `db-model`, `sql-text`, `db-core` (types only), `editor`, `ui`, `commands`. Never on a driver crate, `db-service` or `tokio`. |
+| crate | layer | toolkit | role |
+|---|---|---|---|
+| `db-core` (exists) | platform | no | traits, values, errors, per-dialect catalog SQL. Gains bulk introspection and change tokens (below). No driver dependencies. |
+| `db-service` (exists) | platform | no | profiles, secrets and driver dispatch; implements `db_core::ConnectionSource` for `db-session`. Remains the only crate (besides the CLI) that depends on drivers. |
+| `sql-syntax` (new) | database | no | SQL lexing per dialect, statement splitting, statement at a position, statements in a range, parameter scan, statement classification (kind, `DELETE`/`UPDATE` without `WHERE`, DDL target), explain wrapper. ADR 0022 adds the error-tolerant syntax tree, the dialect tables and the formatter. No database dependency; its `Dialect` is its own enum. |
+| `db-model` (new) | database | no | the metadata model: node arena, kinds, stable ids, merge of snapshots and deltas, name search, the on-disk cache format. Depends on `db-core` (types) and `name-match`. No tokio, no SQL parsing. |
+| `sql-intel` (new, ADR 0022) | database | no | the SQL language services: reference resolution against `db-model`, completion, inspections, quick documentation, navigation, formatting, injection engine; `SqlCodeIntel`, an implementation of the platform `CodeIntel` trait. Depends on `sql-syntax`, `db-model`, `code-intel`. |
+| `db-session` (new) | database | no | the asynchronous layer: runtime, data source handles, sessions, query jobs, the pager, refresh jobs, export and import jobs, console files and history. Depends on `db-core`, `db-model`, `sql-syntax`, `tokio`. |
+| `db-ui` (new) | database | GPUI | explorer tool window, data source dialog, console tab, results panel, grid element, value panel, export and import dialogs, settings pages, the SQL editor glue (file type, highlighter, dialect widget). Depends on `db-session`, `db-model`, `sql-syntax`, `sql-intel`, `db-core` (types only), `editor`, `ui`, `commands`. Never on a driver crate, `db-service` or `tokio`. |
 
-The workbench composes: it builds the `ConnectionSource` from `db-service`,
-starts the `DbRuntime`, registers the Database tool window, the commands, the
-settings page and the keymap files.
+The product composes (ADR 0022, "Module layer"): `pyoxide-ide` builds the
+`ConnectionSource` from `db-service`, starts the `DbRuntime` and hands both
+to `db_ui::module(..)`, a `workbench::Module` that registers the Database
+tool window, the commands, the settings pages, the keymap files, the SQL
+file type and the SQL language services. The workbench knows none of it.
 
-`scripts/check-layers.py` gets these rules: `sql-text`, `db-model`,
-`db-session` and `db-core` know no `gpui`; none of `sql-text`, `db-model`,
-`db-session`, `db-ui` depends on `db-postgres`, `db-sqlite`,
-`db-oracle-thin`, `db-oracle-odpi` or `db-service`; `db-ui` does not
-depend on `tokio`; `editor` does not depend on `sql-text`.
+`scripts/check-layers.py` gets these rules (with the crates): `sql-syntax`,
+`sql-intel`, `db-model`, `db-session` and `db-core` know no `gpui`; none of
+the module's crates depends on `db-postgres`, `db-sqlite`, `db-oracle-thin`,
+`db-oracle-odpi` or `db-service`; `db-ui` does not depend on `tokio`;
+`db-model` does not depend on `sql-syntax`; `editor` does not depend on any
+of them. The general module rules (platform never depends on a module, a
+module never on a product or another module without a stated reason) are
+checked already.
 
 ### Contracts added to `db-core`
 - `trait ConnectionSource { async fn open(&self, data_source: &DataSourceId, purpose: Purpose) -> Result<Arc<dyn Connection>>; }`
@@ -139,7 +152,7 @@ depend on `tokio`; `editor` does not depend on `sql-text`.
   any purpose.
 
 ### Query jobs and cancellation
-- A job is a list of statements from `sql-text`. For each statement the
+- A job is a list of statements from `sql-syntax`. For each statement the
   session emits `Started`, then `Affected(n)` or `ResultOpened(tab, columns,
   first page)`, `Notice(text)` for server messages, `Finished(elapsed)` or
   `Failed(error, position)`. Timing is split into execute and fetch.
@@ -153,7 +166,7 @@ depend on `tokio`; `editor` does not depend on `sql-text`.
   (`SAVEPOINT` / `RELEASE` / `ROLLBACK TO`, all three engines support it) so a
   failed statement leaves the transaction usable. The pending count is the
   number of data-changing statements since the last commit (classified by
-  `sql-text`). Closing a console or disconnecting with a pending transaction
+  `sql-syntax`). Closing a console or disconnecting with a pending transaction
   asks first.
 - Export and import are jobs too: progress events, cancel, and they run on a
   data connection (export) or a transaction of their own (import).
@@ -203,7 +216,7 @@ depend on `tokio`; `editor` does not depend on `sql-text`.
   any connection exists. The format may move to a binary encoding if
   measurements of a 10 000-table schema require it.
 - DDL run in a console schedules a refresh of the objects the statement names
-  (from `sql-text` classification), not a full pass.
+  (from `sql-syntax` classification), not a full pass.
 - Refresh passes report progress (database, schema) and are cancellable.
 
 ### Data sources and files
@@ -225,17 +238,19 @@ depend on `tokio`; `editor` does not depend on `sql-text`.
 ### UI
 - Everything the user does is a registry command (ADR 0001): `db.explorer.*`,
   `db.console.*`, `db.grid.*`, `db.export.*`, `db.import.*` registered by
-  `db-ui`; the engine's headless `db.*` commands stay in `db-service`. Keymaps
-  go to `workbench/keymaps/*/db.toml` with their checks.
+  `db-ui`; the engine's headless `db.*` commands stay in `db-service`. The
+  keymap files `db.toml` (macOS and default) live in `db-ui` and are joined
+  after the workbench's by the module mechanism; their keystroke checks are
+  `db-ui`'s integration tests on the workbench's keymap harness (ADR 0022).
 - The Database tool window is registered in the workbench tool window
-  registry (right stripe). Console and table tabs use `workbench::tab_view`
+  registry (right stripe) by the module. Console and table tabs use `workbench::tab_view`
   where they are editor tabs; results use a bottom panel.
 - The grid is a virtualized element in `db-ui`: only visible rows and
   columns are laid out, text is shaped lazily and cached per cell, a page of
   500 rows and 50 columns scrolls at the display rate.
-- SQL highlighting uses `syntax` with a SQL grammar (licence check in its
-  issue) or the lexer of `sql-text` as a fallback; completion and references
-  come from `db-model`.
+- SQL highlighting, completion, references, inspections and formatting are
+  the SQL language of ADR 0022 (own lexer and parser in `sql-syntax`, services
+  in `sql-intel` over `db-model`); there is no tree-sitter SQL grammar.
 
 ### Performance budgets (to be added to `docs/performance.md` with the first slice)
 Expanding a tree node: no database access, under one frame on a 10 000-table
@@ -246,7 +261,7 @@ one second (PostgreSQL, SQLite). Scrolling a 500 x 50 page holds the display
 rate.
 
 ### Testing
-`sql-text` and `db-model` have unit and property tests (random token soup
+`sql-syntax`, `sql-intel` and `db-model` have unit and property tests (random token soup
 never panics, ranges stay on character boundaries, merge is idempotent).
 `db-session` runs its tests on SQLite in every run and on PostgreSQL and
 Oracle as ignored tests using the containers of `docker-compose.yml`; the
@@ -256,10 +271,12 @@ the next statement, offset fallback and cancel while paging. A fake
 slow fetch. UI crates are tested through their commands and snapshots.
 
 ## Consequences
-- Five crates to add in an order that keeps `main` green: `sql-text`,
+- Six crates to add in an order that keeps `main` green: `sql-syntax`,
   `db-model`, `db-session`, then `db-ui` slice by slice (data sources and
-  tree, console, grid, export and import). The first slice renders the tree
-  from a model loaded by full passes only.
+  tree, console, grid, export and import), and `sql-intel` with the SQL
+  language (ADR 0022) once `db-model` and the console exist. The first slice
+  renders the tree from a model loaded by full passes only. Before the
+  first UI slice the workbench gets the module mechanism (ADR 0022).
 - The engine's `Introspector` grows; existing CLI commands keep working on
   the per-object methods.
 - Console result tabs page less capably than table grids after another
@@ -271,8 +288,8 @@ slow fetch. UI crates are tested through their commands and snapshots.
   the ODPI backend does not have the limit.
 - Splitting `db-ui` later (explorer, console, grid as separate crates) is
   possible because every part talks to `db-session` only.
-- Third-party code adapted for `sql-text` (statement splitting, formatter,
-  completion helpers), import parsing and the SQL generators of the editing
+- Third-party code adapted for `sql-syntax` (lexer, statement splitting),
+  import parsing and the SQL generators of the editing
   milestone comes from an MIT OR Apache-2.0 database client and needs one
   `notices/` entry per adapted piece (ADR 0019). Its interface code, theme,
   icons and texts are not used.

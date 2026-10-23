@@ -3,6 +3,11 @@
 #
 # - ADR 0005: platform crates never depend on product crates, and products
 #   do not depend on each other.
+# - ADR 0022 (modules): a directory in MODULES (crates/database/) is a
+#   reusable module between the platform and the products. A module depends
+#   on platform crates only; products depend on platform crates and modules;
+#   the platform never depends on a module; a module never depends on a
+#   product or on another module.
 # - ADR 0010 (language services): the model and the client know no UI
 #   toolkit; protocol types stay inside the client; platform UI crates
 #   depend on the code intelligence traits, never on the client; the
@@ -17,15 +22,21 @@
 #   client.
 #
 #     python3 scripts/check-layers.py
+#     python3 scripts/check-layers.py --self-test   # only the rules' own tests
 #
-# A crate under crates/platform/ is a platform crate; a crate under any other
+# A crate under crates/platform/ is a platform crate; a crate under a
+# directory of MODULES belongs to that module; a crate under any other
 # crates/<product>/ directory belongs to that product. Crates directly under
 # crates/ are not classified yet and are only listed. Exit code 1 on a violation.
+# Every run starts with the self-test of the layer rules on made-up packages.
 import json, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CRATES = ROOT / "crates"
+
+# ADR 0022: directories of crates/ that are reusable modules, not products.
+MODULES = {"database"}
 
 # ADR 0010; stream-framing, dap-client, debugger and py-debug: ADR 0015.
 TOOLKIT = "gpui"
@@ -56,27 +67,70 @@ def layer(manifest: Path):
     return rel.parts[0]  # "platform" or a product name
 
 
+def layer_violations(by_name, packages, modules=MODULES):
+    """The ADR 0005 / 0022 rules for `packages` (name and dependencies) given
+    the layer of every crate: `platform`, one of `modules`, a product's
+    name, or None when not classified."""
+    bad = []
+    for p in packages:
+        own = by_name[p["name"]]
+        if own is None:
+            continue
+        for d in p["dependencies"]:
+            dep = by_name.get(d["name"])
+            if dep is None or dep == own:
+                continue
+            name, what = p["name"], d["name"]
+            if own == "platform":
+                kind = "a module" if dep in modules else "a product"
+                bad.append(f"{name} (platform) depends on {what} ({dep}, {kind})")
+            elif own in modules:
+                if dep == "platform":
+                    continue
+                kind = "another module" if dep in modules else "a product"
+                bad.append(f"{name} (module {own}) depends on {what} ({dep}, {kind}): modules use platform crates only (ADR 0022)")
+            elif dep not in modules and dep != "platform":
+                bad.append(f"{name} ({own}) depends on {what} (another product: {dep})")
+    return bad
+
+
+def self_test():
+    """The layer rules on made-up crates: what must pass and what must fail."""
+    def pkg(name, *deps):
+        return {"name": name, "dependencies": [{"name": d} for d in deps]}
+
+    layers = {"ui": "platform", "core": "platform", "sql": "database", "sql2": "database", "dbx": "other-mod",
+              "app": "python", "other-app": "tools", "loose": None}
+    ok = [pkg("ui", "core"), pkg("sql", "core", "ui"), pkg("sql", "sql2"), pkg("app", "ui", "sql", "app"),
+          pkg("loose", "app"), pkg("app", "loose")]
+    for p in ok:
+        got = layer_violations(layers, [p], {"database", "other-mod"})
+        assert not got, f"{p} should pass, got {got}"
+    fails = [(pkg("ui", "sql"), "a module"), (pkg("core", "app"), "a product"),
+             (pkg("sql", "app"), "a product"), (pkg("sql", "dbx"), "another module"),
+             (pkg("app", "other-app"), "another product")]
+    for p, word in fails:
+        got = layer_violations(layers, [p], {"database", "other-mod"})
+        assert len(got) == 1 and word in got[0], f"{p} should fail with '{word}', got {got}"
+
+
 def main():
+    try:
+        self_test()
+    except AssertionError as e:
+        print(f"layer rules self-test failed: {e}")
+        sys.exit(1)
+    if "--self-test" in sys.argv:
+        print("layer rules self-test ok")
+        return
     meta = json.loads(subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps"],
         cwd=ROOT, capture_output=True, text=True, check=True).stdout)
     by_name = {}
     for p in meta["packages"]:
         by_name[p["name"]] = layer(Path(p["manifest_path"]))
-    bad, unclassified = [], []
-    for p in meta["packages"]:
-        own = by_name[p["name"]]
-        if own is None:
-            unclassified.append(p["name"])
-            continue
-        for d in p["dependencies"]:
-            dep = by_name.get(d["name"])
-            if dep is None or dep == own:
-                continue
-            if own == "platform" and dep != "platform":
-                bad.append(f"{p['name']} (platform) depends on {d['name']} ({dep})")
-            elif own != "platform" and dep != "platform":
-                bad.append(f"{p['name']} ({own}) depends on {d['name']} (another product: {dep})")
+    unclassified = [p["name"] for p in meta["packages"] if by_name[p["name"]] is None]
+    bad = layer_violations(by_name, meta["packages"])
 
     # What each workspace crate uses to build (dev-dependencies left out):
     # its direct dependencies, and every crate it reaches in the workspace.
@@ -132,7 +186,7 @@ def main():
     if unclassified:
         print("not classified yet:", ", ".join(sorted(unclassified)))
     if bad:
-        print("layer violations (ADR 0005, 0010, 0014, 0015, 0016):")
+        print("layer violations (ADR 0005, 0010, 0014, 0015, 0016, 0022):")
         for b in bad:
             print("  " + b)
         sys.exit(1)

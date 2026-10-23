@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Files and folders mapped to a data source and schema for resolving names,sql,must,yes,no,Pro; ADR 0022; builds on sql-file-bound-to-a-data-source

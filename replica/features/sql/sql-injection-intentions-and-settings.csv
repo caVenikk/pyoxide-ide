@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Inject SQL and Don't inject intentions, language comments, injection lists",sql,could,yes,no,Pro; ADR 0022
