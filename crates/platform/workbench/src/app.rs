@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use code_intel_ui::CodeIntelHook;
 use gpui::{
-    AnyView, App, AppContext as _, Application, Bounds, Menu, MenuItem, TitlebarOptions,
-    WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions, point, px, size,
+    AnyView, App, AppContext as _, Application, Bounds, TitlebarOptions, WeakEntity, Window,
+    WindowBounds, WindowHandle, WindowOptions, point, px, size,
 };
 use ui::command::CommandError;
 use ui::icons::{IconName, IconSvg};
 
-use crate::commands::{self, Quit, ToggleProject};
+use crate::commands::{self, Quit};
 use crate::env;
 use crate::file_types::{FileAssociation, FileType};
 use crate::project_panel;
@@ -312,51 +312,11 @@ pub fn init(cx: &mut App, product: &Product) {
     // The platform's keymap; the stored one replaces it once the settings
     // are read. The menus show the shortcuts of the keymap in use.
     crate::keymap::active::init(cx);
-    let name = product.name;
-    let menus = move |cx: &mut App| cx.set_menus(app_menus(name));
-    menus(cx);
-    crate::keymap::active::set_menus(cx, Rc::new(menus));
+    crate::main_menu::init(cx, product.name);
+    crate::keymap::active::set_menus(cx, Rc::new(crate::main_menu::install));
     if let Some(init) = product.init {
         init(cx);
     }
-}
-
-/// The application menus (macOS menu bar).
-fn app_menus(name: &'static str) -> Vec<Menu> {
-    vec![
-        Menu {
-            name: name.into(),
-            items: vec![
-                MenuItem::action(
-                    "Settings\u{2026}",
-                    settings_ui::commands::OpenSettings {
-                        page: None,
-                        filter: None,
-                    },
-                ),
-                MenuItem::separator(),
-                MenuItem::action("Project", ToggleProject),
-                MenuItem::separator(),
-                MenuItem::action(format!("Quit {name}"), Quit),
-            ],
-        },
-        Menu {
-            name: "View".into(),
-            items: vec![MenuItem::submenu(Menu {
-                name: "Active Editor".into(),
-                items: vec![MenuItem::action(
-                    "Soft-Wrap",
-                    editor::commands::ToggleSoftWraps,
-                )],
-            })],
-        },
-        // Welcome first, as the reference adds `OpenWelcome` to its Help
-        // menu.
-        Menu {
-            name: "Help".into(),
-            items: vec![MenuItem::action("Welcome", crate::welcome::OpenWelcome)],
-        },
-    ]
 }
 
 /// Window options of the main window: the content extends under a
@@ -391,6 +351,15 @@ pub fn window_options(cx: &App, product: &Product) -> WindowOptions {
 /// Opens the main window.
 pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Workbench> {
     let options = window_options(cx, &product);
+    open_main_window_with(cx, product, options)
+}
+
+/// Opens a main window with `options`.
+pub fn open_main_window_with(
+    cx: &mut App,
+    product: Rc<Product>,
+    options: WindowOptions,
+) -> WindowHandle<Workbench> {
     cx.open_window(options, |window, cx| {
         let workbench = cx.new(|cx| Workbench::new(product.clone(), window, cx));
         // Autosave and sync follow the application settings.
@@ -407,6 +376,16 @@ pub fn open_main_window(cx: &mut App, product: Rc<Product>) -> WindowHandle<Work
         // window asks first.
         window.on_window_should_close(cx, |window, cx| {
             settings_ui::leave::can_close_parent(window.window_handle(), cx)
+        });
+        // Recent Projects of the main menu leaves out the active window's
+        // project.
+        workbench.update(cx, |_, cx| {
+            cx.observe_window_activation(window, |_, window, cx| {
+                if window.is_window_active() {
+                    crate::main_menu::refresh(cx);
+                }
+            })
+            .detach()
         });
         workbench
     })

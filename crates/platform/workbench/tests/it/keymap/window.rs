@@ -20,7 +20,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
     let what = format!("`{keys}` -> {}", b.command);
     h.reset();
     match b.command.as_str() {
-        "app.quit" => {
+        // The test platform has no application or window to hide, minimize
+        // or zoom: the keystroke reaches the command.
+        "app.quit" | "app.hide" | "app.hide-others" | "window.minimize" | "window.zoom" => {
             h.press(keys);
         }
         "dialog.confirm" | "dialog.cancel" => {

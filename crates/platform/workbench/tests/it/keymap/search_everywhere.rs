@@ -99,12 +99,17 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "search-everywhere.previous-group" => {
             // The `.py` files: a.py, b.py, m.py, n.py.
             h.search_everywhere("files", ".py");
-            let n = h.se()["rows"].as_array().unwrap().len();
+            let s = h.se();
+            let n = s["rows"].as_array().unwrap().len();
             assert!(n >= 3, "{what}: {n} rows");
+            // The popup may keep the selection of the binding checked
+            // before (the same search): the move is from there, round.
+            let from = s["selected"].as_u64().unwrap() as usize;
             h.press(keys);
             let expected = match b.command.as_str() {
-                "search-everywhere.down" => 1,
-                "search-everywhere.up" | "search-everywhere.next-group" => n - 1,
+                "search-everywhere.down" => (from + 1) % n,
+                "search-everywhere.up" => (from + n - 1) % n,
+                "search-everywhere.next-group" => n - 1,
                 _ => 0,
             };
             assert_eq!(h.se()["selected"], json!(expected), "{what}");

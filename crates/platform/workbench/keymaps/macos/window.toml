@@ -7,6 +7,11 @@
 [[context]]
 [context.bindings]
 "cmd-q" = "app.quit"
+# The reference gets Hide and Hide Others from the macOS application menu.
+"cmd-h" = "app.hide"
+"cmd-alt-h" = "app.hide-others"
+"cmd-m" = "window.minimize"
+"cmd-ctrl-=" = "window.zoom"
 "cmd-w" = "tabs.close"
 "cmd-}" = "tabs.next"
 "ctrl-right" = "tabs.next"

@@ -10,7 +10,6 @@ ChangeSplitOrientation
 ChangesView.Rename
 CloseAllEditors
 CloseAllEditorsButActive
-CloseProject
 CollapseAllRegions
 CollapseBlock
 CollapseDocComments

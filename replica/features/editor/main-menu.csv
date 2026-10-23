@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Main menu (File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git, Window, Help)",editor,must,yes,partial,"macOS menu bar with the application menu (Settings…, Services, Hide, Quit), rows in the reference's order run registry commands with the keymap's shortcuts and are enabled where available; Recent Projects from the recent-projects store; Close Project shows the Welcome tab (#286); rows without a command yet are left out, Tools is empty; the in-window menu of Windows and Linux reuses the model later (#35)"

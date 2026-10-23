@@ -1,6 +1,12 @@
 # ---- Main Menu > File ----------------------------------------------------
 
 [[action]]
+id = "CloseProject"
+text = "Close Project"
+groups = ["Main Menu > File"]
+command = "project.close"
+
+[[action]]
 id = "ShowSettings"
 text = "Settings…"
 groups = ["Main Menu > File > Settings Actions"]
