@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Execute: the statement under the caret, with the picker for nested statements",db-gui,must,yes,no,Pro; Settings > Database > Query Execution
+"Execute: the statement under the caret, with the picker for nested statements",db-gui,must,yes,partial,Pro; Settings > Database > Query Execution

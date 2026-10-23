@@ -43,6 +43,7 @@ members = [
     "crates/platform/vcs-ui",
     "crates/platform/git",
     "crates/platform/workbench",
+    "crates/database/sql-syntax",
     "crates/python/py-debug",
     "crates/python/py-env",
     "crates/python/py-lsp",
@@ -134,6 +135,7 @@ ui = { path = "crates/platform/ui" }
 vcs = { path = "crates/platform/vcs" }
 vcs-ui = { path = "crates/platform/vcs-ui" }
 workbench = { path = "crates/platform/workbench" }
+sql-syntax = { path = "crates/database/sql-syntax" }
 py-debug = { path = "crates/python/py-debug" }
 py-env = { path = "crates/python/py-env" }
 py-lsp = { path = "crates/python/py-lsp" }

@@ -8,6 +8,10 @@
 #   on platform crates only; products depend on platform crates and modules;
 #   the platform never depends on a module; a module never depends on a
 #   product or on another module.
+# - ADR 0021, 0022 (database module): the SQL text layer, the metadata model,
+#   the session layer and the connection core know no UI toolkit; no crate of
+#   the module depends on a driver or on `db-service`; the metadata model does
+#   not know SQL syntax; the editor depends on none of the module's crates.
 # - ADR 0010 (language services): the model and the client know no UI
 #   toolkit; protocol types stay inside the client; platform UI crates
 #   depend on the code intelligence traits, never on the client; the
@@ -46,6 +50,15 @@ PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"
 NOT_MODEL = ["editor"]
 
+# ADR 0021, 0022: the database module (crates/database/) and the connection
+# core it uses. `db-ui` is the module's one crate that has a toolkit.
+DB_NO_TOOLKIT = ["sql-syntax", "sql-intel", "db-model", "db-session", "db-core"]
+DB_DRIVERS = ["db-postgres", "db-sqlite", "db-oracle-thin", "db-oracle-odpi", "db-service"]
+DB_MODEL = "db-model"
+SQL_SYNTAX = "sql-syntax"
+DB_MODULE_CRATES = ["sql-syntax", "sql-intel", "db-model", "db-session", "db-ui"]
+DB_NOT_USERS = ["editor"]
+
 # ADR 0014.
 EMULATOR = "alacritty_terminal"
 EMULATOR_USER = "terminal"
@@ -65,6 +78,44 @@ def layer(manifest: Path):
     if len(rel.parts) < 2:
         return None  # crates/<name>: not classified yet
     return rel.parts[0]  # "platform" or a product name
+
+
+def reach(direct, name):
+    """Every workspace crate that `name` reaches through its dependencies."""
+    seen, stack = set(), [name]
+    while stack:
+        for d in direct.get(stack.pop(), ()):
+            if d in direct and d not in seen:
+                seen.add(d)
+                stack.append(d)
+    return seen
+
+
+def uses(direct, name, dependency):
+    """`name` depends on `dependency`, directly or through workspace crates."""
+    crates = {name} | reach(direct, name)
+    return dependency in crates or any(dependency in direct[c] for c in crates)
+
+
+def database_violations(direct, by_name):
+    """The rules of the database module (ADR 0021, 0022). `direct` maps a crate
+    to its direct dependencies, `by_name` to its layer."""
+    bad = []
+    for name in DB_NO_TOOLKIT:
+        if name in direct and uses(direct, name, TOOLKIT):
+            bad.append(f"{name} uses the UI toolkit ({TOOLKIT}) (ADR 0021)")
+    for name in sorted(direct):
+        if by_name.get(name) == "database":
+            for driver in DB_DRIVERS:
+                if uses(direct, name, driver):
+                    bad.append(f"{name} (database module) depends on {driver}: the module sees connections through db-core only (ADR 0021)")
+    if DB_MODEL in direct and uses(direct, DB_MODEL, SQL_SYNTAX):
+        bad.append(f"{DB_MODEL} depends on {SQL_SYNTAX}: the model knows no SQL syntax (ADR 0022)")
+    for name in DB_NOT_USERS:
+        for dep in DB_MODULE_CRATES:
+            if name in direct and uses(direct, name, dep):
+                bad.append(f"{name} depends on {dep}: the editor knows nothing of the database module (ADR 0021)")
+    return bad
 
 
 def layer_violations(by_name, packages, modules=MODULES):
@@ -113,6 +164,37 @@ def self_test():
         got = layer_violations(layers, [p], {"database", "other-mod"})
         assert len(got) == 1 and word in got[0], f"{p} should fail with '{word}', got {got}"
 
+    # The database module's own rules, on made-up dependency graphs.
+    names = ["sql-syntax", "sql-intel", "db-model", "db-session", "db-core", "db-ui", "db-postgres", "db-service", "editor", "gpui", "wb"]
+    module_layers = {n: "database" for n in ["sql-syntax", "sql-intel", "db-model", "db-session", "db-ui"]}
+    module_layers.update({n: "platform" for n in ["db-core", "db-postgres", "db-service", "editor", "gpui", "wb"]})
+
+    def graph(**edges):
+        direct = {n: set() for n in names}
+        for k, v in edges.items():
+            direct[k.replace("_", "-")] = set(v)
+        return direct
+
+    good = graph(sql_intel=["sql-syntax", "db-model"], db_session=["db-core", "sql-syntax"], db_ui=["sql-intel", "gpui", "editor"],
+                 db_service=["db-postgres", "db-core"], wb=["editor", "gpui", "db-service"])
+    got = database_violations(good, module_layers)
+    assert not got, f"the module rules should pass, got {got}"
+    bad_graphs = [
+        (graph(sql_syntax=["gpui"]), "sql-syntax uses the UI toolkit"),
+        (graph(sql_intel=["db-model"], db_model=["gpui"]), "db-model uses the UI toolkit"),
+        (graph(db_session=["sql-intel"], sql_intel=["gpui"]), "sql-intel uses the UI toolkit"),
+        (graph(db_core=["gpui"]), "db-core uses the UI toolkit"),
+        (graph(db_session=["db-postgres"]), "db-session (database module) depends on db-postgres"),
+        (graph(db_ui=["db-session"], db_session=["db-service"]), "db-ui (database module) depends on db-service"),
+        (graph(db_model=["sql-syntax"]), "db-model depends on sql-syntax"),
+        (graph(db_model=["db-session"], db_session=["sql-syntax"]), "db-model depends on sql-syntax"),
+        (graph(editor=["sql-syntax"]), "editor depends on sql-syntax"),
+        (graph(editor=["wb"], wb=["db-ui"]), "editor depends on db-ui"),
+    ]
+    for direct, what in bad_graphs:
+        got = database_violations(direct, module_layers)
+        assert any(what in g for g in got), f"expected '{what}', got {got}"
+
 
 def main():
     try:
@@ -139,27 +221,16 @@ def main():
         for p in meta["packages"]
     }
 
-    def reach(name):
-        seen, stack = set(), [name]
-        while stack:
-            for d in direct.get(stack.pop(), ()):
-                if d in direct and d not in seen:
-                    seen.add(d)
-                    stack.append(d)
-        return seen
-
-    def uses(name, dependency):
-        """`name` depends on `dependency`, directly or through workspace crates."""
-        crates = {name} | reach(name)
-        return dependency in crates or any(dependency in direct[c] for c in crates)
+    def uses_(name, dependency):
+        return uses(direct, name, dependency)
 
     for name in NO_TOOLKIT:
-        if name in direct and uses(name, TOOLKIT):
+        if name in direct and uses_(name, TOOLKIT):
             bad.append(f"{name} uses the UI toolkit ({TOOLKIT}) (ADR 0010)")
     for name in sorted(direct):
         if name != CLIENT and PROTOCOL_TYPES in direct[name]:
             bad.append(f"{name} depends on {PROTOCOL_TYPES}: protocol types stay in {CLIENT} (ADR 0010)")
-        if by_name.get(name) == "platform" and uses(name, TOOLKIT) and uses(name, CLIENT):
+        if by_name.get(name) == "platform" and uses_(name, TOOLKIT) and uses_(name, CLIENT):
             bad.append(f"{name} is a UI crate and depends on {CLIENT}: UI crates use {MODEL} (ADR 0010)")
     for name in sorted(direct):
         if name != EMULATOR_USER and EMULATOR in direct[name]:
@@ -167,26 +238,28 @@ def main():
     # Direct dependencies only: a UI crate reaches the client through the
     # debugger, which is the point.
     for name in sorted(direct):
-        if name != DEBUGGER and DAP_CLIENT in direct[name] and uses(name, TOOLKIT):
+        if name != DEBUGGER and DAP_CLIENT in direct[name] and uses_(name, TOOLKIT):
             bad.append(f"{name} uses the UI toolkit and depends on {DAP_CLIENT}: UI crates use {DEBUGGER} (ADR 0015)")
     for name in NOT_MODEL:
-        if name in direct and uses(name, MODEL):
+        if name in direct and uses_(name, MODEL):
             bad.append(f"{name} depends on {MODEL}: it has diagnostic marks of its own (ADR 0010)")
 
     for name in VCS_NO_TOOLKIT:
-        if name in direct and uses(name, TOOLKIT):
+        if name in direct and uses_(name, TOOLKIT):
             bad.append(f"{name} uses the UI toolkit ({TOOLKIT}) (ADR 0016)")
-    if VCS_MODEL in direct and uses(VCS_MODEL, VCS_BACKEND):
+    if VCS_MODEL in direct and uses_(VCS_MODEL, VCS_BACKEND):
         bad.append(f"{VCS_MODEL} depends on {VCS_BACKEND}: the model knows no backend (ADR 0016)")
     for name in sorted(direct):
         if (by_name.get(name) == "platform" and name != COMPOSER
-                and TOOLKIT in direct[name] and uses(name, VCS_BACKEND)):
+                and TOOLKIT in direct[name] and uses_(name, VCS_BACKEND)):
             bad.append(f"{name} is a UI crate and depends on {VCS_BACKEND}: UI crates use {VCS_MODEL} (ADR 0016)")
+
+    bad += database_violations(direct, by_name)
 
     if unclassified:
         print("not classified yet:", ", ".join(sorted(unclassified)))
     if bad:
-        print("layer violations (ADR 0005, 0010, 0014, 0015, 0016, 0022):")
+        print("layer violations (ADR 0005, 0010, 0014, 0015, 0016, 0021, 0022):")
         for b in bad:
             print("  " + b)
         sys.exit(1)
