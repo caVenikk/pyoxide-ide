@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use code_intel::{CodeIntel, ServerStatus};
-use gpui::App;
+use code_intel::{CodeIntel, Markup, ServerStatus};
+use gpui::{App, Task};
 use ui::IconName;
 
 use crate::completion::Parentheses;
+use crate::file_doc::FileDoc;
 
 /// The language services of a product.
 pub trait CodeIntelProvider: 'static {
@@ -66,6 +67,23 @@ pub trait CodeIntelProvider: 'static {
     /// icon. By default the file's name without its extension.
     fn doc_location(&self, path: &Path) -> Option<DocLocation> {
         crate::doc::default_location(path)
+    }
+
+    /// Whether the documentation a service sent for a symbol (`hover`) is
+    /// about a whole file, the one at `declaration` (a Python module):
+    /// then the header, the file's type and the link to its external
+    /// documentation, when the task ends (it may look things up off the UI
+    /// thread); the popup adds the file's facts. `None` keeps the
+    /// service's documentation as it is.
+    fn file_doc(
+        &self,
+        hover: &Markup,
+        declaration: &Path,
+        project_root: Option<&Path>,
+        cx: &mut App,
+    ) -> Option<Task<Option<FileDoc>>> {
+        let _ = (hover, declaration, project_root, cx);
+        None
     }
 }
 

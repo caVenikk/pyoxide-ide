@@ -36,3 +36,7 @@ name = "ParameterInfo > Editor"
 name = "Documentation > Editor"
 [context.bindings]
 "escape" = "documentation.close"
+# The documentation popup's Jump to Source and View External Documentation
+# take the shortcuts of EditSource and ExternalJavaDoc.
+"f4" = "documentation.edit-source"
+"shift-f1" = "documentation.view-external"

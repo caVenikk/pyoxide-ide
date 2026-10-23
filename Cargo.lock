@@ -1241,8 +1241,10 @@ dependencies = [
  "futures",
  "gpui",
  "name-match",
+ "project",
  "serde_json",
  "syntax",
+ "tempfile",
  "text",
  "themes",
  "ui",
@@ -7853,6 +7855,7 @@ dependencies = [
 name = "ui"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "commands",
  "gpui",
  "image",

@@ -13,19 +13,25 @@
 
 use std::ops::Range;
 
-use code_intel::{CodeAction, Markup, MarkupKind};
+use code_intel::{CodeAction, Location, Markup, MarkupKind};
 use editor::{DiagnosticMark, MarkSeverity};
 use gpui::{
-    Action, App, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText,
-    TextRun, WeakEntity, Window, div, font, prelude::FluentBuilder, px,
+    Action, App, Context, DismissEvent, Entity, FontWeight, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, TextRun, WeakEntity, Window, div,
+    font, prelude::FluentBuilder, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
+use ui::components::Tooltip;
 use ui::markdown::{self, Code, CodeLexer, Markdown};
+use ui::menu::{ContextMenu, MenuItem};
 use ui::{Icon, IconName, ThemeExt};
 
-use crate::commands::{ApplyFirstFix, ShowIntentions};
+use crate::commands::{
+    ApplyFirstFix, EditDocumentationSource, ShowIntentions, ViewExternalDocumentation,
+};
+use crate::file_doc::{ExternalLink, FileDoc, FileInfo, FileScope};
 use crate::hook::{CodeIntelProvider, DocLocation};
 use crate::view::CodeIntelView;
 
@@ -42,6 +48,31 @@ const PAD_X: f32 = 12.0;
 const PAD_Y: f32 = 8.0;
 /// A signature of one line longer than this gets one parameter per line.
 pub const SIGNATURE_WRAP: usize = 60;
+
+// The documentation of a whole file, measured on the reference (points):
+// the header row and the room around it, the room around the description,
+// a row of the file's facts (a paragraph with its spacing), the room above
+// them, the link row and the room under it.
+const FILE_TITLE_TOP: f32 = 13.0;
+/// Text from the popup's border (the HTML's padding of 14 and 2 and the
+/// popup's insets); the lines between sections reach 2 further out.
+const FILE_PAD_X: f32 = 19.0;
+const FILE_LINE_OUTSET: f32 = 2.0;
+const FILE_TITLE_HEIGHT: f32 = 21.0;
+const FILE_TITLE_BOTTOM: f32 = 7.0;
+const FILE_BODY_TOP: f32 = 12.0;
+const FILE_BODY_BOTTOM: f32 = 8.0;
+const FILE_ROWS_TOP: f32 = 6.0;
+const FILE_ROW: f32 = 31.0;
+const LINK_ROW: f32 = 27.0;
+const LINK_BOTTOM: f32 = 9.0;
+/// The corner toolbar (Jump to Source and the more menu) at the bottom
+/// right of the popup (`DocumentationPopupUI`: toolbar buttons with an
+/// empty border of 11 below and 4 right, 2 from the popup's edges).
+const TOOLBAR_BUTTON: f32 = 22.0;
+const TOOLBAR_GAP: f32 = 4.0;
+const TOOLBAR_RIGHT: f32 = 6.0;
+const TOOLBAR_BOTTOM: f32 = 12.0;
 
 /// What the popup shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +175,31 @@ pub struct Documentation {
     pub definition: Option<Code>,
     /// The description.
     pub body: Markdown,
+    /// The header of a symbol that is a whole file, in place of the
+    /// declaration and the location (`Module contextlib`).
+    pub title: Option<DocTitle>,
+    /// The facts of that file.
+    pub file_info: Option<FileInfo>,
+    /// The link to the external documentation at the bottom.
+    pub external: Option<ExternalLink>,
+    /// Where the symbol is declared (Jump to Source).
+    pub source: Option<Location>,
+}
+
+/// The header of the documentation of a whole file: its kind and, bold,
+/// its name, in the editor font (`PyDocumentationBuilder`: `Module {0}`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocTitle {
+    pub kind: String,
+    pub name: String,
+}
+
+/// What the documentation of a whole file adds: the product's answer and
+/// the file's facts, read off the UI thread.
+#[derive(Debug, Clone)]
+pub struct FileFacts {
+    pub doc: FileDoc,
+    pub info: Option<FileInfo>,
 }
 
 impl Documentation {
@@ -182,7 +238,30 @@ impl Documentation {
             location,
             definition,
             body,
+            title: None,
+            file_info: None,
+            external: None,
+            source: None,
         })
+    }
+
+    /// The documentation of a symbol that is a whole file: the product's
+    /// header in place of the service's declaration and of the location,
+    /// the file's facts and the link to its external documentation
+    /// (`DocumentationManager.generateFileDoc`, `getLink`).
+    pub fn set_file(&mut self, facts: FileFacts) {
+        let FileFacts { doc, info } = facts;
+        self.external = doc
+            .external_url
+            .as_deref()
+            .map(|url| ExternalLink::new(&doc.name, url));
+        self.title = Some(DocTitle {
+            kind: doc.kind,
+            name: doc.name,
+        });
+        self.definition = None;
+        self.location = None;
+        self.file_info = info;
     }
 
     fn to_json(&self) -> Json {
@@ -190,7 +269,11 @@ impl Documentation {
             "markdown": self.markdown,
             "location": self.location.as_ref().map(|l| l.name.clone()),
             "definition": self.definition.as_ref().map(|d| d.text.clone()),
+            "title": self.title.as_ref().map(|t| format!("{} {}", t.kind, t.name)),
             "blocks": self.body.to_json(),
+            "file_info": self.file_info.as_ref().map(FileInfo::to_json),
+            "external": self.external.as_ref().map(|l| json!({"text": l.text, "url": l.url})),
+            "source": self.source.as_ref().map(|l| l.path.display().to_string()),
         })
     }
 }
@@ -366,6 +449,16 @@ impl DocContent {
             let (text, code) = doc.body.line_counts(per_line);
             height += text_line * text as f32 + code_line * code as f32;
             height += px(6.0) * doc.body.blocks.len() as f32;
+            if doc.title.is_some() {
+                height += px(FILE_TITLE_HEIGHT + FILE_TITLE_TOP + FILE_TITLE_BOTTOM);
+                height += px(FILE_BODY_TOP + FILE_BODY_BOTTOM);
+            }
+            if let Some(info) = &doc.file_info {
+                height += px(FILE_ROW * info.rows().len() as f32 + FILE_ROWS_TOP + 1.0);
+            }
+            if doc.external.is_some() || doc.title.is_some() {
+                height += px(LINK_ROW + LINK_BOTTOM);
+            }
         }
         height.min(px(MAX_HEIGHT + 2.0))
     }
@@ -424,6 +517,9 @@ pub struct DocPopup {
     owner: WeakEntity<CodeIntelView>,
     content: Option<DocContent>,
     scroll: ScrollHandle,
+    /// The more menu of the corner toolbar while it is open, where it
+    /// opened.
+    menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
 }
 
 impl DocPopup {
@@ -432,17 +528,51 @@ impl DocPopup {
             owner,
             content: None,
             scroll: ScrollHandle::new(),
+            menu: None,
         }
     }
 
     pub fn set(&mut self, content: DocContent, cx: &mut Context<Self>) {
         self.content = Some(content);
         self.scroll = ScrollHandle::new();
+        self.menu = None;
         cx.notify();
     }
 
     pub fn content(&self) -> Option<&DocContent> {
         self.content.as_ref()
+    }
+
+    /// The more menu of the corner toolbar is open (the popup stays while
+    /// it is).
+    pub fn menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
+
+    /// Opens the more menu of the corner toolbar at `position` (window
+    /// coordinates): what the reference's `MoreActionGroup` holds that
+    /// Pyoxide has (View External Documentation). The chosen command goes
+    /// to the editor, which has the focus back by then.
+    fn open_menu(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let external = self
+            .content
+            .as_ref()
+            .and_then(|c| c.documentation.as_ref())
+            .is_some_and(|d| d.external.is_some());
+        let items = vec![
+            MenuItem::action("View External Documentation", ViewExternalDocumentation)
+                .enabled(external),
+        ];
+        let menu = ContextMenu::build(items, window, cx);
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.menu = None;
+            cx.notify();
+            if let Some(owner) = this.owner.upgrade() {
+                owner.update(cx, |v, cx| v.doc_menu_closed(cx));
+            }
+        });
+        self.menu = Some((menu, position, subscription));
+        cx.notify();
     }
 
     fn render_problem(&self, index: usize, problem: &Problem, cx: &App) -> gpui::AnyElement {
@@ -567,8 +697,193 @@ impl DocPopup {
             .into_any_element()
     }
 
+    /// The documentation of a whole file: the header, a line, the
+    /// description, a line, the file's facts, the link to the external
+    /// documentation (a line goes between sections, as the reference's
+    /// `hr` between definition and content and between contents).
+    fn render_file_documentation(
+        &self,
+        doc: &Documentation,
+        title: &DocTitle,
+        cx: &App,
+    ) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let text = theme.color(UiRole::Text);
+        let muted = theme.color(UiRole::TextMuted);
+        let line = || {
+            div()
+                .mx(px(FILE_PAD_X - FILE_LINE_OUTSET))
+                .h(px(1.0))
+                .bg(theme.color(UiRole::Divider))
+        };
+        let mono = font(theme.mono_family());
+        let title_text = format!("{} {}", title.kind, title.name);
+        let kind_len = title.kind.len() + 1;
+        let run = |len: usize, weight: FontWeight| TextRun {
+            len,
+            font: gpui::Font {
+                weight,
+                ..mono.clone()
+            },
+            color: text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let runs = vec![
+            run(kind_len, FontWeight::NORMAL),
+            run(title_text.len() - kind_len, FontWeight::BOLD),
+        ];
+        let mut column = div()
+            .debug_selector(|| "doc-documentation".into())
+            .w(px(file_doc_width(doc)))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .debug_selector(|| "doc-title".into())
+                    .px(px(FILE_PAD_X))
+                    .pt(px(FILE_TITLE_TOP))
+                    .pb(px(FILE_TITLE_BOTTOM))
+                    .h(px(FILE_TITLE_TOP + FILE_TITLE_HEIGHT + FILE_TITLE_BOTTOM))
+                    .flex()
+                    .items_center()
+                    .text_size(theme.ui_size())
+                    .child(StyledText::new(SharedString::from(title_text)).with_runs(runs)),
+            );
+        if !doc.body.is_empty() {
+            column = column.child(line()).child(
+                div()
+                    .debug_selector(|| "doc-body".into())
+                    .px(px(FILE_PAD_X))
+                    .pt(px(FILE_BODY_TOP))
+                    .pb(px(FILE_BODY_BOTTOM))
+                    .child(doc.body.render("doc-link", cx)),
+            );
+        }
+        if let Some(info) = &doc.file_info {
+            let scope_bg = theme.color(UiRole::NonProjectFile);
+            let rows = info.rows().into_iter().map(|(label, value)| {
+                let is_scope = label == "Scope:" && info.scope == Some(FileScope::NonProject);
+                div()
+                    .h(px(FILE_ROW))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(div().text_color(muted).child(label))
+                    // The reference's non-breaking space.
+                    .child(div().w(px(4.0)))
+                    .child(div().when(is_scope, |d| d.bg(scope_bg)).child(value))
+            });
+            column = column.child(line()).child(
+                div()
+                    .debug_selector(|| "doc-file-info".into())
+                    .px(px(FILE_PAD_X))
+                    .pt(px(FILE_ROWS_TOP))
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            );
+        }
+        // The link row; the corner toolbar is drawn over its right end.
+        let link = doc.external.as_ref().map(|link| {
+            let url = link.url.clone();
+            div()
+                .id("doc-external-link")
+                .debug_selector(|| "doc-external-link".into())
+                .flex()
+                .flex_row()
+                .items_center()
+                .cursor_pointer()
+                .text_color(theme.color(UiRole::TextLink))
+                .child(link.text.clone())
+                .child(Icon::new(IconName::EXTERNAL_LINK).size(px(16.0)))
+                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                    cx.stop_propagation();
+                    markdown::open_link(&url, cx);
+                })
+        });
+        column
+            .child(
+                div()
+                    .h(px(LINK_ROW))
+                    .mb(px(LINK_BOTTOM))
+                    .pl(px(FILE_PAD_X))
+                    .pr(px(2.0 * TOOLBAR_BUTTON + TOOLBAR_GAP + TOOLBAR_RIGHT))
+                    .flex()
+                    .items_center()
+                    .children(link),
+            )
+            .into_any_element()
+    }
+
+    /// The corner toolbar of a popup with documentation, at its bottom
+    /// right: Jump to Source (when the declaration is known) and the more
+    /// menu (`DocumentationPopupUI`).
+    fn render_toolbar(
+        &self,
+        doc: &Documentation,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> gpui::AnyElement {
+        let shortcut = |action: &dyn Action| {
+            window
+                .highest_precedence_binding_for_action(action)
+                .map(|b| SharedString::from(ui::keys::binding_text(&b)))
+        };
+        let size = px(TOOLBAR_BUTTON);
+        let edit = doc.source.is_some().then(|| {
+            ui::components::icon_button(
+                "doc-edit-source",
+                IconName::EDIT,
+                size,
+                px(16.0),
+                false,
+                cx,
+            )
+            .debug_selector(|| "doc-edit-source".into())
+            .tooltip(Tooltip::text(
+                "Jump to Source",
+                shortcut(&EditDocumentationSource),
+            ))
+            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                cx.stop_propagation();
+                window.dispatch_action(EditDocumentationSource.boxed_clone(), cx);
+            })
+        });
+        let more = ui::components::icon_button(
+            "doc-more",
+            IconName::MORE_VERTICAL,
+            size,
+            px(16.0),
+            self.menu.is_some(),
+            cx,
+        )
+        .debug_selector(|| "doc-more".into())
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.open_menu(e.position, window, cx);
+            }),
+        );
+        div()
+            .absolute()
+            .right(px(TOOLBAR_RIGHT))
+            .bottom(px(TOOLBAR_BOTTOM))
+            .flex()
+            .flex_row()
+            .gap(px(TOOLBAR_GAP))
+            .children(edit)
+            .child(more)
+            .into_any_element()
+    }
+
     fn render_documentation(&self, doc: &Documentation, cx: &App) -> gpui::AnyElement {
         let theme = cx.theme();
+        if let Some(title) = &doc.title {
+            return self.render_file_documentation(doc, title, cx);
+        }
         let header = doc.location.as_ref().map(|location| {
             div()
                 .debug_selector(|| "doc-location".into())
@@ -634,9 +949,21 @@ impl Render for DocPopup {
             }
             sections.push(self.render_documentation(doc, cx));
         }
+        // The corner toolbar sits on the link row, which documentation of
+        // a whole file has.
+        let toolbar = content
+            .documentation
+            .as_ref()
+            .filter(|d| d.title.is_some())
+            .map(|doc| self.render_toolbar(doc, window, cx));
+        let menu = self
+            .menu
+            .as_ref()
+            .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
         let owner = self.owner.clone();
         div()
             .id("documentation-popup")
+            .relative()
             .debug_selector(|| "documentation-popup".into())
             .max_w(px(MAX_WIDTH))
             .rounded(px(6.0))
@@ -672,8 +999,36 @@ impl Render for DocPopup {
                     .when(sections.is_empty(), |d| d.p(px(PAD_Y)))
                     .children(sections),
             )
+            .children(toolbar)
+            .children(menu)
             .into_any_element()
     }
+}
+
+/// The width of the documentation of a whole file, as the reference sizes
+/// its documentation pane (`DocumentationEditorPane.getPreferredContentWidth`):
+/// 300 for up to 200 chars of text, growing to 500 at 1000 chars; plus the
+/// popup's insets (13, measured on the reference).
+pub fn file_doc_width(doc: &Documentation) -> f32 {
+    let mut chars = doc.markdown.chars().count();
+    if let Some(info) = &doc.file_info {
+        chars += info
+            .rows()
+            .iter()
+            .map(|(l, v)| l.chars().count() + v.chars().count() + 1)
+            .sum::<usize>();
+    }
+    if let Some(link) = &doc.external {
+        chars += link.text.chars().count();
+    }
+    let pane = if chars < 200 {
+        300.0
+    } else if chars < 1000 {
+        300.0 + (chars - 200) as f32 * 200.0 / 800.0
+    } else {
+        500.0
+    };
+    (pane + 13.0).min(MAX_WIDTH)
 }
 
 /// The header of documentation by default: the declaring file's name

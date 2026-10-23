@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Weak};
 
-use code_intel::{CodeIntel, ServerStatus};
+use code_intel::{CodeIntel, Markup, ServerStatus};
 use code_intel_ui::DocLocation;
 use code_intel_ui::completion::Parentheses;
+use code_intel_ui::file_doc::FileDoc;
 use code_intel_ui::syntax::Lexer;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, Global, Task};
 use py_lsp::lookup::SearchPaths;
@@ -265,6 +266,30 @@ impl CodeIntelProvider for PythonCodeIntel {
             }),
             None => code_intel_ui::doc::default_location(path),
         }
+    }
+
+    /// A hover about a module: the reference's documentation of a module
+    /// (`Module contextlib`, the file's facts, the docs.python.org link of
+    /// a standard library module for the project interpreter's version).
+    fn file_doc(
+        &self,
+        hover: &Markup,
+        declaration: &Path,
+        project_root: Option<&Path>,
+        cx: &mut App,
+    ) -> Option<Task<Option<FileDoc>>> {
+        let hovered = crate::module_doc::hovered_module(hover)?;
+        let roots = self.roots.borrow().clone();
+        let interpreter = project_root.map(|root| crate::interpreter::for_project(root, cx));
+        let path = declaration.to_owned();
+        Some(cx.background_spawn(async move {
+            let version = match interpreter {
+                Some(task) => task.await.map(|selected| Some(selected.version)),
+                None => None,
+            };
+            let name = crate::module_doc::module_name(&path, &roots, hovered);
+            Some(crate::module_doc::module_doc(&path, name, version))
+        }))
     }
 }
 

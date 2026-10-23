@@ -14,7 +14,8 @@
 //! - [`completion`]: the completion popup, opened by Basic Completion or
 //!   by typing.
 //! - [`doc`]: the documentation popup (quick documentation, the popup
-//!   over the text under the mouse, Error Description).
+//!   over the text under the mouse, Error Description); [`file_doc`]: the
+//!   documentation of a symbol that is a whole file (a module).
 //! - [`signature`]: parameter info.
 //! - [`navigation`]: Go to Declaration or Usages, Show Usages, and the
 //!   list popups ([`list_popup`]).
@@ -34,6 +35,7 @@ pub mod commands;
 pub mod completion;
 pub mod doc;
 pub mod document;
+pub mod file_doc;
 mod format;
 mod hook;
 mod hover;

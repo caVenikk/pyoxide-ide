@@ -19,6 +19,7 @@ use code_intel::{
     WorkspaceEdit,
 };
 use code_intel_ui::DocLocation;
+use code_intel_ui::file_doc::FileDoc;
 use code_intel_ui::syntax::{LexSpan, Lexer};
 use editor::{Editor, EditorEvent};
 use gpui::{
@@ -66,7 +67,29 @@ impl CodeIntelProvider for Provider {
             icon: ui::icons::IconName::MODULE,
         })
     }
+
+    /// `<module 'json'>` is a module with a page on docs.python.org.
+    fn file_doc(
+        &self,
+        hover: &Markup,
+        _: &Path,
+        _: Option<&Path>,
+        cx: &mut App,
+    ) -> Option<gpui::Task<Option<FileDoc>>> {
+        hover.text.contains("<module 'json'>").then(|| {
+            cx.background_spawn(async {
+                Some(FileDoc {
+                    kind: "Module".into(),
+                    name: "json".into(),
+                    file_type: "Python".into(),
+                    external_url: Some(JSON_URL.into()),
+                })
+            })
+        })
+    }
 }
+
+const JSON_URL: &str = "https://docs.python.org/3.13/library/json.html";
 
 struct H<'a> {
     cx: &'a mut TestAppContext,
@@ -333,6 +356,80 @@ fn quick_documentation_at_the_caret(cx: &mut TestAppContext) {
     h.caret_after("import");
     h.invoke("code.quick-doc", json!(null));
     assert!(h.popup().is_null());
+}
+
+#[gpui::test]
+fn documentation_of_a_module(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "import json\n")]);
+    // The module's file is outside the project.
+    let stdlib = tempfile::tempdir().unwrap();
+    let json_py = native_path::canonicalize(stdlib.path())
+        .unwrap()
+        .join("json.py");
+    std::fs::write(&json_py, "\"\"\"JSON encoder and decoder.\"\"\"\n").unwrap();
+    h.open("app.py", "import js");
+    h.fake.on_hover(|_, _| {
+        Ok(Some(Hover {
+            contents: Markup::markdown(
+                "```xml\n<module 'json'>\n```\n---\nJSON encoder and decoder.",
+            ),
+            range: Some(Point::new(0, 7)..Point::new(0, 11)),
+        }))
+    });
+    let target = json_py.clone();
+    h.fake.on_definition(move |_, _| {
+        Ok(vec![Location {
+            path: target.clone(),
+            range: Point::new(0, 0)..Point::new(0, 0),
+        }])
+    });
+    h.invoke("code.quick-doc", json!(null));
+
+    // The product's header in place of the server's declaration, the
+    // docstring, the file's facts and the link to the web page.
+    let documentation = h.popup()["documentation"].clone();
+    assert_eq!(documentation["title"], "Module json");
+    assert!(documentation["definition"].is_null());
+    assert!(documentation["location"].is_null());
+    assert_eq!(
+        documentation["blocks"][0]["text"],
+        "JSON encoder and decoder."
+    );
+    let info = &documentation["file_info"];
+    assert_eq!(info["scope"], "Non-Project Files");
+    assert_eq!(info["size"], "32 B");
+    assert_eq!(info["type"], "Python");
+    assert!(info["modified"].is_string());
+    assert_eq!(
+        documentation["external"]["text"],
+        "`json` on docs.python.org"
+    );
+    for selector in [
+        "doc-title",
+        "doc-file-info",
+        "doc-external-link",
+        "doc-edit-source",
+        "doc-more",
+    ] {
+        assert!(h.bounds(selector).is_some(), "{selector} is drawn");
+    }
+
+    // The link opens the page.
+    h.click("doc-external-link");
+    assert_eq!(h.cx.opened_url().as_deref(), Some(JSON_URL));
+
+    // The more menu keeps the popup open.
+    h.invoke("code.quick-doc", json!(null));
+    h.click("doc-more");
+    assert!(!h.popup().is_null());
+    h.press("escape");
+
+    // Jump to Source opens the module's file and closes the popup.
+    h.invoke("code.quick-doc", json!(null));
+    assert!(!h.popup().is_null());
+    h.click("doc-edit-source");
+    assert!(h.popup().is_null());
+    assert_eq!(h.text(), "\"\"\"JSON encoder and decoder.\"\"\"\n");
 }
 
 /// A file with an unused import (with a fix that removes it, and a second

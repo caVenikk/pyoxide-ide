@@ -7,6 +7,7 @@
 mod debug;
 pub mod debugger_settings;
 pub mod interpreter;
+pub mod module_doc;
 mod new_items;
 pub mod run;
 pub mod services;

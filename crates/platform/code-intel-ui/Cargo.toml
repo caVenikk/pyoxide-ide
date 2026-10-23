@@ -13,6 +13,7 @@ flume.workspace = true
 futures.workspace = true
 gpui.workspace = true
 name-match.workspace = true
+project.workspace = true
 serde_json.workspace = true
 syntax.workspace = true
 text.workspace = true
@@ -22,6 +23,7 @@ ui.workspace = true
 [dev-dependencies]
 code-intel = { workspace = true, features = ["fake"] }
 gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"
 
 # Metal shaders are compiled at start-up on machines without Xcode
 # (ADR 0007).
