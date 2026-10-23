@@ -27,10 +27,11 @@ use editor::decorations::layer;
 use editor::{Decoration, DecorationId, Editor, EditorEvent};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EntityId, Modifiers, MouseButton,
-    ParentElement as _, Styled as _, Subscription, Task, Window, anchored, deferred, div, point,
-    prelude::*, px,
+    ParentElement as _, Styled as _, Subscription, Task, Window, anchored, div, point, prelude::*,
+    px,
 };
 use themes::UiRole;
+use ui::deferred;
 use ui::theme::ThemeExt as _;
 
 use crate::breakpoints::presentation;

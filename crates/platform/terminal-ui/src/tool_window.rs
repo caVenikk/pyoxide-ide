@@ -29,12 +29,13 @@ use gpui::{
     AnyElement, App, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
     MouseDownEvent, ParentElement as _, PathBuilder, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, anchored, canvas, deferred,
-    div, point, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, anchored, canvas, div,
+    point, prelude::FluentBuilder as _, px,
 };
 use serde_json::{Value, json};
 use themes::UiRole;
 use ui::components::{HEADER_TAB_HEIGHT, Tooltip, header_tab, icon_button};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;

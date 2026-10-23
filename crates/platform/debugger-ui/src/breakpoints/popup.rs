@@ -14,11 +14,12 @@ use editor::Editor;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable as _,
     FontWeight, IntoElement, ParentElement as _, PathBuilder, Render, SharedString, Styled as _,
-    Subscription, Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    Subscription, Window, anchored, canvas, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;
 use ui::components::checkbox;
+use ui::deferred;
 use ui::form::{CHECK_GAP, MenuPopup, field_button, radio};
 use ui::icons::IconName;
 use ui::menu::MenuItem;

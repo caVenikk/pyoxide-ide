@@ -9,12 +9,13 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    IntoElement, MouseButton, Pixels, Render, SharedString, Subscription, Window, anchored,
-    deferred, div, point, prelude::*, px,
+    IntoElement, MouseButton, Pixels, Render, SharedString, Subscription, Window, anchored, div,
+    point, prelude::*, px,
 };
 use text::{Buffer, Selection, SelectionSet};
 use themes::{Metric, UiRole};
 use ui::components::{input_frame, popup_shadow};
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 

@@ -31,10 +31,11 @@ use editor::{DecorationId, Editor};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EntityId, FocusHandle, Focusable as _,
     InteractiveElement, IntoElement, ParentElement as _, Pixels, Point, Styled as _, Task, Window,
-    anchored, deferred, div, point, prelude::*, px,
+    anchored, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
+use ui::deferred;
 use ui::icons::Icon;
 use ui::pointer::PointerExt as _;
 use ui::theme::ThemeExt as _;

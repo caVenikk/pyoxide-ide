@@ -21,7 +21,7 @@ use std::sync::Arc;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, Focusable, Global,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Task, Window, deferred, div, prelude::*, px, relative,
+    Task, Window, div, prelude::*, px, relative,
 };
 use search::{
     CancelToken, Cancelled, Matcher, Query, QueryError, ReplaceError, SearchOptions, match_lines,
@@ -33,6 +33,7 @@ use themes::UiRole;
 use ui::components::{
     SMALL_BUTTON, Tooltip, input_frame, small_icon_button, status_text, text_button, toggle_button,
 };
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 

@@ -39,12 +39,13 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::deferred;
 use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity,
     FocusHandle, FontWeight, Global, InteractiveElement, IntoElement, MouseButton, ParentElement,
     Pixels, Point, Render, SharedString, Size, StatefulInteractiveElement as _, Styled,
     Subscription, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, anchored, canvas, deferred, div, point, px,
+    WindowKind, WindowOptions, anchored, canvas, div, point, px,
 };
 use themes::UiRole;
 

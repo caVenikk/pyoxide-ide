@@ -8,11 +8,11 @@
 use editor::Editor;
 use gpui::{
     AnyElement, AnyView, App, Context, Corner, Entity, EntityId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Styled, Window, anchored, deferred, div, point,
-    px,
+    ParentElement, Pixels, Render, SharedString, Styled, Window, anchored, div, point, px,
 };
 use themes::{Metric, UiRole};
 use ui::ThemeExt;
+use ui::deferred;
 
 /// Where a popup goes relative to the line of its anchor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

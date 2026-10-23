@@ -7,12 +7,13 @@
 use gpui::{
     AnyElement, ClickEvent, Context, CursorStyle, FontWeight, HighlightStyle, HitboxBehavior,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
-    SharedString, StyledText, Window, anchored, canvas, deferred, div, point, px, uniform_list,
+    SharedString, StyledText, Window, anchored, canvas, div, point, px, uniform_list,
 };
 use themes::{Metric, UiRole};
 use ui::components::{
     SMALL_BUTTON, Tooltip, checkbox, input_frame, small_icon_button, text_button, toggle_button,
 };
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::theme::ThemeExt;
 

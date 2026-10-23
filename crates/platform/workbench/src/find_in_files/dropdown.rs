@@ -4,10 +4,11 @@
 
 use gpui::{
     AnyElement, ClickEvent, Context, Focusable as _, InteractiveElement, IntoElement,
-    ParentElement, Window, deferred, div, prelude::*, px,
+    ParentElement, Window, div, prelude::*, px,
 };
 use serde_json::json;
 use themes::{Metric, UiRole};
+use ui::deferred;
 use ui::theme::ThemeExt;
 
 use super::{FindInFiles, NamedScope, ScopeKind, settings};

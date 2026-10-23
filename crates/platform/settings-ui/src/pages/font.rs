@@ -24,14 +24,15 @@ use editor::{Editor, EditorEvent, Highlighter, InlineStyle, Span};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, ElementId, Entity, FocusHandle,
     FontWeight, Global, IntoElement, KeyDownEvent, Pixels, Render, ScrollStrategy, SharedString,
-    Subscription, Task, TextSystem, UniformListScrollHandle, Window, anchored, canvas, deferred,
-    div, prelude::*, px, uniform_list,
+    Subscription, Task, TextSystem, UniformListScrollHandle, Window, anchored, canvas, div,
+    prelude::*, px, uniform_list,
 };
 use serde_json::{Value as Json, json};
 use settings::{EditorFontSettings, Section as _};
 use text::{AppliedEdit, Buffer};
 use themes::UiRole;
 use ui::components::Tooltip;
+use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::pointer::PointerExt as _;
 use ui::theme::{FontChoice, Theme, ThemeExt};

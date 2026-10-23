@@ -9,6 +9,7 @@
 pub mod avatar;
 pub mod command;
 pub mod components;
+pub mod deferred;
 pub mod dialog_window;
 pub mod fonts;
 pub mod form;
@@ -22,6 +23,7 @@ pub mod pointer;
 pub mod theme;
 pub mod tree_guides;
 
+pub use deferred::{Deferred, deferred};
 pub use icons::{Icon, IconName};
 pub use theme::{Theme, ThemeExt};
 

@@ -27,10 +27,11 @@ use std::time::Duration;
 use gpui::{
     AnyElement, App, Bounds, Context, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Point, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Task, TextRun, Window, anchored, deferred, div, point, px, size,
+    Task, TextRun, Window, anchored, div, point, px, size,
 };
 use project::{Node, NodeId};
 use themes::{Metric, UiRole};
+use ui::deferred;
 use ui::theme::ThemeExt;
 
 use super::{ICON_X, ProjectPanel, TEXT_X, TREE_LEFT};
