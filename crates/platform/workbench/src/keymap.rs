@@ -122,8 +122,10 @@ struct File {
 #[serde(deny_unknown_fields)]
 struct Section {
     name: Option<String>,
+    /// With their places in the file, to keep its order: a command's
+    /// first binding is the one shown for it.
     #[serde(default)]
-    bindings: BTreeMap<String, Target>,
+    bindings: BTreeMap<String, toml::Spanned<Target>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,8 +157,10 @@ impl Keymap {
         let file: File = toml::from_str(text).map_err(|e| e.to_string())?;
         let mut bindings = Vec::new();
         for section in file.contexts {
-            for (keys, target) in section.bindings {
-                let (command, args) = match target {
+            let mut entries: Vec<_> = section.bindings.into_iter().collect();
+            entries.sort_by_key(|(_, target)| target.span().start);
+            for (keys, target) in entries {
+                let (command, args) = match target.into_inner() {
                     Target::Command(command) => (command, None),
                     Target::WithArgs { command, args } => {
                         let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
@@ -368,6 +372,24 @@ name = "Editor"
         assert_eq!(select.context.as_deref(), Some("Editor"));
         assert_eq!(keymap.keys_for("editor.undo"), Some("cmd-z"));
         assert!(Keymap::parse("[[context]]\nnope = 1\n").is_err());
+    }
+
+    #[test]
+    fn bindings_keep_the_order_of_the_file() {
+        let keymap = Keymap::parse(
+            r#"
+[[context]]
+name = "Editor"
+[context.bindings]
+"cmd-shift-z" = "editor.redo"
+"alt-shift-backspace" = "editor.redo"
+"cmd-c" = { command = "editor.copy", args = {} }
+"#,
+        )
+        .unwrap();
+        let keys: Vec<&str> = keymap.bindings.iter().map(|b| b.keys.as_str()).collect();
+        assert_eq!(keys, ["cmd-shift-z", "alt-shift-backspace", "cmd-c"]);
+        assert_eq!(keymap.keys_for("editor.redo"), Some("cmd-shift-z"));
     }
 
     #[test]

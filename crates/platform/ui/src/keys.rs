@@ -103,12 +103,18 @@ pub fn binding_text(binding: &KeyBinding) -> String {
     text.join(" ")
 }
 
-/// The shortcut of `action` that wins where `focus` is (as if it had the
-/// focus), as text; `None` when the action has no binding there.
+/// The shortcut of `action` where `focus` is (as if it had the focus), as
+/// text; `None` when the action has no binding there. Of the bindings of
+/// the key context that wins, the first one: the one a keymap lists first
+/// is shown, as the reference shows an action's first shortcut (GPUI's
+/// winner is the binding added last).
 pub fn shortcut_in(action: &dyn Action, focus: &FocusHandle, window: &Window) -> Option<String> {
-    window
-        .highest_precedence_binding_for_action_in(action, focus)
-        .map(|b| binding_text(&b))
+    let winner = window.highest_precedence_binding_for_action_in(action, focus)?;
+    let first = window
+        .bindings_for_action_in(action, focus)
+        .into_iter()
+        .find(|b| b.predicate() == winner.predicate());
+    Some(binding_text(first.as_ref().unwrap_or(&winner)))
 }
 
 /// [`shortcut_in`] for a view that draws the shortcut while it renders.
