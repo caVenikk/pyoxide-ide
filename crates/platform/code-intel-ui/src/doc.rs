@@ -26,6 +26,7 @@ use themes::{TextRole, UiRole};
 use ui::components::Tooltip;
 use ui::markdown::{self, Code, CodeLexer, Markdown};
 use ui::menu::{ContextMenu, MenuItem};
+use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName, ThemeExt};
 
 use crate::commands::{
@@ -794,7 +795,8 @@ impl DocPopup {
                 .flex()
                 .flex_row()
                 .items_center()
-                .cursor_pointer()
+                .relative()
+                .pointing_hand()
                 .text_color(theme.color(UiRole::TextLink))
                 .child(link.text.clone())
                 .child(Icon::new(IconName::EXTERNAL_LINK).size(px(16.0)))
