@@ -988,6 +988,55 @@ mod tests {
         );
     }
 
+    /// An editor with the popup over it, as the workbench draws them.
+    struct Host {
+        main: Entity<Editor>,
+        popup: Entity<MarkerPopup>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let popup = render_popup(&self.popup, |_, _| {}, window, cx).map(|(p, _)| p);
+            div().size_full().child(self.main.clone()).children(popup)
+        }
+    }
+
+    /// Typing into the old text shows the read-only hint, a deferred
+    /// balloon inside the deferred popup: GPUI aborted the process there.
+    #[gpui::test]
+    fn typing_into_the_old_text_shows_the_read_only_hint(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| ui::theme::init(cx, themes::ThemeKind::Dark));
+        let range = Range::new(0, 1, 0, 1);
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            let main = editor::new_editor("first = 10\nkeep\n", window, cx);
+            let text = popup_text("first = 1\nkeep\n", "first = 10", &range, None);
+            let popup =
+                cx.new(|cx| MarkerPopup::new(main.clone(), range, 0, text, [true; 5], window, cx));
+            Host { main, popup }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            for _ in 0..3 {
+                cx.run_until_parked();
+                cx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear()
+                });
+            }
+        };
+        // The editor's first frame places the popup.
+        draw(cx);
+        let view = host.read_with(cx, |h, cx| h.popup.read(cx).view().cloned());
+        let view = view.expect("old text");
+        cx.update(|window, cx| {
+            window.focus(&view.focus_handle(cx));
+            window.dispatch_action(Box::new(editor::commands::Type { text: "x".into() }), cx);
+        });
+        draw(cx);
+        let hint = view.read_with(cx, |e, _| e.read_only_hint());
+        assert_eq!(hint, Some(editor::READ_ONLY_HINT));
+        assert_eq!(view.read_with(cx, |e, _| e.text()), "first = 1");
+    }
+
     #[test]
     fn mixing_takes_the_share_of_the_background() {
         let fg: Hsla = Rgba {
