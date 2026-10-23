@@ -3,11 +3,13 @@
 //! Every name is passed as a bound parameter. Overloaded functions share one
 //! name: `objects` lists each overload, `source` returns all of them.
 
+mod load;
+
 use async_trait::async_trait;
 
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, ObjectInfo, ObjectKind,
-    SchemaInfo, fetch_all, opt_text, text, wants,
+    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
+    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
 };
 use crate::{Connection, Result, Value};
 
@@ -200,6 +202,7 @@ impl Introspector for PostgresIntrospector<'_> {
                 name: text(&r[0]),
                 is_system: flag(&r[1]),
                 is_current: flag(&r[2]),
+                ..SchemaInfo::default()
             })
             .collect())
     }
@@ -213,6 +216,7 @@ impl Introspector for PostgresIntrospector<'_> {
             kind,
             parent,
             comment,
+            ..ObjectInfo::default()
         };
 
         let wants_relations = [
@@ -289,6 +293,7 @@ impl Introspector for PostgresIntrospector<'_> {
                     default,
                     auto_increment: identity || serial,
                     comment: opt_text(&r[6]),
+                    ..ColumnInfo::default()
                 }
             })
             .collect())
@@ -303,6 +308,7 @@ impl Introspector for PostgresIntrospector<'_> {
                 unique: flag(&r[1]),
                 columns: text_list(&r[3]),
                 method: opt_text(&r[2]),
+                ..IndexInfo::default()
             })
             .collect())
     }
@@ -330,6 +336,7 @@ impl Introspector for PostgresIntrospector<'_> {
                     .then(|| on_delete_action(&text(&r[6])).map(str::to_owned))
                     .flatten(),
                 check: opt_text(&r[7]),
+                ..ConstraintInfo::default()
             });
         }
         Ok(out)
@@ -369,6 +376,10 @@ impl Introspector for PostgresIntrospector<'_> {
             }
             _ => Ok(None),
         }
+    }
+
+    async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
+        load::load(self, scope, level).await
     }
 }
 

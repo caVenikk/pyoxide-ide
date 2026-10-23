@@ -34,4 +34,9 @@ db_testkit::conformance_tests! {
     transactions => Expect::Run;
     read_only => Expect::Run;
     error_kinds => Expect::Run;
+    bulk_load => Expect::Run;
+    load_query_count => Expect::Run;
+    savepoint_round_trip => Expect::Run;
+    cursor_closed_by_next_statement => Expect::Run;
+    cancel_while_paging => Expect::Run;
 }
