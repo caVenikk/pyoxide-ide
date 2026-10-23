@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"SQL code style settings for the formatter, shared and per dialect",sql,should,yes,no,Pro; ADR 0022

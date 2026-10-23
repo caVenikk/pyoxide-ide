@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"SQL highlighting by dialect: keywords, literals, tables, columns, aliases",sql,must,yes,no,"ADR 0022; own lexer and parser, no tree-sitter grammar"

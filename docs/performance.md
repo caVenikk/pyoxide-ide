@@ -17,6 +17,11 @@ projects and machines (macOS and Windows) and then enforced in CI.
 | Editor typing while a terminal prints without pause | p99 within 2 ms of typing without it; the UI thread never waits for the terminal's lock |
 | Terminal output: `cat` of 64 MiB in the Terminal | >= 50 MiB/s, at most ten repaints a second while output floods |
 | Terminal scrolling through the history | no frame gap over 1.5x the median |
+| SQL (ADR 0022): lex and colour a 5000-line script / re-lex after a keystroke | <= 5 ms off the UI thread / <= 0.5 ms |
+| SQL: error-tolerant parse of a 5000-line script / re-parse of the edited statement | <= 40 ms off the UI thread / <= 1 ms |
+| SQL completion, request to items, 5000-line script bound to a 10 000-table model | p99 <= 30 ms (the 100 ms popup budget above stays) |
+| SQL diagnostics of the edited statement / of a 5000-line script on open | <= 10 ms / <= 150 ms off the UI thread |
+| SQL format of a 5000-line script / of a 100-line statement | <= 200 ms / <= 5 ms |
 
 ## Measuring
 Record baseline and current numbers in `replica/perf.md` (method, machine, OS,

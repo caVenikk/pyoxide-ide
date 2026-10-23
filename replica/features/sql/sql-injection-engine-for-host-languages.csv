@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+SQL fragments inside host-language strings through virtual documents and an offset map,sql,could,yes,no,Pro; ADR 0022; the detection for Python is sql-in-python-strings

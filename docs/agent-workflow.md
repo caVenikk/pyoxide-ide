@@ -4,7 +4,7 @@ How AI agents (and humans using them) work in this repository.
 
 ## Method
 Development runs through the skill pack in `skills/` (see `skills/PYOXIDE.md`).
-For each feature area (db, editor, python-intel, run-debug, vcs, db-gui, docker,
+For each feature area (db, editor, python-intel, run-debug, vcs, db-gui, sql, docker,
 settings-import, packaging):
 
 | Step | Skill | Output |

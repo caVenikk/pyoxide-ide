@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Highlight usages and rename aliases, CTEs and variables in a SQL file",sql,could,yes,no,Pro; ADR 0022
