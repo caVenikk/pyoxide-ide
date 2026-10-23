@@ -105,7 +105,8 @@ fn the_menu_bar_follows_the_reference_groups(cx: &mut TestAppContext) {
     h.invoke("workbench.focus-editor", json!(null));
     let text = h.describe();
     println!("{text}");
-    let expected = include_str!("main_menu_macos.txt");
+    // A Windows checkout may turn the file's line ends into CRLF.
+    let expected = include_str!("main_menu_macos.txt").replace("\r\n", "\n");
     assert_eq!(text, expected);
 }
 
