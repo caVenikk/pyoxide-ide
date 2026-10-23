@@ -373,8 +373,14 @@ impl DebuggerView {
             .read(cx)
             .selected_tab()
             .and_then(|t| ExecutionPoint::of(&t.snapshot));
+        self.update_inline_values(cx);
         if point == self.execution {
             return;
+        }
+        // The program moved on: the values shown go.
+        self.close_value_hint(cx);
+        if point.is_some() != self.execution.is_some() {
+            cx.emit(DebuggerViewEvent::MouseHoverPopups(point.is_none()));
         }
         self.execution = point;
         let editors: Vec<Entity<Editor>> =
@@ -685,7 +691,10 @@ impl DebuggerView {
             &mut Context<crate::variables::VariablesView>,
         ),
     ) {
-        if let Some(variables) = self.tool_window.read(cx).selected_variables() {
+        // The tree of an open value popup takes them first.
+        if let Some(variables) = self.value_popup_tree() {
+            variables.update(cx, f);
+        } else if let Some(variables) = self.tool_window.read(cx).selected_variables() {
             variables.update(cx, f);
         }
     }

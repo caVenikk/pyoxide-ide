@@ -649,6 +649,12 @@ the token.
 | `syntax.console-error` | `CONSOLE_ERROR_OUTPUT` | Error output in the run console |
 | `syntax.console-input` | `CONSOLE_USER_INPUT` | User input in the run console |
 | `syntax.console-system` | `CONSOLE_SYSTEM_OUTPUT` | The IDE's own lines in the run console (command line, exit code) |
+| `syntax.debugger-inlined-values` | `DEBUGGER_INLINED_VALUES` | Values of variables shown after the lines while debugging |
+| `syntax.debugger-inlined-values-modified` | `DEBUGGER_INLINED_VALUES_MODIFIED` | Values shown after the lines that changed since the last stop |
+| `syntax.debugger-inlined-values-execution-line` | `DEBUGGER_INLINED_VALUES_EXECUTION_LINE` | Values shown after the line the program is suspended on |
+| `syntax.debugger-evaluated-expression` | `EVALUATED_EXPRESSION_ATTRIBUTES` | The expression whose value the debugger shows under the mouse |
+| `syntax.debugger-evaluated-expression-execution-line` | `EVALUATED_EXPRESSION_EXECUTION_LINE_ATTRIBUTES` | The expression whose value the debugger shows, on the line the program is suspended on |
+| `syntax.reference-link` | `CTRL_CLICKABLE` | A value of the debugger after a line under the mouse, drawn as a link |
 
 ### Fallback roles for text roles
 
@@ -670,6 +676,7 @@ Editor decorations have no fallback except where listed.
 | `syntax.dunder` | `syntax.builtin` |
 | `syntax.fstring-brace` | `syntax.punctuation` |
 | `syntax.diagnostic-unresolved` | `syntax.diagnostic-error` |
+| `syntax.reference-link` | `syntax.link` |
 
 ### Attribute conversion
 

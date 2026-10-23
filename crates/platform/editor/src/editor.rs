@@ -330,6 +330,9 @@ pub struct Editor {
     pub(crate) transparent: bool,
     /// Search matches shown in the text.
     pub(crate) search: Option<SearchHighlights>,
+    /// A char range with the background of a text role
+    /// ([`Editor::set_range_background`]).
+    pub(crate) range_background: Option<(Range<usize>, themes::TextRole)>,
     /// Bring this char offset into the middle of the view on the next
     /// frame when it is not visible.
     pub(crate) reveal: Option<usize>,
@@ -479,6 +482,7 @@ impl Editor {
             font: None,
             transparent: false,
             search: None,
+            range_background: None,
             reveal: None,
             console: false,
             forward_input: false,
@@ -953,6 +957,25 @@ impl Editor {
 
     pub fn link_highlight(&self) -> Option<Range<usize>> {
         self.link_highlight.clone()
+    }
+
+    /// Draws a char range with the background of a text role (the
+    /// debugger's evaluated expression under the mouse), over the line
+    /// backgrounds and under the selection, or removes it.
+    pub fn set_range_background(
+        &mut self,
+        background: Option<(Range<usize>, themes::TextRole)>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.range_background != background {
+            self.range_background = background;
+            cx.notify();
+        }
+    }
+
+    /// The range [`Self::set_range_background`] draws.
+    pub fn range_background(&self) -> Option<Range<usize>> {
+        self.range_background.as_ref().map(|(r, _)| r.clone())
     }
 
     // ---- geometry ----------------------------------------------------------

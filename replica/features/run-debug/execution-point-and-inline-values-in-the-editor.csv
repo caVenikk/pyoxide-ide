@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Execution point and inline values in the editor,run-debug,must,yes,no,Community (#90)
+Execution point and inline values in the editor,run-debug,must,yes,yes,"Community (#90, #167): inline values with changed-value colour, value hint on hover with tree popup, inline value popup, Quick Evaluate; Add as Inline Watch adds a regular watch"

@@ -23,8 +23,8 @@ mod viewer;
 mod wrap;
 
 pub use decorations::{
-    AfterLineText, ChangeKind, Decoration, DecorationId, GutterAction, GutterFill, GutterIcon,
-    LineBackground, StripeMark, TextPiece,
+    AfterLineText, AfterTextHover, ChangeKind, Decoration, DecorationId, GutterAction, GutterFill,
+    GutterIcon, LineBackground, StripeMark, TextPiece,
 };
 pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, ProblemCounts};
 pub use diff_highlights::DiffHighlights;

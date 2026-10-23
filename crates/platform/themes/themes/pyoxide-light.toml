@@ -345,6 +345,12 @@ inlay-hint = { fg = "#5f6877", bg = "#0000000a", italic = true }
 console-error = { fg = "$red" }
 console-input = { fg = "$teal-light" }
 console-system = { fg = "$blue" }
+debugger-inlined-values = { fg = "$fg-dim", italic = true }
+debugger-inlined-values-modified = { fg = "$gold", italic = true }
+debugger-inlined-values-execution-line = { fg = "#5a6f8f", italic = true }
+debugger-evaluated-expression = { bg = "#e5e5e5" }
+debugger-evaluated-expression-execution-line = { bg = "#bfbfbf" }
+reference-link = { fg = "$blue" }
 
 [font]
 # Inter and JetBrains Mono ship with the IDE (crates/platform/ui/assets/fonts).

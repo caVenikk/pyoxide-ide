@@ -37,7 +37,7 @@ ui::ui_commands! {
         "Shows the main toolbar's gear menu below the gear: Settings\u{2026} and the switchers that join it.";
 }
 
-pub use ::settings::{SaveSettings, SyncSettings};
+pub use ::settings::{DataViewSettings, SaveSettings, SyncSettings};
 
 /// Id of the Appearance & Behavior group.
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
@@ -125,6 +125,7 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
     settings_ui::store::register::<SaveSettings>(cx);
     settings_ui::store::register::<SyncSettings>(cx);
     settings_ui::store::register::<::settings::SoftWrapSettings>(cx);
+    settings_ui::store::register::<DataViewSettings>(cx);
     settings_ui::page::register(cx, pages());
     settings_ui::page::register(cx, product_pages.iter().cloned());
     // After the current update: the change may come from a main window
@@ -137,6 +138,9 @@ pub fn init(cx: &mut App, product_pages: &[PageSpec]) {
         <::settings::SoftWrapSettings as ::settings::Section>::KEY,
         |cx| cx.defer(crate::editor_settings::follow),
     );
+    settings_ui::store::observe(cx, <DataViewSettings as ::settings::Section>::KEY, |cx| {
+        cx.defer(follow_data_view_settings)
+    });
     // Theme and keymap imports report in a main window.
     theme_switch::set_notify(cx, Rc::new(notify_main_window));
     keymaps::set_notify(cx, Rc::new(notify_main_window));
@@ -165,6 +169,38 @@ pub(crate) fn notify_main_window(notification: Notification, cx: &mut App) {
             let _ = window.update(cx, |w, _, cx| w.notify(notification, cx));
         }
         None => eprintln!("{}: {}", notification.title, notification.content),
+    }
+}
+
+/// Whether the editors show the values of variables after their lines
+/// (Show Variable Values in Editor).
+pub fn show_values_inline(cx: &App) -> bool {
+    settings_ui::store::get::<DataViewSettings>(cx).show_values_inline
+}
+
+/// Stores Show Variable Values in Editor; every main window follows.
+pub(crate) fn set_show_values_inline(on: bool, cx: &mut App) {
+    settings_ui::store::set(
+        cx,
+        &DataViewSettings {
+            show_values_inline: on,
+        },
+    );
+}
+
+/// Every main window's debugger takes the data view settings of the store
+/// (the check mark of Show Variable Values in Editor and the values in
+/// the editors).
+fn follow_data_view_settings(cx: &mut App) {
+    let on = show_values_inline(cx);
+    for window in cx.windows() {
+        let Some(handle) = window.downcast::<Workbench>() else {
+            continue;
+        };
+        let _ = handle.update(cx, |w, _, cx| {
+            w.debugger_view()
+                .update(cx, |v, cx| v.set_inline_values_shown(on, cx));
+        });
     }
 }
 

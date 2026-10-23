@@ -98,6 +98,7 @@ impl Workbench {
         let view = cx.new(|cx| {
             let mut view = DebuggerView::new(product.debug.clone(), cx);
             view.set_activate(!crate::env::background());
+            view.set_inline_values_shown(crate::settings::show_values_inline(cx), cx);
             view.set_highlighters(Rc::new(move |path: &Path| {
                 file_types
                     .for_path(path)
@@ -212,6 +213,19 @@ impl Workbench {
                 self.debugger
                     .update(cx, |v, cx| v.restart_pending(window, cx));
             }
+            DebuggerViewEvent::ShowValuesInline(on) => {
+                crate::settings::set_show_values_inline(*on, cx);
+            }
+            DebuggerViewEvent::MouseHoverPopups(on) => {
+                if let Some(code_intel) = self.code_intel.clone() {
+                    code_intel.update(cx, |c, cx| c.set_hover_popups(*on, cx));
+                }
+            }
+            DebuggerViewEvent::ShowInfoTooltip { editor, offset } => {
+                if let Some(code_intel) = self.code_intel.clone() {
+                    code_intel.update(cx, |c, cx| c.show_hover_at(editor, *offset, cx));
+                }
+            }
         }
         cx.notify();
     }
@@ -219,7 +233,9 @@ impl Workbench {
     /// The Debug toolbar's More menu (`XDebugger.ToolWindow.TopToolbar3.Extra`
     /// without the actions to come, and Debugger Settings).
     fn debug_more_items(&self, window: &Window, cx: &App) -> Vec<MenuItem> {
-        use debugger_ui::session::commands::{ForceRunToCursor, RunToCursor, ShowExecutionPoint};
+        use debugger_ui::session::commands::{
+            ForceRunToCursor, RunToCursor, ShowExecutionPoint, ToggleInlineValues,
+        };
         let keys = |action: &dyn gpui::Action| {
             ui::keys::shortcut_in(action, &self.focus, window).unwrap_or_default()
         };
@@ -255,8 +271,17 @@ impl Workbench {
                 vec![
                     MenuItem::action("Open Files in Preview Tab", ShowExecutionPoint)
                         .enabled(false),
-                    MenuItem::action("Show Variable Values in Editor", ShowExecutionPoint)
-                        .enabled(false),
+                    {
+                        let item = MenuItem::action(
+                            "Show Variable Values in Editor",
+                            ToggleInlineValues { on: None },
+                        );
+                        if self.debugger.read(cx).inline_values_shown() {
+                            item.icon(IconName::CHECKED)
+                        } else {
+                            item
+                        }
+                    },
                     MenuItem::separator(),
                     MenuItem::action("Sort Variables Alphabetically", ShowExecutionPoint)
                         .enabled(false),

@@ -375,6 +375,12 @@ roles! {
         ConsoleError => ("console-error", "Editor decoration", "Error output in the run console"),
         ConsoleInput => ("console-input", "Editor decoration", "User input in the run console"),
         ConsoleSystem => ("console-system", "Editor decoration", "The IDE's own lines in the run console (command line, exit code)"),
+        DebuggerInlinedValues => ("debugger-inlined-values", "Editor decoration", "Values of variables shown after the lines while debugging"),
+        DebuggerInlinedValuesModified => ("debugger-inlined-values-modified", "Editor decoration", "Values shown after the lines that changed since the last stop"),
+        DebuggerInlinedValuesExecutionLine => ("debugger-inlined-values-execution-line", "Editor decoration", "Values shown after the line the program is suspended on"),
+        DebuggerEvaluatedExpression => ("debugger-evaluated-expression", "Editor decoration", "The expression whose value the debugger shows under the mouse"),
+        DebuggerEvaluatedExpressionExecutionLine => ("debugger-evaluated-expression-execution-line", "Editor decoration", "The expression whose value the debugger shows, on the line the program is suspended on"),
+        ReferenceLink => ("reference-link", "Editor decoration", "A value of the debugger after a line under the mouse, drawn as a link"),
     }
 }
 
@@ -449,6 +455,7 @@ impl TextRole {
             Dunder => Some(Builtin),
             FstringBrace => Some(Punctuation),
             DiagnosticUnresolved => Some(DiagnosticError),
+            ReferenceLink => Some(Link),
             _ => None,
         }
     }

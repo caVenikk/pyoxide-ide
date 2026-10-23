@@ -394,6 +394,39 @@ fn check_debug_watches(h: &mut H, command: &str, keys: &str, what: &str) {
     }
 }
 
+/// The keys of the values in the editor (#167) with a scripted adapter
+/// ([`views_script`]): Quick Evaluate Expression on `a` of `a = 1` (the
+/// adapter answers 1), Escape in the popup of the value after line 1.
+fn check_value_popups(h: &mut H, command: &str, keys: &str, what: &str) {
+    let after = vec![
+        json!({"expect": "evaluate", "arguments": {"expression": "a"}}),
+        json!({"respond": {"result": "1", "type": "int", "variablesReference": 0}}),
+    ];
+    start_views(h, after);
+    let hint = |h: &mut H| h.debug()["value_hint"].clone();
+    match command {
+        "debug.quick-evaluate" => {
+            h.invoke("tabs.select", json!({"index": 0}));
+            h.focus_editor();
+            h.set_editor("|a = 1\n");
+            h.press(keys);
+            let s = h.wait_debug("the value", |s| s["value_hint"]["kind"] == json!("value"));
+            let hint = &s["value_hint"];
+            assert_eq!(hint["expression"], json!("a"), "{what}: {hint}");
+            assert_eq!(hint["text"], json!("{int} 1"), "{what}: {hint}");
+        }
+        "debug.value-popup.close" => {
+            h.invoke("tabs.select", json!({"index": 0}));
+            h.wait_debug("the values after the lines", |s| !s["inline_values"].is_null());
+            h.invoke("debug.inline-value.open", json!({"line": 1, "name": "a"}));
+            assert_eq!(hint(h)["kind"], json!("tree"), "{what}: {}", hint(h));
+            h.press(keys);
+            assert!(hint(h).is_null(), "{what}: {}", hint(h));
+        }
+        _ => panic!("{what}: no check"),
+    }
+}
+
 impl H<'_> {
     /// Waits (at most about 20 s) for a debug state that `f` accepts.
     pub(super) fn wait_debug(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
@@ -498,6 +531,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
             check_debug_views(h, c, keys, &what, b.context.as_deref())
         }
         c if WATCH_COMMANDS.contains(&c) => check_debug_watches(h, c, keys, &what),
+        "debug.quick-evaluate" | "debug.value-popup.close" => {
+            check_value_popups(h, b.command.as_str(), keys, &what)
+        }
         _ => return false,
     }
     true

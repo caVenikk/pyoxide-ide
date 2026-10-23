@@ -10,6 +10,8 @@
 //!   debugs the environment's interpreter), the debugger options that
 //!   change them, the Python 3.8 check;
 //! - [`lines`]: the reference's stoppable-line rule for line breakpoints;
+//! - [`declarations`]: where a frame's variables are declared, for their
+//!   values shown inline;
 //! - [`breakpoints`]: the Python breakpoint types and the exception
 //!   breakpoint mapping ("On termination" is `uncaught`, "On raise" is
 //!   `raised`);
@@ -27,8 +29,10 @@
 
 pub mod breakpoints;
 mod declaration;
+pub mod declarations;
 mod expressions;
 pub mod helper;
+pub mod hover;
 pub mod launch;
 pub mod lines;
 mod provider;

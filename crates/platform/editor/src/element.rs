@@ -396,6 +396,8 @@ pub(crate) struct Prepaint {
     /// words ([`crate::DiffHighlights`]).
     diff_lines: Vec<(Bounds<Pixels>, Hsla)>,
     diff_bars: Vec<(Bounds<Pixels>, Hsla)>,
+    /// The background of a range ([`Editor::set_range_background`]).
+    range_background: Vec<(Bounds<Pixels>, Hsla)>,
     colors: Colors,
 }
 
@@ -1473,6 +1475,36 @@ impl Element for EditorElement {
             }
         }
 
+        // The range with a background of its own, row by row.
+        let mut background_rects = Vec::new();
+        if let Some((r, role)) = &editor.range_background
+            && let Some(bg) = theme.text_style(*role).bg.map(color)
+        {
+            let ra = editor.caret_row(r.start, false);
+            let rb = editor.caret_row(r.end, r.end > r.start);
+            for l in lines.iter().filter(|l| l.row >= ra && l.row <= rb) {
+                let x0 = if l.row == ra {
+                    line_x(l, r.start - l.line_start)
+                } else {
+                    line_x(l, l.seg_start)
+                };
+                let x1 = if l.row == rb {
+                    line_x(l, r.end - l.line_start)
+                } else {
+                    line_x(l, l.end_col)
+                };
+                if x1 > x0 {
+                    background_rects.push((
+                        Bounds::from_corners(
+                            point(x0, top_of(l.row)),
+                            point(x1, top_of(l.row) + lh),
+                        ),
+                        bg,
+                    ));
+                }
+            }
+        }
+
         // The placeholder of an empty one-line field.
         let placeholder = editor.shown_placeholder(focused).cloned().map(|text| {
             let run = TextRun {
@@ -1868,6 +1900,7 @@ impl Element for EditorElement {
             decorations: decoration_paint,
             decoration_spans,
             diff_lines,
+            range_background: background_rects,
             diff_bars,
             colors,
         }
@@ -1952,6 +1985,9 @@ impl Element for EditorElement {
                     }
                 }
                 for (r, c) in &p.diff_bars {
+                    window.paint_quad(fill(*r, *c));
+                }
+                for (r, c) in &p.range_background {
                     window.paint_quad(fill(*r, *c));
                 }
                 let in_selection = p.colors.search_current_background.is_some();

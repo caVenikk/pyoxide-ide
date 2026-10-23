@@ -158,6 +158,8 @@ pub(crate) struct DecorationPaint {
     /// Change markers: rounded bars, the hovered ones last.
     pub changes: Vec<(Bounds<Pixels>, Hsla)>,
     pub after_texts: Vec<AfterText>,
+    /// The icons after hovered texts.
+    pub after_icons: Vec<(IconName, Bounds<Pixels>)>,
     /// Hitboxes of the hovered clickable texts and the change markers
     /// (hand pointer).
     pub hand_hitboxes: Vec<Hitbox>,
@@ -528,9 +530,17 @@ pub(crate) fn prepaint(
                 }
             };
             let hovered = after.clickable && editor.hovered_after == Some(entry.id);
-            let link = theme
-                .text_style(TextRole::Link)
-                .fg
+            let hover_role = match &after.hover {
+                Some(h) => h.role,
+                None => Some(TextRole::Link),
+            };
+            let link = hover_role
+                .and_then(|role| {
+                    theme
+                        .text_style(role)
+                        .fg
+                        .or_else(|| role.fallback().and_then(|f| theme.text_style(f).fg))
+                })
                 .map(color)
                 .unwrap_or(theme.color(UiRole::EditorText));
             let mut text = String::new();
@@ -569,11 +579,25 @@ pub(crate) fn prepaint(
             let x = left + frame.char_width * 1.5;
             let top = frame.top_of(row.row);
             let width = shaped.width;
+            // The icon after a hovered text, and the room it reacts in.
+            let icon = after.hover.as_ref().and_then(|h| h.icon);
             if after.clickable {
+                let reach = if icon.is_some() {
+                    width + px(AFTER_TEXT_ICON)
+                } else {
+                    width
+                };
                 geometry.after_texts.push(AfterHit {
                     id: entry.id,
-                    bounds: Bounds::new(point(x, top), size(width, lh)),
+                    bounds: Bounds::new(point(x, top), size(reach, lh)),
                 });
+            }
+            if let Some(icon) = icon.filter(|_| hovered) {
+                let s = px(AFTER_TEXT_ICON);
+                paint.after_icons.push((
+                    icon,
+                    Bounds::new(point(x + width, top + (lh - s) / 2.0), size(s, s)),
+                ));
             }
             let next = left + width + frame.char_width * 2.0 + px(AFTER_TEXT_ICON);
             match after_x.iter_mut().find(|(l, _)| *l == last_line) {
@@ -694,6 +718,13 @@ pub(crate) fn paint_after_texts(
 ) {
     for t in &paint.after_texts {
         let _ = t.shaped.paint(t.origin, line_height, window, cx);
+    }
+    for (icon, b) in &paint.after_icons {
+        if let Some(image) =
+            ui::icons::image_with_opacity(*icon, b.size.width, None, 1.0, window, cx)
+        {
+            let _ = window.paint_image(*b, Corners::default(), image, 0, false);
+        }
     }
 }
 

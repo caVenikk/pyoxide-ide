@@ -62,8 +62,10 @@ const INDENT: f32 = 19.0;
 const CHEVRON: f32 = 16.0;
 const CHEVRON_ROOM: f32 = 21.0;
 pub(crate) const ICON_ROOM: f32 = 18.5;
-/// Space above the first row.
+/// Space above the first row; in a popup's tree (measured on the
+/// reference's value popup).
 const TREE_TOP: f32 = 4.0;
+pub(crate) const POPUP_TREE_TOP: f32 = 2.5;
 /// The separator of path segments.
 pub(crate) const SEP: char = '\u{1}';
 
@@ -218,6 +220,20 @@ pub(crate) struct ShownFrame {
     pub(crate) line: u32,
 }
 
+/// The one value a popup's tree shows at its root (the reference's
+/// `XDebuggerTreePopup` over `XDebuggerTreeCreator.createTree`): an
+/// evaluated expression or a variable of the frame, expanded.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PopupRoot {
+    pub name: String,
+    pub variable: Variable,
+    /// The size of a container.
+    pub shape: Option<String>,
+    pub kind: ValueKind,
+    /// The scope or value the variable is a child of (0: evaluated).
+    pub parent: i64,
+}
+
 /// The variables of a debug session.
 pub struct VariablesView {
     pub(crate) session: Session,
@@ -283,6 +299,9 @@ pub struct VariablesView {
     pub(crate) highlighted: Option<std::path::PathBuf>,
     /// The line height of an editor in a row, as last drawn.
     pub(crate) line_height: Pixels,
+    /// A popup's tree: its one value instead of the frame's, without the
+    /// evaluate field, the watches and the context menu.
+    pub(crate) popup: Option<PopupRoot>,
 }
 
 impl VariablesView {
@@ -339,7 +358,74 @@ impl VariablesView {
             highlighters: None,
             highlighted: None,
             line_height: px(16.0),
+            popup: None,
         }
+    }
+
+    /// The tree of a popup: `root` in frame `frame` (on `line` of `file`),
+    /// expanded and selected.
+    pub(crate) fn for_popup(
+        session: Session,
+        provider: Option<Arc<dyn DebugAdapterProvider>>,
+        frame: i64,
+        location: Option<(std::path::PathBuf, u32)>,
+        root: PopupRoot,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(session, provider, cx);
+        view.watches.clear();
+        view.paused.clear();
+        view.phase = Phase::Suspended;
+        let (file, line) = match location {
+            Some((file, line)) => (Some(file), line),
+            None => (None, 0),
+        };
+        view.frame = Some(ShownFrame {
+            id: frame,
+            generation: 0,
+            key: String::new(),
+            file,
+            line,
+        });
+        if root.variable.reference > 0 {
+            view.state.expanded.insert(root.name.clone());
+        }
+        view.state.selected = Some(root.name.clone());
+        view.popup = Some(root);
+        view
+    }
+
+    /// The rows' width as a tree's preferred width: the widest row's text
+    /// after its indent, chevron and icon, and the row inset.
+    pub(crate) fn preferred_width(&mut self, window: &Window, cx: &mut Context<Self>) -> Pixels {
+        let rows = self.rows(cx);
+        let theme = cx.theme();
+        let font = gpui::font(theme.ui_family());
+        let size = theme.ui_size();
+        let mut widest = px(0.0);
+        for row in rows.iter() {
+            let text = row.text();
+            let run = gpui::TextRun {
+                len: text.len(),
+                font: font.clone(),
+                color: gpui::black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let width = window
+                .text_system()
+                .shape_line(SharedString::from(text), size, &[run], None)
+                .width;
+            let left = ROW_INSET + ROW_LEFT + INDENT * row.depth as f32 + CHEVRON_ROOM + ICON_ROOM;
+            widest = widest.max(px(left) + width);
+        }
+        widest + px(ROW_INSET)
+    }
+
+    /// The number of rows shown.
+    pub(crate) fn row_count(&mut self, cx: &mut Context<Self>) -> usize {
+        self.rows(cx).len()
     }
 
     pub fn session(&self) -> &Session {
@@ -994,7 +1080,9 @@ impl VariablesView {
                     }
                     window.focus(&this.focus);
                     this.select(&menu_path, cx);
-                    this.open_menu(e.position, window, cx);
+                    if this.popup.is_none() {
+                        this.open_menu(e.position, window, cx);
+                    }
                 }),
             )
             .into_any_element()
@@ -1204,6 +1292,18 @@ impl Builder<'_> {
 
     fn root(&mut self) {
         let view = self.view;
+        if let Some(root) = &view.popup {
+            self.value(
+                &root.variable,
+                root.shape.as_deref(),
+                &root.name,
+                root.kind,
+                root.parent,
+                "",
+                0,
+            );
+            return;
+        }
         self.watches();
         let state_message = match view.phase {
             Phase::Starting => Some(CONNECTING),
@@ -1495,7 +1595,8 @@ impl Render for VariablesView {
         )
         .track_scroll(self.scroll.clone())
         .size_full();
-        let field = self.render_field(window, cx);
+        let popup = self.popup.is_some();
+        let field = (!popup).then(|| self.render_field(window, cx));
         let bounds = self.tree_bounds.clone();
         let tree = div()
             .id("debug-variables")
@@ -1506,7 +1607,7 @@ impl Render for VariablesView {
             .flex_1()
             .min_h(px(0.0))
             .w_full()
-            .pt(px(TREE_TOP))
+            .pt(px(if popup { POPUP_TREE_TOP } else { TREE_TOP }))
             .pb(px(2.0))
             .child(
                 canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
@@ -1522,7 +1623,7 @@ impl Render for VariablesView {
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
-                    if e.click_count == 2 {
+                    if e.click_count == 2 && this.popup.is_none() {
                         this.new_watch(None, window, cx);
                     }
                 }),
@@ -1532,7 +1633,7 @@ impl Render for VariablesView {
             .flex()
             .flex_col()
             .size_full()
-            .child(field)
+            .children(field)
             .child(tree)
             .children(history)
             .children(

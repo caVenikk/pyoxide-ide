@@ -51,6 +51,9 @@ pub(crate) struct DocState {
     closing: Option<Task<()>>,
     /// Counts popups asked for; answers for an older one are dropped.
     generation: u64,
+    /// The popup under the mouse is off (while a debugger shows values
+    /// there, `EditorMouseHoverPopupControl.disablePopups`).
+    hover_off: bool,
 }
 
 impl DocState {
@@ -64,6 +67,7 @@ impl DocState {
             inside: false,
             closing: None,
             generation: 0,
+            hover_off: false,
         }
     }
 }
@@ -150,11 +154,45 @@ impl CodeIntelView {
         let Some((_, offset)) = target else {
             return;
         };
+        if self.docs.hover_off {
+            return;
+        }
         let editor = editor.clone();
         self.docs.delay = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HOVER_DELAY).await;
             let _ = this.update(cx, |v, cx| v.hover_due(&editor, offset, cx));
         }));
+    }
+
+    /// Turns the popup under the mouse off or on again
+    /// (`EditorMouseHoverPopupControl.disablePopups`, `enablePopups`).
+    pub fn set_hover_popups(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.docs.hover_off = !on;
+        if !on {
+            self.docs.delay = None;
+            if self
+                .docs
+                .shown
+                .as_ref()
+                .is_some_and(|s| s.kind == DocKind::Hover)
+            {
+                self.close_doc(cx);
+            }
+        }
+    }
+
+    /// The popup at a char offset of an editor at once, as the mouse
+    /// resting there shows it, also while it is off
+    /// (`EditorMouseHoverPopupManager.showInfoTooltip`).
+    pub fn show_hover_at(
+        &mut self,
+        editor: &Entity<Editor>,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.docs.under_mouse = Some((editor.entity_id(), offset));
+        self.docs.closing = None;
+        self.hover_due(editor, offset, cx);
     }
 
     /// Closes the popup over the text after the grace time, unless the

@@ -74,14 +74,17 @@ pub fn line_type() -> LineBreakpointType {
     }
 }
 
+/// A Python source file, going by its extension.
+pub fn is_python_file(file: &Path) -> bool {
+    file.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| PYTHON_EXTENSIONS.contains(&e))
+}
+
 /// The stoppable lines of a Python file, by line from line 1; `None` for
 /// a file of another type.
 pub fn stoppable_lines(file: &Path, text: &str) -> Option<Vec<bool>> {
-    let python = file
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| PYTHON_EXTENSIONS.contains(&e));
-    if !python {
+    if !is_python_file(file) {
         return None;
     }
     let lines = StoppableLines::of(text);

@@ -421,6 +421,27 @@ italic = true
 [syntax.console-system]
 fg = "#00007f"
 
+[syntax.debugger-inlined-values]
+fg = "#868686"
+italic = true
+
+[syntax.debugger-inlined-values-modified]
+fg = "#ca8021"
+italic = true
+
+[syntax.debugger-inlined-values-execution-line]
+fg = "#a9b7d6"
+italic = true
+
+[syntax.debugger-evaluated-expression]
+bg = "#e5e5e5"
+
+[syntax.debugger-evaluated-expression-execution-line]
+bg = "#bfbfbf"
+
+[syntax.reference-link]
+fg = "#006dcc"
+
 [font]
 ui-family = [
     "Inter",

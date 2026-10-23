@@ -209,7 +209,12 @@ pub const UI_PAIRS: &[(UiRole, UiRole, Need)] = &{
 };
 
 /// Text roles that are dimmed on purpose and only need 3:1.
-const DIMMED: &[TextRole] = &[TextRole::DiagnosticUnused];
+const DIMMED: &[TextRole] = &[
+    TextRole::DiagnosticUnused,
+    TextRole::DebuggerInlinedValues,
+    TextRole::DebuggerInlinedValuesModified,
+    TextRole::DebuggerInlinedValuesExecutionLine,
+];
 
 /// Text roles drawn on the terminal background instead of the editor's.
 const CONSOLE: &[TextRole] = &[
