@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; no settings UI yet"
+Editor colour scheme import (.icls),settings-import,must,yes,partial,"themes crate: schemes with parents and baseAttributes, report; the base schemes Default and Darcula are bundled and supply what a scheme leaves unset (#313); no settings UI yet"

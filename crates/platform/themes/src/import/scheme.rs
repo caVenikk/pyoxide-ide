@@ -101,6 +101,10 @@ pub struct Scheme {
     /// `name` (a `<list>` file such as the Python plugin's attributes for
     /// `Darcula`), not a scheme of its own: it is merged below that scheme.
     pub additional: bool,
+    /// The copy of a base scheme (`Default`, `Darcula`) that ships with the
+    /// crate, used when a scheme names it as its `parent_scheme` and the
+    /// inputs do not hold it (see `import::bundled`).
+    pub bundled: bool,
 }
 
 impl Scheme {
@@ -316,7 +320,12 @@ impl SchemeChain<'_> {
     /// Raw value of a `<colors>` option. An option that is present but empty
     /// means "no colour" and hides the parents' value.
     pub fn color(&self, key: &str) -> Option<&str> {
-        for layer in &self.layers {
+        self.color_with(key, true)
+    }
+
+    /// [`SchemeChain::color`], optionally without the bundled base schemes.
+    pub fn color_with(&self, key: &str, bundled: bool) -> Option<&str> {
+        for layer in self.layers.iter().filter(|l| bundled || !l.bundled) {
             if let Some(value) = layer.colors.get(key) {
                 return Some(value.as_str()).filter(|v| !v.is_empty());
             }
@@ -326,18 +335,24 @@ impl SchemeChain<'_> {
 
     /// The attribute entry for `key` with `baseAttributes` followed.
     pub fn attribute(&self, key: &str) -> Option<Attribute> {
-        self.attribute_at(key, 0)
+        self.attribute_with(key, true)
     }
 
-    fn attribute_at(&self, key: &str, depth: usize) -> Option<Attribute> {
+    /// [`SchemeChain::attribute`], optionally without the bundled base
+    /// schemes.
+    pub fn attribute_with(&self, key: &str, bundled: bool) -> Option<Attribute> {
+        self.attribute_at(key, 0, bundled)
+    }
+
+    fn attribute_at(&self, key: &str, depth: usize, bundled: bool) -> Option<Attribute> {
         const MAX_BASE_DEPTH: usize = 8;
         if depth > MAX_BASE_DEPTH {
             return None;
         }
-        for layer in &self.layers {
+        for layer in self.layers.iter().filter(|l| bundled || !l.bundled) {
             if let Some(own) = layer.attributes.get(key) {
                 return Some(match own.base.as_deref() {
-                    Some(base) => match self.attribute_at(base, depth + 1) {
+                    Some(base) => match self.attribute_at(base, depth + 1, bundled) {
                         Some(under) => own.over(&under),
                         None => own.clone(),
                     },

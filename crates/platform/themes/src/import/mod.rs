@@ -18,6 +18,7 @@
 //! ```
 
 mod archive;
+mod bundled;
 mod convert;
 mod known;
 mod library;

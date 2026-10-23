@@ -69,6 +69,7 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
         chain: SchemeChain {
             layers: inputs.scheme_layers,
         },
+        bundled: true,
         palette,
         report: ImportReport {
             name: inputs.name.clone(),
@@ -148,6 +149,10 @@ struct Converter<'a> {
     controls: Option<Controls>,
     ui_layers: Vec<&'a UiThemeData>,
     chain: SchemeChain<'a>,
+    /// Whether the bundled base schemes (the `parent_scheme` the inputs
+    /// lack) answer lookups: for the text styles and the roles a scheme
+    /// sets, not for the roles of the UI theme (the base theme keeps those).
+    bundled: bool,
     palette: BTreeMap<String, String>,
     report: ImportReport,
     /// Keys already reported as invalid, to warn once.
@@ -281,7 +286,7 @@ impl<'a> Converter<'a> {
     }
 
     fn eval_color(&mut self, key: &str) -> Option<Hit> {
-        let raw = self.chain.color(key)?.to_owned();
+        let raw = self.chain.color_with(key, self.bundled)?.to_owned();
         let color = self.scheme_color(key, &raw)?;
         Some(Hit {
             color,
@@ -292,7 +297,7 @@ impl<'a> Converter<'a> {
     }
 
     fn eval_attr(&mut self, key: &str, part: Part) -> Option<Hit> {
-        let attribute = self.chain.attribute(key)?;
+        let attribute = self.chain.attribute_with(key, self.bundled)?;
         let from_option =
             matches!(part, Part::Bg) && attribute.background_option != BackgroundOption::Unused;
         let raw = match part {
@@ -379,6 +384,7 @@ impl<'a> Converter<'a> {
             // A key the theme sets for this very component beats a wildcard
             // reached through an earlier source.
             let mut hits: Vec<Hit> = Vec::new();
+            self.bundled = mapping::is_scheme_role(role);
             for &src in ui_sources(role) {
                 let Some(hit) = self.eval(src) else {
                     continue;
@@ -413,6 +419,7 @@ impl<'a> Converter<'a> {
                 });
             }
         }
+        self.bundled = true;
         for &role in UiRole::ALL {
             let target = format!("ui.{role}");
             if let Some(color) = direct[role.index()] {
@@ -667,6 +674,19 @@ impl<'a> Converter<'a> {
                 }
             }
         }
+        // The Python language services draw a hint (LSP severity Hint, the
+        // information level) as a grey dotted line
+        // (`PyLspToolIntegrationProvider.getEnforcedTextAttributes`,
+        // IntelliJ Community, Apache-2.0), where the schemes leave the
+        // information attributes empty.
+        let hint = &mut out[TextRole::DiagnosticHint];
+        if hint.is_plain() {
+            *hint = TextStyle {
+                underline: Some(UnderlineStyle::Dotted),
+                underline_color: Some(Rgba::rgb(0x80, 0x80, 0x80)),
+                ..TextStyle::default()
+            };
+        }
     }
 
     // ---- metrics and fonts ------------------------------------------
@@ -715,7 +735,13 @@ impl<'a> Converter<'a> {
                 used: true,
             });
         };
-        let layers = self.chain.layers.clone();
+        let layers: Vec<&Scheme> = self
+            .chain
+            .layers
+            .iter()
+            .filter(|l| !l.bundled)
+            .copied()
+            .collect();
         let first = |pick: &dyn Fn(&Scheme) -> bool| layers.iter().find(|s| pick(s)).copied();
         if let Some(s) = first(&|s| s.fonts.editor_name.is_some())
             && let Some(name) = &s.fonts.editor_name
@@ -797,7 +823,7 @@ impl<'a> Converter<'a> {
                     .or_default() += leaves;
             }
         }
-        for layer in &self.chain.layers {
+        for layer in self.chain.layers.iter().filter(|l| !l.bundled) {
             for key in layer.colors.keys() {
                 if !known.colors.contains(key.as_str()) {
                     *counts
