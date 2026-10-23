@@ -95,6 +95,21 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 | 2026-10-11 | mac-1 | oracle-thin (Free 23) | 39.1 ms | 2.7 ms | 276.6 ms | 0.36 M | PL/SQL wrapper and REF CURSOR fetch around oracle-rs bugs; 64 KiB packets |
 | | | oracle-odpi | | | | | needs Oracle Instant Client |
 
+### Schema load (5000 tables)
+Issue #298: `Introspector::load` on a schema of 5000 tables with 5 columns each
+(25,000 columns), a primary key, a unique constraint, a foreign key, a check
+constraint and an extra index each. Release build, median of 5 runs, other
+builds running on the machine at the same time. SQLite: in-memory
+database, `cargo test -p db-sqlite --release --test it load::bench -- --ignored
+--nocapture`; PostgreSQL 18 in Docker on the same machine, `cargo test -p
+db-postgres --release --test it load::bench -- --ignored --nocapture`.
+
+| date | machine | backend | names | structure | full | queries per schema | notes |
+|---|---|---|---|---|---|---|---|
+| 2026-10-23 | mac-1 | sqlite 3.53.2 | 24 ms | 485 ms | 380 ms | 2 / 5 / 5 | table-valued pragmas, one join per pragma; the full run was quicker than the structure run in the same process |
+| 2026-10-23 | mac-1 | postgres 18.6 | 203 ms | 1248 ms | 1004 ms | 5 / 8 / 11 | `ANALYZE` run before; the same count of statements for 3 and for 60 tables is a conformance case (`load_query_count`) |
+| | | oracle (19c / Free 23) | | | | about 8 / 21 / 23 | not measured: the bulk load is covered by unit tests with canned rows and by ignored integration tests |
+
 ### Editor and shell
 Measured with `python3 scripts/perf/pyoxide_bench.py --work <dir> --runs 3` on
 the files `pycharm_baseline.py` generates (the same as the reference runs). It
