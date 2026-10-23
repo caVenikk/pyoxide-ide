@@ -1807,6 +1807,7 @@ dependencies = [
 name = "db-service"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "commands",
  "db-core",
  "db-oracle-odpi",
@@ -1845,6 +1846,7 @@ dependencies = [
 name = "db-testkit"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "chrono",
  "db-core",
  "tokio",

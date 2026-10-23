@@ -33,7 +33,7 @@ const SCHEMA: &[&str] = &[
     "INSERT INTO autoinc(v) VALUES (1)",
 ];
 
-async fn fixture() -> std::sync::Arc<dyn db_core::Connection> {
+pub(crate) async fn fixture() -> std::sync::Arc<dyn db_core::Connection> {
     let conn = memory().await;
     for sql in SCHEMA {
         run(&conn, sql).await;
