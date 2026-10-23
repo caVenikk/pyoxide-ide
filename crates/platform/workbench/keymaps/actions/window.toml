@@ -1,6 +1,18 @@
 # ---- Main Menu > Window --------------------------------------------------
 
 [[action]]
+id = "MinimizeCurrentWindow"
+text = "Minimize"
+groups = ["Main Menu > Window"]
+command = "window.minimize"
+
+[[action]]
+id = "ZoomCurrentWindow"
+text = "Zoom"
+groups = ["Main Menu > Window"]
+command = "window.zoom"
+
+[[action]]
 id = "HideActiveWindow"
 text = "Hide Active Tool Window"
 groups = ["Main Menu > Window > Active Tool Window"]

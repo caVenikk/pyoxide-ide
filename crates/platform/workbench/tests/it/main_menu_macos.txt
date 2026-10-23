@@ -1,0 +1,158 @@
+Pyoxide
+  Settings…  ⌘,
+  ---
+  Services >
+  ---
+  Hide Pyoxide  ⌘H
+  Hide Others  ⌥⌘H
+  Show All
+  ---
+  Quit Pyoxide  ⌘Q
+File
+  New…  ⌘N
+  Open…
+  Recent Projects >
+    other
+  Close Project
+  ---
+  Save All  ⌘S
+  Reload All from Disk  ⌥⌘Y
+Edit
+  Undo  ⌘Z
+  Redo  ⇧⌘Z
+  ---
+  Cut  ⌘X
+  Copy  ⌘C
+  Copy Paths  ⇧⌘C
+  Paste >
+    Paste  ⌘V
+  Delete  ⌦
+  ---
+  Find >
+    Find…  ⌘F
+    Replace…  ⌘R
+    Find Next Occurrence  ⌘G
+    Find Previous Occurrence  ⇧⌘G
+    ---
+    Find in Files…  ⇧⌘F
+    Replace in Files…  ⇧⌘R
+  Find Usages >
+    Show Usages  ⌥⌘F7  (disabled)
+  ---
+  Select All  ⌘A
+  Extend Selection  ⌥↑
+  Shrink Selection  ⌥↓
+  ---
+  Join Lines  ⌃⇧J
+  Duplicate Line or Selection  ⌘D
+  ---
+  Unindent Line or Selection  ⇧⇥
+View
+  Tool Windows >
+    Commit  ⌘0
+    Project  ⌘1
+    Run  ⌘4
+    Debug  ⌘5
+    Terminal  ⌥F12
+  ---
+  Quick Documentation  F1  (disabled)
+  Parameter Info  ⌘P  (disabled)
+  Error Description  ⌘F1  (disabled)
+  ---
+  Jump to Source  ⌘↓
+  ---
+  Recent Files  ⌘E
+  ---
+  Quick Switch Scheme…  ⌃`
+  Active Editor >
+    Soft-Wrap
+Navigate
+  Back  ⌘[
+  Forward  ⌘]
+  ---
+  Search Everywhere
+  ---
+  File…  ⇧⌘O
+  Text…  ⌥⇧⌘E
+  Line:Column…  ⌘L
+  ---
+  Next Highlighted Error  F2
+  Previous Highlighted Error  ⇧F2
+  ---
+  Navigate in File >
+    Next Change  ⌃⌥⇧↓
+    Previous Change  ⌃⌥⇧↑
+  ---
+  Declaration or Usages  ⌘B  (disabled)
+Code
+  Code Completion >
+    Basic  ⌃Space  (disabled)
+  ---
+  Comment with Line Comment  ⌘/
+  Reformat Code  ⌥⌘L  (disabled)
+  Optimize Imports  ⌃⌥O  (disabled)
+  ---
+  Move Statement Down  ⇧⌘↓
+  Move Statement Up  ⇧⌘↑
+  Move Line Down  ⌥⇧↓
+  Move Line Up  ⌥⇧↑
+Refactor
+  Rename…  ⇧F6
+  ---
+  Move…  F6
+  Copy…  F5
+Run
+  Run  ⌃R
+  Debug  ⌃D
+  ---
+  Run…  ⌃⌥R
+  Edit Configurations…
+  ---
+  Stop  ⌘F2
+  ---
+  Debugging Actions >
+    Step Over  F8
+    Step Into  F7
+    Step Into My Code  ⌥⇧F7
+    Step Out  ⇧F8
+    Run to Cursor  ⌥F9
+    Force Run to Cursor  ⌥⌘F9
+    Pause Program
+    Resume Program  ⌥⌘R
+    ---
+    Evaluate Expression…  ⌥F8
+    Show Execution Point  ⌥F10
+  Toggle Breakpoint >
+    Line Breakpoint  ⌘F8
+    Temporary Line Breakpoint  ⌥⇧⌘F8
+    Toggle Breakpoint Enabled
+  View Breakpoints…  ⇧⌘F8
+Git
+  Commit…  ⌘K
+  Push…  ⇧⌘K
+  Update Project…  ⌘T
+  Fetch
+  ---
+  Branches…
+  New Branch…  ⌥⌘N
+  ---
+  Uncommitted Changes >
+    Rollback…  ⌥⌘Z
+  Current File >
+    Add  ⌥⌘A
+  ---
+  VCS Operations…  ⌃V
+Window
+  Minimize  ⌘M
+  Zoom  ⌃⌘=
+  ---
+  Active Tool Window >
+    Hide Active Tool Window  ⇧⎋
+  Editor Tabs >
+    Select Next Tab  ⌘}
+    Select Previous Tab  ⌘{
+    ---
+    Close Tab  ⌘W
+Help
+  Welcome
+  Find Action…  ⇧⌘A

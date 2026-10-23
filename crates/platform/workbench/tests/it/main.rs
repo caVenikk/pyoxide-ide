@@ -26,6 +26,7 @@ mod find_in_files;
 mod first_run;
 mod keymap;
 mod keymaps;
+mod main_menu;
 mod navigation;
 mod notifications;
 mod pointer;

@@ -4,6 +4,19 @@ ui::ui_commands! {
     COMMANDS, scope = "Workbench";
     /// Quit the application.
     Quit => "app.quit", "Quit", "Closes all windows and quits the application.";
+    /// Hide the application (macOS).
+    Hide => "app.hide", "Hide", "Hides the application's windows (macOS, the application menu's Hide).";
+    /// Hide the other applications (macOS).
+    HideOthers => "app.hide-others", "Hide Others", "Hides the windows of the other applications (macOS).";
+    /// Show the other applications again (macOS).
+    ShowAll => "app.show-all", "Show All", "Shows the windows of the applications hidden with Hide Others again (macOS).";
+    /// Minimize the window.
+    MinimizeWindow => "window.minimize", "Minimize", "Minimizes the main window.";
+    /// Zoom the window.
+    ZoomWindow => "window.zoom", "Zoom", "Zooms the main window to fill the screen, or back to its size (the green window button of macOS).";
+    /// Close the window's project.
+    CloseProject => "project.close", "Close Project",
+        "Closes the window's project: modified files are saved and the window closes; when it is the last main window, a main window without a project with the Welcome tab takes its place.";
     /// Show, focus or hide the project tool window.
     ToggleProject => "workbench.toggle-project", "Project",
         "Shows and focuses the project tool window; hides it when it has the focus.";

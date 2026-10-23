@@ -52,6 +52,7 @@ pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
 mod welcome;
+mod window_actions;
 
 use crate::tool_windows::Area;
 pub use crate::tool_windows::{BOTTOM_WEIGHT, PROJECT_WIDTH, ToolWindow};
@@ -2638,6 +2639,7 @@ impl Render for Workbench {
         root = self.commit_actions(root, cx);
         root = self.terminal_actions(root, cx);
         root = self.diff_actions(root, cx);
+        root = self.window_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);
         root.flex()
