@@ -445,15 +445,30 @@ fn known_parent_without_file_is_a_note_and_missing_values_come_from_the_base() {
         w.level == Level::Info
             && matches!(&w.kind, WarningKind::ParentSchemeUnavailable { name, known: true } if name == "Darcula")
     }));
-    // Neither the theme nor the scheme sets the diff colours.
-    let base = themes::builtin::dark();
-    assert_eq!(item.theme.ui[UiRole::DiffAdded], base.ui[UiRole::DiffAdded]);
+    // Neither the theme nor the scheme sets the diff colours: the base
+    // scheme the importer bundles does (Darcula's `DIFF_INSERTED`).
+    assert_eq!(item.theme.ui[UiRole::DiffAdded], rgba("#294436"));
     assert!(
-        item.report
+        !item
+            .report
             .defaulted
             .iter()
             .any(|d| d.target == "ui.diff-added")
     );
+    // Roles of the UI theme that no key sets still come from the base theme.
+    let base = themes::builtin::dark();
+    let defaulted: Vec<UiRole> = UiRole::ALL
+        .iter()
+        .copied()
+        .filter(|role| {
+            let target = format!("ui.{role}");
+            item.report.defaulted.iter().any(|d| d.target == target)
+        })
+        .collect();
+    assert!(!defaulted.is_empty());
+    for role in defaulted {
+        assert_eq!(item.theme.ui[role], base.ui[role], "{role}");
+    }
 }
 
 #[test]
@@ -692,9 +707,13 @@ fn base_schemes_from_the_context_fill_missing_values() {
             .iter()
             .any(|w| matches!(&w.kind, WarningKind::ParentSchemeUnavailable { .. }))
     );
+    // Without the context the bundled Darcula answers instead.
     let without = plugin_imports();
     let before = by_name(&without, "Nightfall");
-    assert!(item.report.defaulted.len() < before.report.defaulted.len());
+    assert_eq!(
+        before.theme.text[TextRole::Number].fg,
+        Some(rgba("#6897bb"))
+    );
     // The context files are not imported themselves.
     assert_eq!(with_base.len(), 4);
 }
@@ -1300,4 +1319,114 @@ fn other_parents_keep_the_original_base() {
         };
         assert_eq!(item.report.base, expected, "{parent}");
     }
+}
+
+// ---- parent scheme of an imported scheme --------------------------------
+
+/// An Islands Dark child with a scheme that names `parent` as its
+/// `parent_scheme` and sets only the editor text and the string colour.
+fn import_leaf_with_scheme(parent: &str) -> Imported {
+    let mut library = Library::new();
+    library
+        .add_ui_theme_json(
+            r##"{"name": "Leaf", "dark": true, "parentTheme": "Islands Dark",
+                 "editorScheme": "/themes/Leaf.xml", "ui": {"Panel": {"background": "#101a22"}}}"##,
+            "inline-leaf",
+            "themes/leaf.theme.json",
+            true,
+        )
+        .unwrap();
+    let xml = format!(
+        r##"<scheme name="Leaf" version="142" parent_scheme="{parent}">
+          <attributes>
+            <option name="TEXT"><value>
+              <option name="FOREGROUND" value="e0e0e0"/><option name="BACKGROUND" value="101820"/>
+            </value></option>
+            <option name="DEFAULT_STRING"><value><option name="FOREGROUND" value="aabbcc"/></value></option>
+          </attributes></scheme>"##
+    );
+    library
+        .add_scheme_xml(&xml, "inline-leaf-scheme", "themes/Leaf.xml", false)
+        .unwrap();
+    library.import_all().remove(0)
+}
+
+#[test]
+fn what_a_scheme_leaves_unset_comes_from_its_parent_scheme_not_from_the_ui_base() {
+    let item = import_leaf_with_scheme("Darcula");
+    let islands = themes::builtin::default_theme(ThemeKind::Dark);
+    assert_eq!(item.report.base, "islands-dark");
+    // Set by the scheme.
+    assert_eq!(item.theme.text[TextRole::String].fg, Some(rgba("#aabbcc")));
+    assert_eq!(item.theme.ui[UiRole::EditorBackground], rgba("#101820"));
+    // Not set: Darcula's value, not Islands Dark's.
+    assert_eq!(item.theme.text[TextRole::Number].fg, Some(rgba("#6897bb")));
+    assert_ne!(
+        item.theme.text[TextRole::Number].fg,
+        islands.text[TextRole::Number].fg
+    );
+    assert_eq!(item.theme.ui[UiRole::DiffAdded], rgba("#294436"));
+    assert_eq!(item.theme.ui[UiRole::Whitespace], rgba("#606060"));
+    assert_ne!(
+        item.theme.ui[UiRole::Whitespace],
+        islands.ui[UiRole::Whitespace]
+    );
+    // The roles of the UI theme keep the islands base.
+    for role in [UiRole::TreeText, UiRole::NotificationText, UiRole::Accent] {
+        assert_eq!(item.theme.ui[role], islands.ui[role], "{role}");
+    }
+    assert_eq!(item.theme.ui[UiRole::Surface], rgba("#101a22"));
+    // The importer says where the values came from.
+    assert!(item.report.warnings.iter().any(|w| {
+        matches!(&w.kind, WarningKind::ParentSchemeUnavailable { name, known: true } if name == "Darcula")
+    }));
+    assert!(item.report.sources.iter().all(|s| !s.contains("bundled")));
+}
+
+#[test]
+fn the_default_scheme_is_the_parent_of_a_light_scheme() {
+    let item = import_leaf_with_scheme("Default");
+    // `DEFAULT_NUMBER` of the Default scheme.
+    assert_eq!(item.theme.text[TextRole::Number].fg, Some(rgba("#0000ff")));
+}
+
+#[test]
+fn a_parent_scheme_among_the_inputs_beats_the_bundled_one() {
+    let mut library = Library::new();
+    library
+        .add_scheme_xml(
+            r##"<scheme name="Darcula" version="1" parent_scheme="Default">
+              <attributes><option name="DEFAULT_NUMBER"><value>
+                <option name="FOREGROUND" value="123456"/>
+              </value></option></attributes></scheme>"##,
+            "darcula",
+            "darcula.icls",
+            false,
+        )
+        .unwrap();
+    library
+        .add_scheme_xml(
+            r##"<scheme name="Child" version="1" parent_scheme="Darcula">
+              <attributes><option name="TEXT"><value>
+                <option name="FOREGROUND" value="e0e0e0"/><option name="BACKGROUND" value="101820"/>
+              </value></option></attributes></scheme>"##,
+            "child",
+            "child.icls",
+            true,
+        )
+        .unwrap();
+    let item = library.import_all().remove(0);
+    assert_eq!(item.theme.text[TextRole::Number].fg, Some(rgba("#123456")));
+    // What the given Darcula leaves unset comes from the bundled Default.
+    assert_eq!(item.theme.text[TextRole::String].fg, Some(rgba("#008000")));
+}
+
+#[test]
+fn an_unknown_parent_scheme_leaves_the_base_theme() {
+    let item = import_leaf_with_scheme("Unheard Of");
+    let islands = themes::builtin::default_theme(ThemeKind::Dark);
+    assert_eq!(
+        item.theme.text[TextRole::Number].fg,
+        islands.text[TextRole::Number].fg
+    );
 }

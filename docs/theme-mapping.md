@@ -191,10 +191,26 @@ brightness (`Darcula` for dark, `Default` for light) when it is among the inputs
    only to roles that follow a value of the colour scheme (the gutter follows
    the editor background); other roles take the islands value.
 
-The base schemes of the IDE (`Default`, `Darcula`) and the base themes are not
-shipped here. When they are among the inputs (pass the folder or archive of an
-installed IDE as context to the importer) their values are used; otherwise the
-report says which parent was missing.
+**Parent scheme.** The base schemes of the IDE (`Default`, `Darcula`, with the
+Python attributes of `PythonDefault.xml` / `PythonDarcula.xml`) ship with the
+importer (`crates/platform/themes/schemes/`, IntelliJ Platform Community,
+Apache-2.0, `notices/themes-scheme-parent.md`). When a scheme names one of them
+as its `parent_scheme` and the inputs do not hold it (pass the folder or archive
+of an installed IDE as context to use that copy instead), the values the scheme
+leaves unset come from the bundled scheme, as the reference resolves them:
+every text role and every UI role that has a colour-scheme source
+(`is_scheme_role`: the editor, the gutter, version control and diagnostic
+colours, the terminal) is answered by the scheme chain first. The roles of the
+UI theme (steps 6 to 8) keep the base theme of the import, also under an
+islands base; fonts come only from the scheme files given. A `Darcula` among
+the inputs wins over the bundled one, and its own `parent_scheme` `Default` is
+the bundled one. A `parent_scheme` that is neither bundled nor among the inputs
+is reported as before and the base theme fills the roles. The report notes the
+use of a bundled scheme; the bundled files are not listed as sources and their
+unused keys are not reported as unmapped. The one thing the product draws in
+code is the Hint diagnostic: where the scheme leaves the information
+attributes empty, `syntax.diagnostic-hint` is a grey dotted line
+(`PyLspToolIntegrationProvider.getEnforcedTextAttributes`).
 
 ## UI roles
 
@@ -746,8 +762,9 @@ identifiers and their parents (observed on real theme files):
 A known identifier whose file is not available is reported as a note and the
 chain continues with its parent; an identifier that is not in the table and not
 found is reported as a warning (`unknown-parent-theme`). A `parent_scheme`
-that is not among the inputs is a note for `Default` and `Darcula` and a
-warning for any other name.
+that is not among the inputs is a note for `Default` and `Darcula` (the
+bundled scheme answers, see "Parent scheme" above) and a warning for any other
+name.
 
 ## Highlighter names
 

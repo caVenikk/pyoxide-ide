@@ -11,6 +11,7 @@ use crate::color::Rgba;
 use crate::model::Controls;
 
 use super::archive::{self, ArchiveSummary, DataKind};
+use super::bundled;
 use super::convert::{Imported, Inputs, convert};
 use super::known::{known_chain, known_scheme, known_theme};
 use super::report::{Level, SourceKind, Warning, WarningKind};
@@ -399,6 +400,12 @@ impl Library {
                     // Language attributes for a base scheme that is not
                     // among the inputs still apply.
                     layers.extend(self.additional_for(parent));
+                    // The base schemes of the IDE ship with the importer:
+                    // what the scheme leaves unset comes from them, not from
+                    // the theme the import starts from.
+                    let base = bundled::chain(parent);
+                    let has_base = !base.is_empty();
+                    layers.extend(base);
                     let known = known_scheme(parent).is_some();
                     warnings.push(Warning {
                         level: if known { Level::Info } else { Level::Warning },
@@ -407,9 +414,15 @@ impl Library {
                             known,
                         },
                         message: if known {
-                            format!(
-                                "parent scheme `{parent}` is a base scheme of the IDE and is not among the inputs; values it would supply are filled from the built-in theme"
-                            )
+                            if has_base {
+                                format!(
+                                    "parent scheme `{parent}` is a base scheme of the IDE and is not among the inputs; the copy bundled with the importer supplies the values the scheme leaves unset"
+                                )
+                            } else {
+                                format!(
+                                    "parent scheme `{parent}` is a base scheme of the IDE and is not among the inputs; values it would supply are filled from the built-in theme"
+                                )
+                            }
                         } else {
                             format!("parent_scheme `{parent}` is not among the inputs")
                         },
@@ -484,11 +497,12 @@ impl Library {
             .or_else(|| scheme_is_dark(&scheme_layers))
             .unwrap_or(true);
         let mut sources: Vec<String> = Vec::new();
-        for origin in ui_layers
-            .iter()
-            .map(|l| &l.origin)
-            .chain(scheme_layers.iter().map(|s| &s.origin))
-        {
+        for origin in ui_layers.iter().map(|l| &l.origin).chain(
+            scheme_layers
+                .iter()
+                .filter(|s| !s.bundled)
+                .map(|s| &s.origin),
+        ) {
             if !sources.contains(origin) {
                 sources.push(origin.clone());
             }
@@ -514,16 +528,16 @@ impl Library {
     pub fn import_scheme(&self, scheme: &Scheme) -> Imported {
         let (scheme_layers, warnings) = self.scheme_chain(scheme);
         let dark = scheme_is_dark(&scheme_layers).unwrap_or(true);
-        let sources =
-            scheme_layers
-                .iter()
-                .map(|s| s.origin.clone())
-                .fold(Vec::new(), |mut acc, origin| {
-                    if !acc.contains(&origin) {
-                        acc.push(origin);
-                    }
-                    acc
-                });
+        let sources = scheme_layers
+            .iter()
+            .filter(|s| !s.bundled)
+            .map(|s| s.origin.clone())
+            .fold(Vec::new(), |mut acc, origin| {
+                if !acc.contains(&origin) {
+                    acc.push(origin);
+                }
+                acc
+            });
         convert(Inputs {
             name: scheme.name.clone(),
             kind: SourceKind::Scheme,
