@@ -315,6 +315,8 @@ fn write_imported(imported: Vec<Imported>, dir: &Path) -> Result<Vec<ImportedFil
     for item in imported {
         let mut file = item.theme.to_file();
         file.theme.scheme_only = item.report.kind == SourceKind::Scheme;
+        // The theme it was imported on supplies roles added by later versions.
+        file.theme.base = Some(item.report.base.clone());
         let mut id = file.theme.id.clone();
         if builtin.contains(&id) {
             id = format!("{id}-imported");

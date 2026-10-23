@@ -16,6 +16,9 @@ pub const LIGHT_ID: &str = "pyoxide-light";
 pub const ISLANDS_DARK_ID: &str = "islands-dark";
 pub const ISLANDS_LIGHT_ID: &str = "islands-light";
 
+/// The ids of the built-in themes.
+pub(crate) const IDS: [&str; 4] = [DARK_ID, LIGHT_ID, ISLANDS_DARK_ID, ISLANDS_LIGHT_ID];
+
 const DARK_TOML: &str = include_str!("../themes/pyoxide-dark.toml");
 const LIGHT_TOML: &str = include_str!("../themes/pyoxide-light.toml");
 const ISLANDS_DARK_TOML: &str = include_str!("../themes/islands-dark.toml");

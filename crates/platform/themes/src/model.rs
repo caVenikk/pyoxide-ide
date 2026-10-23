@@ -52,7 +52,7 @@ pub enum UnderlineStyle {
 /// `border`, underline variants are `underline`, strikeout is
 /// `strikethrough`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(default, rename_all = "kebab-case")]
 pub struct TextStyle<C = Rgba> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fg: Option<C>,
@@ -404,6 +404,7 @@ impl Theme {
                 author: self.author.clone(),
                 description: self.description.clone(),
                 extends: None,
+                base: None,
                 scheme_only: false,
                 controls: (self.controls != Controls::New).then_some(self.controls),
             },
@@ -429,8 +430,11 @@ impl Theme {
 pub const FORMAT_VERSION: u32 = 1;
 
 /// The `[theme]` table of a theme file.
+///
+/// A field this build does not know is skipped when a file is read (see
+/// [`ThemeFile`]); a bad value of a known field is an error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(default, rename_all = "kebab-case")]
 pub struct ThemeHeader {
     /// Version of the file format; absent means 1.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -448,6 +452,12 @@ pub struct ThemeHeader {
     /// Id of the theme whose values are used for everything this file omits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
+    /// Id of the built-in theme that supplies the roles a self-contained
+    /// file lacks (roles added by later versions): the theme an import was
+    /// made on. When absent, the default theme of the file's kind (the
+    /// base theme of an import for a file with classic controls) is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     /// The file holds an editor colour scheme without a UI theme (an
     /// imported `.icls`): the IDE offers it as an editor colour scheme
     /// only, and its UI colours are those of its base theme.
@@ -479,9 +489,11 @@ pub struct ThemeHeader {
 /// ```
 ///
 /// A key of `[ui]`, `[syntax]` or `[metrics]` that names no role of this
-/// build is skipped, so a file saved by a newer build that knows more roles
-/// still loads; [`ThemeFile::parse_toml`] returns the skipped keys. Anything
-/// else that does not parse is an error.
+/// build is skipped, and so is an attribute of a text style or a field of
+/// `[theme]` that this build does not know, so a file saved by a newer build
+/// that knows more still loads; [`ThemeFile::parse_toml`] returns the skipped
+/// keys. Anything else that does not parse (a bad value of a known key) is an
+/// error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "RawThemeFile")]
 pub struct ThemeFile {
@@ -519,14 +531,52 @@ macro_rules! role_key {
 
 role_key!(UiRole, TextRole, Metric);
 
+/// A value of a role table as read: the value and the names of the keys
+/// inside it that this build does not know.
+trait RoleValue {
+    type Value;
+    fn into_parts(self) -> (Self::Value, Vec<String>);
+}
+
+macro_rules! plain_role_value {
+    ($($ty:ty),*) => {$(
+        impl RoleValue for $ty {
+            type Value = $ty;
+            fn into_parts(self) -> (Self::Value, Vec<String>) {
+                (self, Vec::new())
+            }
+        }
+    )*};
+}
+
+plain_role_value!(ColorRef, f32);
+
+/// A text style as read: attributes this build does not know are kept apart.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct RawStyle {
+    #[serde(flatten)]
+    style: TextStyle<ColorRef>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, IgnoredAny>,
+}
+
+impl RoleValue for RawStyle {
+    type Value = TextStyle<ColorRef>;
+    fn into_parts(self) -> (Self::Value, Vec<String>) {
+        (self.style, self.unknown.into_keys().collect())
+    }
+}
+
 /// A table of a theme file keyed by role names: the entries of the roles this
-/// build knows and the keys it does not (their values are not looked at).
-struct RoleTable<K, V> {
-    entries: BTreeMap<K, V>,
+/// build knows and the keys it does not (their values are not looked at),
+/// with the unknown keys inside the entries as `role.key`.
+struct RoleTable<K, V: RoleValue> {
+    entries: BTreeMap<K, V::Value>,
     skipped: Vec<String>,
 }
 
-impl<K, V> Default for RoleTable<K, V> {
+impl<K, V: RoleValue> Default for RoleTable<K, V> {
     fn default() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -535,11 +585,11 @@ impl<K, V> Default for RoleTable<K, V> {
     }
 }
 
-impl<'de, K: RoleKey, V: Deserialize<'de>> Deserialize<'de> for RoleTable<K, V> {
+impl<'de, K: RoleKey, V: RoleValue + Deserialize<'de>> Deserialize<'de> for RoleTable<K, V> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct RoleVisitor<K, V>(PhantomData<(K, V)>);
 
-        impl<'de, K: RoleKey, V: Deserialize<'de>> Visitor<'de> for RoleVisitor<K, V> {
+        impl<'de, K: RoleKey, V: RoleValue + Deserialize<'de>> Visitor<'de> for RoleVisitor<K, V> {
             type Value = RoleTable<K, V>;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -551,7 +601,11 @@ impl<'de, K: RoleKey, V: Deserialize<'de>> Deserialize<'de> for RoleTable<K, V> 
                 while let Some(key) = map.next_key::<String>()? {
                     match K::from_name(&key) {
                         Some(role) => {
-                            table.entries.insert(role, map.next_value()?);
+                            let (value, unknown) = map.next_value::<V>()?.into_parts();
+                            table.entries.insert(role, value);
+                            table
+                                .skipped
+                                .extend(unknown.into_iter().map(|name| format!("{key}.{name}")));
                         }
                         None => {
                             map.next_value::<IgnoredAny>()?;
@@ -567,15 +621,25 @@ impl<'de, K: RoleKey, V: Deserialize<'de>> Deserialize<'de> for RoleTable<K, V> 
     }
 }
 
+/// The `[theme]` table as read: fields this build does not know are kept
+/// apart.
+#[derive(Default, Deserialize)]
+struct RawHeader {
+    #[serde(flatten)]
+    header: ThemeHeader,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, IgnoredAny>,
+}
+
 /// A [`ThemeFile`] as read: the role tables still list the keys that name no
 /// role.
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct RawThemeFile {
-    theme: ThemeHeader,
+    theme: RawHeader,
     palette: BTreeMap<String, Rgba>,
     ui: RoleTable<UiRole, ColorRef>,
-    syntax: RoleTable<TextRole, TextStyle<ColorRef>>,
+    syntax: RoleTable<TextRole, RawStyle>,
     font: FontPatch,
     metrics: RoleTable<Metric, f32>,
 }
@@ -587,11 +651,12 @@ impl RawThemeFile {
         let mut note = |table: &str, keys: Vec<String>| {
             skipped.extend(keys.into_iter().map(|key| format!("{table}.{key}")));
         };
+        note("theme", self.theme.unknown.into_keys().collect());
         note("ui", self.ui.skipped);
         note("syntax", self.syntax.skipped);
         note("metrics", self.metrics.skipped);
         let file = ThemeFile {
-            theme: self.theme,
+            theme: self.theme.header,
             palette: self.palette,
             ui: self.ui.entries,
             syntax: self.syntax.entries,
@@ -620,10 +685,11 @@ impl ThemeFile {
         Ok(file)
     }
 
-    /// Reads a theme file and returns, apart from it, the keys of `[ui]`,
-    /// `[syntax]` and `[metrics]` that were skipped because they name no
-    /// role of this build, each as `table.key`; [`skipped_warning`] words
-    /// them for the log.
+    /// Reads a theme file and returns, apart from it, the keys that were
+    /// skipped because this build does not know them (roles of `[ui]`,
+    /// `[syntax]` and `[metrics]`, attributes of a text style, fields of
+    /// `[theme]`), each as `table.key` (`syntax.role.attribute` for an
+    /// attribute); [`skipped_warning`] words them for the log.
     pub fn parse_toml(text: &str, origin: &str) -> Result<(Self, Vec<String>), crate::ThemeError> {
         let raw: RawThemeFile = toml::from_str(text).map_err(|e| crate::ThemeError::Parse {
             origin: origin.to_owned(),
@@ -650,7 +716,7 @@ impl ThemeFile {
 /// file `origin`.
 pub fn skipped_warning(origin: &str, skipped: &[String]) -> String {
     format!(
-        "{origin}: skipped {} key{} that name no role of this version (saved by a newer one?): {}",
+        "{origin}: skipped {} key{} this version does not know (saved by a newer one?): {}",
         skipped.len(),
         if skipped.len() == 1 { "" } else { "s" },
         skipped.join(", ")
@@ -682,13 +748,12 @@ mod tests {
     }
 
     #[test]
-    fn text_style_toml_uses_kebab_case_and_rejects_typos() {
+    fn text_style_toml_uses_kebab_case() {
         let style: TextStyle<ColorRef> =
             toml::from_str("fg = \"#112233\"\nunderline = \"wavy\"\nunderline-color = \"$x\"\n")
                 .unwrap();
         assert_eq!(style.underline, Some(UnderlineStyle::Wavy));
         assert_eq!(style.underline_color, Some(ColorRef::Palette("x".into())));
-        assert!(toml::from_str::<TextStyle<ColorRef>>("fgg = \"#112233\"").is_err());
     }
 
     #[test]

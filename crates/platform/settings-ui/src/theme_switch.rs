@@ -488,7 +488,7 @@ fn imported(
 
 /// The balloon of a finished import: what came in, in a sentence or two
 /// (the reference says "Color scheme added" for a scheme). What could not
-/// be mapped goes to the log ([`log_reports`]), not into the balloon.
+/// be mapped stays in the import report, not in the balloon or the log.
 fn import_notification(themes: &[(String, String)], schemes: &[String]) -> Notification {
     let (title, text) = match (themes, schemes) {
         ([], []) => {
@@ -524,23 +524,14 @@ fn import_notification(themes: &[(String, String)], schemes: &[String]) -> Notif
     Notification::new(NotificationKind::Information, title, text)
 }
 
-/// Writes what each imported file mapped and what it could not map, by
-/// group, to the log (stderr).
+/// Writes one short line per imported file to the log (stderr); what could
+/// not be mapped stays in the [`ImportReport`] (`ImportReport::render`).
 fn log_reports(reports: &[ImportReport]) {
     for r in reports {
         let summary = r.summary();
-        let groups: Vec<String> = r
-            .unmapped_groups()
-            .iter()
-            .map(|(g, n)| format!("{g} {n}"))
-            .collect();
         eprintln!(
-            "themes: imported {}: {} mapped, {} not mapped{}{}",
-            r.name,
-            plural(summary.mapped, "key"),
-            summary.unmapped_keys,
-            if groups.is_empty() { "" } else { ": " },
-            groups.join(", "),
+            "themes: imported {}: {} mapped, {} not mapped",
+            r.name, summary.mapped, summary.unmapped_keys,
         );
     }
 }

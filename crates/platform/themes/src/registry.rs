@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::color::{ColorRef, Rgba};
 use crate::model::{
-    FontPatch, Metrics, TextStyle, TextStyles, Theme, ThemeFile, ThemeKind, UiColors,
+    Controls, FontPatch, Metrics, TextStyle, TextStyles, Theme, ThemeFile, ThemeKind, UiColors,
 };
 use crate::roles::{Metric, TextRole, UiRole};
 
@@ -145,11 +145,40 @@ impl Registry {
             chain.push(parent);
             current = parent;
         }
-        merge_chain(&chain)
+        match merge_chain(&chain, None) {
+            Err(ThemeError::Incomplete { theme, missing }) => {
+                // A file written by an older version lacks the roles added
+                // since: the theme it was made on supplies them.
+                match fallback_theme(&chain) {
+                    Some(fallback) => merge_chain(&chain, Some(&fallback)),
+                    None => Err(ThemeError::Incomplete { theme, missing }),
+                }
+            }
+            other => other,
+        }
     }
 }
 
-fn merge_chain(chain: &[&ThemeFile]) -> Result<Theme, ThemeError> {
+/// The built-in theme whose values fill the roles a file lacks: the file's
+/// `base`, else the default theme of its kind (the base theme of an import
+/// for a file with classic controls). `None` when the chain has no kind.
+fn fallback_theme(chain: &[&ThemeFile]) -> Option<Theme> {
+    let kind = chain.iter().find_map(|f| f.theme.kind)?;
+    let recorded = chain
+        .iter()
+        .find_map(|f| f.theme.base.as_deref())
+        .filter(|id| crate::builtin::IDS.contains(id));
+    let id = recorded.unwrap_or_else(|| {
+        let controls = chain.iter().find_map(|f| f.theme.controls);
+        crate::builtin::import_id_for(kind, controls.unwrap_or_default() == Controls::New)
+    });
+    let registry = Registry::with_builtin();
+    let file = registry.get(id)?;
+    let chain = [file];
+    merge_chain(&chain, None).ok()
+}
+
+fn merge_chain(chain: &[&ThemeFile], fallback: Option<&Theme>) -> Result<Theme, ThemeError> {
     // `chain` is leaf first; apply root first so the leaf wins.
     let leaf = chain[0];
     let theme_id = leaf.theme.id.clone();
@@ -200,9 +229,10 @@ fn merge_chain(chain: &[&ThemeFile]) -> Result<Theme, ThemeError> {
 
     let mut colors = UiColors::filled(Rgba::BLACK);
     for &role in UiRole::ALL {
-        match ui.get(&role) {
-            Some(color) => colors[role] = resolve(role.name(), color)?,
-            None => missing.push(format!("ui.{role}")),
+        match (ui.get(&role), fallback) {
+            (Some(color), _) => colors[role] = resolve(role.name(), color)?,
+            (None, Some(base)) => colors[role] = base.ui[role],
+            (None, None) => missing.push(format!("ui.{role}")),
         }
     }
     let mut text = TextStyles::default();
@@ -211,10 +241,14 @@ fn merge_chain(chain: &[&ThemeFile]) -> Result<Theme, ThemeError> {
     }
     let mut numbers = Metrics::filled(0.0);
     for &metric in Metric::ALL {
-        match metrics.get(&metric) {
-            Some(value) => numbers[metric] = *value,
-            None => missing.push(format!("metrics.{metric}")),
+        match (metrics.get(&metric), fallback) {
+            (Some(value), _) => numbers[metric] = *value,
+            (None, Some(base)) => numbers[metric] = base.metrics[metric],
+            (None, None) => missing.push(format!("metrics.{metric}")),
         }
+    }
+    if let Some(base) = fallback {
+        font = FontPatch::from(&base.fonts).overlay(&font);
     }
     missing.extend(font.missing().into_iter().map(str::to_owned));
     if !missing.is_empty() {

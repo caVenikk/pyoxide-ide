@@ -6,4 +6,5 @@
 mod builtin;
 mod import;
 mod local;
+mod missing_roles;
 mod unknown_roles;
