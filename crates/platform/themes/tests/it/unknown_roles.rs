@@ -140,3 +140,57 @@ fn the_log_gets_one_warning_per_file() {
         assert!(warnings[0].contains(key), "{key} is not in: {stderr}");
     }
 }
+
+const NEWER: &str = r##"
+[theme]
+id = "newer"
+name = "Newer"
+extends = "pyoxide-dark"
+a-new-header-field = "x"
+
+[ui]
+accent = "#112233"
+
+[syntax]
+keyword = { fg = "#aa0000", bold = true, glow = "#00ff00", sparkle = 3 }
+string = { fg = "#00aa00" }
+"##;
+
+#[test]
+fn unknown_attributes_and_header_fields_are_skipped_and_listed() {
+    let (file, skipped) = ThemeFile::parse_toml(NEWER, "newer.toml").unwrap();
+    assert_eq!(
+        skipped,
+        [
+            "theme.a-new-header-field",
+            "syntax.keyword.glow",
+            "syntax.keyword.sparkle"
+        ]
+    );
+    assert_eq!(file.theme.id, "newer");
+    assert_eq!(file.theme.extends.as_deref(), Some("pyoxide-dark"));
+    let mut registry = Registry::with_builtin();
+    registry.insert(file).unwrap();
+    let theme = registry.resolve("newer").unwrap();
+    assert_eq!(theme.ui[UiRole::Accent], Rgba::rgb(0x11, 0x22, 0x33));
+    assert_eq!(
+        theme.text[TextRole::Keyword].fg,
+        Some(Rgba::rgb(0xaa, 0, 0))
+    );
+    assert!(theme.text[TextRole::Keyword].is_bold());
+    assert_eq!(theme.text[TextRole::String].fg, Some(Rgba::rgb(0, 0xaa, 0)));
+    let warning = themes::skipped_warning("newer.toml", &skipped);
+    assert_eq!(warning.lines().count(), 1, "{warning}");
+}
+
+#[test]
+fn a_bad_value_of_a_known_attribute_or_header_field_is_still_an_error() {
+    for text in [
+        NEWER.replace("bold = true", "bold = \"loud\""),
+        NEWER.replace("\"#aa0000\"", "\"red-ish\""),
+        NEWER.replace("extends = \"pyoxide-dark\"", "extends = 3"),
+        NEWER.replace("name = \"Newer\"", "kind = \"purple\""),
+    ] {
+        assert!(ThemeFile::parse_toml(&text, "bad.toml").is_err(), "{text}");
+    }
+}

@@ -54,11 +54,19 @@ accent = "$rust"
 keyword = { fg = "$rust", bold = true }
 ```
 
-A key of `[ui]`, `[syntax]` or `[metrics]` that names no role of this build
-is skipped, so a file saved by a newer build that has more roles still loads
+A key of `[ui]`, `[syntax]` or `[metrics]` that names no role of this build,
+an attribute of a text style and a field of `[theme]` that this build does not
+know are skipped, so a file saved by a newer build that has more still loads
 here: the known keys keep their values and the log gets one warning per file
-that lists the skipped keys. Other errors (a bad colour, a misspelt field of a
-text style, broken TOML, a newer `format`) still leave the file out.
+that lists the skipped keys. Other errors (a bad value of a known key, broken
+TOML, a newer `format`) still leave the file out.
+
+The other direction: a self-contained file written by an older build lacks the
+roles added since. They are filled, without a message, from the built-in theme
+named by `base` in `[theme]` (an import records the theme it was made on), else
+from the default theme of the file's kind (the base theme of an import for a
+file with classic controls). Text styles are not filled: an absent one is
+plain, as written.
 
 ## Themes in the IDE
 
