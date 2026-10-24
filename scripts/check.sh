@@ -162,9 +162,43 @@ run_step() {
     esac
 }
 
+# The time of each step, printed at the end (also when a step fails, with the
+# failing one marked) so the tail of a log shows where the time went and what
+# stopped the run.
+timings=()
+current=""
+current_start=0
+script_start=$(date +%s)
+
+summary() {
+    local rc=$?
+    local now
+    now=$(date +%s)
+    if [ -n "$current" ]; then
+        timings+=("$current $((now - current_start)) FAILED")
+    fi
+    if [ ${#timings[@]} -gt 0 ]; then
+        echo
+        echo "== check.sh: $((now - script_start)) s"
+        local entry name secs mark
+        for entry in "${timings[@]}"; do
+            read -r name secs mark <<<"$entry"
+            printf '%-15s %5s s  %s\n' "$name" "$secs" "$mark"
+        done
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "check.sh: FAILED${current:+ at step $current}" >&2
+    fi
+}
+trap summary EXIT
+
 for step in "${steps[@]}"; do
     echo "==> $step"
-    start=$(date +%s)
+    current=$step
+    current_start=$(date +%s)
     run_step "$step"
-    echo "<== $step: $(($(date +%s) - start)) s"
+    elapsed=$(($(date +%s) - current_start))
+    echo "<== $step: $elapsed s"
+    timings+=("$step $elapsed")
+    current=""
 done
