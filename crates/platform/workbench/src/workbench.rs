@@ -2202,8 +2202,10 @@ impl Workbench {
     }
 
     /// The editor island. Files dropped anywhere on it (the tabs, the
-    /// editor or the empty area) open in tabs, as in the reference IDE. It
-    /// takes the width the side areas leave, at least `min`.
+    /// editor or the empty area), from the file manager or from the
+    /// Project tree, open in tabs, as in the reference IDE (its editor
+    /// takes the file list of either drag, `FileDropManager`). It takes the
+    /// width the side areas leave, at least `min`.
     fn editor_island(&self, min: Pixels, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         island(cx, UiRole::EditorBackground)
             .id("editor-area")
@@ -2214,6 +2216,11 @@ impl Workbench {
             .on_drop(
                 cx.listener(|this, dropped: &gpui::ExternalPaths, window, cx| {
                     this.open_dropped(dropped.paths().to_vec(), window, cx)
+                }),
+            )
+            .on_drop(
+                cx.listener(|this, dragged: &project_panel::DraggedFiles, window, cx| {
+                    this.open_dropped(dragged.paths.clone(), window, cx)
                 }),
             )
     }

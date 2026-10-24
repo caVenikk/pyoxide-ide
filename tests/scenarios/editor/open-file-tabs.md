@@ -87,3 +87,39 @@ IntelliJ Platform Community sources (see NOTICE): `EditorsSplitters.kt`,
 `EditorTabbedContainer.kt`, `FileDropManager.kt`, `FileNavigatorImpl.kt`,
 `EditorImpl.java`, `ProjectViewDropTarget.java`, `ProjectsTabFactory.kt`,
 `DefaultEditorEmptyTextProvider.kt`, `EditorEmptyTextPainter.java`.
+
+# Drag rows from the project tree
+
+## Steps
+1. With the project open and no tab open, drag `a.py` from the project tree
+   onto the editor area and drop it.
+2. Select a few words of `a.py`, drag `notes.txt` from the tree onto its
+   text and drop it.
+3. Drag `a.py` from the tree onto the tab strip and drop it.
+4. Drag the `src` folder from the tree onto the editor area and drop it.
+5. Drag `b.py` over the editor area, back over a row of the tree, and drop
+   it there.
+
+## Expected
+- Step 1: `a.py` opens in a tab and its editor has the focus, as a file
+  dropped from the file manager (the reference's project view drags a file
+  list, which its editor area opens in the window under the pointer).
+- Step 2: `notes.txt` opens in a new tab and is selected; `a.py` keeps its
+  selection.
+- Step 3: `a.py` is open already, so its tab is selected.
+- Step 4: the folder is selected in the tree, which takes the focus (the
+  reference navigates to a dropped folder in the project view); the tabs
+  stay as they are.
+- Step 5: nothing opens; the tree's Move dialog asks where to move `b.py`
+  (tests/scenarios/editor/tree-file-operations.md, step 14).
+- The reference has no split for a drop from the tree: an editor edge
+  splits only for a dragged editor tab (`DockableEditorTabbedContainer`).
+
+## Commands
+`workbench.state` (`tabs`, `active_tab`, `tree`). A drag has no command;
+its drop is the same as a drop from the file manager.
+
+## Source
+IntelliJ Platform Community sources (see NOTICE): `AbstractProjectViewPane.java`
+(`MyDragSource`), `EditorsSplitters.kt` (`MyTransferHandler`),
+`FileDropHandler.kt`, `FileDropManager.kt`, `DockableEditorTabbedContainer.kt`.
