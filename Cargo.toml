@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor/oracle-rs"]
 members = [
     "crates/platform/code-intel",
     "crates/platform/code-intel-ui",
@@ -151,3 +152,7 @@ py-syntax = { path = "crates/python/py-syntax" }
 # (ADR 0007). Release builds are unaffected.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Our copy of oracle-rs with fixes (notices/db-oracle-rs-vendored.md).
+[patch.crates-io]
+oracle-rs = { path = "vendor/oracle-rs" }
