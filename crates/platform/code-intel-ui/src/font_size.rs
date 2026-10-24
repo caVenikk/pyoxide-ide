@@ -322,7 +322,7 @@ mod tests {
     #[gpui::test]
     fn keys_step_through_the_sizes(cx: &mut TestAppContext) {
         cx.update(themes_init);
-        let (popup, cx) = cx.add_window_view(|window, cx| FontSizePopup::new(window, cx));
+        let (popup, cx) = cx.add_window_view(FontSizePopup::new);
         let chosen = Rc::new(Cell::new(None));
         let sink = chosen.clone();
         cx.update(|_, cx| {
