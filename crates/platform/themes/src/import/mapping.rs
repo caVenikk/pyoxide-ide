@@ -191,6 +191,8 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         ],
         Progress => &[Ui("ProgressBar.progressColor")],
         ProgressTrack => &[Ui("ProgressBar.trackColor")],
+        ProgressIndeterminateStart => &[Ui("ProgressBar.indeterminateStartColor")],
+        ProgressIndeterminateEnd => &[Ui("ProgressBar.indeterminateEndColor")],
         Notification => &[Ui("Notification.background")],
         NotificationBorder => &[Ui("Notification.borderColor")],
         NotificationText => &[Ui("Notification.foreground")],

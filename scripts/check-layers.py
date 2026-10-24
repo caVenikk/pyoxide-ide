@@ -42,9 +42,10 @@ CRATES = ROOT / "crates"
 # ADR 0022: directories of crates/ that are reusable modules, not products.
 MODULES = {"database"}
 
-# ADR 0010; stream-framing, dap-client, debugger and py-debug: ADR 0015.
+# ADR 0010; stream-framing, dap-client, debugger and py-debug: ADR 0015;
+# progress: the background tasks API that UI crates observe.
 TOOLKIT = "gpui"
-NO_TOOLKIT = ["code-intel", "lsp-client", "py-lsp", "settings", "terminal", "stream-framing", "dap-client", "debugger", "py-debug"]
+NO_TOOLKIT = ["progress", "code-intel", "lsp-client", "py-lsp", "settings", "terminal", "stream-framing", "dap-client", "debugger", "py-debug"]
 CLIENT = "lsp-client"
 PROTOCOL_TYPES = "lsp-types"
 MODEL = "code-intel"

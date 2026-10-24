@@ -55,6 +55,10 @@ impl IconName {
     pub const RERUN: Self = Self("run/rerun");
     pub const STOP: Self = Self("run/stop");
     pub const KILL_PROCESS: Self = Self("run/killProcess");
+    /// The cancel button of a background task and under the pointer (the
+    /// New UI's `AllIcons.Process.Stop`, `StopHovered`).
+    pub const PROGRESS_STOP: Self = Self("progress/stop");
+    pub const PROGRESS_STOP_HOVERED: Self = Self("progress/stopHovered");
     /// White variants for the coloured buttons of the run widget.
     pub const RUN_STROKE: Self = Self("run/run_stroke");
     pub const RERUN_STROKE: Self = Self("run/rerun_stroke");
@@ -313,6 +317,7 @@ platform_icons! {
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
+        "progress/stop", "progress/stopHovered",
         "run/debug", "run/killProcess",
         "startup/configFile", "run/rerun", "run/run", "run/stop",
         "status/error", "status/info", "status/warning",
