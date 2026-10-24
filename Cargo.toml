@@ -21,6 +21,7 @@ members = [
     "crates/platform/name-match",
     "crates/platform/native-path",
     "crates/platform/process",
+    "crates/platform/progress",
     "crates/platform/project",
     "crates/platform/project-search",
     "crates/platform/run-config",
@@ -118,6 +119,7 @@ lsp-client = { path = "crates/platform/lsp-client" }
 name-match = { path = "crates/platform/name-match" }
 native-path = { path = "crates/platform/native-path" }
 process = { path = "crates/platform/process" }
+progress = { path = "crates/platform/progress" }
 file-index = { path = "crates/platform/file-index" }
 file-watcher = { path = "crates/platform/file-watcher" }
 git = { path = "crates/platform/git" }
