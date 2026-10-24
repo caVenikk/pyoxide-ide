@@ -20,21 +20,28 @@
 //!   for speed search uses `name-match`.
 //! - [`ModelHandle`]: the current `Arc<Model>` of a data source, swapped
 //!   whole by a refresh.
+//! - [`ModelCache`]: the model on disk, one versioned JSON file per data
+//!   source in the user cache folder, written atomically; [`SourceStore`]:
+//!   source texts beside it, read lazily.
 //!
 //! No UI toolkit, no async runtime, no SQL parsing.
 //!
 //! [`Snapshot`]: db_core::schema::Snapshot
 //! [`Delta`]: db_core::schema::Delta
 
+mod cache;
 mod id;
 mod kind;
 mod merge;
 mod model;
 mod name;
 mod schema;
+mod source;
 
+pub use cache::{CACHE_FORMAT, CACHE_VERSION, CacheMiss, ModelCache};
 pub use id::{NodeId, ParseNodeIdError};
 pub use kind::{Group, NodeKind};
 pub use model::{Found, Model, ModelHandle};
 pub use name::NameMatch;
 pub use schema::{Cancelled, GroupRef, NodeRef, SchemaModel};
+pub use source::{SourceKey, SourceStore};

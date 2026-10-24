@@ -216,8 +216,9 @@ impl Group {
         }
     }
 
-    /// Groups whose content comes with [`Level::Structure`]
-    /// (db_core::schema::Level): below it they are not loaded, which is not
+    /// Groups whose content comes with
+    /// [`Level::Structure`](db_core::schema::Level::Structure): below it
+    /// they are not loaded, which is not
     /// the same as empty.
     pub fn needs_structure(self) -> bool {
         matches!(

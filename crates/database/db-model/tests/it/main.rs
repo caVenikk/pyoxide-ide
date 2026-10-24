@@ -1,7 +1,9 @@
+mod cache;
 mod fixture;
 mod lookup;
 mod merge;
 mod props;
+mod sources;
 mod tree;
 
 use std::alloc::{GlobalAlloc, Layout, System};

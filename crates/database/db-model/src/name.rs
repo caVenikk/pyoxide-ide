@@ -59,7 +59,13 @@ pub(crate) fn caseless_hash(s: &str) -> u64 {
 /// The order of names in the tree: ignoring case, then exactly, so the
 /// order does not depend on the order the database returned them in.
 pub(crate) fn cmp_names(a: &str, b: &str) -> Ordering {
-    lower(a).cmp(lower(b)).then_with(|| a.cmp(b))
+    let folded = if a.is_ascii() && b.is_ascii() {
+        let fold = |b: u8| b.to_ascii_lowercase();
+        a.bytes().map(fold).cmp(b.bytes().map(fold))
+    } else {
+        lower(a).cmp(lower(b))
+    };
+    folded.then_with(|| a.cmp(b))
 }
 
 #[cfg(test)]

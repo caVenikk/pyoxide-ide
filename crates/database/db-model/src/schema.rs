@@ -35,7 +35,6 @@ impl std::error::Error for Cancelled {}
 pub(crate) struct Node {
     local: u64,
     kind: NodeKind,
-    name: Box<str>,
     parent: u32,
     children: Box<[u32]>,
     /// Runs of `children` per group, in tree order: (group, start, end).
@@ -60,7 +59,29 @@ enum NodeData {
     },
     Column(Box<ColumnInfo>),
     Constraint(Box<ConstraintInfo>),
-    Argument(Box<ArgumentInfo>),
+    /// `name` is the argument's, or `$n` for an unnamed one.
+    Argument {
+        name: Box<str>,
+        info: Box<ArgumentInfo>,
+    },
+}
+
+impl Node {
+    /// The name, kept once: in the facts the node carries.
+    fn name<'a>(&'a self, schema: &'a str) -> &'a str {
+        match &self.data {
+            NodeData::Schema => schema,
+            NodeData::Object { info, .. } => &info.name,
+            NodeData::Index {
+                object: Some(o), ..
+            } => &o.name,
+            NodeData::Index { info: Some(i), .. } => &i.name,
+            NodeData::Index { .. } => "",
+            NodeData::Column(c) => &c.name,
+            NodeData::Constraint(c) => &c.name,
+            NodeData::Argument { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -232,7 +253,7 @@ impl SchemaModel {
 
     fn relation_of(&self, node: &Node) -> RelationInfo {
         let mut relation = RelationInfo {
-            name: node.name.to_string(),
+            name: node.name(&self.info.name).to_string(),
             ..RelationInfo::default()
         };
         for &child in &node.children {
@@ -306,7 +327,7 @@ impl<'a> NodeRef<'a> {
     /// The name as the database stores it. Arguments without a name are
     /// `$1`, `$2`, ...
     pub fn name(&self) -> &'a str {
-        &self.node().name
+        self.node().name(&self.schema.info.name)
     }
 
     /// The schema the node belongs to.
@@ -414,7 +435,7 @@ impl<'a> NodeRef<'a> {
 
     pub fn argument(&self) -> Option<&'a ArgumentInfo> {
         match &self.node().data {
-            NodeData::Argument(a) => Some(a),
+            NodeData::Argument { info, .. } => Some(info),
             _ => None,
         }
     }
@@ -628,14 +649,19 @@ impl<'c> Builder<'c> {
         }
 
         let mut relation_map = HashMap::with_capacity(relations.len());
-        for r in relations {
-            relation_map.entry(r.name.clone()).or_insert(r);
+        let mut estimate = 1 + n;
+        for mut r in relations {
+            estimate += r.columns.len() + r.constraints.len() + r.indexes.len();
+            // The name is the key; the builder does not read it again.
+            relation_map.entry(std::mem::take(&mut r.name)).or_insert(r);
         }
 
         let hash = schema_hash(&info.name);
+        let mut by_local = PassThroughMap::default();
+        by_local.reserve(estimate);
         let mut builder = Builder {
-            nodes: Vec::with_capacity(n * 4 + 1),
-            by_local: PassThroughMap::default(),
+            nodes: Vec::with_capacity(estimate),
+            by_local,
             objects: objects.into_iter().map(Some).collect(),
             relations: relation_map,
             kids,
@@ -645,7 +671,6 @@ impl<'c> Builder<'c> {
         builder.nodes.push(Node {
             local: 0,
             kind: NodeKind::Schema,
-            name: info.name.as_str().into(),
             parent: NONE,
             children: Box::new([]),
             runs: Box::new([]),
@@ -659,6 +684,7 @@ impl<'c> Builder<'c> {
         builder.finish_children(0, children);
 
         let mut names: PassThroughMap<Slots> = PassThroughMap::default();
+        names.reserve(n);
         for (i, node) in builder.nodes.iter().enumerate() {
             let is_object = matches!(
                 node.data,
@@ -670,7 +696,7 @@ impl<'c> Builder<'c> {
             );
             if is_object {
                 names
-                    .entry(caseless_hash(&node.name))
+                    .entry(caseless_hash(node.name(&info.name)))
                     .and_modify(|s| s.push(i as u32))
                     .or_insert(Slots::One(i as u32));
             }
@@ -687,7 +713,7 @@ impl<'c> Builder<'c> {
 
     /// A free local id for `path`: the hash, or the hash with a counter
     /// when an earlier node of the schema took it.
-    fn local(&mut self, kind: NodeKind, path: &[&str]) -> u64 {
+    fn local(&self, kind: NodeKind, path: &[&str]) -> u64 {
         let mut salt = 0;
         loop {
             let h = local_hash(kind.tag(), path, salt);
@@ -698,21 +724,12 @@ impl<'c> Builder<'c> {
         }
     }
 
-    fn push(
-        &mut self,
-        kind: NodeKind,
-        path: &[&str],
-        name: &str,
-        parent: u32,
-        data: NodeData,
-    ) -> u32 {
-        let local = self.local(kind, path);
+    fn insert(&mut self, kind: NodeKind, local: u64, parent: u32, data: NodeData) -> u32 {
         let index = self.nodes.len() as u32;
         self.by_local.insert(local, index);
         self.nodes.push(Node {
             local,
             kind,
-            name: name.into(),
             parent,
             children: Box::new([]),
             runs: Box::new([]),
@@ -742,7 +759,7 @@ impl<'c> Builder<'c> {
                 let (x, y) = (&nodes[a.index as usize], &nodes[b.index as usize]);
                 a.rank
                     .cmp(&b.rank)
-                    .then_with(|| cmp_names(&x.name, &y.name))
+                    .then_with(|| cmp_names(x.name(""), y.name("")))
                     .then_with(|| object_signature(x).cmp(object_signature(y)))
             });
         } else {
@@ -767,26 +784,27 @@ impl<'c> Builder<'c> {
         }
         let info = self.objects[i].take().expect("each object is placed once");
         let kind = NodeKind::from_object(info.kind);
-        let name = info.name.clone();
-        let sig = signature(&info).to_string();
-        let owner = info.parent.clone();
-        let path: Vec<&str> = match kind {
-            NodeKind::Index | NodeKind::Trigger => owner
-                .as_deref()
-                .into_iter()
-                .chain([name.as_str()])
-                .collect(),
-            k if k.is_routine() => vec![name.as_str(), sig.as_str()],
-            _ => vec![name.as_str()],
+        let local = match (kind, info.parent.as_deref()) {
+            (NodeKind::Index | NodeKind::Trigger, Some(owner)) => {
+                self.local(kind, &[owner, &info.name])
+            }
+            (k, _) if k.is_routine() => self.local(kind, &[&info.name, signature(&info)]),
+            _ => self.local(kind, &[&info.name]),
         };
         let relation = if kind.is_relation() {
-            self.relations.remove(&name)
+            self.relations.remove(info.name.as_str())
         } else {
             None
         };
         let arguments = match &info.detail {
             Some(ObjectDetail::Routine(r)) if kind.is_routine() => Some(r.arguments.clone()),
             _ => None,
+        };
+        // Names the children's ids are made of; most objects have none.
+        let (name, sig) = if relation.is_some() || arguments.is_some() {
+            (info.name.clone(), signature(&info).to_string())
+        } else {
+            (String::new(), String::new())
         };
         let data = if kind == NodeKind::Index {
             NodeData::Index {
@@ -799,10 +817,16 @@ impl<'c> Builder<'c> {
                 structure: relation.is_some() || arguments.is_some(),
             }
         };
-        let index = self.push(kind, &path, &name, parent, data);
+        let index = self.insert(kind, local, parent, data);
 
-        let mut children = Vec::new();
         let kids = std::mem::take(&mut self.kids[i]);
+        let mut children = Vec::with_capacity(
+            kids.len()
+                + relation.as_ref().map_or(0, |r| {
+                    r.columns.len() + r.constraints.len() + r.indexes.len()
+                })
+                + arguments.as_ref().map_or(0, Vec::len),
+        );
         if let Some(relation) = relation {
             self.relation(index, &name, relation, &kids, &mut children)?;
         } else {
@@ -814,14 +838,15 @@ impl<'c> Builder<'c> {
             for (n, arg) in arguments.into_iter().enumerate() {
                 let position = (n + 1).to_string();
                 let arg_name = arg.name.clone().unwrap_or_else(|| format!("${position}"));
-                let path = [name.as_str(), sig.as_str(), position.as_str()];
-                let child = self.push(
+                let local = self.local(
                     NodeKind::Argument,
-                    &path,
-                    &arg_name,
-                    index,
-                    NodeData::Argument(Box::new(arg)),
+                    &[name.as_str(), sig.as_str(), position.as_str()],
                 );
+                let data = NodeData::Argument {
+                    name: arg_name.into(),
+                    info: Box::new(arg),
+                };
+                let child = self.insert(NodeKind::Argument, local, index, data);
                 children.push(child);
             }
         }
@@ -850,12 +875,10 @@ impl<'c> Builder<'c> {
                 .then_with(|| cmp_names(&a.name, &b.name))
         });
         for c in cols {
-            let col_name = c.name.clone();
-            let path = [name, col_name.as_str()];
-            children.push(self.push(
+            let local = self.local(NodeKind::Column, &[name, c.name.as_str()]);
+            children.push(self.insert(
                 NodeKind::Column,
-                &path,
-                &col_name,
+                local,
                 index,
                 NodeData::Column(Box::new(c)),
             ));
@@ -867,15 +890,8 @@ impl<'c> Builder<'c> {
         });
         for c in cons {
             let kind = NodeKind::from_constraint(c.kind);
-            let con_name = c.name.clone();
-            let path = [name, con_name.as_str()];
-            children.push(self.push(
-                kind,
-                &path,
-                &con_name,
-                index,
-                NodeData::Constraint(Box::new(c)),
-            ));
+            let local = self.local(kind, &[name, c.name.as_str()]);
+            children.push(self.insert(kind, local, index, NodeData::Constraint(Box::new(c))));
         }
         // Indexes: the ones listed as objects and the ones read with the
         // table, joined by name.
@@ -902,17 +918,12 @@ impl<'c> Builder<'c> {
                 self.built += 1;
                 Box::new(self.objects[k].take().expect("each object is placed once"))
             });
-            let path = [name, index_name.as_str()];
-            children.push(self.push(
-                NodeKind::Index,
-                &path,
-                &index_name,
-                index,
-                NodeData::Index {
-                    object,
-                    info: info.map(Box::new),
-                },
-            ));
+            let local = self.local(NodeKind::Index, &[name, index_name.as_str()]);
+            let data = NodeData::Index {
+                object,
+                info: info.map(Box::new),
+            };
+            children.push(self.insert(NodeKind::Index, local, index, data));
         }
         for &k in kids {
             if self.objects[k].is_some() {
