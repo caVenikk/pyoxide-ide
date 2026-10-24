@@ -42,6 +42,7 @@ mod branches;
 mod commit;
 mod debug;
 mod diff;
+mod documentation_window;
 mod file_events;
 mod file_sync;
 mod history;
@@ -508,6 +509,7 @@ impl Workbench {
             CodeIntelEvent::OpenLocation { path, at } => {
                 self.open_file_at(path.clone(), *at, None, window, cx)
             }
+            CodeIntelEvent::ShowDocumentation => self.show_documentation_window(window, cx),
         }
     }
 

@@ -432,6 +432,171 @@ fn documentation_of_a_module(cx: &mut TestAppContext) {
     assert_eq!(h.text(), "\"\"\"JSON encoder and decoder.\"\"\"\n");
 }
 
+/// Answers documentation of the module `json` (a file outside the project)
+/// anywhere.
+fn answer_json_module(h: &mut H<'_>) -> tempfile::TempDir {
+    let stdlib = tempfile::tempdir().unwrap();
+    let json_py = native_path::canonicalize(stdlib.path())
+        .unwrap()
+        .join("json.py");
+    std::fs::write(&json_py, "\"\"\"JSON encoder and decoder.\"\"\"\n").unwrap();
+    h.fake.on_hover(|_, _| {
+        Ok(Some(Hover {
+            contents: Markup::markdown(
+                "```xml\n<module 'json'>\n```\n---\nJSON encoder and decoder.",
+            ),
+            range: Some(Point::new(0, 7)..Point::new(0, 11)),
+        }))
+    });
+    h.fake.on_definition(move |_, _| {
+        Ok(vec![Location {
+            path: json_py.clone(),
+            range: Point::new(0, 0)..Point::new(0, 0),
+        }])
+    });
+    stdlib
+}
+
+#[gpui::test]
+fn the_more_menu_of_the_documentation_popup(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "import json\n")]);
+    h.open("app.py", "import js");
+    let _stdlib = answer_json_module(&mut h);
+    h.invoke("code.quick-doc", json!(null));
+    h.click("doc-more");
+
+    // The reference's rows: Open in Documentation Tool Window, the two
+    // options (checked by default), Adjust Font Size, then Back and
+    // Forward, disabled without history.
+    let menu = h.popup()["menu"].clone();
+    let rows = menu["levels"][0]["items"].as_array().unwrap().clone();
+    let labels: Vec<&str> = rows
+        .iter()
+        .map(|r| r["label"].as_str().unwrap_or("-"))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Open in Documentation Tool Window",
+            "Show Documentation Popup First",
+            "Show on Mouse Move",
+            "Adjust Font Size\u{2026}",
+            "-",
+            "Back",
+            "Forward",
+        ]
+    );
+    assert_eq!(rows[1]["checked"], true);
+    assert_eq!(rows[2]["checked"], true);
+    assert!(rows[3]["checked"].is_null());
+    assert_eq!(rows[5]["enabled"], false);
+    assert_eq!(rows[6]["enabled"], false);
+    assert_eq!(rows[0]["command"], "documentation.open-in-tool-window");
+    assert_eq!(rows[0]["shortcut"], "F1");
+    assert_eq!(rows[5]["shortcut"], "\u{2318}[");
+    assert_eq!(rows[6]["shortcut"], "\u{2318}]");
+
+    // Show on Mouse Move off: chosen in the menu, the check mark goes and
+    // the option is stored.
+    while h.popup()["menu"]["levels"][0]["selected"] != json!(2) {
+        h.invoke("menu.down", json!(null));
+    }
+    h.invoke("menu.confirm", json!(null));
+    assert!(h.popup()["menu"].is_null());
+    h.click("doc-more");
+    let rows = h.popup()["menu"]["levels"][0]["items"].clone();
+    assert!(rows[2]["checked"].is_null(), "Show on Mouse Move is off");
+    h.invoke("menu.cancel", json!(null));
+    assert!(h.popup()["menu"].is_null());
+    let stored = h.invoke(
+        "settings.get",
+        json!({ "key": "editor.quick-documentation.show-on-mouse-move" }),
+    );
+    assert_eq!(stored, json!(false));
+
+    // Adjust Font Size: the slider popup; Right takes the next size, the
+    // popup stays meanwhile and the size is stored.
+    h.invoke("documentation.adjust-font-size", json!(null));
+    assert_eq!(h.popup()["font_size"]["value"], "small");
+    assert!(h.bounds("doc-font-size").is_some());
+    h.press("right");
+    assert_eq!(h.popup()["font_size"]["value"], "medium");
+    h.press("escape");
+    assert!(h.popup()["font_size"].is_null());
+    assert!(!h.popup().is_null(), "the documentation popup stays");
+    let stored = h.invoke(
+        "settings.get",
+        json!({ "key": "editor.quick-documentation.font-size" }),
+    );
+    assert_eq!(stored, json!("medium"));
+
+    // Open in Documentation Tool Window: the documentation moves into the
+    // tool window, which shows in the right area; the editor keeps the
+    // focus.
+    h.invoke("documentation.open-in-tool-window", json!(null));
+    assert!(h.popup().is_null());
+    let window = h.state()["tool_window"].clone();
+    assert_eq!(
+        window["documentation"]["documentation"]["title"],
+        "Module json"
+    );
+    let shown = h
+        .window
+        .read_with(h.cx, |w, _| {
+            w.is_visible(workbench::tool_windows::ToolWindow("documentation"))
+        })
+        .unwrap();
+    assert!(shown);
+    assert!(h.bounds("documentation-tool-window-content").is_some());
+    assert!(h.editor_focused());
+
+    // Show Documentation Popup First off: Quick Documentation goes to the
+    // tool window at once.
+    h.invoke("documentation.toggle-show-popup-first", json!(null));
+    h.fake.on_hover(|_, _| {
+        Ok(Some(Hover {
+            contents: Markup::markdown("Another text."),
+            range: None,
+        }))
+    });
+    h.invoke("code.quick-doc", json!(null));
+    assert!(h.popup().is_null());
+    assert_eq!(
+        h.state()["tool_window"]["documentation"]["markdown"],
+        "Another text."
+    );
+}
+
+#[gpui::test]
+fn without_show_on_mouse_move_the_popup_over_the_text_has_the_problems_only(
+    cx: &mut TestAppContext,
+) {
+    let mut h = H::new(cx, &[("app.py", "import os\nx = 1\n")]);
+    h.open("app.py", "x = 1");
+    problems_fixture(&mut h);
+    h.invoke("documentation.toggle-show-on-mouse-move", json!(null));
+    h.draw();
+
+    // Over the problem: the problem, no documentation asked for.
+    let os = h.offset_after("import o") - 1;
+    h.hover(Some(os));
+    h.wait(600);
+    let popup = h.popup();
+    assert_eq!(popup["kind"], "hover");
+    assert_eq!(popup["problems"][0]["text"], "`os` imported but unused");
+    assert!(popup["documentation"].is_null());
+    assert!(h.calls_of(|c| matches!(c, Call::Hover { .. })).is_empty());
+
+    // Over a name without problems: nothing.
+    h.hover(None);
+    h.wait(600);
+    let x = h.offset_after("\nx") - 1;
+    h.hover(Some(x));
+    h.wait(600);
+    assert!(h.popup().is_null());
+    assert!(h.calls_of(|c| matches!(c, Call::Hover { .. })).is_empty());
+}
+
 /// A file with an unused import (with a fix that removes it, and a second
 /// quick fix) and a documented call.
 fn problems_fixture(h: &mut H<'_>) {

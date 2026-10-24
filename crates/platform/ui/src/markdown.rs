@@ -313,7 +313,15 @@ impl Markdown {
     /// The blocks as elements, one under the other. `id` makes the ids of
     /// the interactive parts (links) unique in the window.
     pub fn render(&self, id: &str, cx: &App) -> AnyElement {
+        self.render_scaled(id, 1.0, cx)
+    }
+
+    /// The blocks as elements with their text `scale` times the theme's
+    /// sizes (documentation in a larger or smaller font); the size of
+    /// paragraphs comes from the parent, which scales it.
+    pub fn render_scaled(&self, id: &str, scale: f32, cx: &App) -> AnyElement {
         let mut ids = Ids::new(id);
+        ids.scale = scale;
         render_blocks(&self.blocks, &mut ids, cx).into_any_element()
     }
 }
@@ -672,6 +680,8 @@ const NUMBER_WIDTH: f32 = 24.0;
 struct Ids {
     prefix: String,
     next: usize,
+    /// How much larger than the theme's sizes the text is drawn.
+    scale: f32,
 }
 
 impl Ids {
@@ -679,6 +689,7 @@ impl Ids {
         Self {
             prefix: prefix.to_owned(),
             next: 0,
+            scale: 1.0,
         }
     }
 
@@ -707,7 +718,7 @@ fn render_block(block: &Block, ids: &mut Ids, cx: &App) -> AnyElement {
                 _ => 1.0,
             };
             div()
-                .text_size(theme.ui_size() * scale)
+                .text_size(theme.ui_size() * scale * ids.scale)
                 .font_weight(FontWeight::BOLD)
                 .child(render_inline_with(text, ids.next(), FontWeight::BOLD, cx))
                 .into_any_element()
@@ -717,7 +728,7 @@ fn render_block(block: &Block, ids: &mut Ids, cx: &App) -> AnyElement {
             .py(px(6.0))
             .rounded(px(4.0))
             .bg(theme.color(UiRole::SurfaceAlt))
-            .child(render_code(code, cx))
+            .child(render_code_scaled(code, ids.scale, cx))
             .into_any_element(),
         Block::List { start, items } => {
             let width = if start.is_some() {
@@ -864,11 +875,16 @@ fn inline_runs(
 /// Code in the editor font and size, its tokens in the colours of the
 /// theme's text roles.
 pub fn render_code(code: &Code, cx: &App) -> AnyElement {
+    render_code_scaled(code, 1.0, cx)
+}
+
+/// Code in the editor font at `scale` times the editor's size.
+pub fn render_code_scaled(code: &Code, scale: f32, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let runs = code_runs(code, cx);
     div()
         .font_family(theme.mono_family())
-        .text_size(theme.editor_size())
+        .text_size(theme.editor_size() * scale)
         .text_color(theme.color(UiRole::EditorText))
         .child(StyledText::new(SharedString::from(code.text.clone())).with_runs(runs))
         .into_any_element()

@@ -37,6 +37,18 @@ ui::ui_commands! {
         "Opens the declaration the documentation popup is about and closes the popup.";
     ViewExternalDocumentation => "documentation.view-external", "View External Documentation",
         "Opens the web page with the documentation of the symbol in the documentation popup.";
+    OpenInToolWindow => "documentation.open-in-tool-window", "Open in Documentation Tool Window",
+        "Moves the documentation of the popup into the Documentation tool window; without a popup, shows the documentation of the symbol at the caret there.";
+    ToggleShowPopupFirst => "documentation.toggle-show-popup-first", "Show Documentation Popup First",
+        "Turns on or off whether Quick Documentation shows a popup before the Documentation tool window (a stored setting).";
+    ToggleShowOnMouseMove => "documentation.toggle-show-on-mouse-move", "Show on Mouse Move",
+        "Turns on or off whether the popup over the text under the mouse shows the documentation of the symbol there (a stored setting).";
+    AdjustFontSize => "documentation.adjust-font-size", "Adjust Font Size\u{2026}",
+        "Opens the slider that sets the font size of documentation, at the mouse.";
+    DocumentationBack => "documentation.back", "Back",
+        "Shows the documentation the popup showed before the link that was followed.";
+    DocumentationForward => "documentation.forward", "Forward",
+        "Shows again the documentation the popup went back from.";
 }
 
 ui::ui_commands! {
