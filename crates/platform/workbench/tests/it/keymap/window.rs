@@ -1,4 +1,4 @@
-//! Quit, editor tabs, context menus and message dialogs: the bindings of `keymaps/*/window.toml`.
+//! Quit, editor tabs, context menus, message dialogs and the Processes popup: the bindings of `keymaps/*/window.toml`.
 
 use super::*;
 
@@ -80,6 +80,12 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             // On a submenu row: the submenu opens.
             assert_eq!(h.menu_levels().len(), 2, "{what}");
+        }
+        "background-tasks.hide" => {
+            h.invoke("background-tasks.show", json!(null));
+            assert_eq!(h.state()["background_tasks"]["popup"], json!(true), "{what}");
+            h.press(keys);
+            assert_eq!(h.state()["background_tasks"]["popup"], json!(false), "{what}");
         }
         "menu.cancel" => {
             h.open_menu("src");

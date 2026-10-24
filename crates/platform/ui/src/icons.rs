@@ -202,6 +202,8 @@ impl IconName {
     /// Balloon icons of information and warning notifications.
     pub const INFO: Self = Self("status/info");
     pub const WARNING: Self = Self("status/warning");
+    /// `AllIcons.Status.Success` (all background tasks completed).
+    pub const STATUS_SUCCESS: Self = Self("status/success");
     pub const ERROR_MARK: Self = Self("nodes/errorMark");
     // The toolbar of the Run/Debug Configurations dialog.
     pub const REMOVE: Self = Self("general/remove");
@@ -326,7 +328,7 @@ platform_icons! {
         "progress/stop", "progress/stopHovered",
         "run/debug", "run/killProcess",
         "startup/configFile", "run/rerun", "run/run", "run/stop",
-        "status/error", "status/info", "status/warning",
+        "status/error", "status/info", "status/success", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/documentation@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",

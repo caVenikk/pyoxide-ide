@@ -27,3 +27,9 @@ name = "Dialog"
 [context.bindings]
 "enter" = "dialog.confirm"
 "escape" = "dialog.cancel"
+
+# The Processes popup of the background tasks: Escape hides it.
+[[context]]
+name = "ProcessesPopup"
+[context.bindings]
+"escape" = "background-tasks.hide"

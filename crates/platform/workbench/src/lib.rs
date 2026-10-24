@@ -8,6 +8,7 @@
 //! [`Product::with_module`] and calls [`run`].
 
 pub mod app;
+pub mod background_tasks;
 mod bench;
 pub mod chrome;
 pub mod commands;

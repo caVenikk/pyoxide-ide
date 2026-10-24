@@ -92,7 +92,13 @@ pub trait ProgressBarPainter: 'static {
     /// centred in the space the bar was given).
     ///
     /// [`height`]: ProgressBarPainter::height
-    fn paint(&self, bounds: Bounds<Pixels>, state: &BarState, colors: &BarColors, window: &mut Window);
+    fn paint(
+        &self,
+        bounds: Bounds<Pixels>,
+        state: &BarState,
+        colors: &BarColors,
+        window: &mut Window,
+    );
 }
 
 /// The reference's progress bar (`DarculaProgressBarUI`).
@@ -100,7 +106,13 @@ pub trait ProgressBarPainter: 'static {
 pub struct ReferencePainter;
 
 impl ProgressBarPainter for ReferencePainter {
-    fn paint(&self, bounds: Bounds<Pixels>, state: &BarState, colors: &BarColors, window: &mut Window) {
+    fn paint(
+        &self,
+        bounds: Bounds<Pixels>,
+        state: &BarState,
+        colors: &BarColors,
+        window: &mut Window,
+    ) {
         let h = bounds.size.height;
         let radius = h / 2.0;
         match state.fraction.filter(|f| *f > 0.0) {
@@ -131,8 +143,11 @@ impl ProgressBarPainter for ReferencePainter {
                         corners.top_right = radius;
                         corners.bottom_right = radius;
                     }
-                    let background =
-                        linear_gradient(90.0, linear_color_stop(from, 0.0), linear_color_stop(to, 1.0));
+                    let background = linear_gradient(
+                        90.0,
+                        linear_color_stop(from, 0.0),
+                        linear_color_stop(to, 1.0),
+                    );
                     window.paint_quad(fill(b, background).corner_radii(corners));
                 }
             }
@@ -250,7 +265,10 @@ mod tests {
         let start = Instant::now();
         assert_eq!(FRAMES, 16);
         assert_eq!(animation_frame(start, start), 0);
-        assert_eq!(animation_frame(start, start + Duration::from_millis(149)), 2);
+        assert_eq!(
+            animation_frame(start, start + Duration::from_millis(149)),
+            2
+        );
         assert_eq!(animation_frame(start, start + CYCLE), 0);
         assert_eq!(animation_frame(start, start + CYCLE + FRAME * 3), 3);
     }
@@ -300,8 +318,26 @@ mod tests {
     #[test]
     fn indeterminate_states() {
         let frame = 0;
-        assert!(BarState { fraction: None, frame }.is_indeterminate());
-        assert!(BarState { fraction: Some(0.0), frame }.is_indeterminate());
-        assert!(!BarState { fraction: Some(0.1), frame }.is_indeterminate());
+        assert!(
+            BarState {
+                fraction: None,
+                frame
+            }
+            .is_indeterminate()
+        );
+        assert!(
+            BarState {
+                fraction: Some(0.0),
+                frame
+            }
+            .is_indeterminate()
+        );
+        assert!(
+            !BarState {
+                fraction: Some(0.1),
+                frame
+            }
+            .is_indeterminate()
+        );
     }
 }

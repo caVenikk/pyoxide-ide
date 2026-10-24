@@ -143,10 +143,7 @@ impl Tasks {
     /// shows as stopping until its work ends. `false` when there is no
     /// such task or it cannot be cancelled.
     pub fn cancel(&self, id: TaskId) -> bool {
-        let task = lock(&self.inner.tasks)
-            .iter()
-            .find(|t| t.id == id)
-            .cloned();
+        let task = lock(&self.inner.tasks).iter().find(|t| t.id == id).cloned();
         match task {
             Some(t) if t.cancellable && !t.cancel.is_cancelled() => {
                 t.cancel.cancel();

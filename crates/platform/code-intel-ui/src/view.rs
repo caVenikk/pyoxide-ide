@@ -113,6 +113,8 @@ pub struct CodeIntelView {
     pub(crate) intentions: IntentionState,
     /// Reformat Code or Optimize Imports in flight.
     pub(crate) format_request: Option<Task<()>>,
+    /// The servers' work in the status bar.
+    server_tasks: crate::server_tasks::ServerTasks,
     /// Receives the services' events.
     _events: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -166,6 +168,7 @@ impl CodeIntelView {
             nav: NavState::default(),
             intentions: IntentionState::new(cx.weak_entity()),
             format_request: None,
+            server_tasks: Default::default(),
             _events: None,
             _subscriptions: vec![quit, keys],
         }
@@ -278,6 +281,7 @@ impl CodeIntelView {
         self.popups.clear();
         self.documents.clear();
         self.services_popup = None;
+        self.server_tasks.clear();
         self.active = None;
         self.root = Some(root.to_owned());
         self.parts = self.hooks.iter().map(|h| h.0.start(root, cx)).collect();
@@ -499,6 +503,7 @@ impl CodeIntelView {
     }
 
     fn service_event(&mut self, event: IntelEvent, cx: &mut Context<Self>) {
+        self.server_tasks.event(&event, self.root.as_deref());
         match event {
             IntelEvent::Diagnostics {
                 doc,

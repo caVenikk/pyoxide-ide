@@ -6,7 +6,8 @@
 //! [`ProjectFiles::apply`] (files created, deleted or renamed by the
 //! application, and the changes the file watcher reports). The source
 //! roots come with the rules (ADR 0013); a change of the roots alone does
-//! not build the index again.
+//! not build the index again. A build is a background task in the status
+//! bar while it runs.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,6 +17,10 @@ use std::time::Duration;
 use file_index::{Change, FileIndex};
 use gpui::{AppContext as _, Context, Task};
 use project::Filter;
+
+/// The title of the build's background task
+/// (`IndexingBundle` `progress.indexing.scanning`).
+pub const SCANNING: &str = "Scanning files\u{2026}";
 
 pub struct ProjectFiles {
     index: Option<Arc<FileIndex>>,
@@ -158,7 +163,13 @@ impl ProjectFiles {
         self.generation += 1;
         let generation = self.generation;
         let non_project = self.non_project;
+        // In the status bar while it runs (the reference's scanning task).
+        let scanning = progress::global()
+            .task(SCANNING)
+            .project(root.clone())
+            .start();
         let build = cx.background_spawn(async move {
+            let _scanning = scanning;
             let start = std::time::Instant::now();
             let index = FileIndex::build(&root, &filter, non_project, &cancel);
             index.map(|i| (i, start.elapsed()))
