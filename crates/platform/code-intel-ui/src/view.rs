@@ -23,6 +23,7 @@ use crate::commands::*;
 use crate::completion::list::CompletionList;
 use crate::completion::{self, Session, identifier_start, is_identifier_char};
 use crate::doc::{self, DocPopup};
+use crate::doc_window::DocToolWindow;
 use crate::document::Document;
 use crate::hook::CodeIntelHook;
 use crate::hover::DocState;
@@ -65,6 +66,9 @@ pub enum CodeIntelEvent {
     /// Open a file in a tab with the caret at a position (a navigation
     /// target).
     OpenLocation { path: PathBuf, at: Point },
+    /// Show the Documentation tool window ([`CodeIntelView::doc_window`])
+    /// without moving the focus, registering it at its first use.
+    ShowDocumentation,
 }
 
 /// The code intelligence of a main window: the project's language
@@ -138,6 +142,8 @@ impl CodeIntelView {
         let owner = cx.weak_entity();
         let completion_list = cx.new(|_| CompletionList::new(owner.clone()));
         let doc_popup = cx.new(|_| DocPopup::new(owner.clone()));
+        let doc_window = cx.new(|cx| DocToolWindow::new(owner.clone(), cx));
+        crate::hover::follow_doc_settings(&owner, cx);
         let signature_popup = cx.new(|_| SignaturePopup::new(owner));
         Self {
             hooks,
@@ -153,7 +159,7 @@ impl CodeIntelView {
             empty_auto: None,
             services_popup: None,
             widget_bounds: WidgetBounds::default(),
-            docs: DocState::new(doc_popup),
+            docs: DocState::new(doc_popup, doc_window),
             signatures: SignatureState::new(signature_popup),
             reported: Reported::default(),
             nav: NavState::default(),
@@ -319,9 +325,15 @@ impl CodeIntelView {
             let editor = editor.entity_id();
             move |this, _, cx| this.editor_blurred(editor, cx)
         });
+        // The bulb shows only while its editor has the focus.
+        let focus = cx.on_focus(&editor.focus_handle(cx), window, {
+            let editor = editor.entity_id();
+            move |this, _, cx| this.bulb_focus_changed(editor, cx)
+        });
         let id = DocumentId::new(path);
         let text = editor.read(cx).buffer().rope().clone();
-        let doc = Document::new(id, language, editor.clone(), text, vec![events, blur]);
+        let subscriptions = vec![events, blur, focus];
+        let doc = Document::new(id, language, editor.clone(), text, subscriptions);
         services.did_open(&doc.id, language, doc.version(), doc.versions.text());
         self.documents.insert(path.to_owned(), doc);
         self.update_analysis(path, cx);
@@ -452,6 +464,7 @@ impl CodeIntelView {
     }
 
     fn editor_blurred(&mut self, editor: EntityId, cx: &mut Context<Self>) {
+        self.bulb_focus_changed(editor, cx);
         self.signature_blurred(editor, cx);
         self.doc_blurred(editor, cx);
         if self
@@ -1067,7 +1080,7 @@ impl CodeIntelView {
     /// its content.
     pub fn render_overlay(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
         let mut overlay = self.popups.render(window, cx);
-        overlay.extend(self.render_bulb(cx));
+        overlay.extend(self.render_bulb(window, cx));
         if let Some((popup, _)) = &self.services_popup
             && !popup.read(cx).is_dismissed()
         {
@@ -1122,6 +1135,7 @@ impl CodeIntelView {
             "widget": services::WidgetState::new(&items).map(|w| w.state_json()),
             "services_popup": self.services_popup.as_ref().map(|(p, _)| p.read(cx).state_json()),
             "popup": self.doc_state_json(cx),
+            "tool_window": self.doc_window().read(cx).state_json(cx),
             "signature": self.signature_state_json(cx),
             "list": self.list_state_json(cx),
             "bulb": self.bulb_state_json(),
@@ -1275,6 +1289,9 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
     }
     forward!(el,
         QuickDoc => quick_doc,
+        OpenInToolWindow => open_in_tool_window,
+        ToggleShowPopupFirst => toggle_show_popup_first,
+        ToggleShowOnMouseMove => toggle_show_on_mouse_move,
         ParameterInfo => parameter_info,
         GoToDeclaration => go_to_declaration,
         ShowUsages => show_usages,
@@ -1339,6 +1356,7 @@ pub fn editor_container<E: InteractiveElement>(
                     view.update(cx, |v, cx| v.view_external_documentation(cx))
                 }
             });
+        el = crate::hover::doc_popup_actions(el, view);
     }
     if shown(signature::CONTEXT) {
         el = el.on_action({

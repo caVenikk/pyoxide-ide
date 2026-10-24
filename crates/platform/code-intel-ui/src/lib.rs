@@ -14,8 +14,10 @@
 //! - [`completion`]: the completion popup, opened by Basic Completion or
 //!   by typing.
 //! - [`doc`]: the documentation popup (quick documentation, the popup
-//!   over the text under the mouse, Error Description); [`file_doc`]: the
-//!   documentation of a symbol that is a whole file (a module).
+//!   over the text under the mouse, Error Description) and its more menu;
+//!   [`file_doc`]: the documentation of a symbol that is a whole file (a
+//!   module); [`font_size`]: its Adjust Font Size popup; [`doc_window`]:
+//!   the Documentation tool window.
 //! - [`signature`]: parameter info.
 //! - [`navigation`]: Go to Declaration or Usages, Show Usages, and the
 //!   list popups ([`list_popup`]).
@@ -34,8 +36,10 @@ pub mod bench;
 pub mod commands;
 pub mod completion;
 pub mod doc;
+pub mod doc_window;
 pub mod document;
 pub mod file_doc;
+pub mod font_size;
 mod format;
 mod hook;
 mod hover;
@@ -58,6 +62,7 @@ pub use view::{
 
 /// Registers the code intelligence commands with the command index.
 pub fn init(cx: &mut gpui::App) {
+    settings_ui::store::register::<settings::DocumentationSettings>(cx);
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::COMPLETION_COMMANDS);
     ui::command::register(cx, commands::SERVICE_COMMANDS);

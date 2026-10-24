@@ -41,3 +41,7 @@ name = "Documentation > Editor"
 # take the shortcuts of EditSource and ExternalJavaDoc.
 "f4" = "documentation.edit-source"
 "shift-f1" = "documentation.view-external"
+# Open in Documentation Tool Window takes the shortcut of Quick
+# Documentation while the popup shows (`OpenInToolwindowAction`).
+"f1" = "documentation.open-in-tool-window"
+"ctrl-j" = "documentation.open-in-tool-window"

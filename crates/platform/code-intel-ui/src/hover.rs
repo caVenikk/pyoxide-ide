@@ -7,16 +7,30 @@
 //! it is about or inside the popup (where it can scroll), and closes a
 //! moment after the mouse left both. Escape, typing, a caret move, a blur
 //! or another tab close it.
+//!
+//! The options of the popup's more menu (`settings::DocumentationSettings`)
+//! decide where Quick Documentation shows (the popup, or the Documentation
+//! tool window at once) and whether the popup over the text shows
+//! documentation or the problems only.
 
 use std::ops::Range;
 use std::time::Duration;
 
 use code_intel::{ActionTrigger, CodeActionContext, Hover, Location, Point};
 use editor::{Editor, EditorEvent};
-use gpui::{App, AsyncApp, Context, Entity, EntityId, Modifiers, Task, WeakEntity};
+use gpui::{
+    App, AsyncApp, Context, Entity, EntityId, InteractiveElement, Modifiers, Task, WeakEntity,
+    Window,
+};
+use settings::{DocumentationSettings, Section as _};
 
+use crate::commands::{
+    AdjustFontSize, DocumentationBack, DocumentationForward, OpenInToolWindow,
+    ToggleShowOnMouseMove, ToggleShowPopupFirst,
+};
 use crate::completion::{identifier_end, identifier_start, is_identifier_char};
 use crate::doc::{self, DocContent, DocKind, DocLexer, DocPopup, Documentation, FileFacts, Fix};
+use crate::doc_window::DocToolWindow;
 use crate::file_doc::FileInfo;
 use crate::popup::{CaretPopup, Placement};
 use crate::view::CodeIntelView;
@@ -38,6 +52,8 @@ struct Shown {
 /// The state of the documentation popup of a window.
 pub(crate) struct DocState {
     pub(crate) popup: Entity<DocPopup>,
+    /// The Documentation tool window's view.
+    pub(crate) window: Entity<DocToolWindow>,
     /// The editor and char offset under the mouse (not while the
     /// navigation modifier is held).
     under_mouse: Option<(EntityId, usize)>,
@@ -58,9 +74,10 @@ pub(crate) struct DocState {
 }
 
 impl DocState {
-    pub(crate) fn new(popup: Entity<DocPopup>) -> Self {
+    pub(crate) fn new(popup: Entity<DocPopup>, window: Entity<DocToolWindow>) -> Self {
         Self {
             popup,
+            window,
             under_mouse: None,
             delay: None,
             request: None,
@@ -71,6 +88,71 @@ impl DocState {
             hover_off: false,
         }
     }
+}
+
+/// The stored quick documentation options.
+pub fn doc_settings(cx: &App) -> DocumentationSettings {
+    settings_ui::store::get(cx)
+}
+
+/// Stores the quick documentation options.
+fn set_doc_settings(settings: DocumentationSettings, cx: &mut App) {
+    settings_ui::store::set(cx, &settings);
+}
+
+/// The popup and the tool window of a window draw again when the options
+/// change (the font size, the check marks), wherever they changed.
+pub(crate) fn follow_doc_settings(owner: &WeakEntity<CodeIntelView>, cx: &mut App) {
+    let owner = owner.clone();
+    settings_ui::store::observe(cx, DocumentationSettings::KEY, move |cx| {
+        // After the current update: the change may come from the view
+        // itself (the menu's options).
+        let owner = owner.clone();
+        cx.defer(move |cx| redraw_docs(&owner, cx));
+    });
+}
+
+fn redraw_docs(owner: &WeakEntity<CodeIntelView>, cx: &mut App) {
+    let Some(view) = owner.upgrade() else {
+        return;
+    };
+    let (popup, window) = {
+        let docs = &view.read(cx).docs;
+        (docs.popup.clone(), docs.window.clone())
+    };
+    popup.update(cx, |_, cx| cx.notify());
+    window.update(cx, |_, cx| cx.notify());
+    view.update(cx, |_, cx| cx.notify());
+}
+
+/// The commands of the documentation popup's more menu that act on the
+/// popup shown for the editor of `el`: Adjust Font Size, Back, Forward.
+pub(crate) fn doc_popup_actions<E: InteractiveElement>(
+    el: E,
+    view: &Entity<CodeIntelView>,
+) -> E {
+    let popup = |view: &Entity<CodeIntelView>, cx: &App| view.read(cx).docs.popup.clone();
+    el.on_action({
+        let view = view.clone();
+        move |_: &AdjustFontSize, window, cx| {
+            let popup = popup(&view, cx);
+            popup.update(cx, |p, cx| p.open_font_size(window, cx));
+        }
+    })
+    .on_action({
+        let view = view.clone();
+        move |_: &DocumentationBack, _, cx| {
+            let popup = popup(&view, cx);
+            popup.update(cx, |p, cx| p.back(cx));
+        }
+    })
+    .on_action({
+        let view = view.clone();
+        move |_: &DocumentationForward, _, cx| {
+            let popup = popup(&view, cx);
+            popup.update(cx, |p, cx| p.forward(cx));
+        }
+    })
 }
 
 /// What a request for documentation answers: the documentation and where
@@ -328,14 +410,17 @@ impl CodeIntelView {
         let on_identifier = buffer.char_at(offset).is_some_and(is_identifier_char);
         let word = identifier_start(buffer, offset)..identifier_end(buffer, offset);
         let (problems, mark) = doc::problems_at(editor.read(cx).diagnostics(), offset, false);
-        if problems.is_empty() && !on_identifier {
+        if problems.is_empty() && !(on_identifier && doc_settings(cx).show_on_mouse_move) {
             return;
         }
         let Some(services) = self.services().cloned() else {
             return;
         };
         let at = document.versions.point(offset);
-        let documentation = on_identifier.then(|| self.request_documentation(&doc_id, at));
+        // Show on Mouse Move off: the problems there only
+        // (`HoverPopupContext.documentationHoverInfo`).
+        let documentation = (on_identifier && doc_settings(cx).show_on_mouse_move)
+            .then(|| self.request_documentation(&doc_id, at));
         let language = document.language.clone();
         let fix = mark.clone().map(|range| {
             let points = document.versions.point(range.start)..document.versions.point(range.end);
@@ -483,8 +568,16 @@ impl CodeIntelView {
     }
 
     /// Quick Documentation at the caret of an editor: the documentation of
-    /// the symbol at the caret (or right before it).
+    /// the symbol at the caret (or right before it), in the popup, or in
+    /// the Documentation tool window while Show Documentation Popup First
+    /// is off (`DocumentationManager.showDocumentation`, `skipPopup`).
     pub(crate) fn quick_doc_at_caret(&mut self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
+        let to_window = !doc_settings(cx).show_popup_first;
+        self.quick_doc_to(editor, to_window, cx);
+    }
+
+    /// Quick Documentation at the caret, in the tool window or the popup.
+    fn quick_doc_to(&mut self, editor: &Entity<Editor>, to_window: bool, cx: &mut Context<Self>) {
         let Some(query) = self.caret_query(editor, cx) else {
             return;
         };
@@ -511,6 +604,10 @@ impl CodeIntelView {
                 else {
                     return;
                 };
+                if to_window {
+                    v.show_in_tool_window(documentation, cx);
+                    return;
+                }
                 let caret = editor.read(cx).selections().primary().head;
                 let content = DocContent {
                     kind: DocKind::QuickDoc,
@@ -577,12 +674,81 @@ impl CodeIntelView {
         if !self.popups().is_shown(doc::CONTEXT) {
             return serde_json::Value::Null;
         }
-        self.docs
-            .popup
-            .read(cx)
+        let popup = self.docs.popup.read(cx);
+        let mut state = popup
             .content()
             .map(DocContent::to_json)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some(object) = state.as_object_mut() {
+            object.insert("menu".into(), popup.menu_state(cx).into());
+            object.insert("font_size".into(), popup.font_size_state(cx).into());
+        }
+        state
+    }
+
+    /// The Documentation tool window's view (the workbench registers it).
+    pub fn doc_window(&self) -> &Entity<DocToolWindow> {
+        &self.docs.window
+    }
+
+    /// Shows documentation in the Documentation tool window.
+    fn show_in_tool_window(&mut self, documentation: Documentation, cx: &mut Context<Self>) {
+        self.docs
+            .window
+            .update(cx, |w, cx| w.set(documentation, cx));
+        cx.emit(crate::view::CodeIntelEvent::ShowDocumentation);
+    }
+
+    /// Open in Documentation Tool Window: the popup's documentation moves
+    /// there and the popup closes (`OpenInToolwindowAction`). Its shortcut
+    /// is Quick Documentation's: over a popup without documentation (Error
+    /// Description) it is Quick Documentation. Without a popup the
+    /// documentation at the caret of the active editor goes to the tool
+    /// window.
+    pub(crate) fn open_in_tool_window(
+        &mut self,
+        _: &OpenInToolWindow,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(documentation) = self.shown_documentation(cx) {
+            self.close_doc(cx);
+            self.show_in_tool_window(documentation, cx);
+            return;
+        }
+        let shown = self.docs.shown.is_some();
+        if let Some(editor) = self.active_document().map(|d| d.editor.clone()) {
+            if shown {
+                self.close_doc(cx);
+                self.quick_doc_at_caret(&editor, cx);
+            } else {
+                self.quick_doc_to(&editor, true, cx);
+            }
+        }
+    }
+
+    /// Show Documentation Popup First, on or off (a stored option).
+    pub(crate) fn toggle_show_popup_first(
+        &mut self,
+        _: &ToggleShowPopupFirst,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut settings = doc_settings(cx);
+        settings.show_popup_first = !settings.show_popup_first;
+        set_doc_settings(settings, cx);
+    }
+
+    /// Show on Mouse Move, on or off (a stored option).
+    pub(crate) fn toggle_show_on_mouse_move(
+        &mut self,
+        _: &ToggleShowOnMouseMove,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut settings = doc_settings(cx);
+        settings.show_on_mouse_move = !settings.show_on_mouse_move;
+        set_doc_settings(settings, cx);
     }
 
     /// The editor of a document by its entity id.

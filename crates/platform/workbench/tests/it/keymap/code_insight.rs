@@ -57,6 +57,23 @@ fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
             h.press(keys);
             assert_eq!(state(h)["popup"]["kind"], "quick-doc", "{what}");
         }
+        "documentation.open-in-tool-window" => {
+            // The popup's documentation moves into the Documentation tool
+            // window; the editor keeps the focus.
+            h.set_editor("x = al|pha");
+            h.invoke("code.quick-doc", json!(null));
+            assert!(!state(h)["popup"].is_null(), "{what}");
+            h.press(keys);
+            assert!(state(h)["popup"].is_null(), "{what}");
+            assert_eq!(
+                state(h)["tool_window"]["documentation"]["kind"],
+                "quick-doc",
+                "{what}"
+            );
+            let shown = h.workbench(|w, _| w.is_visible(workbench::tool_windows::ToolWindow("documentation")));
+            assert!(shown, "{what}: the tool window shows");
+            assert!(h.editor_focused(), "{what}: the editor keeps the focus");
+        }
         "code.parameter-info" => {
             h.set_editor("f(a, |b)");
             h.press(keys);
@@ -163,6 +180,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "documentation.close"
         | "documentation.edit-source"
         | "documentation.view-external"
+        | "documentation.open-in-tool-window"
         | "code.parameter-info"
         | "parameter-info.close"
         | "code.error-description"

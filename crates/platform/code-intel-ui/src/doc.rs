@@ -29,10 +29,15 @@ use ui::menu::{ContextMenu, MenuItem};
 use ui::pointer::PointerExt as _;
 use ui::{Icon, IconName, ThemeExt};
 
+use settings::DocumentationSettings;
+
 use crate::commands::{
-    ApplyFirstFix, EditDocumentationSource, ShowIntentions, ViewExternalDocumentation,
+    AdjustFontSize, ApplyFirstFix, DocumentationBack, DocumentationForward,
+    EditDocumentationSource, OpenInToolWindow, ShowIntentions, ToggleShowOnMouseMove,
+    ToggleShowPopupFirst,
 };
 use crate::file_doc::{ExternalLink, FileDoc, FileInfo, FileScope};
+use crate::font_size::{FontSizePopup, SizeChosen};
 use crate::hook::{CodeIntelProvider, DocLocation};
 use crate::view::CodeIntelView;
 
@@ -422,10 +427,12 @@ impl DocContent {
     /// before it is drawn); at most the popup's highest.
     pub fn estimated_height(&self, cx: &App) -> Pixels {
         let theme = cx.theme();
-        let text_line = theme.ui_size() * 1.4;
-        let code_line = theme.editor_size() * theme.editor_line_spacing().max(1.2);
+        let scale = font_scale(cx);
+        let text_line = theme.ui_size() * scale * 1.4;
+        let code_line = theme.editor_size() * scale * theme.editor_line_spacing().max(1.2);
         // Chars of a wrapped line: the popup's width over an average char.
-        let per_line = ((MAX_WIDTH - 2.0 * PAD_X) / (f32::from(theme.ui_size()) * 0.55)) as usize;
+        let per_line =
+            ((MAX_WIDTH - 2.0 * PAD_X) / (f32::from(theme.ui_size()) * scale * 0.55)) as usize;
         let wrapped = |text: &str| {
             text.lines()
                 .map(|l| l.chars().count().div_ceil(per_line.max(1)).max(1))
@@ -451,14 +458,14 @@ impl DocContent {
             height += text_line * text as f32 + code_line * code as f32;
             height += px(6.0) * doc.body.blocks.len() as f32;
             if doc.title.is_some() {
-                height += px(FILE_TITLE_HEIGHT + FILE_TITLE_TOP + FILE_TITLE_BOTTOM);
+                height += px(FILE_TITLE_HEIGHT * scale + FILE_TITLE_TOP + FILE_TITLE_BOTTOM);
                 height += px(FILE_BODY_TOP + FILE_BODY_BOTTOM);
             }
             if let Some(info) = &doc.file_info {
-                height += px(FILE_ROW * info.rows().len() as f32 + FILE_ROWS_TOP + 1.0);
+                height += px(FILE_ROW * scale * info.rows().len() as f32 + FILE_ROWS_TOP + 1.0);
             }
             if doc.external.is_some() || doc.title.is_some() {
-                height += px(LINK_ROW + LINK_BOTTOM);
+                height += px(LINK_ROW * scale + LINK_BOTTOM);
             }
         }
         height.min(px(MAX_HEIGHT + 2.0))
@@ -513,7 +520,60 @@ pub fn lex_lines(lexer: &dyn syntax::Lexer, code: &str) -> Vec<(Range<usize>, Te
     spans
 }
 
-/// The content of the documentation popup.
+/// How much larger than the theme's sizes documentation text is drawn:
+/// the stored font size of documentation (Adjust Font Size).
+pub fn font_scale(cx: &App) -> f32 {
+    settings_ui::store::get::<DocumentationSettings>(cx)
+        .font_size
+        .scale()
+}
+
+/// The pages the popup showed before and after the one it shows, as links
+/// inside it were followed (`DocumentationBrowserHistory`): Back and
+/// Forward of its more menu. A new popup starts without history.
+#[derive(Debug, Clone, Default)]
+pub struct DocHistory {
+    back: Vec<DocContent>,
+    forward: Vec<DocContent>,
+}
+
+impl DocHistory {
+    pub fn can_back(&self) -> bool {
+        !self.back.is_empty()
+    }
+
+    pub fn can_forward(&self) -> bool {
+        !self.forward.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.back.clear();
+        self.forward.clear();
+    }
+
+    /// A link was followed from `current` (`nextPage`).
+    pub fn next_page(&mut self, current: DocContent) {
+        self.back.push(current);
+        self.forward.clear();
+    }
+
+    /// The page before `current`, which becomes the next one.
+    pub fn backward(&mut self, current: DocContent) -> Option<DocContent> {
+        let page = self.back.pop()?;
+        self.forward.push(current);
+        Some(page)
+    }
+
+    /// The page after `current`, which becomes the previous one.
+    pub fn forward(&mut self, current: DocContent) -> Option<DocContent> {
+        let page = self.forward.pop()?;
+        self.back.push(current);
+        Some(page)
+    }
+}
+
+/// The content of the documentation popup, also drawn in the
+/// Documentation tool window (without the popup's frame and toolbar).
 pub struct DocPopup {
     owner: WeakEntity<CodeIntelView>,
     content: Option<DocContent>,
@@ -521,6 +581,11 @@ pub struct DocPopup {
     /// The more menu of the corner toolbar while it is open, where it
     /// opened.
     menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// The Adjust Font Size popup while it is open, where its top left is.
+    font_size: Option<(Entity<FontSizePopup>, Point<Pixels>, Vec<Subscription>)>,
+    history: DocHistory,
+    /// Drawn in the Documentation tool window.
+    in_tool_window: bool,
 }
 
 impl DocPopup {
@@ -530,13 +595,31 @@ impl DocPopup {
             content: None,
             scroll: ScrollHandle::new(),
             menu: None,
+            font_size: None,
+            history: DocHistory::default(),
+            in_tool_window: false,
         }
     }
 
+    /// The content of the Documentation tool window.
+    pub fn for_tool_window(owner: WeakEntity<CodeIntelView>) -> Self {
+        Self {
+            in_tool_window: true,
+            ..Self::new(owner)
+        }
+    }
+
+    /// Shows `content` as a new page: the history starts again.
     pub fn set(&mut self, content: DocContent, cx: &mut Context<Self>) {
+        self.history.clear();
+        self.show_page(content, cx);
+    }
+
+    fn show_page(&mut self, content: DocContent, cx: &mut Context<Self>) {
         self.content = Some(content);
         self.scroll = ScrollHandle::new();
         self.menu = None;
+        self.font_size = None;
         cx.notify();
     }
 
@@ -544,35 +627,168 @@ impl DocPopup {
         self.content.as_ref()
     }
 
-    /// The more menu of the corner toolbar is open (the popup stays while
-    /// it is).
+    pub fn history(&self) -> &DocHistory {
+        &self.history
+    }
+
+    /// Shows the documentation a link inside the popup leads to; Back
+    /// returns to the page shown now.
+    pub fn follow(&mut self, content: DocContent, cx: &mut Context<Self>) {
+        if let Some(current) = self.content.take() {
+            self.history.next_page(current);
+        }
+        self.show_page(content, cx);
+    }
+
+    /// Back: the page before (`DocumentationBackAction`).
+    pub fn back(&mut self, cx: &mut Context<Self>) {
+        if let Some(current) = self.content.clone()
+            && let Some(page) = self.history.backward(current)
+        {
+            self.show_page(page, cx);
+        }
+    }
+
+    /// Forward: the page Back left (`DocumentationForwardAction`).
+    pub fn forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(current) = self.content.clone()
+            && let Some(page) = self.history.forward(current)
+        {
+            self.show_page(page, cx);
+        }
+    }
+
+    /// The more menu of the corner toolbar or the Adjust Font Size popup
+    /// is open (the popup stays while it is).
     pub fn menu_open(&self) -> bool {
-        self.menu.is_some()
+        self.menu.is_some() || self.font_size.is_some()
+    }
+
+    /// The more menu's state while it is open.
+    pub fn menu_state(&self, cx: &App) -> Option<Json> {
+        Some(self.menu.as_ref()?.0.read(cx).state_json())
+    }
+
+    /// The Adjust Font Size popup's state while it is open.
+    pub fn font_size_state(&self, cx: &App) -> Option<Json> {
+        Some(self.font_size.as_ref()?.0.read(cx).state_json())
+    }
+
+    /// The rows of the more menu of the corner toolbar, as the reference's
+    /// `DocumentationPopupUI` builds its `MoreActionGroup`: Open in
+    /// Documentation Tool Window, the two options, Adjust Font Size, then
+    /// the navigation group without Jump to Source (the toolbar's pencil):
+    /// Back and Forward, with the shortcuts of the window's Back and
+    /// Forward (`use-shortcut-of`), disabled without history. Restore
+    /// Size (only after a resize), Show Automatically During Completion
+    /// (only with a completion popup), Copy (only with a selection) and
+    /// View External Documentation (only when the documentation has an
+    /// external URL of its own, which file documentation has not) are
+    /// left out.
+    pub fn menu_items(&self, window: &Window, cx: &App) -> Vec<MenuItem> {
+        let settings = settings_ui::store::get::<DocumentationSettings>(cx);
+        let checked = |item: MenuItem, on: bool| {
+            if on {
+                item.icon(IconName::CHECKED)
+            } else {
+                item
+            }
+        };
+        // The first of the winning context's bindings (`cmd-[` before
+        // `cmd-alt-left`), as the reference shows the first shortcut.
+        let shortcut_of = |name: &str| {
+            let action = cx.build_action(name, None).ok()?;
+            let winner = window.highest_precedence_binding_for_action(action.as_ref())?;
+            let first = window
+                .bindings_for_action(action.as_ref())
+                .into_iter()
+                .find(|b| b.predicate() == winner.predicate());
+            let binding = first.as_ref().unwrap_or(&winner);
+            Some(SharedString::from(ui::keys::binding_text(binding)))
+        };
+        let navigation = |item: MenuItem, of: &str, enabled: bool| {
+            let item = item.enabled(enabled);
+            match shortcut_of(of) {
+                Some(text) => item.shortcut(text),
+                None => item,
+            }
+        };
+        vec![
+            MenuItem::action("Open in Documentation Tool Window", OpenInToolWindow)
+                .icon(IconName::MOVE_TO_RIGHT_BOTTOM),
+            checked(
+                MenuItem::action("Show Documentation Popup First", ToggleShowPopupFirst),
+                settings.show_popup_first,
+            ),
+            checked(
+                MenuItem::action("Show on Mouse Move", ToggleShowOnMouseMove),
+                settings.show_on_mouse_move,
+            ),
+            MenuItem::action("Adjust Font Size\u{2026}", AdjustFontSize),
+            MenuItem::separator(),
+            navigation(
+                MenuItem::action("Back", DocumentationBack).icon(IconName::BACK),
+                "workbench.back",
+                self.history.can_back(),
+            ),
+            navigation(
+                MenuItem::action("Forward", DocumentationForward).icon(IconName::FORWARD),
+                "workbench.forward",
+                self.history.can_forward(),
+            ),
+        ]
     }
 
     /// Opens the more menu of the corner toolbar at `position` (window
-    /// coordinates): what the reference's `MoreActionGroup` holds that
-    /// Pyoxide has (View External Documentation). The chosen command goes
-    /// to the editor, which has the focus back by then.
+    /// coordinates). The chosen command goes to the editor, which has the
+    /// focus back by then.
     fn open_menu(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let external = self
-            .content
-            .as_ref()
-            .and_then(|c| c.documentation.as_ref())
-            .is_some_and(|d| d.external.is_some());
-        let items = vec![
-            MenuItem::action("View External Documentation", ViewExternalDocumentation)
-                .enabled(external),
-        ];
+        let items = self.menu_items(window, cx);
         let menu = ContextMenu::build(items, window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
-            if let Some(owner) = this.owner.upgrade() {
-                owner.update(cx, |v, cx| v.doc_menu_closed(cx));
-            }
+            this.popup_closed(cx);
         });
         self.menu = Some((menu, position, subscription));
+        cx.notify();
+    }
+
+    /// A popup over the documentation popup closed: the popup over the
+    /// text closes a moment later unless the mouse is back inside it.
+    fn popup_closed(&self, cx: &mut Context<Self>) {
+        if self.menu_open() || self.in_tool_window {
+            return;
+        }
+        if let Some(owner) = self.owner.upgrade() {
+            owner.update(cx, |v, cx| v.doc_menu_closed(cx));
+        }
+    }
+
+    /// Adjust Font Size: the slider popup centred on the mouse
+    /// (`showFontSizePopup`); a size chosen is stored at once and the
+    /// documentation follows.
+    pub fn open_font_size(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let popup = gpui::AppContext::new(cx, |cx| FontSizePopup::new(window, cx));
+        let size = FontSizePopup::size(window, cx);
+        let mouse = window.mouse_position();
+        let at = gpui::point(mouse.x - size.width / 2.0, mouse.y - size.height / 2.0);
+        let subscriptions = vec![
+            cx.subscribe(&popup, |_, _, e: &SizeChosen, cx| {
+                let settings = DocumentationSettings {
+                    font_size: e.0,
+                    ..settings_ui::store::get(cx)
+                };
+                settings_ui::store::set(cx, &settings);
+                cx.notify();
+            }),
+            cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+                this.font_size = None;
+                cx.notify();
+                this.popup_closed(cx);
+            }),
+        ];
+        self.font_size = Some((popup, at, subscriptions));
         cx.notify();
     }
 
@@ -709,6 +925,7 @@ impl DocPopup {
         cx: &App,
     ) -> gpui::AnyElement {
         let theme = cx.theme();
+        let scale = font_scale(cx);
         let text = theme.color(UiRole::Text);
         let muted = theme.color(UiRole::TextMuted);
         let line = || {
@@ -737,7 +954,8 @@ impl DocPopup {
         ];
         let mut column = div()
             .debug_selector(|| "doc-documentation".into())
-            .w(px(file_doc_width(doc)))
+            .when(!self.in_tool_window, |d| d.w(px(file_doc_width(doc) * scale)))
+            .when(self.in_tool_window, |d| d.w_full())
             .flex()
             .flex_col()
             .child(
@@ -746,10 +964,10 @@ impl DocPopup {
                     .px(px(FILE_PAD_X))
                     .pt(px(FILE_TITLE_TOP))
                     .pb(px(FILE_TITLE_BOTTOM))
-                    .h(px(FILE_TITLE_TOP + FILE_TITLE_HEIGHT + FILE_TITLE_BOTTOM))
+                    .h(px(FILE_TITLE_TOP + FILE_TITLE_HEIGHT * scale + FILE_TITLE_BOTTOM))
                     .flex()
                     .items_center()
-                    .text_size(theme.ui_size())
+                    .text_size(theme.ui_size() * scale)
                     .child(StyledText::new(SharedString::from(title_text)).with_runs(runs)),
             );
         if !doc.body.is_empty() {
@@ -759,7 +977,7 @@ impl DocPopup {
                     .px(px(FILE_PAD_X))
                     .pt(px(FILE_BODY_TOP))
                     .pb(px(FILE_BODY_BOTTOM))
-                    .child(doc.body.render("doc-link", cx)),
+                    .child(doc.body.render_scaled("doc-link", scale, cx)),
             );
         }
         if let Some(info) = &doc.file_info {
@@ -767,7 +985,7 @@ impl DocPopup {
             let rows = info.rows().into_iter().map(|(label, value)| {
                 let is_scope = label == "Scope:" && info.scope == Some(FileScope::NonProject);
                 div()
-                    .h(px(FILE_ROW))
+                    .h(px(FILE_ROW * scale))
                     .flex()
                     .flex_row()
                     .items_center()
@@ -799,7 +1017,7 @@ impl DocPopup {
                 .pointing_hand()
                 .text_color(theme.color(UiRole::TextLink))
                 .child(link.text.clone())
-                .child(Icon::new(IconName::EXTERNAL_LINK).size(px(16.0)))
+                .child(Icon::new(IconName::EXTERNAL_LINK).size(px(16.0 * scale)))
                 .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                     cx.stop_propagation();
                     markdown::open_link(&url, cx);
@@ -808,7 +1026,7 @@ impl DocPopup {
         column
             .child(
                 div()
-                    .h(px(LINK_ROW))
+                    .h(px(LINK_ROW * scale))
                     .mb(px(LINK_BOTTOM))
                     .pl(px(FILE_PAD_X))
                     .pr(px(2.0 * TOOLBAR_BUTTON + TOOLBAR_GAP + TOOLBAR_RIGHT))
@@ -883,6 +1101,7 @@ impl DocPopup {
 
     fn render_documentation(&self, doc: &Documentation, cx: &App) -> gpui::AnyElement {
         let theme = cx.theme();
+        let scale = font_scale(cx);
         if let Some(title) = &doc.title {
             return self.render_file_documentation(doc, title, cx);
         }
@@ -899,14 +1118,14 @@ impl DocPopup {
         let definition = doc.definition.as_ref().map(|code| {
             div()
                 .debug_selector(|| "doc-definition".into())
-                .child(markdown::render_code(code, cx))
+                .child(markdown::render_code_scaled(code, scale, cx))
         });
         let separator = (doc.definition.is_some() && !doc.body.is_empty())
             .then(|| div().w_full().h(px(1.0)).bg(theme.color(UiRole::Divider)));
         let body = (!doc.body.is_empty()).then(|| {
             div()
                 .debug_selector(|| "doc-body".into())
-                .child(doc.body.render("doc-link", cx))
+                .child(doc.body.render_scaled("doc-link", scale, cx))
         });
         div()
             .debug_selector(|| "doc-documentation".into())
@@ -952,57 +1171,67 @@ impl Render for DocPopup {
             sections.push(self.render_documentation(doc, cx));
         }
         // The corner toolbar sits on the link row, which documentation of
-        // a whole file has.
+        // a whole file has; the tool window has none.
         let toolbar = content
             .documentation
             .as_ref()
-            .filter(|d| d.title.is_some())
+            .filter(|d| d.title.is_some() && !self.in_tool_window)
             .map(|doc| self.render_toolbar(doc, window, cx));
         let menu = self
             .menu
             .as_ref()
             .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
-        let owner = self.owner.clone();
-        div()
-            .id("documentation-popup")
-            .relative()
-            .debug_selector(|| "documentation-popup".into())
-            .max_w(px(MAX_WIDTH))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.color(UiRole::PopupBorder))
-            .bg(theme.color(UiRole::DocumentationPopup))
-            .shadow(ui::components::popup_shadow())
-            .overflow_hidden()
-            .font_family(theme.ui_family())
-            .text_size(theme.ui_size())
-            .text_color(theme.color(UiRole::Text))
-            .font_weight(FontWeight::NORMAL)
-            // Shrinks to the room the window has; the content scrolls.
+        let font_size = self.font_size.as_ref().map(|(popup, at, _)| {
+            ui::deferred(gpui::anchored().position(*at).child(popup.clone()))
+                .with_priority(2)
+                .into_any_element()
+        });
+        let scroll = div()
+            .id("documentation-scroll")
+            .debug_selector(|| "documentation-scroll".into())
+            .min_h(px(0.0))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .flex()
             .flex_col()
-            .min_h(px(0.0))
-            .on_hover(move |inside, _, cx| {
-                if let Some(owner) = owner.upgrade() {
-                    owner.update(cx, |v, cx| v.doc_mouse_inside(*inside, cx));
-                }
-            })
-            .child(
-                div()
-                    .id("documentation-scroll")
-                    .debug_selector(|| "documentation-scroll".into())
-                    .max_h(px(MAX_HEIGHT))
-                    .min_h(px(0.0))
-                    .flex_shrink()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .flex()
-                    .flex_col()
-                    .when(sections.is_empty(), |d| d.p(px(PAD_Y)))
-                    .children(sections),
-            )
+            .when(self.in_tool_window, |d| d.flex_1())
+            .when(!self.in_tool_window, |d| d.max_h(px(MAX_HEIGHT)).flex_shrink())
+            .when(sections.is_empty(), |d| d.p(px(PAD_Y)))
+            .children(sections);
+        let owner = self.owner.clone();
+        let root = div()
+            .id("documentation-popup")
+            .relative()
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size() * font_scale(cx))
+            .text_color(theme.color(UiRole::Text))
+            .font_weight(FontWeight::NORMAL)
+            .flex()
+            .flex_col()
+            .min_h(px(0.0));
+        let root = if self.in_tool_window {
+            root.debug_selector(|| "documentation-tool-window-content".into())
+                .size_full()
+        } else {
+            root.debug_selector(|| "documentation-popup".into())
+                .max_w(px(MAX_WIDTH))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.color(UiRole::PopupBorder))
+                .bg(theme.color(UiRole::DocumentationPopup))
+                .shadow(ui::components::popup_shadow())
+                .overflow_hidden()
+                // Shrinks to the room the window has; the content scrolls.
+                .on_hover(move |inside, _, cx| {
+                    if let Some(owner) = owner.upgrade() {
+                        owner.update(cx, |v, cx| v.doc_mouse_inside(*inside, cx));
+                    }
+                })
+        };
+        root.child(scroll)
             .children(toolbar)
             .children(menu)
+            .children(font_size)
             .into_any_element()
     }
 }
