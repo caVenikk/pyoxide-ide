@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use code_intel::{
     AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, Feature, FileChange,
-    FileChangeKind, IntelError, IntelEvent, ServerId,
+    FileChangeKind, IntelError, IntelEvent, Route, RoutedCodeIntel, ServerId, ServerStatus,
 };
 use editor::{Analysis, Editor, EditorEvent};
 use gpui::{
@@ -72,9 +72,13 @@ pub enum CodeIntelEvent {
 /// them. The workbench reports the project, editors, saves and the active
 /// tab; the view does the rest.
 pub struct CodeIntelView {
-    hook: CodeIntelHook,
-    /// The services of the open project.
+    /// The providers, the product's first (ADR 0022).
+    hooks: Vec<CodeIntelHook>,
+    /// The services of the open project: the one provider's, or all routed
+    /// by language.
     services: Option<Arc<dyn CodeIntel>>,
+    /// Each provider's services, in the order of `hooks`.
+    parts: Vec<Arc<dyn CodeIntel>>,
     root: Option<PathBuf>,
     /// The documents, by path.
     documents: HashMap<PathBuf, Document>,
@@ -112,7 +116,10 @@ pub struct CodeIntelView {
 impl EventEmitter<CodeIntelEvent> for CodeIntelView {}
 
 impl CodeIntelView {
-    pub fn new(hook: CodeIntelHook, cx: &mut Context<Self>) -> Self {
+    /// The view of a window with the services of these providers (at
+    /// least one).
+    pub fn new(hooks: Vec<CodeIntelHook>, cx: &mut Context<Self>) -> Self {
+        debug_assert!(!hooks.is_empty(), "a provider of language services");
         // Servers do not outlive the application.
         let quit = cx.on_app_quit(|this: &mut Self, cx| {
             let services = this.services.take();
@@ -133,8 +140,9 @@ impl CodeIntelView {
         let doc_popup = cx.new(|_| DocPopup::new(owner.clone()));
         let signature_popup = cx.new(|_| SignaturePopup::new(owner));
         Self {
-            hook,
+            hooks,
             services: None,
+            parts: Vec::new(),
             root: None,
             documents: HashMap::new(),
             active: None,
@@ -156,8 +164,34 @@ impl CodeIntelView {
         }
     }
 
-    pub fn hook(&self) -> &CodeIntelHook {
-        &self.hook
+    /// The providers, the product's first.
+    pub fn hooks(&self) -> &[CodeIntelHook] {
+        &self.hooks
+    }
+
+    /// The provider that answers for the UI about a language: the first
+    /// that names it, else the first that serves every language, else the
+    /// product's.
+    pub fn hook_for(&self, language: &str) -> &CodeIntelHook {
+        let hooks = &self.hooks;
+        hooks
+            .iter()
+            .find(|h| h.languages().contains(&language))
+            .or_else(|| hooks.iter().find(|h| h.languages().is_empty()))
+            .unwrap_or(&hooks[0])
+    }
+
+    /// The provider whose services run a server (else the product's).
+    fn hook_of(&self, server: &ServerStatus) -> &CodeIntelHook {
+        if self.parts.len() > 1
+            && let Some(i) = self
+                .parts
+                .iter()
+                .position(|p| p.status().iter().any(|s| s.id == server.id))
+        {
+            return &self.hooks[i];
+        }
+        &self.hooks[0]
     }
 
     /// The language services of the open project.
@@ -239,7 +273,15 @@ impl CodeIntelView {
         self.services_popup = None;
         self.active = None;
         self.root = Some(root.to_owned());
-        let services = self.hook.0.start(root, cx);
+        self.parts = self.hooks.iter().map(|h| h.0.start(root, cx)).collect();
+        let services = match self.parts.as_slice() {
+            [one] => one.clone(),
+            parts => {
+                let routes = self.hooks.iter().zip(parts);
+                let routes = routes.map(|(h, s)| Route::new(h.languages(), s.clone()));
+                Arc::new(RoutedCodeIntel::new(routes.collect())) as Arc<dyn CodeIntel>
+            }
+        };
         let events = services.events();
         self._events = Some(cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv_async().await {
@@ -810,7 +852,7 @@ impl CodeIntelView {
             return;
         };
         let item = &session.items[index];
-        let parentheses = self.hook.0.parentheses(&doc.language);
+        let parentheses = self.hook_for(&doc.language).0.parentheses(&doc.language);
         session.editor.update(cx, |e, cx| {
             let caret = e.selections().primary().head;
             let (edits, caret) = completion::insertion(
@@ -891,11 +933,11 @@ impl CodeIntelView {
             return Vec::new();
         };
         let current = self.active_document().map(|d| d.id.clone());
-        let provider = &self.hook.0;
         let mut items: Vec<ServerItem> = services
             .status()
             .iter()
             .map(|status| {
+                let provider = &self.hook_of(status).0;
                 ServerItem::new(
                     status,
                     provider.server_title(status),
@@ -1008,7 +1050,7 @@ impl CodeIntelView {
         let Some(root) = &self.root else {
             return;
         };
-        match self.hook.0.settings_file(root) {
+        match self.hooks[0].0.settings_file(root) {
             Some(file) if file.is_file() => cx.emit(CodeIntelEvent::OpenFile(file)),
             Some(file) => cx.emit(CodeIntelEvent::Notice(format!(
                 "The project has no settings file yet ({})",
@@ -1350,7 +1392,7 @@ mod tests {
     fn a_project_gets_its_services(cx: &mut TestAppContext) {
         let fake = FakeCodeIntel::new();
         let hook = CodeIntelHook::new(Fake(fake.clone()));
-        let view = cx.new(|cx| CodeIntelView::new(hook, cx));
+        let view = cx.new(|cx| CodeIntelView::new(vec![hook], cx));
         view.update(cx, |v, cx| {
             assert!(v.services().is_none());
             v.project_opened(Path::new("/p"), cx);
@@ -1363,6 +1405,50 @@ mod tests {
         view.update(cx, |v, cx| v.project_opened(Path::new("/q"), cx));
         cx.run_until_parked();
         assert_eq!(fake.calls(), [Call::Shutdown]);
+    }
+
+    /// The services of some languages, with the tool's name in its
+    /// servers' titles.
+    struct Languages(Arc<FakeCodeIntel>, &'static [&'static str], &'static str);
+
+    impl CodeIntelProvider for Languages {
+        fn languages(&self) -> &[&'static str] {
+            self.1
+        }
+
+        fn start(&self, _: &Path, _: &mut App) -> Arc<dyn CodeIntel> {
+            self.0.clone()
+        }
+
+        fn server_title(&self, server: &ServerStatus) -> String {
+            format!("{} {}", self.2, server.name)
+        }
+    }
+
+    #[gpui::test]
+    fn several_providers_answer_for_their_languages(cx: &mut TestAppContext) {
+        let python = FakeCodeIntel::new();
+        let sql = FakeCodeIntel::new();
+        python.set_status(vec![ServerStatus::new(ServerId::new("ty"), "ty")]);
+        sql.set_status(vec![ServerStatus::new(ServerId::new("sql"), "sql")]);
+        let hooks = vec![
+            CodeIntelHook::new(Languages(python.clone(), &[], "Python")),
+            CodeIntelHook::new(Languages(sql.clone(), &["sql"], "SQL")),
+        ];
+        let view = cx.new(|cx| CodeIntelView::new(hooks, cx));
+        view.update(cx, |v, cx| {
+            assert_eq!(v.hook_for("sql").languages(), ["sql"]);
+            assert!(v.hook_for("python").languages().is_empty());
+            v.project_opened(Path::new("/p"), cx);
+            // Each server is named by its own provider.
+            let mut titles: Vec<String> = v.server_items(cx).into_iter().map(|i| i.title).collect();
+            titles.sort();
+            assert_eq!(titles, ["Python ty", "SQL sql"]);
+        });
+        view.update(cx, |v, cx| v.project_opened(Path::new("/q"), cx));
+        cx.run_until_parked();
+        assert_eq!(python.calls(), [Call::Shutdown]);
+        assert_eq!(sql.calls(), [Call::Shutdown]);
     }
 
     #[test]

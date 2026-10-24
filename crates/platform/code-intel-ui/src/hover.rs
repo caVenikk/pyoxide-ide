@@ -77,11 +77,12 @@ impl DocState {
 /// the symbol is declared.
 type DocAnswer = (Option<Hover>, Option<Location>);
 
-/// The facts of the file an answer is about, when the product says the
-/// symbol is a whole file (a module): its answer, then the file's facts
-/// read off the UI thread.
+/// The facts of the file an answer is about, when the provider of the
+/// document's language says the symbol is a whole file (a module): its
+/// answer, then the file's facts read off the UI thread.
 async fn file_facts(
     this: &WeakEntity<CodeIntelView>,
+    language: &str,
     (hover, location): &DocAnswer,
     cx: &mut AsyncApp,
 ) -> Option<FileFacts> {
@@ -89,7 +90,7 @@ async fn file_facts(
     let (task, root) = this
         .update(cx, |v, cx| {
             let root = v.project_root().map(std::path::Path::to_owned);
-            let hook = v.hook().0.clone();
+            let hook = v.hook_for(language).0.clone();
             let task = hook.file_doc(&hover.contents, &location.path, root.as_deref(), cx)?;
             Some((task, root))
         })
@@ -335,6 +336,7 @@ impl CodeIntelView {
         };
         let at = document.versions.point(offset);
         let documentation = on_identifier.then(|| self.request_documentation(&doc_id, at));
+        let language = document.language.clone();
         let fix = mark.clone().map(|range| {
             let points = document.versions.point(range.start)..document.versions.point(range.end);
             let context = CodeActionContext {
@@ -352,7 +354,7 @@ impl CodeIntelView {
                 Some(request) => request.await,
                 None => (None, None),
             };
-            let facts = file_facts(&this, &documentation, cx).await;
+            let facts = file_facts(&this, &language, &documentation, cx).await;
             let fix = match fix {
                 Some(request) => request
                     .await
@@ -427,7 +429,7 @@ impl CodeIntelView {
     ) -> Option<(Documentation, Option<Range<usize>>)> {
         let hover = hover?;
         let document = self.document_of(editor)?;
-        let provider = self.hook().0.as_ref();
+        let provider = self.hook_for(&document.language).0.as_ref();
         let header = location
             .as_ref()
             .and_then(|l| provider.doc_location(&l.path));
@@ -492,13 +494,14 @@ impl CodeIntelView {
             return;
         };
         let at = document.versions.point(offset);
+        let language = document.language.clone();
         let request = self.request_documentation(&query.doc, at);
         self.docs.generation += 1;
         let generation = self.docs.generation;
         let (editor, version) = (editor.clone(), query.version);
         self.docs.request = Some(cx.spawn(async move |this, cx| {
             let answer = request.await;
-            let facts = file_facts(&this, &answer, cx).await;
+            let facts = file_facts(&this, &language, &answer, cx).await;
             let _ = this.update(cx, |v, cx| {
                 if v.docs.generation != generation {
                     return;

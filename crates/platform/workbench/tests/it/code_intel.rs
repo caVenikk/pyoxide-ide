@@ -105,7 +105,7 @@ fn open(cx: &mut TestAppContext, hook: Option<CodeIntelHook>) -> WindowHandle<Wo
             highlighter: Some(Arc::new(|| Box::new(Lexer::default()))),
             ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
         }],
-        code_intel: hook,
+        code_intel: hook.into_iter().collect(),
         ..Product::default()
     };
     let window = cx.update(|cx| {

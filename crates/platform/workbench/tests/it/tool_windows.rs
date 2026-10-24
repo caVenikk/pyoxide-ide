@@ -169,7 +169,7 @@ fn product_hooks_see_the_workbench(cx: &mut TestAppContext) {
     let sink = events.clone();
     let product = Product {
         name: "Test IDE",
-        init: Some(|cx| cx.set_global(InitRan)),
+        init: vec![workbench::Init::new(|cx| cx.set_global(InitRan))],
         status_widgets: vec![StatusWidget {
             id: "test-widget",
             create: Rc::new(move |workbench, _, cx| {

@@ -19,6 +19,8 @@
 //!   futures and [`IntelEvent`]s.
 //! - Features a document has no service for answer
 //!   [`IntelError::Unsupported`].
+//! - Several providers (a product's and a module's, ADR 0022) are one
+//!   [`RoutedCodeIntel`], which routes each document by its language id.
 //!
 //! No UI toolkit and no protocol types here.
 
@@ -29,7 +31,10 @@ mod document;
 mod edit;
 mod events;
 mod markup;
+pub mod positions;
+mod routed;
 mod server;
+mod symbol;
 
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;
@@ -50,7 +55,9 @@ pub use markup::{
     Hover, Markup, MarkupKind, ParameterInfo, Signature, SignatureContext, SignatureHelp,
     SignatureTrigger,
 };
+pub use routed::{Route, RoutedCodeIntel};
 pub use server::{Feature, Features, ServerId, ServerState, ServerStatus};
+pub use symbol::{DefinitionTarget, DocumentSymbol, ObjectTarget};
 pub use text::{AppliedEdit, Point, Rope};
 
 /// The answer of a request: a future that is cancelled by dropping it.
@@ -161,6 +168,17 @@ pub trait CodeIntel: Send + Sync + 'static {
     /// Where the symbol at a position is declared.
     fn definition(&self, doc: &DocumentId, at: Point) -> Intel<Vec<Location>>;
 
+    /// Where Go to Declaration goes from a position: places in files, or
+    /// objects that are no place in a file (a database table). By default
+    /// the places of [`definition`](Self::definition).
+    fn definition_targets(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DefinitionTarget>> {
+        let definition = self.definition(doc, at);
+        Box::pin(async move {
+            let locations = definition.await?;
+            Ok(locations.into_iter().map(DefinitionTarget::File).collect())
+        })
+    }
+
     /// Where the type of the symbol at a position is declared.
     fn type_definition(&self, doc: &DocumentId, at: Point) -> Intel<Vec<Location>>;
 
@@ -209,6 +227,13 @@ pub trait CodeIntel: Send + Sync + 'static {
     /// The occurrences in the document of the symbol at a position.
     fn document_highlights(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DocumentHighlight>> {
         let _ = (doc, at);
+        unsupported()
+    }
+
+    /// The structure of a document: its symbols with the symbols declared
+    /// inside them, in the order of the text.
+    fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {
+        let _ = doc;
         unsupported()
     }
 
@@ -277,8 +302,11 @@ mod tests {
         ) -> Intel<Option<SignatureHelp>> {
             ready(Ok(None))
         }
-        fn definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
-            ready(Ok(Vec::new()))
+        fn definition(&self, doc: &DocumentId, _: Point) -> Intel<Vec<Location>> {
+            ready(Ok(vec![Location {
+                path: doc.path().to_owned(),
+                range: Point::new(1, 0)..Point::new(1, 1),
+            }]))
         }
         fn type_definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
             ready(Ok(Vec::new()))
@@ -335,6 +363,18 @@ mod tests {
         assert_eq!(
             futures::executor::block_on(intel.document_highlights(&doc, Point::new(0, 0))),
             Err(IntelError::Unsupported)
+        );
+        assert_eq!(
+            futures::executor::block_on(intel.document_symbols(&doc)),
+            Err(IntelError::Unsupported)
+        );
+        // The definition's places, as file targets.
+        assert_eq!(
+            futures::executor::block_on(intel.definition_targets(&doc, Point::new(0, 0))),
+            Ok(vec![DefinitionTarget::File(Location {
+                path: "/p/a.py".into(),
+                range: Point::new(1, 0)..Point::new(1, 1),
+            })])
         );
         let command = Command {
             title: "Organize".into(),

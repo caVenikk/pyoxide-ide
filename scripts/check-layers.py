@@ -249,8 +249,11 @@ def main():
             bad.append(f"{name} uses the UI toolkit ({TOOLKIT}) (ADR 0016)")
     if VCS_MODEL in direct and uses_(VCS_MODEL, VCS_BACKEND):
         bad.append(f"{VCS_MODEL} depends on {VCS_BACKEND}: the model knows no backend (ADR 0016)")
+    # The workbench composes the UI crates with the backend; a crate built
+    # on the workbench (the test fixture of a module) is composed above it.
     for name in sorted(direct):
         if (by_name.get(name) == "platform" and name != COMPOSER
+                and COMPOSER not in direct[name]
                 and TOOLKIT in direct[name] and uses_(name, VCS_BACKEND)):
             bad.append(f"{name} is a UI crate and depends on {VCS_BACKEND}: UI crates use {VCS_MODEL} (ADR 0016)")
 

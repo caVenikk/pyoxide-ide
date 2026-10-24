@@ -63,16 +63,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
         assert!(errors.is_empty(), "keymap errors: {errors:?}");
         workbench::open_main_window(cx, Rc::new(product))
     });
-    let dispatched = Rc::new(RefCell::new(Vec::new()));
-    let sink = dispatched.clone();
-    cx.update(|cx| {
-        cx.observe_keystrokes(move |event, _, _| {
-            if let Some(action) = &event.action {
-                sink.borrow_mut().push(action.name().to_owned());
-            }
-        })
-        .detach()
-    });
+    let dispatched = cx.update(Dispatched::observe);
     let mut h = H {
         cx,
         window,

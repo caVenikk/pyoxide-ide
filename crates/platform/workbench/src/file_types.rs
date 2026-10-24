@@ -602,16 +602,18 @@ impl FileTypes {
 
     /// The platform's types and the product's, then the product's own
     /// associations; a later association of a mask replaces an earlier
-    /// one, so the product's replace the platform's.
+    /// one, so the product's replace the platform's. Of two product types,
+    /// or two associations, that claim one mask the first wins (a
+    /// product's own come before its modules', ADR 0022).
     pub fn with_associations(product: &[FileType], associations: &[FileAssociation]) -> Self {
         let platform = platform_types();
         let mut table = Associations::default();
-        for t in platform.iter().chain(product) {
+        for t in platform.iter().chain(product.iter().rev()) {
             for matcher in t.matchers() {
                 table.add(matcher, t.name);
             }
         }
-        for a in associations {
+        for a in associations.iter().rev() {
             table.add(NameMatcher::parse(a.mask), a.file_type);
         }
         let mut types = product.to_vec();

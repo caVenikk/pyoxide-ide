@@ -1,0 +1,19 @@
+[package]
+name = "workbench-fixture-module"
+description = "A module for the workbench's tests (ADR 0022): a file type, a language service provider, a command and its key bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+code-intel = { workspace = true, features = ["fake"] }
+gpui.workspace = true
+ui.workspace = true
+workbench = { workspace = true, features = ["test-support"] }
+
+# Only tests build this crate: shaders compiled at run time, as the test
+# builds of the other GPUI crates have them.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { workspace = true, features = ["runtime_shaders"] }

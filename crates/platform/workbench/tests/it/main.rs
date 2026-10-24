@@ -27,6 +27,7 @@ mod first_run;
 mod keymap;
 mod keymaps;
 mod main_menu;
+mod modules;
 mod navigation;
 mod notifications;
 mod pointer;

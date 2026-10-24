@@ -9140,7 +9140,18 @@ dependencies = [
  "ui",
  "vcs",
  "vcs-ui",
+ "workbench-fixture-module",
  "zip",
+]
+
+[[package]]
+name = "workbench-fixture-module"
+version = "0.0.1"
+dependencies = [
+ "code-intel",
+ "gpui",
+ "ui",
+ "workbench",
 ]
 
 [[package]]

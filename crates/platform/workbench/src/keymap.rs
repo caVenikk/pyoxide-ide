@@ -27,6 +27,10 @@
 //! placed after the files whose bindings it must win over; a new area file
 //! is added to both lists.
 //!
+//! A module (ADR 0022) brings its own folders of area files in its crate,
+//! joined the same way into a [`KeymapFiles`]; they come after the
+//! workbench's files ([`active::set_modules`]).
+//!
 //! Besides the two base keymaps there are derived ones (ADR 0018,
 //! [`derived`]): the reference's VS Code keymaps and custom keymaps
 //! imported from the reference ([`reference`]), converted through the
@@ -103,6 +107,59 @@ pub const DEFAULT: &str = concat!(
     include_str!("../keymaps/default/breakpoints.toml"),
     include_str!("../keymaps/default/terminal.toml"),
 );
+
+/// The key bindings of a module (ADR 0022): its area files for macOS and
+/// for Windows and Linux, each folder joined in order with `concat!` as
+/// [`MACOS`] and [`DEFAULT`] are. They are joined after the workbench's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeymapFiles {
+    pub macos: &'static str,
+    pub default: &'static str,
+}
+
+impl KeymapFiles {
+    /// The files of one of the two keymaps.
+    pub fn text(&self, macos: bool) -> &'static str {
+        if macos { self.macos } else { self.default }
+    }
+}
+
+/// A default keymap with the bindings of `modules` joined after it.
+pub fn with_modules(macos: bool, modules: &[KeymapFiles]) -> String {
+    let mut text = String::from(if macos { MACOS } else { DEFAULT });
+    for files in modules {
+        text.push_str(files.text(macos));
+    }
+    text
+}
+
+/// Checks that every file of a keymap folder is joined into `joined` once,
+/// that each ends with a line break and that nothing else is joined: a
+/// file missing from a `concat!` list, or in it twice, is an error.
+#[cfg(any(test, feature = "test-support"))]
+pub fn check_joined_once(folder: &std::path::Path, joined: &str) -> Result<(), String> {
+    let entries = std::fs::read_dir(folder).map_err(|e| format!("{folder:?}: {e}"))?;
+    let mut length = 0;
+    for entry in entries {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            return Err(format!("{path:?} is not a .toml file"));
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{path:?}: {e}"))?;
+        if !text.ends_with('\n') {
+            return Err(format!("{path:?} does not end with a line break"));
+        }
+        let count = joined.matches(&text).count();
+        if count != 1 {
+            return Err(format!("{path:?} is joined {count} times, not once"));
+        }
+        length += text.len();
+    }
+    if joined.len() != length {
+        return Err(format!("{folder:?}: something else is joined"));
+    }
+    Ok(())
+}
 
 /// The names of the predefined keymaps, as the reference shows them
 /// (`DefaultKeymap.getKeymapPresentableName`).
@@ -402,6 +459,21 @@ name = "Editor"
     }
 
     #[test]
+    fn module_bindings_come_after_the_workbench_ones() {
+        let module = KeymapFiles {
+            macos: "[[context]]\n[context.bindings]\n\"cmd-alt-f9\" = \"m.run\"\n",
+            default: "[[context]]\n[context.bindings]\n\"ctrl-alt-f9\" = \"m.run\"\n",
+        };
+        for macos in [true, false] {
+            let keymap = Keymap::parse(&with_modules(macos, &[module])).unwrap();
+            let last = keymap.bindings.last().unwrap();
+            assert_eq!(last.command, "m.run");
+            let base = Keymap::parse(if macos { MACOS } else { DEFAULT }).unwrap();
+            assert_eq!(keymap.bindings.len(), base.bindings.len() + 1);
+        }
+    }
+
+    #[test]
     fn default_keymaps_parse() {
         for text in [MACOS, DEFAULT] {
             let keymap = Keymap::parse(text).unwrap();
@@ -419,16 +491,12 @@ name = "Editor"
             ("default", DEFAULT),
             ("actions", actions::ACTIONS),
         ] {
-            let mut length = 0;
-            for entry in std::fs::read_dir(keymaps.join(folder)).unwrap() {
-                let path = entry.unwrap().path();
-                assert_eq!(path.extension().and_then(|e| e.to_str()), Some("toml"));
-                let text = std::fs::read_to_string(&path).unwrap();
-                assert!(text.ends_with('\n'), "{path:?} ends with a line break");
-                assert_eq!(joined.matches(&text).count(), 1, "{path:?} is joined once");
-                length += text.len();
-            }
-            assert_eq!(joined.len(), length, "{folder}: nothing else is joined");
+            check_joined_once(&keymaps.join(folder), joined).unwrap();
         }
+        // A file twice, or something else joined.
+        let macos = keymaps.join("macos");
+        let twice = format!("{MACOS}{}", include_str!("../keymaps/macos/editor.toml"));
+        assert!(check_joined_once(&macos, &twice).is_err());
+        assert!(check_joined_once(&macos, &format!("{MACOS}\n")).is_err());
     }
 }

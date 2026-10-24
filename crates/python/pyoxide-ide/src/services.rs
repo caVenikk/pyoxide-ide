@@ -906,7 +906,7 @@ pub(crate) mod tests {
             extensions: Vec::new(),
         };
         let mut product = crate::product();
-        product.code_intel = Some(workbench::CodeIntelHook::new(provider(&recorder, search)));
+        product.code_intel = vec![workbench::CodeIntelHook::new(provider(&recorder, search))];
         let product = Rc::new(product);
         let window = cx.update(|cx| {
             workbench::init(cx, &product);
@@ -1036,7 +1036,7 @@ pub(crate) mod tests {
             extensions: Vec::new(),
         };
         let mut product = crate::product();
-        product.code_intel = Some(workbench::CodeIntelHook::new(provider(&recorder, search)));
+        product.code_intel = vec![workbench::CodeIntelHook::new(provider(&recorder, search))];
         let product = Rc::new(product);
         let window = cx.update(|cx| {
             workbench::init(cx, &product);

@@ -64,7 +64,13 @@ appending to a shared one, and nothing generated is committed:
   of the keymap (of two bindings of one keystroke in the same innermost
   context, or one of them without a context, the later wins, so the file of
   a popup's Escape comes after the editor's): put a new file after the files
-  whose bindings it must win over, and do not reorder the lists.
+  whose bindings it must win over, and do not reorder the lists. A module
+  (ADR 0022) keeps its own folders in its crate
+  (`keymaps/{macos,default}/<area>.toml`), joins them the same way into its
+  `workbench::KeymapFiles` (joined after the workbench's files) and checks
+  them in its own tests with `workbench::test_support::keymap` (feature
+  `test-support`): `check_area` per area and keymap, `check_joined_once` per
+  folder.
 - **Third-party notices**: one file per entry in `notices/` (ADR 0019).
 - **Counts written by hand** that every feature would change (for example the
   number of theme roles) are left out of the docs; the code is the list.

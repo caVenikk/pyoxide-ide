@@ -1,5 +1,6 @@
-//! What a product supplies: the language services of a project, the icons
-//! and names of its servers, and what its languages add to completion.
+//! What a product or a module supplies: the language services of a
+//! project for some languages, the icons and names of its servers, and what
+//! its languages add to completion.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -12,8 +13,17 @@ use ui::IconName;
 use crate::completion::Parentheses;
 use crate::file_doc::FileDoc;
 
-/// The language services of a product.
+/// The language services of a product or a module.
 pub trait CodeIntelProvider: 'static {
+    /// The language ids (`"python"`) whose documents these services serve
+    /// (ADR 0022); none serves every id. With several providers the
+    /// documents of a language go to the providers that serve it, and the
+    /// first that names the language (else the first that serves every
+    /// id) answers for the UI (`parentheses`, `lexer`, `doc_location`).
+    fn languages(&self) -> &[&'static str] {
+        &[]
+    }
+
     /// The language services of a project, when it opens. Cheap: servers
     /// start when the first document that needs them opens.
     fn start(&self, project_root: &Path, cx: &mut App) -> Arc<dyn CodeIntel>;
@@ -95,13 +105,24 @@ pub struct DocLocation {
     pub icon: IconName,
 }
 
-/// The product's [`CodeIntelProvider`] in a `workbench::Product`.
+/// A [`CodeIntelProvider`] in a `workbench::Product` or `workbench::Module`.
 #[derive(Clone)]
 pub struct CodeIntelHook(pub Rc<dyn CodeIntelProvider>);
 
 impl CodeIntelHook {
     pub fn new(provider: impl CodeIntelProvider) -> Self {
         Self(Rc::new(provider))
+    }
+
+    /// The language ids it serves; none: every id.
+    pub fn languages(&self) -> &[&'static str] {
+        self.0.languages()
+    }
+
+    /// Whether documents of a language id go to it.
+    pub fn serves(&self, language: &str) -> bool {
+        let languages = self.languages();
+        languages.is_empty() || languages.contains(&language)
     }
 }
 
