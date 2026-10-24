@@ -1,5 +1,7 @@
 //! Files and folders dragged from the file manager onto the main window
-//! (tests/scenarios/editor/open-file-tabs.md, "Drop files and folders").
+//! (tests/scenarios/editor/open-file-tabs.md, "Drop files and folders"),
+//! and rows dragged from the project tree onto the editor area ("Drag rows
+//! from the project tree").
 //!
 //! The drags go through GPUI's test platform as the platform layer sends
 //! them: `FileDropEvent::Entered` with the paths, `Pending` while moving,
@@ -391,6 +393,107 @@ fn a_dropped_folder_of_the_project_is_selected_in_the_tree(cx: &mut TestAppConte
     assert_eq!(s["project"]["root"], json!(root.display().to_string()));
     assert_eq!(s["tree"]["selected"], json!(""));
     assert_eq!(tabs(&s), ["README.md", "src/app.py"]);
+}
+
+/// The middle of the tree row of `path` (relative to the project).
+fn row(cx: &mut TestAppContext, window: WindowHandle<Workbench>, path: &str) -> Point<Pixels> {
+    let name: &'static str = Box::leak(format!("tree-row:{path}").into_boxed_str());
+    bounds(cx, window, name).center()
+}
+
+/// Presses on the tree row of `from`, moves the pointer along `route`
+/// (window positions) and lets go at its end.
+fn drag_row(
+    cx: &mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    from: &str,
+    route: &[Point<Pixels>],
+) {
+    let start = row(cx, window, from);
+    let none = gpui::Modifiers::none();
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_move(start, None, none);
+    vcx.simulate_mouse_down(start, gpui::MouseButton::Left, none);
+    vcx.simulate_mouse_move(
+        start + point(px(10.0), px(0.0)),
+        gpui::MouseButton::Left,
+        none,
+    );
+    for &position in route {
+        vcx.simulate_mouse_move(position, gpui::MouseButton::Left, none);
+    }
+    let end = *route.last().unwrap();
+    vcx.simulate_mouse_up(end, gpui::MouseButton::Left, none);
+    draw(cx, window);
+    assert!(!cx.update(|cx| cx.has_active_drag()), "the drag is over");
+}
+
+#[gpui::test]
+fn rows_dragged_from_the_tree_onto_the_editor_area_open_in_tabs(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let window = open(cx);
+    open_folder(cx, window, &root);
+    invoke(
+        cx,
+        window,
+        "project.tree.reveal",
+        json!({"path": "src/app.py"}),
+    );
+
+    // Onto the empty editor area: the file opens and its editor has the
+    // focus, as a file dropped from the file manager.
+    let area = bounds(cx, window, "editor-area");
+    drag_row(cx, window, "src/app.py", &[area.center()]);
+    let s = state(cx, window);
+    assert_eq!(tabs(&s), ["src/app.py"]);
+    assert_eq!(s["active_tab"], json!(0));
+    assert_eq!(s["tree"]["drop_target"], Value::Null);
+    assert!(editor_focused(cx, window));
+
+    // Onto the text of an editor: the file opens in a new tab; the editor
+    // it was dropped on keeps its selection.
+    let selection = json!({"anchor": {"line": 0, "column": 4}, "head": {"line": 1, "column": 4}});
+    invoke(cx, window, "editor.set-selection", selection.clone());
+    let (origin, line_height, _) = window
+        .update(cx, |workbench, _, cx| {
+            workbench.active_editor().unwrap().read(cx).text_geometry()
+        })
+        .unwrap()
+        .unwrap();
+    let on_text = point(origin.x + px(30.0), origin.y + line_height * 3.5);
+    drag_row(cx, window, "README.md", &[on_text]);
+    let s = state(cx, window);
+    assert_eq!(tabs(&s), ["src/app.py", "README.md"]);
+    assert_eq!(s["active_tab"], json!(1));
+
+    // Onto the tab strip: a file that is open has its tab selected.
+    let strip = bounds(cx, window, "editor-tabs");
+    drag_row(
+        cx,
+        window,
+        "src/app.py",
+        &[point(strip.right() - px(20.0), strip.center().y)],
+    );
+    let s = state(cx, window);
+    assert_eq!(tabs(&s), ["src/app.py", "README.md"]);
+    assert_eq!(s["active_tab"], json!(0));
+    assert_eq!(s["editor"]["selections"], json!([selection]));
+
+    // A folder is selected in the tree (the reference navigates to it in
+    // the project view); the tabs stay as they are.
+    let area = bounds(cx, window, "editor-area");
+    drag_row(cx, window, "src", &[area.center()]);
+    let s = state(cx, window);
+    assert_eq!(s["tree"]["selected"], json!("src"));
+    assert_eq!(tabs(&s), ["src/app.py", "README.md"]);
+    assert!(tree_focused(cx, window));
+
+    // A drag that goes back to the tree and ends there opens nothing.
+    let back = row(cx, window, "README.md");
+    drag_row(cx, window, "src/util.py", &[area.center(), back]);
+    let s = state(cx, window);
+    assert_eq!(tabs(&s), ["src/app.py", "README.md"]);
+    assert_eq!(s["tree"]["transfer"]["title"], json!("Move"));
 }
 
 #[gpui::test]
