@@ -22,7 +22,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{App, Global, Hsla};
 use serde::{Deserialize, Serialize};
-use themes::Controls;
 use ui::theme::ThemeExt;
 
 /// The file's name in the configuration folder.
@@ -145,16 +144,13 @@ impl RecentProjects {
 }
 
 /// The two colours of the project avatar of colour `index`
-/// (`ProjectIconPalette`): the New UI themes' `RecentProject.ColorN.Avatar`
-/// start and end, the platform's defaults in other themes.
-pub fn colors(index: u8, cx: &App) -> (Hsla, Hsla) {
-    let theme = cx.theme();
-    let ix = usize::from(index % COLORS);
-    let (start, end) = match (theme.controls(), theme.is_dark()) {
-        (Controls::New, _) => NEW_UI[ix],
-        (Controls::Classic, true) => CLASSIC_DARK[ix],
-        (Controls::Classic, false) => CLASSIC_LIGHT[ix],
-    };
+/// (`ProjectIconPalette`): `RecentProject.ColorN.Avatar` start and end of
+/// the New UI themes (the same in the dark and the light one). A project's
+/// colour belongs to the project: the palette does not follow the current
+/// theme's roles, its kind or the look of its controls, so switching
+/// themes does not change it.
+pub fn colors(index: u8) -> (Hsla, Hsla) {
+    let (start, end) = NEW_UI[usize::from(index % COLORS)];
     (rgb(start), rgb(end))
 }
 
@@ -176,46 +172,24 @@ const NEW_UI: [(u32, u32); 9] = [
     (0x5FAD65, 0x3D968B),
 ];
 
-/// The defaults of `ProjectIconPalette` (dark).
-const CLASSIC_DARK: [(u32, u32); 9] = [
-    (0xCE443C, 0xE77E41),
-    (0xE27237, 0xE8A83E),
-    (0x2DBCAD, 0x35D6A4),
-    (0x3895E1, 0x51C5EA),
-    (0x7B75E8, 0x7D99EB),
-    (0x7854AD, 0x897AE6),
-    (0x8F4593, 0xB572E3),
-    (0xC840B9, 0xE074AE),
-    (0xD75370, 0xE96FA3),
-];
-
-/// The defaults of `ProjectIconPalette` (light).
-const CLASSIC_LIGHT: [(u32, u32); 9] = [
-    (0xDB3D3C, 0xFF8E42),
-    (0xF57236, 0xFCBA3F),
-    (0x2BC8BB, 0x36EBAE),
-    (0x359AF2, 0x57DBFF),
-    (0x8379FB, 0x85A8FF),
-    (0x7E54B5, 0x9486FF),
-    (0xD63CC8, 0xF582B9),
-    (0x954294, 0xC87DFF),
-    (0xE75371, 0xFF78B5),
-];
-
 /// The main toolbar's colour of a project of colour `index`
 /// (`RecentProjectColorPalette.mainToolbarGradientStart`): the New UI dark
 /// themes' and the Islands Light theme's `RecentProject.ColorN.
-/// MainToolbarGradientStart`, the platform's defaults in other themes.
+/// MainToolbarGradientStart`. The hue is the project's in every theme; only
+/// the lightness follows a dark or a light toolbar, which the colour is
+/// blended into.
 pub fn toolbar_color(index: u8, cx: &App) -> Hsla {
-    let theme = cx.theme();
+    toolbar_gradient_start(index, cx.theme().is_dark())
+}
+
+/// [`toolbar_color`] for a dark or a light toolbar.
+pub fn toolbar_gradient_start(index: u8, dark: bool) -> Hsla {
     let ix = usize::from(index % COLORS);
-    let hex = match (theme.controls(), theme.is_dark()) {
-        (Controls::New, true) => TOOLBAR_NEW_UI_DARK[ix],
-        (Controls::New, false) => TOOLBAR_NEW_UI_LIGHT[ix],
-        (Controls::Classic, true) => CLASSIC_DARK[ix].0,
-        (Controls::Classic, false) => CLASSIC_LIGHT[ix].0,
-    };
-    rgb(hex)
+    rgb(if dark {
+        TOOLBAR_NEW_UI_DARK[ix]
+    } else {
+        TOOLBAR_NEW_UI_LIGHT[ix]
+    })
 }
 
 /// `RecentProject.ColorN.MainToolbarGradientStart` of `expUI_dark.theme.json`.
@@ -230,8 +204,8 @@ const TOOLBAR_NEW_UI_LIGHT: [u32; 9] = [
 ];
 
 /// The avatar of a project: its initials in its colours.
-pub fn avatar(name: &str, color: u8, cx: &App) -> ui::avatar::Avatar {
-    let (start, end) = colors(color, cx);
+pub fn avatar(name: &str, color: u8) -> ui::avatar::Avatar {
+    let (start, end) = colors(color);
     ui::avatar::Avatar::new(name, start, end)
 }
 

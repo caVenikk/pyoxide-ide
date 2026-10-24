@@ -519,7 +519,7 @@ impl WelcomeProjects {
         let button_hover = theme.color(UiRole::ListButtonHover);
         let radius = theme.metric(Metric::CornerRadius);
         let small = theme.ui_size() - px(1.0);
-        let mut avatar = recent_projects::avatar(&p.name, p.color, cx);
+        let mut avatar = recent_projects::avatar(&p.name, p.color);
         if gone {
             // `IconUtil.desaturate`: the lightness of each colour.
             avatar.start = avatar.start.grayscale();
