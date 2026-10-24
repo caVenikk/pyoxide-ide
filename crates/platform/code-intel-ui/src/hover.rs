@@ -13,10 +13,11 @@ use std::time::Duration;
 
 use code_intel::{ActionTrigger, CodeActionContext, Hover, Location, Point};
 use editor::{Editor, EditorEvent};
-use gpui::{App, Context, Entity, EntityId, Modifiers, Task};
+use gpui::{App, AsyncApp, Context, Entity, EntityId, Modifiers, Task, WeakEntity};
 
 use crate::completion::{identifier_end, identifier_start, is_identifier_char};
-use crate::doc::{self, DocContent, DocKind, DocLexer, DocPopup, Documentation, Fix};
+use crate::doc::{self, DocContent, DocKind, DocLexer, DocPopup, Documentation, FileFacts, Fix};
+use crate::file_doc::FileInfo;
 use crate::popup::{CaretPopup, Placement};
 use crate::view::CodeIntelView;
 
@@ -75,6 +76,32 @@ impl DocState {
 /// What a request for documentation answers: the documentation and where
 /// the symbol is declared.
 type DocAnswer = (Option<Hover>, Option<Location>);
+
+/// The facts of the file an answer is about, when the product says the
+/// symbol is a whole file (a module): its answer, then the file's facts
+/// read off the UI thread.
+async fn file_facts(
+    this: &WeakEntity<CodeIntelView>,
+    (hover, location): &DocAnswer,
+    cx: &mut AsyncApp,
+) -> Option<FileFacts> {
+    let (hover, location) = (hover.as_ref()?, location.as_ref()?);
+    let (task, root) = this
+        .update(cx, |v, cx| {
+            let root = v.project_root().map(std::path::Path::to_owned);
+            let hook = v.hook().0.clone();
+            let task = hook.file_doc(&hover.contents, &location.path, root.as_deref(), cx)?;
+            Some((task, root))
+        })
+        .ok()??;
+    let doc = task.await?;
+    let (path, file_type) = (location.path.clone(), doc.file_type.clone());
+    let info = cx
+        .background_executor()
+        .spawn(async move { FileInfo::read(&path, root.as_deref(), &file_type) })
+        .await;
+    Some(FileFacts { doc, info })
+}
 
 impl CodeIntelView {
     /// Closes the documentation popup and forgets the requests for it.
@@ -205,7 +232,7 @@ impl CodeIntelView {
             cx.background_executor().timer(HOVER_GRACE).await;
             let _ = this.update(cx, |v, cx| {
                 v.docs.closing = None;
-                if !v.docs.inside {
+                if !v.docs.inside && !v.docs.popup.read(cx).menu_open() {
                     v.close_doc(cx);
                 }
             });
@@ -216,9 +243,60 @@ impl CodeIntelView {
     /// the mouse is inside it.
     pub(crate) fn doc_blurred(&mut self, editor: EntityId, cx: &mut Context<Self>) {
         let ours = self.docs.shown.as_ref().is_some_and(|s| s.editor == editor);
-        if ours && !self.docs.inside {
+        if ours && !self.docs.inside && !self.docs.popup.read(cx).menu_open() {
             self.close_doc(cx);
         }
+    }
+
+    /// The more menu of the popup closed: the popup over the text closes
+    /// a moment later unless the mouse is back inside it.
+    pub(crate) fn doc_menu_closed(&mut self, cx: &mut Context<Self>) {
+        let hover = self
+            .docs
+            .shown
+            .as_ref()
+            .is_some_and(|s| s.kind == DocKind::Hover);
+        if hover && !self.docs.inside {
+            self.close_doc_later(cx);
+        }
+    }
+
+    /// The documentation shown, when there is some.
+    fn shown_documentation(&self, cx: &App) -> Option<Documentation> {
+        self.docs.shown.as_ref()?;
+        self.docs
+            .popup
+            .read(cx)
+            .content()
+            .and_then(|c| c.documentation.clone())
+    }
+
+    /// Jump to Source of the popup: opens the declaration it is about and
+    /// closes it (`DocumentationEditSourceAction`).
+    pub(crate) fn edit_documentation_source(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self
+            .docs
+            .shown
+            .as_ref()
+            .and_then(|s| self.editor_by_id(s.editor))
+        else {
+            return;
+        };
+        let Some(source) = self.shown_documentation(cx).and_then(|d| d.source) else {
+            return;
+        };
+        self.close_doc(cx);
+        self.navigate(&editor, source, cx);
+    }
+
+    /// View External Documentation of the popup: opens its link in the
+    /// browser and closes it.
+    pub(crate) fn view_external_documentation(&mut self, cx: &mut Context<Self>) {
+        let Some(link) = self.shown_documentation(cx).and_then(|d| d.external) else {
+            return;
+        };
+        self.close_doc(cx);
+        cx.open_url(&link.url);
     }
 
     /// The mouse entered or left the documentation popup.
@@ -274,6 +352,7 @@ impl CodeIntelView {
                 Some(request) => request.await,
                 None => (None, None),
             };
+            let facts = file_facts(&this, &documentation, cx).await;
             let fix = match fix {
                 Some(request) => request
                     .await
@@ -286,7 +365,7 @@ impl CodeIntelView {
                     return;
                 }
                 v.docs.request = None;
-                let documentation = v.documentation(&editor, version, documentation);
+                let documentation = v.documentation(&editor, version, documentation, facts);
                 let mut range = mark.unwrap_or(word);
                 if let Some((_, Some(r))) = &documentation {
                     range = range.start.min(r.start)..range.end.max(r.end);
@@ -336,23 +415,31 @@ impl CodeIntelView {
         }
     }
 
-    /// The documentation of an answer, and the range in the current text
-    /// it is about when the service said.
+    /// The documentation of an answer (with the facts of the file it is
+    /// about, when it is about a whole file), and the range in the current
+    /// text it is about when the service said.
     fn documentation(
         &self,
         editor: &Entity<Editor>,
         version: u64,
         (hover, location): DocAnswer,
+        facts: Option<FileFacts>,
     ) -> Option<(Documentation, Option<Range<usize>>)> {
         let hover = hover?;
         let document = self.document_of(editor)?;
         let provider = self.hook().0.as_ref();
-        let location = location.and_then(|l| provider.doc_location(&l.path));
+        let header = location
+            .as_ref()
+            .and_then(|l| provider.doc_location(&l.path));
         let lexer = DocLexer {
             provider,
             language: &document.language,
         };
-        let documentation = Documentation::new(&hover.contents, location, Some(&lexer))?;
+        let mut documentation = Documentation::new(&hover.contents, header, Some(&lexer))?;
+        documentation.source = location;
+        if let Some(facts) = facts {
+            documentation.set_file(facts);
+        }
         let range = hover
             .range
             .and_then(|r| document.versions.range(version, r));
@@ -411,12 +498,14 @@ impl CodeIntelView {
         let (editor, version) = (editor.clone(), query.version);
         self.docs.request = Some(cx.spawn(async move |this, cx| {
             let answer = request.await;
+            let facts = file_facts(&this, &answer, cx).await;
             let _ = this.update(cx, |v, cx| {
                 if v.docs.generation != generation {
                     return;
                 }
                 v.docs.request = None;
-                let Some((documentation, _)) = v.documentation(&editor, version, answer) else {
+                let Some((documentation, _)) = v.documentation(&editor, version, answer, facts)
+                else {
                     return;
                 };
                 let caret = editor.read(cx).selections().primary().head;

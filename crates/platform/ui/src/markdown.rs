@@ -465,9 +465,18 @@ impl<'a> Builder<'a> {
                 if self.html {
                     let text = strip_tags(&text);
                     self.text(&text, Style::default());
+                } else if self.code.is_some() {
+                    self.text(&text, Style::default());
                 } else {
+                    // Prose collapses runs of spaces, as the reference's
+                    // HTML documentation shows `contexts.  See` as
+                    // `contexts. See`.
                     let style = self.style();
-                    self.text(&text, style);
+                    let after_space = self
+                        .inline
+                        .as_ref()
+                        .is_some_and(|(_, i)| i.text.ends_with(' '));
+                    self.text(&collapse_spaces(&text, after_space), style);
                 }
             }
             Event::Code(text) => {
@@ -618,6 +627,25 @@ fn is_line_break(html: &str) -> bool {
 }
 
 /// Text of HTML without its tags.
+/// Prose with each run of spaces and tabs as one space; a leading one goes
+/// when the text before ends with a space.
+fn collapse_spaces(text: &str, after_space: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut space = after_space;
+    for c in text.chars() {
+        if c == ' ' || c == '\t' {
+            if !space {
+                out.push(' ');
+            }
+            space = true;
+        } else {
+            out.push(c);
+            space = false;
+        }
+    }
+    out
+}
+
 fn strip_tags(html: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
@@ -890,6 +918,22 @@ fn code_runs(code: &Code, cx: &App) -> Vec<TextRun> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prose_collapses_runs_of_spaces() {
+        let md = Markdown::parse(
+            "Utilities for with-statement contexts.  See PEP 343.\n\n```\na  =  1\n```",
+            None,
+        );
+        let json = md.to_json();
+        assert_eq!(
+            json[0]["text"],
+            "Utilities for with-statement contexts. See PEP 343."
+        );
+        assert_eq!(json[1]["text"], "a  =  1");
+        assert_eq!(collapse_spaces("  a \t b", true), "a b");
+        assert_eq!(collapse_spaces(" a", false), " a");
+    }
 
     /// Colours `def` and `return` as keywords and digits as numbers.
     struct Words;

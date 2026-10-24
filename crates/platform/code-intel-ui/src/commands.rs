@@ -33,6 +33,10 @@ ui::ui_commands! {
     DOCUMENTATION_COMMANDS, scope = "Documentation";
     CloseDocumentation => "documentation.close", "Close Documentation",
         "Closes the documentation popup.";
+    EditDocumentationSource => "documentation.edit-source", "Jump to Source",
+        "Opens the declaration the documentation popup is about and closes the popup.";
+    ViewExternalDocumentation => "documentation.view-external", "View External Documentation",
+        "Opens the web page with the documentation of the symbol in the documentation popup.";
 }
 
 ui::ui_commands! {

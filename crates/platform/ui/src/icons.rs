@@ -214,6 +214,8 @@ impl IconName {
     pub const BACK: Self = Self("general/left");
     pub const FORWARD: Self = Self("general/right");
     pub const PROJECT_CONFIGURABLE: Self = Self("general/projectConfigurable");
+    /// The arrow after a link to a web page (`AllIcons.Ide.External_link_arrow`).
+    pub const EXTERNAL_LINK: Self = Self("ide/externalLink");
     /// Jump to Source in a diff (`AllIcons.Actions.EditSource`).
     pub const EDIT: Self = Self("general/edit");
     /// The diff viewer's modes.
@@ -298,6 +300,7 @@ platform_icons! {
         "general/settings", "general/settings@20x20", "general/show", "general/softWrap",
         "general/showAsTree", "general/up", "general/upload", "general/vcs",
         "general/keyboard", "general/learn",
+        "ide/externalLink",
         "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",

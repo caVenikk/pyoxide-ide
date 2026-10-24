@@ -41,6 +41,22 @@ fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
             assert!(state(h)["popup"].is_null(), "{what}");
             assert_eq!(h.editor_marked(), "x = al|pha", "{what}");
         }
+        "documentation.edit-source" => {
+            h.set_editor("x = al|pha\ny\n");
+            h.invoke("code.quick-doc", json!(null));
+            assert!(!state(h)["popup"].is_null(), "{what}");
+            h.press(keys);
+            assert!(state(h)["popup"].is_null(), "{what}");
+            assert_eq!(h.editor_marked(), "x = alpha\n|y\n", "{what}");
+        }
+        "documentation.view-external" => {
+            // Documentation without a link to a web page: nothing to open,
+            // the popup stays.
+            h.set_editor("x = al|pha");
+            h.invoke("code.quick-doc", json!(null));
+            h.press(keys);
+            assert_eq!(state(h)["popup"]["kind"], "quick-doc", "{what}");
+        }
         "code.parameter-info" => {
             h.set_editor("f(a, |b)");
             h.press(keys);
@@ -145,6 +161,8 @@ fn check(h: &mut H, b: &Binding) -> bool {
         }
         "code.quick-doc"
         | "documentation.close"
+        | "documentation.edit-source"
+        | "documentation.view-external"
         | "code.parameter-info"
         | "parameter-info.close"
         | "code.error-description"

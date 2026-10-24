@@ -1278,12 +1278,25 @@ pub fn editor_container<E: InteractiveElement>(
             .is_some_and(|p| p.editor.entity_id() == editor.entity_id())
     };
     if shown(doc::CONTEXT) {
-        el = el.on_action({
-            let view = view.clone();
-            move |a: &CloseDocumentation, window, cx| {
-                view.update(cx, |v, cx| v.close_documentation(a, window, cx))
-            }
-        });
+        el = el
+            .on_action({
+                let view = view.clone();
+                move |a: &CloseDocumentation, window, cx| {
+                    view.update(cx, |v, cx| v.close_documentation(a, window, cx))
+                }
+            })
+            .on_action({
+                let view = view.clone();
+                move |_: &EditDocumentationSource, _, cx| {
+                    view.update(cx, |v, cx| v.edit_documentation_source(cx))
+                }
+            })
+            .on_action({
+                let view = view.clone();
+                move |_: &ViewExternalDocumentation, _, cx| {
+                    view.update(cx, |v, cx| v.view_external_documentation(cx))
+                }
+            });
     }
     if shown(signature::CONTEXT) {
         el = el.on_action({
