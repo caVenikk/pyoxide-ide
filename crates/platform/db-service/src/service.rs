@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use db_core::{ConnectParams, Connection, Error, ErrorKind, Result, Secret};
+use async_trait::async_trait;
+use db_core::{
+    ConnectParams, Connection, ConnectionSource, DataSourceId, Dialect, Error, ErrorKind, Purpose,
+    Result, Secret, Value, opt,
+};
 use secrets::{EnvLookup, Prompter, SecretStore};
 use serde::{Deserialize, Serialize};
 
@@ -161,11 +165,41 @@ impl DbService {
     }
 
     pub async fn open(&self, target: &Target) -> Result<Opened> {
+        self.open_for(target, None).await
+    }
+
+    /// [`DbService::open`], naming the session after the data source and
+    /// the `purpose` (see [`session_name`]) where the engine has a place for
+    /// it: PostgreSQL `application_name`, Oracle `MODULE`.
+    pub async fn open_for(&self, target: &Target, purpose: Option<Purpose>) -> Result<Opened> {
         let (name, profile) = self.resolve_target(target)?;
-        let (params, password_source) = self.params_for(&name, &profile)?;
+        let (mut params, password_source) = self.params_for(&name, &profile)?;
+        let dialect = profile.backend.dialect();
+        let session = purpose.map(|purpose| {
+            let base = params
+                .option(opt::APPLICATION_NAME)
+                .unwrap_or(DEFAULT_SESSION_PREFIX);
+            session_name(base, &name, purpose, name_limit(dialect))
+        });
+        if let (Some(session), Dialect::Postgres) = (&session, dialect) {
+            params
+                .options
+                .insert(opt::APPLICATION_NAME.into(), session.clone());
+        }
         let driver = crate::driver(profile.backend);
         let started = Instant::now();
         let conn = driver.connect(&params).await?;
+        if let (Some(session), Dialect::Oracle) = (&session, dialect) {
+            // Best effort: it only helps a DBA to recognise the session in
+            // V$SESSION.
+            let _ = conn
+                .execute(
+                    "BEGIN DBMS_APPLICATION_INFO.SET_MODULE(:1, NULL); END;",
+                    &[Value::from(session.as_str())],
+                    &db_core::ExecOptions::default(),
+                )
+                .await;
+        }
         Ok(Opened {
             conn,
             name,
@@ -173,6 +207,51 @@ impl DbService {
             password_source,
             connect_ms: millis(started),
         })
+    }
+}
+
+/// The IDE's name in a session name.
+const DEFAULT_SESSION_PREFIX: &str = "pyoxide";
+
+/// Longest session name the engine keeps: PostgreSQL `application_name`
+/// (`NAMEDATALEN - 1`), Oracle `MODULE`; SQLite has no sessions to name.
+fn name_limit(dialect: Dialect) -> usize {
+    match dialect {
+        Dialect::Postgres => 63,
+        Dialect::Oracle => 48,
+        Dialect::Sqlite => 63,
+    }
+}
+
+/// `pyoxide:<data source>:<purpose>`, at most `limit` bytes and plain ASCII
+/// (servers replace other characters): the data source name is shortened
+/// first so that the purpose stays visible.
+pub fn session_name(prefix: &str, data_source: &str, purpose: Purpose, limit: usize) -> String {
+    let plain = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_graphic() { c } else { '_' })
+            .collect()
+    };
+    let (prefix, source) = (plain(prefix), plain(data_source));
+    let suffix = purpose.id();
+    let fixed = prefix.len() + suffix.len() + 2;
+    let room = limit.saturating_sub(fixed);
+    let source = &source[..source.len().min(room)];
+    let name = format!("{prefix}:{source}:{suffix}");
+    name[..name.len().min(limit)].to_owned()
+}
+
+/// A data source id is the name of a saved profile.
+#[async_trait]
+impl ConnectionSource for DbService {
+    async fn open(
+        &self,
+        data_source: &DataSourceId,
+        purpose: Purpose,
+    ) -> Result<Arc<dyn Connection>> {
+        let target = Target::Profile(data_source.as_str().to_owned());
+        let opened = self.open_for(&target, Some(purpose)).await?;
+        Ok(Arc::from(opened.conn))
     }
 }
 
@@ -220,6 +299,51 @@ mod tests {
         let e = svc.params_for("pg", &p).unwrap_err();
         assert_eq!(e.kind, ErrorKind::Config);
         assert!(e.message.contains("secret set pg"));
+    }
+
+    #[test]
+    fn session_names() {
+        assert_eq!(
+            session_name("pyoxide", "reporting", Purpose::Meta, 63),
+            "pyoxide:reporting:meta"
+        );
+        // Non-ASCII and spaces are replaced.
+        assert_eq!(
+            session_name("pyoxide", "my db\u{e9}", Purpose::Data, 63),
+            "pyoxide:my_db_:data"
+        );
+        // The data source is cut, not the purpose.
+        let long = "x".repeat(100);
+        for (limit, expected_len) in [(63, 63), (48, 48)] {
+            let name = session_name("pyoxide", &long, Purpose::Console, limit);
+            assert_eq!(name.len(), expected_len, "{name}");
+            assert!(
+                name.starts_with("pyoxide:x") && name.ends_with(":console"),
+                "{name}"
+            );
+        }
+        // Nothing fits: still never longer than the limit.
+        assert!(session_name("pyoxide", "a", Purpose::Console, 5).len() <= 5);
+    }
+
+    #[tokio::test]
+    async fn opens_connections_by_data_source_and_purpose() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = service(dir.path());
+        let mut p = Profile::new(Backend::Sqlite);
+        p.path = Some(":memory:".into());
+        svc.save_profile("scratch", p).unwrap();
+
+        let source: &dyn ConnectionSource = &svc;
+        let id = DataSourceId::from("scratch");
+        for purpose in Purpose::ALL {
+            let conn = source.open(&id, purpose).await.unwrap();
+            conn.query("SELECT 1", &[], 1).await.unwrap();
+        }
+        let missing = source
+            .open(&DataSourceId::from("nope"), Purpose::Meta)
+            .await;
+        assert!(missing.is_err());
     }
 
     #[test]

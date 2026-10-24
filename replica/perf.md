@@ -113,6 +113,21 @@ with other builds (load average 30-50), so the numbers are upper bounds.
 | 2026-10-24 | mac-1 | `expected_at` (completion context) | 0.003 ms | | parses the statement up to the caret |
 | 2026-10-24 | mac-1 | memory of the trees, 141 KB / 250 KB | 3.7 MB / 6.6 MB | 30 MB | estimate from the vectors' capacities |
 
+### Schema load (5000 tables)
+Issue #298: `Introspector::load` on a schema of 5000 tables with 5 columns each
+(25,000 columns), a primary key, a unique constraint, a foreign key, a check
+constraint and an extra index each. Release build, median of 5 runs, other
+builds running on the machine at the same time. SQLite: in-memory
+database, `cargo test -p db-sqlite --release --test it load::bench -- --ignored
+--nocapture`; PostgreSQL 18 in Docker on the same machine, `cargo test -p
+db-postgres --release --test it load::bench -- --ignored --nocapture`.
+
+| date | machine | backend | names | structure | full | queries per schema | notes |
+|---|---|---|---|---|---|---|---|
+| 2026-10-23 | mac-1 | sqlite 3.53.2 | 24 ms | 485 ms | 380 ms | 2 / 5 / 5 | table-valued pragmas, one join per pragma; the full run was quicker than the structure run in the same process |
+| 2026-10-23 | mac-1 | postgres 18.6 | 203 ms | 1248 ms | 1004 ms | 5 / 8 / 11 | `ANALYZE` run before; the same count of statements for 3 and for 60 tables is a conformance case (`load_query_count`) |
+| | | oracle (19c / Free 23) | | | | about 8 / 21 / 23 | not measured: the bulk load is covered by unit tests with canned rows and by ignored integration tests |
+
 ### Editor and shell
 Measured with `python3 scripts/perf/pyoxide_bench.py --work <dir> --runs 3` on
 the files `pycharm_baseline.py` generates (the same as the reference runs). It

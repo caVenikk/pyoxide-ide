@@ -37,4 +37,14 @@ db_testkit::conformance_tests! {
     read_only => Expect::Run;
     #[ignore = "needs the oracle container"]
     error_kinds => Expect::Run;
+    #[ignore = "needs the oracle container"]
+    bulk_load => Expect::Run;
+    #[ignore = "needs the oracle container"]
+    load_query_count => Expect::Run;
+    #[ignore = "needs the oracle container"]
+    savepoint_round_trip => Expect::Run;
+    #[ignore = "needs the oracle container"]
+    cursor_closed_by_next_statement => Expect::Run;
+    #[ignore = "needs the oracle container"]
+    cancel_while_paging => Expect::Skip;
 }

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Indexes constraints sequences procedures,database,should,yes,yes,"Oracle, PostgreSQL, SQLite"
+Indexes constraints sequences procedures,database,should,yes,yes,"Oracle, PostgreSQL, SQLite. Bulk load (#298) adds routine arguments and return type, trigger event and timing, sequence parameters, type definitions, partition parent and bounds (PostgreSQL), foreign key actions and deferral, identity and generated columns, partial and expression indexes; Oracle bulk load runs in the Oracle Free 23 conformance tests (vendored oracle-rs, #334)"

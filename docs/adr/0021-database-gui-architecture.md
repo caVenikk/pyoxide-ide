@@ -162,9 +162,14 @@ checked already.
   reconnects, and if a manual transaction was open the UI is told it is gone
   (event `TransactionLost`). The target is a cancel observed in under one
   second on PostgreSQL and SQLite.
-- Manual transaction mode wraps every user statement in a savepoint
-  (`SAVEPOINT` / `RELEASE` / `ROLLBACK TO`, all three engines support it) so a
-  failed statement leaves the transaction usable. The pending count is the
+- Manual transaction mode wraps every user statement in a savepoint so a
+  failed statement leaves the transaction usable: `SAVEPOINT` before the
+  statement, `ROLLBACK TO` when it fails. On success PostgreSQL and SQLite
+  `RELEASE` it (a release also releases every savepoint made after it, so only
+  one savepoint per console is alive at a time). Oracle has no `RELEASE
+  SAVEPOINT`: a savepoint lives until the transaction ends, so the session
+  reuses one name, and issuing `SAVEPOINT` again with the same name moves the
+  savepoint. The pending count is the
   number of data-changing statements since the last commit (classified by
   `sql-syntax`). Closing a console or disconnecting with a pending transaction
   asks first.

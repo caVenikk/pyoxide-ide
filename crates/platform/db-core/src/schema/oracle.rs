@@ -15,10 +15,66 @@
 use async_trait::async_trait;
 
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, ObjectInfo, ObjectKind,
-    SchemaInfo, fetch_all, opt_text, text, wants,
+    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
+    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
 };
-use crate::{Connection, Result, Value};
+use crate::{Connection, Result, Row, Value};
+
+/// PL/SQL functions for a `WITH` clause (the first one follows `WITH `, the
+/// others are separated by the `;` that ends each). They copy a LONG or a
+/// CLOB the driver cannot fetch directly into a VARCHAR2 or return
+/// `DBMS_METADATA` output, and yield NULL on any error.
+macro_rules! px_default_fn {
+    () => {
+        "FUNCTION px_default(p_owner VARCHAR2, p_table VARCHAR2, p_column VARCHAR2) RETURN VARCHAR2 IS\n\
+  v LONG;\n\
+BEGIN\n\
+  SELECT data_default INTO v FROM all_tab_columns\n\
+   WHERE owner = p_owner AND table_name = p_table AND column_name = p_column;\n\
+  RETURN SUBSTRB(v, 1, 4000);\n\
+EXCEPTION WHEN OTHERS THEN RETURN NULL;\n\
+END;\n"
+    };
+}
+
+macro_rules! px_expr_fn {
+    () => {
+        "FUNCTION px_expr(p_owner VARCHAR2, p_index VARCHAR2, p_pos NUMBER) RETURN VARCHAR2 IS\n\
+  v LONG;\n\
+BEGIN\n\
+  SELECT column_expression INTO v FROM all_ind_expressions\n\
+   WHERE index_owner = p_owner AND index_name = p_index AND column_position = p_pos;\n\
+  RETURN SUBSTRB(v, 1, 4000);\n\
+EXCEPTION WHEN OTHERS THEN RETURN NULL;\n\
+END;\n"
+    };
+}
+
+macro_rules! px_ddl_fn {
+    () => {
+        "FUNCTION px_ddl(p_type VARCHAR2, p_name VARCHAR2, p_owner VARCHAR2) RETURN CLOB IS\n\
+BEGIN\n\
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SEGMENT_ATTRIBUTES', FALSE);\n\
+  RETURN DBMS_METADATA.GET_DDL(p_type, p_name, p_owner);\n\
+EXCEPTION WHEN OTHERS THEN RETURN NULL;\n\
+END;\n"
+    };
+}
+
+macro_rules! px_when_fn {
+    () => {
+        "FUNCTION px_when(p_owner VARCHAR2, p_trigger VARCHAR2) RETURN VARCHAR2 IS\n\
+  v LONG;\n\
+BEGIN\n\
+  SELECT when_clause INTO v FROM all_triggers\n\
+   WHERE owner = p_owner AND trigger_name = p_trigger;\n\
+  RETURN SUBSTRB(v, 1, 4000);\n\
+EXCEPTION WHEN OTHERS THEN RETURN NULL;\n\
+END;\n"
+    };
+}
+
+mod load;
 
 pub struct OracleIntrospector<'a> {
     conn: &'a dyn Connection,
@@ -150,43 +206,35 @@ fn objects_sql(kinds: &[ObjectKind]) -> Vec<String> {
 }
 
 /// `DATA_DEFAULT` is LONG: the function copies it into a VARCHAR2.
-const COLUMNS: &str = "\
-WITH FUNCTION px_default(p_owner VARCHAR2, p_table VARCHAR2, p_column VARCHAR2) RETURN VARCHAR2 IS
-  v LONG;
-BEGIN
-  SELECT data_default INTO v FROM all_tab_columns
-   WHERE owner = p_owner AND table_name = p_table AND column_name = p_column;
-  RETURN SUBSTRB(v, 1, 4000);
-EXCEPTION WHEN OTHERS THEN RETURN NULL;
-END;
-SELECT c.column_name, c.column_id, c.data_type, c.data_length, c.data_precision, c.data_scale,
-       c.char_used, c.char_length, c.nullable,
-       CASE WHEN c.default_length > 0 THEN px_default(c.owner, c.table_name, c.column_name) END,
-       c.identity_column, cc.comments, c.data_type_owner
-FROM all_tab_columns c
-LEFT JOIN all_col_comments cc
-       ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
-WHERE c.owner = :1 AND c.table_name = :2
-ORDER BY c.column_id";
+const COLUMNS: &str = concat!(
+    "WITH ",
+    px_default_fn!(),
+    "SELECT c.column_name, c.column_id, c.data_type, c.data_length, c.data_precision, \
+            c.data_scale, c.char_used, c.char_length, c.nullable, \
+            CASE WHEN c.default_length > 0 \
+                 THEN px_default(c.owner, c.table_name, c.column_name) END, \
+            c.identity_column, cc.comments, c.data_type_owner \
+     FROM all_tab_columns c \
+     LEFT JOIN all_col_comments cc \
+            ON cc.owner = c.owner AND cc.table_name = c.table_name \
+           AND cc.column_name = c.column_name \
+     WHERE c.owner = :1 AND c.table_name = :2 \
+     ORDER BY c.column_id"
+);
 
 /// Function-based index expressions (`COLUMN_EXPRESSION`, LONG) through a
 /// function; descending columns are function-based too.
-const INDEXES: &str = "\
-WITH FUNCTION px_expr(p_owner VARCHAR2, p_index VARCHAR2, p_pos NUMBER) RETURN VARCHAR2 IS
-  v LONG;
-BEGIN
-  SELECT column_expression INTO v FROM all_ind_expressions
-   WHERE index_owner = p_owner AND index_name = p_index AND column_position = p_pos;
-  RETURN SUBSTRB(v, 1, 4000);
-EXCEPTION WHEN OTHERS THEN RETURN NULL;
-END;
-SELECT i.index_name, i.uniqueness, i.index_type, c.column_name, c.descend,
-       CASE WHEN i.index_type LIKE 'FUNCTION-BASED%'
-            THEN px_expr(c.index_owner, c.index_name, c.column_position) END
-FROM all_indexes i
-JOIN all_ind_columns c ON c.index_owner = i.owner AND c.index_name = i.index_name
-WHERE i.table_owner = :1 AND i.table_name = :2 AND i.index_type <> 'LOB'
-ORDER BY i.index_name, c.column_position";
+const INDEXES: &str = concat!(
+    "WITH ",
+    px_expr_fn!(),
+    "SELECT i.index_name, i.uniqueness, i.index_type, c.column_name, c.descend, \
+            CASE WHEN i.index_type LIKE 'FUNCTION-BASED%' \
+                 THEN px_expr(c.index_owner, c.index_name, c.column_position) END \
+     FROM all_indexes i \
+     JOIN all_ind_columns c ON c.index_owner = i.owner AND c.index_name = i.index_name \
+     WHERE i.table_owner = :1 AND i.table_name = :2 AND i.index_type <> 'LOB' \
+     ORDER BY i.index_name, c.column_position"
+);
 
 const CONSTRAINTS: &str = "\
 SELECT c.constraint_name, c.constraint_type, c.generated, c.search_condition_vc, c.delete_rule, \
@@ -213,14 +261,7 @@ SELECT v.text_length, v.text_vc FROM all_views v WHERE v.owner = :1 AND v.view_n
 
 /// DDL from DBMS_METADATA, or NULL when it fails (object missing, no
 /// privilege for another schema). Segment attributes are left out.
-const METADATA_DDL: &str = "\
-WITH FUNCTION px_ddl(p_type VARCHAR2, p_name VARCHAR2, p_owner VARCHAR2) RETURN CLOB IS
-BEGIN
-  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SEGMENT_ATTRIBUTES', FALSE);
-  RETURN DBMS_METADATA.GET_DDL(p_type, p_name, p_owner);
-EXCEPTION WHEN OTHERS THEN RETURN NULL;
-END;
-SELECT px_ddl(:1, :2, :3) FROM dual";
+const METADATA_DDL: &str = concat!("WITH ", px_ddl_fn!(), "SELECT px_ddl(:1, :2, :3) FROM dual");
 
 const SYNONYM_SOURCE: &str = "\
 SELECT s.table_owner, s.table_name, s.db_link FROM all_synonyms s \
@@ -246,6 +287,7 @@ impl Introspector for OracleIntrospector<'_> {
                 name: text(&r[0]),
                 is_system: text(&r[1]) == "Y",
                 is_current: text(&r[2]) == "Y",
+                ..SchemaInfo::default()
             })
             .collect())
     }
@@ -264,6 +306,7 @@ impl Introspector for OracleIntrospector<'_> {
                         kind,
                         parent: opt_text(&r[2]),
                         comment: opt_text(&r[3]),
+                        ..ObjectInfo::default()
                     });
                 }
             }
@@ -273,20 +316,7 @@ impl Introspector for OracleIntrospector<'_> {
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let rows = fetch_all(self.conn, COLUMNS, &[schema.into(), table.into()]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| ColumnInfo {
-                name: text(&r[0]),
-                position: r[1].as_i64().unwrap_or(0) as u32,
-                data_type: oracle_type(r, schema),
-                nullable: text(&r[8]) != "N",
-                default: opt_text(&r[9])
-                    .map(|d| d.trim().to_owned())
-                    .filter(|d| !d.is_empty()),
-                auto_increment: text(&r[10]) == "YES",
-                comment: opt_text(&r[11]),
-            })
-            .collect())
+        Ok(rows.iter().map(|r| column_info(r, schema)).collect())
     }
 
     async fn indexes(&self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
@@ -302,6 +332,7 @@ impl Introspector for OracleIntrospector<'_> {
                     unique: text(&r[1]) == "UNIQUE",
                     columns: vec![column],
                     method: opt_text(&r[2]),
+                    ..IndexInfo::default()
                 }),
             }
         }
@@ -312,47 +343,7 @@ impl Introspector for OracleIntrospector<'_> {
         let rows = fetch_all(self.conn, CONSTRAINTS, &[schema.into(), table.into()]).await?;
         let mut out: Vec<ConstraintInfo> = Vec::new();
         for r in &rows {
-            let name = text(&r[0]);
-            let column = opt_text(&r[5]);
-            let ref_column = opt_text(&r[8]);
-            if let Some(last) = out.last_mut().filter(|c| c.name == name) {
-                if let Some(c) = column.filter(|c| !last.columns.contains(c)) {
-                    last.columns.push(c);
-                }
-                if let Some(c) = ref_column {
-                    last.ref_columns.push(c);
-                }
-                continue;
-            }
-            let kind = match text(&r[1]).as_str() {
-                "P" => ConstraintKind::PrimaryKey,
-                "U" => ConstraintKind::Unique,
-                "R" => ConstraintKind::ForeignKey,
-                "C" => ConstraintKind::Check,
-                _ => continue,
-            };
-            let check = opt_text(&r[3]);
-            if kind == ConstraintKind::Check
-                && text(&r[2]) == "GENERATED NAME"
-                && check.as_deref().is_some_and(is_not_null_check)
-            {
-                continue;
-            }
-            let is_fk = kind == ConstraintKind::ForeignKey;
-            out.push(ConstraintInfo {
-                name,
-                kind,
-                columns: column.into_iter().collect(),
-                ref_schema: is_fk.then(|| opt_text(&r[6])).flatten(),
-                ref_table: is_fk.then(|| opt_text(&r[7])).flatten(),
-                ref_columns: if is_fk {
-                    ref_column.into_iter().collect()
-                } else {
-                    Vec::new()
-                },
-                on_delete: is_fk.then(|| opt_text(&r[4])).flatten(),
-                check: (kind == ConstraintKind::Check).then_some(check).flatten(),
-            });
+            fold_constraint_row(&mut out, r);
         }
         Ok(out)
     }
@@ -382,15 +373,13 @@ impl Introspector for OracleIntrospector<'_> {
                     return Ok(None);
                 };
                 let length = r[0].as_i64().unwrap_or(0);
-                if length <= 4000 {
-                    return Ok(Some(format!(
-                        "CREATE OR REPLACE VIEW {} AS\n{}",
-                        qualified(schema, name),
-                        text(&r[1]).trim_end()
-                    )));
-                }
                 // TEXT_VC is cut at 4000 characters.
-                self.metadata("VIEW", schema, name).await
+                let ddl = if length > 4000 {
+                    self.metadata("VIEW", schema, name).await?
+                } else {
+                    None
+                };
+                Ok(view_source(schema, name, length, &text(&r[1]), ddl))
             }
             ObjectKind::Synonym => {
                 let rows = fetch_all(self.conn, SYNONYM_SOURCE, &args).await?;
@@ -419,6 +408,10 @@ impl Introspector for OracleIntrospector<'_> {
             ObjectKind::MaterializedView => self.metadata("MATERIALIZED_VIEW", schema, name).await,
             ObjectKind::Index => self.metadata("INDEX", schema, name).await,
         }
+    }
+
+    async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
+        load::load(self, scope, level).await
     }
 }
 
@@ -455,6 +448,79 @@ fn quote_ident(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
 }
 
+/// A column from a row of [`COLUMNS`] (the bulk query appends the table
+/// name, which is not read here).
+fn column_info(r: &Row, schema: &str) -> ColumnInfo {
+    ColumnInfo {
+        name: text(&r[0]),
+        position: r[1].as_i64().unwrap_or(0) as u32,
+        data_type: oracle_type(r, schema),
+        nullable: text(&r[8]) != "N",
+        default: opt_text(&r[9])
+            .map(|d| d.trim().to_owned())
+            .filter(|d| !d.is_empty()),
+        auto_increment: text(&r[10]) == "YES",
+        comment: opt_text(&r[11]),
+        ..ColumnInfo::default()
+    }
+}
+
+/// Add one row of the constraints query to `out`, the constraints of one
+/// table in the query's order. A constraint spans several rows (one per
+/// column, in key order), all of them next to each other. The first nine
+/// columns are those of [`CONSTRAINTS`]; the bulk query adds the
+/// deferrable, deferred, status and validated columns after them, which
+/// are read when present.
+fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Row) {
+    let name = text(&r[0]);
+    let column = opt_text(&r[5]);
+    let ref_column = opt_text(&r[8]);
+    if let Some(last) = out.last_mut().filter(|c| c.name == name) {
+        if let Some(c) = column.filter(|c| !last.columns.contains(c)) {
+            last.columns.push(c);
+        }
+        if let Some(c) = ref_column {
+            last.ref_columns.push(c);
+        }
+        return;
+    }
+    let kind = match text(&r[1]).as_str() {
+        "P" => ConstraintKind::PrimaryKey,
+        "U" => ConstraintKind::Unique,
+        "R" => ConstraintKind::ForeignKey,
+        "C" => ConstraintKind::Check,
+        _ => return,
+    };
+    let check = opt_text(&r[3]);
+    if kind == ConstraintKind::Check
+        && text(&r[2]) == "GENERATED NAME"
+        && check.as_deref().is_some_and(is_not_null_check)
+    {
+        return;
+    }
+    let is_fk = kind == ConstraintKind::ForeignKey;
+    let extra = |i: usize| r.get(i).map(text).unwrap_or_default();
+    out.push(ConstraintInfo {
+        name,
+        kind,
+        columns: column.into_iter().collect(),
+        ref_schema: is_fk.then(|| opt_text(&r[6])).flatten(),
+        ref_table: is_fk.then(|| opt_text(&r[7])).flatten(),
+        ref_columns: if is_fk {
+            ref_column.into_iter().collect()
+        } else {
+            Vec::new()
+        },
+        on_delete: is_fk.then(|| opt_text(&r[4])).flatten(),
+        check: (kind == ConstraintKind::Check).then_some(check).flatten(),
+        deferrable: extra(9) == "DEFERRABLE",
+        initially_deferred: extra(10) == "DEFERRED",
+        disabled: extra(11) == "DISABLED",
+        not_validated: extra(12) == "NOT VALIDATED",
+        ..ConstraintInfo::default()
+    });
+}
+
 /// `"COL" IS NOT NULL`: the check Oracle creates for a NOT NULL column.
 fn is_not_null_check(condition: &str) -> bool {
     let c = condition.trim();
@@ -470,13 +536,23 @@ fn is_not_null_check(condition: &str) -> bool {
 /// An index column: the name, or the expression of a function-based index
 /// (`"NAME"` for a plain descending column), with ` DESC` when descending.
 fn index_column(column: &str, expression: Option<String>, descend: &str) -> String {
+    index_column_parts(column, expression, descend).0
+}
+
+/// [`index_column`] and whether the column is an expression (not a plain
+/// column that happens to be stored as a hidden expression column).
+fn index_column_parts(column: &str, expression: Option<String>, descend: &str) -> (String, bool) {
+    let mut is_expression = false;
     let mut out = match expression {
         Some(e) => {
             let e = e.trim();
             let inner = e.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
             match inner {
                 Some(name) if !name.contains('"') => name.to_owned(),
-                _ => e.to_owned(),
+                _ => {
+                    is_expression = true;
+                    e.to_owned()
+                }
             }
         }
         None => column.to_owned(),
@@ -484,16 +560,19 @@ fn index_column(column: &str, expression: Option<String>, descend: &str) -> Stri
     if descend.eq_ignore_ascii_case("DESC") {
         out.push_str(" DESC");
     }
-    out
+    (out, is_expression)
 }
 
 /// Stored units in order, each as `CREATE OR REPLACE <text>` terminated by
 /// `/`; spec before body.
 fn join_units(rows: &[Vec<Value>]) -> Option<String> {
+    join_unit_lines(rows.iter().map(|r| (text(&r[0]), text(&r[1]))))
+}
+
+/// [`join_units`] over `(type, line)` pairs.
+fn join_unit_lines(lines: impl Iterator<Item = (String, String)>) -> Option<String> {
     let mut units: Vec<(String, String)> = Vec::new();
-    for r in rows {
-        let ty = text(&r[0]);
-        let line = text(&r[1]);
+    for (ty, line) in lines {
         match units.last_mut() {
             Some((t, body)) if *t == ty => body.push_str(&line),
             _ => units.push((ty, line)),
@@ -509,6 +588,25 @@ fn join_units(rows: &[Vec<Value>]) -> Option<String> {
             .collect::<Vec<_>>()
             .join("\n\n"),
     )
+}
+
+/// The text of a view as `source` returns it. `ddl` is what
+/// `DBMS_METADATA` gave for a view longer than `TEXT_VC` holds.
+fn view_source(
+    schema: &str,
+    name: &str,
+    length: i64,
+    text_vc: &str,
+    ddl: Option<String>,
+) -> Option<String> {
+    if length <= 4000 {
+        return Some(format!(
+            "CREATE OR REPLACE VIEW {} AS\n{}",
+            qualified(schema, name),
+            text_vc.trim_end()
+        ));
+    }
+    ddl.map(|d| d.trim().to_owned()).filter(|d| !d.is_empty())
 }
 
 /// DDL for a sequence from ALL_SEQUENCES (fallback when DBMS_METADATA is
@@ -545,36 +643,63 @@ fn sequence_ddl(name: &str, r: &[Value]) -> String {
 /// types already carry their precision in DATA_TYPE.
 fn oracle_type(r: &[Value], table_owner: &str) -> String {
     let ty = text(&r[2]);
-    let precision = r[4].as_i64();
-    let scale = r[5].as_i64();
-    match ty.as_str() {
+    if let Some(sized) = sized_type(
+        &ty,
+        r[3].as_i64(),
+        r[4].as_i64(),
+        r[5].as_i64(),
+        &text(&r[6]),
+        r[7].as_i64(),
+    ) {
+        return sized;
+    }
+    match r.get(12).and_then(opt_text) {
+        Some(owner) => qualified_type(&owner, &ty, table_owner),
+        None => ty,
+    }
+}
+
+/// `owner.name` unless the type is the schema's own or a built-in one.
+fn qualified_type(owner: &str, name: &str, schema: &str) -> String {
+    if owner == schema || owner == "SYS" || owner == "PUBLIC" {
+        name.to_owned()
+    } else {
+        format!("{owner}.{name}")
+    }
+}
+
+/// Types written with a length, precision or scale; `None` for the others.
+fn sized_type(
+    ty: &str,
+    length: Option<i64>,
+    precision: Option<i64>,
+    scale: Option<i64>,
+    char_used: &str,
+    char_length: Option<i64>,
+) -> Option<String> {
+    Some(match ty {
         "NUMBER" => match (precision, scale) {
             (Some(p), Some(0)) => format!("NUMBER({p})"),
             (Some(p), Some(s)) => format!("NUMBER({p},{s})"),
             (None, Some(0)) => "INTEGER".to_owned(),
-            _ => ty,
+            _ => ty.to_owned(),
         },
         "FLOAT" => match precision {
             Some(p) => format!("FLOAT({p})"),
-            None => ty,
+            None => ty.to_owned(),
         },
         "VARCHAR2" | "NVARCHAR2" | "CHAR" | "NCHAR" => {
-            let unit = if text(&r[6]) == "C" { " CHAR" } else { "" };
-            let len = r[7].as_i64().or(r[3].as_i64()).unwrap_or(0);
+            let unit = if char_used == "C" { " CHAR" } else { "" };
+            let len = char_length.or(length).unwrap_or(0);
             if ty.starts_with('N') {
                 format!("{ty}({len})")
             } else {
                 format!("{ty}({len}{unit})")
             }
         }
-        "RAW" | "UROWID" => format!("{ty}({})", r[3].as_i64().unwrap_or(0)),
-        _ => match r.get(12).and_then(opt_text) {
-            Some(owner) if owner != table_owner && owner != "SYS" && owner != "PUBLIC" => {
-                format!("{owner}.{ty}")
-            }
-            _ => ty,
-        },
-    }
+        "RAW" | "UROWID" => format!("{ty}({})", length.unwrap_or(0)),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
