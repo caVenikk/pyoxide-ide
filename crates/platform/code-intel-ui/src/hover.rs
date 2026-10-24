@@ -127,10 +127,7 @@ fn redraw_docs(owner: &WeakEntity<CodeIntelView>, cx: &mut App) {
 
 /// The commands of the documentation popup's more menu that act on the
 /// popup shown for the editor of `el`: Adjust Font Size, Back, Forward.
-pub(crate) fn doc_popup_actions<E: InteractiveElement>(
-    el: E,
-    view: &Entity<CodeIntelView>,
-) -> E {
+pub(crate) fn doc_popup_actions<E: InteractiveElement>(el: E, view: &Entity<CodeIntelView>) -> E {
     let popup = |view: &Entity<CodeIntelView>, cx: &App| view.read(cx).docs.popup.clone();
     el.on_action({
         let view = view.clone();
@@ -675,10 +672,7 @@ impl CodeIntelView {
             return serde_json::Value::Null;
         }
         let popup = self.docs.popup.read(cx);
-        let mut state = popup
-            .content()
-            .map(DocContent::to_json)
-            .unwrap_or_default();
+        let mut state = popup.content().map(DocContent::to_json).unwrap_or_default();
         if let Some(object) = state.as_object_mut() {
             object.insert("menu".into(), popup.menu_state(cx).into());
             object.insert("font_size".into(), popup.font_size_state(cx).into());

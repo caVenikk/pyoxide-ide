@@ -12,11 +12,11 @@ use std::time::Duration;
 
 use code_intel::{ActionTrigger, CodeAction, CodeActionContext, Severity};
 use editor::{Editor, EditorEvent};
+use gpui::Focusable as _;
 use gpui::{
     AnyElement, App, Context, Entity, EntityId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Styled, Task, WeakEntity, Window, anchored, div, point, px,
 };
-use gpui::Focusable as _;
 use serde_json::{Value as Json, json};
 use ui::deferred;
 use ui::pointer::PointerExt as _;

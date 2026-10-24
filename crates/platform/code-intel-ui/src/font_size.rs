@@ -305,9 +305,9 @@ impl Render for FontSizePopup {
             .text_color(theme.color(UiRole::Text))
             .when(self.dismissed, |d| d.invisible())
             .on_key_down(cx.listener(Self::key_down))
-            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                this.dismiss(window, cx)
-            }))
+            .on_mouse_down_out(
+                cx.listener(|this, _: &MouseDownEvent, window, cx| this.dismiss(window, cx)),
+            )
             .child(div().flex_none().whitespace_nowrap().child(LABEL))
             .child(slider)
     }
@@ -322,8 +322,7 @@ mod tests {
     #[gpui::test]
     fn keys_step_through_the_sizes(cx: &mut TestAppContext) {
         cx.update(themes_init);
-        let (popup, cx) =
-            cx.add_window_view(|window, cx| FontSizePopup::new(window, cx));
+        let (popup, cx) = cx.add_window_view(|window, cx| FontSizePopup::new(window, cx));
         let chosen = Rc::new(Cell::new(None));
         let sink = chosen.clone();
         cx.update(|_, cx| {

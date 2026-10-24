@@ -954,7 +954,9 @@ impl DocPopup {
         ];
         let mut column = div()
             .debug_selector(|| "doc-documentation".into())
-            .when(!self.in_tool_window, |d| d.w(px(file_doc_width(doc) * scale)))
+            .when(!self.in_tool_window, |d| {
+                d.w(px(file_doc_width(doc) * scale))
+            })
             .when(self.in_tool_window, |d| d.w_full())
             .flex()
             .flex_col()
@@ -964,7 +966,9 @@ impl DocPopup {
                     .px(px(FILE_PAD_X))
                     .pt(px(FILE_TITLE_TOP))
                     .pb(px(FILE_TITLE_BOTTOM))
-                    .h(px(FILE_TITLE_TOP + FILE_TITLE_HEIGHT * scale + FILE_TITLE_BOTTOM))
+                    .h(px(FILE_TITLE_TOP
+                        + FILE_TITLE_HEIGHT * scale
+                        + FILE_TITLE_BOTTOM))
                     .flex()
                     .items_center()
                     .text_size(theme.ui_size() * scale)
@@ -1195,7 +1199,9 @@ impl Render for DocPopup {
             .flex()
             .flex_col()
             .when(self.in_tool_window, |d| d.flex_1())
-            .when(!self.in_tool_window, |d| d.max_h(px(MAX_HEIGHT)).flex_shrink())
+            .when(!self.in_tool_window, |d| {
+                d.max_h(px(MAX_HEIGHT)).flex_shrink()
+            })
             .when(sections.is_empty(), |d| d.p(px(PAD_Y)))
             .children(sections);
         let owner = self.owner.clone();
