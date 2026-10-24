@@ -50,13 +50,23 @@ impl FetchMessage {
     }
 
     /// Build the fetch request packet
-    pub fn build_request(&self, _caps: &Capabilities) -> Result<Bytes> {
+    pub fn build_request(&self, caps: &Capabilities) -> Result<Bytes> {
+        self.build_request_with(caps, 0, false)
+    }
+
+    /// Build the fetch request packet with the connection's sequence number
+    /// and length encoding.
+    pub fn build_request_with(&self, caps: &Capabilities, seq_num: u8, large_sdu: bool) -> Result<Bytes> {
         let mut buf = WriteBuffer::new();
 
         // Write message header
         buf.write_u8(MessageType::Function as u8)?;
         buf.write_u8(FunctionCode::Fetch as u8)?;
-        buf.write_u8(0)?; // Sequence number
+        buf.write_u8(seq_num)?;
+        // Token number (TTC field version >= 18, Oracle 23ai)
+        if caps.ttc_field_version >= 18 {
+            buf.write_ub8(0)?;
+        }
 
         // Write fetch body
         buf.write_ub4(self.cursor_id as u32)?;
@@ -68,15 +78,18 @@ impl FetchMessage {
             buf.write_ub4(self.offset as u32)?; // Fetch position (for absolute/relative)
         }
 
-        // Build packet with header
+        // Build packet with header; the length covers the data flags too
         let payload = buf.freeze();
-        let packet_len = PACKET_HEADER_SIZE + payload.len();
+        let packet_len = PACKET_HEADER_SIZE + 2 + payload.len();
 
         let mut packet = BytesMut::with_capacity(packet_len);
 
-        // Packet header
-        packet.put_u16(packet_len as u16); // Length
-        packet.put_u16(0); // Checksum
+        if large_sdu {
+            packet.put_u32(packet_len as u32);
+        } else {
+            packet.put_u16(packet_len as u16);
+            packet.put_u16(0); // Checksum
+        }
         packet.put_u8(PacketType::Data as u8);
         packet.put_u8(0); // Flags
         packet.put_u16(0); // Header checksum

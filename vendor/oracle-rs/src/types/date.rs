@@ -261,14 +261,16 @@ pub fn decode_oracle_timestamp(data: &[u8]) -> Result<OracleTimestamp> {
     // Timezone (bytes 11-12)
     let (tz_hour, tz_minute) = if data.len() >= 13 && data[11] != 0 && data[12] != 0 {
         if data[11] & HAS_REGION_ID != 0 {
-            return Err(Error::DataConversionError(
-                "Named timezone regions are not supported".to_string(),
-            ));
+            // A named region (America/New_York) needs a time zone database to
+            // resolve. The date bytes are already UTC, so report the instant
+            // at +00:00 rather than fail the whole query over one column.
+            (0, 0)
+        } else {
+            (
+                (data[11] as i8) - TZ_HOUR_OFFSET,
+                (data[12] as i8) - TZ_MINUTE_OFFSET,
+            )
         }
-        (
-            (data[11] as i8) - TZ_HOUR_OFFSET,
-            (data[12] as i8) - TZ_MINUTE_OFFSET,
-        )
     } else {
         (0, 0)
     };
@@ -327,6 +329,15 @@ pub fn encode_oracle_timestamp(ts: &OracleTimestamp, include_tz: bool) -> Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_named_zone_reads_as_its_utc_instant_rather_than_failing() {
+        // 2026-01-01 15:00:00 UTC, zone given as a region id, not an offset.
+        let bytes = [120, 126, 1, 1, 16, 1, 1, 0, 0, 0, 0, 0x80 | 0x01, 0x2c];
+        let t = decode_oracle_timestamp(&bytes).unwrap();
+        assert_eq!((t.year, t.month, t.day, t.hour, t.minute), (2026, 1, 1, 15, 0));
+        assert_eq!((t.tz_hour_offset, t.tz_minute_offset), (0, 0));
+    }
 
     #[test]
     fn test_decode_date() {
