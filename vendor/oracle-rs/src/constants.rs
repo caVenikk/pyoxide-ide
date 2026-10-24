@@ -425,6 +425,7 @@ pub mod ccap_value {
     pub const FIELD_VERSION_12_2: u8 = 8;
     pub const FIELD_VERSION_18_1: u8 = 10;
     pub const FIELD_VERSION_19_1: u8 = 12;
+    pub const FIELD_VERSION_20_1: u8 = 14;
     pub const FIELD_VERSION_21_1: u8 = 16;
     pub const FIELD_VERSION_23_1: u8 = 17;
     pub const FIELD_VERSION_23_4: u8 = 24;
@@ -679,6 +680,13 @@ impl OracleType {
             self,
             OracleType::Clob | OracleType::Blob | OracleType::Bfile | OracleType::Json | OracleType::Vector
         )
+    }
+
+    /// Check if this type needs an explicit column define (a re-execute) to
+    /// fetch its data: LOBs, and LONG / LONG RAW, which the server only streams
+    /// when the define advertises `MAX_LONG_LENGTH` as the buffer size.
+    pub fn requires_define(&self) -> bool {
+        self.is_lob() || matches!(self, OracleType::Long | OracleType::LongRaw)
     }
 
     /// Check if this type requires no prefetch (data must be fetched separately)

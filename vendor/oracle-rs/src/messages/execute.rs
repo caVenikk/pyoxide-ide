@@ -486,7 +486,7 @@ impl<'a> ExecuteMessage<'a> {
     /// This tells Oracle how we want the column data returned. For LOB columns,
     /// we need to tell Oracle to return LOB locators instead of inline data.
     fn write_column_defines(&self, buf: &mut WriteBuffer, caps: &Capabilities) -> Result<()> {
-        use crate::constants::{bind_flags, ccap_value, charset, lob_flags};
+        use crate::constants::{bind_flags, ccap_value, charset, lob_flags, MAX_LONG_LENGTH};
 
         for col in self.statement.columns() {
             let mut ora_type_num = col.oracle_type as u8;
@@ -496,6 +496,13 @@ impl<'a> ExecuteMessage<'a> {
             if col.oracle_type == OracleType::Rowid || col.oracle_type == OracleType::Urowid {
                 ora_type_num = OracleType::Varchar as u8;
                 buffer_size = 4000; // MAX_UROWID_LENGTH
+            }
+
+            // LONG / LONG RAW are streamed in length-prefixed chunks. The describe
+            // reports a zero or undersized buffer size for them, and a define that
+            // repeats it makes the server send no data at all.
+            if col.oracle_type == OracleType::Long || col.oracle_type == OracleType::LongRaw {
+                buffer_size = MAX_LONG_LENGTH;
             }
 
             // Set flags - always use indicators
@@ -683,7 +690,8 @@ impl<'a> ExecuteMessage<'a> {
         const LOB_PREFETCH_FLAG: u64 = 0x2000000;
 
         match value {
-            Value::Null => (OracleType::Varchar, 1u32, 1u8, 0u64), // Use VARCHAR for NULL
+            // VARCHAR for NULL, sized for the longest value of the column in the batch
+            Value::Null => (OracleType::Varchar, std::cmp::max(max_size, 1), 1u8, 0u64),
             Value::Integer(_) => (OracleType::Number, 22, 0, 0),
             Value::Float(_) => (OracleType::BinaryDouble, 8, 0, 0),
             Value::String(_) => {
@@ -768,9 +776,8 @@ impl<'a> ExecuteMessage<'a> {
                     buf.write_u8(bytes.len() as u8)?;
                     buf.write_bytes(bytes)?;
                 } else {
-                    buf.write_u8(254)?; // Long form indicator
-                    buf.write_ub4(bytes.len() as u32)?;
-                    buf.write_bytes(bytes)?;
+                    // Long form: chunks ended by a zero-length chunk
+                    buf.write_bytes_with_length(Some(bytes))?;
                 }
             }
             Value::Bytes(b) => {
@@ -780,9 +787,8 @@ impl<'a> ExecuteMessage<'a> {
                     buf.write_u8(b.len() as u8)?;
                     buf.write_bytes(b)?;
                 } else {
-                    buf.write_u8(254)?;
-                    buf.write_ub4(b.len() as u32)?;
-                    buf.write_bytes(b)?;
+                    // Long form: chunks ended by a zero-length chunk
+                    buf.write_bytes_with_length(Some(b))?;
                 }
             }
             Value::Boolean(b) => {

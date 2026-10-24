@@ -147,7 +147,7 @@ pub enum Error {
     // Database Errors
     // =========================================================================
     /// Oracle database error with error code
-    #[error("ORA-{code:05}: {message}")]
+    #[error("{}", oracle_display(*code, message))]
     OracleError { code: u32, message: String },
 
     /// SQL execution error
@@ -245,6 +245,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_server_message_is_shown_once_with_its_code() {
+        let from_server = Error::oracle(942, "ORA-00942: table or view does not exist");
+        assert_eq!(from_server.to_string(), "ORA-00942: table or view does not exist");
+        let bare = Error::oracle(942, "table or view does not exist");
+        assert_eq!(bare.to_string(), "ORA-00942: table or view does not exist");
+    }
+
+    #[test]
     fn test_oracle_error_display() {
         let err = Error::oracle(1017, "invalid username/password");
         assert_eq!(
@@ -269,5 +277,16 @@ mod tests {
         }
         .is_connection_error());
         assert!(!Error::NoDataFound.is_connection_error());
+    }
+}
+
+/// Server messages already start with their "ORA-nnnnn:" code; prefix only
+/// those that do not.
+fn oracle_display(code: u32, message: &str) -> String {
+    let prefix = format!("ORA-{code:05}");
+    if message.starts_with(&prefix) {
+        message.to_string()
+    } else {
+        format!("{prefix}: {message}")
     }
 }
