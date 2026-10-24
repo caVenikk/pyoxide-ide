@@ -89,7 +89,9 @@ CI. On Windows, `scripts/check.ps1` runs it with the bash of Git for Windows.
 The steps: `fmt`, `clippy`, `clippy-windows` (clippy for
 `x86_64-pc-windows-gnu`, which catches items used only under `cfg(unix)`
 before the Windows job does; needs `rustup target add x86_64-pc-windows-gnu`
-and mingw-w64, skipped with a note without them), `build` and `test`
+and mingw-w64, skipped with a note without them; with `--quick` only for the
+changed crates that have platform-specific code and their direct dependents,
+see `scripts/changed-crates.py --windows`), `build` and `test`
 (cargo-nextest, profile `ci`), `throughput` (terminal, ADR 0014), `doc`
 (doctests) and `repo` (progress, layer and notice checks).
 

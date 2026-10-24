@@ -16,7 +16,10 @@
 #                   on Windows (items used only under cfg(unix)). Needs the
 #                   rustup target and mingw-w64; skipped with a note when
 #                   they are missing and on Windows. CI has a Windows runner
-#                   instead.
+#                   instead. With --quick only the changed crates with
+#                   platform-specific code and their direct dependents (the
+#                   rest compiles the same on every OS, `scripts/changed-crates.py
+#                   --windows`); CI checks the rest.
 #   build           the test binaries (cargo nextest run --no-run)
 #   test            the tests (cargo nextest run, profile `ci`)
 #   throughput      terminal throughput (ADR 0014), numbers to the log
@@ -67,6 +70,7 @@ fi
 # The packages the cargo steps check: the workspace, or with --quick the
 # changed crates and their dependents.
 scope=(--workspace)
+win_scope=(--workspace)
 doc_scope=(--workspace)
 crates=()
 if [ "$quick" -eq 1 ]; then
@@ -79,6 +83,16 @@ if [ "$quick" -eq 1 ]; then
             crates+=("$c")
             scope+=(-p "$c")
         done
+        # Windows clippy only where Windows can differ, see changed-crates.py.
+        win_scope=()
+        win_affected=$("$PYTHON" scripts/changed-crates.py --windows)
+        if [ "$win_affected" = "*" ]; then
+            win_scope=(--workspace)
+        else
+            for c in $win_affected; do
+                win_scope+=(-p "$c")
+            done
+        fi
         # Doctests only for crates with a library.
         doc_scope=()
         libs=$("$PYTHON" scripts/changed-crates.py --lib)
@@ -131,8 +145,8 @@ run_step() {
             fi
             ;;
         clippy-windows)
-            if has_scope && windows_ready; then
-                cargo clippy "${scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
+            if [ ${#win_scope[@]} -gt 0 ] && windows_ready; then
+                cargo clippy "${win_scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
             fi
             ;;
         build)
