@@ -1763,6 +1763,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-model"
+version = "0.0.1"
+dependencies = [
+ "db-core",
+ "dirs 7.0.0",
+ "name-match",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "db-oracle-odpi"
 version = "0.0.1"
 dependencies = [
