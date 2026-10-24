@@ -11,15 +11,17 @@
 //! reference's LSP client): that block becomes the signature section, the
 //! rest the description.
 
+use std::cell::Cell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use code_intel::{CodeAction, Location, Markup, MarkupKind};
 use editor::{DiagnosticMark, MarkSeverity};
 use gpui::{
-    Action, App, Context, DismissEvent, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, Subscription, TextRun, WeakEntity, Window, div,
-    font, prelude::FluentBuilder, px,
+    Action, App, Bounds, Context, DismissEvent, Entity, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, TextRun, WeakEntity, Window,
+    canvas, div, font, prelude::FluentBuilder, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{TextRole, UiRole};
@@ -581,6 +583,9 @@ pub struct DocPopup {
     /// The more menu of the corner toolbar while it is open, where it
     /// opened.
     menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// Where the more button is: its menu opens underneath it
+    /// (`ActionButton` shows a popup group with `showUnderneathOf`).
+    more_anchor: Rc<Cell<Bounds<Pixels>>>,
     /// The Adjust Font Size popup while it is open, where its top left is.
     font_size: Option<(Entity<FontSizePopup>, Point<Pixels>, Vec<Subscription>)>,
     history: DocHistory,
@@ -595,6 +600,7 @@ impl DocPopup {
             content: None,
             scroll: ScrollHandle::new(),
             menu: None,
+            more_anchor: Rc::default(),
             font_size: None,
             history: DocHistory::default(),
             in_tool_window: false,
@@ -1080,17 +1086,23 @@ impl DocPopup {
             IconName::MORE_VERTICAL,
             size,
             px(16.0),
-            self.menu.is_some(),
+            false,
             cx,
         )
         .debug_selector(|| "doc-more".into())
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
+            cx.listener(|this, _: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();
-                this.open_menu(e.position, window, cx);
+                this.open_menu(this.more_anchor.get().bottom_left(), window, cx);
             }),
-        );
+        )
+        .child({
+            let anchor = self.more_anchor.clone();
+            canvas(move |b, _, _| anchor.set(b), |_, _, _, _| {})
+                .absolute()
+                .size_full()
+        });
         div()
             .absolute()
             .right(px(TOOLBAR_RIGHT))
