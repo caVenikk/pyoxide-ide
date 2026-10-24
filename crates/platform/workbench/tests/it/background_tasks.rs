@@ -5,7 +5,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui::{TestAppContext, WindowHandle};
+use gpui::{AppContext as _, TestAppContext, WindowHandle};
 use serde_json::{Value, json};
 use workbench::{Product, Workbench};
 
