@@ -7,7 +7,9 @@
 //! The keymap in use is `[keymap] name` of the settings, else the
 //! platform's default ("macOS" on macOS, "Windows" elsewhere). Custom
 //! keymaps are derived keymaps in `keymaps/<name>.toml` of the
-//! configuration folder.
+//! configuration folder. The bindings of the product's modules
+//! ([`set_modules`]) are joined after the workbench's in every predefined
+//! keymap, before a derived keymap's changes.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -25,7 +27,8 @@ use super::actions::ActionTable;
 use super::derived::Derived;
 use super::reference::{self, Converted, ReferenceKeymap, Unmapped};
 use super::{
-    DEFAULT, Keymap, MACOS, MACOS_NAME, VSCODE_MACOS_NAME, VSCODE_NAME, WINDOWS_NAME, bind,
+    DEFAULT, Keymap, KeymapFiles, MACOS, MACOS_NAME, VSCODE_MACOS_NAME, VSCODE_NAME, WINDOWS_NAME,
+    bind,
 };
 
 ui::ui_commands! {
@@ -68,6 +71,8 @@ pub struct KeymapEntry {
 
 struct State {
     custom: Vec<Derived>,
+    /// The bindings of the product's modules.
+    modules: Vec<KeymapFiles>,
     /// The folder of custom keymaps.
     dir: Option<PathBuf>,
     /// The keymap whose bindings are installed.
@@ -82,6 +87,7 @@ fn state(cx: &mut App) -> &mut State {
     if !cx.has_global::<State>() {
         cx.set_global(State {
             custom: Vec::new(),
+            modules: Vec::new(),
             dir: None,
             active: String::new(),
             refresh_menus: None,
@@ -135,6 +141,12 @@ pub fn init(cx: &mut App) {
     if let Err(e) = activate(platform_default(), cx) {
         eprintln!("keymap: {e}");
     }
+}
+
+/// The key bindings of the product's modules, joined after the
+/// workbench's in every predefined keymap; set before [`init`].
+pub fn set_modules(cx: &mut App, modules: Vec<KeymapFiles>) {
+    state(cx).modules = modules;
 }
 
 /// Reads the custom keymaps of `dir` (start-up, before the first window)
@@ -257,15 +269,26 @@ pub fn entries(cx: &App) -> Vec<KeymapEntry> {
 
 /// The bindings of a keymap by name.
 pub fn resolve(name: &str, cx: &App) -> Result<Keymap, String> {
-    resolve_with(name, custom(cx))
+    let modules = cx.try_global::<State>().map_or(&[][..], |s| &s.modules);
+    resolve_in(name, custom(cx), modules)
 }
 
 /// The bindings of a keymap by name, with `custom` as the custom keymaps.
 pub fn resolve_with(name: &str, custom: &[Derived]) -> Result<Keymap, String> {
+    resolve_in(name, custom, &[])
+}
+
+/// The bindings of a keymap by name, with `custom` as the custom keymaps
+/// and the bindings of `modules` in the predefined ones.
+pub fn resolve_in(
+    name: &str,
+    custom: &[Derived],
+    modules: &[KeymapFiles],
+) -> Result<Keymap, String> {
     let mut chain: Vec<&Derived> = Vec::new();
     let mut current = name;
     loop {
-        if let Some(base) = predefined(current) {
+        if let Some(base) = predefined_with(current, modules) {
             let mut keymap = base?;
             for derived in chain.iter().rev() {
                 keymap = derived.apply(&keymap);
@@ -282,6 +305,40 @@ pub fn resolve_with(name: &str, custom: &[Derived]) -> Result<Keymap, String> {
         chain.push(derived);
         current = &derived.parent;
     }
+}
+
+/// A predefined keymap's bindings with the modules' joined after the
+/// workbench's; a VS Code keymap's changes apply to both.
+fn predefined_with(name: &str, modules: &[KeymapFiles]) -> Option<Result<Keymap, String>> {
+    if modules.is_empty() {
+        return predefined(name);
+    }
+    let (macos, vscode) = match name {
+        MACOS_NAME => (true, false),
+        WINDOWS_NAME => (false, false),
+        VSCODE_NAME => (false, true),
+        VSCODE_MACOS_NAME => (true, true),
+        _ => return None,
+    };
+    let base = predefined(if macos { MACOS_NAME } else { WINDOWS_NAME })?;
+    Some(base.and_then(|mut keymap| {
+        for files in modules {
+            let text = if macos { files.macos } else { files.default };
+            keymap.bindings.extend(Keymap::parse(text)?.bindings);
+        }
+        Ok(match vscode {
+            true => vscode_changes(macos).apply(&keymap),
+            false => keymap,
+        })
+    }))
+}
+
+/// The changes of the reference's VS Code keymap (converted once).
+fn vscode_changes(macos: bool) -> &'static Derived {
+    static VSCODE: OnceLock<Derived> = OnceLock::new();
+    static VSCODE_MAC: OnceLock<Derived> = OnceLock::new();
+    let cell = if macos { &VSCODE_MAC } else { &VSCODE };
+    cell.get_or_init(|| vscode(macos).derived)
 }
 
 /// A predefined keymap's bindings (parsed once).
@@ -690,6 +747,38 @@ mod tests {
             Derived::parse("version = 1\nname = \"B\"\nparent = \"A\"\n").unwrap(),
         ];
         assert!(resolve_with("A", &looped).unwrap_err().contains("loop"));
+    }
+
+    #[test]
+    fn module_bindings_reach_custom_keymaps_and_their_changes_win() {
+        let module = KeymapFiles {
+            macos: "[[context]]\n[context.bindings]\n\"cmd-alt-shift-f9\" = \"tabs.close\"\n",
+            default: "[[context]]\n[context.bindings]\n\"ctrl-alt-shift-f9\" = \"tabs.close\"\n",
+        };
+        let mine = Derived::parse(
+            "version = 1\nname = \"Mine\"\nparent = \"macOS\"\n[[override]]\ncommand = \"tabs.close\"\nkeys = [\"ctrl-w\"]\n",
+        )
+        .unwrap();
+        let keys = |keymap: &Keymap| -> Vec<String> {
+            keymap
+                .bindings
+                .iter()
+                .filter(|b| b.command == "tabs.close" && b.args.is_none())
+                .map(|b| b.keys.clone())
+                .collect()
+        };
+        let mac = resolve_in(MACOS_NAME, &[], &[module]).unwrap();
+        assert!(keys(&mac).contains(&"cmd-alt-shift-f9".to_owned()));
+        let windows = resolve_in(WINDOWS_NAME, &[], &[module]).unwrap();
+        assert!(keys(&windows).contains(&"ctrl-alt-shift-f9".to_owned()));
+        // A custom keymap's change replaces the module's binding too.
+        let custom = resolve_in("Mine", &[mine], &[module]).unwrap();
+        assert_eq!(keys(&custom), ["ctrl-w"]);
+        // Without modules: the workbench's keymap as before.
+        assert_eq!(
+            resolve_in(MACOS_NAME, &[], &[]).unwrap(),
+            Keymap::parse(MACOS).unwrap()
+        );
     }
 
     #[test]

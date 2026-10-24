@@ -151,7 +151,7 @@ fn project_with(text: &str) -> (tempfile::TempDir, PathBuf) {
 fn open<'a>(cx: &'a mut TestAppContext, root: &Path) -> H<'a> {
     cx.executor().allow_parking();
     let product = Rc::new(workbench::Product {
-        code_intel: None,
+        code_intel: Vec::new(),
         ..pyoxide_ide::product()
     });
     let window = cx.update(|cx| {

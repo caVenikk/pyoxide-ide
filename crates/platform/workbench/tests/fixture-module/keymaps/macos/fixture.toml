@@ -1,0 +1,6 @@
+# The fixture module's bindings for macOS, joined after the workbench's
+# keymap (ADR 0022).
+
+[[context]]
+[context.bindings]
+"cmd-alt-shift-f9" = "fixture.ping"

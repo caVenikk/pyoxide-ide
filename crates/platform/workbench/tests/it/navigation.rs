@@ -206,7 +206,7 @@ fn setup(cx: &mut TestAppContext) -> (H<'_>, tempfile::TempDir) {
             language_id: Some("python"),
             ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
         }],
-        code_intel: Some(CodeIntelHook::new(Provider(fake.clone()))),
+        code_intel: vec![CodeIntelHook::new(Provider(fake.clone()))],
         ..Product::default()
     };
     let window = cx.update(|cx| {

@@ -4,7 +4,8 @@
 //! used by automated runs.
 //!
 //! The workbench knows no language. A product (for example the Python IDE)
-//! describes itself with a [`Product`] and calls [`run`].
+//! describes itself with a [`Product`], includes modules (ADR 0022) with
+//! [`Product::with_module`] and calls [`run`].
 
 pub mod app;
 mod bench;
@@ -20,8 +21,10 @@ pub mod keymap;
 pub mod layout;
 pub mod main_menu;
 pub mod main_toolbar;
+pub mod module;
 pub mod navigation;
 pub mod notifications;
+pub mod object_targets;
 pub mod popup;
 pub mod project_files;
 pub mod project_panel;
@@ -34,6 +37,8 @@ mod shot;
 pub mod simulate;
 pub mod tab_view;
 pub mod terminal;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod tool_windows;
 pub mod welcome;
 pub mod workbench;
@@ -43,6 +48,8 @@ pub use app::{NavigationHooks, Product, StatusWidget, StripeItem, init, open_mai
 pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use debugger_ui::DebugHook;
 pub use file_types::{FileAssociation, FileType, HighlighterFactory};
+pub use keymap::KeymapFiles;
+pub use module::{Init, Module};
 pub use project::AutoExclusions;
 pub use project_panel::{NewItem, NewItemKind, NewTemplate, RootKind, TreeHooks};
 pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};

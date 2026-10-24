@@ -8,12 +8,13 @@
 //! `keymaps/default/<area>.toml`). A module per area starts its own app with
 //! the complete keymap and presses only the bindings of its area file, so
 //! the areas run in parallel and a failure names the area. This module is
-//! the harness they share; a new area file needs a module here (listed in
-//! `areas!`) with its `area_tests!` and a `check` of its commands.
+//! the harness they share, on the generic part the workbench exports for
+//! modules' crates (`workbench::test_support::keymap`); a new area file
+//! needs a module here (listed in `areas!`) with its `area_tests!` and a
+//! `check` of its commands.
 
 use crate::support;
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use serde_json::{Value, json};
 use text::{Buffer, Selection, SelectionSet};
 use ui::icons::IconName;
 use workbench::keymap::{self, Binding, Keymap};
+use workbench::test_support::keymap::{Dispatched, KeymapHost, press_bindings};
 use workbench::{CodeIntelHook, CodeIntelProvider, FileType, Product, Workbench};
 
 /// The two tests of an area, `every_macos_binding_works` and
@@ -171,7 +173,13 @@ struct H<'a> {
     window: WindowHandle<Workbench>,
     root: PathBuf,
     /// Commands the keystrokes resolved to, in order.
-    dispatched: Rc<RefCell<Vec<String>>>,
+    dispatched: Dispatched,
+}
+
+impl KeymapHost for H<'_> {
+    fn dispatched(&self) -> &Dispatched {
+        &self.dispatched
+    }
 }
 
 impl H<'_> {
@@ -589,7 +597,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
         name: "Test IDE",
         file_types: vec![python()],
         run: Some(support::run_hook()),
-        code_intel: Some(CodeIntelHook::new(Intel(FakeCodeIntel::new()))),
+        code_intel: vec![CodeIntelHook::new(Intel(FakeCodeIntel::new()))],
         debug: Some(support::debug_hook()),
         new_items: vec![workbench::NewItem {
             label: "Python File",
@@ -617,16 +625,7 @@ fn setup<'a>(cx: &'a mut TestAppContext, keymap_text: &str) -> (H<'a>, tempfile:
         assert!(errors.is_empty(), "keymap errors: {errors:?}");
         workbench::open_main_window(cx, Rc::new(product))
     });
-    let dispatched = Rc::new(RefCell::new(Vec::new()));
-    let sink = dispatched.clone();
-    cx.update(|cx| {
-        cx.observe_keystrokes(move |event, _, _| {
-            if let Some(action) = &event.action {
-                sink.borrow_mut().push(action.name().to_owned());
-            }
-        })
-        .detach()
-    });
+    let dispatched = cx.update(Dispatched::observe);
     let mut h = H {
         cx,
         window,
@@ -740,31 +739,7 @@ fn check_area(
 
 /// Presses the bindings of `area_text` in `h`.
 fn press_area(h: &mut H, area_text: &str, check: fn(&mut H, &Binding) -> bool) {
-    let keymap = Keymap::parse(area_text).unwrap();
-    let mut missing = Vec::new();
-    for b in &keymap.bindings {
-        eprintln!("checking `{}` -> {}", b.keys, b.command);
-        if !check(h, b) {
-            missing.push(format!("`{}` -> {}", b.keys, b.command));
-            continue;
-        }
-        // A double tap or a mouse button runs its command without a
-        // keystroke.
-        if keymap::parse_double_tap(&b.keys).is_some()
-            || keymap::parse_mouse_button(&b.keys).is_some()
-        {
-            continue;
-        }
-        let dispatched = h.dispatched.borrow().clone();
-        assert!(
-            dispatched.contains(&b.command),
-            "`{}` should dispatch {} in context {:?}, dispatched {dispatched:?}",
-            b.keys,
-            b.command,
-            b.context
-        );
-    }
-    assert!(missing.is_empty(), "bindings without a check: {missing:?}");
+    press_bindings(h, area_text, check);
 }
 
 /// Every file of the keymap folders has a module that checks it.

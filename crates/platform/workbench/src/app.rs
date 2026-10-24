@@ -15,6 +15,8 @@ use ui::icons::{IconName, IconSvg};
 use crate::commands::{self, Quit};
 use crate::env;
 use crate::file_types::{FileAssociation, FileType};
+use crate::keymap::KeymapFiles;
+use crate::module::Init;
 use crate::project_panel;
 use crate::run::RunHook;
 use crate::terminal::TerminalHook;
@@ -67,7 +69,8 @@ impl std::fmt::Debug for StatusWidget {
     }
 }
 
-/// What a product tells the workbench about itself.
+/// What a product tells the workbench about itself, with the modules it
+/// includes ([`Product::with_module`]).
 #[derive(Debug, Clone, Default)]
 pub struct Product {
     /// File types of the product's languages (icons, indentation,
@@ -80,7 +83,7 @@ pub struct Product {
     /// Name shown in the window title and the application menu.
     pub name: &'static str,
     /// Icons of the product (file types, tool windows).
-    pub icons: &'static [IconSvg],
+    pub icons: Vec<IconSvg>,
     /// Extra tool window buttons in the lower group of the left stripe.
     pub left_stripe_bottom: Vec<StripeItem>,
     /// The product's widgets in the status bar, in order, right of the
@@ -94,16 +97,20 @@ pub struct Product {
     pub auto_excluded: project::AutoExclusions,
     /// Source roots, locations and package folders for Go to File.
     pub navigation: NavigationHooks,
-    /// Registers the product's commands, globals and key bindings; called
-    /// at the end of [`init`].
-    pub init: Option<fn(&mut App)>,
+    /// Register the product's commands, globals and key bindings, then its
+    /// modules'; called in order at the end of [`init`].
+    pub init: Vec<Init>,
+    /// Key bindings of the product's modules, joined after the
+    /// workbench's.
+    pub keymaps: Vec<KeymapFiles>,
     /// Runs files of the product's languages (the run widget, the Run tool
     /// window and the `run.*` commands); without it nothing can be run.
     pub run: Option<RunHook>,
-    /// Language services of the product's languages (ADR 0010): editor
-    /// tabs of file types with a language id get code intelligence; without
-    /// it they get none.
-    pub code_intel: Option<CodeIntelHook>,
+    /// Language services of the product's languages and its modules'
+    /// (ADR 0010, 0022), the product's first: editor tabs of file types
+    /// with a language id get code intelligence from the providers that
+    /// serve the id; without any they get none.
+    pub code_intel: Vec<CodeIntelHook>,
     /// Debugging the product's programs (ADR 0015): the breakpoint types
     /// and where breakpoints can be put, the debug adapter; without it
     /// there are no breakpoints.
@@ -134,7 +141,7 @@ pub const TRAFFIC_LIGHTS: (f32, f32) = (14.0, 13.0);
 pub fn init(cx: &mut App, product: &Product) {
     project::set_auto_exclusions(product.auto_excluded);
     ui::init(cx, env::theme_kind());
-    ui::icons::register(cx, product.icons);
+    ui::icons::register(cx, &product.icons);
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::GO_TO_LINE_COMMANDS);
     ui::command::register(cx, crate::notifications::COMMANDS);
@@ -311,11 +318,12 @@ pub fn init(cx: &mut App, product: &Product) {
         .detach();
     // The platform's keymap; the stored one replaces it once the settings
     // are read. The menus show the shortcuts of the keymap in use.
+    crate::keymap::active::set_modules(cx, product.keymaps.clone());
     crate::keymap::active::init(cx);
     crate::main_menu::init(cx, product.name);
     crate::keymap::active::set_menus(cx, Rc::new(crate::main_menu::install));
-    if let Some(init) = product.init {
-        init(cx);
+    for init in &product.init {
+        init.run(cx);
     }
 }
 

@@ -128,8 +128,15 @@ Platform (`crates/platform/`, language-agnostic):
 - `code-intel`: the language-agnostic model and `CodeIntel` trait of code
   intelligence (ADR 0010): documents, positions as `text::Point`,
   diagnostics, completion items, documentation, signatures, locations,
-  text and workspace edits, code actions, server status and events; an
-  in-memory `FakeCodeIntel` (feature `fake`) for tests.
+  text and workspace edits, code actions, document symbols, definition
+  targets (a file location or an object target `{scheme, id, title}`),
+  server status and events; `RoutedCodeIntel`, several providers as one
+  `CodeIntel` routed by language id (ADR 0022: document calls go to the
+  providers of the document's language, project-wide calls to all; list
+  answers are joined, single answers come from the first provider with
+  one; the diagnostics of a document several providers serve are joined in
+  its current text); an in-memory `FakeCodeIntel` (feature `fake`) for
+  tests.
 - `stream-framing`: the `Content-Length` framing of a byte stream (an
   encoder and a decoder of chunks that never panics on malformed input),
   used by `lsp-client` and `dap-client`; no protocol types.
@@ -168,10 +175,13 @@ Platform (`crates/platform/`, language-agnostic):
   and a debug session's Console: the `console` model in a read-only
   editor, typed input to the process, the output fed off the UI thread
   with the exit line, a file as standard input.
-- `code-intel-ui`: the code intelligence of a main window: the product
-  hook (`CodeIntelProvider`, `CodeIntelHook`), the `CodeIntelView` the
-  workbench reports editors to, the `code.*` and `completion.*` commands.
-  A skeleton: the commands do nothing yet.
+- `code-intel-ui`: the code intelligence of a main window: the provider
+  hook of a product or a module (`CodeIntelProvider`, `CodeIntelHook`, with
+  the language ids it serves; none serves every id), the `CodeIntelView`
+  the workbench reports editors to (with several providers it routes their
+  services through `RoutedCodeIntel` and asks the provider of a
+  document's language for parentheses, lexer, documentation header and
+  server icons), the `code.*` and `completion.*` commands.
 - `themes`: theme model and tokens, default themes, import of PyCharm colour
   schemes and UI themes, the catalog of built-in and imported themes.
 - `ui`: component layer on GPUI (ADR 0006, 0007): theme as GPUI colours and
@@ -204,7 +214,11 @@ Platform (`crates/platform/`, language-agnostic):
   outside the application (the file watcher, a look at the open files
   when the window gets the focus, Reload All from Disk, the File Cache
   Conflict dialog, saves that never write over a newer file); the
-  project's Git repository with its statuses (`version_control.rs`).
+  project's Git repository with its statuses (`version_control.rs`);
+  modules (`Module`, `Product::with_module`, ADR 0022) and the handlers of
+  object targets by scheme (`object_targets`); behind the `test-support`
+  feature, the keymap harness (`test_support::keymap`) a module's crate
+  checks its key bindings with.
 
 Python product (`crates/python/`):
 - `py-env`: interpreter and virtualenv discovery, project model
@@ -232,9 +246,19 @@ Python product.
 - `crates/<module>/` (first: `crates/database/`, the database interface and
   the SQL language): a reusable set of crates, the equivalent of a plugin
   that several products share. Depends on platform crates only; never on a
-  product or on another module. A product includes a module with
-  `Product::with_module` and gives it what only a product can (for the
-  database module: the connection source and the runtime).
+  product or on another module. A module describes its contributions with a
+  `workbench::Module` (file types and associations, icons, settings pages,
+  status widgets, an `Init` that registers commands, tool windows and
+  globals, its keymap folders as `KeymapFiles`, language service providers
+  for its languages); a product includes it with `Product::with_module`,
+  which appends the module's lists after the product's own (the product's
+  file types, associations and icons win; `init` functions run in order;
+  the module's key bindings are joined after the workbench's), and gives
+  it what only a product can (for the database module: the connection
+  source and the runtime). A module's crate checks its key bindings with
+  `workbench::test_support::keymap`; the workbench's own tests use a
+  fixture module crate (`crates/platform/workbench/tests/fixture-module`)
+  and depend on no real module.
 - `crates/<product>/` (first: `crates/python/`): language crates and the
   product binary. Depends on platform crates and modules, not on other
   products.

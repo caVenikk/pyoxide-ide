@@ -336,11 +336,11 @@ impl Workbench {
             )),
             _ => None,
         };
-        let code_intel = product
-            .code_intel
-            .clone()
-            .or(bench_intel)
-            .map(|hook| cx.new(|cx| CodeIntelView::new(hook, cx)));
+        let hooks = match bench_intel {
+            Some(hook) if product.code_intel.is_empty() => vec![hook],
+            _ => product.code_intel.clone(),
+        };
+        let code_intel = (!hooks.is_empty()).then(|| cx.new(|cx| CodeIntelView::new(hooks, cx)));
         let mut subscriptions = vec![
             cx.subscribe_in(&run_window, window, |this, _, event, window, cx| {
                 this.run_window_event(event, window, cx)

@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# `test_support`: the keymap harness for crates that build on the workbench
+# (a module's crate checks its key bindings with it, ADR 0022).
+test-support = ["gpui/test-support"]
+
 [dependencies]
 # The time of a notification in the Notifications tool window.
 chrono.workspace = true
@@ -62,6 +67,9 @@ smallvec = "1"
 tempfile = "3"
 # Theme plugins of the reference in tests/it/first_run.rs.
 zip.workspace = true
+# A module for tests/it/modules.rs, a crate built as a module's crate is;
+# it turns on this crate's `test-support` for the tests.
+workbench-fixture-module = { path = "tests/fixture-module" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui = { workspace = true, features = ["runtime_shaders", "test-support"] }

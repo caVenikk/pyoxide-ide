@@ -104,7 +104,7 @@ fn setup_with(cx: &mut TestAppContext, sync: SyncSettings) -> H<'_> {
             language_id: Some("python"),
             ..FileType::plain("Python", &["py"], ui::icons::IconName::FILE_TEXT)
         }],
-        code_intel: Some(CodeIntelHook::new(Provider(intel.clone()))),
+        code_intel: vec![CodeIntelHook::new(Provider(intel.clone()))],
         new_items: test_items(),
         ..Product::default()
     };

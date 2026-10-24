@@ -245,7 +245,7 @@ pub fn product() -> Product {
         name: "Pyoxide",
         file_types: [python()].into_iter().chain(python_files()).collect(),
         file_associations: FILE_ASSOCIATIONS.to_vec(),
-        icons: ICONS,
+        icons: ICONS.to_vec(),
         left_stripe_bottom: vec![
             StripeItem {
                 id: "stripe-python-packages",
@@ -271,11 +271,12 @@ pub fn product() -> Product {
             file_location: Some(file_location),
             package_markers: &["__init__.py"],
         },
-        init: Some(init),
+        init: vec![workbench::Init::new(init)],
+        keymaps: Vec::new(),
         run: Some(RunHook::new(run::PythonRunProvider)),
-        code_intel: Some(workbench::CodeIntelHook::new(
+        code_intel: vec![workbench::CodeIntelHook::new(
             services::PythonCodeIntel::new(),
-        )),
+        )],
         debug: Some(debug::debug_hook()),
         new_items: new_items::new_items(),
         tree: tree(),
@@ -296,9 +297,9 @@ pub fn product() -> Product {
 /// the machine never start.
 pub fn product_with_tools(search: py_lsp::SearchPaths) -> Product {
     Product {
-        code_intel: Some(workbench::CodeIntelHook::new(
+        code_intel: vec![workbench::CodeIntelHook::new(
             services::PythonCodeIntel::with_search(search),
-        )),
+        )],
         ..product()
     }
 }

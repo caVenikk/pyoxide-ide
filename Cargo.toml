@@ -43,6 +43,7 @@ members = [
     "crates/platform/vcs-ui",
     "crates/platform/git",
     "crates/platform/workbench",
+    "crates/platform/workbench/tests/fixture-module",
     "crates/database/sql-syntax",
     "crates/python/py-debug",
     "crates/python/py-env",

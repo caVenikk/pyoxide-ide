@@ -32,9 +32,9 @@ use text::{AppliedEdit, Point, Rope};
 
 use crate::{
     CodeAction, CodeActionContext, CodeIntel, Command, CompletionItem, CompletionTrigger,
-    Completions, Diagnostic, DocumentHighlight, DocumentId, EventHub, FileChange, FormatOptions,
-    Hover, Intel, IntelError, IntelEvent, Location, ServerId, ServerStatus, SignatureContext,
-    SignatureHelp, TextEdit, WorkspaceEdit, ready,
+    Completions, DefinitionTarget, Diagnostic, DocumentHighlight, DocumentId, DocumentSymbol,
+    EventHub, FileChange, FormatOptions, Hover, Intel, IntelError, IntelEvent, Location, ServerId,
+    ServerStatus, SignatureContext, SignatureHelp, TextEdit, WorkspaceEdit, ready,
 };
 
 /// The kinds of requests, for scripting and holding answers.
@@ -53,6 +53,8 @@ pub enum RequestKind {
     ExecuteCommand,
     Rename,
     DocumentHighlights,
+    DocumentSymbols,
+    DefinitionTargets,
     Shutdown,
 }
 
@@ -137,6 +139,13 @@ pub enum Call {
         doc: DocumentId,
         at: Point,
     },
+    DocumentSymbols {
+        doc: DocumentId,
+    },
+    DefinitionTargets {
+        doc: DocumentId,
+        at: Point,
+    },
     Restart(Option<ServerId>),
     Stop(ServerId),
     Shutdown,
@@ -159,6 +168,8 @@ impl Call {
             Call::ExecuteCommand(_) => RequestKind::ExecuteCommand,
             Call::Rename { .. } => RequestKind::Rename,
             Call::DocumentHighlights { .. } => RequestKind::DocumentHighlights,
+            Call::DocumentSymbols { .. } => RequestKind::DocumentSymbols,
+            Call::DefinitionTargets { .. } => RequestKind::DefinitionTargets,
             Call::Shutdown => RequestKind::Shutdown,
             _ => return None,
         })
@@ -527,6 +538,38 @@ impl FakeCodeIntel {
         );
     }
 
+    pub fn on_document_symbols(
+        &self,
+        f: impl Fn(&DocumentId) -> Result<Vec<DocumentSymbol>, IntelError> + Send + Sync + 'static,
+    ) {
+        self.set_answer::<Vec<DocumentSymbol>>(
+            RequestKind::DocumentSymbols,
+            Arc::new(move |call| match call {
+                Call::DocumentSymbols { doc } => f(doc),
+                _ => Err(IntelError::Other("not a structure request".into())),
+            }),
+        );
+    }
+
+    /// Scripts Go to Declaration's targets; without a script they are the
+    /// places of [`on_definition`](Self::on_definition) (the trait's
+    /// default).
+    pub fn on_definition_targets(
+        &self,
+        f: impl Fn(&DocumentId, Point) -> Result<Vec<DefinitionTarget>, IntelError>
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.set_answer::<Vec<DefinitionTarget>>(
+            RequestKind::DefinitionTargets,
+            Arc::new(move |call| match call {
+                Call::DefinitionTargets { doc, at } => f(doc, *at),
+                _ => Err(IntelError::Other("not a definition targets request".into())),
+            }),
+        );
+    }
+
     // ---- holding answers ------------------------------------------------------
 
     /// Answers of this kind wait for [`release`](Self::release) from now on.
@@ -857,6 +900,34 @@ impl CodeIntel for FakeCodeIntel {
         )
     }
 
+    fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {
+        self.request(
+            Call::DocumentSymbols { doc: doc.clone() },
+            Err(IntelError::Unsupported),
+        )
+    }
+
+    fn definition_targets(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DefinitionTarget>> {
+        let scripted = self
+            .lock()
+            .answers
+            .contains_key(&RequestKind::DefinitionTargets);
+        if scripted {
+            return self.request(
+                Call::DefinitionTargets {
+                    doc: doc.clone(),
+                    at,
+                },
+                Err(IntelError::Unsupported),
+            );
+        }
+        let definition = self.definition(doc, at);
+        Box::pin(async move {
+            let locations = definition.await?;
+            Ok(locations.into_iter().map(DefinitionTarget::File).collect())
+        })
+    }
+
     fn status(&self) -> Vec<ServerStatus> {
         self.lock().status.clone()
     }
@@ -982,6 +1053,45 @@ mod tests {
             block_on(intel.format(&doc(), None, FormatOptions::default())),
             Err(IntelError::Unsupported)
         );
+    }
+
+    #[test]
+    fn structure_and_definition_targets() {
+        use crate::{ObjectTarget, SymbolKind};
+
+        let fake = FakeCodeIntel::new();
+        let intel: Arc<dyn CodeIntel> = fake.clone();
+        let at = Point::new(0, 1);
+        assert_eq!(
+            block_on(intel.document_symbols(&doc())),
+            Err(IntelError::Unsupported)
+        );
+        let symbol = DocumentSymbol::new("f", SymbolKind::Function, at..Point::new(1, 0));
+        let answer = vec![symbol.clone()];
+        fake.on_document_symbols(move |_| Ok(answer.clone()));
+        assert_eq!(block_on(intel.document_symbols(&doc())), Ok(vec![symbol]));
+
+        // Without a script: the definition's places.
+        let place = Location {
+            path: "/p/b.py".into(),
+            range: at..at,
+        };
+        let answer = place.clone();
+        fake.on_definition(move |_, _| Ok(vec![answer.clone()]));
+        assert_eq!(
+            block_on(intel.definition_targets(&doc(), at)),
+            Ok(vec![DefinitionTarget::File(place)])
+        );
+        let table = ObjectTarget::new("db", "main/orders", "orders");
+        let answer = table.clone();
+        fake.on_definition_targets(move |_, _| Ok(vec![DefinitionTarget::Object(answer.clone())]));
+        assert_eq!(
+            block_on(intel.definition_targets(&doc(), at)),
+            Ok(vec![DefinitionTarget::Object(table)])
+        );
+        assert_eq!(fake.requests(RequestKind::DocumentSymbols), 2);
+        assert_eq!(fake.requests(RequestKind::DefinitionTargets), 1);
+        assert_eq!(fake.requests(RequestKind::Definition), 1);
     }
 
     #[test]
