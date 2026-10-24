@@ -730,6 +730,12 @@ pub struct Connection {
     config: Config,
     closed: AtomicBool,
     id: u32,
+    /// The last row the server sent for each open cursor, by cursor id.
+    ///
+    /// A column whose value equals the one in the row before is sent without
+    /// data (the duplicate-column bit vector); at the start of a fetch round
+    /// trip the row before is the last row of the previous trip.
+    last_rows: std::sync::Mutex<std::collections::HashMap<u16, Vec<Value>>>,
 }
 
 // Connection ID counter
@@ -805,6 +811,7 @@ impl Connection {
             config,
             closed: AtomicBool::new(false),
             id,
+            last_rows: std::sync::Mutex::new(std::collections::HashMap::new()),
         };
 
         // Perform connection handshake
@@ -1791,7 +1798,7 @@ impl Connection {
         let payload = &response[PACKET_HEADER_SIZE..];
         let caps = inner.capabilities.clone();
         drop(inner); // Release lock before parsing
-        self.parse_fetch_response(payload, columns, &caps)
+        self.parse_fetch_response(payload, columns, &caps, cursor_id)
     }
 
     /// Fetch rows from a REF CURSOR
@@ -1892,7 +1899,7 @@ impl Connection {
         let payload = &response[PACKET_HEADER_SIZE..];
         let caps = inner.capabilities.clone();
         drop(inner); // Release lock before parsing
-        self.parse_fetch_response(payload, cursor.columns(), &caps)
+        self.parse_fetch_response(payload, cursor.columns(), &caps, cursor.cursor_id())
     }
 
     /// Fetch rows from an implicit result set
@@ -1942,7 +1949,13 @@ impl Connection {
     /// - RowHeader (6): Contains metadata about the following row data
     /// - RowData (7): Contains the actual row values
     /// - Error (4): Contains error info with cursor_id and row counts
-    fn parse_fetch_response(&self, payload: &[u8], columns: &[ColumnInfo], caps: &Capabilities) -> Result<QueryResult> {
+    fn parse_fetch_response(
+        &self,
+        payload: &[u8],
+        columns: &[ColumnInfo],
+        caps: &Capabilities,
+        cursor_id: u16,
+    ) -> Result<QueryResult> {
         if payload.len() < 3 {
             return Err(Error::Protocol("Fetch response too short".to_string()));
         }
@@ -1950,10 +1963,14 @@ impl Connection {
         let mut buf = ReadBuffer::from_slice(payload);
         let mut rows = Vec::new();
         let mut has_more_rows = false;
+        // The server reported ORA-01403: the cursor has no more rows
+        let mut exhausted = false;
 
         // Bit vector for duplicate column optimization
         let mut bit_vector: Option<Vec<u8>> = None;
-        let mut previous_row_values: Option<Vec<Value>> = None;
+        // The first row of this round trip may repeat the last row of the
+        // previous one, which the server then sends without data.
+        let mut previous_row_values: Option<Vec<Value>> = self.last_row(cursor_id);
 
         // Skip data flags
         buf.skip(2)?;
@@ -2009,7 +2026,9 @@ impl Connection {
                     // Error message contains row count and cursor info
                     let (error_code, error_msg, more_rows) = self.parse_error_message_info(&mut buf)?;
                     has_more_rows = more_rows;
+                    exhausted = error_code == 1403;
                     if error_code != 0 && error_code != 1403 { // 1403 = no data found
+                        self.forget_last_row(cursor_id);
                         return Err(Error::OracleError {
                             code: error_code,
                             message: error_msg,
@@ -2031,6 +2050,11 @@ impl Connection {
             }
         }
 
+        match previous_row_values {
+            Some(last) if !exhausted => self.remember_last_row(cursor_id, last),
+            _ => self.forget_last_row(cursor_id),
+        }
+
         Ok(QueryResult {
             columns: columns.to_vec(),
             rows,
@@ -2038,6 +2062,27 @@ impl Connection {
             has_more_rows,
             cursor_id: 0,
         })
+    }
+
+    /// The last row the server sent for a cursor, if it is known.
+    fn last_row(&self, cursor_id: u16) -> Option<Vec<Value>> {
+        if cursor_id == 0 {
+            return None;
+        }
+        let map = self.last_rows.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&cursor_id).cloned()
+    }
+
+    fn remember_last_row(&self, cursor_id: u16, row: Vec<Value>) {
+        if cursor_id != 0 {
+            let mut map = self.last_rows.lock().unwrap_or_else(|e| e.into_inner());
+            map.insert(cursor_id, row);
+        }
+    }
+
+    fn forget_last_row(&self, cursor_id: u16) {
+        let mut map = self.last_rows.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(&cursor_id);
     }
 
     /// Parse error message info including cursor_id and row counts
@@ -2473,6 +2518,12 @@ impl Connection {
             )?;
         }
 
+        // A later fetch on this cursor may start with a repeat of the last row
+        match result.rows.last() {
+            Some(last) => self.remember_last_row(result.cursor_id, last.values().to_vec()),
+            None => self.forget_last_row(result.cursor_id),
+        }
+
         Ok(result)
     }
 
@@ -2668,7 +2719,9 @@ impl Connection {
 
                 // RowHeader (6) - header info for rows
                 x if x == MessageType::RowHeader as u8 => {
-                    self.parse_row_header(&mut buf)?;
+                    if let Some(bv) = self.parse_row_header(&mut buf)? {
+                        bit_vector = Some(bv);
+                    }
                 }
 
                 // RowData (7) - actual row values
@@ -2988,22 +3041,26 @@ impl Connection {
     }
 
     /// Parse row header (TNS_MSG_TYPE_ROW_HEADER = 6)
-    fn parse_row_header(&self, buf: &mut ReadBuffer) -> Result<()> {
+    ///
+    /// Returns the duplicate-column bit vector of the row that follows, if the
+    /// header carries one.
+    fn parse_row_header(&self, buf: &mut ReadBuffer) -> Result<Option<Vec<u8>>> {
         buf.skip_ub1()?;  // flags
         buf.skip_ub2()?;  // num requests
         buf.skip_ub4()?;  // iteration number
         buf.skip_ub4()?;  // num iters
         buf.skip_ub2()?;  // buffer length
         let num_bytes = buf.read_ub4()? as usize;
+        let mut bit_vector = None;
         if num_bytes > 0 {
             buf.skip_ub1()?;  // skip repeated length
-            buf.skip(num_bytes)?;  // bit vector
+            bit_vector = Some(buf.read_bytes_vec(num_bytes)?);
         }
         let num_bytes = buf.read_ub4()? as usize;
         if num_bytes > 0 {
             buf.skip_raw_bytes_chunked()?;  // rxhrid
         }
-        Ok(())
+        Ok(bit_vector)
     }
 
     /// Parse return parameters (TNS_MSG_TYPE_PARAMETER = 8)
@@ -5401,5 +5458,119 @@ mod tests {
 
         let collected: Vec<Row> = result.into_iter().collect();
         assert_eq!(collected.len(), 2);
+    }
+
+    fn offline_connection() -> Connection {
+        Connection {
+            inner: Arc::new(Mutex::new(ConnectionInner::new_with_cache(0))),
+            config: Config::new("localhost", 1521, "svc", "user", "password"),
+            closed: AtomicBool::new(false),
+            id: 0,
+            last_rows: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn varchar_columns(n: usize) -> Vec<ColumnInfo> {
+        (0..n)
+            .map(|i| ColumnInfo::new(&format!("C{i}"), crate::constants::OracleType::Varchar))
+            .collect()
+    }
+
+    /// A fetch response of rows with the given cells; `None` is a column the
+    /// server leaves out because it equals the one in the row before.
+    fn fetch_payload(rows: &[&[Option<&str>]]) -> Vec<u8> {
+        let mut p = vec![0u8, 0]; // data flags
+        for row in rows {
+            if row.iter().any(|c| c.is_none()) {
+                p.push(MessageType::BitVector as u8);
+                p.extend_from_slice(&[1, row.len() as u8]); // ub2 columns sent
+                let mut bits = vec![0u8; (row.len() + 7) / 8];
+                for (i, c) in row.iter().enumerate() {
+                    if c.is_some() {
+                        bits[i / 8] |= 1 << (i % 8);
+                    }
+                }
+                p.extend_from_slice(&bits);
+            }
+            p.push(MessageType::RowData as u8);
+            for c in row.iter().flatten() {
+                p.push(c.len() as u8);
+                p.extend_from_slice(c.as_bytes());
+            }
+        }
+        p.push(MessageType::EndOfResponse as u8);
+        p
+    }
+
+    fn cell(v: &Value) -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Null => "NULL".to_string(),
+            other => format!("{other:?}"),
+        }
+    }
+
+    fn texts(r: &QueryResult) -> Vec<Vec<String>> {
+        r.rows.iter().map(|r| r.values().iter().map(cell).collect()).collect()
+    }
+
+    fn row(cells: &[&str]) -> Vec<String> {
+        cells.iter().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn test_fetch_repeats_last_row_of_previous_round_trip() {
+        let conn = offline_connection();
+        let cols = varchar_columns(3);
+        let caps = Capabilities::default();
+
+        let first = fetch_payload(&[&[Some("a"), Some("x"), Some("1")], &[Some("a"), Some("y"), None]]);
+        let r = conn.parse_fetch_response(&first, &cols, &caps, 7).unwrap();
+        assert_eq!(texts(&r)[1], row(&["a", "y", "1"]));
+
+        // Every column of the first row repeats the last row above (a, y, 1)
+        // except the second one
+        let second = fetch_payload(&[&[None, Some("z"), None], &[None, None, Some("2")]]);
+        let r = conn.parse_fetch_response(&second, &cols, &caps, 7).unwrap();
+        assert_eq!(texts(&r), vec![row(&["a", "z", "1"]), row(&["a", "z", "2"])]);
+    }
+
+    #[test]
+    fn test_fetch_last_rows_are_per_cursor() {
+        let conn = offline_connection();
+        let cols = varchar_columns(2);
+        let caps = Capabilities::default();
+
+        for (cursor, v) in [(3u16, "three"), (4u16, "four")] {
+            let p = fetch_payload(&[&[Some(v), Some("k")]]);
+            conn.parse_fetch_response(&p, &cols, &caps, cursor).unwrap();
+        }
+        let p = fetch_payload(&[&[None, None]]);
+        let r3 = conn.parse_fetch_response(&p, &cols, &caps, 3).unwrap();
+        let r4 = conn.parse_fetch_response(&p, &cols, &caps, 4).unwrap();
+        assert_eq!(texts(&r3), vec![row(&["three", "k"])]);
+        assert_eq!(texts(&r4), vec![row(&["four", "k"])]);
+    }
+
+    #[test]
+    fn test_fetch_without_known_last_row_gives_null() {
+        let conn = offline_connection();
+        let cols = varchar_columns(2);
+        let p = fetch_payload(&[&[None, Some("v")]]);
+        let r = conn.parse_fetch_response(&p, &cols, &Capabilities::default(), 9).unwrap();
+        assert_eq!(texts(&r), vec![row(&["NULL", "v"])]);
+    }
+
+    #[test]
+    fn test_remember_and_forget_last_row() {
+        let conn = offline_connection();
+        assert!(conn.last_row(5).is_none());
+        conn.remember_last_row(5, vec![Value::String("a".into())]);
+        assert_eq!(conn.last_row(5).map(|r| r.iter().map(cell).collect::<Vec<_>>()), Some(row(&["a"])));
+        conn.forget_last_row(5);
+        assert!(conn.last_row(5).is_none());
+        // Cursor id 0 is never a cursor
+        conn.remember_last_row(0, vec![Value::String("a".into())]);
+        assert!(conn.last_row(0).is_none());
     }
 }

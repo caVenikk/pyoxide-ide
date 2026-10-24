@@ -543,6 +543,51 @@ async fn pages_100k_rows() {
     assert_eq!(single(&*c, "SELECT 7 FROM dual", &[]).await, Value::Int(7));
 }
 
+/// A value equal to the one in the row before comes without data on the
+/// wire; at the start of a round trip the row before is the last row of the
+/// previous trip.
+#[tokio::test]
+#[ignore]
+async fn repeated_values_survive_round_trips() {
+    let c = connect().await;
+    let opts = ExecOptions {
+        fetch_size: 7,
+        ..ExecOptions::default()
+    };
+    let Outcome::Rows(mut cur) = c
+        .execute(
+            "SELECT 'same' s, TRUNC(LEVEL / 20) g, CASE WHEN MOD(LEVEL, 3) = 0 THEN NULL \
+             ELSE 'v' END n FROM dual CONNECT BY LEVEL <= 300",
+            &[],
+            &opts,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected rows");
+    };
+    let mut level = 0i64;
+    loop {
+        let page = cur.next_page(500).await.unwrap();
+        if page.is_empty() {
+            break;
+        }
+        for row in &page {
+            level += 1;
+            assert_eq!(row[0], Value::Text("same".into()), "s at row {level}");
+            assert_eq!(row[1], Value::Int(level / 20), "g at row {level}");
+            let n = if level % 3 == 0 {
+                Value::Null
+            } else {
+                Value::Text("v".into())
+            };
+            assert_eq!(row[2], n, "n at row {level}");
+        }
+    }
+    assert_eq!(level, 300);
+    cur.close().await.unwrap();
+}
+
 #[tokio::test]
 #[ignore]
 async fn wide_rows_fit_each_round_trip() {
