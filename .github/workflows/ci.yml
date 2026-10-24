@@ -19,33 +19,34 @@ jobs:
   # When they do not, their jobs still start and pass without running
   # anything: the required checks need a result, and a matrix job skipped
   # by `if` reports under the job's name, not under each OS's.
+  #
+  # scripts/ci-scope.sh decides, and scripts/test-ci-scope.sh tests it. The
+  # draft state is read from the API when the job runs, not taken from the
+  # event, which carries the state of the moment it was queued: a push to a
+  # draft and `gh pr ready` queue two runs, and when the stale one survived,
+  # a ready pull request merged on checks that tested nothing (#335). A job
+  # that skipped because of a draft reads the state once more as its last
+  # step and fails when the pull request became ready in the meantime, so a
+  # skip never stays green next to a ready pull request.
   scope:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      draft: ${{ steps.scope.outputs.draft }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
         with:
           # The merge commit and its parents: HEAD^1 is the base branch.
           fetch-depth: 2
       - id: scope
         env:
           EVENT: ${{ github.event_name }}
-          DRAFT: ${{ github.event.pull_request.draft }}
-        run: |
-          full=true
-          if [ "$EVENT" = pull_request ]; then
-            if [ "$DRAFT" = true ]; then
-              full=false
-              echo "Draft pull request: the OS matrix runs when it is ready for review."
-            elif ! git diff --name-only HEAD^1 HEAD \
-                | grep -qvE '(\.md$|^docs/|^replica/|^tests/scenarios/)'; then
-              full=false
-              echo "Only documentation changed: nothing to build or test."
-            fi
-          fi
-          echo "full=$full" >> "$GITHUB_OUTPUT"
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci-scope.sh scope
 
   check:
     needs: scope
@@ -54,6 +55,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: read
     # The steps are those of scripts/check.sh, which runs the same commands
     # locally.
     defaults:
@@ -71,6 +75,18 @@ jobs:
       - name: Skipped
         if: needs.scope.outputs.full != 'true'
         run: echo "Draft or documentation only, see job scope."
+      # The last word on a draft skip, see job scope.
+      - uses: actions/checkout@v4
+        if: needs.scope.outputs.draft == 'true'
+        with:
+          sparse-checkout: scripts/ci-scope.sh
+          sparse-checkout-cone-mode: false
+      - name: Still a draft
+        if: needs.scope.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci-scope.sh recheck
       - uses: actions/checkout@v4
         if: needs.scope.outputs.full == 'true'
       # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
@@ -145,12 +161,16 @@ jobs:
       - run: python3 scripts/check-layers.py
       # notices/ holds the third-party notices, one file per entry (ADR 0019).
       - run: python3 scripts/notice.py --check
+      - run: bash scripts/test-ci-scope.sh
 
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.
   integration:
     needs: scope
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     services:
       # An empty image starts no container: drafts and documentation-only
       # pull requests do not pull the database images.
@@ -180,6 +200,18 @@ jobs:
       - name: Skipped
         if: needs.scope.outputs.full != 'true'
         run: echo "Draft or documentation only, see job scope."
+      # The last word on a draft skip, see job scope.
+      - uses: actions/checkout@v4
+        if: needs.scope.outputs.draft == 'true'
+        with:
+          sparse-checkout: scripts/ci-scope.sh
+          sparse-checkout-cone-mode: false
+      - name: Still a draft
+        if: needs.scope.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci-scope.sh recheck
       - uses: actions/checkout@v4
         if: needs.scope.outputs.full == 'true'
       - uses: dtolnay/rust-toolchain@stable

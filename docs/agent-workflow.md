@@ -93,6 +93,21 @@ and mingw-w64, skipped with a note without them), `build` and `test`
 (cargo-nextest, profile `ci`), `throughput` (terminal, ADR 0014), `doc`
 (doctests) and `repo` (progress, layer and notice checks).
 
+A fresh git worktree starts with an empty `target/`, and the first check
+compiles every dependency again (GPUI, tree-sitter, tokio, ... with optimized
+dependencies, ADR 0007): that, not the checks themselves, is what a first
+`scripts/check.sh` in a new worktree waits for. `scripts/seed-target.sh` run
+once in the new worktree, before the first build, clones the compiled
+dependencies into `target/` (APFS clonefile on macOS, reflink on Linux file
+systems that support it; no disk space until files change). It keeps its seed
+in `~/.cache/pyoxide/target-seed`, built with the commands of `check.sh` and
+refreshed when `Cargo.lock` or the toolchain changes (`--refresh` does only
+that). `--from DIR` clones the `target/` of another checkout instead and takes
+cargo's build locks while it copies, so a build running there waits for the
+clone and is never read half-written. Without a copy-on-write file system, or
+with a non-empty `target/`, it does nothing. `scripts/check.sh` prints the
+time of each step at the end.
+
 What CI runs, and when (`.github/workflows/ci.yml`):
 - One run per pull request: a new push cancels the run of the push before.
   Runs on `main` are never cancelled.
@@ -101,7 +116,12 @@ What CI runs, and when (`.github/workflows/ci.yml`):
   than documentation (`*.md`, `docs/`, `replica/`, `tests/scenarios/`). For a
   draft or a documentation-only pull request their jobs pass without running
   anything, so the required checks report; marking a draft ready for review
-  starts the full run. Push checkpoints as drafts.
+  starts the full run. Push checkpoints as drafts. The draft state is read
+  from the API when the job runs, not from the event, and a job that skipped
+  for a draft reads it once more at its end and fails when the pull request
+  became ready meanwhile, so a skipped run never stays green next to a ready
+  pull request (`scripts/ci-scope.sh`, tested by `scripts/test-ci-scope.sh`,
+  part of the `repo` step).
 - Pull requests restore the build cache of `main` and do not save their own.
 - The checks build with the workspace's dev profile, as a local debug build
   does (optimized dependencies, ADR 0007), so `scripts/check.sh` reuses what
