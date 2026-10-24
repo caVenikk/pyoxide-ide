@@ -207,7 +207,7 @@ fn items(rows: &[ProjectRow], cx: &App) -> Vec<MenuItem> {
                 welcome: None,
             },
         )
-        .avatar(recent_projects::avatar(&r.name, r.color, cx))
+        .avatar(recent_projects::avatar(&r.name, r.color))
         .comment(project::display_path(&r.path));
         match folders.branches.get(&r.path) {
             Some(branch) => item.branch(branch.clone()),
@@ -232,7 +232,7 @@ impl Workbench {
     pub(super) fn project_avatar(&self, project: &project::Project, cx: &App) -> Avatar {
         let color = recent_projects::color(project.root(), cx)
             .unwrap_or_else(|| fallback_color(project.root()));
-        recent_projects::avatar(project.name(), color, cx)
+        recent_projects::avatar(project.name(), color)
     }
 
     /// The project's colour on the main toolbar, `height` high: layers

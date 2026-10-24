@@ -151,6 +151,50 @@ fn opened_projects_are_recent_and_the_popup_lists_them(cx: &mut TestAppContext) 
     assert_eq!(s["open"], json!(false));
 }
 
+/// The project's colour belongs to the project (#336): the same project has
+/// the same avatar in every theme, and the same toolbar colour in the themes
+/// of one kind, whatever their controls.
+#[gpui::test]
+fn the_project_colour_does_not_follow_the_theme(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    let alpha = h.folder("alpha");
+    h.open(&alpha);
+    let color =
+        h.cx.update(|cx| recent_projects::color(&alpha, cx))
+            .expect("the opened project has a colour");
+    let mut classic_dark = themes::builtin::dark();
+    classic_dark.controls = themes::Controls::Classic;
+    let mut classic_light = themes::builtin::light();
+    classic_light.controls = themes::Controls::Classic;
+    let all = [
+        themes::builtin::default_theme(themes::ThemeKind::Dark),
+        themes::builtin::dark(),
+        classic_dark,
+        themes::builtin::default_theme(themes::ThemeKind::Light),
+        classic_light,
+    ];
+    let seen: Vec<_> = all
+        .into_iter()
+        .map(|theme| {
+            h.cx.update(|cx| {
+                let dark = theme.kind == themes::ThemeKind::Dark;
+                ui::theme::set(cx, theme);
+                assert_eq!(recent_projects::color(&alpha, cx), Some(color));
+                (
+                    dark,
+                    recent_projects::avatar("alpha", color),
+                    recent_projects::toolbar_color(color, cx),
+                )
+            })
+        })
+        .collect();
+    for (dark, avatar, toolbar) in &seen {
+        assert_eq!(avatar, &seen[0].1);
+        let same_kind = seen.iter().find(|s| s.0 == *dark).unwrap();
+        assert_eq!(toolbar, &same_kind.2);
+    }
+}
+
 #[gpui::test]
 fn a_recent_project_opens_in_the_window(cx: &mut TestAppContext) {
     let mut h = open(cx);
