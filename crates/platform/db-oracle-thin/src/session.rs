@@ -99,7 +99,7 @@ impl Session {
     pub fn check_request(&self, text: &str) -> Result<()> {
         if text.len() > self.max_request {
             return Err(Error::unsupported(format!(
-                "the statement with its bind values needs a {} KiB request, but the thin driver can send at most {} KiB (oracle-rs 0.1.7 sends each request in one network packet of the negotiated size); shorten it or use the oracle-odpi backend",
+                "the statement with its bind values needs a {} KiB request, but the thin driver limits a request to {} KiB; shorten it or use the oracle-odpi backend",
                 text.len().div_ceil(1024),
                 self.max_request / 1024
             )));
@@ -152,7 +152,7 @@ impl Drop for CallGuard<'_> {
     }
 }
 
-const DESYNC_HINT: &str = "the session was closed to keep the protocol consistent. oracle-rs 0.1.7 reads one network packet per call, so a page of rows larger than the negotiated packet size cannot be read; use smaller pages or the oracle-odpi backend";
+const DESYNC_HINT: &str = "the session was closed to keep the protocol consistent; if this repeats, report it with the statement, or use the oracle-odpi backend";
 
 /// Map an error of a call on an open session. The flag says whether the
 /// session must be considered broken.
@@ -165,7 +165,7 @@ pub fn map_call_error(e: OraError) -> (Error, bool) {
             true,
         ),
         OraError::OracleError { code, message } => {
-            let err = error_from_message(format!("ORA-{code:05}: {message}"), ErrorKind::Query);
+            let err = error_from_message(ora_text(code, &message), ErrorKind::Query);
             let broken = err.kind == ErrorKind::ConnectionLost;
             (err, broken)
         }
@@ -175,7 +175,7 @@ pub fn map_call_error(e: OraError) -> (Error, bool) {
         ),
         OraError::ConnectionClosedByServer(_) => (
             Error::connection_lost(
-                "the server reported an error and closed the session; oracle-rs 0.1.7 cannot read error details at this point (typically a run-time error while fetching rows, such as ORA-01722 or ORA-01476)",
+                "the server reported an error and closed the session without sending the error details",
             ),
             true,
         ),
@@ -222,6 +222,17 @@ fn looks_like_tls(message: &str) -> bool {
     ]
     .iter()
     .any(|k| m.contains(k))
+}
+
+/// A server message with its `ORA-nnnnn:` code in front, unless the message
+/// already starts with it.
+fn ora_text(code: u32, message: &str) -> String {
+    let prefix = format!("ORA-{code:05}");
+    if message.starts_with(&prefix) {
+        message.to_owned()
+    } else {
+        format!("{prefix}: {message}")
+    }
 }
 
 /// Map an error raised while connecting.
@@ -344,6 +355,24 @@ mod tests {
             message: "x".into(),
         });
         assert_eq!(e.kind, ErrorKind::ConnectionLost);
+    }
+
+    #[test]
+    fn a_code_is_shown_once() {
+        assert_eq!(
+            ora_text(942, "ORA-00942: table or view does not exist"),
+            "ORA-00942: table or view does not exist"
+        );
+        assert_eq!(
+            ora_text(942, "table or view does not exist"),
+            "ORA-00942: table or view does not exist"
+        );
+        let (e, _) = map_call_error(OraError::OracleError {
+            code: 1476,
+            message: "ORA-01476: divisor is equal to zero".into(),
+        });
+        assert_eq!(e.message, "ORA-01476: divisor is equal to zero");
+        assert_eq!(e.code.as_deref(), Some("ORA-01476"));
     }
 
     #[test]

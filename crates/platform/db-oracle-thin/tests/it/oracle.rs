@@ -588,6 +588,26 @@ async fn repeated_values_survive_round_trips() {
     cur.close().await.unwrap();
 }
 
+/// A NULL literal in the middle of a select list, and a time zone given as a
+/// region name, both used to break the row.
+#[tokio::test]
+#[ignore]
+async fn null_literal_and_named_zone_in_a_row() {
+    let c = connect().await;
+    let rs = query(
+        &*c,
+        "SELECT 1 a, NULL b, 'x' c, TIMESTAMP '2026-01-02 03:04:05 Europe/Moscow' d, 2 e FROM dual",
+        &[],
+    )
+    .await;
+    let row = &rs.rows[0];
+    assert_eq!(row[0], Value::Int(1));
+    assert_eq!(row[1], Value::Null);
+    assert_eq!(row[2], Value::Text("x".into()));
+    assert!(matches!(row[3], Value::TimestampTz(_)), "{:?}", row[3]);
+    assert_eq!(row[4], Value::Int(2));
+}
+
 #[tokio::test]
 #[ignore]
 async fn wide_rows_fit_each_round_trip() {
@@ -728,18 +748,20 @@ async fn errors_are_trapped_and_the_session_survives() {
 
 #[tokio::test]
 #[ignore]
-async fn fetch_time_error_loses_the_connection() {
-    // oracle-rs drops the session when the server reports an error while
-    // rows are fetched; the driver reports it as ConnectionLost.
+async fn fetch_time_error_keeps_the_connection() {
+    // The server reports the error while rows are fetched; the driver
+    // reads it and the session stays usable.
     let c = connect().await;
     let e = c.query("SELECT 1/0 FROM dual", &[], 10).await.unwrap_err();
-    assert_eq!(e.kind, ErrorKind::ConnectionLost, "{e:?}");
-    assert_eq!(c.ping().await.unwrap_err().kind, ErrorKind::ConnectionLost);
-    let fresh = connect().await;
+    assert_eq!(e.kind, ErrorKind::Query, "{e:?}");
+    assert_eq!(e.code.as_deref(), Some("ORA-01476"));
     assert_eq!(
-        single(&*fresh, "SELECT 1 FROM dual", &[]).await,
-        Value::Int(1)
+        e.message.matches("ORA-01476").count(),
+        1,
+        "the code appears once: {e:?}"
     );
+    c.ping().await.unwrap();
+    assert_eq!(single(&*c, "SELECT 1 FROM dual", &[]).await, Value::Int(1));
 }
 
 #[tokio::test]
@@ -970,8 +992,10 @@ async fn small_packets_still_work() {
     )
     .await;
     assert_eq!(rs.rows.len(), 40);
+    // A request larger than the session data unit goes out in several
+    // packets; the server answers the 10 000-character literal itself.
     let long = format!("SELECT 1 FROM dual WHERE 'x' <> '{}'", "y".repeat(10_000));
     let e = c.query(&long, &[], 1).await.unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Unsupported, "{e:?}");
+    assert_eq!(e.code.as_deref(), Some("ORA-01704"), "{e:?}");
     assert_eq!(single(&*c, "SELECT 2 FROM dual", &[]).await, Value::Int(2));
 }
