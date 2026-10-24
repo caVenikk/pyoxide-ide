@@ -63,7 +63,10 @@ fn the_file_holds_the_model_and_the_data_source_id_only() {
     let path = cache.model_path(&ds);
     assert!(path.starts_with(cache.root()));
     let json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    let keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    // Sorted: with serde_json's `preserve_order` (on in the workspace build)
+    // the map keeps the file's order.
+    let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
     assert_eq!(
         keys,
         ["data_source", "format", "schemas", "token", "version"]
