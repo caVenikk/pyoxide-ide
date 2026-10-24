@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: expanding a node reads the local model, never the database",db-gui,must,yes,no,Pro; performance budget
+"Explorer: expanding a node reads the local model, never the database",db-gui,must,yes,partial,"Pro; performance budget. Model side done (db-model, #300: children per node, groups reported empty or not loaded, 10 000 lookups 1 ms); the tree comes with #302"

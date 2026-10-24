@@ -442,6 +442,18 @@ SQL inside Python strings is served through virtual documents with an
 offset map (ADR 0022). Rules for `scripts/check-layers.py` come with the
 first crates; the module rules are in the script already.
 
+`db-model` exists: a `Model` per data source is an immutable value whose
+schemas are `Arc`-shared between versions. It is built from a `db-core`
+`Snapshot`, merged with a `Delta` (idempotent, by working on the flat form of
+the schemas a change touches) and trimmed by a live-object list; a
+`ModelHandle` swaps whole models, so a cancelled refresh changes nothing.
+Nodes sit in an arena per schema (partitions nested under their table,
+groups as the tree shows them, empty and not-loaded groups reported as
+such). Ids are hashes of kind and qualified name, never oids. Lookups by
+schema, name and kind are hash lookups that do not allocate. The disk cache
+is versioned JSON in the user cache folder (`ModelCache`), with source texts
+in files beside it (`SourceStore`).
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded
