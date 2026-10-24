@@ -134,17 +134,17 @@ on a synthetic schema of 10 000 tables with eight columns, a primary key, a
 foreign key and an index each (and a trigger on every tenth): 131,004 nodes,
 a cache file of 18.1 MB. Release build, best of 10 runs (50 for lookups).
 The machine was running several other builds (load average 45-75 on 10
-cores), so wall times are upper bounds; the CPU time of the cache load was
-taken separately from `/usr/bin/time` over ten loads.
+cores), so wall times are upper bounds; the CPU time of the cache load
+was taken separately from `/usr/bin/time` over ten loads.
 
 | date | machine | metric | value | budget | notes |
 |---|---|---|---|---|---|
-| 2026-10-25 | mac-1 | cache load: read, parse, build | 141 ms CPU per load (wall best 333 ms under load) | 150 ms off the UI thread | JSON parse about 78 ms CPU of it; the binary format ADR 0021 allows is not needed at this size |
-| 2026-10-25 | mac-1 | build from a snapshot | 202 ms wall best | | off the UI thread, during a refresh |
-| 2026-10-25 | mac-1 | cache store: serialize, write, fsync, rename | 160 ms wall best | | off the UI thread, after a refresh |
-| 2026-10-25 | mac-1 | 10 000 lookups by schema and name, exact / ignoring case | 0.67 ms / 1.56 ms | 5 ms | no allocation per lookup (counted in the tests) |
-| 2026-10-25 | mac-1 | 10 000 lookups of a table, then a column in it | 1.99 ms | | |
-| 2026-10-25 | mac-1 | name search (`name-match`) over all schema objects | 2.3 ms | | speed search |
+| 2026-10-25 | mac-1 | cache load: read, parse, build | 141 ms CPU per load; wall best 279 ms under load | 150 ms off the UI thread | JSON parse about 78 ms CPU of it (wall best 178 ms); the binary format ADR 0021 allows is not needed at this size |
+| 2026-10-25 | mac-1 | build from a snapshot | 92 ms (median 134) | | off the UI thread, during a refresh |
+| 2026-10-25 | mac-1 | cache store: serialize, write, fsync, rename | 114 ms (median 245) | | off the UI thread, after a refresh |
+| 2026-10-25 | mac-1 | 10 000 lookups by schema and name, exact / ignoring case | 0.97 ms / 1.44 ms | 5 ms | no allocation per lookup (counted in the tests) |
+| 2026-10-25 | mac-1 | 10 000 lookups of a table, then a column in it | 2.7 ms | | |
+| 2026-10-25 | mac-1 | name search (`name-match`) over all schema objects | 4.5 ms | | speed search |
 
 ### Editor and shell
 Measured with `python3 scripts/perf/pyoxide_bench.py --work <dir> --runs 3` on
