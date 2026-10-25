@@ -144,7 +144,9 @@ pub(crate) fn init(cx: &mut App) {
         with_target(cx, move |e, window, cx| e.add(&backend, window, cx))
     });
     cx.on_action(|_: &Properties, cx| with_target(cx, |e, window, cx| e.properties(window, cx)));
-    cx.on_action(|_: &TestConnection, cx| with_target(cx, |e, _, cx| e.test_selected(cx)));
+    cx.on_action(|_: &TestConnection, cx| {
+        with_target(cx, |e, window, cx| e.test_selected(window, cx))
+    });
     cx.on_action(|_: &ImportDataSources, cx| with_target(cx, |e, _, cx| e.import(cx)));
     cx.on_action(|a: &SelectDataSource, cx| {
         let name = a.name.clone();
@@ -424,13 +426,37 @@ impl Explorer {
         dialog::open(root, sources, initial, window, cx);
     }
 
-    fn test_selected(&mut self, cx: &mut Context<Self>) {
+    /// Tests the selected data source; one whose password is not kept
+    /// ("Save: Never") asks for it first, every time.
+    fn test_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(root), Some(source)) = (self.root.clone(), self.selected_source().cloned())
         else {
             return;
         };
+        let asks = source.profile.needs_password()
+            && source.profile.gui_options().password_save == db_core::PasswordSave::Never;
+        if asks {
+            let this = cx.entity().downgrade();
+            let (name, user) = (source.name.clone(), source.profile.user.clone());
+            crate::prompt::ask(&name, &user, window, cx, move |secret, cx| {
+                if let (Some(secret), Some(this)) = (secret, this.upgrade()) {
+                    this.update(cx, |this, cx| this.run_test(root, source, Some(secret), cx));
+                }
+            });
+            return;
+        }
+        self.run_test(root, source, None, cx);
+    }
+
+    fn run_test(
+        &mut self,
+        root: PathBuf,
+        source: DataSource,
+        password: Option<db_core::Secret>,
+        cx: &mut Context<Self>,
+    ) {
         let name = source.name.clone();
-        let test = crate::store(cx).test(&root, source, None);
+        let test = crate::store(cx).test(&root, source, password);
         let run = cx.background_spawn(test);
         self.test_task = cx.spawn(async move |this, cx| {
             let result = run.await;

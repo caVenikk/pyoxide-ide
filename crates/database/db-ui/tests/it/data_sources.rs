@@ -219,7 +219,7 @@ fn never_asks_for_the_password(cx: &mut TestAppContext) {
     h.invoke("db.password-prompt.set", json!({"value": SECRET}));
     h.invoke("db.password-prompt.ok", Value::Null);
     let s = state(&mut h);
-    assert!(s["prompt"].is_null() || s["prompt"]["field"].is_object());
+    assert!(s["prompt"].is_null(), "the prompt closed: {s}");
     assert_eq!(s["dialog"]["test"]["state"], "ok", "{s}");
     assert_eq!(store.password("postgres@localhost"), None);
     assert!(!s.to_string().contains(SECRET));
@@ -357,4 +357,29 @@ fn import_adds_data_sources(cx: &mut TestAppContext) {
     h.invoke("db.explorer.import-data-sources", Value::Null);
     let s = state(&mut h);
     assert_eq!(s["explorer"]["sources"][0]["name"], "imported", "{s}");
+}
+
+/// Test Connection from the tool window asks for a password that is not
+/// kept, on every connect.
+#[gpui::test]
+fn the_tool_window_asks_for_a_password_that_is_not_kept(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let store = FakeStore::new(SECRET);
+    let mut profile = pg();
+    profile.gui = Some(db_core::GuiOptions {
+        password_save: db_core::PasswordSave::Never,
+        ..Default::default()
+    });
+    store.add(&root, "local", profile);
+    let mut h = open(cx, store.clone(), &root);
+    for round in 1..=2 {
+        h.invoke("db.explorer.test-connection", Value::Null);
+        let s = state(&mut h);
+        assert_eq!(s["prompt"]["name"], "local", "round {round}: {s}");
+        h.invoke("db.password-prompt.set", json!({"value": SECRET}));
+        h.invoke("db.password-prompt.ok", Value::Null);
+        assert!(state(&mut h)["prompt"].is_null());
+        assert_eq!(store.tests(), round);
+    }
+    assert_eq!(store.password("local"), None);
 }
