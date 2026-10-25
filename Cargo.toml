@@ -47,6 +47,7 @@ members = [
     "crates/platform/workbench/tests/fixture-module",
     "crates/database/sql-syntax",
     "crates/database/db-model",
+    "crates/database/db-session",
     "crates/python/py-debug",
     "crates/python/py-env",
     "crates/python/py-lsp",
@@ -143,6 +144,7 @@ vcs-ui = { path = "crates/platform/vcs-ui" }
 workbench = { path = "crates/platform/workbench" }
 sql-syntax = { path = "crates/database/sql-syntax" }
 db-model = { path = "crates/database/db-model" }
+db-session = { path = "crates/database/db-session" }
 py-debug = { path = "crates/python/py-debug" }
 py-env = { path = "crates/python/py-env" }
 py-lsp = { path = "crates/python/py-lsp" }
