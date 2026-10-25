@@ -21,8 +21,19 @@ fn print_lines(n: usize) -> String {
 
 static PRINTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// Frames the terminal must show the same state in before it counts as
+/// settled (ConPTY hands the shell's output over in bursts, with pauses
+/// between them).
+const SETTLED_FRAMES: usize = 60;
+
+thread_local! {
+    /// The binding being checked, for the panic messages of the waits.
+    static BINDING: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
     let offset = |s: &Value| s["display_offset"].as_u64().unwrap();
+    BINDING.with(|b| *b.borrow_mut() = what.to_owned());
     match command {
         "terminal.copy" => {
             h.terminal_with_history();
@@ -80,17 +91,29 @@ fn check_terminal(h: &mut H, command: &str, keys: &str, what: &str) {
         "terminal.line-down" | "terminal.page-down" => {
             h.terminal_with_history();
             h.invoke("terminal.page-up", json!(null));
-            let scrolled = h.wait_terminal("scrolled up", |s| offset(s) > 0);
+            let scrolled = h.wait_terminal("the view scrolled up by page-up", |s| offset(s) > 0);
             let up = offset(&scrolled);
             h.press(keys);
-            let s = h.wait_terminal(what, |s| offset(s) < up);
-            if command == "terminal.line-down" {
-                let late = history(&s) - history(&scrolled);
-                let o = offset(&s);
-                assert!(o + 1 >= up && o < up + late, "{what}: {o}, {up} - 1 + {late}");
+            // Output that arrives while the view is scrolled up moves the
+            // offset with it, by exactly the lines it adds to the history.
+            // So the key has taken effect once the offset is below what the
+            // history growth alone would make it.
+            let grown = |s: &Value| history(s) - history(&scrolled);
+            let s = h.wait_terminal(&format!("the offset below {up} + growth"), |s| {
+                offset(s) < up + grown(s)
+            });
+            let step = if command == "terminal.line-down" {
+                1
             } else {
-                assert_eq!(offset(&s), 0, "{what}");
-            }
+                s["rows"].as_u64().unwrap()
+            };
+            let expected = (up + grown(&s)).saturating_sub(step);
+            assert_eq!(
+                offset(&s),
+                expected,
+                "{what}: offset {up} + {} history lines since - {step}: {s:#}",
+                grown(&s)
+            );
             h.invoke("terminal.page-down", json!(null));
         }
         _ => unreachable!("{command}"),
@@ -259,6 +282,7 @@ impl H<'_> {
 
     /// Waits (at most about 20 s) for a terminal state that `f` accepts;
     /// frames are drawn meanwhile (a frame takes the session's snapshot).
+    /// The panic names the binding being checked and the step.
     fn wait_terminal(&mut self, what: &str, f: impl Fn(&Value) -> bool) -> Value {
         let mut last = Value::Null;
         for _ in 0..2000 {
@@ -269,7 +293,8 @@ impl H<'_> {
                 return last;
             }
         }
-        panic!("timed out waiting for {what}: {last:#}");
+        let binding = BINDING.with(|b| b.borrow().clone());
+        panic!("binding {binding}: timed out waiting for {what}: {last:#}");
     }
 
     /// Shows the terminal (a plain shell) with the focus in it, optionally
@@ -320,16 +345,46 @@ impl H<'_> {
         panic!("the shell did not get idle");
     }
 
-    /// The terminal with `line0` to `line99` printed (a scrollback).
+    /// The terminal with `line0` to `line99` printed (a scrollback), the
+    /// shell's next prompt drawn below the mark and the terminal settled:
+    /// nothing changes any more until a key is pressed.
     fn terminal_with_history(&mut self) -> Value {
         let n = PRINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.open_terminal(Some(&print_lines(n)));
         let mark = format!("mark{n}");
+        let row_of_mark = |s: &Value| {
+            s["lines"]
+                .as_array()
+                .and_then(|l| l.iter().rposition(|l| l.as_str().unwrap() == mark))
+        };
         self.wait_terminal("the printed lines", |s| {
-            s["history"].as_u64().is_some_and(|h| h > 10)
-                && s["lines"]
-                    .as_array()
-                    .is_some_and(|l| l.iter().any(|l| l.as_str().unwrap() == mark))
+            s["history"].as_u64().is_some_and(|h| h > 10) && row_of_mark(s).is_some()
+        });
+        // The prompt comes after the mark, in a later burst on ConPTY: the
+        // cursor is below the mark, past the first column.
+        self.wait_terminal("the prompt below the mark", |s| {
+            let cursor = &s["cursor"];
+            row_of_mark(s).is_some_and(|m| {
+                cursor["line"].as_u64().is_some_and(|l| l as usize > m)
+                    && cursor["column"].as_u64().is_some_and(|c| c > 0)
+            })
+        });
+        self.wait_settled()
+    }
+
+    /// Waits until the terminal shows the same state (history, cursor and
+    /// lines) in [`SETTLED_FRAMES`] frames in a row.
+    fn wait_settled(&mut self) -> Value {
+        let seen: std::cell::RefCell<(Value, usize)> = Default::default();
+        self.wait_terminal("the terminal to settle (no output)", |s| {
+            let now = json!([s["history"], s["cursor"], s["lines"]]);
+            let mut seen = seen.borrow_mut();
+            if seen.0 == now {
+                seen.1 += 1;
+            } else {
+                *seen = (now, 1);
+            }
+            seen.1 >= SETTLED_FRAMES
         })
     }
 }
