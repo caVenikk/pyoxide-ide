@@ -309,6 +309,21 @@ impl DataSourceStore for ProjectStore {
         })
     }
 
+    fn databases(
+        &self,
+        project: &Path,
+        source: DataSource,
+        password: Option<Secret>,
+    ) -> BoxFuture<Result<Vec<String>, Failure>> {
+        let svc = self.service(project);
+        spawn(async move {
+            let dialect = source.profile.dialect();
+            db_service::ops::profile_databases(&svc, &source.name, &source.profile, password)
+                .await
+                .map_err(|e| failure(dialect, e))
+        })
+    }
+
     fn import_pycharm(&self, project: &Path) -> Result<ImportSummary, String> {
         let svc = self.service(project);
         let args = db_service::import::PycharmImportArgs {

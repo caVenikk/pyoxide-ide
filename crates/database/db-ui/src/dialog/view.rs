@@ -81,6 +81,67 @@ const SUCCEEDED: &str = "Succeeded";
 const FAILED: &str = "Failed";
 const COPY: &str = "Copy";
 const EMPTY_LIST: &str = "No data sources";
+const PROBLEMS: &str = "Problems";
+/// The Problems row under the list: the gap above its line, its indent.
+const PROBLEMS_GAP: f32 = 22.0;
+const PROBLEMS_INDENT: f32 = 26.0;
+/// The pointer of the test result towards the status icon (width,
+/// height) and where its tip is from the result's left edge.
+const POINTER: (f32, f32) = (14.0, 7.0);
+const POINTER_TIP: f32 = 182.0;
+
+/// The pointer under a balloon: a triangle in the balloon's fill with its
+/// outline on the two slanted sides.
+fn pointer(fill: gpui::Hsla, edge: gpui::Hsla) -> AnyElement {
+    use gpui::{PathBuilder, point};
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let (x0, x1) = (bounds.left(), bounds.right());
+            let mid = bounds.left() + px(POINTER.0 / 2.0);
+            let (base, tip) = (bounds.top() - px(1.0), bounds.bottom());
+            let mut path = PathBuilder::fill();
+            path.move_to(point(x0, base));
+            path.line_to(point(mid, tip));
+            path.line_to(point(x1, base));
+            path.close();
+            if let Ok(path) = path.build() {
+                window.paint_path(path, fill);
+            }
+            let mut line = PathBuilder::stroke(px(1.0));
+            line.move_to(point(x0, base));
+            line.line_to(point(mid, tip));
+            line.line_to(point(x1, base));
+            if let Ok(path) = line.build() {
+                window.paint_path(path, edge);
+            }
+        },
+    )
+    .absolute()
+    .left(px(POINTER_TIP - POINTER.0 / 2.0))
+    .bottom(px(-POINTER.1))
+    .w(px(POINTER.0))
+    .h(px(POINTER.1))
+    .into_any_element()
+}
+
+/// Height of the expanded editor of a field.
+const EXPANDED_HEIGHT: f32 = 120.0;
+
+/// The colour of a data source's colour name (the IDE's file colours of
+/// the dark themes, as a dot).
+fn color_value(name: &str) -> gpui::Hsla {
+    let rgb = match name {
+        "blue" => 0x2f4d73,
+        "green" => 0x3b5139,
+        "orange" => 0x6e4b2f,
+        "rose" => 0x6e3a43,
+        "violet" => 0x55416e,
+        "yellow" => 0x6b6332,
+        _ => 0x4d4f53,
+    };
+    gpui::rgb(rgb).into()
+}
 const NOTHING_SELECTED: &str = "Select a data source or add one with +";
 
 impl DataSourcesDialog {
@@ -255,7 +316,32 @@ impl DataSourcesDialog {
                     .children(rows)
                     .when(self.items.is_empty(), |d| {
                         d.child(div().px(px(10.0)).text_color(muted).child(EMPTY_LIST))
-                    }),
+                    })
+                    .child(
+                        // The data sources' problems (`Problems`): what keeps
+                        // one from being saved.
+                        div()
+                            .id("data-sources-problems")
+                            .debug_selector(|| "data-sources-problems".into())
+                            .mt(px(PROBLEMS_GAP))
+                            .pt(px(PROBLEMS_GAP - 6.0))
+                            .border_t_1()
+                            .border_color(theme.color(UiRole::Divider))
+                            .pl(px(PROBLEMS_INDENT))
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(PROBLEMS)
+                            .children(self.problem().map(|(_, p)| {
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .gap(px(6.0))
+                                    .text_color(theme.color(UiRole::Danger))
+                                    .child(Icon::new(IconName::ERROR).size(px(14.0)))
+                                    .child(div().flex_1().child(p))
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -263,12 +349,140 @@ impl DataSourcesDialog {
     /// A text field of the form.
     fn field(&self, id: FieldId, error: bool, window: &Window, cx: &App) -> gpui::Div {
         let selector = format!("data-source-{}", id.id());
-        editor::field::frame(self.editor(id), id.ui_font(), error, window, cx).child(
-            div()
-                .id(SharedString::from(selector.clone()))
-                .debug_selector(move || selector.clone())
+        let anchors = self.field_anchors.clone();
+        editor::field::frame(self.editor(id), id.ui_font(), error, window, cx)
+            .relative()
+            .child(
+                div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .absolute()
+                    .size_0(),
+            )
+            .child(
+                canvas(
+                    move |b, _, _| {
+                        anchors.borrow_mut().insert(id, b);
+                    },
+                    |_, _, _, _| {},
+                )
                 .absolute()
-                .size_0(),
+                .size_full(),
+            )
+    }
+
+    /// A field with the Expand button at its end (`ExpandableTextField`).
+    fn expandable(&self, id: FieldId, error: bool, window: &Window, cx: &App) -> gpui::Div {
+        self.field(id, error, window, cx)
+            .child(ui::form::field_button(
+                SharedString::from(format!("data-source-expand-{}", id.id())),
+                IconName::EXPAND,
+                "Expand",
+                Some(Box::new(DialogExpand {
+                    field: id.id().to_owned(),
+                })),
+            ))
+    }
+
+    /// The Database field: editable, with the list of the server's
+    /// databases behind its arrow.
+    fn database_field(&self, window: &Window, cx: &App) -> gpui::Div {
+        let anchors = self.anchors.clone();
+        self.field(FieldId::Database, false, window, cx)
+            .child(
+                canvas(
+                    move |b, _, _| {
+                        anchors.borrow_mut().insert(ListId::Database, b);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(ui::form::field_button(
+                "data-source-database-list",
+                IconName::CHEVRON_DOWN,
+                "Show Databases",
+                Some(Box::new(DialogOpenList {
+                    list: ListId::Database.id().to_owned(),
+                })),
+            ))
+    }
+
+    /// The Color choice at the end of the Name field.
+    fn color_choice(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let color = self.item().and_then(|i| i.gui().color);
+        let anchors = self.anchors.clone();
+        let label = color
+            .as_deref()
+            .and_then(|c| COLORS.iter().find(|(id, _)| *id == c))
+            .map(|(_, l)| *l)
+            .unwrap_or("Color");
+        div()
+            .id("data-source-color")
+            .debug_selector(|| "data-source-color".into())
+            .relative()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(4.0))
+            .text_color(theme.color(UiRole::TextMuted))
+            .children(
+                color
+                    .as_deref()
+                    .map(|c| div().size(px(10.0)).rounded_full().bg(color_value(c))),
+            )
+            .child(label)
+            .child(Icon::new(IconName::CHEVRON_DOWN).size(px(14.0)))
+            .child(
+                canvas(
+                    move |b, _, _| {
+                        anchors.borrow_mut().insert(ListId::Color, b);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.open_list(ListId::Color, window, cx)))
+            .into_any_element()
+    }
+
+    /// The expanded editor over its field, with a backdrop that closes it.
+    fn render_expanded(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let id = self.expanded?;
+        let bounds = self.field_anchors.borrow().get(&id).copied()?;
+        let theme = cx.theme();
+        let focused = self.expand_editor.focus_handle(cx).is_focused(window);
+        Some(
+            div()
+                .id("data-source-expanded-backdrop")
+                .occlude()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.collapse(window, cx)),
+                )
+                .child(
+                    ui::components::input_frame(focused, false, cx)
+                        .id("data-source-expanded")
+                        .debug_selector(|| "data-source-expanded".into())
+                        .occlude()
+                        .absolute()
+                        .left(bounds.left())
+                        .top(bounds.top())
+                        .w(bounds.size.width)
+                        .h(px(EXPANDED_HEIGHT))
+                        .p(px(6.0))
+                        .bg(theme.color(UiRole::Input))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(self.expand_editor.clone()),
+                )
+                .into_any_element(),
         )
     }
 
@@ -379,6 +593,7 @@ impl DataSourcesDialog {
         let name_error = self
             .item()
             .is_some_and(|i| db_core::profile::validate_name(&i.source.name).is_err());
+        let color = self.color_choice(cx);
         let link = ui::link::link("data-source-add-comment", ADD_COMMENT, cx)
             .debug_selector(|| "data-source-add-comment".into())
             .on_click(cx.listener(|this, _, window, cx| {
@@ -403,12 +618,12 @@ impl DataSourcesDialog {
                     .items_center()
                     .gap(px(12.0))
                     .child(div().flex_none().child(NAME))
-                    .child(div().flex_1().min_w(px(0.0)).child(self.field(
-                        FieldId::Name,
-                        name_error,
-                        window,
-                        cx,
-                    )))
+                    .child(
+                        div().flex_1().min_w(px(0.0)).child(
+                            self.field(FieldId::Name, name_error, window, cx)
+                                .child(color),
+                        ),
+                    )
                     .when(!comment_shown, |d| d.child(link)),
             )
             .when(comment_shown, |d| {
@@ -579,12 +794,8 @@ impl DataSourcesDialog {
             match dialect {
                 Dialect::Postgres => rows.push((
                     GROUP_GAP,
-                    Self::row(
-                        DATABASE,
-                        LABEL_WIDTH,
-                        self.field(FieldId::Database, false, window, cx),
-                    )
-                    .into_any_element(),
+                    Self::row(DATABASE, LABEL_WIDTH, self.database_field(window, cx))
+                        .into_any_element(),
                 )),
                 Dialect::Oracle => rows.push((
                     GROUP_GAP,
@@ -620,7 +831,7 @@ impl DataSourcesDialog {
                     .child(Self::row(
                         URL,
                         LABEL_WIDTH,
-                        self.field(FieldId::Url, self.url_error.is_some(), window, cx),
+                        self.expandable(FieldId::Url, self.url_error.is_some(), window, cx),
                     ))
                     .child(
                         div().pl(px(LABEL_WIDTH)).child(
@@ -763,7 +974,7 @@ impl DataSourcesDialog {
                     Self::row(
                         "Startup script:",
                         label_w,
-                        self.field(FieldId::StartupScript, false, window, cx),
+                        self.expandable(FieldId::StartupScript, false, window, cx),
                     )
                     .into_any_element(),
                 ),
@@ -1215,7 +1426,7 @@ impl DataSourcesDialog {
                 .occlude()
                 .absolute()
                 .left(px(RESULT_LEFT))
-                .bottom(px(TEST_BAR + 2.0))
+                .bottom(px(TEST_BAR + POINTER.1))
                 .w(px(RESULT_WIDTH))
                 .flex()
                 .flex_col()
@@ -1239,6 +1450,10 @@ impl DataSourcesDialog {
                         ),
                 )
                 .children(lines)
+                .child(pointer(
+                    theme.color(UiRole::SurfaceRaised),
+                    theme.color(UiRole::PopupBorder),
+                ))
                 .into_any_element(),
         )
     }
@@ -1451,6 +1666,7 @@ impl Render for DataSourcesDialog {
         let list = self.render_list(window, cx);
         let page = self.render_page(window, cx);
         let footer = self.render_footer(cx);
+        let expanded = self.render_expanded(window, cx);
         div()
             .id("data-sources-dialog")
             .debug_selector(|| "data-sources-dialog".into())
@@ -1520,8 +1736,17 @@ impl Render for DataSourcesDialog {
                     cx.stop_propagation();
                 }),
             )
+            .on_action(cx.listener(|this, a: &DialogExpand, window, cx| {
+                if let Some(id) = FieldId::from_id(&a.field) {
+                    this.expand(id, window, cx);
+                }
+            }))
             .capture_action(
                 cx.listener(|this, _: &editor::commands::Newline, window, cx| {
+                    // The expanded editor takes new lines.
+                    if this.expanded.is_some() {
+                        return;
+                    }
                     this.save(true, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1529,6 +1754,9 @@ impl Render for DataSourcesDialog {
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                 let m = &e.keystroke.modifiers;
                 if m.control || m.alt || m.platform || m.shift {
+                    return;
+                }
+                if this.expanded.is_some() && e.keystroke.key == "enter" {
                     return;
                 }
                 match e.keystroke.key.as_str() {
@@ -1568,6 +1796,7 @@ impl Render for DataSourcesDialog {
                     .child(page),
             )
             .child(footer)
+            .children(expanded)
             .child(ui::pointer::frame())
             .children(ui::dialog_window::blocker(window, cx))
     }
@@ -1576,6 +1805,10 @@ impl Render for DataSourcesDialog {
 impl DataSourcesDialog {
     /// Escape: closes the message or the result, else the dialog.
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.expanded.is_some() {
+            self.collapse(window, cx);
+            return;
+        }
         if self.failure.take().is_some() || self.result_shown {
             self.result_shown = false;
             cx.notify();

@@ -117,6 +117,16 @@ pub trait DataSourceStore: Send + Sync {
         password: Option<Secret>,
     ) -> BoxFuture<Result<Vec<SchemaInfo>, Failure>>;
 
+    /// The databases the server of `source` offers, for the Database
+    /// field's list (empty for an engine with one database), connecting
+    /// as [`Self::test`] does.
+    fn databases(
+        &self,
+        project: &Path,
+        source: DataSource,
+        password: Option<Secret>,
+    ) -> BoxFuture<Result<Vec<String>, Failure>>;
+
     /// Imports the data sources of the PyCharm project at `project`
     /// (`.idea/dataSources.xml`), without their passwords.
     fn import_pycharm(&self, project: &Path) -> Result<ImportSummary, String>;
@@ -330,6 +340,19 @@ pub mod fake {
                     connect_ms: 3.0,
                     ping_ms: 1.0,
                 })
+            })
+        }
+
+        fn databases(
+            &self,
+            _: &Path,
+            source: DataSource,
+            password: Option<Secret>,
+        ) -> BoxFuture<Result<Vec<String>, Failure>> {
+            let connect = self.connect(&source, password);
+            Box::pin(async move {
+                connect.await?;
+                Ok(vec!["postgres".into(), "pyoxide".into()])
             })
         }
 

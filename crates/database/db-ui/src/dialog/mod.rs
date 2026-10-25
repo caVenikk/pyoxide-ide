@@ -76,6 +76,10 @@ ui::ui_commands! {
     /// Read the schemas.
     DialogLoadSchemas => "db.data-sources.load-schemas", "Refresh Schemas",
         "Reads the schemas of the selected data source for the Schemas tab.";
+    /// Expand a field.
+    DialogExpand { field: String } => "db.data-sources.expand", "Expand",
+        "Shows the text of a field (`url`, `startup-script`) in a larger editor under it; Escape or a click elsewhere goes back to the field.",
+        r#"{"field": "url"}"#;
     /// Add a comment.
     DialogAddComment => "db.data-sources.add-comment", "Add Comment",
         "Shows the comment field of the selected data source.";
@@ -246,10 +250,12 @@ pub(crate) enum ListId {
     Level,
     SslMode,
     Add,
+    Database,
+    Color,
 }
 
 impl ListId {
-    const ALL: [ListId; 9] = [
+    const ALL: [ListId; 11] = [
         ListId::Driver,
         ListId::Auth,
         ListId::Save,
@@ -259,6 +265,8 @@ impl ListId {
         ListId::Level,
         ListId::SslMode,
         ListId::Add,
+        ListId::Database,
+        ListId::Color,
     ];
 
     fn id(self) -> &'static str {
@@ -272,6 +280,8 @@ impl ListId {
             ListId::Level => "level",
             ListId::SslMode => "ssl-mode",
             ListId::Add => "add",
+            ListId::Database => "database-list",
+            ListId::Color => "color",
         }
     }
 
@@ -315,8 +325,23 @@ pub(crate) fn choices(list: ListId) -> Vec<(&'static str, &'static str)> {
             .iter()
             .map(|b| (b.id(), backend_title(*b)))
             .collect(),
+        // The server's databases, read when the list opens.
+        ListId::Database => Vec::new(),
+        ListId::Color => COLORS.to_vec(),
     }
 }
+
+/// The colours of a data source (the names of the IDE's file colours).
+pub(crate) const COLORS: [(&str, &str); 8] = [
+    ("none", "No color"),
+    ("blue", "Blue"),
+    ("green", "Green"),
+    ("orange", "Orange"),
+    ("rose", "Rose"),
+    ("violet", "Violet"),
+    ("yellow", "Yellow"),
+    ("gray", "Gray"),
+];
 
 /// What happens to the typed password of an item.
 #[derive(Debug, Clone, Default)]
@@ -544,12 +569,22 @@ pub struct DataSourcesDialog {
     list: Option<OpenList>,
     /// Where each combo is, for its list.
     anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<ListId, Bounds<Pixels>>>>,
+    /// Where the expandable fields are, for the expanded editor.
+    field_anchors:
+        std::rc::Rc<std::cell::RefCell<std::collections::HashMap<FieldId, Bounds<Pixels>>>>,
     focus: FocusHandle,
     filling: bool,
     test_task: Task<()>,
     schema_task: Task<()>,
     save_task: Task<()>,
     kept_task: Task<()>,
+    /// The server's databases as last read (the Database field's list).
+    databases: Option<Vec<String>>,
+    databases_task: Task<()>,
+    /// The field whose text shows in the expanded editor
+    /// (`ExpandableTextField`), and that editor.
+    expanded: Option<FieldId>,
+    expand_editor: Entity<Editor>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -583,6 +618,22 @@ impl DataSourcesDialog {
                 (id, editor)
             })
             .collect();
+        let expand_editor = cx.new(|cx| {
+            let mut e = Editor::new(text::Buffer::new(""), window, cx);
+            e.set_transparent(true);
+            e.set_config(editor::EditorConfig {
+                brackets: Vec::new(),
+                ..editor::EditorConfig::default()
+            });
+            e
+        });
+        subscriptions.push(
+            cx.subscribe(&expand_editor, |this, _, e: &editor::EditorEvent, cx| {
+                if matches!(e, editor::EditorEvent::Edited(_)) {
+                    this.expanded_edited(cx);
+                }
+            }),
+        );
         let password = cx.new(|cx| PasswordField::new("data-source-password", cx));
         subscriptions.push(cx.subscribe(&password, |this, _, _: &PasswordEdited, cx| {
             this.password_edited(cx)
@@ -618,12 +669,17 @@ impl DataSourcesDialog {
             schemas_loading: false,
             list: None,
             anchors: Default::default(),
+            field_anchors: Default::default(),
             focus,
             filling: false,
             test_task: Task::ready(()),
             schema_task: Task::ready(()),
             save_task: Task::ready(()),
             kept_task: Task::ready(()),
+            databases: None,
+            databases_task: Task::ready(()),
+            expanded: None,
+            expand_editor,
             _subscriptions: subscriptions,
         };
         match initial {
@@ -786,6 +842,9 @@ impl DataSourcesDialog {
     fn select(&mut self, at: Option<usize>, cx: &mut Context<Self>) {
         self.close_list(cx);
         self.selected = at;
+        self.databases = None;
+        self.databases_task = Task::ready(());
+        self.expanded = None;
         self.test = TestState::Idle;
         self.result_shown = false;
         self.failure = None;
@@ -934,6 +993,7 @@ impl DataSourcesDialog {
             }
         }
         if connection_changed {
+            self.databases = None;
             let url = self.item().map(|i| crate::url::format(i.profile()));
             if let Some(url) = url {
                 self.filling = true;
@@ -943,6 +1003,44 @@ impl DataSourcesDialog {
             }
         }
         cx.notify();
+    }
+
+    /// Shows `id`'s text in the expanded editor under the field.
+    pub(crate) fn expand(&mut self, id: FieldId, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.text(id, cx);
+        self.expand_editor.update(cx, |e, cx| {
+            e.set_text_selected(&text, cx);
+            let end = e.text().chars().count();
+            e.set_selections(text::SelectionSet::caret(end), cx);
+        });
+        self.expanded = Some(id);
+        let focus = self.expand_editor.focus_handle(cx);
+        window.focus(&focus);
+        cx.notify();
+    }
+
+    /// Back to the one-line field.
+    pub(crate) fn collapse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.expanded.take() {
+            let focus = self.editor(id).focus_handle(cx);
+            window.focus(&focus);
+        }
+        cx.notify();
+    }
+
+    fn expanded_edited(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.expanded else {
+            return;
+        };
+        let text = self.expand_editor.read(cx).text();
+        // A URL is one line.
+        let text = if id == FieldId::Url {
+            text.replace(['\n', '\r'], "")
+        } else {
+            text
+        };
+        self.set_text(id, &text, cx);
+        self.field_edited(id, cx);
     }
 
     /// The connection fields again after the URL set them.
@@ -1155,6 +1253,18 @@ impl DataSourcesDialog {
                 };
                 tls_mut(item).mode = mode;
             }
+            ListId::Color => {
+                let color = match value {
+                    "none" => None,
+                    id if COLORS.iter().any(|(c, _)| *c == id) => Some(id.to_owned()),
+                    _ => return false,
+                };
+                item.set_gui(|g| g.color = color);
+            }
+            ListId::Database => {
+                self.set_text(FieldId::Database, value, cx);
+                self.field_edited(FieldId::Database, cx);
+            }
             ListId::Add => {
                 let Some(backend) = Backend::from_id(value) else {
                     return false;
@@ -1262,6 +1372,8 @@ impl DataSourcesDialog {
 
     fn on_set(&mut self, a: &DialogSet, window: &mut Window, cx: &mut Context<Self>) {
         let (field, value) = (a.field.as_str(), a.value.as_str());
+        // A row of an open list was chosen: the list closes.
+        self.close_list(cx);
         if field == "password" {
             self.password.update(cx, |f, cx| f.set(value, cx));
             return;
@@ -1417,6 +1529,7 @@ impl DataSourcesDialog {
                 match result {
                     Ok(info) => {
                         this.test = TestState::Ok(info);
+                        this.load_databases(false, None, cx);
                         this.result_shown = true;
                     }
                     Err(failure) => {
@@ -1503,7 +1616,11 @@ impl DataSourcesDialog {
                 TlsMode::VerifyCa => "verify-ca",
                 TlsMode::VerifyFull => "verify-full",
             },
-            ListId::Add => return None,
+            ListId::Color => {
+                let color = gui.color.as_deref().unwrap_or("none");
+                COLORS.iter().find(|(c, _)| *c == color)?.0
+            }
+            ListId::Add | ListId::Database => return None,
         })
     }
 
@@ -1522,26 +1639,43 @@ impl DataSourcesDialog {
             return;
         }
         self.close_list(cx);
-        let current = self.current_choice(list);
-        let items: Vec<MenuItem> = choices(list)
+        let mut current = self.current_choice(list).map(str::to_owned);
+        let entries: Vec<(String, String)> = if list == ListId::Database {
+            let Some(databases) = self.databases.clone() else {
+                // Read first; the list opens when they are there.
+                self.load_databases(true, Some(window), cx);
+                return;
+            };
+            current = self.item().and_then(|i| i.profile().database.clone());
+            databases.into_iter().map(|d| (d.clone(), d)).collect()
+        } else {
+            choices(list)
+                .into_iter()
+                .map(|(id, label)| (id.to_owned(), label.to_owned()))
+                .collect()
+        };
+        let items: Vec<MenuItem> = entries
             .into_iter()
             .map(|(id, label)| {
                 let item = MenuItem::action(
                     label,
                     DialogSet {
                         field: list.id().to_owned(),
-                        value: id.to_owned(),
+                        value: id.clone(),
                     },
                 );
                 let item = match list {
                     ListId::Driver | ListId::Add => {
-                        item.icon(icons::backend(Backend::from_id(id).expect("a backend")))
+                        item.icon(icons::backend(Backend::from_id(&id).expect("a backend")))
                     }
                     _ => item,
                 };
-                item.bold(Some(id) == current && list != ListId::Add)
+                item.bold(Some(&id) == current.as_ref() && list != ListId::Add)
             })
             .collect();
+        if items.is_empty() {
+            return;
+        }
         let bounds = self.anchors.borrow().get(&list).copied();
         let position = match bounds {
             Some(b) => gpui::point(b.left(), b.bottom() + px(2.0)),
@@ -1562,6 +1696,49 @@ impl DataSourcesDialog {
             self.list = Some(OpenList { list, popup });
         }
         cx.notify();
+    }
+
+    /// Reads the server's databases for the Database field's list; with
+    /// `open`, the list opens when they are there.
+    fn load_databases(&mut self, open: bool, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        let Some(item) = self.item().cloned() else {
+            return;
+        };
+        if item.profile().dialect() != Dialect::Postgres || item.profile().validate().is_err() {
+            return;
+        }
+        let at = self.selected;
+        let password = self.password_to_try(&item);
+        let read = crate::store(cx).databases(&self.root, item.source, password);
+        let run = cx.background_spawn(read);
+        let finish = move |this: &mut Self, result: Result<Vec<String>, Failure>| {
+            if this.selected != at {
+                return false;
+            }
+            match result {
+                Ok(databases) => this.databases = Some(databases),
+                Err(f) => this.banner = Some(failure_text(&f).replace('\n', " ")),
+            }
+            true
+        };
+        self.databases_task = match window {
+            Some(window) if open => cx.spawn_in(window, async move |this, cx| {
+                let result = run.await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if finish(this, result) && this.databases.is_some() {
+                        this.open_list(ListId::Database, window, cx);
+                    }
+                    cx.notify();
+                });
+            }),
+            _ => cx.spawn(async move |this, cx| {
+                let result = run.await;
+                let _ = this.update(cx, |this, cx| {
+                    finish(this, result);
+                    cx.notify();
+                });
+            }),
+        };
     }
 
     fn close_list(&mut self, cx: &mut Context<Self>) {
@@ -1732,6 +1909,8 @@ impl DataSourcesDialog {
                 "name": f.name, "text": failure_text(&f.failure), "auth": f.failure.auth,
             })),
             "banner": self.banner,
+            "databases": self.databases,
+            "expanded": self.expanded.map(FieldId::id),
             "schemas_loading": self.schemas_loading,
             "save_error": self.save_error,
             "problem": self.problem().map(|(_, p)| p),

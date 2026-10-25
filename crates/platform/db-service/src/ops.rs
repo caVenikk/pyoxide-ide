@@ -307,6 +307,35 @@ pub async fn profile_schemas(
     r
 }
 
+/// The databases the server of `profile` offers (PostgreSQL: those that
+/// accept connections and are no templates); other engines have one, so
+/// the list is empty.
+pub async fn profile_databases(
+    svc: &DbService,
+    name: &str,
+    profile: &Profile,
+    password: Option<Secret>,
+) -> Result<Vec<String>, Error> {
+    if profile.dialect() != db_core::Dialect::Postgres {
+        return Ok(Vec::new());
+    }
+    let opened = open_profile(svc, name, profile, password).await?;
+    let r = opened
+        .conn
+        .query(
+            "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname",
+            &[],
+            1000,
+        )
+        .await;
+    opened.conn.close().await.ok();
+    Ok(r?
+        .rows
+        .into_iter()
+        .filter_map(|row| row.into_iter().next().and_then(|v| v.to_text()))
+        .collect())
+}
+
 /// Opens `profile` (saved or not) under the name `name` with the given
 /// password, else the one found the usual way.
 pub async fn open_profile(

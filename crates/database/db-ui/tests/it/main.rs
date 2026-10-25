@@ -63,8 +63,22 @@ pub fn set(h: &mut Harness, field: &str, value: &str) {
     );
 }
 
-#[allow(dead_code)]
-pub fn root_of(h: &mut Harness) -> PathBuf {
-    let s = state(h);
-    Path::new(s["explorer"]["root"].as_str().unwrap()).to_owned()
+/// Chooses a row of the dialog's open list: the row's command runs in the
+/// dialog, as a click on it does (commands sent to the window go to the
+/// popup over the dialog).
+pub fn choose_in_list(h: &mut Harness, list: &str, value: &str) {
+    use gpui::AppContext as _;
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let dialog =
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .expect("the dialog");
+    let action = db_ui::dialog::DialogSet {
+        field: list.to_owned(),
+        value: value.to_owned(),
+    };
+    h.cx.update_window(dialog, |_, window, cx| {
+        window.dispatch_action(Box::new(action), cx)
+    })
+    .unwrap();
+    h.draw();
 }

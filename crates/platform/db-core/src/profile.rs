@@ -368,6 +368,10 @@ pub struct GuiOptions {
     /// A note shown with the data source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+    /// The data source's colour (`blue`, `green`, `orange`, `rose`,
+    /// `violet`, `yellow`, `gray`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     /// Transaction mode of new consoles (auto when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_mode: Option<TxMode>,

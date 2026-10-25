@@ -359,6 +359,55 @@ fn import_adds_data_sources(cx: &mut TestAppContext) {
     assert_eq!(s["explorer"]["sources"][0]["name"], "imported", "{s}");
 }
 
+/// The Database field lists the server's databases after a test; the
+/// Color choice and the expanded URL editor.
+#[gpui::test]
+fn databases_color_and_the_expanded_editor(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let store = FakeStore::new(SECRET);
+    store.add(&root, "local", pg());
+    let mut h = open(cx, store.clone(), &root);
+    h.invoke("db.explorer.properties", Value::Null);
+    set(&mut h, "password", SECRET);
+    dialog(&mut h, "db.data-sources.test-connection", Value::Null);
+    let s = state(&mut h);
+    assert_eq!(
+        s["dialog"]["databases"],
+        json!(["postgres", "pyoxide"]),
+        "{s}"
+    );
+    dialog(
+        &mut h,
+        "db.data-sources.open-list",
+        json!({"list": "database-list"}),
+    );
+    let s = state(&mut h);
+    assert_eq!(s["dialog"]["list"]["list"], "database-list", "{s}");
+    choose_in_list(&mut h, "database-list", "postgres");
+    let s = state(&mut h);
+    assert_eq!(s["dialog"]["selected"]["profile"]["database"], "postgres");
+    assert_eq!(
+        s["dialog"]["selected"]["url"],
+        "postgresql://localhost:55432/postgres"
+    );
+
+    set(&mut h, "color", "blue");
+    dialog(&mut h, "db.data-sources.expand", json!({"field": "url"}));
+    assert_eq!(state(&mut h)["dialog"]["expanded"], "url");
+    h.press("escape");
+    let s = state(&mut h);
+    assert!(s["dialog"]["expanded"].is_null(), "{s}");
+    assert!(
+        !s["dialog"].is_null(),
+        "Escape closes the editor, not the dialog"
+    );
+
+    dialog(&mut h, "db.data-sources.ok", Value::Null);
+    let p = &store.sources(&root)[0].profile;
+    assert_eq!(p.gui_options().color.as_deref(), Some("blue"));
+    assert_eq!(p.database.as_deref(), Some("postgres"));
+}
+
 /// Test Connection from the tool window asks for a password that is not
 /// kept, on every connect.
 #[gpui::test]
