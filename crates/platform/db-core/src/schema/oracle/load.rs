@@ -17,13 +17,13 @@ use super::{
     qualified_type, sized_type, view_source,
 };
 use crate::schema::{
-    ArgumentInfo, ArgumentMode, AttributeInfo, ColumnInfo, GeneratedColumn, IdentityKind,
+    ArgumentInfo, ArgumentMode, AttributeInfo, Cells, ColumnInfo, GeneratedColumn, IdentityKind,
     IndexInfo, Introspector, Level, ObjectDetail, ObjectInfo, ObjectKind, RelationInfo,
     RoutineDetail, SchemaInfo, SchemaSnapshot, Scope, SequenceDetail, Snapshot, SourceInfo,
     TableDetail, TriggerDetail, TypeCategory, TypeDetail, fetch_all, has_columns, has_source,
-    opt_text, text,
+    opt_text,
 };
-use crate::{Connection, Dialect, Result, Row, Value};
+use crate::{Connection, Dialect, Result, Value};
 
 /// Tables with the flags of their storage and the partitioning scheme. Same
 /// filter as the table branch of `objects`.
@@ -230,31 +230,31 @@ impl Details {
     async fn read(conn: &dyn Connection, arg: &[Value], schema: &str) -> Result<Self> {
         let mut d = Details::default();
 
-        for r in fetch_all(conn, TABLES, arg).await? {
-            d.tables.insert(text(&r[0]), table_detail(&r));
+        for r in fetch_all(conn, "tables", TABLES, arg).await? {
+            d.tables.insert(r.text(0)?, table_detail(&r)?);
         }
-        for r in fetch_all(conn, SEQUENCES, arg).await? {
-            d.sequences.insert(text(&r[0]), sequence_detail(&r));
+        for r in fetch_all(conn, "sequences", SEQUENCES, arg).await? {
+            d.sequences.insert(r.text(0)?, sequence_detail(&r)?);
         }
 
-        for r in fetch_all(conn, ROUTINES, arg).await? {
-            d.routines.insert(text(&r[0]), routine_detail(&r));
+        for r in fetch_all(conn, "routines", ROUTINES, arg).await? {
+            d.routines.insert(r.text(0)?, routine_detail(&r)?);
         }
-        for r in fetch_all(conn, ARGUMENTS, arg).await? {
-            if let Some(routine) = d.routines.get_mut(&text(&r[0])) {
-                add_argument(routine, &r, schema);
+        for r in fetch_all(conn, "arguments", ARGUMENTS, arg).await? {
+            if let Some(routine) = d.routines.get_mut(&r.text(0)?) {
+                add_argument(routine, &r, schema)?;
             }
         }
 
-        for r in fetch_all(conn, TRIGGERS, arg).await? {
-            d.triggers.insert(text(&r[0]), trigger_detail(&r));
+        for r in fetch_all(conn, "triggers", TRIGGERS, arg).await? {
+            d.triggers.insert(r.text(0)?, trigger_detail(&r)?);
         }
 
-        for r in fetch_all(conn, TYPES, arg).await? {
+        for r in fetch_all(conn, "types", TYPES, arg).await? {
             d.types.insert(
-                text(&r[0]),
+                r.text(0)?,
                 TypeDetail {
-                    category: match text(&r[1]).as_str() {
+                    category: match r.text(1)?.as_str() {
                         "OBJECT" => TypeCategory::Object,
                         "COLLECTION" => TypeCategory::Collection,
                         _ => TypeCategory::Other,
@@ -263,18 +263,18 @@ impl Details {
                 },
             );
         }
-        for r in fetch_all(conn, TYPE_ATTRIBUTES, arg).await? {
-            if let Some(t) = d.types.get_mut(&text(&r[0])) {
+        for r in fetch_all(conn, "type_attributes", TYPE_ATTRIBUTES, arg).await? {
+            if let Some(t) = d.types.get_mut(&r.text(0)?) {
                 t.attributes.push(AttributeInfo {
-                    name: text(&r[1]),
-                    data_type: member_type(&r, schema),
+                    name: r.text(1)?,
+                    data_type: member_type(&r, schema)?,
                 });
             }
         }
-        for r in fetch_all(conn, COLLECTION_TYPES, arg).await? {
-            if let Some(t) = d.types.get_mut(&text(&r[0])) {
-                let element = member_type(&r, schema);
-                t.base_type = Some(match text(&r[1]).as_str() {
+        for r in fetch_all(conn, "collection_types", COLLECTION_TYPES, arg).await? {
+            if let Some(t) = d.types.get_mut(&r.text(0)?) {
+                let element = member_type(&r, schema)?;
+                t.base_type = Some(match r.text(1)?.as_str() {
                     "VARRAY" => format!("VARRAY OF {element}"),
                     _ => format!("TABLE OF {element}"),
                 });
@@ -304,86 +304,90 @@ impl Details {
 
 /// Columns: table name, temporary (`Y`/`N`), IOT type, partitioning type,
 /// partition key columns.
-fn table_detail(r: &Row) -> TableDetail {
-    let partitioning = opt_text(&r[3]);
-    TableDetail {
-        temporary: text(&r[1]) == "Y",
-        index_organized: text(&r[2]) == "IOT",
+fn table_detail(r: &Cells) -> Result<TableDetail> {
+    let partitioning = r.opt_text(3)?;
+    let partition_key = match &partitioning {
+        Some(kind) => Some(format!("{kind} ({})", r.opt_text(4)?.unwrap_or_default())),
+        None => None,
+    };
+    Ok(TableDetail {
+        temporary: r.text(1)? == "Y",
+        index_organized: r.text(2)? == "IOT",
         partitioned: partitioning.is_some(),
-        partition_key: partitioning
-            .map(|kind| format!("{kind} ({})", opt_text(&r[4]).unwrap_or_default())),
+        partition_key,
         ..TableDetail::default()
-    }
+    })
 }
 
 /// Columns: name, min, max, increment, cycle, order, cache.
-fn sequence_detail(r: &Row) -> SequenceDetail {
-    SequenceDetail {
-        min: opt_text(&r[1]),
-        max: opt_text(&r[2]),
-        increment: opt_text(&r[3]),
-        cycle: text(&r[4]) == "Y",
-        cache: r[6].as_i64().filter(|n| *n > 0),
-        ordered: text(&r[5]) == "Y",
+fn sequence_detail(r: &Cells) -> Result<SequenceDetail> {
+    Ok(SequenceDetail {
+        min: r.opt_text(1)?,
+        max: r.opt_text(2)?,
+        increment: r.opt_text(3)?,
+        cycle: r.text(4)? == "Y",
+        cache: r.int(6)?.filter(|n| *n > 0),
+        ordered: r.text(5)? == "Y",
         ..SequenceDetail::default()
-    }
+    })
 }
 
 /// Columns: name, deterministic, pipelined, authid, parallel.
-fn routine_detail(r: &Row) -> RoutineDetail {
+fn routine_detail(r: &Cells) -> Result<RoutineDetail> {
     let mut characteristics = Vec::new();
-    if text(&r[1]) == "YES" {
+    if r.text(1)? == "YES" {
         characteristics.push("DETERMINISTIC".to_owned());
     }
-    if text(&r[2]) == "YES" {
+    if r.text(2)? == "YES" {
         characteristics.push("PIPELINED".to_owned());
     }
-    if text(&r[3]) == "CURRENT_USER" {
+    if r.text(3)? == "CURRENT_USER" {
         characteristics.push("AUTHID CURRENT_USER".to_owned());
     }
-    if text(&r[4]) == "YES" {
+    if r.text(4)? == "YES" {
         characteristics.push("PARALLEL_ENABLE".to_owned());
     }
-    RoutineDetail {
+    Ok(RoutineDetail {
         language: Some("PL/SQL".to_owned()),
         characteristics,
         ..RoutineDetail::default()
-    }
+    })
 }
 
 /// A row of [`ARGUMENTS`] into the routine: position 0 is the return type
 /// of a function, the others are arguments.
-fn add_argument(routine: &mut RoutineDetail, r: &Row, schema: &str) {
-    let Some(data_type) = opt_text(&r[3]) else {
-        return;
+fn add_argument(routine: &mut RoutineDetail, r: &Cells, schema: &str) -> Result<()> {
+    let Some(data_type) = r.opt_text(3)? else {
+        return Ok(());
     };
-    let data_type = match opt_text(&r[7]) {
-        Some(name) => match opt_text(&r[6]) {
+    let data_type = match r.opt_text(7)? {
+        Some(name) => match r.opt_text(6)? {
             Some(owner) => qualified_type(&owner, &name, schema),
             None => name,
         },
         None => data_type,
     };
-    if r[2].as_i64() == Some(0) {
+    if r.int(2)? == Some(0) {
         routine.return_type = Some(data_type);
-        return;
+        return Ok(());
     }
     routine.arguments.push(ArgumentInfo {
-        name: opt_text(&r[1]),
+        name: r.opt_text(1)?,
         data_type,
-        mode: match text(&r[4]).as_str() {
+        mode: match r.text(4)?.as_str() {
             "OUT" => ArgumentMode::Out,
             "IN/OUT" => ArgumentMode::InOut,
             _ => ArgumentMode::In,
         },
-        has_default: text(&r[5]) == "Y",
+        has_default: r.text(5)? == "Y",
     });
+    Ok(())
 }
 
 /// Columns: name, trigger type (`BEFORE EACH ROW`), events (`INSERT OR
 /// UPDATE`), status, `WHEN` condition.
-fn trigger_detail(r: &Row) -> TriggerDetail {
-    let kind = text(&r[1]);
+fn trigger_detail(r: &Cells) -> Result<TriggerDetail> {
+    let kind = r.text(1)?;
     let kind = kind.trim();
     let (timing, each_row) = if kind == "INSTEAD OF" {
         ("INSTEAD OF".to_owned(), true)
@@ -394,8 +398,9 @@ fn trigger_detail(r: &Row) -> TriggerDetail {
     } else {
         (kind.to_owned(), false)
     };
-    TriggerDetail {
-        events: text(&r[2])
+    Ok(TriggerDetail {
+        events: r
+            .text(2)?
             .split(" OR ")
             .map(|e| e.trim().to_owned())
             .filter(|e| !e.is_empty())
@@ -403,32 +408,26 @@ fn trigger_detail(r: &Row) -> TriggerDetail {
         timing: Some(timing).filter(|t| !t.is_empty()),
         each_row,
         function: None,
-        condition: opt_text(&r[4]).map(|c| c.trim().to_owned()),
-        disabled: text(&r[3]) == "DISABLED",
-    }
+        condition: r.opt_text(4)?.map(|c| c.trim().to_owned()),
+        disabled: r.text(3)? == "DISABLED",
+    })
 }
 
 /// The type of an attribute or collection element from columns 2..=8
 /// (`type_mod, type_owner, type_name, length, precision, scale, char_used`)
 /// of [`TYPE_ATTRIBUTES`] and [`COLLECTION_TYPES`].
-fn member_type(r: &Row, schema: &str) -> String {
-    let name = text(&r[4]);
-    let base = sized_type(
-        &name,
-        r[5].as_i64(),
-        r[6].as_i64(),
-        r[7].as_i64(),
-        &text(&r[8]),
-        None,
-    )
-    .unwrap_or_else(|| match opt_text(&r[3]) {
-        Some(owner) => qualified_type(&owner, &name, schema),
-        None => name,
-    });
-    match opt_text(&r[2]) {
+fn member_type(r: &Cells, schema: &str) -> Result<String> {
+    let name = r.text(4)?;
+    let owner = r.opt_text(3)?;
+    let base = sized_type(&name, r.int(5)?, r.int(6)?, r.int(7)?, &r.text(8)?, None)
+        .unwrap_or_else(|| match owner {
+            Some(owner) => qualified_type(&owner, &name, schema),
+            None => name,
+        });
+    Ok(match r.opt_text(2)? {
         Some(modifier) => format!("{modifier} {base}"),
         None => base,
-    }
+    })
 }
 
 /// Columns, indexes and constraints of every table, view and materialized
@@ -454,28 +453,28 @@ async fn relations_of(
         .collect();
 
     let mut identity: HashMap<(String, String), IdentityKind> = HashMap::new();
-    for r in fetch_all(conn, IDENTITY_COLUMNS, arg).await? {
+    for r in fetch_all(conn, "identity_columns", IDENTITY_COLUMNS, arg).await? {
         identity.insert(
-            (text(&r[0]), text(&r[1])),
-            if text(&r[2]) == "ALWAYS" {
+            (r.text(0)?, r.text(1)?),
+            if r.text(2)? == "ALWAYS" {
                 IdentityKind::Always
             } else {
                 IdentityKind::ByDefault
             },
         );
     }
-    let virtual_columns: Vec<(String, String)> = fetch_all(conn, VIRTUAL_COLUMNS, arg)
+    let virtual_columns = fetch_all(conn, "virtual_columns", VIRTUAL_COLUMNS, arg)
         .await?
         .iter()
-        .map(|r| (text(&r[0]), text(&r[1])))
-        .collect();
+        .map(|r| Ok((r.text(0)?, r.text(1)?)))
+        .collect::<Result<Vec<(String, String)>>>()?;
 
-    for r in fetch_all(conn, COLUMNS, arg).await? {
-        let table = text(&r[13]);
+    for r in fetch_all(conn, "columns", COLUMNS, arg).await? {
+        let table = r.text(13)?;
         let Some(&at) = index.get(&table) else {
             continue;
         };
-        let mut column: ColumnInfo = column_info(&r, schema);
+        let mut column: ColumnInfo = column_info(&r, schema)?;
         let key = (table, column.name.clone());
         column.identity = identity.get(&key).copied();
         if virtual_columns.contains(&key) {
@@ -488,27 +487,27 @@ async fn relations_of(
         relations[at].columns.push(column);
     }
 
-    for r in fetch_all(conn, INDEXES, arg).await? {
-        let Some(&at) = index.get(&text(&r[6])) else {
+    for r in fetch_all(conn, "indexes", INDEXES, arg).await? {
+        let Some(&at) = index.get(&r.text(6)?) else {
             continue;
         };
-        add_index_row(&mut relations[at].indexes, &r);
+        add_index_row(&mut relations[at].indexes, &r)?;
     }
 
-    for r in fetch_all(conn, CONSTRAINTS, arg).await? {
-        let Some(&at) = index.get(&text(&r[13])) else {
+    for r in fetch_all(conn, "constraints", CONSTRAINTS, arg).await? {
+        let Some(&at) = index.get(&r.text(13)?) else {
             continue;
         };
-        fold_constraint_row(&mut relations[at].constraints, &r);
+        fold_constraint_row(&mut relations[at].constraints, &r)?;
     }
     Ok(relations)
 }
 
 /// A row of [`INDEXES`] into the indexes of its table: a new index, or the
 /// next column of the last one.
-fn add_index_row(indexes: &mut Vec<IndexInfo>, r: &Row) {
-    let name = text(&r[0]);
-    let (column, is_expression) = index_column_parts(&text(&r[3]), opt_text(&r[5]), &text(&r[4]));
+fn add_index_row(indexes: &mut Vec<IndexInfo>, r: &Cells) -> Result<()> {
+    let name = r.text(0)?;
+    let (column, is_expression) = index_column_parts(&r.text(3)?, r.opt_text(5)?, &r.text(4)?);
     match indexes.last_mut().filter(|i| i.name == name) {
         Some(last) => {
             if is_expression {
@@ -518,13 +517,14 @@ fn add_index_row(indexes: &mut Vec<IndexInfo>, r: &Row) {
         }
         None => indexes.push(IndexInfo {
             name,
-            unique: text(&r[1]) == "UNIQUE",
+            unique: r.text(1)? == "UNIQUE",
             expressions: if is_expression { vec![0] } else { Vec::new() },
             columns: vec![column],
-            method: opt_text(&r[2]),
+            method: r.opt_text(2)?,
             ..IndexInfo::default()
         }),
     }
+    Ok(())
 }
 
 /// The texts `source` returns for the objects of the schema: views, and
@@ -541,18 +541,16 @@ async fn read_sources(
     };
     let mut out = Vec::new();
 
-    for r in fetch_all(conn, VIEW_SOURCES, arg).await? {
-        let name = text(&r[0]);
+    for r in fetch_all(conn, "view_sources", VIEW_SOURCES, arg).await? {
+        let name = r.text(0)?;
         if !known(&name, ObjectKind::View) {
             continue;
         }
-        let ddl = opt_text(&match &r[3] {
+        let ddl = opt_text(&match r.value(3)? {
             Value::Truncated { prefix, .. } => prefix.as_ref().clone(),
             v => v.clone(),
         });
-        if let Some(text) =
-            view_source(schema, &name, r[1].as_i64().unwrap_or(0), &text(&r[2]), ddl)
-        {
+        if let Some(text) = view_source(schema, &name, r.int(1)?.unwrap_or(0), &r.text(2)?, ddl) {
             out.push(SourceInfo {
                 name,
                 kind: ObjectKind::View,
@@ -566,8 +564,8 @@ async fn read_sources(
     type Unit = (String, ObjectKind, Vec<(String, String)>);
     let mut units: Vec<Unit> = Vec::new();
     let mut at: HashMap<(String, ObjectKind), usize> = HashMap::new();
-    for r in fetch_all(conn, UNIT_SOURCES, arg).await? {
-        let (name, ty) = (text(&r[0]), text(&r[1]));
+    for r in fetch_all(conn, "unit_sources", UNIT_SOURCES, arg).await? {
+        let (name, ty) = (r.text(0)?, r.text(1)?);
         let Some(kind) = unit_kind(&ty) else {
             continue;
         };
@@ -578,7 +576,7 @@ async fn read_sources(
             units.push((name, kind, Vec::new()));
             units.len() - 1
         });
-        units[slot].2.push((ty, text(&r[2])));
+        units[slot].2.push((ty, r.text(2)?));
     }
     for (name, kind, lines) in units {
         if let Some(text) = join_unit_lines(lines.into_iter()) {
@@ -614,15 +612,15 @@ mod tests {
     use super::*;
     use crate::schema::{ConstraintKind, SchemaFilter};
     use crate::{
-        Backend, Column, Cursor, ExecOptions, Outcome, Result as DbResult, TxMode, ValueKind,
+        Backend, Column, Cursor, ExecOptions, Outcome, Result as DbResult, Row, TxMode, ValueKind,
     };
 
     fn v(s: &str) -> Value {
         Value::from(s)
     }
 
-    fn row(cells: Vec<Value>) -> Row {
-        cells
+    fn row(cells: Vec<Value>) -> Cells {
+        Cells::new("test", cells)
     }
 
     #[test]
@@ -688,9 +686,9 @@ mod tests {
     #[test]
     fn describes_tables_and_sequences() {
         let plain = row(vec![v("T"), v("N"), Value::Null, Value::Null, Value::Null]);
-        assert_eq!(table_detail(&plain), TableDetail::default());
+        assert_eq!(table_detail(&plain).unwrap(), TableDetail::default());
         let partitioned = row(vec![v("T"), v("Y"), v("IOT"), v("RANGE"), v("DAY, SHOP")]);
-        let detail = table_detail(&partitioned);
+        let detail = table_detail(&partitioned).unwrap();
         assert!(detail.temporary && detail.index_organized && detail.partitioned);
         assert_eq!(detail.partition_key.as_deref(), Some("RANGE (DAY, SHOP)"));
 
@@ -703,7 +701,7 @@ mod tests {
             v("N"),
             Value::Int(10),
         ]);
-        let detail = sequence_detail(&seq);
+        let detail = sequence_detail(&seq).unwrap();
         assert_eq!(detail.max.as_deref(), Some("9999999999999999999999999999"));
         assert!(detail.cycle && !detail.ordered);
         assert_eq!(detail.cache, Some(10));
@@ -716,7 +714,7 @@ mod tests {
             v("Y"),
             Value::Int(0),
         ]);
-        let detail = sequence_detail(&nocache);
+        let detail = sequence_detail(&nocache).unwrap();
         assert_eq!(detail.cache, None);
         assert!(detail.ordered);
     }
@@ -729,7 +727,8 @@ mod tests {
             v("NO"),
             v("CURRENT_USER"),
             v("NO"),
-        ]));
+        ]))
+        .unwrap();
         assert_eq!(
             routine.characteristics,
             ["DETERMINISTIC", "AUTHID CURRENT_USER"]
@@ -746,13 +745,14 @@ mod tests {
                 Value::Null,
             ])
         };
-        add_argument(&mut routine, &arg(None, 0, "NUMBER", "OUT", "N"), "S");
-        add_argument(&mut routine, &arg(Some("A"), 1, "NUMBER", "IN", "N"), "S");
+        add_argument(&mut routine, &arg(None, 0, "NUMBER", "OUT", "N"), "S").unwrap();
+        add_argument(&mut routine, &arg(Some("A"), 1, "NUMBER", "IN", "N"), "S").unwrap();
         add_argument(
             &mut routine,
             &arg(Some("B"), 2, "NUMBER", "IN/OUT", "Y"),
             "S",
-        );
+        )
+        .unwrap();
         // The placeholder row of a routine without arguments.
         add_argument(
             &mut routine,
@@ -767,7 +767,8 @@ mod tests {
                 Value::Null,
             ]),
             "S",
-        );
+        )
+        .unwrap();
         assert_eq!(routine.return_type.as_deref(), Some("NUMBER"));
         assert_eq!(routine.arguments.len(), 2);
         assert_eq!(routine.arguments[0].name.as_deref(), Some("A"));
@@ -788,8 +789,8 @@ mod tests {
                 v("ADDRESS_T"),
             ])
         };
-        add_argument(&mut routine, &typed("OTHER"), "S");
-        add_argument(&mut routine, &typed("S"), "S");
+        add_argument(&mut routine, &typed("OTHER"), "S").unwrap();
+        add_argument(&mut routine, &typed("S"), "S").unwrap();
         assert_eq!(routine.arguments[0].data_type, "OTHER.ADDRESS_T");
         assert_eq!(routine.arguments[1].data_type, "ADDRESS_T");
     }
@@ -802,7 +803,8 @@ mod tests {
             v("INSERT OR UPDATE"),
             v("ENABLED"),
             v("NEW.qty > 0 "),
-        ]));
+        ]))
+        .unwrap();
         assert_eq!(t.events, ["INSERT", "UPDATE"]);
         assert_eq!(t.timing.as_deref(), Some("BEFORE"));
         assert!(t.each_row && !t.disabled);
@@ -814,7 +816,8 @@ mod tests {
             v("DELETE"),
             v("DISABLED"),
             Value::Null,
-        ]));
+        ]))
+        .unwrap();
         assert_eq!(t.timing.as_deref(), Some("AFTER"));
         assert!(!t.each_row && t.disabled);
         assert_eq!(t.condition, None);
@@ -825,7 +828,8 @@ mod tests {
             v("INSERT"),
             v("ENABLED"),
             Value::Null,
-        ]));
+        ]))
+        .unwrap();
         assert_eq!(t.timing.as_deref(), Some("INSTEAD OF"));
         assert!(t.each_row);
     }
@@ -834,7 +838,7 @@ mod tests {
     fn describes_member_types() {
         let attr =
             |owner: Option<&str>, ty: &str, len: Option<i64>, p: Option<i64>, s: Option<i64>| {
-                row(vec![
+                vec![
                     v("T"),
                     v("A"),
                     Value::Null,
@@ -844,30 +848,39 @@ mod tests {
                     p.into(),
                     s.into(),
                     v("B"),
-                ])
+                ]
             };
         assert_eq!(
             member_type(
-                &attr(Some("SYS"), "NUMBER", Some(22), Some(9), Some(2)),
+                &row(attr(Some("SYS"), "NUMBER", Some(22), Some(9), Some(2))),
                 "S"
-            ),
+            )
+            .unwrap(),
             "NUMBER(9,2)"
         );
         assert_eq!(
-            member_type(&attr(Some("SYS"), "VARCHAR2", Some(10), None, None), "S"),
+            member_type(
+                &row(attr(Some("SYS"), "VARCHAR2", Some(10), None, None)),
+                "S"
+            )
+            .unwrap(),
             "VARCHAR2(10)"
         );
         assert_eq!(
-            member_type(&attr(Some("SYS"), "DATE", Some(7), None, None), "S"),
+            member_type(&row(attr(Some("SYS"), "DATE", Some(7), None, None)), "S").unwrap(),
             "DATE"
         );
         assert_eq!(
-            member_type(&attr(Some("OTHER"), "ADDRESS_T", None, None, None), "S"),
+            member_type(
+                &row(attr(Some("OTHER"), "ADDRESS_T", None, None, None)),
+                "S"
+            )
+            .unwrap(),
             "OTHER.ADDRESS_T"
         );
         let mut by_ref = attr(Some("S"), "ADDRESS_T", None, None, None);
         by_ref[2] = v("REF");
-        assert_eq!(member_type(&by_ref, "S"), "REF ADDRESS_T");
+        assert_eq!(member_type(&row(by_ref), "S").unwrap(), "REF ADDRESS_T");
     }
 
     fn constraint_row(
@@ -931,7 +944,7 @@ mod tests {
         ];
         let mut out = Vec::new();
         for r in &rows {
-            fold_constraint_row(&mut out, r);
+            fold_constraint_row(&mut out, &row(r.clone())).unwrap();
         }
         assert_eq!(out.len(), 3, "the NOT NULL check is skipped: {out:?}");
         assert_eq!(out[0].kind, ConstraintKind::PrimaryKey);
@@ -946,7 +959,7 @@ mod tests {
 
         // A row of the per-object query has nine columns.
         let mut out = Vec::new();
-        fold_constraint_row(&mut out, &rows[0][..9].to_vec());
+        fold_constraint_row(&mut out, &row(rows[0][..9].to_vec())).unwrap();
         assert_eq!(out.len(), 1);
         assert!(!out[0].deferrable && !out[0].disabled);
     }
@@ -976,7 +989,7 @@ mod tests {
             r("I1", "NONUNIQUE", "SYS_NC2$", "DESC", Some("\"QTY\"")),
             r("I2", "UNIQUE", "ID", "ASC", None),
         ] {
-            add_index_row(&mut out, &row);
+            add_index_row(&mut out, &row).unwrap();
         }
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].columns, ["UPPER(\"LABEL\")", "QTY DESC"]);

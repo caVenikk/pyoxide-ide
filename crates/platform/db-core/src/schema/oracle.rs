@@ -15,10 +15,10 @@
 use async_trait::async_trait;
 
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
+    Cells, ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
     ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
 };
-use crate::{Connection, Result, Row, Value};
+use crate::{Connection, Result, Value};
 
 /// PL/SQL functions for a `WITH` clause (the first one follows `WITH `, the
 /// others are separated by the `;` that ends each). They copy a LONG or a
@@ -275,37 +275,39 @@ FROM all_sequences s WHERE s.sequence_owner = :1 AND s.sequence_name = :2";
 #[async_trait]
 impl Introspector for OracleIntrospector<'_> {
     async fn current_schema(&self) -> Result<String> {
-        let rows = fetch_all(self.conn, CURRENT_SCHEMA, &[]).await?;
-        Ok(rows.first().map(|r| text(&r[0])).unwrap_or_default())
+        let rows = fetch_all(self.conn, "current_schema", CURRENT_SCHEMA, &[]).await?;
+        rows.first()
+            .map_or_else(|| Ok(String::new()), |r| r.text(0))
     }
 
     async fn schemas(&self) -> Result<Vec<SchemaInfo>> {
-        let rows = fetch_all(self.conn, SCHEMAS, &[]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| SchemaInfo {
-                name: text(&r[0]),
-                is_system: text(&r[1]) == "Y",
-                is_current: text(&r[2]) == "Y",
-                ..SchemaInfo::default()
+        let rows = fetch_all(self.conn, "schemas", SCHEMAS, &[]).await?;
+        rows.iter()
+            .map(|r| {
+                Ok(SchemaInfo {
+                    name: r.text(0)?,
+                    is_system: r.text(1)? == "Y",
+                    is_current: r.text(2)? == "Y",
+                    ..SchemaInfo::default()
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn objects(&self, schema: &str, kinds: &[ObjectKind]) -> Result<Vec<ObjectInfo>> {
         let mut out = Vec::new();
         for sql in objects_sql(kinds) {
-            for r in fetch_all(self.conn, &sql, &[Value::from(schema)]).await? {
-                let Some(kind) = object_kind(&text(&r[1])) else {
+            for r in fetch_all(self.conn, "objects", &sql, &[Value::from(schema)]).await? {
+                let Some(kind) = object_kind(&r.text(1)?) else {
                     continue;
                 };
                 if wants(kinds, kind) {
                     out.push(ObjectInfo {
                         schema: schema.to_owned(),
-                        name: text(&r[0]),
+                        name: r.text(0)?,
                         kind,
-                        parent: opt_text(&r[2]),
-                        comment: opt_text(&r[3]),
+                        parent: r.opt_text(2)?,
+                        comment: r.opt_text(3)?,
                         ..ObjectInfo::default()
                     });
                 }
@@ -315,23 +317,35 @@ impl Introspector for OracleIntrospector<'_> {
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
-        let rows = fetch_all(self.conn, COLUMNS, &[schema.into(), table.into()]).await?;
-        Ok(rows.iter().map(|r| column_info(r, schema)).collect())
+        let rows = fetch_all(
+            self.conn,
+            "columns",
+            COLUMNS,
+            &[schema.into(), table.into()],
+        )
+        .await?;
+        rows.iter().map(|r| column_info(r, schema)).collect()
     }
 
     async fn indexes(&self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
-        let rows = fetch_all(self.conn, INDEXES, &[schema.into(), table.into()]).await?;
+        let rows = fetch_all(
+            self.conn,
+            "indexes",
+            INDEXES,
+            &[schema.into(), table.into()],
+        )
+        .await?;
         let mut out: Vec<IndexInfo> = Vec::new();
         for r in &rows {
-            let name = text(&r[0]);
-            let column = index_column(&text(&r[3]), opt_text(&r[5]), &text(&r[4]));
+            let name = r.text(0)?;
+            let column = index_column(&r.text(3)?, r.opt_text(5)?, &r.text(4)?);
             match out.last_mut() {
                 Some(last) if last.name == name => last.columns.push(column),
                 _ => out.push(IndexInfo {
                     name,
-                    unique: text(&r[1]) == "UNIQUE",
+                    unique: r.text(1)? == "UNIQUE",
                     columns: vec![column],
-                    method: opt_text(&r[2]),
+                    method: r.opt_text(2)?,
                     ..IndexInfo::default()
                 }),
             }
@@ -340,10 +354,16 @@ impl Introspector for OracleIntrospector<'_> {
     }
 
     async fn constraints(&self, schema: &str, table: &str) -> Result<Vec<ConstraintInfo>> {
-        let rows = fetch_all(self.conn, CONSTRAINTS, &[schema.into(), table.into()]).await?;
+        let rows = fetch_all(
+            self.conn,
+            "constraints",
+            CONSTRAINTS,
+            &[schema.into(), table.into()],
+        )
+        .await?;
         let mut out: Vec<ConstraintInfo> = Vec::new();
         for r in &rows {
-            fold_constraint_row(&mut out, r);
+            fold_constraint_row(&mut out, r)?;
         }
         Ok(out)
     }
@@ -364,45 +384,47 @@ impl Introspector for OracleIntrospector<'_> {
                     _ => "'TRIGGER'",
                 };
                 let sql = UNIT_SOURCE.replace("{}", types);
-                let rows = fetch_all(self.conn, &sql, &args).await?;
-                Ok(join_units(&rows))
+                let rows = fetch_all(self.conn, "unit_source", &sql, &args).await?;
+                join_units(&rows)
             }
             ObjectKind::View => {
-                let rows = fetch_all(self.conn, VIEW_SOURCE, &args).await?;
+                let rows = fetch_all(self.conn, "view_source", VIEW_SOURCE, &args).await?;
                 let Some(r) = rows.first() else {
                     return Ok(None);
                 };
-                let length = r[0].as_i64().unwrap_or(0);
+                let length = r.int(0)?.unwrap_or(0);
                 // TEXT_VC is cut at 4000 characters.
                 let ddl = if length > 4000 {
                     self.metadata("VIEW", schema, name).await?
                 } else {
                     None
                 };
-                Ok(view_source(schema, name, length, &text(&r[1]), ddl))
+                Ok(view_source(schema, name, length, &r.text(1)?, ddl))
             }
             ObjectKind::Synonym => {
-                let rows = fetch_all(self.conn, SYNONYM_SOURCE, &args).await?;
-                Ok(rows.first().map(|r| {
-                    let target = match opt_text(&r[0]) {
-                        Some(owner) => qualified(&owner, &text(&r[1])),
-                        None => quote_ident(&text(&r[1])),
-                    };
-                    let link = opt_text(&r[2]).map(|l| format!("@{l}")).unwrap_or_default();
-                    format!(
-                        "CREATE OR REPLACE SYNONYM {} FOR {target}{link}",
-                        qualified(schema, name)
-                    )
-                }))
+                let rows = fetch_all(self.conn, "synonym_source", SYNONYM_SOURCE, &args).await?;
+                rows.first()
+                    .map(|r| {
+                        let target = match r.opt_text(0)? {
+                            Some(owner) => qualified(&owner, &r.text(1)?),
+                            None => quote_ident(&r.text(1)?),
+                        };
+                        let link = r.opt_text(2)?.map(|l| format!("@{l}")).unwrap_or_default();
+                        Ok(format!(
+                            "CREATE OR REPLACE SYNONYM {} FOR {target}{link}",
+                            qualified(schema, name)
+                        ))
+                    })
+                    .transpose()
             }
             ObjectKind::Sequence => {
                 if let Some(ddl) = self.metadata("SEQUENCE", schema, name).await? {
                     return Ok(Some(ddl));
                 }
-                let rows = fetch_all(self.conn, SEQUENCE_SOURCE, &args).await?;
-                Ok(rows
-                    .first()
-                    .map(|r| sequence_ddl(&qualified(schema, name), r)))
+                let rows = fetch_all(self.conn, "sequence_source", SEQUENCE_SOURCE, &args).await?;
+                rows.first()
+                    .map(|r| sequence_ddl(&qualified(schema, name), r))
+                    .transpose()
             }
             ObjectKind::Table => self.metadata("TABLE", schema, name).await,
             ObjectKind::MaterializedView => self.metadata("MATERIALIZED_VIEW", schema, name).await,
@@ -425,17 +447,19 @@ impl OracleIntrospector<'_> {
     ) -> Result<Option<String>> {
         let rows = fetch_all(
             self.conn,
+            "metadata_ddl",
             METADATA_DDL,
             &[object_type.into(), name.into(), schema.into()],
         )
         .await?;
-        Ok(rows.first().and_then(|r| {
-            let v = match &r[0] {
-                Value::Truncated { prefix, .. } => prefix.as_ref().clone(),
-                v => v.clone(),
-            };
-            opt_text(&v).map(|s| s.trim().to_owned())
-        }))
+        let Some(r) = rows.first() else {
+            return Ok(None);
+        };
+        let v = match r.value(0)? {
+            Value::Truncated { prefix, .. } => prefix.as_ref().clone(),
+            v => v.clone(),
+        };
+        Ok(opt_text(&v).map(|s| s.trim().to_owned()))
     }
 }
 
@@ -450,19 +474,20 @@ fn quote_ident(s: &str) -> String {
 
 /// A column from a row of [`COLUMNS`] (the bulk query appends the table
 /// name, which is not read here).
-fn column_info(r: &Row, schema: &str) -> ColumnInfo {
-    ColumnInfo {
-        name: text(&r[0]),
-        position: r[1].as_i64().unwrap_or(0) as u32,
-        data_type: oracle_type(r, schema),
-        nullable: text(&r[8]) != "N",
-        default: opt_text(&r[9])
+fn column_info(r: &Cells, schema: &str) -> Result<ColumnInfo> {
+    Ok(ColumnInfo {
+        name: r.text(0)?,
+        position: r.int(1)?.unwrap_or(0) as u32,
+        data_type: oracle_type(r, schema)?,
+        nullable: r.text(8)? != "N",
+        default: r
+            .opt_text(9)?
             .map(|d| d.trim().to_owned())
             .filter(|d| !d.is_empty()),
-        auto_increment: text(&r[10]) == "YES",
-        comment: opt_text(&r[11]),
+        auto_increment: r.text(10)? == "YES",
+        comment: r.opt_text(11)?,
         ..ColumnInfo::default()
-    }
+    })
 }
 
 /// Add one row of the constraints query to `out`, the constraints of one
@@ -471,10 +496,10 @@ fn column_info(r: &Row, schema: &str) -> ColumnInfo {
 /// columns are those of [`CONSTRAINTS`]; the bulk query adds the
 /// deferrable, deferred, status and validated columns after them, which
 /// are read when present.
-fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Row) {
-    let name = text(&r[0]);
-    let column = opt_text(&r[5]);
-    let ref_column = opt_text(&r[8]);
+fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Cells) -> Result<()> {
+    let name = r.text(0)?;
+    let column = r.opt_text(5)?;
+    let ref_column = r.opt_text(8)?;
     if let Some(last) = out.last_mut().filter(|c| c.name == name) {
         if let Some(c) = column.filter(|c| !last.columns.contains(c)) {
             last.columns.push(c);
@@ -482,21 +507,21 @@ fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Row) {
         if let Some(c) = ref_column {
             last.ref_columns.push(c);
         }
-        return;
+        return Ok(());
     }
-    let kind = match text(&r[1]).as_str() {
+    let kind = match r.text(1)?.as_str() {
         "P" => ConstraintKind::PrimaryKey,
         "U" => ConstraintKind::Unique,
         "R" => ConstraintKind::ForeignKey,
         "C" => ConstraintKind::Check,
-        _ => return,
+        _ => return Ok(()),
     };
-    let check = opt_text(&r[3]);
+    let check = r.opt_text(3)?;
     if kind == ConstraintKind::Check
-        && text(&r[2]) == "GENERATED NAME"
+        && r.text(2)? == "GENERATED NAME"
         && check.as_deref().is_some_and(is_not_null_check)
     {
-        return;
+        return Ok(());
     }
     let is_fk = kind == ConstraintKind::ForeignKey;
     let extra = |i: usize| r.get(i).map(text).unwrap_or_default();
@@ -504,14 +529,14 @@ fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Row) {
         name,
         kind,
         columns: column.into_iter().collect(),
-        ref_schema: is_fk.then(|| opt_text(&r[6])).flatten(),
-        ref_table: is_fk.then(|| opt_text(&r[7])).flatten(),
+        ref_schema: if is_fk { r.opt_text(6)? } else { None },
+        ref_table: if is_fk { r.opt_text(7)? } else { None },
         ref_columns: if is_fk {
             ref_column.into_iter().collect()
         } else {
             Vec::new()
         },
-        on_delete: is_fk.then(|| opt_text(&r[4])).flatten(),
+        on_delete: if is_fk { r.opt_text(4)? } else { None },
         check: (kind == ConstraintKind::Check).then_some(check).flatten(),
         deferrable: extra(9) == "DEFERRABLE",
         initially_deferred: extra(10) == "DEFERRED",
@@ -519,6 +544,7 @@ fn fold_constraint_row(out: &mut Vec<ConstraintInfo>, r: &Row) {
         not_validated: extra(12) == "NOT VALIDATED",
         ..ConstraintInfo::default()
     });
+    Ok(())
 }
 
 /// `"COL" IS NOT NULL`: the check Oracle creates for a NOT NULL column.
@@ -565,8 +591,12 @@ fn index_column_parts(column: &str, expression: Option<String>, descend: &str) -
 
 /// Stored units in order, each as `CREATE OR REPLACE <text>` terminated by
 /// `/`; spec before body.
-fn join_units(rows: &[Vec<Value>]) -> Option<String> {
-    join_unit_lines(rows.iter().map(|r| (text(&r[0]), text(&r[1]))))
+fn join_units(rows: &[Cells]) -> Result<Option<String>> {
+    let mut lines = Vec::with_capacity(rows.len());
+    for r in rows {
+        lines.push((r.text(0)?, r.text(1)?));
+    }
+    Ok(join_unit_lines(lines.into_iter()))
 }
 
 /// [`join_units`] over `(type, line)` pairs.
@@ -611,52 +641,45 @@ fn view_source(
 
 /// DDL for a sequence from ALL_SEQUENCES (fallback when DBMS_METADATA is
 /// not allowed). `LAST_NUMBER` is where the sequence would continue.
-fn sequence_ddl(name: &str, r: &[Value]) -> String {
-    let cache = r[5].as_i64().unwrap_or(0);
-    format!(
+fn sequence_ddl(name: &str, r: &Cells) -> Result<String> {
+    let cache = r.int(5)?.unwrap_or(0);
+    Ok(format!(
         "CREATE SEQUENCE {name} START WITH {} INCREMENT BY {} MINVALUE {} MAXVALUE {} {} {} {}",
-        text(&r[6]),
-        text(&r[2]),
-        text(&r[0]),
-        text(&r[1]),
+        r.text(6)?,
+        r.text(2)?,
+        r.text(0)?,
+        r.text(1)?,
         if cache > 0 {
             format!("CACHE {cache}")
         } else {
             "NOCACHE".into()
         },
-        if text(&r[3]) == "Y" {
+        if r.text(3)? == "Y" {
             "CYCLE"
         } else {
             "NOCYCLE"
         },
-        if text(&r[4]) == "Y" {
+        if r.text(4)? == "Y" {
             "ORDER"
         } else {
             "NOORDER"
         },
-    )
+    ))
 }
 
 /// Full type text from ALL_TAB_COLUMNS columns 2..=7
 /// (`data_type, data_length, data_precision, data_scale, char_used,
 /// char_length`) and column 12 (`data_type_owner`). TIMESTAMP and INTERVAL
 /// types already carry their precision in DATA_TYPE.
-fn oracle_type(r: &[Value], table_owner: &str) -> String {
-    let ty = text(&r[2]);
-    if let Some(sized) = sized_type(
-        &ty,
-        r[3].as_i64(),
-        r[4].as_i64(),
-        r[5].as_i64(),
-        &text(&r[6]),
-        r[7].as_i64(),
-    ) {
-        return sized;
+fn oracle_type(r: &Cells, table_owner: &str) -> Result<String> {
+    let ty = r.text(2)?;
+    if let Some(sized) = sized_type(&ty, r.int(3)?, r.int(4)?, r.int(5)?, &r.text(6)?, r.int(7)?) {
+        return Ok(sized);
     }
-    match r.get(12).and_then(opt_text) {
+    Ok(match r.get(12).and_then(opt_text) {
         Some(owner) => qualified_type(&owner, &ty, table_owner),
         None => ty,
-    }
+    })
 }
 
 /// `owner.name` unless the type is the schema's own or a built-in one.
@@ -706,6 +729,10 @@ fn sized_type(
 mod tests {
     use super::*;
 
+    fn cells(row: Vec<Value>) -> Cells {
+        Cells::new("test", row)
+    }
+
     fn row(ty: &str, len: i64, p: Option<i64>, s: Option<i64>, unit: &str) -> Vec<Value> {
         vec![
             Value::from("C"),
@@ -727,51 +754,61 @@ mod tests {
     #[test]
     fn formats_types() {
         assert_eq!(
-            oracle_type(&row("NUMBER", 22, Some(10), Some(2), ""), "S"),
+            oracle_type(&cells(row("NUMBER", 22, Some(10), Some(2), "")), "S").unwrap(),
             "NUMBER(10,2)"
         );
         assert_eq!(
-            oracle_type(&row("NUMBER", 22, None, Some(0), ""), "S"),
+            oracle_type(&cells(row("NUMBER", 22, None, Some(0), "")), "S").unwrap(),
             "INTEGER"
         );
         assert_eq!(
-            oracle_type(&row("NUMBER", 22, None, None, ""), "S"),
+            oracle_type(&cells(row("NUMBER", 22, None, None, "")), "S").unwrap(),
             "NUMBER"
         );
         assert_eq!(
-            oracle_type(&row("NUMBER", 22, Some(38), Some(0), ""), "S"),
+            oracle_type(&cells(row("NUMBER", 22, Some(38), Some(0), "")), "S").unwrap(),
             "NUMBER(38)"
         );
         assert_eq!(
-            oracle_type(&row("VARCHAR2", 40, None, None, "C"), "S"),
+            oracle_type(&cells(row("VARCHAR2", 40, None, None, "C")), "S").unwrap(),
             "VARCHAR2(40 CHAR)"
         );
         assert_eq!(
-            oracle_type(&row("VARCHAR2", 40, None, None, "B"), "S"),
+            oracle_type(&cells(row("VARCHAR2", 40, None, None, "B")), "S").unwrap(),
             "VARCHAR2(40)"
         );
         assert_eq!(
-            oracle_type(&row("NVARCHAR2", 100, None, None, "C"), "S"),
+            oracle_type(&cells(row("NVARCHAR2", 100, None, None, "C")), "S").unwrap(),
             "NVARCHAR2(100)"
         );
-        assert_eq!(oracle_type(&row("RAW", 16, None, None, ""), "S"), "RAW(16)");
         assert_eq!(
-            oracle_type(&row("FLOAT", 22, Some(126), None, ""), "S"),
+            oracle_type(&cells(row("RAW", 16, None, None, "")), "S").unwrap(),
+            "RAW(16)"
+        );
+        assert_eq!(
+            oracle_type(&cells(row("FLOAT", 22, Some(126), None, "")), "S").unwrap(),
             "FLOAT(126)"
         );
-        assert_eq!(oracle_type(&row("DATE", 7, None, None, ""), "S"), "DATE");
+        assert_eq!(
+            oracle_type(&cells(row("DATE", 7, None, None, "")), "S").unwrap(),
+            "DATE"
+        );
         assert_eq!(
             oracle_type(
-                &row("TIMESTAMP(6) WITH TIME ZONE", 13, None, Some(6), ""),
+                &cells(row("TIMESTAMP(6) WITH TIME ZONE", 13, None, Some(6), "")),
                 "S"
-            ),
+            )
+            .unwrap(),
             "TIMESTAMP(6) WITH TIME ZONE"
         );
         let mut udt = row("ADDRESS_T", 1, None, None, "");
         udt[12] = Value::from("OTHER");
-        assert_eq!(oracle_type(&udt, "S"), "OTHER.ADDRESS_T");
+        assert_eq!(
+            oracle_type(&cells(udt.clone()), "S").unwrap(),
+            "OTHER.ADDRESS_T"
+        );
         udt[12] = Value::from("S");
-        assert_eq!(oracle_type(&udt, "S"), "ADDRESS_T");
+        assert_eq!(oracle_type(&cells(udt.clone()), "S").unwrap(), "ADDRESS_T");
     }
 
     #[test]
@@ -829,19 +866,20 @@ mod tests {
     #[test]
     fn joins_units_in_order() {
         let rows = vec![
-            vec![Value::from("PACKAGE"), Value::from("PACKAGE p AS\n")],
-            vec![Value::from("PACKAGE"), Value::from("END;\n")],
-            vec![
+            cells(vec![Value::from("PACKAGE"), Value::from("PACKAGE p AS\n")]),
+            cells(vec![Value::from("PACKAGE"), Value::from("END;\n")]),
+            cells(vec![
                 Value::from("PACKAGE BODY"),
                 Value::from("PACKAGE BODY p AS\n"),
-            ],
-            vec![Value::from("PACKAGE BODY"), Value::from("END;\n")],
+            ]),
+            cells(vec![Value::from("PACKAGE BODY"), Value::from("END;\n")]),
         ];
         assert_eq!(
-            join_units(&rows).unwrap(),
+            join_units(&rows).unwrap().unwrap(),
             "CREATE OR REPLACE PACKAGE p AS\nEND;\n/\n\nCREATE OR REPLACE PACKAGE BODY p AS\nEND;\n/"
         );
-        assert_eq!(join_units(&[]), None);
+        assert_eq!(join_units(&[]).unwrap(), None);
+        assert!(join_units(&[cells(vec![Value::from("PACKAGE")])]).is_err());
     }
 
     #[test]
@@ -852,7 +890,7 @@ mod tests {
 
     #[test]
     fn sequence_fallback_ddl() {
-        let r = vec![
+        let r = cells(vec![
             Value::Int(1),
             Value::Decimal("9999999999999999999999999999".into()),
             Value::Int(1),
@@ -860,9 +898,9 @@ mod tests {
             Value::from("N"),
             Value::Int(20),
             Value::Int(41),
-        ];
+        ]);
         assert_eq!(
-            sequence_ddl("\"S\".\"Q\"", &r),
+            sequence_ddl("\"S\".\"Q\"", &r).unwrap(),
             "CREATE SEQUENCE \"S\".\"Q\" START WITH 41 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9999999999999999999999999999 CACHE 20 NOCYCLE NOORDER"
         );
     }

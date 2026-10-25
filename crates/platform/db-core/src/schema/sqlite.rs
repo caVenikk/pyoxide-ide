@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use super::{
     ColumnInfo, ConstraintInfo, ConstraintKind, GeneratedColumn, IndexInfo, Introspector, Level,
-    ObjectInfo, ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
+    ObjectInfo, ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, wants,
 };
 use crate::{Connection, Error, Result};
 
@@ -67,9 +67,15 @@ impl SqliteIntrospector<'_> {
     /// Schema names cannot be bound, so they are checked against the list of
     /// databases before they are quoted into a statement.
     async fn schema_name(&self, schema: &str) -> Result<String> {
-        let rows = fetch_all(self.conn, DATABASE_BY_NAME, &[schema.into()]).await?;
+        let rows = fetch_all(
+            self.conn,
+            "database_by_name",
+            DATABASE_BY_NAME,
+            &[schema.into()],
+        )
+        .await?;
         if let Some(row) = rows.first() {
-            return Ok(text(&row[0]));
+            return row.text(0);
         }
         // The temp schema is not listed until something is stored in it.
         if schema.eq_ignore_ascii_case("temp") {
@@ -79,19 +85,26 @@ impl SqliteIntrospector<'_> {
     }
 
     async fn raw_columns(&self, schema: &str, table: &str) -> Result<Vec<RawColumn>> {
-        let rows = fetch_all(self.conn, TABLE_XINFO, &[table.into(), schema.into()]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| RawColumn {
-                cid: r[0].as_i64().unwrap_or(0),
-                name: text(&r[1]),
-                declared: text(&r[2]),
-                not_null: r[3].as_i64().unwrap_or(0) != 0,
-                default: opt_text(&r[4]),
-                pk: r[5].as_i64().unwrap_or(0),
-                hidden: r[6].as_i64().unwrap_or(0),
+        let rows = fetch_all(
+            self.conn,
+            "table_xinfo",
+            TABLE_XINFO,
+            &[table.into(), schema.into()],
+        )
+        .await?;
+        rows.iter()
+            .map(|r| {
+                Ok(RawColumn {
+                    cid: r.int(0)?.unwrap_or(0),
+                    name: r.text(1)?,
+                    declared: r.text(2)?,
+                    not_null: r.int(3)?.unwrap_or(0) != 0,
+                    default: r.opt_text(4)?,
+                    pk: r.int(5)?.unwrap_or(0),
+                    hidden: r.int(6)?.unwrap_or(0),
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// The `sql` column of `sqlite_schema` for one object.
@@ -100,22 +113,28 @@ impl SqliteIntrospector<'_> {
             "SELECT sql FROM {}.sqlite_schema WHERE type = ?1 AND name = ?2 COLLATE NOCASE",
             quote_ident(schema)
         );
-        let rows = fetch_all(self.conn, &sql, &[kind.into(), name.into()]).await?;
-        Ok(rows.first().and_then(|r| opt_text(&r[0])))
+        let rows = fetch_all(self.conn, "source_sql", &sql, &[kind.into(), name.into()]).await?;
+        Ok(rows.first().map(|r| r.opt_text(0)).transpose()?.flatten())
     }
 
     /// Key columns of an index, in order. Expressions come from the
     /// `CREATE INDEX` text; the pragma only says that there is one.
     async fn index_columns(&self, schema: &str, index: &str) -> Result<Vec<String>> {
-        let rows = fetch_all(self.conn, INDEX_XINFO, &[index.into(), schema.into()]).await?;
+        let rows = fetch_all(
+            self.conn,
+            "index_xinfo",
+            INDEX_XINFO,
+            &[index.into(), schema.into()],
+        )
+        .await?;
         let mut expressions: Option<Vec<String>> = None;
         let mut out = Vec::with_capacity(rows.len());
         for row in &rows {
-            if let Some(name) = opt_text(&row[2]) {
+            if let Some(name) = row.opt_text(2)? {
                 out.push(name);
                 continue;
             }
-            let cid = row[1].as_i64().unwrap_or(-2);
+            let cid = row.int(1)?.unwrap_or(-2);
             if cid == -1 {
                 out.push("rowid".to_owned());
                 continue;
@@ -124,7 +143,7 @@ impl SqliteIntrospector<'_> {
                 let sql = self.object_sql(schema, "index", index).await?;
                 expressions = Some(sql.map(|s| sql_text::index_items(&s)).unwrap_or_default());
             }
-            let seqno = usize::try_from(row[0].as_i64().unwrap_or(0)).unwrap_or(0);
+            let seqno = usize::try_from(row.int(0)?.unwrap_or(0)).unwrap_or(0);
             let item = expressions.as_ref().and_then(|e| e.get(seqno)).cloned();
             out.push(item.unwrap_or_else(|| "<expression>".to_owned()));
         }
@@ -139,19 +158,19 @@ impl Introspector for SqliteIntrospector<'_> {
     }
 
     async fn schemas(&self) -> Result<Vec<SchemaInfo>> {
-        let rows = fetch_all(self.conn, DATABASES, &[]).await?;
+        let rows = fetch_all(self.conn, "databases", DATABASES, &[]).await?;
         let mut out: Vec<SchemaInfo> = rows
             .iter()
             .map(|r| {
-                let name = text(&r[0]);
-                SchemaInfo {
+                let name = r.text(0)?;
+                Ok(SchemaInfo {
                     is_current: name == MAIN,
                     is_system: false,
                     name,
                     ..SchemaInfo::default()
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_>>()?;
         if !out.iter().any(|s| s.name == MAIN) {
             out.insert(
                 0,
@@ -178,10 +197,10 @@ impl Introspector for SqliteIntrospector<'_> {
              name",
             quote_ident(&schema)
         );
-        let rows = fetch_all(self.conn, &sql, &[]).await?;
+        let rows = fetch_all(self.conn, "objects", &sql, &[]).await?;
         let mut out = Vec::new();
         for row in &rows {
-            let (kind, has_parent) = match text(&row[0]).as_str() {
+            let (kind, has_parent) = match row.text(0)?.as_str() {
                 "table" => (ObjectKind::Table, false),
                 "view" => (ObjectKind::View, false),
                 "index" => (ObjectKind::Index, true),
@@ -193,9 +212,9 @@ impl Introspector for SqliteIntrospector<'_> {
             }
             out.push(ObjectInfo {
                 schema: schema.clone(),
-                name: text(&row[1]),
+                name: row.text(1)?,
                 kind,
-                parent: has_parent.then(|| text(&row[2])),
+                parent: if has_parent { Some(row.text(2)?) } else { None },
                 ..ObjectInfo::default()
             });
         }
@@ -225,15 +244,16 @@ impl Introspector for SqliteIntrospector<'_> {
         let schema = self.schema_name(schema).await?;
         let list = fetch_all(
             self.conn,
+            "index_list",
             INDEX_LIST,
             &[table.into(), schema.as_str().into()],
         )
         .await?;
         let mut out = Vec::with_capacity(list.len());
         for row in &list {
-            let name = text(&row[0]);
+            let name = row.text(0)?;
             out.push(IndexInfo {
-                unique: row[1].as_i64().unwrap_or(0) != 0,
+                unique: row.int(1)?.unwrap_or(0) != 0,
                 columns: self.index_columns(&schema, &name).await?,
                 method: None,
                 name,
@@ -254,36 +274,42 @@ impl Introspector for SqliteIntrospector<'_> {
 
         let list = fetch_all(
             self.conn,
+            "index_list",
             INDEX_LIST,
             &[table.into(), schema.as_str().into()],
         )
         .await?;
         let mut unique = Vec::new();
         for row in &list {
-            if text(&row[2]) != "u" {
+            if row.text(2)? != "u" {
                 continue;
             }
-            let index = text(&row[0]);
+            let index = row.text(0)?;
             let columns = self.index_columns(&schema, &index).await?;
             unique.push((index, columns));
         }
 
         let fks = fetch_all(
             self.conn,
+            "foreign_keys",
             FOREIGN_KEYS,
             &[table.into(), schema.as_str().into()],
         )
         .await?;
-        let groups = foreign_key_groups(fks.iter().map(|row| {
-            (
-                row[0].as_i64().unwrap_or(0),
-                text(&row[2]),
-                text(&row[3]),
-                opt_text(&row[4]),
-                opt_text(&row[5]),
-                opt_text(&row[6]),
-            )
-        }));
+        let columns = fks
+            .iter()
+            .map(|row| {
+                Ok((
+                    row.int(0)?.unwrap_or(0),
+                    row.text(2)?,
+                    row.text(3)?,
+                    row.opt_text(4)?,
+                    row.opt_text(5)?,
+                    row.opt_text(6)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let groups = foreign_key_groups(columns.into_iter());
         // `REFERENCES parent` without columns means parent's primary key.
         let mut parent_pks = HashMap::new();
         for group in &groups {

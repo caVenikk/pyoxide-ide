@@ -485,13 +485,20 @@ async fn scopes_pick_schemas() {
         names(Scope::patterns(["PXPG_LOAD_SCOPE_*"])).await,
         ["pxpg_load_scope_a", "pxpg_load_scope_b"]
     );
-    let all = names(Scope::all()).await;
-    assert!(all.contains(&"public".to_owned()) && all.contains(&"pxpg_load_scope_a".to_owned()));
+    // Patterns, not `Scope::all()`: other tests create and drop schemas of
+    // their own in the same database while this one runs.
+    let wide = ["public", "pxpg_load_scope_*", "pg_*", "information_schema"];
+    let selected = names(Scope::patterns(wide)).await;
     assert!(
-        !all.iter()
+        selected.contains(&"public".to_owned())
+            && selected.contains(&"pxpg_load_scope_a".to_owned())
+    );
+    assert!(
+        !selected
+            .iter()
             .any(|n| n == "pg_catalog" || n == "information_schema")
     );
-    let with_system = names(Scope::all().with_system(true)).await;
+    let with_system = names(Scope::patterns(wide).with_system(true)).await;
     assert!(with_system.contains(&"pg_catalog".to_owned()));
     assert!(with_system.contains(&"information_schema".to_owned()));
     assert_eq!(
