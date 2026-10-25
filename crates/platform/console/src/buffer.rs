@@ -66,6 +66,13 @@ impl Line {
         }
     }
 
+    /// Gives back the capacity the line does not use.
+    fn shrink(&mut self) {
+        self.text.shrink_to_fit();
+        self.runs.shrink_to_fit();
+        self.links.shrink_to_fit();
+    }
+
     fn clear(&mut self) {
         self.text.clear();
         self.runs.clear();
@@ -273,6 +280,7 @@ impl Console {
     /// continues with the same colours, as in the reference's Clear All).
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.lines.shrink_to_fit();
         self.lines.push_back(Line::default());
         self.units = 0;
         self.links_from = None;
@@ -396,6 +404,9 @@ impl Console {
 
     fn new_line(&mut self) {
         let last = self.lines.len() - 1;
+        // A finished line gives back what its growth reserved: with short
+        // lines the slack is most of the memory.
+        self.lines[last].shrink();
         self.lines.push_back(Line::default());
         self.units += 1;
         self.changed(last);
