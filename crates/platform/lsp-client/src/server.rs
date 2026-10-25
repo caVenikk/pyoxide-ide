@@ -394,10 +394,6 @@ impl LanguageServer {
             {
                 return;
             }
-            // Queued under the lock that makes it Running: nothing about
-            // documents goes out before it, and an exit right after it is
-            // seen once it runs.
-            session.connection.notify("initialized", json!({}));
             if let Some(name) = info.name {
                 slot.status.name = name;
                 slot.reported_name = true;
@@ -407,6 +403,12 @@ impl LanguageServer {
             }
             slot.status.state = ServerState::Running;
             self.emit(&slot);
+            // Queued under the lock that makes it Running: nothing about
+            // documents goes out before it, and an exit right after it is
+            // seen once it runs. Queued after the status event: whatever
+            // the server sends in answer to it must not be reported
+            // before the server is Running.
+            session.connection.notify("initialized", json!({}));
             (slot.status.clone(), slot.spec.clone())
         };
         if spec.empty_configuration_change {

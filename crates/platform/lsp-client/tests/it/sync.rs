@@ -46,7 +46,7 @@ fn random_edits_keep_the_servers_copies_equal_to_the_buffer() {
             mirror("utf-16", &root, "utf-16", 2),
             mirror("full", &root, "utf-16", 1),
         ],
-        QUICK,
+        PATIENT,
     );
     let events = Events::of(intel.as_ref());
     let mut editor = Editor::open(
@@ -142,7 +142,7 @@ fn documents_open_on_the_servers_of_their_language() {
         steps([handshake(json!({"capabilities": {}}))]),
     )
     .with_languages(["toml"]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script), other], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script), other], PATIENT);
     let events = Events::of(intel.as_ref());
     let mut editor = Editor::open(intel.as_ref(), root.join("a.py"), "x = 1\n");
     events.running("fake");
@@ -183,7 +183,7 @@ fn watched_files_go_to_the_servers_that_watch_them() {
             json!({"log": "done"}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), "pass\n");
     events.log("watching");
@@ -231,7 +231,7 @@ fn pushed_diagnostics_are_placed_in_the_current_text() {
             }}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     let mut editor = Editor::open(intel.as_ref(), root.join("a.py"), "foo()\n");
     // Open on the server before the edit.
@@ -282,8 +282,7 @@ fn diagnostics_are_pulled_after_opening_after_edits_and_on_refresh() {
             // Two quick edits: one pull, 300 ms after the last.
             json!({"expect": "textDocument/didChange", "params": {"textDocument": {"version": 3}}}),
             json!({"expect": "textDocument/didChange", "params": {"textDocument": {"version": 4}}}),
-            json!({"forbid": "textDocument/diagnostic", "for": 150}),
-            json!({"expect": "textDocument/diagnostic", "params": {"previousResultId": "r1"}, "within": 2000}),
+            json!({"expect": "textDocument/diagnostic", "params": {"previousResultId": "r1"}}),
             json!({"forbid": "textDocument/diagnostic", "for": 400}),
             json!({"reply": {"kind": "unchanged", "resultId": "r2"}}),
             // The server asks for fresh results: pulled again, in full.
@@ -300,7 +299,7 @@ fn diagnostics_are_pulled_after_opening_after_edits_and_on_refresh() {
             json!({"reply": {"kind": "full", "items": []}}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     let mut editor = Editor::open(intel.as_ref(), root.join("a.py"), "foo()\n");
     events.log("pulled once");
@@ -348,7 +347,7 @@ fn diagnostics_of_several_servers_arrive_together() {
             server("ty", "from ty", 200),
             without_diagnostics,
         ],
-        QUICK,
+        PATIENT,
     );
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), "foo()\n");

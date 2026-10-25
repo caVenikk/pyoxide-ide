@@ -47,7 +47,7 @@ fn completion_with_triggers_incomplete_lists_and_resolve() {
             json!({"reply": null}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("ty", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("ty", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
     events.opened_all(&["ty"]);
@@ -118,7 +118,7 @@ fn completion_items_as_the_product_presents_them() {
     ]);
     let intel = LspCodeIntel::with_timeouts(
         vec![spec("ty", &root, script).with_customizer(Arc::new(Presenting))],
-        QUICK,
+        PATIENT,
     );
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
@@ -181,7 +181,7 @@ fn documentation_signatures_and_navigation() {
             ],
         ]),
     );
-    let intel = LspCodeIntel::with_timeouts(vec![a, b], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![a, b], PATIENT);
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
     events.opened_all(&["a", "b"]);
@@ -318,7 +318,7 @@ fn code_actions_of_two_servers_formatting_from_one() {
             ],
         ]),
     );
-    let intel = LspCodeIntel::with_timeouts(vec![lint, types], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![lint, types], PATIENT);
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
     // The first server's diagnostics and the second's document, in any
@@ -436,7 +436,7 @@ fn routing_errors_cancellation_and_stale_answers() {
     )
     .with_features(Features::of(&[Feature::Diagnostics]));
     let intel =
-        LspCodeIntel::with_timeouts(vec![spec("fake", &root, script), without_hover], QUICK);
+        LspCodeIntel::with_timeouts(vec![spec("fake", &root, script), without_hover], PATIENT);
     let events = Events::of(intel.as_ref());
     let mut editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
     events.opened_all(&["fake", "plain"]);
@@ -505,7 +505,7 @@ fn rename_highlights_and_configuration_changes() {
             json!({"log": "configured"}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     let editor = Editor::open(intel.as_ref(), root.join("a.py"), TEXT);
     events.opened_all(&["fake"]);

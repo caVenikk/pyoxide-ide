@@ -138,9 +138,12 @@ mod tests {
             "{:?}",
             at - rescheduled
         );
-        debouncer.schedule("c", 4, Duration::from_millis(300));
+        // A cancelled key is gone at once. (Waiting to see that it does not
+        // fire would race with the delay on a busy machine.)
+        debouncer.schedule("c", 4, Duration::from_secs(60));
+        assert!(debouncer.shared.lock().due.contains_key("c"));
         debouncer.cancel(&"c");
-        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+        assert!(debouncer.shared.lock().due.is_empty());
         debouncer.schedule("d", 5, Duration::ZERO);
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap().1, 5);
     }

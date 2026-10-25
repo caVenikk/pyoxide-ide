@@ -6,7 +6,7 @@
 //!
 //! | step | does |
 //! |---|---|
-//! | `{"expect": method, "params": p, "within": ms}` | waits (at most `within`, default 30 s) for a message with this method whose params contain `p` (see below); messages that do not match are kept for later steps |
+//! | `{"expect": method, "params": p, "within": ms}` | waits (at most `within`, default 60 s) for a message with this method whose params contain `p` (see below); messages that do not match are kept for later steps |
 //! | `{"reply": result, "to": method}` | answers the last expected request (or the last one with `method`) |
 //! | `{"reply_error": {"code": c, "message": m}, "to": method}` | answers with an error |
 //! | `{"notify": method, "params": p}` | sends a notification |
@@ -42,7 +42,7 @@ use serde_json::{Value, json};
 use stream_framing as framing;
 
 /// How long a step waits for a message by default.
-const WAIT: Duration = Duration::from_secs(30);
+const WAIT: Duration = Duration::from_secs(60);
 
 fn main() {
     let script = load();

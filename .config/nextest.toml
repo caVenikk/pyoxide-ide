@@ -26,12 +26,6 @@ failure-output = "immediate-final"
 
 # Known flaky tests: retried twice with a pause, and only these.
 #
-# lsp-client: the fake language server answers late when the machine is
-# loaded (issue #133). Remove this override when that issue is fixed.
-[[profile.default.overrides]]
-filter = 'package(lsp-client)'
-retries = { backoff = "fixed", count = 2, delay = "1s" }
-
 # The file watcher reports events asynchronously; on a loaded runner the
 # event can arrive after the test's own wait.
 [[profile.default.overrides]]
