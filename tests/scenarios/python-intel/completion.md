@@ -11,6 +11,9 @@
 6. Press Escape; press Ctrl+Space with the caret after a letter.
 7. Type inside a string literal and inside a comment.
 8. Type `print(` inside an unclosed call and then `self.`.
+9. Press Ctrl+Space after `pri` and type `(`; after `x = al` type `.`,
+   `,`, `=` or `+`; with an automatic popup (not moved by Up/Down) type
+   `.`.
 
 ## Expected
 - Step 1: the lookup opens below the caret (`.` is a trigger character);
@@ -28,6 +31,13 @@
 - Step 7: no auto-popup inside strings and comments.
 - Step 8: the bracket is closed automatically, so the server still
   completes `self.`.
+- Step 9: when the selection is the person's (Basic Completion, Up/Down,
+  a click) the characters `.` `,` `;` `=` space `:` `(` insert the
+  selected item first and are typed after it; `(` after a function makes
+  `print(|)` with one parenthesis pair. Another character such as `+` only
+  closes the popup. An automatic popup that was not moved closes on any of
+  them without inserting. LSP commit characters are not used (the
+  reference does not use them).
 
 ## Commands
 `code.complete`, `completion.accept`, `completion.replace`,
