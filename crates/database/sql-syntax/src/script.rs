@@ -1,11 +1,12 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::classify::DdlTarget;
 use crate::dialect::Dialect;
 use crate::lexer::{Lexer, Token, TokenKind, lex};
 use crate::parser;
 use crate::split::statement_spans;
-use crate::tree::{Expected, StatementTree, SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::tree::{Expected, FragmentLanguage, StatementTree, SyntaxKind, SyntaxNode, SyntaxToken};
 
 /// How far after the start of a unit an edit must be to leave the unit before
 /// it alone: the lexer looks at most this many bytes past a token's end.
@@ -79,6 +80,39 @@ impl SyntaxError {
             SyntaxErrorKind::Unexpected => {
                 format!("Unexpected '{}'", src.get(self.range.clone()).unwrap_or(""))
             }
+        }
+    }
+}
+
+/// The errors of a tree and of the programs embedded in its strings.
+fn collect_errors(root: SyntaxNode<'_>, out: &mut Vec<SyntaxError>) {
+    for n in root.descendants() {
+        match n.kind() {
+            SyntaxKind::Missing => {
+                // Only the first of several missing parts at one position:
+                // the others follow from it.
+                let repeated = out
+                    .last()
+                    .is_some_and(|e| e.kind == SyntaxErrorKind::Missing && e.range == n.range());
+                if !repeated {
+                    out.push(SyntaxError {
+                        kind: SyntaxErrorKind::Missing,
+                        range: n.range(),
+                        expected: n.expected().to_vec(),
+                    });
+                }
+            }
+            SyntaxKind::Error => out.push(SyntaxError {
+                kind: SyntaxErrorKind::Unexpected,
+                range: n.tokens().next().map_or(n.range(), |t| t.range()),
+                expected: n.expected().to_vec(),
+            }),
+            SyntaxKind::EmbeddedBody => {
+                if let Some(f) = n.fragment() {
+                    collect_errors(f.root, out);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -212,13 +246,36 @@ impl Script {
     pub fn expected_at(&self, offset: usize) -> Vec<Expected> {
         let offset = floor_boundary(&self.text, offset);
         let u = &self.units[self.unit_index(offset)];
+        if let Some(f) = u.tree.root(u.start, &self.text).fragment_at(offset) {
+            let proc = match f.language {
+                FragmentLanguage::PlPgSql => parser::Proc::PlPgSql,
+                FragmentLanguage::Sql => parser::Proc::No,
+            };
+            return parser::expected_at(
+                &self.text[f.body.clone()],
+                f.root.statement_tree().tokens(),
+                self.dialect,
+                offset - f.body.start,
+                proc,
+            );
+        }
         let end = u.start + u.tree.len();
         parser::expected_at(
             &self.text[u.start..end],
             u.tree.tokens(),
             self.dialect,
             offset - u.start,
+            parser::Proc::No,
         )
+    }
+
+    /// The objects the DDL statement at `offset` creates, alters, drops,
+    /// truncates or comments, read from the tree; `None` for other statements
+    /// and for DDL the parser does not know. The token scan of
+    /// [`crate::classify`] gives the same answer for well-formed statements.
+    pub fn ddl_target(&self, offset: usize) -> Option<DdlTarget> {
+        let stmt = self.root_at(offset).child_nodes().next()?;
+        crate::targets::ddl_target(stmt, self.dialect)
     }
 
     /// The syntax errors: one per `Error` node and per position with
@@ -226,30 +283,7 @@ impl Script {
     pub fn errors(&self) -> Vec<SyntaxError> {
         let mut out: Vec<SyntaxError> = Vec::new();
         for root in self.statements() {
-            for n in root.descendants() {
-                match n.kind() {
-                    SyntaxKind::Missing => {
-                        // Only the first of several missing parts at one
-                        // position: the others follow from it.
-                        let repeated = out.last().is_some_and(|e| {
-                            e.kind == SyntaxErrorKind::Missing && e.range == n.range()
-                        });
-                        if !repeated {
-                            out.push(SyntaxError {
-                                kind: SyntaxErrorKind::Missing,
-                                range: n.range(),
-                                expected: n.expected().to_vec(),
-                            });
-                        }
-                    }
-                    SyntaxKind::Error => out.push(SyntaxError {
-                        kind: SyntaxErrorKind::Unexpected,
-                        range: n.tokens().next().map_or(n.range(), |t| t.range()),
-                        expected: n.expected().to_vec(),
-                    }),
-                    _ => {}
-                }
-            }
+            collect_errors(root, &mut out);
         }
         out
     }

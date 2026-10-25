@@ -35,6 +35,8 @@ enum Infix {
     Subscript,
     OuterJoin,
     Field,
+    /// `cursor%FOUND`.
+    Attribute,
 }
 
 /// Functions whose arguments have keywords of their own.
@@ -80,6 +82,31 @@ impl Parser<'_> {
         self.leave();
     }
 
+    /// The `n`th token is a PL/SQL attribute name (`FOUND`, `ROWCOUNT`, ..).
+    fn attribute_at(&self, n: usize) -> bool {
+        [
+            "found",
+            "notfound",
+            "isopen",
+            "rowcount",
+            "bulk_rowcount",
+            "bulk_exceptions",
+        ]
+        .iter()
+        .any(|w| self.nth_word(n, w))
+    }
+
+    /// `:name` of a PL/SQL trigger (`:new`, `:old`) or a bind at `n`.
+    fn colon_name_at(&self, n: usize) -> bool {
+        self.g.plsql
+            && self.nth_op(n, ":")
+            && self.nth_kind(n + 1) == Some(TokenKind::Word)
+            && self
+                .nth(n)
+                .zip(self.nth(n + 1))
+                .is_some_and(|(a, b)| a.end == b.start)
+    }
+
     fn infix(&mut self) -> Option<(Infix, u8)> {
         use Kw::*;
         let g = self.g;
@@ -88,6 +115,9 @@ impl Parser<'_> {
             Some(TokenKind::Operator) => {
                 let op = self.nth_text(0);
                 let bp = match op {
+                    "%" if g.plsql && self.attribute_at(1) => {
+                        return Some((Infix::Attribute, BP_POSTFIX));
+                    }
                     "::" if g.double_colon_cast => return Some((Infix::Cast, BP_POSTFIX)),
                     "=" | "<>" | "!=" | "<" | ">" | "<=" | ">=" | "==" => BP_CMP,
                     "+" | "-" => BP_ADD,
@@ -110,6 +140,7 @@ impl Parser<'_> {
             Some(TokenKind::LParen) if self.outer_join_mark_at(0) => {
                 return Some((Infix::OuterJoin, BP_POSTFIX));
             }
+            Some(TokenKind::Dot) if self.range_dots_at(0) => return None,
             Some(TokenKind::Dot) => return Some((Infix::Field, BP_POSTFIX)),
             _ => {}
         }
@@ -131,7 +162,9 @@ impl Parser<'_> {
                 Some(LIKE | SIMILAR) => Some((Infix::Like, BP_LIKE)),
                 Some(ILIKE) if g.ilike => Some((Infix::Like, BP_LIKE)),
                 Some(GLOB | REGEXP | MATCH) if g.sqlite_operators => Some((Infix::Like, BP_LIKE)),
-                Some(NULL) if g.null_postfix => Some((Infix::NullPostfix, BP_IS)),
+                Some(NULL) if g.null_postfix && !self.stop_not_null => {
+                    Some((Infix::NullPostfix, BP_IS))
+                }
                 _ => None,
             };
         }
@@ -285,6 +318,14 @@ impl Parser<'_> {
                 self.bump();
                 SyntaxKind::OuterJoinMark
             }
+            Infix::Attribute => {
+                self.bump();
+                self.bump();
+                if self.nth_kind(0) == Some(TokenKind::LParen) {
+                    self.bump_group();
+                }
+                SyntaxKind::AttributeExpr
+            }
             Infix::Field => {
                 self.bump();
                 if self.is_name_at(0) {
@@ -339,7 +380,7 @@ impl Parser<'_> {
             ) => true,
             Some(TokenKind::Operator) => {
                 let op = self.nth_text(n);
-                op == "*" || PREFIX_OPS.contains(&op)
+                op == "*" || PREFIX_OPS.contains(&op) || self.colon_name_at(n)
             }
             Some(TokenKind::Word) => {
                 let paren = self.nth_kind(n + 1) == Some(TokenKind::LParen);
@@ -360,6 +401,11 @@ impl Parser<'_> {
             }
             _ => false,
         }
+    }
+
+    /// Something that can start an expression is next (no expected set).
+    pub(super) fn expr_start_here(&self) -> bool {
+        self.expr_start_at(0)
     }
 
     fn at_expr_start(&mut self) -> bool {
@@ -411,6 +457,12 @@ impl Parser<'_> {
                 self.finish();
             }
             Some(TokenKind::LParen) => self.paren_expr(),
+            Some(TokenKind::Operator) if self.colon_name_at(0) => {
+                self.start(SyntaxKind::Param);
+                self.bump();
+                self.bump();
+                self.finish();
+            }
             Some(TokenKind::Operator) => {
                 // `*` where an expression stands.
                 self.start(SyntaxKind::Star);
@@ -425,7 +477,7 @@ impl Parser<'_> {
         use Kw::*;
         let paren = self.nth_kind(1) == Some(TokenKind::LParen);
         match self.nth_kw(0) {
-            Some(NULL | TRUE | FALSE) if !paren => {
+            Some(NULL | TRUE | FALSE | DEFAULT) if !paren => {
                 self.start(SyntaxKind::Literal);
                 self.bump();
                 self.finish();
@@ -671,7 +723,14 @@ impl Parser<'_> {
         };
         let missing = tail == Tail::Missing;
         self.chain(SyntaxKind::TypeRef, parts, missing, true);
-        if !missing {
+        if !missing
+            && self.g.plsql
+            && self.nth_op(0, "%")
+            && (self.nth_word(1, "type") || self.nth_word(1, "rowtype"))
+        {
+            self.bump();
+            self.bump();
+        } else if !missing {
             let base = self.prev_text().to_ascii_lowercase();
             match base.as_str() {
                 "double" if self.nth_word(0, "precision") => self.bump(),

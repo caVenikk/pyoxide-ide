@@ -337,6 +337,9 @@ impl Cursor<'_> {
         if object == ObjectKind::Type && self.is(i, "BODY") {
             i += 1;
         }
+        while self.is(i, "CONCURRENTLY") {
+            i += 1;
+        }
         if self.is(i, "IF") {
             // IF [NOT] EXISTS
             i += 1;
@@ -346,6 +349,10 @@ impl Cursor<'_> {
             if self.is(i, "EXISTS") {
                 i += 1;
             }
+        }
+        if object == ObjectKind::Schema && self.is(i, "AUTHORIZATION") {
+            // `CREATE SCHEMA AUTHORIZATION role`: the schema is named after the role.
+            i += 1;
         }
         while self.is_any(i, &["CONCURRENTLY", "ONLY"]) {
             i += 1;

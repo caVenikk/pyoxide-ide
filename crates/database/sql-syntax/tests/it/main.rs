@@ -1,12 +1,16 @@
+mod blocks;
 mod candidates;
 mod classify;
 mod corpus;
+mod ddl;
 mod dialect;
+mod dml;
 mod explain;
 mod lexer;
 mod params;
 mod soup;
 mod split;
+mod statements;
 mod tree;
 mod tree_props;
 
