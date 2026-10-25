@@ -11,8 +11,8 @@ use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, DispatchPhase, Div, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollWheelEvent,
-    SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollHandle,
+    ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
 use serde_json::json;
@@ -218,6 +218,11 @@ pub struct Workbench {
     panel: Entity<ProjectPanel>,
     tabs: Vec<Tab>,
     active: Option<usize>,
+    /// Scroll position of the tab strip, and the active tab and tab count
+    /// it was last brought to show (a change of either scrolls the strip
+    /// just enough to show the whole active tab).
+    tab_scroll: ScrollHandle,
+    tab_scroll_shown: std::cell::Cell<Option<(usize, usize)>>,
     /// Background reads and writes in flight.
     pending: usize,
     /// Last error or notice, shown in the status bar.
@@ -443,6 +448,8 @@ impl Workbench {
             panel,
             tabs: Vec::new(),
             active: None,
+            tab_scroll: ScrollHandle::new(),
+            tab_scroll_shown: std::cell::Cell::new(None),
             pending: 0,
             message: None,
             notice: None,
@@ -2251,6 +2258,10 @@ impl Workbench {
             let tabs: Vec<AnyElement> = (0..self.tabs.len())
                 .map(|i| self.render_tab(i, cx))
                 .collect();
+            let shown = Some((active, self.tabs.len()));
+            if self.tab_scroll_shown.replace(shown) != shown {
+                self.tab_scroll.scroll_to_item(active);
+            }
             let separator = match &self.tabs[active].content {
                 TabContent::View(view) if !view.separator(cx) => gpui::transparent_black(),
                 _ => separator,
@@ -2268,6 +2279,7 @@ impl Workbench {
                         .h(tab_h)
                         .pl(px(FIRST_TAB_OFFSET))
                         .overflow_x_scroll()
+                        .track_scroll(&self.tab_scroll)
                         .border_b_1()
                         .border_color(separator)
                         .children(tabs),

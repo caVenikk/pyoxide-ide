@@ -388,3 +388,72 @@ fn a_narrow_field_keeps_a_short_text_in_view(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(editor.read_with(cx, |e, _| e.scroll_left()), px(0.0));
 }
+
+fn swipe_left(cx: &mut VisualTestContext, editor: &Entity<Editor>, pixels: f32) {
+    let (origin, lh, _) = editor.read_with(cx, |e, _| e.text_geometry().unwrap());
+    let middle = cx.update(|window, _| window.bounds().center().x);
+    cx.simulate_event(ScrollWheelEvent {
+        position: point(middle, origin.y + lh / 2.0),
+        delta: ScrollDelta::Pixels(point(px(-pixels), px(0.0))),
+        modifiers: Modifiers::none(),
+        touch_phase: TouchPhase::Moved,
+    });
+    draw(cx);
+}
+
+#[gpui::test]
+fn a_swipe_far_right_stops_at_the_longest_line(cx: &mut TestAppContext) {
+    let long = "x".repeat(300);
+    let (editor, cx) = open(cx, &format!("short\n{long}\n\tend"));
+    let (origin, _, cw) = editor.read_with(cx, |e, _| e.text_geometry().unwrap());
+    let view_right = cx.update(|window, _| window.bounds().right());
+    swipe_left(cx, &editor, 100_000.0);
+    let limit = editor.read_with(cx, |e, _| e.scroll_left());
+    assert!(limit > px(0.0));
+    // The end of the longest line plus three columns of margin is at the
+    // right edge of the text area (the error stripe is narrower than a
+    // column and a half).
+    let end = origin.x - limit + cw * 300.0;
+    assert!(end + cw * 3.0 <= view_right, "{end:?} {view_right:?}");
+    assert!(
+        end + cw * 3.0 > view_right - px(40.0),
+        "{end:?} {view_right:?}"
+    );
+    // Swiping on does not move it, and back left moves it.
+    swipe_left(cx, &editor, 5_000.0);
+    assert_eq!(editor.read_with(cx, |e, _| e.scroll_left()), limit);
+    swipe_left(cx, &editor, -100.0);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.scroll_left()),
+        limit - px(100.0)
+    );
+}
+
+#[gpui::test]
+fn text_that_fits_does_not_scroll_sideways(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "short\nlines");
+    swipe_left(cx, &editor, 1_000.0);
+    assert_eq!(editor.read_with(cx, |e, _| e.scroll_left()), px(0.0));
+}
+
+#[gpui::test]
+fn soft_wrapped_text_does_not_scroll_sideways(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, &"word ".repeat(200));
+    editor.update(cx, |e, cx| e.set_soft_wraps(true, cx));
+    draw(cx);
+    swipe_left(cx, &editor, 1_000.0);
+    assert_eq!(editor.read_with(cx, |e, _| e.scroll_left()), px(0.0));
+}
+
+#[gpui::test]
+fn the_limit_follows_edits_of_the_longest_line(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, &format!("{}\nab", "x".repeat(300)));
+    swipe_left(cx, &editor, 100_000.0);
+    let long = editor.read_with(cx, |e, _| e.scroll_left());
+    // Cutting the long line shortens the range the text scrolls in.
+    select(cx, (0, 100), (0, 300));
+    act(cx, Backspace);
+    swipe_left(cx, &editor, 100_000.0);
+    let short = editor.read_with(cx, |e, _| e.scroll_left());
+    assert!(short < long, "{short:?} {long:?}");
+}

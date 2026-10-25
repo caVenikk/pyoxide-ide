@@ -1078,10 +1078,10 @@ impl Element for EditorElement {
                 e.scroll.y = lh * row as f32 - (bounds.size.height - lh) / 2.0;
             }
             e.scroll.y = e.scroll.y.clamp(px(0.0), max_y);
-            e.scroll.x = if e.soft_wraps() {
+            e.scroll.x = if e.soft_wraps() || e.scroll.x <= px(0.0) {
                 px(0.0)
             } else {
-                e.scroll.x.max(px(0.0))
+                e.scroll.x.min(e.max_scroll_x_for(text_width, m.char_width))
             };
             if moves && e.scroll != before {
                 cx.emit(EditorEvent::Scrolled);

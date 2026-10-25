@@ -22,6 +22,7 @@ use crate::decorations::{DecorationId, Decorations};
 use crate::diagnostics::{Analysis, DiagnosticMark, Marks, ProblemCounts, problem_to_go};
 use crate::element::{EditorElement, LayoutInfo};
 use crate::highlight::Highlighter;
+use crate::longest_line::{ADDITIONAL_COLUMNS, LongestLine};
 use crate::soft_wrap::SoftWrap;
 use crate::wrap::{WrapParams, WrapRule};
 
@@ -367,6 +368,8 @@ pub struct Editor {
     pub(crate) pressed_stripe: Option<(usize, gpui::Point<Pixels>)>,
     /// Soft wraps, when on ([`Editor::set_soft_wraps`]).
     pub(crate) soft_wrap: Option<SoftWrap>,
+    /// Width of the longest line, for the limit of the sideways scroll.
+    pub(crate) longest_line: LongestLine,
     /// Carets (by head) at a soft wrap drawn at the end of the row before
     /// it rather than at the start of the next (after End, or moving up
     /// or down to the end of a row).
@@ -496,6 +499,7 @@ impl Editor {
             stripe_hover: None,
             pressed_stripe: None,
             soft_wrap: None,
+            longest_line: LongestLine::default(),
             lean_back: BTreeSet::new(),
             last_wrap_params: None,
             wrap_rules: WrapRule::defaults().into(),
@@ -2834,12 +2838,40 @@ impl Editor {
         let before = self.scroll;
         self.scroll.y = (self.scroll.y + delta.y).clamp(px(0.0), max_y);
         if self.soft_wrap.is_none() {
-            self.scroll.x = (self.scroll.x + delta.x).max(px(0.0));
+            let x = self.scroll.x + delta.x;
+            self.scroll.x = if x <= px(0.0) {
+                px(0.0)
+            } else {
+                x.min(self.max_scroll_x())
+            };
         }
         if self.scroll != before {
             cx.emit(EditorEvent::Scrolled);
         }
         cx.notify();
+    }
+
+    /// How far the text scrolls sideways as of the last frame: until the
+    /// end of the longest line and the reference's margin of additional
+    /// columns is at the right edge of the view. Soft-wrapped text does not
+    /// scroll sideways; before the first frame there is no limit.
+    pub(crate) fn max_scroll_x(&self) -> Pixels {
+        if self.soft_wrap.is_some() {
+            return px(0.0);
+        }
+        match self.layout.as_ref() {
+            Some(l) => self.max_scroll_x_for((l.text_end - l.text_x).max(px(0.0)), l.char_width),
+            None => Pixels::MAX,
+        }
+    }
+
+    /// The sideways scroll limit for a text area of `text_width`.
+    pub(crate) fn max_scroll_x_for(&self, text_width: Pixels, char_width: Pixels) -> Pixels {
+        let columns = self
+            .longest_line
+            .columns(&self.buffer, self.config.tab_size)
+            + ADDITIONAL_COLUMNS;
+        (char_width * columns as f32 - text_width).max(px(0.0))
     }
 
     pub(crate) fn max_scroll_y(&self) -> Pixels {
