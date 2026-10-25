@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Stop cancels the running statement and keeps the session,db-gui,must,yes,no,Pro; engine row query-timeout-and-cancel
+Stop cancels the running statement and keeps the session,db-gui,must,yes,partial,"Pro; engine row query-timeout-and-cancel. Engine done (db-session, #299): server cancel within 1 s, the session stays; thin Oracle reconnects and reports a lost transaction; the console button comes with #304"

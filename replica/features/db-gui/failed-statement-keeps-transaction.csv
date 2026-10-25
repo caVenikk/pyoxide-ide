@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-In manual mode a failed statement rolls back to a savepoint and the transaction continues,db-gui,should,yes,no,Pro; PostgreSQL
+In manual mode a failed statement rolls back to a savepoint and the transaction continues,db-gui,should,yes,partial,"Pro; PostgreSQL. Engine done (db-session, #299): each statement in manual mode runs under a savepoint, checked on PostgreSQL, Oracle and SQLite; the console comes with #304"

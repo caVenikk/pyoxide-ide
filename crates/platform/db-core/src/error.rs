@@ -44,6 +44,11 @@ pub struct Error {
     pub kind: ErrorKind,
     pub code: Option<String>,
     pub message: String,
+    /// Where the server located the error: a zero-based character offset
+    /// into the statement text as the caller sent it (PostgreSQL `position`,
+    /// SQLite syntax errors). `None` when the backend did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<usize>,
 }
 
 impl Error {
@@ -52,7 +57,13 @@ impl Error {
             kind,
             code: None,
             message: message.into(),
+            position: None,
         }
+    }
+
+    pub fn with_position(mut self, position: usize) -> Self {
+        self.position = Some(position);
+        self
     }
 
     pub fn with_code(mut self, code: impl Into<String>) -> Self {

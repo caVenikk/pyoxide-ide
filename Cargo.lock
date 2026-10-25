@@ -1844,6 +1844,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-session"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "commands",
+ "db-core",
+ "db-model",
+ "db-oracle-thin",
+ "db-postgres",
+ "db-sqlite",
+ "serde",
+ "serde_json",
+ "sql-syntax",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "db-sqlite"
 version = "0.0.1"
 dependencies = [

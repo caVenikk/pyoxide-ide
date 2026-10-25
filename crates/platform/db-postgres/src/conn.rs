@@ -183,10 +183,17 @@ impl Inner {
         // closed without a cancel. Everything else streams.
         if self.mode() == TxMode::Manual && stmt::is_declarable(sql) {
             let name = format!("pxpg_c{}", self.cursor_seq.fetch_add(1, Ordering::Relaxed));
+            let prefix = format!("DECLARE {name} NO SCROLL CURSOR FOR ");
             let declare = client
-                .prepare(&format!("DECLARE {name} NO SCROLL CURSOR FOR {sql}"))
+                .prepare(&format!("{prefix}{sql}"))
                 .await
-                .map_err(|e| self.map(&e))?;
+                .map_err(|e| {
+                    // Positions refer to the caller's statement, not to the
+                    // wrapper.
+                    let mut e = self.map(&e);
+                    e.position = e.position.and_then(|p| p.checked_sub(prefix.len()));
+                    e
+                })?;
             let binds = bind::convert_all(params, declare.params())?;
             client
                 .execute_raw(&declare, &binds)

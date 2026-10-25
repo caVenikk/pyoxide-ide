@@ -12,6 +12,7 @@ cargo test -p db-postgres -- --ignored
 cargo test -p db-oracle-thin -- --ignored
 cargo test -p db-oracle-odpi -- --ignored # needs an Oracle Client installed
 cargo test -p db-service -- --ignored
+cargo test -p db-session -- --ignored     # sessions: cancel, savepoints, read-only
 ```
 
 | service | address | database | user | password |

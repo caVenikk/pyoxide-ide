@@ -51,7 +51,12 @@ pub(crate) fn map_error(e: &tokio_postgres::Error, phase: Phase) -> Error {
             message.push_str("\nHINT: ");
             message.push_str(hint);
         }
-        return Error::new(kind, message).with_code(code);
+        let mut error = Error::new(kind, message).with_code(code);
+        // A 1-based character index into the statement the client sent.
+        if let Some(tokio_postgres::error::ErrorPosition::Original(at)) = db.position() {
+            error = error.with_position((*at as usize).saturating_sub(1));
+        }
+        return error;
     }
 
     let message = chain_message(e);

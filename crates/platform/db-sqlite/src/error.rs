@@ -97,7 +97,15 @@ pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
             ffi::SQLITE_MISUSE | ffi::SQLITE_INTERNAL => (ErrorKind::Internal, text),
             _ => (ErrorKind::Query, text),
         };
-        return Error::new(kind, message).with_code(code);
+        let error = Error::new(kind, message).with_code(code);
+        // A syntax error points at the offending token (a byte offset).
+        if let rusqlite::Error::SqlInputError { sql, offset, .. } = e
+            && let Ok(offset) = usize::try_from(*offset)
+            && let Some(before) = sql.get(..offset)
+        {
+            return error.with_position(before.chars().count());
+        }
+        return error;
     }
     match e {
         rusqlite::Error::MultipleStatement => Error::query(
@@ -136,6 +144,18 @@ mod tests {
 
     fn failure(extended: i32, msg: &str) -> rusqlite::Error {
         rusqlite::Error::SqliteFailure(ffi::Error::new(extended), Some(msg.to_owned()))
+    }
+
+    #[test]
+    fn syntax_errors_carry_a_character_position() {
+        let e = rusqlite::Error::SqlInputError {
+            error: ffi::Error::new(ffi::SQLITE_ERROR),
+            msg: "near \"frm\": syntax error".into(),
+            sql: "select \u{e9} frm t".into(),
+            offset: 10,
+        };
+        assert_eq!(map_error(&e).position, Some(9));
+        assert_eq!(map_error(&failure(ffi::SQLITE_ERROR, "x")).position, None);
     }
 
     #[test]

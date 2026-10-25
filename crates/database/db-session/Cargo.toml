@@ -1,0 +1,29 @@
+[package]
+name = "db-session"
+description = "Asynchronous layer of the database module of Pyoxide IDE: the database runtime, data source handles (connect, keep-alive, idle disconnect, data and metadata connections), console sessions with manual transactions and out-of-band cancel, and query jobs reported as events. No toolkit; tokio stays inside"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# `db_session::fake`: a scripted `ConnectionSource` for tests of this crate
+# and of the crates built on it.
+test-support = []
+
+[dependencies]
+async-trait.workspace = true
+commands.workspace = true
+db-core.workspace = true
+db-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sql-syntax.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+db-oracle-thin.workspace = true
+db-postgres.workspace = true
+db-sqlite.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }
