@@ -219,3 +219,18 @@ fn list_children(pid: libc::pid_t) -> Vec<libc::pid_t> {
 fn children_map(_root: libc::pid_t) -> HashMap<libc::pid_t, Vec<libc::pid_t>> {
     HashMap::new()
 }
+
+/// A process with this id exists (also one of another user).
+pub(crate) fn is_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // Signal 0 only checks that the process can be signalled; pid 0 and
+    // negative ids would address process groups.
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: `kill` with signal 0 sends nothing.
+    let r = unsafe { libc::kill(pid, 0) };
+    r == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}

@@ -5,7 +5,8 @@ use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, FALSE, FILETIME, GetLastError, HANDLE, STILL_ACTIVE, TRUE, WAIT_OBJECT_0,
+    CloseHandle, ERROR_ACCESS_DENIED, FALSE, FILETIME, GetLastError, HANDLE, STILL_ACTIVE, TRUE,
+    WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::Console::{
     AttachConsole, CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
@@ -293,6 +294,25 @@ fn snapshot() -> Vec<Entry> {
         CloseHandle(snap);
     }
     out
+}
+
+/// A process with this id exists and has not exited (also one we may not
+/// open).
+pub(crate) fn is_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: a handle opened, used and closed here.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if h.is_null() {
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        let mut code: u32 = 0;
+        let alive = GetExitCodeProcess(h, &mut code) != 0 && code == STILL_ACTIVE as u32;
+        CloseHandle(h);
+        alive
+    }
 }
 
 #[cfg(test)]

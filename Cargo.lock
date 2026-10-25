@@ -5318,6 +5318,7 @@ name = "project"
 version = "0.0.1"
 dependencies = [
  "native-path",
+ "process",
  "quick-xml 0.42.0",
  "tempfile",
  "text",

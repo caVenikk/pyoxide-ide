@@ -48,6 +48,33 @@ fn project() -> Project {
     }
 }
 
+#[test]
+fn leftovers_of_interrupted_saves_are_hidden_and_removed_when_safe() {
+    let p = project();
+    let gone = p.root.join(".app.py.pyoxide-save-2147483632-0");
+    let nested_gone = p
+        .root
+        .join("src/flask/.helpers.py.pyoxide-save-2147483632-3");
+    let in_venv = p.root.join(".venv/lib/.site.py.pyoxide-save-2147483632-0");
+    let mine = p
+        .root
+        .join(format!(".app.py.pyoxide-save-{}-1", std::process::id()));
+    for f in [&gone, &nested_gone, &in_venv, &mine] {
+        std::fs::write(f, "x").unwrap();
+    }
+    let index = FileIndex::build(&p.root, &p.filter, false, &AtomicBool::new(false)).unwrap();
+    assert_eq!(index.len(), p.index.len(), "none of them is listed");
+    assert!(index.find(&gone).is_none() && index.find(&mine).is_none());
+    // Left by a session that is gone: removed. A write of this process and
+    // a file in an excluded folder: kept.
+    assert!(!gone.exists() && !nested_gone.exists());
+    assert!(mine.exists() && in_venv.exists());
+
+    // Also with the content of excluded folders listed.
+    let index = FileIndex::build(&p.root, &p.filter, true, &AtomicBool::new(false)).unwrap();
+    assert!(index.find(&in_venv).is_none() && index.find(&mine).is_none());
+}
+
 /// Relative paths of what `text` finds, ranked as the popup shows them.
 fn find(index: &FileIndex, text: &str) -> Vec<String> {
     find_with(

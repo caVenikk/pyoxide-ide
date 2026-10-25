@@ -38,6 +38,12 @@ pub use helper::{
     INTERRUPT_HELPER_ARG, InterruptHelper, run_interrupt_helper_if_requested, set_interrupt_helper,
 };
 
+/// A process with this id is running (any process of the system, not only
+/// those started here).
+pub fn is_alive(pid: u32) -> bool {
+    sys::is_alive(pid)
+}
+
 /// The direct children of the process `pid` (not their descendants), or none
 /// when the process has none, has ended or the system cannot list them (a
 /// Unix system other than Linux and macOS). The reference asks a terminal's
@@ -80,3 +86,16 @@ pub const EVENT_CHANNEL_CAPACITY: usize = 64;
 /// The largest output chunk one read produces (the reference reads 8192
 /// characters at a time).
 pub const READ_CHUNK_SIZE: usize = 8192;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tells_a_running_process_from_a_missing_one() {
+        assert!(is_alive(std::process::id()));
+        assert!(!is_alive(0));
+        // Above the process id limit of Linux and macOS, not an id on Windows.
+        assert!(!is_alive(0x7fff_fff0));
+    }
+}
