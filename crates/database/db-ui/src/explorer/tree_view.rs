@@ -337,6 +337,58 @@ impl Explorer {
         cx.notify();
     }
 
+    /// Opens every node of the loaded data sources, level by level (the
+    /// local model only), up to a bound for very large models.
+    pub(super) fn expand_all(&mut self, cx: &mut Context<Self>) {
+        const MAX_ROWS: usize = 20_000;
+        loop {
+            let closed: Vec<RowKey> = self
+                .tree
+                .rows
+                .iter()
+                .filter(|r| {
+                    r.expandable
+                        && !r.expanded
+                        && (r.key.node != NodeKey::Source
+                            || self.tree.lives.contains_key(&*r.key.source))
+                })
+                .map(|r| r.key.clone())
+                .collect();
+            if closed.is_empty() || self.tree.rows.len() >= MAX_ROWS {
+                break;
+            }
+            self.tree.expanded.extend(closed);
+            self.rebuild_rows();
+        }
+        cx.notify();
+    }
+
+    /// Closes every node, leaving the data sources.
+    pub(super) fn collapse_all(&mut self, cx: &mut Context<Self>) {
+        self.tree.expanded.clear();
+        self.rebuild_rows();
+        cx.notify();
+    }
+
+    /// Scrolls to the selected row (the selected data source's when no row
+    /// is selected).
+    pub(super) fn locate(&mut self, cx: &mut Context<Self>) {
+        if self.tree.selected.is_none()
+            && let Some(name) = self.selected_source().map(|s| s.name.clone())
+        {
+            self.select_row(RowKey::source(&name.as_str().into()), cx);
+        }
+        if let Some(ix) = self
+            .tree
+            .rows
+            .iter()
+            .position(|r| Some(&r.key) == self.tree.selected.as_ref())
+        {
+            self.scroll.scroll_to_item(ix, gpui::ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
     /// Refreshes the selected data source (opening it when it is not).
     pub(super) fn refresh_selected(&mut self, cx: &mut Context<Self>) {
         let Some(name) = self.selected_source().map(|s| s.name.clone()) else {

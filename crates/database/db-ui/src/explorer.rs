@@ -77,6 +77,15 @@ ui::ui_commands! {
     Collapse { path: String } => "db.explorer.collapse", "Collapse",
         "Closes the node at `path` in the Database tool window's tree (see db.explorer.expand).",
         r#"{"path": "pyoxide-local/pyoxide/demo"}"#;
+    /// Open every node of the tree.
+    ExpandAll => "db.explorer.expand-all", "Expand All",
+        "Opens every node of the Database tool window's tree that is loaded (the local model is read, never the database).";
+    /// Close every node of the tree.
+    CollapseAll => "db.explorer.collapse-all", "Collapse All",
+        "Closes every node of the Database tool window's tree, leaving the data sources.";
+    /// Scroll to the selected row.
+    Locate => "db.explorer.locate", "Select Opened Node",
+        "Scrolls the Database tool window's tree to the selected row (the selected data source when no row is).";
 }
 
 /// Texts of the empty state and the menu (our own wording where the
@@ -183,6 +192,9 @@ pub(crate) fn init(cx: &mut App) {
         let path = a.path.clone();
         with_target(cx, move |e, _, cx| e.collapse_path(&path, cx))
     });
+    cx.on_action(|_: &ExpandAll, cx| with_target(cx, |e, _, cx| e.expand_all(cx)));
+    cx.on_action(|_: &CollapseAll, cx| with_target(cx, |e, _, cx| e.collapse_all(cx)));
+    cx.on_action(|_: &Locate, cx| with_target(cx, |e, _, cx| e.locate(cx)));
     ui::command::register_query(
         cx,
         "db.state",
@@ -600,6 +612,42 @@ impl Explorer {
                     .child(TITLE),
             )
             .child(div().flex_1())
+            .child(
+                icon_button(
+                    "database-locate",
+                    IconName::LOCATE,
+                    px(BUTTON),
+                    px(ICON),
+                    false,
+                    cx,
+                )
+                .tooltip(Tooltip::text("Select Opened Node", None))
+                .on_click(cx.listener(|this, _, _, cx| this.locate(cx))),
+            )
+            .child(
+                icon_button(
+                    "database-expand-all",
+                    IconName::EXPAND_ALL,
+                    px(BUTTON),
+                    px(ICON),
+                    false,
+                    cx,
+                )
+                .tooltip(Tooltip::text("Expand All", None))
+                .on_click(cx.listener(|this, _, _, cx| this.expand_all(cx))),
+            )
+            .child(
+                icon_button(
+                    "database-collapse-all",
+                    IconName::COLLAPSE_ALL,
+                    px(BUTTON),
+                    px(ICON),
+                    false,
+                    cx,
+                )
+                .tooltip(Tooltip::text("Collapse All", None))
+                .on_click(cx.listener(|this, _, _, cx| this.collapse_all(cx))),
+            )
             .child(
                 icon_button(
                     "database-options",

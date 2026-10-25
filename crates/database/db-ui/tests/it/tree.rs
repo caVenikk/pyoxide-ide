@@ -190,3 +190,33 @@ fn the_data_source_and_database_rows_count_what_is_shown(cx: &mut TestAppContext
         detail(0) == Some("1 of 2") && detail(1) == Some("2 of 4")
     });
 }
+
+#[gpui::test]
+fn expand_all_and_collapse_all_open_and_close_the_tree(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let cache = ModelCache::new(cache_dir.path());
+    cache
+        .store(&Model::from_snapshot(
+            DataSourceId::from(NAME),
+            demo_snapshot(),
+        ))
+        .unwrap();
+    let store = FakeStore::new("");
+    store.set_model_cache(cache_dir.path());
+    store.set_connections(Arc::new(NoServer::default()));
+    let mut h = open(cx, store, &root);
+    h.invoke("db.explorer.expand", json!({ "path": NAME }));
+    wait_for(&mut h, "the cached model", |s| {
+        s["explorer"]["tree"]["data_sources"][NAME]["has_model"] == true
+    });
+    h.invoke("db.explorer.expand-all", Value::Null);
+    let all = rows(&mut h);
+    assert!(
+        all.iter()
+            .any(|r| r.ends_with("tables/customers/columns/id [integer (auto increment)]")),
+        "{all:?}"
+    );
+    h.invoke("db.explorer.collapse-all", Value::Null);
+    assert_eq!(rows(&mut h).len(), 1);
+}
