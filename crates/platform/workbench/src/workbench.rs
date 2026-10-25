@@ -618,11 +618,21 @@ impl Workbench {
         cx: &mut App,
     ) {
         let weak = this.downgrade();
+        let stripe = f32::from(cx.theme().metric(themes::Metric::StripeWidth));
+        let pane = f32::from(window.viewport_size().width) - 2.0 * stripe;
         for hook in &product.tool_windows {
             let content = (hook.create)(weak.clone(), window, cx);
             let spec = hook.spec.clone();
+            let width = hook
+                .width
+                .filter(|_| spec.area.is_side())
+                .map(|w| w.min(crate::tool_windows::BOTTOM_WEIGHT * pane));
             this.update(cx, |this, cx| {
-                this.register_tool_window(spec, Some(content), cx)
+                let area = spec.area;
+                this.register_tool_window(spec, Some(content), cx);
+                if let Some(width) = width {
+                    this.tool_windows.set_size(area, width);
+                }
             });
         }
     }

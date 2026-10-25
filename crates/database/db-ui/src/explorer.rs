@@ -63,6 +63,9 @@ ui::ui_commands! {
 /// Texts of the empty state and the menu (our own wording where the
 /// reference's is not a plain name).
 pub const TITLE: &str = "Database";
+/// The tool window's width on the reference's main window of 1710 px
+/// (the workbench keeps it within the default share of a smaller one).
+pub const WIDTH: f32 = 466.0;
 const CREATE_GROUP: &str = "Create Data Source";
 const IMPORT_GROUP: &str = "Import Data Sources";
 const IMPORT_PYCHARM: &str = "From PyCharm Project";

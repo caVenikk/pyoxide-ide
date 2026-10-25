@@ -445,6 +445,7 @@ fn a_module_tool_window_is_made_for_the_main_window(cx: &mut TestAppContext) {
                     focus: cx.focus_handle(),
                 }))
             }),
+            width: Some(10_000.0),
         }],
         ..workbench::Module::default()
     };
@@ -460,6 +461,12 @@ fn a_module_tool_window_is_made_for_the_main_window(cx: &mut TestAppContext) {
     let state = invoke(cx, window, "workbench.state", json!(null));
     assert_eq!(state["tool_windows"]["test-module"]["visible"], json!(true));
     assert_eq!(state["tool_windows"]["test-module"]["area"], json!("right"));
+    // The width asked for, at most the default share of the window.
+    let width = state["tool_window_areas"]["right"]["width"]
+        .as_f64()
+        .unwrap();
+    let window_width = workbench::app::WINDOW_SIZE.0 as f64;
+    assert!(width > 333.0 && width <= 0.33 * window_width, "{width}");
 }
 
 /// Toggling by id: the first command shows and focuses the tool window,

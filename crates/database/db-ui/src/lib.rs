@@ -135,6 +135,7 @@ pub fn module(config: DbUiConfig) -> Module {
                 registered: true,
             },
             create: std::rc::Rc::new(explorer::create),
+            width: Some(explorer::WIDTH),
         }],
         ..Module::default()
     }

@@ -167,6 +167,10 @@ pub type CreateToolWindow =
 pub struct ToolWindowHook {
     pub spec: ToolWindowSpec,
     pub create: CreateToolWindow,
+    /// The width a side area starts with for this tool window, at most the
+    /// reference's default share of the window (`BOTTOM_WEIGHT`,
+    /// `WindowInfoImpl.DEFAULT_WEIGHT`); `None` keeps the area's.
+    pub width: Option<f32>,
 }
 
 impl std::fmt::Debug for ToolWindowHook {
