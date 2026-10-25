@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Highlight of unresolved table and column references,db-gui,could,yes,no,Pro
+Highlight of unresolved table and column references,db-gui,could,yes,partial,"Pro; engine part done (sql-intel, #319: Unresolved vs Unknown); the highlight comes with #321"

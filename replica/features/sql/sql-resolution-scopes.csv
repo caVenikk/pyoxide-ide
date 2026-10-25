@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Files and folders mapped to a data source and schema for resolving names,sql,must,yes,no,Pro; ADR 0022; builds on sql-file-bound-to-a-data-source
+Files and folders mapped to a data source and schema for resolving names,sql,must,yes,partial,"Pro; ADR 0022; builds on sql-file-bound-to-a-data-source. Engine done (sql-intel, #319): scope with search path per dialect, CTEs, aliases, script-local objects; mapping files to a data source comes with db-ui (#321)"
