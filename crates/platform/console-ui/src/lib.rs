@@ -9,6 +9,7 @@
 //! - [`feed_input`]: a file as a process's standard input ("Redirect input
 //!   from").
 
+mod decor;
 mod view;
 
 use std::path::PathBuf;

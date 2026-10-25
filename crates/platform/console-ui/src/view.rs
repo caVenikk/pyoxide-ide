@@ -35,51 +35,7 @@ pub const FLUSH_DELAY: Duration = Duration::from_millis(16);
 /// the window's frames (the reference shows output every 200 ms).
 pub const FLOOD_INTERVAL: Duration = Duration::from_millis(100);
 
-/// One style run of a console line, in chars.
-#[derive(Debug, Clone, PartialEq)]
-struct Run {
-    range: Range<usize>,
-    kind: ContentKind,
-    style: Style,
-}
-
-/// What the view keeps of a console line for drawing it.
-#[derive(Debug, Clone, Default, PartialEq)]
-struct LineDecor {
-    runs: Vec<Run>,
-    links: Vec<(Range<usize>, LinkTarget)>,
-}
-
-impl LineDecor {
-    fn of(line: &console::Line) -> Self {
-        let text = line.text();
-        // Byte offsets to char offsets, in one pass per line.
-        let to_char = |byte: usize| text[..byte.min(text.len())].chars().count();
-        Self {
-            runs: line
-                .runs()
-                .iter()
-                .map(|r| Run {
-                    range: to_char(r.range.start)..to_char(r.range.end),
-                    kind: r.kind,
-                    style: r.style,
-                })
-                .collect(),
-            links: line
-                .links()
-                .iter()
-                .map(|l| {
-                    (
-                        to_char(l.range.start)..to_char(l.range.end),
-                        l.target.clone(),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-type Decor = Rc<RefCell<Vec<LineDecor>>>;
+type Decor = Rc<RefCell<crate::decor::Decor>>;
 
 /// The text role of plain text of a content kind (normal output has the
 /// console's default colour).
@@ -173,31 +129,31 @@ impl Highlighter for ConsoleHighlighter {
     fn edited(&mut self, _: &Buffer, _: &[text::AppliedEdit]) {}
 
     fn line_spans(&self, line: usize, out: &mut Vec<Span>) {
-        if let Some(d) = self.decor.borrow().get(line) {
-            for run in &d.runs {
-                if !run.style.ansi
-                    && let Some(role) = kind_role(run.kind)
-                {
-                    out.push((run.range.clone(), role));
-                }
+        for run in self.decor.borrow().runs(line) {
+            if !run.style.ansi
+                && let Some(role) = kind_role(run.kind)
+            {
+                out.push((run.range(), role));
             }
         }
     }
 
     fn line_styles(&self, line: usize, theme: &Theme, out: &mut Vec<(Range<usize>, InlineStyle)>) {
-        if let Some(d) = self.decor.borrow().get(line) {
-            for run in &d.runs {
-                if run.style.ansi {
-                    out.push((run.range.clone(), ansi_style(&run.style, theme)));
-                }
+        for run in self.decor.borrow().runs(line) {
+            if run.style.ansi {
+                out.push((run.range(), ansi_style(&run.style, theme)));
             }
         }
     }
 
     fn line_links(&self, line: usize, out: &mut Vec<Range<usize>>) {
-        if let Some(d) = self.decor.borrow().get(line) {
-            out.extend(d.links.iter().map(|(r, _)| r.clone()));
-        }
+        out.extend(
+            self.decor
+                .borrow()
+                .links(line)
+                .iter()
+                .map(|(r, _)| r.clone()),
+        );
     }
 }
 
@@ -235,7 +191,7 @@ impl EventEmitter<ConsoleEvent> for ConsoleView {}
 
 impl ConsoleView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let decor: Decor = Rc::new(RefCell::new(vec![LineDecor::default()]));
+        let decor: Decor = Rc::default();
         let editor = cx.new(|cx| {
             let mut buffer = Buffer::new("");
             buffer.set_read_only(true);
@@ -385,14 +341,13 @@ impl ConsoleView {
             if changes.cleared || changes.trimmed >= lines {
                 let len = e.buffer().len_chars();
                 e.replace_untracked(vec![Edit::new(0..len, joined(&model, 0))], cx);
-                *decor = model.lines().map(LineDecor::of).collect();
+                decor.reset(model.lines());
                 return;
             }
             if changes.trimmed > 0 {
                 let end = e.buffer().line_start(changes.trimmed);
                 e.replace_untracked(vec![Edit::delete(0..end)], cx);
-                let trimmed = changes.trimmed.min(decor.len());
-                decor.drain(..trimmed);
+                decor.drain_front(changes.trimmed);
             }
             if changes.first_line_cut && changes.changed_from > 0 {
                 let end = e.buffer().line_end(0);
@@ -401,8 +356,8 @@ impl ConsoleView {
                     .map(|l| l.text().to_owned())
                     .unwrap_or_default();
                 e.replace_untracked(vec![Edit::new(0..end, line)], cx);
-                if let (Some(d), Some(l)) = (decor.first_mut(), model.line(0)) {
-                    *d = LineDecor::of(l);
+                if let Some(l) = model.line(0) {
+                    decor.replace_first(l);
                 }
             }
             let from = changes.changed_from.min(model.line_count());
@@ -415,7 +370,7 @@ impl ConsoleView {
             };
             e.replace_untracked(vec![edit], cx);
             decor.truncate(from);
-            decor.extend(model.lines().skip(from).map(LineDecor::of));
+            decor.extend(model.lines().skip(from));
         });
         drop(decor);
         drop(model);
@@ -496,12 +451,13 @@ impl ConsoleView {
     }
 
     fn follow(&mut self, line: usize, range: Range<usize>, cx: &mut Context<Self>) {
-        let target = self.decor.borrow().get(line).and_then(|d| {
-            d.links
-                .iter()
-                .find(|(r, _)| *r == range)
-                .map(|(_, t)| t.clone())
-        });
+        let target = self
+            .decor
+            .borrow()
+            .links(line)
+            .iter()
+            .find(|(r, _)| *r == range)
+            .map(|(_, t)| t.clone());
         if let Some(target) = target {
             self.followed = Some((line, range));
             cx.emit(ConsoleEvent::OpenLink(target));
@@ -514,9 +470,8 @@ impl ConsoleView {
         let links: Vec<(usize, Range<usize>)> = self
             .decor
             .borrow()
-            .iter()
-            .enumerate()
-            .flat_map(|(i, d)| d.links.iter().map(move |(r, _)| (i, r.clone())))
+            .all_links()
+            .map(|(i, (r, _))| (i, r.clone()))
             .collect();
         if links.is_empty() {
             return false;
@@ -560,7 +515,7 @@ impl ConsoleView {
 
     /// The console has links (Up and Down the Stack Trace are enabled).
     pub fn has_links(&self) -> bool {
-        self.decor.borrow().iter().any(|d| !d.links.is_empty())
+        self.decor.borrow().has_links()
     }
 
     /// The console has text (Clear All is enabled).
@@ -587,16 +542,15 @@ impl ConsoleView {
             .split('\n')
             .enumerate()
             .map(|(i, line)| {
-                let d = decor.get(i);
                 serde_json::json!({
                     "text": line,
-                    "runs": d.map(|d| d.runs.iter().map(|r| serde_json::json!({
-                        "start": r.range.start,
-                        "end": r.range.end,
+                    "runs": Some(decor.runs(i).iter().map(|r| serde_json::json!({
+                        "start": r.start,
+                        "end": r.end,
                         "kind": kind(r.kind),
                         "ansi": r.style.ansi,
                     })).collect::<Vec<_>>()),
-                    "links": d.map(|d| d.links.iter().map(|(r, t)| serde_json::json!({
+                    "links": Some(decor.links(i).iter().map(|(r, t)| serde_json::json!({
                         "start": r.start,
                         "end": r.end,
                         "target": match t {

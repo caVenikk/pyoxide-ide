@@ -235,6 +235,43 @@ dominates and the budget is missed. The window therefore draws at once after
 every keystroke (macOS: the layer's display callback), so the typed text is
 ready for the next refresh; the table above is measured that way.
 
+### Run console memory
+A process floods the Run console for 40 s, release build, window in the
+background (`PYOXIDE_BACKGROUND=1`) with `PYOXIDE_FORCE_FRAMES=4000` so that
+the window paints as an uncovered one (a covered window draws nothing and
+hides the cost of painting). The process writes coloured lines with
+`os.write` in 190 KB blocks, about 700 000 lines (64 MB) a second. RSS is
+sampled with `ps` every 3 s, the malloc zone with `vmmap -summary` during the
+flood. "Idle" is the same window and project without a run. Cycle buffer: the
+default 1024 KB.
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-26 | mac-1 | RSS, flood of 90-character lines, before | 136 MB (idle 122 MB) | idle <= 300 MB | +14 MB; the buffer holds about 12 500 lines; load average about 2.5 |
+| 2026-10-26 | mac-1 | RSS, flood of 90-character lines, after | 134 MB (idle 122 MB) | idle <= 300 MB | no change expected: the lines are few; load average about 2.5 |
+| 2026-10-26 | mac-1 | RSS, flood of 5-character lines, before | 204 MB (idle 122 MB) | idle <= 300 MB | +82 MB; the buffer holds about 192 000 lines; malloc zone 99 MB resident, 79 MB in 648 000 blocks; footprint peak 221 MB |
+| 2026-10-26 | mac-1 | RSS, flood of 5-character lines, after | 163 MB (idle 122 MB) | idle <= 300 MB | +41 MB; malloc zone 67 MB resident, 55 MB in 455 000 blocks; footprint peak 179 MB; load average about 2.5 |
+| 2026-10-26 | mac-1 | the console model alone, 5-character lines | 27 MB live for 192 000 lines (about 140 bytes a line) | | counting allocator in a test, release; the peak equals the live size; 90-character lines: 3.2 MB for 12 500 lines |
+
+The cycle buffer counts UTF-16 units of text, not lines, so the memory it
+holds depends on how long the lines are: the 1024 KB of text are 12 500
+lines of 90 characters or 192 000 of five. What was kept per line was a
+`Line` of the model (text, runs, links) and, in the view, a second copy of
+its runs and links in a `LineDecor` with two vectors of its own; a finished
+line also kept the capacity its growth had reserved (a `Vec` of runs starts
+with room for four). The view now keeps the runs and links of all lines in
+two flat vectors with one end offset per line (no allocation per line, kept
+between frames so that taking the whole text anew each frame does not leave
+a trail of freed large blocks), and a finished line gives back its spare
+capacity. The 600 MB reported at the end of the 2026-10-13 run (251 MB
+without the run) is not reproduced by a flood of 90-character lines with this
+code: the RSS stays within 15 MB of idle; with a 100 000-line file open the
+flooded window stayed within about 45 MB of the idle one (a covered
+window's RSS also drops by itself when the machine is short of memory, so
+single samples differ by tens of megabytes; the table lists runs with the
+machine quiet). The remaining cost of short lines is the model's
+80-byte `Line` plus its two small blocks.
+
 ### Find in file
 Engine: `cargo test --release -p search --test it perf:: -- --ignored --nocapture`
 on the generated 10 MB file (10,485,700 bytes, 108,100 lines), median of 5
