@@ -273,7 +273,10 @@ fn readers_see_whole_models_while_refreshes_swap() {
             std::thread::spawn(move || {
                 barrier.wait();
                 let mut reads = 0u64;
-                while !stop.load(Ordering::Relaxed) {
+                // At least one read, also when the refreshes are done
+                // before this thread first runs.
+                loop {
+                    let done = stop.load(Ordering::Relaxed);
                     let model = handle.get();
                     // Either version, never a mix: orders and its index go
                     // together.
@@ -281,6 +284,9 @@ fn readers_see_whole_models_while_refreshes_swap() {
                     let idx = model.find("public", "orders_customer_idx", NameMatch::Exact, &[]);
                     assert_eq!(orders.is_some(), idx.is_some());
                     reads += 1;
+                    if done {
+                        break;
+                    }
                 }
                 reads
             })
