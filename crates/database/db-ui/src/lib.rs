@@ -7,9 +7,11 @@
 
 pub mod dialog;
 pub mod explorer;
+pub mod fixture;
 mod password;
 pub mod prompt;
 pub mod store;
+pub mod tree;
 pub mod url;
 
 use std::sync::Arc;

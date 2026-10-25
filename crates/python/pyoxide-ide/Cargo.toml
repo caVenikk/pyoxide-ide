@@ -17,9 +17,11 @@ default = ["runtime-shaders"]
 runtime-shaders = ["gpui/runtime_shaders"]
 
 [dependencies]
+async-trait.workspace = true
 code-intel.workspace = true
 code-intel-ui.workspace = true
 db-core.workspace = true
+db-model.workspace = true
 db-service.workspace = true
 db-ui.workspace = true
 debugger.workspace = true

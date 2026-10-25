@@ -13,8 +13,11 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 
+use std::sync::Arc;
+
 use db_core::schema::SchemaInfo;
-use db_core::{Profile, Secret};
+use db_core::{ConnectionSource, Profile, Secret};
+use db_model::ModelCache;
 
 /// A future of the store, run by the module's executor (dropping it
 /// cancels the work).
@@ -130,6 +133,17 @@ pub trait DataSourceStore: Send + Sync {
     /// Imports the data sources of the PyCharm project at `project`
     /// (`.idea/dataSources.xml`), without their passwords.
     fn import_pycharm(&self, project: &Path) -> Result<ImportSummary, String>;
+
+    /// Connections to the project's data sources, by name (the
+    /// `DataSourceId` of a data source is its name), with their kept
+    /// passwords: what the module's data source handles (`db-session`)
+    /// open their connections with.
+    fn connections(&self, project: &Path) -> Arc<dyn ConnectionSource>;
+
+    /// Where the metadata models of the project's data sources are kept
+    /// between runs (ADR 0021: the user cache folder, never the project);
+    /// `None` keeps them in memory only.
+    fn model_cache(&self, project: &Path) -> Option<ModelCache>;
 }
 
 pub mod fake {
@@ -142,7 +156,7 @@ pub mod fake {
     use std::sync::{Arc, Mutex};
 
     use db_core::schema::SchemaInfo;
-    use db_core::{Backend, Profile, Secret};
+    use db_core::{Backend, Connection, DataSourceId, Profile, Purpose, Secret};
 
     use super::*;
 
@@ -152,6 +166,36 @@ pub mod fake {
         passwords: HashMap<String, Secret>,
         saves: usize,
         tests: usize,
+        cache: Option<PathBuf>,
+        connections: Option<Arc<dyn ConnectionSource>>,
+    }
+
+    /// A server that is not there: every connection is refused, and
+    /// counted.
+    #[derive(Default)]
+    pub struct NoServer {
+        opened: AtomicUsize,
+    }
+
+    impl NoServer {
+        /// The message of the refused connections.
+        pub const MESSAGE: &str = "connection refused (localhost:55432)";
+
+        /// How many connections were asked for.
+        pub fn opened(&self) -> usize {
+            self.opened.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConnectionSource for NoServer {
+        async fn open(&self, _: &DataSourceId, _: Purpose) -> db_core::Result<Arc<dyn Connection>> {
+            self.opened.fetch_add(1, Ordering::SeqCst);
+            Err(db_core::Error::new(
+                db_core::ErrorKind::Network,
+                Self::MESSAGE,
+            ))
+        }
     }
 
     /// The fake store. [`FakeStore::password`] is the one the fake server
@@ -191,6 +235,18 @@ pub mod fake {
                 hang: true,
                 cancelled: Arc::default(),
             })
+        }
+
+        /// Keeps the models of the data sources in `dir` (in memory only
+        /// until this is called).
+        pub fn set_model_cache(&self, dir: &Path) {
+            self.state.lock().unwrap().cache = Some(dir.to_owned());
+        }
+
+        /// The data source handles connect through `source` (a [`NoServer`]
+        /// until this is called).
+        pub fn set_connections(&self, source: Arc<dyn ConnectionSource>) {
+            self.state.lock().unwrap().connections = Some(source);
         }
 
         /// How many hanging connections were cancelled.
@@ -390,6 +446,19 @@ pub mod fake {
                 imported: vec!["imported".into()],
                 skipped: Vec::new(),
             })
+        }
+
+        fn connections(&self, _: &Path) -> Arc<dyn ConnectionSource> {
+            let mut state = self.state.lock().unwrap();
+            state
+                .connections
+                .get_or_insert_with(|| Arc::new(NoServer::default()))
+                .clone()
+        }
+
+        fn model_cache(&self, _: &Path) -> Option<ModelCache> {
+            let state = self.state.lock().unwrap();
+            state.cache.as_ref().map(ModelCache::new)
         }
     }
 }
