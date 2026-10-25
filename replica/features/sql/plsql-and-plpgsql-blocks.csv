@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"PL/SQL blocks and PL/pgSQL bodies parsed, highlighted and resolved",sql,should,yes,no,Pro; ADR 0022; staged grammar
+"PL/SQL blocks and PL/pgSQL bodies parsed, highlighted and resolved",sql,should,yes,partial,"Pro; ADR 0022; staged grammar. Parsed (#317): PL/SQL blocks, packages, triggers and type bodies; PL/pgSQL bodies in dollar quotes as fragments; highlighting and resolution come with sql-intel"
