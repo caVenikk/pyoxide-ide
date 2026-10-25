@@ -22,5 +22,6 @@ pub use split::{
     Candidate, CandidateKind, Statement, candidates_at, split, statement_at, statements_in,
 };
 pub use tree::{
-    Expected, NameKind, StatementTree, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
+    EmbeddedFragment, Expected, FragmentLanguage, NameKind, StatementTree, SyntaxElement,
+    SyntaxKind, SyntaxNode, SyntaxToken,
 };

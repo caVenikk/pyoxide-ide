@@ -362,6 +362,11 @@ impl Parser<'_> {
         }
     }
 
+    /// Something that can start an expression is next (no expected set).
+    pub(super) fn expr_start_here(&self) -> bool {
+        self.expr_start_at(0)
+    }
+
     fn at_expr_start(&mut self) -> bool {
         self.note(Expected::Expression);
         self.expr_start_at(0)
@@ -425,7 +430,7 @@ impl Parser<'_> {
         use Kw::*;
         let paren = self.nth_kind(1) == Some(TokenKind::LParen);
         match self.nth_kw(0) {
-            Some(NULL | TRUE | FALSE) if !paren => {
+            Some(NULL | TRUE | FALSE | DEFAULT) if !paren => {
                 self.start(SyntaxKind::Literal);
                 self.bump();
                 self.finish();

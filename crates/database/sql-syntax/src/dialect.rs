@@ -142,6 +142,28 @@ pub struct Grammar {
     pub filter_clause: bool,
     /// `WITHIN GROUP (ORDER BY ..)` after an aggregate.
     pub within_group: bool,
+    /// `INSERT .. ON CONFLICT ..`.
+    pub on_conflict: bool,
+    /// `RETURNING` after `INSERT`, `UPDATE`, `DELETE` and `MERGE`.
+    pub returning: bool,
+    /// The `MERGE` statement.
+    pub merge: bool,
+    /// Oracle's multi-table `INSERT ALL|FIRST`.
+    pub multi_insert: bool,
+    /// SQLite's `INSERT OR REPLACE`, `UPDATE OR IGNORE`, `REPLACE INTO`.
+    pub conflict_resolution: bool,
+    /// `UPDATE .. FROM sources`.
+    pub update_from: bool,
+    /// `DELETE .. USING sources`.
+    pub delete_using: bool,
+    /// PL/SQL: anonymous blocks, `CREATE PROCEDURE .. IS ..`, packages,
+    /// `%TYPE`, cursor attributes.
+    pub plsql: bool,
+    /// PL/pgSQL: `DO` blocks and `$$` function bodies, `CREATE FUNCTION ..
+    /// AS $$ .. $$ LANGUAGE ..`.
+    pub plpgsql: bool,
+    /// `PRAGMA`, and trigger bodies of SQLite.
+    pub pragma: bool,
 }
 
 const GENERIC: LexRules = LexRules {
@@ -261,6 +283,16 @@ impl Dialect {
             table_statement: true,
             filter_clause: true,
             within_group: true,
+            on_conflict: true,
+            returning: true,
+            merge: true,
+            multi_insert: true,
+            conflict_resolution: true,
+            update_from: true,
+            delete_using: true,
+            plsql: true,
+            plpgsql: true,
+            pragma: true,
         };
         let none = Grammar {
             lateral: false,
@@ -283,6 +315,16 @@ impl Dialect {
             table_statement: false,
             filter_clause: false,
             within_group: false,
+            on_conflict: false,
+            returning: false,
+            merge: false,
+            multi_insert: false,
+            conflict_resolution: false,
+            update_from: false,
+            delete_using: false,
+            plsql: false,
+            plpgsql: false,
+            pragma: false,
         };
         match self {
             Dialect::Generic => all,
@@ -300,6 +342,12 @@ impl Dialect {
                 table_statement: true,
                 filter_clause: true,
                 within_group: true,
+                on_conflict: true,
+                returning: true,
+                merge: true,
+                update_from: true,
+                delete_using: true,
+                plpgsql: true,
                 ..none
             },
             Dialect::Oracle => Grammar {
@@ -313,6 +361,10 @@ impl Dialect {
                 join_requires_condition: true,
                 apply_joins: true,
                 within_group: true,
+                returning: true,
+                merge: true,
+                multi_insert: true,
+                plsql: true,
                 ..none
             },
             Dialect::Sqlite => Grammar {
@@ -320,6 +372,11 @@ impl Dialect {
                 sqlite_operators: true,
                 null_postfix: true,
                 filter_clause: true,
+                on_conflict: true,
+                returning: true,
+                conflict_resolution: true,
+                update_from: true,
+                pragma: true,
                 ..none
             },
         }

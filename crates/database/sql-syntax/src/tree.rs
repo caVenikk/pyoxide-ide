@@ -149,6 +149,150 @@ pub enum SyntaxKind {
     OuterJoinMark,
     CollateExpr,
     AtTimeZone,
+    /// `cursor%FOUND`, `sql%ROWCOUNT` (PL/SQL).
+    AttributeExpr,
+
+    // Data modification. The target of an `INSERT`, `UPDATE`, `DELETE` and
+    // `MERGE` is a `TableSource` (or a `SubquerySource`), the same node as in
+    // `FROM`. A leading `WITH` is the first child.
+    /// `INSERT INTO table [AS alias] [(columns)] source [ON CONFLICT ..] [RETURNING ..]`;
+    /// the source is `VALUES`, a query or `DEFAULT VALUES`. Oracle's
+    /// `INSERT ALL|FIRST` has `InsertInto` children (also inside `WhenClause`
+    /// and `ElseClause`) and the query last.
+    Insert,
+    /// `INTO table [(columns)] [VALUES (..)]` of a multi-table insert.
+    InsertInto,
+    /// `(a, b)`: column names of an insert, a conflict target, an index.
+    ColumnList,
+    /// `OR REPLACE|IGNORE|ABORT|FAIL|ROLLBACK` of SQLite.
+    ConflictResolution,
+    /// `ON CONFLICT [target] DO NOTHING | DO UPDATE SET ..`.
+    OnConflictClause,
+    /// `(columns) [WHERE ..]` or `ON CONSTRAINT name` of `ON CONFLICT`.
+    ConflictTarget,
+    /// `SET a = 1, (b, c) = (..)`.
+    SetClause,
+    /// `target = value` in a `SET` clause.
+    Assignment,
+    /// `RETURNING items [INTO targets]`.
+    ReturningClause,
+    /// `UPDATE target SET .. [FROM ..] [WHERE ..] [RETURNING ..]`.
+    Update,
+    /// `DELETE FROM target [USING ..] [WHERE ..] [RETURNING ..]`.
+    Delete,
+    /// The sources after `USING` of a `DELETE` or a `MERGE`.
+    UsingSource,
+    /// `MERGE INTO target USING source ON condition WHEN ..`.
+    Merge,
+    /// `WHEN [NOT] MATCHED [BY ..] [AND condition] THEN action`.
+    MergeClause,
+    MergeUpdate,
+    MergeDelete,
+    MergeInsert,
+    /// `WHERE CURRENT OF cursor`.
+    CurrentOf,
+
+    // Definitions. Names are references typed by position; a name that a
+    // statement defines is a `DefName` (a column, a constraint, a variable, a
+    // parameter, a label), or the first `TableRef` / `ObjectRef` / `FunctionRef`
+    // of a `CREATE` statement.
+    /// A name defined here; the parent says what it names.
+    DefName,
+    /// A named object that is not a table or a function: an index, a sequence,
+    /// a trigger, a package, a constraint, an exception. Qualified by `SchemaRef`.
+    ObjectRef,
+    CreateTable,
+    /// `name type [constraints]` (also an attribute of a type).
+    ColumnDef,
+    ColumnConstraint,
+    TableConstraint,
+    /// `REFERENCES table [(columns)] [ON DELETE ..]`.
+    ReferencesClause,
+    CreateView,
+    CreateMaterializedView,
+    CreateIndex,
+    /// An indexed expression or column with its order.
+    IndexElement,
+    CreateSequence,
+    CreateSchema,
+    CreateType,
+    CreateTypeBody,
+    CreateTrigger,
+    /// `INSERT`, `UPDATE [OF columns]`, `DELETE`, `TRUNCATE` of a trigger.
+    TriggerEvent,
+    /// `WHEN (condition)` of a trigger.
+    TriggerCondition,
+    CreateFunction,
+    CreateProcedure,
+    CreatePackage,
+    CreatePackageBody,
+    AlterTable,
+    /// One action of `ALTER TABLE`.
+    AlterAction,
+    /// `ALTER` of anything else: the object and the rest of the statement.
+    AlterObject,
+    DropStatement,
+    Truncate,
+    /// `COMMENT ON object IS 'text'`.
+    CommentStatement,
+    /// SQLite's `PRAGMA [schema.]name [= value | (value)]`.
+    Pragma,
+    /// PostgreSQL's `DO [LANGUAGE x] 'body'`.
+    DoStatement,
+    /// `(param, ..)` of a routine.
+    ParamList,
+    /// `[mode] name type [DEFAULT value]`.
+    RoutineParam,
+    /// `RETURNS type | TABLE (..)` (PostgreSQL), `RETURN type` (PL/SQL).
+    ReturnsClause,
+    /// `LANGUAGE x`, `IMMUTABLE`, `SECURITY DEFINER`, `DETERMINISTIC`, ...
+    RoutineOption,
+    /// The body of a routine given as a string (`$$ .. $$`): the string token
+    /// is a leaf and [`SyntaxNode::fragment`] is the parsed program inside it.
+    EmbeddedBody,
+
+    // Procedural code: PL/SQL, PL/pgSQL and trigger bodies.
+    /// `[DECLARE decls] BEGIN statements [EXCEPTION handlers] END [name]`; the
+    /// body of a routine starts at its declarations.
+    Block,
+    DeclareSection,
+    StatementList,
+    /// `name [CONSTANT] type [NOT NULL] [:= value]`.
+    VarDecl,
+    /// `CURSOR name [(params)] [RETURN type] IS|FOR query`.
+    CursorDecl,
+    /// `TYPE name IS ..`, `SUBTYPE name IS ..`.
+    TypeDecl,
+    /// `name EXCEPTION`.
+    ExceptionDecl,
+    /// A procedure or function declared or defined inside a block or package.
+    SubprogramDecl,
+    /// `<<name>>`.
+    Label,
+    ExceptionSection,
+    /// `WHEN name [OR name] THEN statements`.
+    ExceptionHandler,
+    IfStmt,
+    /// `ELSIF condition THEN statements`.
+    ElsifClause,
+    CaseStmt,
+    LoopStmt,
+    WhileStmt,
+    /// `FOR i IN a..b | query | cursor LOOP ..`.
+    ForStmt,
+    ForallStmt,
+    ExitStmt,
+    ReturnStmt,
+    AssignStmt,
+    /// A call of a procedure as a statement.
+    CallStmt,
+    NullStmt,
+    RaiseStmt,
+    /// `EXECUTE [IMMEDIATE] string [INTO ..] [USING ..]`.
+    ExecuteStmt,
+    OpenStmt,
+    FetchStmt,
+    CloseStmt,
 }
 
 impl SyntaxKind {
@@ -166,6 +310,8 @@ impl SyntaxKind {
                 | SyntaxKind::CteDef
                 | SyntaxKind::WindowDef
                 | SyntaxKind::WindowRef
+                | SyntaxKind::DefName
+                | SyntaxKind::ObjectRef
         )
     }
 }
@@ -181,6 +327,8 @@ pub enum NameKind {
     Type,
     Cte,
     Window,
+    /// An index, sequence, trigger, package or other named object.
+    Object,
 }
 
 /// One entry of an expected set: what would be valid at a position. Sets are
@@ -211,6 +359,7 @@ impl fmt::Display for Expected {
                 NameKind::Type => "type name",
                 NameKind::Cte => "CTE name",
                 NameKind::Window => "window name",
+                NameKind::Object => "object name",
             }),
             Expected::Expression => f.write_str("expression"),
         }
@@ -250,6 +399,45 @@ pub struct StatementTree {
     elems: Vec<Elem>,
     expected: Vec<Box<[Expected]>>,
     root: u32,
+    fragments: Vec<Fragment>,
+}
+
+/// What an embedded program is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FragmentLanguage {
+    /// PL/pgSQL: a `DO` block or a `LANGUAGE plpgsql` body.
+    PlPgSql,
+    /// A `LANGUAGE sql` body: statements.
+    Sql,
+}
+
+/// A program inside a string token (`$$ .. $$`), parsed on its own. Its
+/// offsets are relative to `offset`, the start of the text inside the quotes;
+/// quotes that need no unescaping make that map a plain shift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Fragment {
+    /// Index of the string token in the unit.
+    token: u32,
+    /// Offset of the body in the unit.
+    offset: u32,
+    language: FragmentLanguage,
+    tree: StatementTree,
+}
+
+impl Fragment {
+    pub(crate) fn new(
+        token: usize,
+        offset: usize,
+        language: FragmentLanguage,
+        tree: StatementTree,
+    ) -> Self {
+        Fragment {
+            token: token as u32,
+            offset: offset as u32,
+            language,
+            tree,
+        }
+    }
 }
 
 impl StatementTree {
@@ -282,6 +470,11 @@ impl StatementTree {
                 .iter()
                 .map(|e| e.len() * size_of::<Expected>() + 16)
                 .sum::<usize>()
+            + self
+                .fragments
+                .iter()
+                .map(|f| size_of::<Fragment>() + f.tree.heap_size())
+                .sum::<usize>()
     }
 
     pub(crate) fn root<'a>(&'a self, base: usize, src: &'a str) -> SyntaxNode<'a> {
@@ -309,6 +502,7 @@ pub(crate) struct Builder<'t> {
     expected: Vec<Box<[Expected]>>,
     tok_parent: Vec<u32>,
     last_sig_end: u32,
+    fragments: Vec<Fragment>,
 }
 
 impl<'t> Builder<'t> {
@@ -323,7 +517,13 @@ impl<'t> Builder<'t> {
             expected: Vec::new(),
             tok_parent: vec![NONE; toks.len()],
             last_sig_end: 0,
+            fragments: Vec::new(),
         }
+    }
+
+    /// Attaches a parsed program to a string token of this unit.
+    pub(crate) fn fragment(&mut self, fragment: Fragment) {
+        self.fragments.push(fragment);
     }
 
     fn flush_to(&mut self, i: usize) {
@@ -439,6 +639,7 @@ impl<'t> Builder<'t> {
             elems: self.elems,
             expected: self.expected,
             root,
+            fragments: self.fragments,
         }
     }
 }
@@ -451,6 +652,7 @@ pub(crate) struct TreeParts {
     elems: Vec<Elem>,
     expected: Vec<Box<[Expected]>>,
     root: u32,
+    fragments: Vec<Fragment>,
 }
 
 impl TreeParts {
@@ -463,6 +665,7 @@ impl TreeParts {
             elems: self.elems,
             expected: self.expected,
             root: self.root,
+            fragments: self.fragments,
         }
     }
 }
@@ -489,6 +692,15 @@ impl fmt::Debug for SyntaxNode<'_> {
         let r = self.range();
         write!(f, "{:?}@{}..{}", self.kind(), r.start, r.end)
     }
+}
+
+/// A program embedded in a string token, see [`SyntaxNode::fragment`].
+#[derive(Debug, Clone)]
+pub struct EmbeddedFragment<'a> {
+    pub root: SyntaxNode<'a>,
+    pub language: FragmentLanguage,
+    /// The text inside the quotes, in the script.
+    pub body: Range<usize>,
 }
 
 /// A token of a script's syntax tree.
@@ -672,6 +884,30 @@ impl<'a> SyntaxNode<'a> {
         }
     }
 
+    /// The program inside the string token of this node (the body of a
+    /// routine in `$$ .. $$`), parsed on its own: the root of its tree, whose
+    /// ranges are offsets in the script like all others. The fragment is not
+    /// part of [`SyntaxNode::children`], [`SyntaxNode::descendants`] or
+    /// [`SyntaxNode::print`]; the string token is.
+    pub fn fragment(&self) -> Option<EmbeddedFragment<'a>> {
+        let tree = self.tree;
+        if tree.fragments.is_empty() {
+            return None;
+        }
+        let (s, e) = self.data().children;
+        tree.elems[s as usize..e as usize]
+            .iter()
+            .find_map(|el| match el {
+                Elem::Token(t) => tree.fragments.iter().find(|f| f.token == *t),
+                Elem::Node(_) => None,
+            })
+            .map(|f| EmbeddedFragment {
+                root: f.tree.root(self.base + f.offset as usize, self.src),
+                language: f.language,
+                body: self.base + f.offset as usize..self.base + f.offset as usize + f.tree.len(),
+            })
+    }
+
     /// The innermost node of the subtree whose range contains `offset`: a
     /// node strictly around it wins over one that only touches it, and among
     /// nodes touching it the first (left) one wins. `None` when `offset` is
@@ -696,9 +932,17 @@ impl<'a> SyntaxNode<'a> {
             }
             match touching {
                 Some(c) => cur = c,
-                None => return Some(cur),
+                None => break,
             }
         }
+        // Inside the program embedded in a string, the node of that program.
+        if let Some(f) = cur.fragment()
+            && f.body.start <= offset
+            && offset <= f.body.end
+        {
+            return f.root.node_at(offset).or(Some(cur));
+        }
+        Some(cur)
     }
 
     /// The whole text of the subtree, trivia included.

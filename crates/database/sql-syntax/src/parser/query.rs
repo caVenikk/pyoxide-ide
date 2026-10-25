@@ -26,6 +26,8 @@ impl Parser<'_> {
         self.with_clause();
         if self.query_body_starts() {
             self.query_rest(cp);
+        } else if self.dml_at() {
+            self.dml(Some(cp));
         } else {
             let end = self.statement_end();
             self.start_at(cp, SyntaxKind::Opaque);
@@ -97,8 +99,10 @@ impl Parser<'_> {
         self.parened(|p| {
             if p.query_starts(0) || p.nth_kind(0) == Some(TokenKind::LParen) {
                 p.query();
-            } else if p.nth_kind(0) != Some(TokenKind::RParen) {
+            } else if p.dml_at() {
                 // A data-modifying statement (PostgreSQL).
+                p.dml(None);
+            } else if p.nth_kind(0) != Some(TokenKind::RParen) {
                 p.opaque_until(false);
             } else {
                 p.at_kw(SELECT);
@@ -158,7 +162,7 @@ impl Parser<'_> {
         }
     }
 
-    fn values(&mut self) {
+    pub(super) fn values(&mut self) {
         self.start(SyntaxKind::Values);
         self.bump();
         loop {
@@ -229,7 +233,13 @@ impl Parser<'_> {
         let g = self.g;
         for i in 0..SELECT_CLAUSES {
             let hit = match i {
-                0 => self.check_kw(INTO, i >= stage),
+                0 => {
+                    if self.in_procedure() && self.at_into() {
+                        true
+                    } else {
+                        self.check_kw(INTO, i >= stage)
+                    }
+                }
                 1 => self.check_kw(FROM, i >= stage),
                 2 => self.check_kw(WHERE, i >= stage),
                 3 => {
@@ -259,6 +269,7 @@ impl Parser<'_> {
     fn select_clause(&mut self, i: usize) {
         use Kw::*;
         match i {
+            0 if self.in_procedure() => self.into_clause(),
             0 => {
                 self.start(SyntaxKind::IntoClause);
                 self.bump();
@@ -358,8 +369,13 @@ impl Parser<'_> {
             Some(TokenKind::RParen) => return self.parens > 0,
             _ => {}
         }
+        if g.plsql && self.nth_word(0, "log") && self.nth_word(1, "errors") {
+            return true;
+        }
         match self.nth_kw(0) {
             Some(ORDER | UNION | INTERSECT | EXCEPT) => true,
+            Some(RETURNING) => g.returning,
+            Some(ON) => g.on_conflict && self.nth_kw(1) == Some(CONFLICT),
             Some(MINUS) => g.minus,
             Some(LIMIT) => g.limit,
             Some(OFFSET) => g.limit || g.fetch_first,
@@ -372,7 +388,7 @@ impl Parser<'_> {
     fn select_list(&mut self) {
         self.start(SyntaxKind::SelectList);
         let empty = self.g.empty_select_list
-            && (self.at_recovery() || self.at_select_end() || self.peek_kw(Kw::INTO));
+            && (self.at_recovery() || self.at_select_end() || self.at_into());
         if empty {
             self.at_op("*");
             self.note(Expected::Expression);
@@ -382,7 +398,7 @@ impl Parser<'_> {
                 if self.eat(TokenKind::Comma) {
                     continue;
                 }
-                if self.at_recovery() || self.at_select_end() || self.peek_kw(Kw::INTO) {
+                if self.at_recovery() || self.at_select_end() || self.at_into() {
                     break;
                 }
                 self.error_until(true, None);
@@ -394,7 +410,7 @@ impl Parser<'_> {
         self.finish();
     }
 
-    fn select_item(&mut self) {
+    pub(super) fn select_item(&mut self) {
         self.start(SyntaxKind::SelectItem);
         if self.at_op("*") {
             self.start(SyntaxKind::Star);
@@ -408,7 +424,7 @@ impl Parser<'_> {
     }
 
     /// `[AS] alias`, and with `columns` a column list `(a, b)` after it.
-    fn opt_alias(&mut self, columns: bool) {
+    pub(super) fn opt_alias(&mut self, columns: bool) {
         use Kw::*;
         let flashback = self.peek_kw(AS)
             && self.nth_kw(1) == Some(OF)
@@ -479,7 +495,7 @@ impl Parser<'_> {
 
     /// A table name as a `TableRef` (qualified, possibly with a missing last
     /// part), or a `Missing` node expecting one.
-    fn table_name(&mut self) {
+    pub(super) fn table_name(&mut self) {
         match self.chain_ahead() {
             Some((parts, tail)) => {
                 let missing = matches!(tail, Tail::Missing | Tail::Star);
@@ -492,7 +508,7 @@ impl Parser<'_> {
         }
     }
 
-    fn source_clause(&mut self) {
+    pub(super) fn source_clause(&mut self) {
         self.start(SyntaxKind::FromClause);
         self.bump();
         loop {
@@ -505,7 +521,7 @@ impl Parser<'_> {
     }
 
     /// A source with the joins after it.
-    fn source_item(&mut self) {
+    pub(super) fn source_item(&mut self) {
         use Kw::*;
         let cp = self.checkpoint();
         self.table_primary();
@@ -580,7 +596,7 @@ impl Parser<'_> {
 
     /// A table, a subquery, a function or a parenthesised join, with its
     /// alias.
-    fn table_primary(&mut self) {
+    pub(super) fn table_primary(&mut self) {
         use Kw::*;
         if !self.enter() {
             return;
@@ -741,7 +757,7 @@ impl Parser<'_> {
         self.opaque_suffixes();
     }
 
-    fn opaque_suffixes(&mut self) {
+    pub(super) fn opaque_suffixes(&mut self) {
         use Kw::*;
         loop {
             let paren_next = self.nth_kind(1) == Some(TokenKind::LParen);
@@ -979,7 +995,7 @@ impl Parser<'_> {
     }
 
     /// `ORDER BY`, `LIMIT`, `OFFSET`, `FETCH` and locking clauses of a query.
-    fn query_tail(&mut self) {
+    pub(super) fn query_tail(&mut self) {
         use Kw::*;
         let g = self.g;
         if self.at_kw(ORDER) {

@@ -197,10 +197,7 @@ fn unknown_statements_are_one_opaque_node_without_errors() {
             Dialect::Postgres,
             "create table t (a int primary key, b text)",
         ),
-        (
-            Dialect::Postgres,
-            "insert into t (a) values (1) on conflict do nothing",
-        ),
+        (Dialect::Postgres, "vacuum analyze t"),
         (Dialect::Postgres, "do $$ begin raise notice 'x'; end $$"),
         (Dialect::Postgres, "explain analyze select 1"),
         (Dialect::Oracle, "begin\n  dbms_output.put_line('x');\nend;"),
@@ -218,14 +215,14 @@ fn unknown_statements_are_one_opaque_node_without_errors() {
         assert_eq!(child_kinds(root), [K::Opaque], "{src}");
         assert_eq!(s.print(), src);
     }
-    // A data-modifying statement after WITH: the WITH clause is parsed.
+    // A data-modifying statement after WITH: the WITH clause is its first child.
     let s = parse(
         "with x as (select 1) insert into t select * from x",
         Dialect::Postgres,
     );
     assert!(s.errors().is_empty());
-    let opaque = find(&s, K::Opaque).unwrap();
-    assert_eq!(child_kinds(opaque), [K::WithClause]);
+    let insert = find(&s, K::Insert).unwrap();
+    assert_eq!(child_kinds(insert)[0], K::WithClause);
     assert_eq!(count(&s, K::CteDef), 1);
 }
 

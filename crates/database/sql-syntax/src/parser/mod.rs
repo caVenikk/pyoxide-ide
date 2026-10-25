@@ -7,6 +7,7 @@ use crate::dialect::{Dialect, Grammar};
 use crate::lexer::{Token, TokenKind};
 use crate::tree::{Builder, Expected, NameKind, StatementTree, SyntaxKind};
 
+mod dml;
 mod expr;
 mod kw;
 mod query;
@@ -16,6 +17,17 @@ pub(crate) use kw::Kw;
 /// Nesting deeper than this (parentheses, subqueries, unary operators) is
 /// kept as an `Opaque` node instead of recursing further.
 const MAX_DEPTH: u32 = 96;
+
+/// What kind of procedural code is being parsed: it decides what `INTO`,
+/// `:=` and the statements mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Proc {
+    No,
+    /// PL/SQL (Oracle, and generic SQL).
+    PlSql,
+    /// PL/pgSQL.
+    PlPgSql,
+}
 
 /// `Parser::close` of a `(` that is never closed, and of other tokens.
 const NO_CLOSE: u32 = u32::MAX;
@@ -81,6 +93,8 @@ pub(crate) struct Parser<'a> {
     /// Parsing a prefix for `expected_at`: the set is captured at the end.
     probe: bool,
     probe_result: Option<Vec<Expected>>,
+    /// Inside procedural code.
+    proc: Proc,
 }
 
 impl<'a> Parser<'a> {
@@ -125,6 +139,7 @@ impl<'a> Parser<'a> {
             depth: 0,
             probe,
             probe_result: None,
+            proc: Proc::No,
         }
     }
 
@@ -167,6 +182,32 @@ impl<'a> Parser<'a> {
             .map(|&i| &self.toks[i as usize])
             .and_then(|t| text.get(t.start..t.end))
             .unwrap_or("")
+    }
+
+    /// `INTO`, or `BULK COLLECT INTO`, is next.
+    fn at_into(&self) -> bool {
+        self.peek_kw(Kw::INTO)
+            || (self.peek_kw(Kw::BULK)
+                && self.nth_kw(1) == Some(Kw::COLLECT)
+                && self.nth_kw(2) == Some(Kw::INTO))
+    }
+
+    /// Skips `[..]` groups (subscripts), nested.
+    fn bump_brackets(&mut self) {
+        while self.nth_kind(0) == Some(TokenKind::LBracket) {
+            let mut depth = 0u32;
+            while !self.eof() && !self.at_terminator() {
+                match self.nth_kind(0) {
+                    Some(TokenKind::LBracket) => depth += 1,
+                    Some(TokenKind::RBracket) => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                self.bump();
+                if depth == 0 {
+                    break;
+                }
+            }
+        }
     }
 
     fn eof(&self) -> bool {
@@ -466,6 +507,7 @@ impl<'a> Parser<'a> {
         match kw {
             FROM | WHERE | GROUP | HAVING | ORDER | UNION | INTERSECT | EXCEPT | WINDOW | JOIN
             | INNER | CROSS | NATURAL | ON | USING | THEN | WHEN | ELSE | END => true,
+            RETURNING => g.returning,
             LIMIT => g.limit,
             OFFSET => g.limit || g.fetch_first,
             FETCH => g.fetch_first,
@@ -518,13 +560,21 @@ impl<'a> Parser<'a> {
             return false;
         }
         let g = self.g;
+        if g.plsql && self.nth_word(n, "log") && self.nth_word(n + 1, "errors") {
+            return false;
+        }
+        if g.on_conflict && self.nth_word(n, "overriding") {
+            return false;
+        }
         if let Some(kw) = self.nth_kw(n) {
             let paren_next = self.nth_kind(n + 1) == Some(TokenKind::LParen);
             let excluded = match kw {
                 GLOB | REGEXP | MATCH => g.sqlite_operators,
                 PIVOT | UNPIVOT => g.pivot,
                 ILIKE | SIMILAR | COLLATE | ESCAPE | OVER | FILTER | WITHIN | KEEP | LATERAL
-                | TABLESAMPLE | INDEXED | MODEL | MATCH_RECOGNIZE | APPLY => true,
+                | TABLESAMPLE | INDEXED | MODEL | MATCH_RECOGNIZE | APPLY | SET | VALUES
+                | RETURNING | RETURN | DEFAULT => true,
+                BULK => self.nth_kw(n + 1) == Some(COLLECT),
                 SAMPLE | PARTITION => paren_next || self.nth_word(n + 1, "block"),
                 _ => false,
             };
@@ -645,6 +695,8 @@ impl<'a> Parser<'a> {
                     SyntaxKind::TableRef => NameKind::Table,
                     SyntaxKind::FunctionRef => NameKind::Function,
                     SyntaxKind::TypeRef => NameKind::Type,
+                    SyntaxKind::ObjectRef => NameKind::Object,
+                    SyntaxKind::SchemaRef => NameKind::Schema,
                     _ => NameKind::Column,
                 };
                 self.note(Expected::Name(name));
@@ -771,6 +823,8 @@ impl<'a> Parser<'a> {
         };
         if query {
             self.query_statement();
+        } else if self.dml_at() {
+            self.dml(None);
         } else if self.nth_kind(0) == Some(TokenKind::Hole)
             && self.part_len(0) + self.pos >= self.statement_end()
         {
@@ -820,9 +874,10 @@ enum Tail {
 fn qualifier(kind: SyntaxKind) -> SyntaxKind {
     match kind {
         SyntaxKind::ColumnRef => SyntaxKind::TableRef,
-        SyntaxKind::TableRef | SyntaxKind::FunctionRef | SyntaxKind::TypeRef => {
-            SyntaxKind::SchemaRef
-        }
+        SyntaxKind::TableRef
+        | SyntaxKind::FunctionRef
+        | SyntaxKind::TypeRef
+        | SyntaxKind::ObjectRef => SyntaxKind::SchemaRef,
         _ => SyntaxKind::CatalogRef,
     }
 }
