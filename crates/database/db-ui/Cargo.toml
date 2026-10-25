@@ -25,6 +25,7 @@ workbench.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+db-model.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 native-path.workspace = true
 tempfile = "3"

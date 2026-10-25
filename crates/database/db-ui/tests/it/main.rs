@@ -1,9 +1,11 @@
 //! The database module's interface in a headless main window: the key
 //! bindings of `keymaps/*/db.toml` (`keymap`) and the Database tool window
-//! with the Data Sources dialog over a fake store (`data_sources`).
+//! with the Data Sources dialog over a fake store (`data_sources`), and its
+//! object tree (`tree`).
 
 mod data_sources;
 mod keymap;
+mod tree;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

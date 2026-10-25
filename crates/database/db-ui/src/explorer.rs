@@ -4,6 +4,10 @@
 //! project's data sources, or the empty state that offers to create one or
 //! to import a PyCharm project's.
 //!
+//! Below the toolbar the object tree ([`tree_view`]): data source >
+//! database > schema > groups > objects, from each data source's metadata
+//! model.
+//!
 //! The data sources are the project's (`DataSourceStore::load`), read off
 //! the UI thread when a project opens and again after the Data Sources
 //! dialog saved them.
@@ -13,7 +17,8 @@ use std::path::{Path, PathBuf};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, ClickEvent, Context, DismissEvent,
     Entity, FocusHandle, Focusable, FontWeight, Global, IntoElement, Pixels, Point, Render,
-    SharedString, Subscription, Task, WeakEntity, Window, canvas, div, point, prelude::*, px,
+    SharedString, Subscription, Task, UniformListScrollHandle, WeakEntity, Window, canvas, div,
+    point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
@@ -28,7 +33,10 @@ use workbench::{Workbench, WorkbenchEvent};
 
 use crate::dialog::{self, Initial};
 use crate::store::DataSource;
+use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
+
+mod tree_view;
 
 /// The key context of the tool window (its bindings in `db.toml`).
 pub const KEY_CONTEXT: &str = "DatabaseExplorer";
@@ -58,6 +66,17 @@ ui::ui_commands! {
     SelectDataSource { name: String } => "db.explorer.select", "Select Data Source",
         "Selects the data source `name` in the Database tool window.",
         r#"{"name": "pyoxide-local"}"#;
+    /// Refresh the selected data source's metadata.
+    Refresh => "db.explorer.refresh", "Refresh",
+        "Reads the metadata of the data source selected in the Database tool window again (its introspection scope) and shows it in the tree; the tree keeps the previous model until the new one is complete.";
+    /// Open nodes of the tree.
+    Expand { path: String } => "db.explorer.expand", "Expand",
+        "Opens every node along `path` in the Database tool window's tree and selects the last: the rows' texts from the data source down, joined by `/`. Opening a node reads the local model, never the database; opening a data source the first time shows its cached model, or reads it when there is none.",
+        r#"{"path": "pyoxide-local/pyoxide/demo/tables"}"#;
+    /// Close a node of the tree.
+    Collapse { path: String } => "db.explorer.collapse", "Collapse",
+        "Closes the node at `path` in the Database tool window's tree (see db.explorer.expand).",
+        r#"{"path": "pyoxide-local/pyoxide/demo"}"#;
 }
 
 /// Texts of the empty state and the menu (our own wording where the
@@ -155,6 +174,15 @@ pub(crate) fn init(cx: &mut App) {
         let name = a.name.clone();
         with_target(cx, move |e, _, cx| e.select_name(&name, cx))
     });
+    cx.on_action(|_: &Refresh, cx| with_target(cx, |e, _, cx| e.refresh_selected(cx)));
+    cx.on_action(|a: &Expand, cx| {
+        let path = a.path.clone();
+        with_target(cx, move |e, _, cx| e.expand_path(&path, cx))
+    });
+    cx.on_action(|a: &Collapse, cx| {
+        let path = a.path.clone();
+        with_target(cx, move |e, _, cx| e.collapse_path(&path, cx))
+    });
     ui::command::register_query(
         cx,
         "db.state",
@@ -230,6 +258,12 @@ pub struct Explorer {
     focus: FocusHandle,
     load_task: Task<()>,
     test_task: Task<()>,
+    tree: tree_view::TreeState,
+    /// Where the data source handles send their events (made with the
+    /// first handle).
+    sink: Option<db_session::EventSink>,
+    events_task: Task<()>,
+    scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -254,6 +288,10 @@ impl Explorer {
             focus: cx.focus_handle(),
             load_task: Task::ready(()),
             test_task: Task::ready(()),
+            tree: tree_view::TreeState::default(),
+            sink: None,
+            events_task: Task::ready(()),
+            scroll: UniformListScrollHandle::new(),
             _subscriptions: Vec::new(),
         }
     }
@@ -310,6 +348,7 @@ impl Explorer {
                         this.error = Some(e);
                     }
                 }
+                this.sources_changed();
                 cx.notify();
             });
         });
@@ -325,8 +364,7 @@ impl Explorer {
 
     fn select_name(&mut self, name: &str, cx: &mut Context<Self>) {
         if self.sources().iter().any(|s| s.name == name) {
-            self.selected = Some(name.to_owned());
-            cx.notify();
+            self.select_row(tree::RowKey::source(&name.into()), cx);
         }
     }
 
@@ -537,6 +575,7 @@ impl Explorer {
                 "target": s.profile.target(),
             })).collect::<Vec<_>>(),
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
+            "tree": self.tree_json(),
         })
     }
 
@@ -652,7 +691,18 @@ impl Explorer {
                 }),
             )
             .child(separator())
-            .child(self.toolbar_button("database-refresh", IconName::REFRESH, "Refresh", false, cx))
+            .child(
+                self.toolbar_button(
+                    "database-refresh",
+                    IconName::REFRESH,
+                    "Refresh",
+                    has_source,
+                    cx,
+                )
+                .when(has_source, |d| {
+                    d.on_click(cx.listener(|this, _, _, cx| this.refresh_selected(cx)))
+                }),
+            )
             .child(self.toolbar_button(
                 "database-disconnect",
                 icons::DISCONNECT,
@@ -803,75 +853,6 @@ impl Explorer {
             .child(self.group(IMPORT_GROUP, import, cx))
             .into_any_element()
     }
-
-    fn render_list(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let row_height = theme.metric(Metric::RowHeight);
-        let focused_list = self.focus.contains_focused(window, cx);
-        let selected = self.selected_source().map(|s| s.name.clone());
-        let rows: Vec<AnyElement> = self
-            .sources()
-            .iter()
-            .map(|s| {
-                let name = s.name.clone();
-                let is_selected = selected.as_deref() == Some(name.as_str());
-                let selector = format!("database-source-{name}");
-                div()
-                    .id(gpui::ElementId::Name(selector.clone().into()))
-                    .debug_selector(move || selector.clone())
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.0))
-                    .h(row_height)
-                    .px(px(8.0))
-                    .mx(px(6.0))
-                    .rounded(theme.metric(Metric::CornerRadius))
-                    .when(is_selected, |d| {
-                        d.bg(theme.color(if focused_list {
-                            UiRole::Selection
-                        } else {
-                            UiRole::SelectionInactive
-                        }))
-                    })
-                    .child(Icon::new(icons::backend(s.profile.backend)).size(px(ICON)))
-                    .child(div().whitespace_nowrap().child(s.name.clone()))
-                    .child(
-                        div()
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_color(theme.color(UiRole::TextMuted))
-                            .child(s.profile.target()),
-                    )
-                    // A double click selects only: in the reference it
-                    // expands the data source's tree; Properties has its
-                    // own command and keystroke.
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.selected = Some(name.clone());
-                        window.focus(&this.focus);
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-        div()
-            .id("database-sources")
-            .debug_selector(|| "database-sources".into())
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h(px(0.0))
-            .overflow_y_scroll()
-            .pt(px(4.0))
-            .children(rows)
-            .children(self.error.clone().map(|e| {
-                div()
-                    .px(px(CONTENT_SIDE))
-                    .text_color(theme.color(UiRole::Danger))
-                    .child(e)
-            }))
-            .into_any_element()
-    }
 }
 
 impl Render for Explorer {
@@ -885,7 +866,7 @@ impl Render for Explorer {
                 self.render_empty(cx)
             }
         } else {
-            self.render_list(window, cx)
+            self.render_tree(window, cx)
         };
         let popup = self
             .menu
