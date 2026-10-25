@@ -302,9 +302,10 @@ impl Filter {
         &self.inner.exclusions
     }
 
-    /// Never shown and never searched.
+    /// Never shown and never searched: the ignored names, the settings
+    /// folder and the temporary files of a save a session left behind.
     pub fn is_hidden(&self, name: &str) -> bool {
-        name == STORE_DIR || default_ignored().matches(name)
+        name == STORE_DIR || default_ignored().matches(name) || crate::is_save_temp(name)
     }
 
     /// Shown but excluded: the path or one of its folders is excluded.

@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 native-path.workspace = true
+process.workspace = true
 quick-xml.workspace = true
 text.workspace = true
 thiserror.workspace = true

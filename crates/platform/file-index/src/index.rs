@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ignore::{WalkBuilder, WalkState};
 use project::Filter;
@@ -98,8 +98,9 @@ impl FileIndex {
     ) -> Option<Self> {
         let mut index = Self::empty(root);
         index.non_project = non_project;
-        let found = walk(root, filter, non_project, cancel)?;
+        let (found, temps) = walk(root, filter, non_project, cancel)?;
         index.insert_found(found);
+        remove_stale_save_temps(&temps, filter);
         Some(index)
     }
 
@@ -119,7 +120,7 @@ impl FileIndex {
         index.non_project = true;
         for id in unlisted {
             let dir = index.path(id);
-            let found = walk(&dir, filter, true, cancel)?;
+            let (found, _) = walk(&dir, filter, true, cancel)?;
             index.entries[id as usize].unlisted = false;
             index.insert_found(found);
         }
@@ -404,15 +405,49 @@ impl FileIndex {
     }
 }
 
+/// Temporary files of an interrupted save the walk met (hidden like any
+/// ignored name).
+type SaveTemps = Vec<PathBuf>;
+
+/// Removes the temporary files of saves that a session which is gone left
+/// behind (a crash). Those in excluded folders (libraries, environments)
+/// are not ours to touch; a file of a running process is kept. Blocking, but
+/// the walk was just done in the background.
+fn remove_stale_save_temps(temps: &[PathBuf], filter: &Filter) {
+    for path in temps {
+        if !filter.is_excluded(path, false) {
+            project::remove_stale_save_temp(path);
+        }
+    }
+}
+
 /// Walks a folder in parallel: hidden names are left out; an excluded
-/// folder is listed, its content only with `non_project`.
-fn walk(dir: &Path, filter: &Filter, non_project: bool, cancel: &AtomicBool) -> Option<Vec<Found>> {
+/// folder is listed, its content only with `non_project`. The temporary
+/// files of saves are left out too and returned.
+fn walk(
+    dir: &Path,
+    filter: &Filter,
+    non_project: bool,
+    cancel: &AtomicBool,
+) -> Option<(Vec<Found>, SaveTemps)> {
     let found = Mutex::new(Vec::new());
+    let temps = Arc::new(Mutex::new(Vec::new()));
     let mut builder = WalkBuilder::new(dir);
     builder.standard_filters(false).follow_links(false);
     let hidden = filter.clone();
+    let temps_seen = Arc::clone(&temps);
     builder.filter_entry(move |entry| {
-        entry.depth() == 0 || !hidden.is_hidden(&entry.file_name().to_string_lossy())
+        if entry.depth() == 0 {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if project::is_save_temp(&name) {
+            if let Ok(mut temps) = temps_seen.lock() {
+                temps.push(entry.path().to_owned());
+            }
+            return false;
+        }
+        !hidden.is_hidden(&name)
     });
     builder.build_parallel().run(|| {
         Box::new(|entry| {
@@ -442,5 +477,6 @@ fn walk(dir: &Path, filter: &Filter, non_project: bool, cancel: &AtomicBool) -> 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
-    found.into_inner().ok()
+    let temps = std::mem::take(&mut *temps.lock().ok()?);
+    Some((found.into_inner().ok()?, temps))
 }

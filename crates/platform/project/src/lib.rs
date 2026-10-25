@@ -21,7 +21,8 @@ pub mod workspace;
 
 pub use changes::{DiskChange, disk_changes, is_hidden_path};
 pub use document::{
-    LoadError, Loaded, MAX_FILE_SIZE, Stamp, is_save_temp, read_document, write_document,
+    LoadError, Loaded, MAX_FILE_SIZE, Stamp, finish_writes, is_save_temp, read_document,
+    remove_stale_save_temp, write_document,
 };
 pub use filter::{
     AutoExclusions, DEFAULT_IGNORED, Filter, NameMasks, auto_exclusions, set_auto_exclusions,

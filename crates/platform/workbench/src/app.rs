@@ -133,6 +133,9 @@ pub struct Product {
 
 /// Default size of the main window's content.
 pub const WINDOW_SIZE: (f32, f32) = (1280.0, 800.0);
+
+/// How long quitting waits for the saves in progress.
+const SAVES_ON_QUIT: std::time::Duration = std::time::Duration::from_millis(300);
 /// Position of the macOS window buttons inside the main toolbar.
 pub const TRAFFIC_LIGHTS: (f32, f32) = (14.0, 13.0);
 
@@ -313,6 +316,14 @@ pub fn init(cx: &mut App, product: &Product) {
     cx.on_action(|_: &Quit, cx| {
         settings_ui::leave::resolve(settings_ui::leave::Leaving::Application, cx, |cx| cx.quit())
     });
+    // A save in progress gets a moment to end; the temporary file of one
+    // that does not is removed, so quitting leaves nothing next to the
+    // document. (The open files are written when the workbench quits.)
+    cx.on_app_quit(|_| {
+        project::finish_writes(SAVES_ON_QUIT);
+        async {}
+    })
+    .detach();
     // Any key ends a double tap of a modifier in progress.
     cx.intercept_keystrokes(|event, _, cx| crate::keymap::key_pressed(&event.keystroke, cx))
         .detach();
