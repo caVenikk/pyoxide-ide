@@ -99,7 +99,7 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     let timeouts = Timeouts {
         shutdown: Duration::from_secs(10),
         exit: Duration::from_secs(5),
-        ..QUICK
+        ..PATIENT
     };
     let intel = LspCodeIntel::with_timeouts(vec![spec], timeouts);
     let events = Events::of(intel.as_ref());
@@ -135,7 +135,7 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     assert_eq!(block_on(intel.shutdown()), Ok(()));
     events.log("shutdown received");
     // It answered and exited: no waiting for the timeouts.
-    assert!(started.elapsed() < timeouts.exit, "{:?}", started.elapsed());
+    assert!(started.elapsed() < PATIENT.exit, "{:?}", started.elapsed());
     let stopped = &intel.status()[0];
     assert_eq!(stopped.state, ServerState::Stopped);
     // The last name and version stay for the widget.
@@ -195,7 +195,7 @@ fn the_server_asks_and_the_client_answers() {
     let spec = spec("fake", &root, script)
         .with_settings(json!({"fake": {"analysis": {"mode": "strict"}}}))
         .with_customizer(Arc::new(Recording::default()));
-    let intel = LspCodeIntel::with_timeouts(vec![spec], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -280,7 +280,7 @@ fn edits_the_server_asks_for_go_to_the_application() {
             json!({"log": "edits done"}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -325,7 +325,7 @@ fn a_crash_terminates_with_the_error_output_and_no_restart() {
             json!({"exit": 3}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -335,9 +335,9 @@ fn a_crash_terminates_with_the_error_output_and_no_restart() {
         error.ends_with("Process finished with exit code 3"),
         "{error}"
     );
-    // Opening another document does not restart it.
+    // Opening another document does not restart it (a start would be
+    // visible at once: the state changes before `did_open` returns).
     open(intel.as_ref(), &root);
-    std::thread::sleep(Duration::from_millis(200));
     assert!(matches!(
         intel.status()[0].state,
         ServerState::Terminated { .. }
@@ -365,19 +365,13 @@ fn servers_that_cannot_start_are_terminated() {
         vec![
             json!({"expect": "initialize"}),
             json!({"reply_error": {"code": -32603, "message": "no workspace"}}),
-            json!({"hang": true}),
         ],
     );
-    let silent = spec(
-        "silent",
-        &root,
-        vec![json!({"expect": "initialize"}), json!({"hang": true})],
-    );
-    let intel = LspCodeIntel::with_timeouts(vec![missing, failing, silent], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![missing, failing], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     // Each in its own time, in any order.
-    let errors = events.terminated_all(&["missing", "failing", "silent"]);
+    let errors = events.terminated_all(&["missing", "failing"]);
     let error = &errors["missing"];
     assert!(error.starts_with("Cannot run program"), "{error}");
     let error = &errors["failing"];
@@ -385,9 +379,30 @@ fn servers_that_cannot_start_are_terminated() {
         error.contains("failed to initialize: no workspace"),
         "{error}"
     );
-    let error = &errors["silent"];
+    assert_eq!(block_on(intel.shutdown()), Ok(()));
+}
+
+#[test]
+fn a_server_that_does_not_answer_initialize_is_terminated() {
+    let root = root("silent");
+    let silent = spec(
+        "silent",
+        &root,
+        vec![json!({"expect": "initialize"}), json!({"hang": true})],
+    );
+    // A server that never answers cannot answer in time by chance, so the
+    // short timeout does not make the test depend on the speed of the
+    // machine.
+    let timeouts = Timeouts {
+        initialize: Duration::from_millis(300),
+        ..HUNG
+    };
+    let intel = LspCodeIntel::with_timeouts(vec![silent], timeouts);
+    let events = Events::of(intel.as_ref());
+    open(intel.as_ref(), &root);
+    let error = events.terminated("silent");
     assert!(
-        error.contains("did not answer initialize in 1.5 s"),
+        error.contains("did not answer initialize in 0.3 s"),
         "{error}"
     );
     assert_eq!(block_on(intel.shutdown()), Ok(()));
@@ -400,7 +415,8 @@ fn a_server_that_ignores_shutdown_is_stopped_anyway() {
         handshake(json!({"capabilities": {}})),
         vec![json!({"hang": true})],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let timeouts = HUNG;
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], timeouts);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -409,7 +425,7 @@ fn a_server_that_ignores_shutdown_is_stopped_anyway() {
     let took = started.elapsed();
     // `shutdown` unanswered, then `exit` and end of input ignored: the
     // process was interrupted after the exit timeout.
-    assert!(took >= QUICK.shutdown + QUICK.exit, "{took:?}");
+    assert!(took >= timeouts.shutdown + timeouts.exit, "{took:?}");
     assert!(took < WAIT, "{took:?}");
     assert_eq!(intel.status()[0].state, ServerState::Stopped);
 }
@@ -421,7 +437,7 @@ fn a_stopped_server_starts_again_when_needed() {
         handshake(json!({"capabilities": {}})),
         vec![json!({"log": "up"})],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -459,7 +475,7 @@ fn malformed_output_of_a_real_process_is_survived() {
             json!({"exit": 1}),
         ],
     ]);
-    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec("fake", &root, script)], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("fake");
@@ -488,7 +504,7 @@ fn specs_are_replaced_while_documents_are_open() {
             vec![json!({"log": "up"})],
         ])
     };
-    let intel = LspCodeIntel::with_timeouts(Vec::new(), QUICK);
+    let intel = LspCodeIntel::with_timeouts(Vec::new(), PATIENT);
     let events = Events::of(intel.as_ref());
     assert!(intel.status().is_empty());
     assert!(intel.specs().is_empty());
@@ -558,7 +574,7 @@ fn an_empty_configuration_change_once_running() {
             "python": {"pythonPath": "/venv/bin/python"},
             "basedpyright": {"analysis": {"typeCheckingMode": "standard"}},
         }));
-    let intel = LspCodeIntel::with_timeouts(vec![spec], QUICK);
+    let intel = LspCodeIntel::with_timeouts(vec![spec], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
     events.running("basedpyright");

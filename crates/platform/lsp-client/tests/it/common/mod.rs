@@ -16,13 +16,33 @@ use serde_json::{Value, json};
 use text::{AppliedEdit, Buffer, CaretPlacement, Edit, EditKind, SelectionSet};
 
 pub const FAKE: &str = env!("CARGO_BIN_EXE_lsp-fake-server");
-pub const WAIT: Duration = Duration::from_secs(20);
 
-/// Short waits, so stopping a server that does not cooperate is quick.
-pub const QUICK: Timeouts = Timeouts {
-    initialize: Duration::from_millis(1500),
+/// The upper bound of every wait for an event. Waits return as soon as the
+/// event comes, so the bound only matters when something is wrong; it is
+/// generous because a loaded CI runner can take seconds to start the fake
+/// server.
+pub const WAIT: Duration = Duration::from_secs(90);
+
+/// What the tests give the client. The fake server answers `initialize`
+/// and `shutdown` and ends on `exit`, so these waits end when it does; they
+/// only run out when something is wrong, and an `initialize` that timed
+/// out under load would terminate the server in a test that is not about
+/// that. `initialize` is shorter than [`WAIT`]: when the server really does
+/// not answer, the test fails with that reason, not with a missing event.
+pub const PATIENT: Timeouts = Timeouts {
+    initialize: Duration::from_secs(60),
+    shutdown: Duration::from_secs(30),
+    exit: Duration::from_secs(20),
+};
+
+/// For the tests of servers that hang (they never answer `shutdown`, or
+/// `initialize`): stopping takes the waits for `shutdown` and `exit`, so
+/// they are short. The server still answers `initialize` in time unless
+/// the test says otherwise.
+pub const HUNG: Timeouts = Timeouts {
     shutdown: Duration::from_millis(500),
     exit: Duration::from_millis(300),
+    ..PATIENT
 };
 
 /// A folder of its own for each test, removed at its end.
