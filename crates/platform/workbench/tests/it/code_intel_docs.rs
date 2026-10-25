@@ -492,9 +492,14 @@ fn the_more_menu_of_the_documentation_popup(cx: &mut TestAppContext) {
     assert_eq!(rows[5]["enabled"], false);
     assert_eq!(rows[6]["enabled"], false);
     assert_eq!(rows[0]["command"], "documentation.open-in-tool-window");
-    assert_eq!(rows[0]["shortcut"], "F1");
-    assert_eq!(rows[5]["shortcut"], "\u{2318}[");
-    assert_eq!(rows[6]["shortcut"], "\u{2318}]");
+    let (open, back, forward) = if cfg!(target_os = "macos") {
+        ("F1", "\u{2318}[", "\u{2318}]")
+    } else {
+        ("Ctrl+Q", "Ctrl+Alt+Left", "Ctrl+Alt+Right")
+    };
+    assert_eq!(rows[0]["shortcut"], open);
+    assert_eq!(rows[5]["shortcut"], back);
+    assert_eq!(rows[6]["shortcut"], forward);
 
     // Show on Mouse Move off: chosen in the menu, the check mark goes and
     // the option is stored.
