@@ -16,12 +16,16 @@
 #                   on Windows (items used only under cfg(unix)). Needs the
 #                   rustup target and mingw-w64; skipped with a note when
 #                   they are missing and on Windows. CI has a Windows runner
-#                   instead.
+#                   instead. With --quick only the changed crates with
+#                   platform-specific code and their direct dependents (the
+#                   rest compiles the same on every OS, `scripts/changed-crates.py
+#                   --windows`); CI checks the rest.
 #   build           the test binaries (cargo nextest run --no-run)
 #   test            the tests (cargo nextest run, profile `ci`)
 #   throughput      terminal throughput (ADR 0014), numbers to the log
 #   doc             doctests, which nextest does not run
-#   repo            progress, layer and notice checks (job `progress`)
+#   repo            progress, layer and notice checks, the tests of the CI
+#                   scope script (job `progress`)
 #
 # Needs cargo-nextest (`cargo install cargo-nextest --locked`) and python3.
 set -euo pipefail
@@ -66,6 +70,7 @@ fi
 # The packages the cargo steps check: the workspace, or with --quick the
 # changed crates and their dependents.
 scope=(--workspace)
+win_scope=(--workspace)
 doc_scope=(--workspace)
 crates=()
 if [ "$quick" -eq 1 ]; then
@@ -78,6 +83,16 @@ if [ "$quick" -eq 1 ]; then
             crates+=("$c")
             scope+=(-p "$c")
         done
+        # Windows clippy only where Windows can differ, see changed-crates.py.
+        win_scope=()
+        win_affected=$("$PYTHON" scripts/changed-crates.py --windows)
+        if [ "$win_affected" = "*" ]; then
+            win_scope=(--workspace)
+        else
+            for c in $win_affected; do
+                win_scope+=(-p "$c")
+            done
+        fi
         # Doctests only for crates with a library.
         doc_scope=()
         libs=$("$PYTHON" scripts/changed-crates.py --lib)
@@ -130,8 +145,8 @@ run_step() {
             fi
             ;;
         clippy-windows)
-            if has_scope && windows_ready; then
-                cargo clippy "${scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
+            if [ ${#win_scope[@]} -gt 0 ] && windows_ready; then
+                cargo clippy "${win_scope[@]}" --all-targets --target "$WINDOWS_TARGET" -- -D warnings
             fi
             ;;
         build)
@@ -158,13 +173,48 @@ run_step() {
             "$PYTHON" scripts/progress.py --check-data
             "$PYTHON" scripts/check-layers.py
             "$PYTHON" scripts/notice.py --check
+            bash scripts/test-ci-scope.sh
             ;;
     esac
 }
 
+# The time of each step, printed at the end (also when a step fails, with the
+# failing one marked) so the tail of a log shows where the time went and what
+# stopped the run.
+timings=()
+current=""
+current_start=0
+script_start=$(date +%s)
+
+summary() {
+    local rc=$?
+    local now
+    now=$(date +%s)
+    if [ -n "$current" ]; then
+        timings+=("$current $((now - current_start)) FAILED")
+    fi
+    if [ ${#timings[@]} -gt 0 ]; then
+        echo
+        echo "== check.sh: $((now - script_start)) s"
+        local entry name secs mark
+        for entry in "${timings[@]}"; do
+            read -r name secs mark <<<"$entry"
+            printf '%-15s %5s s  %s\n' "$name" "$secs" "$mark"
+        done
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "check.sh: FAILED${current:+ at step $current}" >&2
+    fi
+}
+trap summary EXIT
+
 for step in "${steps[@]}"; do
     echo "==> $step"
-    start=$(date +%s)
+    current=$step
+    current_start=$(date +%s)
     run_step "$step"
-    echo "<== $step: $(($(date +%s) - start)) s"
+    elapsed=$(($(date +%s) - current_start))
+    echo "<== $step: $elapsed s"
+    timings+=("$step $elapsed")
+    current=""
 done

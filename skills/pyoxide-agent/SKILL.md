@@ -19,6 +19,7 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 - Derive behaviour from the reference, not from other editors. What the sources cannot settle goes under "needs a reference screenshot" in your report.
 
 ## Build and code
+- A new worktree has an empty `target/`: run `scripts/seed-target.sh` once before the first build (clones compiled dependencies copy-on-write; see `docs/agent-workflow.md`), and `scripts/check.sh` prints the time of each step.
 - Rust: make sure `cargo` is on `PATH` (the lead says if the machine needs a prefix); `export CARGO_BUILD_JOBS=4` when several agents build at once; own `target/` in the worktree.
 - Reuse what exists (`ui::dialog_window` incl. non-modal, `ui::form`, `editor::field`, `ui::menu`, `ui::tree_guides`, the tool window registry `workbench/src/tool_windows.rs`, theme roles, navigation history, file sync hooks, `run-config`). Do not build a second one.
 - Layering: platform crates know no language (ADR 0005, `python3 scripts/check-layers.py`); Python specifics come through product hooks.
