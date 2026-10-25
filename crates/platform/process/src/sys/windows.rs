@@ -296,18 +296,6 @@ fn snapshot() -> Vec<Entry> {
     out
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_console_host;
-
-    #[test]
-    fn console_hosts_are_not_commands() {
-        assert!(is_console_host("conhost.exe"));
-        assert!(is_console_host("OpenConsole.EXE"));
-        assert!(!is_console_host("python.exe"));
-    }
-}
-
 /// A process with this id exists and has not exited (also one we may not
 /// open).
 pub(crate) fn is_alive(pid: u32) -> bool {
@@ -324,5 +312,17 @@ pub(crate) fn is_alive(pid: u32) -> bool {
         let alive = GetExitCodeProcess(h, &mut code) != 0 && code == STILL_ACTIVE as u32;
         CloseHandle(h);
         alive
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_console_host;
+
+    #[test]
+    fn console_hosts_are_not_commands() {
+        assert!(is_console_host("conhost.exe"));
+        assert!(is_console_host("OpenConsole.EXE"));
+        assert!(!is_console_host("python.exe"));
     }
 }
