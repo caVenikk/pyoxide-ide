@@ -404,7 +404,30 @@ fn keyboard_moves_scroll_the_tree_as_little_as_needed(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_tab_strip_scrolls_sideways(cx: &mut TestAppContext) {
     let (window, _dir) = open_project(cx);
-    for i in 0..30 {
+    open_many_tabs(cx, window, 30);
+    let strip = bounds(cx, window, "editor-tabs");
+    // The last tab is the active one: the strip is scrolled to it.
+    assert!(
+        bounds(cx, window, "tab-0").right() < strip.left(),
+        "the tabs must be wider than the strip"
+    );
+    let first_left = |cx: &mut TestAppContext| f32::from(bounds(cx, window, "tab-0").left());
+    let start = first_left(cx);
+    // A mouse wheel turned up scrolls the tabs to the right.
+    wheel_lines(cx, window, strip.center(), 0.0, 3.0);
+    let after_wheel = first_left(cx);
+    assert!(after_wheel > start, "the wheel did not scroll the tabs");
+    // A sideways swipe scrolls them too.
+    swipe(cx, window, strip.center(), -40.0, 0.0);
+    assert_eq!(first_left(cx), after_wheel - 40.0);
+    // Neither moved the editor or the tree.
+    assert_eq!(editor_top(cx, window), 0.0);
+    assert_eq!(tree_top(cx, window), 0.0);
+}
+
+/// Opens `count` files `m00.py`... so the tabs are wider than the strip.
+fn open_many_tabs(cx: &mut TestAppContext, window: WindowHandle<Workbench>, count: usize) {
+    for i in 0..count {
         invoke(
             cx,
             window,
@@ -412,24 +435,40 @@ fn the_tab_strip_scrolls_sideways(cx: &mut TestAppContext) {
             json!({"path": format!("m{i:02}.py")}),
         );
     }
+}
+
+/// Whether the whole tab `part` is inside the tab strip.
+fn tab_is_shown(
+    cx: &mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    part: &'static str,
+) -> bool {
     let strip = bounds(cx, window, "editor-tabs");
-    let last = bounds(cx, window, "tab-29");
-    assert!(
-        last.right() > strip.right(),
-        "the tabs must be wider than the strip"
-    );
-    let first_left = |cx: &mut TestAppContext| f32::from(bounds(cx, window, "tab-0").left());
-    let start = first_left(cx);
-    // A mouse wheel turned down scrolls the tabs to the left.
-    wheel_lines(cx, window, strip.center(), 0.0, -3.0);
-    let after_wheel = first_left(cx);
-    assert!(after_wheel < start, "the wheel did not scroll the tabs");
-    // A sideways swipe scrolls them too.
-    swipe(cx, window, strip.center(), -40.0, 0.0);
-    assert_eq!(first_left(cx), after_wheel - 40.0);
-    // Neither moved the editor or the tree.
-    assert_eq!(editor_top(cx, window), 0.0);
-    assert_eq!(tree_top(cx, window), 0.0);
+    let tab = bounds(cx, window, part);
+    tab.left() >= strip.left() && tab.right() <= strip.right()
+}
+
+#[gpui::test]
+fn the_active_tab_is_scrolled_into_view(cx: &mut TestAppContext) {
+    let (window, _dir) = open_project(cx);
+    open_many_tabs(cx, window, 30);
+    // Opening a tab beyond the strip shows it.
+    assert!(tab_is_shown(cx, window, "tab-29"));
+    // Activating one far to the left brings it back.
+    invoke(cx, window, "project.open-file", json!({"path": "m00.py"}));
+    assert!(tab_is_shown(cx, window, "tab-0"));
+    // And one far to the right again.
+    invoke(cx, window, "project.open-file", json!({"path": "m20.py"}));
+    assert!(tab_is_shown(cx, window, "tab-20"));
+    // A tab already inside the strip does not move the strip.
+    let left = bounds(cx, window, "tab-20").left();
+    invoke(cx, window, "project.open-file", json!({"path": "m19.py"}));
+    assert!(tab_is_shown(cx, window, "tab-19"));
+    assert_eq!(bounds(cx, window, "tab-20").left(), left);
+    // Closing the last tab shows the one that becomes active.
+    invoke(cx, window, "project.open-file", json!({"path": "m29.py"}));
+    invoke(cx, window, "tabs.close", json!({"index": 29}));
+    assert!(tab_is_shown(cx, window, "tab-28"));
 }
 
 #[gpui::test]
