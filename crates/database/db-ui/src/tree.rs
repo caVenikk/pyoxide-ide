@@ -128,13 +128,21 @@ impl TreeGroup {
     }
 
     /// How many nodes the group has under `parent` (none when its content
-    /// is not loaded).
+    /// is not loaded). Tables count their nested partitions too, as the
+    /// reference's count does.
     pub fn len(self, parent: NodeRef<'_>) -> usize {
+        let nested = matches!(self, TreeGroup::Tables | TreeGroup::Partitions);
         self.model_groups()
             .iter()
             .map(|g| parent.group(*g))
             .filter(|g| g.is_loaded())
-            .map(|g| g.len())
+            .map(|g| {
+                if nested {
+                    g.nodes().map(|n| 1 + partitions(n)).sum()
+                } else {
+                    g.len()
+                }
+            })
             .sum()
     }
 
@@ -158,6 +166,15 @@ impl TreeGroup {
             TreeGroup::Partitions => "partitions",
         }
     }
+}
+
+/// The partitions under a table, at every level.
+fn partitions(table: NodeRef<'_>) -> usize {
+    table
+        .group(Group::Partitions)
+        .nodes()
+        .map(|p| 1 + partitions(p))
+        .sum()
 }
 
 /// The visible groups under `parent` (empty and unloaded ones hidden).
@@ -434,7 +451,7 @@ fn column_view(node: NodeRef<'_>) -> (RowIcon, Option<String>) {
     } else {
         RowIcon::Column
     };
-    let mut detail = column.data_type.clone();
+    let mut detail = short_type(&column.data_type);
     if column.auto_increment || column.identity.is_some() {
         detail.push_str(" (auto increment)");
     } else if let Some(default) = &column.default {
@@ -442,6 +459,19 @@ fn column_view(node: NodeRef<'_>) -> (RowIcon, Option<String>) {
         detail.push_str(default);
     }
     (icon, Some(detail))
+}
+
+/// PostgreSQL's long names of the character types in the reference's
+/// short spelling: `char(2)`, `varchar(100)`.
+fn short_type(data_type: &str) -> String {
+    for (long, short) in [("character varying", "varchar"), ("character", "char")] {
+        if let Some(rest) = data_type.strip_prefix(long)
+            && (rest.is_empty() || rest.starts_with('(') || rest.starts_with('['))
+        {
+            return format!("{short}{rest}");
+        }
+    }
+    data_type.to_owned()
 }
 
 /// `(lower(email::text)) UNIQUE`, `(country) where is_active`.

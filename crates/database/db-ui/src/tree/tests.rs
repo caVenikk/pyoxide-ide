@@ -138,6 +138,11 @@ fn row_texts() {
         (RowIcon::ColumnNotNull, "char(2) = 'DE'::bpchar".into())
     );
     assert_eq!(col("profile"), (RowIcon::Column, "jsonb".into()));
+    assert_eq!(short_type("character(2)"), "char(2)");
+    assert_eq!(short_type("character varying(100)[]"), "varchar(100)[]");
+    assert_eq!(short_type("character"), "char");
+    assert_eq!(short_type("characteristic"), "characteristic");
+    assert_eq!(short_type("VARCHAR2(10)"), "VARCHAR2(10)");
 
     let idx = |name: &str| node_view(node(&model, name, NodeKind::Index));
     let v = idx("customers_email_lower_idx");

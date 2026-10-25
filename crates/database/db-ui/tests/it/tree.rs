@@ -95,7 +95,7 @@ fn a_cached_model_opens_without_the_database(cx: &mut TestAppContext) {
         NAME.to_owned(),
         format!("{NAME}/pyoxide"),
         p("").trim_end_matches('/').to_owned(),
-        p("tables 4"),
+        p("tables 6"),
         p("tables/audit_log"),
         p("tables/customers"),
         p("tables/customers/columns 8"),
