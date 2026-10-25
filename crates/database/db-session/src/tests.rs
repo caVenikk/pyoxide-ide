@@ -836,3 +836,24 @@ fn headless_command_runs_a_script() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+#[test]
+fn a_server_position_is_mapped_into_the_script() {
+    let h = harness(Backend::Postgres, DataSourceOptions::default());
+    // Character 9 of the statement, after a two-byte character.
+    h.source.on(
+        "ünd",
+        Reaction::Fail(
+            db_core::Error::query("syntax error")
+                .with_code("42601")
+                .with_position(9),
+        ),
+    );
+    let session = h.handle.open_session(SessionOptions::default());
+    let script = "select 1;\nselect ünd x";
+    let events = h.run(&session, script);
+    let JobEvent::Failed { error, .. } = &events[4] else {
+        panic!("{events:?}")
+    };
+    assert_eq!(&script[error.position..], "d x");
+}

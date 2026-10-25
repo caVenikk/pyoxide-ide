@@ -227,6 +227,11 @@ impl Session {
                     event,
                 })
             };
+            emit(JobEvent::Started {
+                index: 0,
+                range: 0..0,
+                text: String::new(),
+            });
             emit(JobEvent::Failed {
                 index: 0,
                 error: StatementError {
@@ -1141,7 +1146,18 @@ impl Actor {
     }
 }
 
-/// Byte offset in the script where the error of `st` is.
-fn error_position(st: &JobStatement, _error: &Error) -> usize {
-    st.range.start
+/// Byte offset in the script where the error of `st` is: the server's
+/// position (characters into the statement text) or the statement's start.
+fn error_position(st: &JobStatement, error: &Error) -> usize {
+    let within = error
+        .position
+        .and_then(|chars| {
+            st.text
+                .char_indices()
+                .map(|(i, _)| i)
+                .chain(std::iter::once(st.text.len()))
+                .nth(chars)
+        })
+        .unwrap_or(0);
+    st.range.start + within
 }

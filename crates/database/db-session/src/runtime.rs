@@ -25,10 +25,17 @@ struct Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        // Never blocks, also when the last clone is dropped inside another
-        // async runtime.
+        // Never blocks. The last clone may be dropped by a task of this very
+        // runtime (a session ending) or inside another runtime: shut down
+        // from a thread of its own then.
         if let Some(rt) = self.runtime.take() {
-            rt.shutdown_background();
+            if tokio::runtime::Handle::try_current().is_ok() {
+                let _ = std::thread::Builder::new()
+                    .name("pyoxide-db-shutdown".into())
+                    .spawn(move || rt.shutdown_background());
+            } else {
+                rt.shutdown_background();
+            }
         }
     }
 }
