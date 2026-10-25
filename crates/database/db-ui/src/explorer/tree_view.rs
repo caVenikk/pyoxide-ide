@@ -524,7 +524,7 @@ impl Explorer {
             theme.color(UiRole::Text)
         };
         let muted = theme.color(UiRole::TextMuted);
-        let small = theme.ui_size() - px(1.0);
+        let small = theme.ui_size() - px(2.0);
         let guides = self.guides(cx).row(
             row.depth,
             row.expanded,
