@@ -1,8 +1,8 @@
 //! The URL field of the Data Sources dialog: the connection as one line
 //! that follows the fields, and that sets the fields when it is edited.
 //!
-//! - PostgreSQL: `postgresql://[user@]host[:port]/database` (the libpq
-//!   connection URI; `postgres://` is taken too);
+//! - PostgreSQL: `postgresql://host[:port]/database` (the libpq connection
+//!   URI; `postgres://` and a user before the host are taken too);
 //! - Oracle: `oracle://host[:port]/service` or `oracle://host[:port]?sid=SID`;
 //!   any other text is a connect string (a TNS alias or a descriptor);
 //! - SQLite: `sqlite:path`.
@@ -15,14 +15,10 @@ use db_core::{Dialect, Profile};
 /// The URL of the profile's connection.
 pub fn format(profile: &Profile) -> String {
     match profile.dialect() {
+        // The user has a field of its own; a pasted URL may name one.
         Dialect::Postgres => {
-            let user = if profile.user.is_empty() {
-                String::new()
-            } else {
-                format!("{}@", profile.user)
-            };
             format!(
-                "postgresql://{user}{}{}/{}",
+                "postgresql://{}{}/{}",
                 profile.host,
                 port_part(profile),
                 profile.database.as_deref().unwrap_or("")
@@ -179,7 +175,7 @@ mod tests {
             ),
             ("db.example.com", Some(6543), Some("sales"), "app")
         );
-        assert_eq!(format(&p), "postgresql://app@db.example.com:6543/sales");
+        assert_eq!(format(&p), "postgresql://db.example.com:6543/sales");
         apply(&mut p, "jdbc:postgresql://localhost/x").unwrap();
         assert_eq!((p.host.as_str(), p.port), ("localhost", None));
         let before = p.clone();

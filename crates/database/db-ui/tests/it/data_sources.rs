@@ -65,7 +65,7 @@ fn the_url_and_the_fields_follow_each_other(cx: &mut TestAppContext) {
     let s = state(&mut h);
     assert_eq!(
         s["dialog"]["selected"]["url"],
-        "postgresql://app@localhost:55432/pyoxide"
+        "postgresql://localhost:55432/pyoxide"
     );
 
     set(&mut h, "url", "postgresql://db.example.com:6543/sales");
