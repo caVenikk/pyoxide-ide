@@ -12,7 +12,6 @@ use super::{
 use crate::schema::{
     IndexInfo, Introspector, Level, ObjectDetail, ObjectInfo, ObjectKind, RelationInfo, SchemaInfo,
     SchemaSnapshot, Scope, Snapshot, SourceInfo, TableDetail, TriggerDetail, fetch_all, has_source,
-    opt_text, text,
 };
 use crate::{Connection, Dialect, Result};
 
@@ -55,6 +54,7 @@ async fn load_schema(
     // Same set and order as `objects`.
     let master = fetch_all(
         conn,
+        "master",
         &format!(
             "SELECT m.type, m.name, m.tbl_name, m.sql FROM {quoted}.sqlite_schema AS m \
              WHERE m.type IN ('table', 'view', 'index', 'trigger') AND {NOT_INTERNAL} \
@@ -64,24 +64,22 @@ async fn load_schema(
         &[],
     )
     .await?;
-    let entries: Vec<Entry> = master
-        .iter()
-        .filter_map(|row| {
-            let kind = match text(&row[0]).as_str() {
-                "table" => ObjectKind::Table,
-                "view" => ObjectKind::View,
-                "index" => ObjectKind::Index,
-                "trigger" => ObjectKind::Trigger,
-                _ => return None,
-            };
-            Some(Entry {
-                kind,
-                name: text(&row[1]),
-                table: text(&row[2]),
-                sql: opt_text(&row[3]),
-            })
-        })
-        .collect();
+    let mut entries: Vec<Entry> = Vec::with_capacity(master.len());
+    for row in &master {
+        let kind = match row.text(0)?.as_str() {
+            "table" => ObjectKind::Table,
+            "view" => ObjectKind::View,
+            "index" => ObjectKind::Index,
+            "trigger" => ObjectKind::Trigger,
+            _ => continue,
+        };
+        entries.push(Entry {
+            kind,
+            name: row.text(1)?,
+            table: row.text(2)?,
+            sql: row.opt_text(3)?,
+        });
+    }
 
     let mut objects: Vec<ObjectInfo> = entries
         .iter()
@@ -173,6 +171,7 @@ impl Bulk {
         let mut columns: HashMap<String, Vec<RawColumn>> = HashMap::new();
         let rows = fetch_all(
             conn,
+            "table_columns",
             &format!(
                 "SELECT m.name, x.cid, x.name, x.type, x.\"notnull\", x.dflt_value, x.pk, x.hidden \
                  FROM {from}, pragma_table_xinfo(m.name, ?1) AS x \
@@ -183,14 +182,14 @@ impl Bulk {
         )
         .await?;
         for r in &rows {
-            columns.entry(text(&r[0])).or_default().push(RawColumn {
-                cid: r[1].as_i64().unwrap_or(0),
-                name: text(&r[2]),
-                declared: text(&r[3]),
-                not_null: r[4].as_i64().unwrap_or(0) != 0,
-                default: opt_text(&r[5]),
-                pk: r[6].as_i64().unwrap_or(0),
-                hidden: r[7].as_i64().unwrap_or(0),
+            columns.entry(r.text(0)?).or_default().push(RawColumn {
+                cid: r.int(1)?.unwrap_or(0),
+                name: r.text(2)?,
+                declared: r.text(3)?,
+                not_null: r.int(4)?.unwrap_or(0) != 0,
+                default: r.opt_text(5)?,
+                pk: r.int(6)?.unwrap_or(0),
+                hidden: r.int(7)?.unwrap_or(0),
             });
         }
 
@@ -201,6 +200,7 @@ impl Bulk {
         let mut index_keys: HashMap<String, Vec<(i64, i64, Option<String>)>> = HashMap::new();
         let rows = fetch_all(
             conn,
+            "index_keys",
             &format!(
                 "SELECT m.name, il.name, il.\"unique\", il.origin, il.partial, \
                         x.seqno, x.cid, x.name \
@@ -213,26 +213,27 @@ impl Bulk {
         )
         .await?;
         for r in &rows {
-            let (table, index) = (text(&r[0]), text(&r[1]));
+            let (table, index) = (r.text(0)?, r.text(1)?);
             let list = index_list.entry(table).or_default();
             if list.last().is_none_or(|(last, ..)| *last != index) {
                 list.push((
                     index.clone(),
-                    r[2].as_i64().unwrap_or(0) != 0,
-                    text(&r[3]),
-                    r[4].as_i64().unwrap_or(0) != 0,
+                    r.int(2)?.unwrap_or(0) != 0,
+                    r.text(3)?,
+                    r.int(4)?.unwrap_or(0) != 0,
                 ));
             }
             index_keys.entry(index).or_default().push((
-                r[5].as_i64().unwrap_or(0),
-                r[6].as_i64().unwrap_or(-2),
-                opt_text(&r[7]),
+                r.int(5)?.unwrap_or(0),
+                r.int(6)?.unwrap_or(-2),
+                r.opt_text(7)?,
             ));
         }
 
         let mut foreign_keys: HashMap<String, Vec<ForeignKey>> = HashMap::new();
         let rows = fetch_all(
             conn,
+            "foreign_keys",
             &format!(
                 "SELECT m.name, f.id, f.\"table\", f.\"from\", f.\"to\", f.on_update, f.on_delete \
                  FROM {from}, pragma_foreign_key_list(m.name, ?1) AS f \
@@ -244,14 +245,14 @@ impl Bulk {
         .await?;
         let mut by_table: Vec<(String, Vec<_>)> = Vec::new();
         for r in &rows {
-            let table = text(&r[0]);
+            let table = r.text(0)?;
             let row = (
-                r[1].as_i64().unwrap_or(0),
-                text(&r[2]),
-                text(&r[3]),
-                opt_text(&r[4]),
-                opt_text(&r[5]),
-                opt_text(&r[6]),
+                r.int(1)?.unwrap_or(0),
+                r.text(2)?,
+                r.text(3)?,
+                r.opt_text(4)?,
+                r.opt_text(5)?,
+                r.opt_text(6)?,
             );
             match by_table.last_mut() {
                 Some((t, rows)) if *t == table => rows.push(row),

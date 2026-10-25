@@ -7,14 +7,15 @@
 //! Information Functions). Needs PostgreSQL 12 or later (`attgenerated`).
 
 use super::{PostgresIntrospector, flag, on_delete_action, relation_kind, text_list};
+use crate::schema::Cells;
 use crate::schema::{
     ArgumentInfo, ArgumentMode, AttributeInfo, ColumnInfo, ConstraintInfo, ConstraintKind,
     GeneratedColumn, IdentityKind, IndexInfo, Level, ObjectDetail, ObjectInfo, ObjectKind,
     PartitionOf, RelationInfo, RoutineDetail, SchemaInfo, SchemaSnapshot, Scope, SequenceDetail,
     Snapshot, SourceInfo, TableDetail, TriggerDetail, TypeCategory, TypeDetail, ViewDetail,
-    fetch_all, opt_text, text,
+    fetch_all, text,
 };
-use crate::{Connection, Result, Row, Value};
+use crate::{Connection, Error, ErrorKind, Result, Value};
 
 const SCHEMAS: &str = "\
 SELECT n.nspname, \
@@ -199,16 +200,16 @@ pub(super) async fn load(
 ) -> Result<Snapshot> {
     let conn = intro.conn;
     let mut schemas = Vec::new();
-    for r in fetch_all(conn, SCHEMAS, &[]).await? {
+    for r in fetch_all(conn, "schemas", SCHEMAS, &[]).await? {
         let info = SchemaInfo {
-            name: text(&r[0]),
-            is_system: flag(&r[1]),
-            is_current: flag(&r[2]),
-            owner: opt_text(&r[3]),
-            comment: opt_text(&r[4]),
+            name: r.text(0)?,
+            is_system: flag(r.value(1)?),
+            is_current: flag(r.value(2)?),
+            owner: r.opt_text(3)?,
+            comment: r.opt_text(4)?,
         };
         if scope.selects(&info) {
-            schemas.push(load_schema(conn, info, level).await?);
+            schemas.push(load_schema_retrying(conn, info, level).await?);
         }
     }
     Ok(Snapshot {
@@ -216,6 +217,45 @@ pub(super) async fn load(
         token: None,
         schemas,
     })
+}
+
+/// How many times a schema is loaded when objects vanish under the load.
+const LOAD_ATTEMPTS: usize = 3;
+
+/// The catalog functions (`pg_get_indexdef`, `pg_get_viewdef`, ...) look
+/// objects up by OID at the time they run, not in the statement's snapshot:
+/// an object dropped by a concurrent session after the statement started
+/// fails it with `XX000 could not open relation with OID ...` (or `cache
+/// lookup failed`) instead of vanishing from the result.
+fn vanished_object(err: &Error) -> bool {
+    err.kind == ErrorKind::Query
+        && match err.code.as_deref() {
+            Some("XX000") => {
+                err.message.contains("could not open relation with OID")
+                    || err.message.contains("cache lookup failed")
+            }
+            Some("42P01") => true,
+            _ => false,
+        }
+}
+
+/// Loads one schema again when an object was dropped during the load: the
+/// queries are bulk, so the dropped object cannot be skipped on its own, and
+/// the second pass no longer sees it. The attempts are limited, so a
+/// persistent catalog fault is still reported. A schema that is gone itself
+/// has no objects and comes back empty.
+async fn load_schema_retrying(
+    conn: &dyn Connection,
+    info: SchemaInfo,
+    level: Level,
+) -> Result<SchemaSnapshot> {
+    let mut attempt = 1;
+    loop {
+        match load_schema(conn, info.clone(), level).await {
+            Err(err) if attempt < LOAD_ATTEMPTS && vanished_object(&err) => attempt += 1,
+            other => return other,
+        }
+    }
 }
 
 async fn load_schema(
@@ -228,63 +268,65 @@ async fn load_schema(
     let structure = level >= Level::Structure;
     let mut objects = Vec::new();
 
-    for r in fetch_all(conn, RELATIONS, &arg).await? {
-        let code = text(&r[1]);
+    for r in fetch_all(conn, "relations", RELATIONS, &arg).await? {
+        let code = r.text(1)?;
         let Some(kind) = relation_kind(&code) else {
             continue;
         };
-        let detail = relation_detail(&code, &r);
+        let detail = relation_detail(&code, &r)?;
         objects.push(ObjectInfo {
             schema: schema.clone(),
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind,
-            parent: (kind == ObjectKind::Index)
-                .then(|| opt_text(&r[3]))
-                .flatten(),
-            comment: opt_text(&r[2]),
-            owner: opt_text(&r[4]),
+            parent: if kind == ObjectKind::Index {
+                r.opt_text(3)?
+            } else {
+                None
+            },
+            comment: r.opt_text(2)?,
+            owner: r.opt_text(4)?,
             detail,
         });
     }
 
-    for r in fetch_all(conn, TRIGGERS, &arg).await? {
+    for r in fetch_all(conn, "triggers", TRIGGERS, &arg).await? {
         objects.push(ObjectInfo {
             schema: schema.clone(),
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind: ObjectKind::Trigger,
-            parent: opt_text(&r[1]),
-            comment: opt_text(&r[2]),
+            parent: r.opt_text(1)?,
+            comment: r.opt_text(2)?,
             owner: None,
-            detail: Some(ObjectDetail::Trigger(trigger_detail(&r))),
+            detail: Some(ObjectDetail::Trigger(trigger_detail(&r)?)),
         });
     }
 
-    for r in fetch_all(conn, ROUTINES, &arg).await? {
-        let kind = if text(&r[1]) == "p" {
+    for r in fetch_all(conn, "routines", ROUTINES, &arg).await? {
+        let kind = if r.text(1)? == "p" {
             ObjectKind::Procedure
         } else {
             ObjectKind::Function
         };
         objects.push(ObjectInfo {
             schema: schema.clone(),
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind,
             parent: None,
-            comment: opt_text(&r[2]),
-            owner: opt_text(&r[3]),
-            detail: Some(ObjectDetail::Routine(routine_detail(&r))),
+            comment: r.opt_text(2)?,
+            owner: r.opt_text(3)?,
+            detail: Some(ObjectDetail::Routine(routine_detail(&r)?)),
         });
     }
 
-    for r in fetch_all(conn, TYPES, &arg).await? {
+    for r in fetch_all(conn, "types", TYPES, &arg).await? {
         objects.push(ObjectInfo {
             schema: schema.clone(),
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind: ObjectKind::Type,
             parent: None,
-            comment: opt_text(&r[1]),
-            owner: opt_text(&r[2]),
-            detail: Some(ObjectDetail::Type(type_detail(&r))),
+            comment: r.opt_text(1)?,
+            owner: r.opt_text(2)?,
+            detail: Some(ObjectDetail::Type(type_detail(&r)?)),
         });
     }
 
@@ -325,45 +367,51 @@ async fn load_schema(
     })
 }
 
-fn relation_detail(code: &str, r: &Row) -> Option<ObjectDetail> {
-    match code {
-        "r" | "p" | "f" => Some(ObjectDetail::Table(TableDetail {
-            temporary: text(&r[5]) == "t",
-            unlogged: text(&r[5]) == "u",
-            foreign: code == "f",
-            partitioned: code == "p",
-            partition_key: opt_text(&r[9]),
-            partition_of: opt_text(&r[7]).map(|table| PartitionOf {
-                schema: text(&r[6]),
-                table,
-                bounds: opt_text(&r[8]),
-            }),
-            ..TableDetail::default()
-        })),
+fn relation_detail(code: &str, r: &Cells) -> Result<Option<ObjectDetail>> {
+    Ok(match code {
+        "r" | "p" | "f" => {
+            let partition_of = match r.opt_text(7)? {
+                Some(table) => Some(PartitionOf {
+                    schema: r.text(6)?,
+                    table,
+                    bounds: r.opt_text(8)?,
+                }),
+                None => None,
+            };
+            Some(ObjectDetail::Table(TableDetail {
+                temporary: r.text(5)? == "t",
+                unlogged: r.text(5)? == "u",
+                foreign: code == "f",
+                partitioned: code == "p",
+                partition_key: r.opt_text(9)?,
+                partition_of,
+                ..TableDetail::default()
+            }))
+        }
         "v" | "m" => Some(ObjectDetail::View(ViewDetail {
-            populated: match &r[10] {
+            populated: match r.value(10)? {
                 Value::Bool(b) => Some(*b),
                 _ => None,
             },
         })),
         "S" => Some(ObjectDetail::Sequence(SequenceDetail {
-            data_type: opt_text(&r[11]),
-            start: opt_text(&r[12]),
-            min: opt_text(&r[13]),
-            max: opt_text(&r[14]),
-            increment: opt_text(&r[15]),
-            cycle: flag(&r[16]),
-            cache: r[17].as_i64().filter(|c| *c > 1),
+            data_type: r.opt_text(11)?,
+            start: r.opt_text(12)?,
+            min: r.opt_text(13)?,
+            max: r.opt_text(14)?,
+            increment: r.opt_text(15)?,
+            cycle: flag(r.value(16)?),
+            cache: r.int(17)?.filter(|c| *c > 1),
             ordered: false,
         })),
         _ => None,
-    }
+    })
 }
 
 /// `tgtype` bits: 1 row, 2 before, 4 insert, 8 delete, 16 update,
 /// 32 truncate, 64 instead of.
-fn trigger_detail(r: &Row) -> TriggerDetail {
-    let bits = r[3].as_i64().unwrap_or(0);
+fn trigger_detail(r: &Cells) -> Result<TriggerDetail> {
+    let bits = r.int(3)?.unwrap_or(0);
     let mut events = Vec::new();
     for (bit, name) in [
         (4, "INSERT"),
@@ -382,17 +430,23 @@ fn trigger_detail(r: &Row) -> TriggerDetail {
     } else {
         "AFTER"
     };
-    TriggerDetail {
-        events,
-        timing: Some(timing.to_owned()),
-        each_row: bits & 1 != 0,
-        function: opt_text(&r[6]).map(|f| match opt_text(&r[5]) {
+    let function = match r.opt_text(6)? {
+        Some(f) => Some(match r.opt_text(5)? {
             Some(schema) => format!("{schema}.{f}"),
             None => f,
         }),
-        condition: opt_text(&r[7]).and_then(|definition| when_condition(&definition)),
-        disabled: text(&r[4]) == "D",
-    }
+        None => None,
+    };
+    Ok(TriggerDetail {
+        events,
+        timing: Some(timing.to_owned()),
+        each_row: bits & 1 != 0,
+        function,
+        condition: r
+            .opt_text(7)?
+            .and_then(|definition| when_condition(&definition)),
+        disabled: r.text(4)? == "D",
+    })
 }
 
 /// The condition of `CREATE TRIGGER ... WHEN (condition) EXECUTE ...`.
@@ -403,11 +457,11 @@ fn when_condition(definition: &str) -> Option<String> {
     (end >= start).then(|| definition[start..end].to_owned())
 }
 
-fn routine_detail(r: &Row) -> RoutineDetail {
-    let types = text_list(&r[11]);
-    let names = text_list(&r[12]);
-    let modes = text_list(&r[13]);
-    let defaults = usize::try_from(r[14].as_i64().unwrap_or(0)).unwrap_or(0);
+fn routine_detail(r: &Cells) -> Result<RoutineDetail> {
+    let types = text_list(r.value(11)?);
+    let names = text_list(r.value(12)?);
+    let modes = text_list(r.value(13)?);
+    let defaults = usize::try_from(r.int(14)?.unwrap_or(0)).unwrap_or(0);
     let mode_of = |i: usize| match modes.get(i).map(String::as_str) {
         Some("o") => ArgumentMode::Out,
         Some("b") => ArgumentMode::InOut,
@@ -448,58 +502,58 @@ fn routine_detail(r: &Row) -> RoutineDetail {
         .collect();
 
     let mut characteristics = Vec::new();
-    if text(&r[1]) == "w" {
+    if r.text(1)? == "w" {
         characteristics.push("WINDOW".to_owned());
     }
-    match text(&r[7]).as_str() {
+    match r.text(7)?.as_str() {
         "i" => characteristics.push("IMMUTABLE".to_owned()),
         "s" => characteristics.push("STABLE".to_owned()),
         _ => {}
     }
-    if flag(&r[8]) {
+    if flag(r.value(8)?) {
         characteristics.push("SECURITY DEFINER".to_owned());
     }
-    if flag(&r[9]) {
+    if flag(r.value(9)?) {
         characteristics.push("STRICT".to_owned());
     }
-    match text(&r[10]).as_str() {
+    match r.text(10)?.as_str() {
         "s" => characteristics.push("PARALLEL SAFE".to_owned()),
         "r" => characteristics.push("PARALLEL RESTRICTED".to_owned()),
         _ => {}
     }
 
-    RoutineDetail {
-        signature: text(&r[4]),
+    Ok(RoutineDetail {
+        signature: r.text(4)?,
         arguments,
-        return_type: opt_text(&r[5]),
-        language: opt_text(&r[6]),
+        return_type: r.opt_text(5)?,
+        language: r.opt_text(6)?,
         characteristics,
-    }
+    })
 }
 
-fn type_detail(r: &Row) -> TypeDetail {
-    let category = match text(&r[3]).as_str() {
+fn type_detail(r: &Cells) -> Result<TypeDetail> {
+    let category = match r.text(3)?.as_str() {
         "e" => TypeCategory::Enum,
         "c" => TypeCategory::Composite,
         "d" => TypeCategory::Domain,
         "r" => TypeCategory::Range,
         _ => TypeCategory::Other,
     };
-    let attribute_names = text_list(&r[5]);
-    let attribute_types = text_list(&r[6]);
-    TypeDetail {
+    let attribute_names = text_list(r.value(5)?);
+    let attribute_types = text_list(r.value(6)?);
+    Ok(TypeDetail {
         category,
-        labels: text_list(&r[4]),
+        labels: text_list(r.value(4)?),
         attributes: attribute_names
             .into_iter()
             .zip(attribute_types)
             .map(|(name, data_type)| AttributeInfo { name, data_type })
             .collect(),
-        base_type: opt_text(&r[7]),
-        constraints: text_list(&r[8]),
-        not_null: category == TypeCategory::Domain && flag(&r[9]),
-        default: opt_text(&r[10]),
-    }
+        base_type: r.opt_text(7)?,
+        constraints: text_list(r.value(8)?),
+        not_null: category == TypeCategory::Domain && flag(r.value(9)?),
+        default: r.opt_text(10)?,
+    })
 }
 
 /// Columns, indexes and constraints of every table, view and materialized
@@ -523,23 +577,23 @@ async fn relations_of(
         .map(|(i, r)| (r.name.clone(), i))
         .collect();
 
-    for r in fetch_all(conn, COLUMNS, arg).await? {
-        let Some(&at) = index.get(&text(&r[0])) else {
+    for r in fetch_all(conn, "columns", COLUMNS, arg).await? {
+        let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
-        let default = opt_text(&r[5]);
-        let identity = text(&r[6]);
-        let generated = text(&r[8]);
+        let default = r.opt_text(5)?;
+        let identity = r.text(6)?;
+        let generated = r.text(8)?;
         let serial = default
             .as_deref()
             .is_some_and(|d| d.starts_with("nextval("));
         relations[at].columns.push(ColumnInfo {
-            name: text(&r[1]),
-            position: r[2].as_i64().unwrap_or(0) as u32,
-            data_type: text(&r[3]),
-            nullable: !flag(&r[4]),
+            name: r.text(1)?,
+            position: r.int(2)?.unwrap_or(0) as u32,
+            data_type: r.text(3)?,
+            nullable: !flag(r.value(4)?),
             auto_increment: matches!(identity.as_str(), "a" | "d") || serial,
-            comment: opt_text(&r[7]),
+            comment: r.opt_text(7)?,
             identity: match identity.as_str() {
                 "a" => Some(IdentityKind::Always),
                 "d" => Some(IdentityKind::ByDefault),
@@ -555,18 +609,18 @@ async fn relations_of(
         });
     }
 
-    for r in fetch_all(conn, INDEXES, arg).await? {
-        let Some(&at) = index.get(&text(&r[0])) else {
+    for r in fetch_all(conn, "indexes", INDEXES, arg).await? {
+        let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
         relations[at].indexes.push(IndexInfo {
-            name: text(&r[1]),
-            unique: flag(&r[2]),
-            columns: text_list(&r[4]),
-            method: opt_text(&r[3]),
-            predicate: opt_text(&r[5]),
-            include: text_list(&r[6]),
-            expressions: match &r[7] {
+            name: r.text(1)?,
+            unique: flag(r.value(2)?),
+            columns: text_list(r.value(4)?),
+            method: r.opt_text(3)?,
+            predicate: r.opt_text(5)?,
+            include: text_list(r.value(6)?),
+            expressions: match r.value(7)? {
                 Value::Array(items) => items
                     .iter()
                     .filter_map(|v| v.as_i64())
@@ -577,11 +631,11 @@ async fn relations_of(
         });
     }
 
-    for r in fetch_all(conn, CONSTRAINTS, arg).await? {
-        let Some(&at) = index.get(&text(&r[0])) else {
+    for r in fetch_all(conn, "constraints", CONSTRAINTS, arg).await? {
+        let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
-        let kind = match text(&r[2]).as_str() {
+        let kind = match r.text(2)?.as_str() {
             "p" => ConstraintKind::PrimaryKey,
             "u" => ConstraintKind::Unique,
             "f" => ConstraintKind::ForeignKey,
@@ -595,28 +649,34 @@ async fn relations_of(
                 .flatten()
         };
         relations[at].constraints.push(ConstraintInfo {
-            name: text(&r[1]),
+            name: r.text(1)?,
             kind,
-            columns: text_list(&r[3]),
-            ref_schema: is_fk.then(|| opt_text(&r[4])).flatten(),
-            ref_table: is_fk.then(|| opt_text(&r[5])).flatten(),
-            ref_columns: if is_fk { text_list(&r[6]) } else { Vec::new() },
-            on_delete: action(&r[7]),
-            check: opt_text(&r[8]),
-            on_update: action(&r[9]),
-            match_type: is_fk
-                .then(|| match text(&r[10]).as_str() {
+            columns: text_list(r.value(3)?),
+            ref_schema: if is_fk { r.opt_text(4)? } else { None },
+            ref_table: if is_fk { r.opt_text(5)? } else { None },
+            ref_columns: if is_fk {
+                text_list(r.value(6)?)
+            } else {
+                Vec::new()
+            },
+            on_delete: action(r.value(7)?),
+            check: r.opt_text(8)?,
+            on_update: action(r.value(9)?),
+            match_type: if is_fk {
+                match r.text(10)?.as_str() {
                     "f" => Some("FULL"),
                     "p" => Some("PARTIAL"),
                     "s" => Some("SIMPLE"),
                     _ => None,
-                })
-                .flatten()
-                .map(str::to_owned),
-            deferrable: flag(&r[11]),
-            initially_deferred: flag(&r[12]),
+                }
+                .map(str::to_owned)
+            } else {
+                None
+            },
+            deferrable: flag(r.value(11)?),
+            initially_deferred: flag(r.value(12)?),
             disabled: false,
-            not_validated: !flag(&r[13]),
+            not_validated: !flag(r.value(13)?),
         });
     }
     Ok(relations)
@@ -626,44 +686,225 @@ async fn relations_of(
 /// per table for triggers of the same name).
 async fn read_sources(conn: &dyn Connection, arg: &[Value]) -> Result<Vec<SourceInfo>> {
     let mut out = Vec::new();
-    for r in fetch_all(conn, VIEW_SOURCES, arg).await? {
-        let (kind, create) = if text(&r[1]) == "m" {
+    for r in fetch_all(conn, "view_sources", VIEW_SOURCES, arg).await? {
+        let (kind, create) = if r.text(1)? == "m" {
             (ObjectKind::MaterializedView, "CREATE MATERIALIZED VIEW")
         } else {
             (ObjectKind::View, "CREATE OR REPLACE VIEW")
         };
         out.push(SourceInfo {
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind,
             signature: String::new(),
-            text: format!("{create} {} AS\n{}", text(&r[2]), text(&r[3])),
+            text: format!("{create} {} AS\n{}", r.text(2)?, r.text(3)?),
         });
     }
-    for r in fetch_all(conn, ROUTINE_SOURCES, arg).await? {
-        let Some(body) = opt_text(&r[3]) else {
+    for r in fetch_all(conn, "routine_sources", ROUTINE_SOURCES, arg).await? {
+        let Some(body) = r.opt_text(3)? else {
             continue;
         };
         out.push(SourceInfo {
-            name: text(&r[0]),
-            kind: if text(&r[1]) == "p" {
+            name: r.text(0)?,
+            kind: if r.text(1)? == "p" {
                 ObjectKind::Procedure
             } else {
                 ObjectKind::Function
             },
-            signature: text(&r[2]),
+            signature: r.text(2)?,
             text: body,
         });
     }
-    for r in fetch_all(conn, TRIGGER_SOURCES, arg).await? {
-        let Some(body) = opt_text(&r[2]) else {
+    for r in fetch_all(conn, "trigger_sources", TRIGGER_SOURCES, arg).await? {
+        let Some(body) = r.opt_text(2)? else {
             continue;
         };
         out.push(SourceInfo {
-            name: text(&r[0]),
+            name: r.text(0)?,
             kind: ObjectKind::Trigger,
-            signature: text(&r[1]),
+            signature: r.text(1)?,
             text: body,
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::{Backend, Column, Cursor, ExecOptions, Outcome, Row, TxMode};
+
+    /// A server that answers the schema list, fails the relations query
+    /// with the given errors (one per call, the last one repeats) or
+    /// answers it with `relations`, and anything else with no rows.
+    struct Scripted {
+        failures: Vec<Option<Error>>,
+        relations: Vec<Row>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl Scripted {
+        fn new(failures: Vec<Option<Error>>, relations: Vec<Row>) -> Self {
+            Self {
+                failures,
+                relations,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn relation_calls(&self) -> usize {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|sql| sql.as_str() == RELATIONS)
+                .count()
+        }
+    }
+
+    struct Page(Vec<Row>);
+
+    #[async_trait]
+    impl Cursor for Page {
+        fn columns(&self) -> &[Column] {
+            &[]
+        }
+        async fn next_page(&mut self, _max_rows: usize) -> Result<Vec<Row>> {
+            Ok(std::mem::take(&mut self.0))
+        }
+        fn is_exhausted(&self) -> bool {
+            self.0.is_empty()
+        }
+        async fn close(self: Box<Self>) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl Connection for Scripted {
+        fn backend(&self) -> Backend {
+            Backend::Postgres
+        }
+        async fn execute(
+            &self,
+            sql: &str,
+            _params: &[Value],
+            _opts: &ExecOptions,
+        ) -> Result<Outcome> {
+            let call = {
+                let mut calls = self.calls.lock().unwrap();
+                calls.push(sql.to_owned());
+                calls.iter().filter(|c| c.as_str() == RELATIONS).count()
+            };
+            let rows = if sql == SCHEMAS {
+                vec![vec![
+                    Value::from("s"),
+                    Value::Bool(false),
+                    Value::Bool(true),
+                    Value::Null,
+                    Value::Null,
+                ]]
+            } else if sql == RELATIONS {
+                let failure = self
+                    .failures
+                    .get(call - 1)
+                    .or(self.failures.last())
+                    .cloned()
+                    .flatten();
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+                self.relations.clone()
+            } else {
+                Vec::new()
+            };
+            Ok(Outcome::Rows(Box::new(Page(rows))))
+        }
+        async fn cancel(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn server_version(&self) -> Result<String> {
+            Ok("PostgreSQL 17".into())
+        }
+        async fn ping(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn tx_mode(&self) -> TxMode {
+            TxMode::default()
+        }
+        async fn set_tx_mode(&self, _mode: TxMode) -> Result<()> {
+            Ok(())
+        }
+        async fn commit(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn rollback(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn close(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn vanished() -> Error {
+        Error::query("could not open relation with OID 16421").with_code("XX000")
+    }
+
+    async fn load_all(conn: &Scripted) -> Result<Snapshot> {
+        let intro = PostgresIntrospector::new(conn);
+        crate::schema::Introspector::load(&intro, &Scope::current(), Level::Structure).await
+    }
+
+    #[tokio::test]
+    async fn a_row_narrower_than_the_query_is_an_error() {
+        let conn = Scripted::new(vec![None], vec![vec![Value::from("t")]]);
+        let err = load_all(&conn).await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Internal);
+        assert!(err.message.contains("`relations`"), "{}", err.message);
+        assert!(err.message.contains("column 1"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn a_schema_is_loaded_again_when_an_object_vanished() {
+        let conn = Scripted::new(vec![Some(vanished()), None], Vec::new());
+        let snapshot = load_all(&conn).await.expect("the second pass succeeds");
+        assert_eq!(snapshot.schemas.len(), 1);
+        assert_eq!(conn.relation_calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_persistent_catalog_error_is_reported_after_the_attempts() {
+        let conn = Scripted::new(vec![Some(vanished())], Vec::new());
+        let err = load_all(&conn).await.unwrap_err();
+        assert_eq!(err.code.as_deref(), Some("XX000"));
+        assert_eq!(conn.relation_calls(), LOAD_ATTEMPTS);
+    }
+
+    #[tokio::test]
+    async fn other_errors_are_not_retried() {
+        let denied = Error::query("permission denied for table t").with_code("42501");
+        let conn = Scripted::new(vec![Some(denied)], Vec::new());
+        assert!(load_all(&conn).await.is_err());
+        assert_eq!(conn.relation_calls(), 1);
+    }
+
+    #[test]
+    fn only_vanished_objects_are_retried() {
+        assert!(vanished_object(&vanished()));
+        assert!(vanished_object(
+            &Error::query("cache lookup failed for type 5").with_code("XX000")
+        ));
+        assert!(vanished_object(
+            &Error::query("relation \"t\" does not exist").with_code("42P01")
+        ));
+        assert!(!vanished_object(&Error::query(
+            "could not open relation with OID 1"
+        )));
+        assert!(!vanished_object(
+            &Error::query("syntax error").with_code("42601")
+        ));
+    }
 }

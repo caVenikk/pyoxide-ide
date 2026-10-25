@@ -8,8 +8,8 @@ mod load;
 use async_trait::async_trait;
 
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
-    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
+    Cells, ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
+    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, text, wants,
 };
 use crate::{Connection, Result, Value};
 
@@ -190,21 +190,23 @@ fn on_delete_action(code: &str) -> Option<&'static str> {
 #[async_trait]
 impl Introspector for PostgresIntrospector<'_> {
     async fn current_schema(&self) -> Result<String> {
-        let rows = fetch_all(self.conn, CURRENT_SCHEMA, &[]).await?;
-        Ok(rows.first().map(|r| text(&r[0])).unwrap_or_default())
+        let rows = fetch_all(self.conn, "current_schema", CURRENT_SCHEMA, &[]).await?;
+        rows.first()
+            .map_or_else(|| Ok(String::new()), |r| r.text(0))
     }
 
     async fn schemas(&self) -> Result<Vec<SchemaInfo>> {
-        let rows = fetch_all(self.conn, SCHEMAS, &[]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| SchemaInfo {
-                name: text(&r[0]),
-                is_system: flag(&r[1]),
-                is_current: flag(&r[2]),
-                ..SchemaInfo::default()
+        let rows = fetch_all(self.conn, "schemas", SCHEMAS, &[]).await?;
+        rows.iter()
+            .map(|r| {
+                Ok(SchemaInfo {
+                    name: r.text(0)?,
+                    is_system: flag(r.value(1)?),
+                    is_current: flag(r.value(2)?),
+                    ..SchemaInfo::default()
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn objects(&self, schema: &str, kinds: &[ObjectKind]) -> Result<Vec<ObjectInfo>> {
@@ -229,95 +231,115 @@ impl Introspector for PostgresIntrospector<'_> {
         .iter()
         .any(|k| wants(kinds, *k));
         if wants_relations {
-            for r in fetch_all(self.conn, RELATIONS, &schema_param).await? {
-                let Some(kind) = relation_kind(&text(&r[1])) else {
+            for r in fetch_all(self.conn, "relations", RELATIONS, &schema_param).await? {
+                let Some(kind) = relation_kind(&r.text(1)?) else {
                     continue;
                 };
                 if !wants(kinds, kind) {
                     continue;
                 }
-                let parent = (kind == ObjectKind::Index)
-                    .then(|| opt_text(&r[3]))
-                    .flatten();
-                out.push(object(text(&r[0]), kind, parent, opt_text(&r[2])));
+                let parent = if kind == ObjectKind::Index {
+                    r.opt_text(3)?
+                } else {
+                    None
+                };
+                out.push(object(r.text(0)?, kind, parent, r.opt_text(2)?));
             }
         }
 
         if wants(kinds, ObjectKind::Trigger) {
-            for r in fetch_all(self.conn, TRIGGERS, &schema_param).await? {
+            for r in fetch_all(self.conn, "triggers", TRIGGERS, &schema_param).await? {
                 out.push(object(
-                    text(&r[0]),
+                    r.text(0)?,
                     ObjectKind::Trigger,
-                    opt_text(&r[1]),
-                    opt_text(&r[2]),
+                    r.opt_text(1)?,
+                    r.opt_text(2)?,
                 ));
             }
         }
 
         if wants(kinds, ObjectKind::Function) || wants(kinds, ObjectKind::Procedure) {
-            for r in fetch_all(self.conn, ROUTINES, &schema_param).await? {
-                let kind = if text(&r[1]) == "p" {
+            for r in fetch_all(self.conn, "routines", ROUTINES, &schema_param).await? {
+                let kind = if r.text(1)? == "p" {
                     ObjectKind::Procedure
                 } else {
                     ObjectKind::Function
                 };
                 if wants(kinds, kind) {
-                    out.push(object(text(&r[0]), kind, None, opt_text(&r[2])));
+                    out.push(object(r.text(0)?, kind, None, r.opt_text(2)?));
                 }
             }
         }
 
         if wants(kinds, ObjectKind::Type) {
-            for r in fetch_all(self.conn, TYPES, &schema_param).await? {
-                out.push(object(text(&r[0]), ObjectKind::Type, None, opt_text(&r[1])));
+            for r in fetch_all(self.conn, "types", TYPES, &schema_param).await? {
+                out.push(object(r.text(0)?, ObjectKind::Type, None, r.opt_text(1)?));
             }
         }
         Ok(out)
     }
 
     async fn columns(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
-        let rows = fetch_all(self.conn, COLUMNS, &[schema.into(), table.into()]).await?;
-        Ok(rows
-            .iter()
+        let rows = fetch_all(
+            self.conn,
+            "columns",
+            COLUMNS,
+            &[schema.into(), table.into()],
+        )
+        .await?;
+        rows.iter()
             .map(|r| {
-                let default = opt_text(&r[4]);
-                let identity = matches!(text(&r[5]).as_str(), "a" | "d");
+                let default = r.opt_text(4)?;
+                let identity = matches!(r.text(5)?.as_str(), "a" | "d");
                 let serial = default
                     .as_deref()
                     .is_some_and(|d| d.starts_with("nextval("));
-                ColumnInfo {
-                    name: text(&r[0]),
-                    position: r[1].as_i64().unwrap_or(0) as u32,
-                    data_type: text(&r[2]),
-                    nullable: !flag(&r[3]),
+                Ok(ColumnInfo {
+                    name: r.text(0)?,
+                    position: r.int(1)?.unwrap_or(0) as u32,
+                    data_type: r.text(2)?,
+                    nullable: !flag(r.value(3)?),
                     default,
                     auto_increment: identity || serial,
-                    comment: opt_text(&r[6]),
+                    comment: r.opt_text(6)?,
                     ..ColumnInfo::default()
-                }
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn indexes(&self, schema: &str, table: &str) -> Result<Vec<IndexInfo>> {
-        let rows = fetch_all(self.conn, INDEXES, &[schema.into(), table.into()]).await?;
-        Ok(rows
-            .iter()
-            .map(|r| IndexInfo {
-                name: text(&r[0]),
-                unique: flag(&r[1]),
-                columns: text_list(&r[3]),
-                method: opt_text(&r[2]),
-                ..IndexInfo::default()
+        let rows = fetch_all(
+            self.conn,
+            "indexes",
+            INDEXES,
+            &[schema.into(), table.into()],
+        )
+        .await?;
+        rows.iter()
+            .map(|r| {
+                Ok(IndexInfo {
+                    name: r.text(0)?,
+                    unique: flag(r.value(1)?),
+                    columns: text_list(r.value(3)?),
+                    method: r.opt_text(2)?,
+                    ..IndexInfo::default()
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn constraints(&self, schema: &str, table: &str) -> Result<Vec<ConstraintInfo>> {
-        let rows = fetch_all(self.conn, CONSTRAINTS, &[schema.into(), table.into()]).await?;
+        let rows = fetch_all(
+            self.conn,
+            "constraints",
+            CONSTRAINTS,
+            &[schema.into(), table.into()],
+        )
+        .await?;
         let mut out = Vec::new();
         for r in &rows {
-            let kind = match text(&r[1]).as_str() {
+            let kind = match r.text(1)?.as_str() {
                 "p" => ConstraintKind::PrimaryKey,
                 "u" => ConstraintKind::Unique,
                 "f" => ConstraintKind::ForeignKey,
@@ -326,16 +348,22 @@ impl Introspector for PostgresIntrospector<'_> {
             };
             let is_fk = kind == ConstraintKind::ForeignKey;
             out.push(ConstraintInfo {
-                name: text(&r[0]),
+                name: r.text(0)?,
                 kind,
-                columns: text_list(&r[2]),
-                ref_schema: is_fk.then(|| opt_text(&r[3])).flatten(),
-                ref_table: is_fk.then(|| opt_text(&r[4])).flatten(),
-                ref_columns: if is_fk { text_list(&r[5]) } else { Vec::new() },
-                on_delete: is_fk
-                    .then(|| on_delete_action(&text(&r[6])).map(str::to_owned))
-                    .flatten(),
-                check: opt_text(&r[7]),
+                columns: text_list(r.value(2)?),
+                ref_schema: if is_fk { r.opt_text(3)? } else { None },
+                ref_table: if is_fk { r.opt_text(4)? } else { None },
+                ref_columns: if is_fk {
+                    text_list(r.value(5)?)
+                } else {
+                    Vec::new()
+                },
+                on_delete: if is_fk {
+                    on_delete_action(&r.text(6)?).map(str::to_owned)
+                } else {
+                    None
+                },
+                check: r.opt_text(7)?,
                 ..ConstraintInfo::default()
             });
         }
@@ -346,15 +374,17 @@ impl Introspector for PostgresIntrospector<'_> {
         let args = [Value::from(schema), Value::from(name)];
         match kind {
             ObjectKind::View | ObjectKind::MaterializedView => {
-                let rows = fetch_all(self.conn, VIEW_SOURCE, &args).await?;
-                Ok(rows.first().map(|r| {
-                    let create = if text(&r[0]) == "m" {
-                        "CREATE MATERIALIZED VIEW"
-                    } else {
-                        "CREATE OR REPLACE VIEW"
-                    };
-                    format!("{create} {} AS\n{}", text(&r[1]), text(&r[2]))
-                }))
+                let rows = fetch_all(self.conn, "view_source", VIEW_SOURCE, &args).await?;
+                rows.first()
+                    .map(|r| {
+                        let create = if r.text(0)? == "m" {
+                            "CREATE MATERIALIZED VIEW"
+                        } else {
+                            "CREATE OR REPLACE VIEW"
+                        };
+                        Ok(format!("{create} {} AS\n{}", r.text(1)?, r.text(2)?))
+                    })
+                    .transpose()
             }
             ObjectKind::Function | ObjectKind::Procedure => {
                 let kinds = if kind == ObjectKind::Procedure {
@@ -363,16 +393,16 @@ impl Introspector for PostgresIntrospector<'_> {
                     "{f,w}"
                 };
                 let params = [args[0].clone(), args[1].clone(), Value::from(kinds)];
-                let rows = fetch_all(self.conn, ROUTINE_SOURCE, &params).await?;
-                Ok(join_sources(&rows))
+                let rows = fetch_all(self.conn, "routine_source", ROUTINE_SOURCE, &params).await?;
+                join_sources(&rows)
             }
             ObjectKind::Trigger => {
-                let rows = fetch_all(self.conn, TRIGGER_SOURCE, &args).await?;
-                Ok(join_sources(&rows))
+                let rows = fetch_all(self.conn, "trigger_source", TRIGGER_SOURCE, &args).await?;
+                join_sources(&rows)
             }
             ObjectKind::Index => {
-                let rows = fetch_all(self.conn, INDEX_SOURCE, &args).await?;
-                Ok(join_sources(&rows))
+                let rows = fetch_all(self.conn, "index_source", INDEX_SOURCE, &args).await?;
+                join_sources(&rows)
             }
             _ => Ok(None),
         }
@@ -384,9 +414,12 @@ impl Introspector for PostgresIntrospector<'_> {
 }
 
 /// All definitions (one per overload or table) separated by a blank line.
-fn join_sources(rows: &[Vec<Value>]) -> Option<String> {
-    let parts: Vec<String> = rows.iter().filter_map(|r| opt_text(&r[0])).collect();
-    (!parts.is_empty()).then(|| parts.join("\n\n"))
+fn join_sources(rows: &[Cells]) -> Result<Option<String>> {
+    let mut parts = Vec::new();
+    for r in rows {
+        parts.extend(r.opt_text(0)?);
+    }
+    Ok((!parts.is_empty()).then(|| parts.join("\n\n")))
 }
 
 #[cfg(test)]
@@ -426,11 +459,19 @@ mod tests {
         assert!(!flag(&Value::Null));
     }
 
+    fn cells(row: crate::Row) -> Cells {
+        Cells::new("sources", row)
+    }
+
     #[test]
     fn join_sources_skips_empty_rows() {
-        assert_eq!(join_sources(&[]), None);
-        assert_eq!(join_sources(&[vec![Value::Null]]), None);
-        let rows = vec![vec![Value::from("one")], vec![Value::from("two")]];
-        assert_eq!(join_sources(&rows).as_deref(), Some("one\n\ntwo"));
+        assert_eq!(join_sources(&[]).unwrap(), None);
+        assert_eq!(join_sources(&[cells(vec![Value::Null])]).unwrap(), None);
+        let rows = vec![
+            cells(vec![Value::from("one")]),
+            cells(vec![Value::from("two")]),
+        ];
+        assert_eq!(join_sources(&rows).unwrap().as_deref(), Some("one\n\ntwo"));
+        assert!(join_sources(&[cells(Vec::new())]).is_err());
     }
 }

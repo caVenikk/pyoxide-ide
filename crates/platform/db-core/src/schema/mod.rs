@@ -5,13 +5,14 @@
 mod detail;
 mod oracle;
 mod postgres;
+mod rows;
 mod snapshot;
 mod sqlite;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{Connection, Dialect, Error, Result, Row, Value};
+use crate::{Connection, Dialect, Error, Result, Value};
 
 pub use detail::{
     ArgumentInfo, ArgumentMode, AttributeInfo, GeneratedColumn, IdentityKind, ObjectDetail,
@@ -26,6 +27,7 @@ pub use snapshot::{
 };
 pub use sqlite::SqliteIntrospector;
 
+use rows::Cells;
 use snapshot::{has_columns, has_source};
 
 #[derive(
@@ -220,13 +222,15 @@ pub fn introspector(conn: &dyn Connection) -> Box<dyn Introspector + '_> {
     }
 }
 
-/// All rows of a metadata query.
+/// All rows of a metadata query; `name` labels the query in errors.
 pub(crate) async fn fetch_all(
     conn: &dyn Connection,
+    name: &'static str,
     sql: &str,
     params: &[Value],
-) -> Result<Vec<Row>> {
-    Ok(conn.query(sql, params, usize::MAX).await?.rows)
+) -> Result<Vec<Cells>> {
+    let rows = conn.query(sql, params, usize::MAX).await?.rows;
+    Ok(rows.into_iter().map(|row| Cells::new(name, row)).collect())
 }
 
 /// Text of a cell; empty for NULL.
