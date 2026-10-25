@@ -279,6 +279,23 @@ the others, so the cost of a keystroke is the size of one statement.
   `enclosing(kind)`, and scope-visiting helpers used by resolution.
 - Offsets are bytes in the document; `sql-intel` converts to
   `text::Point` at the `CodeIntel` boundary.
+- Programs inside strings: the body of a PostgreSQL routine or `DO` block
+  written in `$tag$ .. $tag$` (or in single quotes that need no unescaping)
+  is parsed on its own when the language is known (`LANGUAGE plpgsql` or
+  `sql`, `plpgsql` for `DO`): the string stays one token of the statement's
+  tree (so the tree still prints back to the text), and the program is a
+  fragment tree hung on it, read through `SyntaxNode::fragment()`. The
+  offset map is a plain shift, so ranges inside a fragment are offsets in
+  the document like all others; a body with escapes to undo, an
+  unterminated quote or another language is left as the string. `errors`,
+  `node_at` and `expected_at` look into fragments; a keystroke re-parses the
+  statement that holds the string, fragment included. Oracle PL/SQL has no
+  string bodies: its blocks are nodes of the statement.
+- A construct the parser keeps opaque (an Oracle storage clause, `GET
+  DIAGNOSTICS`, an unknown `CREATE`) is an `Opaque` node, not an error;
+  inside a block, `END IF` / `END LOOP` / `;` that are missing are `Missing`
+  nodes at the place where the construct stops, so an error stays inside
+  the block that holds it.
 
 Staging of the grammar (each stage is usable alone; the first is the
 lexer-only fallback): (1) lexer, statement splitter, classification;

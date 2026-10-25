@@ -7,10 +7,13 @@ use crate::dialect::{Dialect, Grammar};
 use crate::lexer::{Token, TokenKind};
 use crate::tree::{Builder, Expected, NameKind, StatementTree, SyntaxKind};
 
+mod block;
+mod ddl;
 mod dml;
 mod expr;
 mod kw;
 mod query;
+mod routine;
 
 pub(crate) use kw::Kw;
 
@@ -51,6 +54,7 @@ pub(crate) fn expected_at(
     tokens: &[Token],
     dialect: Dialect,
     offset: usize,
+    proc: Proc,
 ) -> Vec<Expected> {
     let mut cut = tokens.partition_point(|t| t.end <= offset);
     // The significant token before the cut, if it touches the offset and is a
@@ -68,6 +72,7 @@ pub(crate) fn expected_at(
     }
     // Trivia before the offset belongs to the prefix.
     let mut p = Parser::new(text, &tokens[..cut], dialect, true);
+    p.proc = proc;
     p.unit();
     p.probe_result.unwrap_or_default()
 }
@@ -95,6 +100,8 @@ pub(crate) struct Parser<'a> {
     probe_result: Option<Vec<Expected>>,
     /// Inside procedural code.
     proc: Proc,
+    /// Parsing a `DEFAULT` value: a following `NOT NULL` is a constraint.
+    stop_not_null: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -140,6 +147,7 @@ impl<'a> Parser<'a> {
             probe,
             probe_result: None,
             proc: Proc::No,
+            stop_not_null: false,
         }
     }
 
@@ -508,6 +516,7 @@ impl<'a> Parser<'a> {
             FROM | WHERE | GROUP | HAVING | ORDER | UNION | INTERSECT | EXCEPT | WINDOW | JOIN
             | INNER | CROSS | NATURAL | ON | USING | THEN | WHEN | ELSE | END => true,
             RETURNING => g.returning,
+            LOOP => self.proc != Proc::No,
             LIMIT => g.limit,
             OFFSET => g.limit || g.fetch_first,
             FETCH => g.fetch_first,
@@ -573,7 +582,7 @@ impl<'a> Parser<'a> {
                 PIVOT | UNPIVOT => g.pivot,
                 ILIKE | SIMILAR | COLLATE | ESCAPE | OVER | FILTER | WITHIN | KEEP | LATERAL
                 | TABLESAMPLE | INDEXED | MODEL | MATCH_RECOGNIZE | APPLY | SET | VALUES
-                | RETURNING | RETURN | DEFAULT => true,
+                | RETURNING | RETURN | DEFAULT | LOOP => true,
                 BULK => self.nth_kw(n + 1) == Some(COLLECT),
                 SAMPLE | PARTITION => paren_next || self.nth_word(n + 1, "block"),
                 _ => false,
@@ -645,7 +654,7 @@ impl<'a> Parser<'a> {
             }
             i += len;
             parts += 1;
-            if self.nth_kind(i) == Some(TokenKind::Dot) {
+            if self.nth_kind(i) == Some(TokenKind::Dot) && !self.range_dots_at(i) {
                 if self.part_len(i + 1) > 0 {
                     i += 1;
                     continue;
@@ -664,6 +673,11 @@ impl<'a> Parser<'a> {
         }
         let call = self.nth_kind(i) == Some(TokenKind::LParen) && !self.outer_join_mark_at(i);
         Some((parts, if call { Tail::Call } else { Tail::Name }))
+    }
+
+    /// `..` (a range of PL/SQL and PL/pgSQL) at the `n`th token.
+    fn range_dots_at(&self, n: usize) -> bool {
+        self.nth_kind(n) == Some(TokenKind::Dot) && self.nth_kind(n + 1) == Some(TokenKind::Dot)
     }
 
     fn outer_join_mark_at(&self, n: usize) -> bool {
@@ -816,6 +830,10 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) {
         use Kw::*;
+        if self.proc != Proc::No {
+            self.proc_unit_statement();
+            return;
+        }
         let query = match self.nth_kw(0) {
             Some(SELECT | VALUES | WITH) => true,
             Some(TABLE) => self.g.table_statement && self.is_name_at(1),
@@ -825,6 +843,11 @@ impl<'a> Parser<'a> {
             self.query_statement();
         } else if self.dml_at() {
             self.dml(None);
+        } else if self.ddl_at() {
+            self.ddl_statement();
+            return;
+        } else if self.dialect == Dialect::Oracle && self.block_at() {
+            self.block(block::BlockStart::Full);
         } else if self.nth_kind(0) == Some(TokenKind::Hole)
             && self.part_len(0) + self.pos >= self.statement_end()
         {

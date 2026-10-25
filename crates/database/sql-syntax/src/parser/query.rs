@@ -180,7 +180,7 @@ impl Parser<'_> {
         self.finish();
     }
 
-    fn select(&mut self) {
+    pub(super) fn select(&mut self) {
         use Kw::*;
         self.start(SyntaxKind::Select);
         self.bump();
@@ -269,7 +269,7 @@ impl Parser<'_> {
     fn select_clause(&mut self, i: usize) {
         use Kw::*;
         match i {
-            0 if self.in_procedure() => self.into_clause(),
+            0 if self.in_procedure() => self.targets_clause(),
             0 => {
                 self.start(SyntaxKind::IntoClause);
                 self.bump();
@@ -375,6 +375,10 @@ impl Parser<'_> {
         match self.nth_kw(0) {
             Some(ORDER | UNION | INTERSECT | EXCEPT) => true,
             Some(RETURNING) => g.returning,
+            Some(LOOP) => self.proc != super::Proc::No,
+            Some(WITH) => ["check", "local", "cascaded", "read", "no", "data"]
+                .iter()
+                .any(|w| self.nth_word(1, w)),
             Some(ON) => g.on_conflict && self.nth_kw(1) == Some(CONFLICT),
             Some(MINUS) => g.minus,
             Some(LIMIT) => g.limit,

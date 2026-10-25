@@ -100,7 +100,8 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 a generated script of queries (joins, CTEs, window functions, subqueries,
 set operations, about ten lines per statement), lexed and parsed whole, then
 re-parsed after one character typed into a name in the middle of the script
-(and after its removal). Median and worst of 30 runs (parse) and 300 runs
+(and after its removal). Since #317 the bench also parses a script of data
+modification, DDL and PL/pgSQL functions, and one of PL/SQL procedures. Median and worst of 30 runs (parse) and 300 runs
 (re-parse, `expected_at`). Release build, Rust 1.99.0. The machine was busy
 with other builds (load average 30-50), so the numbers are upper bounds.
 
@@ -112,6 +113,11 @@ with other builds (load average 30-50), so the numbers are upper bounds.
 | 2026-10-24 | mac-1 | re-parse after a keystroke, 250 KB script | 0.09 ms (max 0.67) | 1 ms | one or two statements re-lexed and re-parsed, the rest shared |
 | 2026-10-24 | mac-1 | `expected_at` (completion context) | 0.003 ms | | parses the statement up to the caret |
 | 2026-10-24 | mac-1 | memory of the trees, 141 KB / 250 KB | 3.7 MB / 6.6 MB | 30 MB | estimate from the vectors' capacities |
+| 2026-10-26 | mac-1 | parse, 5000 lines of data modification, DDL and PL/pgSQL (177 KB, 1500 statements) | 13.0 ms (max 14.4) | 40 ms | #317: inserts with `ON CONFLICT`, updates with `FROM`, `MERGE`, `CREATE TABLE`, indexes, `ALTER TABLE`, PL/pgSQL functions in `$$` (parsed as fragments); generic: 12.6 ms |
+| 2026-10-26 | mac-1 | parse, 5000 lines of PL/SQL (135 KB, 2780 statements) | 8.5 ms (max 10.6) | 40 ms | #317: procedures with a cursor, `FOR` loop, `IF`, handlers, `/` terminators; Oracle dialect |
+| 2026-10-26 | mac-1 | re-parse after a keystroke, mixed and PL/SQL scripts | 0.05 ms / 0.03 ms (max 0.2) | 1 ms | a keystroke in a function body re-parses that statement and its fragment |
+| 2026-10-26 | mac-1 | memory of the trees, mixed / PL/SQL | 3.9 MB / 2.8 MB | 30 MB | |
+| 2026-10-26 | mac-1 | parse, queries again, 5000 lines / 250 KB (after #317) | 19 ms / 18 ms | 40 ms | measured at load average 35-55, so an upper bound; 12.2 / 19.7 ms on 2026-10-24 |
 
 ### Schema load (5000 tables)
 Issue #298: `Introspector::load` on a schema of 5000 tables with 5 columns each

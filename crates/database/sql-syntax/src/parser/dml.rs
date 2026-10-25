@@ -495,6 +495,10 @@ impl Parser<'_> {
             if p.nth_kind(0) != Some(TokenKind::RParen) {
                 loop {
                     p.column_name_ref();
+                    // Keys of constraints and indexes: `(a DESC, b COLLATE x)`.
+                    if p.peek_kw(Kw::ASC) || p.peek_kw(Kw::DESC) {
+                        p.bump();
+                    }
                     if !p.eat(TokenKind::Comma) {
                         break;
                     }
@@ -548,13 +552,13 @@ impl Parser<'_> {
             }
         }
         if (self.g.plsql || self.in_procedure()) && self.at_into() {
-            self.into_clause();
+            self.targets_clause();
         }
         self.finish();
     }
 
     /// `[BULK COLLECT] INTO a, b` where the targets are variables.
-    pub(super) fn into_clause(&mut self) {
+    pub(super) fn targets_clause(&mut self) {
         self.start(SyntaxKind::IntoClause);
         if self.peek_kw(Kw::BULK) {
             self.bump();
@@ -581,7 +585,7 @@ impl Parser<'_> {
     /// A named object (cursor, index, trigger, ...) as an `ObjectRef`.
     pub(super) fn object_name(&mut self) {
         match self.chain_ahead() {
-            Some((parts, tail)) if tail != Tail::Call => {
+            Some((parts, tail)) => {
                 let missing = matches!(tail, Tail::Missing | Tail::Star);
                 self.chain(SyntaxKind::ObjectRef, parts, missing, false);
             }

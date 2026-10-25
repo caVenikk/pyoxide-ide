@@ -131,6 +131,75 @@ const VOCAB: &[&str] = &[
     "日本",
     "\u{e000}",
     "date '2024-01-01'",
+    "update",
+    "set",
+    "delete",
+    "merge",
+    "matched",
+    "returning",
+    "conflict",
+    "do",
+    "nothing",
+    "default",
+    "all",
+    "alter",
+    "drop",
+    "truncate",
+    "comment",
+    "add",
+    "column",
+    "constraint",
+    "primary",
+    "key",
+    "references",
+    "check",
+    "unique",
+    "index",
+    "view",
+    "function",
+    "procedure",
+    "trigger",
+    "package",
+    "body",
+    "type",
+    "language",
+    "plpgsql",
+    "returns",
+    "return",
+    "raise",
+    "perform",
+    "execute",
+    "open",
+    "close",
+    "fetch",
+    "is",
+    "loop",
+    "if",
+    "then",
+    "elsif",
+    "exception",
+    "end if;",
+    "end loop;",
+    "<<",
+    ">>",
+    ":=",
+    "%type",
+    "%rowtype",
+    ":new.x",
+    "..",
+    "1..3",
+    "do $$ begin null; end $$",
+    "as $$ begin x := 1; if a then b := 2; end if; end $$",
+    "as $$ select 1; $$",
+    "create function f() returns int language plpgsql",
+    "create table t (a int,",
+    "create index i on t (a)",
+    "create procedure p is begin null; end;",
+    "begin null; end;",
+    "declare x number; begin x := 1; end;",
+    "insert into t (a) values (1) on conflict do nothing",
+    "update t set a = 1 where b = 2",
+    "merge into t using s on (t.id = s.id) when matched then delete",
 ];
 
 const CHARS: &[char] = &[
@@ -185,6 +254,24 @@ fn check_node(src: &str, node: SyntaxNode<'_>) {
     }
 }
 
+/// A program embedded in a string lies inside the string's token, and its
+/// tree nests like any other.
+fn check_fragments(src: &str, node: SyntaxNode<'_>) {
+    for n in node.descendants() {
+        if let Some(f) = n.fragment() {
+            let r = n.range();
+            assert!(
+                r.start <= f.body.start && f.body.end <= r.end,
+                "{:?} outside {n:?} in {src:?}",
+                f.body
+            );
+            assert_eq!(f.root.range(), f.body);
+            check_node(src, f.root);
+            check_fragments(src, f.root);
+        }
+    }
+}
+
 fn check_script(src: &str, d: Dialect, rng: &mut Rng) -> Script {
     let s = parse(src, d);
     assert_eq!(s.print(), src, "{d:?}");
@@ -195,6 +282,9 @@ fn check_script(src: &str, d: Dialect, rng: &mut Rng) -> Script {
         check_node(src, root);
     }
     assert_eq!(end, src.len());
+    for root in s.statements() {
+        check_fragments(src, root);
+    }
     for e in s.errors() {
         assert!(src.is_char_boundary(e.range.start) && src.is_char_boundary(e.range.end));
         let _ = e.message(src);
@@ -296,6 +386,8 @@ fn reparse_after_random_edits_equals_a_full_parse() {
         "select a from t;\nselect b, c from u where x = 1;\n\nselect 1;",
         "with x as (select 1) select * from x;\ninsert into t values (1);\nselect 'a;b' from dual;\n",
         "begin\n  null;\nend;\n/\nselect 1 from dual;\ncreate procedure p is begin null; end;\n/\n",
+        "create function f(a int) returns int language plpgsql as $$ begin if a > 1 then return a; end if; return 0; end $$;\nselect 1;\ndo $$ begin null; end $$;",
+        "create table t (a int primary key, b text);\ninsert into t values (1, 'x') on conflict do nothing;\nupdate t set b = 'y' where a = 1;\ndelete from t;",
         "select $$ ; $$; select /* ; */ 1; -- ;\nselect \"a;\" from t",
     ];
     let mut rng = Rng(0xDEAD_BEEF_1234_5678);

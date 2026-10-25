@@ -9,6 +9,9 @@ use sqlparser::dialect::{
 use sqlparser::parser::Parser;
 
 const DML: &str = include_str!("corpus/dml.sql");
+const DDL: &str = include_str!("corpus/ddl.sql");
+const PLSQL: &str = include_str!("corpus/plsql.sql");
+const PLPGSQL: &str = include_str!("corpus/plpgsql.sql");
 
 pub struct Case {
     pub text: String,
@@ -27,7 +30,7 @@ fn dialect_list(list: &str) -> Vec<Dialect> {
 
 /// The blocks of a corpus file (separated by blank lines; a block without
 /// code, the header, is skipped) with their directives.
-pub fn cases(src: &str) -> Vec<Case> {
+pub fn cases(src: &str, default: &[Dialect]) -> Vec<Case> {
     let mut out = Vec::new();
     for block in src.split("\n\n") {
         let block = block.trim();
@@ -37,7 +40,7 @@ pub fn cases(src: &str) -> Vec<Case> {
         if !code {
             continue;
         }
-        let mut dialects = Dialect::ALL.to_vec();
+        let mut dialects = default.to_vec();
         let mut first = None;
         let mut sqlparser = Vec::new();
         let mut text = Vec::new();
@@ -104,8 +107,8 @@ pub fn problems(case: &Case, dialect: Dialect) -> Vec<String> {
     out
 }
 
-pub fn check_corpus(src: &str, min: usize) -> usize {
-    let all = cases(src);
+pub fn check_corpus(src: &str, default: &[Dialect], min: usize) -> usize {
+    let all = cases(src, default);
     let mut failures = Vec::new();
     for c in &all {
         for &d in &c.dialects {
@@ -122,7 +125,7 @@ pub fn check_corpus(src: &str, min: usize) -> usize {
 
 pub fn check_sqlparser(src: &str) {
     let mut failures = Vec::new();
-    for c in cases(src) {
+    for c in cases(src, &[]) {
         for &d in &c.sqlparser {
             let oracle: &dyn OracleDialect = match d {
                 Dialect::Postgres => &PostgreSqlDialect {},
@@ -139,10 +142,30 @@ pub fn check_sqlparser(src: &str) {
 
 #[test]
 fn data_modification_parses_without_errors() {
-    check_corpus(DML, 80);
+    check_corpus(DML, &Dialect::ALL, 80);
 }
 
 #[test]
 fn sqlparser_accepts_the_data_modification_it_is_listed_for() {
     check_sqlparser(DML);
+}
+
+#[test]
+fn ddl_parses_without_errors() {
+    check_corpus(DDL, &Dialect::ALL, 150);
+}
+
+#[test]
+fn sqlparser_accepts_the_ddl_it_is_listed_for() {
+    check_sqlparser(DDL);
+}
+
+#[test]
+fn plsql_blocks_and_routines_parse_without_errors() {
+    check_corpus(PLSQL, &[Dialect::Oracle], 40);
+}
+
+#[test]
+fn plpgsql_routines_parse_without_errors() {
+    check_corpus(PLPGSQL, &[Dialect::Postgres, Dialect::Generic], 40);
 }

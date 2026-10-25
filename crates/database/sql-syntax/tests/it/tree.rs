@@ -193,19 +193,13 @@ fn stray_tokens_become_errors_and_parsing_resumes() {
 #[test]
 fn unknown_statements_are_one_opaque_node_without_errors() {
     let cases = [
-        (
-            Dialect::Postgres,
-            "create table t (a int primary key, b text)",
-        ),
+        (Dialect::Postgres, "create extension if not exists pgcrypto"),
+        (Dialect::Postgres, "grant select on t to u"),
         (Dialect::Postgres, "vacuum analyze t"),
-        (Dialect::Postgres, "do $$ begin raise notice 'x'; end $$"),
         (Dialect::Postgres, "explain analyze select 1"),
-        (Dialect::Oracle, "begin\n  dbms_output.put_line('x');\nend;"),
-        (
-            Dialect::Oracle,
-            "create or replace procedure p is begin null; end;",
-        ),
-        (Dialect::Sqlite, "pragma table_info(t)"),
+        (Dialect::Oracle, "create public synonym s for t"),
+        (Dialect::Oracle, "rename a to b"),
+        (Dialect::Sqlite, "vacuum into 'x.db'"),
         (Dialect::Generic, "frobnicate the widgets ((("),
     ];
     for (d, src) in cases {

@@ -1,6 +1,8 @@
+mod blocks;
 mod candidates;
 mod classify;
 mod corpus;
+mod ddl;
 mod dialect;
 mod dml;
 mod explain;

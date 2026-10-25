@@ -7,6 +7,7 @@ mod params;
 mod parser;
 mod script;
 mod split;
+mod targets;
 mod tree;
 
 pub use classify::{

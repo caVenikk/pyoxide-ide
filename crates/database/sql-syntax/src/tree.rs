@@ -908,6 +908,21 @@ impl<'a> SyntaxNode<'a> {
             })
     }
 
+    /// The program embedded in a string of this subtree that contains `offset`.
+    pub fn fragment_at(&self, offset: usize) -> Option<EmbeddedFragment<'a>> {
+        if self.tree.fragments.is_empty() {
+            return None;
+        }
+        self.descendants().find_map(|n| {
+            n.fragment()
+                .filter(|f| f.body.start <= offset && offset <= f.body.end)
+        })
+    }
+
+    pub(crate) fn statement_tree(&self) -> &'a StatementTree {
+        self.tree
+    }
+
     /// The innermost node of the subtree whose range contains `offset`: a
     /// node strictly around it wins over one that only touches it, and among
     /// nodes touching it the first (left) one wins. `None` when `offset` is
