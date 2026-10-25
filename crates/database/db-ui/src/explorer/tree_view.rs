@@ -516,6 +516,8 @@ impl Explorer {
         let hover = theme.color(UiRole::Hover);
         let name_color: Hsla = if text.failed {
             theme.color(UiRole::Danger)
+        } else if row.key.node == NodeKey::Status {
+            theme.color(UiRole::TextMuted)
         } else if selected && focused {
             theme.color(UiRole::SelectionText)
         } else {
