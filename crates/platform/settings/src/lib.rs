@@ -16,6 +16,7 @@
 
 mod appearance;
 mod debugger;
+mod documentation;
 mod editor;
 mod files;
 mod import;
@@ -27,6 +28,7 @@ use std::path::PathBuf;
 
 pub use appearance::{AppearanceSettings, themes_dir};
 pub use debugger::DataViewSettings;
+pub use documentation::{DocFontSize, DocumentationSettings};
 pub use editor::{DEFAULT_SOFT_WRAP_FILES, EditorFontSettings, SoftWrapSettings};
 pub use files::{SaveSettings, SyncSettings};
 pub use import::{FileTypeAssociation, FileTypeSettings, ImportSettings};

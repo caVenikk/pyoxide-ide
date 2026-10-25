@@ -118,6 +118,10 @@ impl IconName {
     pub const PACKAGE: Self = Self("nodes/package");
     pub const PREVIEW: Self = Self("general/previewHorizontally");
     pub const OPEN_IN_TOOL_WINDOW: Self = Self("general/openInToolWindow");
+    /// Where a side tool window in split mode sits, at the right
+    /// (`AllIcons.Actions.MoveToRightBottom`): Open in Documentation Tool
+    /// Window of the documentation popup.
+    pub const MOVE_TO_RIGHT_BOTTOM: Self = Self("actions/moveToRightBottom");
     pub const MODULE: Self = Self("nodes/module");
     pub const EXCLUDED_FOLDER: Self = Self("nodes/excludeRoot");
     /// A sources root and a test sources root (`AllIcons.Modules.SourceRoot`,
@@ -138,6 +142,8 @@ impl IconName {
     pub const TOOL_FIND: Self = Self("toolwindows/find@20x20");
     pub const TOOL_TODO: Self = Self("toolwindows/todo@20x20");
     pub const TOOL_TERMINAL: Self = Self("toolwindows/terminal@20x20");
+    /// The Documentation tool window (`AllIcons.Toolwindows.Documentation`).
+    pub const TOOL_DOCUMENTATION: Self = Self("toolwindows/documentation@20x20");
     pub const FILE_TEXT: Self = Self("fileTypes/text");
     pub const FILE_UNKNOWN: Self = Self("fileTypes/unknown");
     pub const FILE_BINARY: Self = Self("fileTypes/binaryData");
@@ -273,7 +279,7 @@ macro_rules! platform_icons {
 
 platform_icons! {
     both: [
-        "actions/checked", "actions/inSelection", "actions/newFolder", "actions/shortcutFilter",
+        "actions/checked", "actions/inSelection", "actions/moveToRightBottom", "actions/newFolder", "actions/shortcutFilter",
         "actions/stopAndRestart",
         "codeInsight/intentionBulb", "codeInsight/quickfixBulb",
         "diff/arrowRight@14x14", "diff/gutterCheckBox@14x14",
@@ -317,6 +323,7 @@ platform_icons! {
         "startup/configFile", "run/rerun", "run/run", "run/stop",
         "status/error", "status/info", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
+        "toolwindows/documentation@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",
         "toolwindows/problems@20x20", "toolwindows/project@20x20", "toolwindows/run@20x20",
         "toolwindows/services@20x20", "toolwindows/structure@20x20",

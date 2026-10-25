@@ -583,6 +583,12 @@ fn the_bulb_shows_that_actions_are_there(cx: &mut TestAppContext) {
     assert!(h.state()["bulb"].is_null());
     h.wait(300);
     assert_eq!(h.state()["bulb"]["line"], 1);
+    // The bulb is drawn while the editor has the focus (GPUI keeps the
+    // debug bounds of earlier frames, so only its return is checked).
+    h.invoke("workbench.toggle-project", json!(null));
+    h.invoke("workbench.focus-editor", json!(null));
+    h.state();
+    assert!(h.drawn("intention-bulb"));
     // A click on it opens the list.
     h.click("intention-bulb");
     assert_eq!(h.list()["name"], "intentions");

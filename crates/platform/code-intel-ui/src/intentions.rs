@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use code_intel::{ActionTrigger, CodeAction, CodeActionContext, Severity};
 use editor::{Editor, EditorEvent};
+use gpui::Focusable as _;
 use gpui::{
     AnyElement, App, Context, Entity, EntityId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Styled, Task, WeakEntity, Window, anchored, div, point, px,
@@ -264,6 +265,14 @@ impl CodeIntelView {
         }));
     }
 
+    /// The editor of the bulb got or lost the focus: the bulb is drawn
+    /// again (or not).
+    pub(crate) fn bulb_focus_changed(&mut self, editor: EntityId, cx: &mut Context<Self>) {
+        if self.intentions.bulb.is_some_and(|b| b.editor == editor) {
+            cx.notify();
+        }
+    }
+
     pub(crate) fn clear_bulb(&mut self, cx: &mut Context<Self>) {
         self.intentions.bulb_request = None;
         if self.intentions.bulb.take().is_some() {
@@ -271,11 +280,17 @@ impl CodeIntelView {
         }
     }
 
-    /// The bulb at the start of the caret line, left of the text.
-    pub(crate) fn render_bulb(&self, cx: &App) -> Option<AnyElement> {
+    /// The bulb at the start of the caret line, left of the text, while
+    /// the editor has the focus (`IntentionsUIImpl.update` shows it only
+    /// then): not while a menu of the documentation popup or another
+    /// popup that took the focus is open.
+    pub(crate) fn render_bulb(&self, window: &Window, cx: &App) -> Option<AnyElement> {
         let bulb = self.intentions.bulb?;
         let editor = self.active_document()?.editor.clone();
         if editor.entity_id() != bulb.editor {
+            return None;
+        }
+        if !editor.focus_handle(cx).contains_focused(window, cx) {
             return None;
         }
         let e = editor.read(cx);
