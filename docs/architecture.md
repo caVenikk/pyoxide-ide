@@ -454,6 +454,21 @@ schema, name and kind are hash lookups that do not allocate. The disk cache
 is versioned JSON in the user cache folder (`ModelCache`), with source texts
 in files beside it (`SourceStore`).
 
+`sql-intel` exists with resolution, the first inspections and their quick
+fixes. A `ScopeProvider` (implemented by `db-ui`) gives a document its
+dialect and `Scope` (an `Arc<Model>`, a search path, whether the model lists
+every schema). A resolver walks one statement's tree with a stack of query
+frames (sources with their columns, select-list aliases, `USING` columns)
+and a stack of CTEs; every name resolves to resolved, ambiguous, unresolved
+or unknown, and only unresolved is reported: no scope, a schema outside the
+model or at names only, a hole, procedural code and the generic dialect give
+unknown. The analysis of a statement is cached by its text, the objects the
+statements before it create and the scope, so an edit analyses one
+statement. `SqlCodeIntel` runs it on one background thread (cancelled
+between statements by a newer version), publishes diagnostics and answers
+code actions; *Disable inspection* is a command that changes the
+`InspectionProfile` and tells the product to write it.
+
 ## Planned layers
 `core` (project model, settings, commands) -> `services` (LSP/DAP clients, VCS,
 Docker, DB, terminal) -> `ui` (GPUI, ADR 0006) -> `app`. Decisions are recorded

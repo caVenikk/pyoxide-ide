@@ -23,6 +23,7 @@
 mod analysis;
 mod context;
 mod inspect;
+mod intel;
 mod locals;
 mod names;
 mod profile;
@@ -32,5 +33,6 @@ mod resolve;
 pub use analysis::{Analyzer, DocumentAnalysis, analyze};
 pub use context::{FixedScope, Scope, ScopeProvider, SqlContext};
 pub use inspect::{Fix, FixEdit, Problem};
+pub use intel::{SERVER_ID, SqlCodeIntel};
 pub use profile::{Inspection, InspectionLevel, InspectionProfile};
 pub use reference::{RefKind, Reference, Resolution, Suggestion, Target};

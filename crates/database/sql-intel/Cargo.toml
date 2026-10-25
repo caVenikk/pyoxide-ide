@@ -19,3 +19,7 @@ text.workspace = true
 [dev-dependencies]
 db-core.workspace = true
 serde_json.workspace = true
+
+[[bench]]
+name = "analysis"
+harness = false

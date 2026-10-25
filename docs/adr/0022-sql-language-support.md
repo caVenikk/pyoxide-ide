@@ -343,37 +343,41 @@ by a hole are reported (below).
 ### Inspections and quick fixes
 Inspections run on the statements changed since the last run, in a
 background task, and are published as `IntelEvent::Diagnostics` of the
-document with a code (an id). Severities are settings; the defaults below
+document with a code (an id). The ids are the reference's public
+inspection ids, so `-- noinspection` comments written in either
+application mean the same. Severities are settings; the defaults below
 are our choice and need a reference screenshot to compare ("verify").
 
 First set:
 | id | what | default |
 |---|---|---|
-| `SqlSyntax` | syntax error (above) | error |
-| `SqlUnresolved` | table, view, schema, column or routine that does not resolve (`Unresolved` only) | error (verify) |
-| `SqlAmbiguous` | an unqualified column found in more than one table of the `FROM` | error |
-| `SqlNoWhere` | `DELETE` or `UPDATE` without `WHERE` (shares `sql-syntax` classification) | warning |
-| `SqlInsertArity` | `INSERT` with a different number of columns and values | error |
-| `SqlNullComparison` | `= NULL`, `<> NULL`, `!= NULL` | warning |
-| `SqlUnusedCte` | a common table expression never referenced | weak warning, greyed |
-| `SqlUnsupportedSyntax` | a construct another dialect has, in a document whose dialect is known | weak warning (later) |
+| (none) | syntax error (above); never suppressed or turned off, as in the reference, where syntax errors are no inspection | error |
+| `SqlResolve` | table, view, schema, column or routine that does not resolve (`Unresolved` only) | error (verify) |
+| `SqlAmbiguousColumn` | an unqualified column found in more than one table of the `FROM` | warning (verify) |
+| `SqlWithoutWhere` | `DELETE` or `UPDATE` without `WHERE` | warning (verify) |
+| `SqlInsertValues` | `INSERT` with a different number of columns and values | error (verify) |
+| `SqlConstantExpression` | `= NULL`, `<> NULL`, `!= NULL` (the reference reports them with its constant expressions; only this case so far) | warning (verify) |
+| `SqlUnusedCte` | a common table expression never referenced | weak warning, greyed (verify) |
+| `SqlDialectInspection` | a construct another dialect has, in a document whose dialect is known | weak warning (later) |
 
 Later: columns missing from `GROUP BY`, ambiguous `JOIN` without condition,
 `SELECT *` in `INSERT .. SELECT`, deprecated functions, type mismatches.
 
 Quick fixes (code actions of kind `quickfix`, offered at the mark):
-- `SqlUnresolved`: *Change to 'x'* for the nearest names (one fix per
+- `SqlResolve`: *Change to 'x'* for the nearest names (one fix per
   candidate, by edit distance and `name-match`); *Qualify with schema*
   when the object exists in another schema; *Use alias* inside a statement.
-- `SqlAmbiguous`: *Qualify with 'a'* per candidate table or alias.
-- `SqlNoWhere`: *Add WHERE clause* (inserts `where ` and leaves the caret
-  after it).
-- `SqlNullComparison`: *Replace with IS NULL / IS NOT NULL*.
+- `SqlAmbiguousColumn`: *Qualify with 'a'* per candidate table or alias.
+- `SqlWithoutWhere`: *Add WHERE clause* (inserts `where `; the caret after
+  it is the editor's to place).
+- `SqlConstantExpression`: *Replace with IS NULL / IS NOT NULL*.
 - `SqlUnusedCte`: *Remove CTE*.
-- `SqlSyntax`: *Add missing ')'* when the expected set is exactly a
-  closing parenthesis.
+- Syntax errors: *Add missing ')'* when the expected set has a closing
+  parenthesis and a `(` before the position is not closed.
 - Every inspection: *Suppress for statement* adds `-- noinspection <id>`
-  before the statement; *Disable inspection* writes the setting.
+  before the statement (or the id to such a comment); `<id>ForFile` in a
+  comment at the top of the file suppresses it for the file; *Disable
+  inspection* writes the setting (`[sql.inspections]`, id to level).
 
 ### Quick documentation and parameter info
 Quick documentation (`hover`, Markdown, same popup as other languages):

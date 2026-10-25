@@ -3,4 +3,7 @@
 //! incremental analysis and the `CodeIntel` services.
 
 mod fixture;
+mod inspections;
+mod intel;
 mod resolution;
+mod valid;

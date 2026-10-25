@@ -152,6 +152,30 @@ impl DocumentAnalysis {
         self.unit_at(offset).map(|u| u.statement.clone())
     }
 
+    /// The `-- noinspection` ids already written before the statement at
+    /// `offset`, and where that comment's ids end.
+    pub(crate) fn suppression_comment(
+        &self,
+        text: &str,
+        offset: usize,
+    ) -> Option<(Vec<String>, usize)> {
+        let u = self.unit_at(offset)?;
+        let i = self.units.iter().position(|x| std::ptr::eq(x, u))?;
+        let gap_start = if i == 0 {
+            0
+        } else {
+            self.units[i - 1].statement.end
+        };
+        let gap = text.get(gap_start..u.statement.start)?;
+        let mut found = None;
+        for (start, line) in line_comments(gap) {
+            if let Some(ids) = noinspection(line) {
+                found = Some((ids, gap_start + start + line.len()));
+            }
+        }
+        found
+    }
+
     /// The number of statements.
     pub fn statement_count(&self) -> usize {
         self.units.len()
@@ -222,6 +246,14 @@ pub struct Analyzer {
 impl Analyzer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An analyzer that counts the statements it analyses in `counter`.
+    pub fn with_counter(counter: Arc<AtomicUsize>) -> Self {
+        Self {
+            analysed: counter,
+            ..Self::default()
+        }
     }
 
     /// How many statements were analysed, cache misses only (shared with
