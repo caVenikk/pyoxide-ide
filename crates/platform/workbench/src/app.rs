@@ -708,6 +708,21 @@ fn run_commands_and_shot(
                     .await;
             }
         }
+        // `PYOXIDE_FORCE_FRAMES=<n>`: draw `n` frames at 60 Hz after the
+        // commands, as an uncovered window would (a window behind others
+        // draws nothing, so memory measurements would miss the painting).
+        let frames = std::env::var("PYOXIDE_FORCE_FRAMES")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+        for _ in 0..frames {
+            let _ = cx.update_window(window.into(), |_, window, _| {
+                crate::shot::request_display(window)
+            });
+            cx.background_executor()
+                .timer(Duration::from_millis(16))
+                .await;
+        }
         let Some(path) = shot else {
             return;
         };

@@ -95,12 +95,23 @@ impl<T> PerLine<T> {
         }
     }
 
+    /// Forgets the lines but keeps the room: a flood takes the whole text
+    /// anew every frame, and growing the vectors again would leave a trail
+    /// of freed large blocks.
     fn clear(&mut self) {
         self.ends.clear();
         self.items.clear();
-        // What a long run reserved goes back with the text.
-        self.ends.shrink_to(1024);
-        self.items.shrink_to(1024);
+    }
+
+    /// Gives back room that is much larger than the lines in it.
+    fn trim_capacity(&mut self) {
+        if self.items.capacity() > 2 * self.items.len().max(1024) {
+            self.items
+                .shrink_to(self.items.len() + self.items.len() / 4);
+        }
+        if self.ends.capacity() > 2 * self.ends.len().max(1024) {
+            self.ends.shrink_to(self.ends.len() + self.ends.len() / 4);
+        }
     }
 }
 
@@ -148,6 +159,8 @@ impl Decor {
         self.runs.clear();
         self.links.clear();
         self.extend(lines);
+        self.runs.trim_capacity();
+        self.links.trim_capacity();
     }
 
     /// Drops the first `lines` lines.
