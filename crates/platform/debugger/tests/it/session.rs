@@ -273,6 +273,57 @@ fn a_session_stops_and_shows_frames_variables_and_values() {
     assert!(seen.contains(&DebuggerEvent::SessionEnded(session.id())));
 }
 
+/// Two callers asking for the same scopes or children while the adapter is
+/// still answering (the variables view and the values after the lines do
+/// at a stop) share one request: the adapter, which answers each request
+/// once, is not asked twice.
+#[test]
+fn requests_for_the_same_scopes_and_children_are_sent_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let main = root.join("main.py");
+    let mut script = start_steps(json!([{"line": 3}]), json!(["uncaught"]));
+    script.extend([
+        json!({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 1, "hitBreakpointIds": [11]}}),
+        json!({"expect": "threads"}),
+        json!({"respond": {"threads": [{"id": 1, "name": "MainThread"}]}}),
+        json!({"expect": "stackTrace", "arguments": {"threadId": 1}}),
+        json!({"respond": {"stackFrames": [
+            {"id": 100, "name": "<module>", "line": 3, "column": 1, "source": {"path": main}}],
+            "totalFrames": 1}}),
+        json!({"expect": "scopes", "arguments": {"frameId": 100}}),
+        json!({"delay": 200}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5, "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"delay": 200}),
+        json!({"respond": {"variables": [
+            {"name": "x", "value": "1", "type": "int", "variablesReference": 0}]}}),
+        json!({"forbid": "scopes", "for": 300}),
+        json!({"forbid": "variables", "for": 300}),
+        json!({"expect": "continue", "arguments": {"threadId": 1}}),
+        json!({"respond": {"allThreadsContinued": true}}),
+        json!({"event": "terminated"}),
+    ]);
+    let debugger = Debugger::open(root, Provider::with(Value::Array(script)));
+    debugger.toggle_breakpoint(&main, 3, false);
+    let session = debugger.start(request(root)).unwrap();
+    wait_phase(&session, Phase::Suspended);
+    wait_until("frames", || session.snapshot().selected_frame == Some(100));
+
+    let (first, second) = (session.scopes(100), session.scopes(100));
+    let (first, second) = block_on(futures::future::join(first, second));
+    assert_eq!(first.unwrap()[0].reference, 5);
+    assert_eq!(second.unwrap()[0].reference, 5);
+    let (first, second) = (session.children(5), session.children(5));
+    let (first, second) = block_on(futures::future::join(first, second));
+    assert_eq!(first.unwrap().items.len(), 1);
+    assert_eq!(second.unwrap().items.len(), 1);
+
+    block_on(session.resume()).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
 #[test]
 fn changes_reach_a_running_session_and_stop_ends_it() {
     let dir = tempfile::tempdir().unwrap();

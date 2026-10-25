@@ -126,6 +126,9 @@ impl From<DapError> for DebugError {
 /// An answer the UI awaits; dropping it does not stop the request.
 pub type Pending<T> = BoxFuture<'static, Result<T, DebugError>>;
 
+/// A request several callers wait for.
+type SharedPending<T> = futures::future::Shared<Pending<T>>;
+
 fn ready<T: Send + 'static>(result: Result<T, DebugError>) -> Pending<T> {
     futures::future::ready(result).boxed()
 }
@@ -225,6 +228,11 @@ struct Data {
     selected_frame: Option<i64>,
     scopes: HashMap<i64, Vec<Scope>>,
     children: HashMap<i64, Children>,
+    /// Scopes and children being loaded, with the generation they were
+    /// asked at: a second request for the same frame or reference joins
+    /// the first instead of asking the adapter again.
+    scopes_pending: HashMap<i64, (u64, SharedPending<Vec<Scope>>)>,
+    children_pending: HashMap<i64, (u64, SharedPending<Children>)>,
     /// The frame a scope's, a variable's or a value's children belong to
     /// (their sizes are evaluated there).
     reference_frames: HashMap<i64, i64>,
@@ -375,6 +383,8 @@ impl Session {
                     selected_frame: None,
                     scopes: HashMap::new(),
                     children: HashMap::new(),
+                    scopes_pending: HashMap::new(),
+                    children_pending: HashMap::new(),
                     reference_frames: HashMap::new(),
                     statuses: HashMap::new(),
                     sent: HashMap::new(),
@@ -1955,28 +1965,51 @@ impl Session {
         let Some(client) = self.client() else {
             return ready(Err(DebugError::Ended));
         };
-        let generation = {
-            let data = lock(&self.inner.data);
+        let (generation, tx, pending) = {
+            let mut data = lock(&self.inner.data);
             if let Some(scopes) = data.scopes.get(&frame) {
                 return ready(Ok(scopes.clone()));
             }
             if data.phase != Phase::Suspended {
                 return ready(Err(DebugError::NotSuspended));
             }
-            data.generation
+            let generation = data.generation;
+            if let Some((_, pending)) = data
+                .scopes_pending
+                .get(&frame)
+                .filter(|(asked, _)| *asked == generation)
+            {
+                return pending.clone().boxed();
+            }
+            let (tx, rx) = oneshot::channel();
+            let pending: Pending<Vec<Scope>> =
+                rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed();
+            let pending = pending.shared();
+            data.scopes_pending
+                .insert(frame, (generation, pending.clone()));
+            (generation, tx, pending)
         };
         let weak = Arc::downgrade(&self.inner);
-        track(client.scopes(frame), move |result| {
-            if let (Ok(scopes), Some(inner)) = (result, weak.upgrade()) {
+        client.scopes(frame).on_done(move |result| {
+            if let Some(inner) = weak.upgrade() {
                 let mut data = lock(&inner.data);
-                if data.generation == generation {
-                    for scope in &scopes {
+                if data
+                    .scopes_pending
+                    .get(&frame)
+                    .is_some_and(|(asked, _)| *asked == generation)
+                {
+                    data.scopes_pending.remove(&frame);
+                }
+                if let (Ok(scopes), true) = (&result, data.generation == generation) {
+                    for scope in scopes {
                         data.reference_frames.insert(scope.reference, frame);
                     }
                     data.scopes.insert(frame, scopes.clone());
                 }
             }
-        })
+            let _ = tx.send(result.map_err(DebugError::from));
+        });
+        pending.boxed()
     }
 
     /// The loaded scopes of a frame.
@@ -1997,27 +2030,59 @@ impl Session {
         let Some(client) = self.client() else {
             return ready(Err(DebugError::Ended));
         };
-        let generation = {
-            let data = lock(&self.inner.data);
+        let (generation, tx, pending) = {
+            let mut data = lock(&self.inner.data);
             if let Some(loaded) = data.children.get(&reference) {
                 return ready(Ok(loaded.clone()));
             }
             if data.phase != Phase::Suspended {
                 return ready(Err(DebugError::NotSuspended));
             }
-            data.generation
+            let generation = data.generation;
+            if let Some((_, pending)) = data
+                .children_pending
+                .get(&reference)
+                .filter(|(asked, _)| *asked == generation)
+            {
+                return pending.clone().boxed();
+            }
+            let (tx, rx) = oneshot::channel();
+            let pending: Pending<Children> =
+                rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed();
+            let pending = pending.shared();
+            data.children_pending
+                .insert(reference, (generation, pending.clone()));
+            (generation, tx, pending)
         };
         let session = self.clone();
-        let (tx, rx) = oneshot::channel();
         client
             .variables(reference, VariablesFilter::All, None)
             .on_done(move |result| match result {
                 Ok(items) => session.children_loaded(reference, items, generation, tx),
                 Err(error) => {
+                    session.children_settled(reference, generation, None);
                     let _ = tx.send(Err(error.into()));
                 }
             });
-        rx.map(|r| r.unwrap_or(Err(DebugError::Ended))).boxed()
+        pending.boxed()
+    }
+
+    /// The children of `reference` asked at `generation` are no longer
+    /// pending; loaded ones are kept (unless the program moved on).
+    fn children_settled(&self, reference: i64, generation: u64, children: Option<&Children>) {
+        let mut data = lock(&self.inner.data);
+        if data
+            .children_pending
+            .get(&reference)
+            .is_some_and(|(asked, _)| *asked == generation)
+        {
+            data.children_pending.remove(&reference);
+        }
+        if let (Some(children), true) = (children, data.generation == generation) {
+            data.children
+                .entry(reference)
+                .or_insert_with(|| children.clone());
+        }
     }
 
     /// Children came: their sizes are asked for, then they are kept.
@@ -2051,21 +2116,14 @@ impl Session {
             })
             .filter_map(|(i, v)| Some((i, v.evaluate_name.clone()?)))
             .collect();
-        let weak = Arc::downgrade(&self.inner);
+        let session = self.clone();
         let store = move |items: Vec<Variable>, shapes: Vec<Option<String>>| {
             let children = Children {
                 items,
                 shapes,
                 more: false,
             };
-            if let Some(inner) = weak.upgrade() {
-                let mut data = lock(&inner.data);
-                if data.generation == generation {
-                    data.children
-                        .entry(reference)
-                        .or_insert_with(|| children.clone());
-                }
-            }
+            session.children_settled(reference, generation, Some(&children));
             let _ = tx.send(Ok(children));
         };
         let expressions: Vec<String> = sized.iter().map(|(_, e)| e.clone()).collect();
