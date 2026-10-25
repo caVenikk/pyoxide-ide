@@ -1,0 +1,21 @@
+[package]
+name = "sql-intel"
+description = "SQL language services of Pyoxide IDE over the metadata model: resolution scopes, reference resolution, inspections and quick fixes, and SqlCodeIntel implementing CodeIntel. No toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+code-intel.workspace = true
+db-model.workspace = true
+flume.workspace = true
+futures.workspace = true
+name-match.workspace = true
+serde.workspace = true
+sql-syntax.workspace = true
+text.workspace = true
+
+[dev-dependencies]
+db-core.workspace = true
+serde_json.workspace = true
