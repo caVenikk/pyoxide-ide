@@ -5,6 +5,7 @@
 //! model only.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use db_core::DataSourceId;
@@ -23,6 +24,7 @@ use ui::theme::ThemeExt;
 use super::Explorer;
 use crate::icons;
 use crate::live::{self, Live};
+use crate::store::DataSource;
 use crate::tree::{self, NodeKey, NodeView, Row, RowIcon, RowKey, SourceTree, Status};
 
 /// Metrics of the rows (logical px), the project tree's: the space left of
@@ -96,6 +98,17 @@ pub(crate) struct TreeState {
     pub rows: Vec<Row>,
     pub selected: Option<RowKey>,
     cache_tasks: HashMap<String, gpui::Task<()>>,
+    /// How many schemas and databases the servers offer, by data source
+    /// (the counters after the names).
+    pub totals: HashMap<String, Totals>,
+    total_tasks: HashMap<String, gpui::Task<()>>,
+}
+
+/// What a server offers, as far as it is read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Totals {
+    pub schemas: Option<usize>,
+    pub databases: Option<usize>,
 }
 
 impl Explorer {
@@ -149,6 +162,9 @@ impl Explorer {
     /// data source whose profile changed gets a new handle.
     pub(super) fn sources_changed(&mut self) {
         let sources = self.sources.clone().unwrap_or_default();
+        self.tree
+            .totals
+            .retain(|name, _| sources.iter().any(|s| &s.name == name));
         self.tree.lives.retain(|name, live| {
             sources
                 .iter()
@@ -211,6 +227,35 @@ impl Explorer {
             None => live.refresh(),
         }
         self.tree.lives.insert(name.to_owned(), live);
+        self.load_totals(&source, &root, cx);
+    }
+
+    /// Reads how many schemas and databases the server offers, in the
+    /// background, for the counters.
+    fn load_totals(&mut self, source: &DataSource, root: &Path, cx: &mut Context<Self>) {
+        let store = crate::store(cx);
+        let schemas = store.schemas(root, source.clone(), None);
+        let databases = (source.profile.backend == db_core::Backend::Postgres)
+            .then(|| store.databases(root, source.clone(), None));
+        let run = cx.background_spawn(async move {
+            let schemas = schemas.await.ok().map(|s| s.len());
+            let databases = match databases {
+                Some(d) => d.await.ok().map(|d| d.len()),
+                None => None,
+            };
+            Totals { schemas, databases }
+        });
+        let name = source.name.clone();
+        let key = name.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let totals = run.await;
+            let _ = this.update(cx, |this, cx| {
+                this.tree.total_tasks.remove(&key);
+                this.tree.totals.insert(key, totals);
+                cx.notify();
+            });
+        });
+        self.tree.total_tasks.insert(name, task);
     }
 
     fn cache_loaded(&mut self, name: &str, model: Option<Model>, cx: &mut Context<Self>) {
@@ -331,6 +376,8 @@ impl Explorer {
             .iter()
             .find(|s| s.name == source)
             .map(|s| &s.profile);
+        let totals = self.tree.totals.get(source).copied();
+        let shown_schemas = self.model_of(source).map(|m| m.schemas().len());
         let plain = |icon: Option<IconName>, name: String| RowText {
             icon,
             view: NodeView {
@@ -342,17 +389,49 @@ impl Explorer {
             failed: false,
         };
         match row.key.node {
-            NodeKey::Source => plain(
-                Some(profile.map_or(icons::DATA_SOURCE, |p| icons::backend(p.backend))),
-                source.to_owned(),
-            ),
-            NodeKey::Database => plain(
-                Some(icons::DATABASE_NODE),
-                profile
-                    .and_then(database_name)
-                    .unwrap_or_default()
-                    .to_owned(),
-            ),
+            NodeKey::Source => {
+                let mut text = plain(
+                    Some(profile.map_or(icons::DATA_SOURCE, |p| icons::backend(p.backend))),
+                    source.to_owned(),
+                );
+                // The databases shown of the server's (the current one),
+                // or the schemas where the engine has one database.
+                text.view.detail = match (profile.and_then(database_name), totals) {
+                    (
+                        Some(_),
+                        Some(Totals {
+                            databases: Some(n), ..
+                        }),
+                    ) => Some(format!("{} of {n}", 1.min(n))),
+                    (
+                        None,
+                        Some(Totals {
+                            schemas: Some(n), ..
+                        }),
+                    ) => shown_schemas.map(|k| format!("{k} of {}", n.max(k))),
+                    _ => None,
+                };
+                text
+            }
+            NodeKey::Database => {
+                let mut text = plain(
+                    Some(icons::DATABASE_NODE),
+                    profile
+                        .and_then(database_name)
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
+                text.view.detail = match (totals, shown_schemas) {
+                    (
+                        Some(Totals {
+                            schemas: Some(n), ..
+                        }),
+                        Some(k),
+                    ) => Some(format!("{k} of {}", n.max(k))),
+                    _ => None,
+                };
+                text
+            }
             NodeKey::Status => {
                 let status = self
                     .tree

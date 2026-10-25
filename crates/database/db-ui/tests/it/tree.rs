@@ -162,3 +162,31 @@ fn without_a_model_a_failed_connection_shows_the_error_and_retry(cx: &mut TestAp
         s["explorer"]["tree"]["data_sources"][NAME]["refreshing"] == false
     });
 }
+
+#[gpui::test]
+fn the_data_source_and_database_rows_count_what_is_shown(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let cache = ModelCache::new(cache_dir.path());
+    cache
+        .store(&Model::from_snapshot(
+            DataSourceId::from(NAME),
+            demo_snapshot(),
+        ))
+        .unwrap();
+    let store = FakeStore::new("");
+    store.set_model_cache(cache_dir.path());
+    store.set_connections(Arc::new(NoServer::default()));
+    let mut h = open(cx, store, &root);
+    h.invoke("db.explorer.expand", json!({ "path": NAME }));
+    h.invoke(
+        "db.explorer.expand",
+        json!({ "path": format!("{NAME}/pyoxide") }),
+    );
+    // One of the server's two databases, two of its four schemas.
+    wait_for(&mut h, "the counters", |s| {
+        let rows = s["explorer"]["tree"]["rows"].as_array().unwrap();
+        let detail = |i: usize| rows.get(i).and_then(|r| r["detail"].as_str());
+        detail(0) == Some("1 of 2") && detail(1) == Some("2 of 4")
+    });
+}
