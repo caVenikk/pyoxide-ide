@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"SQL inspections (unresolved, ambiguous, no WHERE, arity, NULL comparison, unused CTE) with quick fixes and suppression",sql,should,yes,no,Pro; ADR 0022
+"SQL inspections (unresolved, ambiguous, no WHERE, arity, NULL comparison, unused CTE) with quick fixes and suppression",sql,should,yes,partial,"Pro; ADR 0022. Engine done (sql-intel, #319): SqlResolve, SqlAmbiguousColumn, SqlWithoutWhere, SqlInsertValues, SqlConstantExpression, SqlUnusedCte with fixes and suppression comments; shown in the editor with #321"

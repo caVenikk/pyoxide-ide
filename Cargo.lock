@@ -6858,6 +6858,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sql-intel"
+version = "0.0.1"
+dependencies = [
+ "code-intel",
+ "db-core",
+ "db-model",
+ "flume",
+ "futures",
+ "name-match",
+ "serde",
+ "serde_json",
+ "sql-syntax",
+ "text",
+]
+
+[[package]]
 name = "sql-syntax"
 version = "0.0.1"
 dependencies = [

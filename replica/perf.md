@@ -119,6 +119,23 @@ with other builds (load average 30-50), so the numbers are upper bounds.
 | 2026-10-26 | mac-1 | memory of the trees, mixed / PL/SQL | 3.9 MB / 2.8 MB | 30 MB | |
 | 2026-10-26 | mac-1 | parse, queries again, 5000 lines / 250 KB (after #317) | 19 ms / 18 ms | 40 ms | measured at load average 35-55, so an upper bound; 12.2 / 19.7 ms on 2026-10-24 |
 
+### SQL diagnostics
+`cargo bench -p sql-intel` (`crates/database/sql-intel/benches/analysis.rs`):
+a generated 5000-line script of queries, CTEs, correlated subqueries,
+updates with `FROM` and deletes (about ten lines per statement), bound to a
+PostgreSQL model of 10 006 tables with eight columns each. "On open" is the
+resolution and the inspections of every statement with a fresh cache (median
+and worst of 20 runs); "keystroke" types one character into the middle
+statement and removes it again, alternately: re-parse, analysis with the
+other statements from the cache, and the problem list (median and worst of
+200 runs). Release build, Rust 1.99.0, one thread; the machine ran other
+agents' builds at the same time.
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-26 | mac-1 | diagnostics of a 5000-line script on open (142 KB, 600 statements) | 10.3 ms (max 11.4) | 150 ms | parsed beforehand; parse and analysis together 19.7 ms (max 21.7) |
+| 2026-10-26 | mac-1 | diagnostics after a keystroke | 0.29 ms (max 0.47) | 10 ms | re-parse included; one statement analysed per keystroke |
+
 ### Schema load (5000 tables)
 Issue #298: `Introspector::load` on a schema of 5000 tables with 5 columns each
 (25,000 columns), a primary key, a unique constraint, a foreign key, a check
