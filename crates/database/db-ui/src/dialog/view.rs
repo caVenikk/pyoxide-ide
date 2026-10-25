@@ -40,7 +40,8 @@ const TAB_GAP: f32 = 6.0;
 const FORM_TOP: f32 = 12.0;
 const LABEL_WIDTH: f32 = 118.0;
 const SSL_LABEL_WIDTH: f32 = 141.0;
-const SHORT_FIELD: f32 = 94.0;
+/// Port and Save (the reference: 94 for "Forever"; room for "Until restart").
+const SHORT_FIELD: f32 = 118.0;
 const SIDE_LABEL_GAP: f32 = 24.0;
 /// The column of Port and Save, their gaps included.
 const SIDE_LABEL_WIDTH: f32 = 70.0;
@@ -189,6 +190,8 @@ impl DataSourcesDialog {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .on_click(cx.listener(|this, _, window, cx| this.open_list(ListId::Add, window, cx)));
@@ -367,6 +370,8 @@ impl DataSourcesDialog {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
     }
@@ -397,6 +402,8 @@ impl DataSourcesDialog {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .child(ui::form::field_button(
@@ -443,6 +450,8 @@ impl DataSourcesDialog {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .on_click(cx.listener(|this, _, window, cx| this.open_list(ListId::Color, window, cx)))
@@ -510,6 +519,8 @@ impl DataSourcesDialog {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
@@ -1223,7 +1234,11 @@ impl DataSourcesDialog {
             cx,
         ));
         for s in &schemas {
-            if s.is_system && !scope.system && !listed(&s.name, s.is_current) {
+            // The SQL catalogs show; the other system schemas (toast, temporary,
+            // Oracle's) only with "Show internal system schemas".
+            let internal =
+                s.is_system && !matches!(s.name.as_str(), "information_schema" | "pg_catalog");
+            if internal && !scope.system && !listed(&s.name, s.is_current) {
                 continue;
             }
             let on = all || listed(&s.name, s.is_current);
@@ -1519,6 +1534,7 @@ impl DataSourcesDialog {
                                         .flex()
                                         .flex_col()
                                         .flex_1()
+                                        .min_w(px(0.0))
                                         .gap(px(6.0))
                                         .child(div().font_weight(FontWeight::SEMIBOLD).child(
                                             format!(

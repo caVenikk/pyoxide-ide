@@ -628,6 +628,8 @@ impl Explorer {
                     .child(
                         canvas(move |bounds, _, _| add_bounds.set(bounds), |_, _, _, _| {})
                             .absolute()
+                            .top_0()
+                            .left_0()
                             .size_full(),
                     )
                     .relative()

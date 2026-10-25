@@ -620,6 +620,8 @@ impl DataSourcesDialog {
             .collect();
         let expand_editor = cx.new(|cx| {
             let mut e = Editor::new(text::Buffer::new(""), window, cx);
+            // A text area: no line numbers, no caret row.
+            e.set_console(true);
             e.set_transparent(true);
             e.set_config(editor::EditorConfig {
                 brackets: Vec::new(),
