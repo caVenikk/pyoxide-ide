@@ -609,6 +609,24 @@ impl Workbench {
         });
     }
 
+    /// Makes the tool windows of the product's modules (once, after the
+    /// workbench entity exists).
+    pub(crate) fn create_module_tool_windows(
+        this: &Entity<Self>,
+        product: &crate::app::Product,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let weak = this.downgrade();
+        for hook in &product.tool_windows {
+            let content = (hook.create)(weak.clone(), window, cx);
+            let spec = hook.spec.clone();
+            this.update(cx, |this, cx| {
+                this.register_tool_window(spec, Some(content), cx)
+            });
+        }
+    }
+
     /// The project folder, when a project is open.
     pub fn project_root(&self, cx: &App) -> Option<PathBuf> {
         self.project(cx).map(|p| p.root().to_owned())

@@ -420,6 +420,48 @@ fn a_left_tool_window_replaces_project_and_back(cx: &mut TestAppContext) {
     assert!((back.size.width - project.size.width).abs() < px(1.0));
 }
 
+/// A module's tool window (ADR 0022) is made for the main window with the
+/// workbench at hand, gets its stripe button and shows by its id.
+#[gpui::test]
+fn a_module_tool_window_is_made_for_the_main_window(cx: &mut TestAppContext) {
+    let made = Rc::new(RefCell::new(0));
+    let count = made.clone();
+    let module = workbench::Module {
+        name: "test",
+        tool_windows: vec![workbench::tool_windows::ToolWindowHook {
+            spec: ToolWindowSpec {
+                id: ToolWindow("test-module"),
+                area: Area::Right,
+                order: 20,
+                icon: ui::icons::IconName::TOOL_TERMINAL,
+                title: "Module",
+                command: None,
+                registered: true,
+            },
+            create: Rc::new(move |workbench, _, cx| {
+                assert!(workbench.upgrade().is_some());
+                *count.borrow_mut() += 1;
+                ToolWindowContent::new(cx.new(|cx| TestToolWindow {
+                    focus: cx.focus_handle(),
+                }))
+            }),
+        }],
+        ..workbench::Module::default()
+    };
+    let window = open(cx, test_product().with_module(module));
+    assert_eq!(*made.borrow(), 1);
+    assert!(bounds(cx, window, "stripe-test-module").is_some());
+    invoke(
+        cx,
+        window,
+        "workbench.activate-tool-window",
+        json!({"id": "test-module"}),
+    );
+    let state = invoke(cx, window, "workbench.state", json!(null));
+    assert_eq!(state["tool_windows"]["test-module"]["visible"], json!(true));
+    assert_eq!(state["tool_windows"]["test-module"]["area"], json!("right"));
+}
+
 /// Toggling by id: the first command shows and focuses the tool window,
 /// the second one (while it has the focus) hides it. A tool window that
 /// is created by its first use has no stripe button before it.

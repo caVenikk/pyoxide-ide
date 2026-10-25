@@ -12,6 +12,7 @@ use ui::icons::IconSvg;
 use crate::app::{Product, StatusWidget};
 use crate::file_types::{FileAssociation, FileType};
 use crate::keymap::KeymapFiles;
+use crate::tool_windows::ToolWindowHook;
 
 /// A function that registers commands, tool windows, globals and settings
 /// sections at start-up (the end of [`crate::init`]). It may own what a
@@ -69,6 +70,8 @@ pub struct Module {
     /// Language services of the module's languages (a provider's
     /// `languages` say which documents it gets).
     pub code_intel: Vec<CodeIntelHook>,
+    /// The module's tool windows, made for each main window.
+    pub tool_windows: Vec<ToolWindowHook>,
 }
 
 impl Product {
@@ -90,6 +93,7 @@ impl Product {
         self.init.extend(module.init);
         self.keymaps.extend(module.keymaps);
         self.code_intel.extend(module.code_intel);
+        self.tool_windows.extend(module.tool_windows);
         self
     }
 }

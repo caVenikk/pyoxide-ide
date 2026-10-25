@@ -19,6 +19,9 @@ runtime-shaders = ["gpui/runtime_shaders"]
 [dependencies]
 code-intel.workspace = true
 code-intel-ui.workspace = true
+db-core.workspace = true
+db-service.workspace = true
+db-ui.workspace = true
 debugger.workspace = true
 dirs = "7"
 editor.workspace = true
@@ -33,6 +36,7 @@ py-lsp.workspace = true
 py-run.workspace = true
 py-syntax.workspace = true
 run-config.workspace = true
+secrets.workspace = true
 serde_json.workspace = true
 settings.workspace = true
 settings-ui.workspace = true
