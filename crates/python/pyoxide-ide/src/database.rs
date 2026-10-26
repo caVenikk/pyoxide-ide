@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use db_core::schema::SchemaInfo;
-use db_core::{Dialect, Error, ErrorKind, PasswordSave, Secret};
+use db_core::{Dialect, Error, ErrorKind, PasswordSave, Profile, Secret};
 use db_service::DbService;
 use db_service::profiles::ProfilesFile;
 use db_service::secrets::{SECRET_SERVICE, SecretKind};
@@ -68,33 +68,50 @@ fn spawn<T: Send + 'static>(work: impl Future<Output = T> + Send + 'static) -> B
 }
 
 /// A secret store that finds a password in memory first ("Until
-/// restart"), then in the configured store.
+/// restart"), then, for a data source that saves "Forever", in the
+/// configured store. For any other data source the configured store is
+/// never asked: the OS may prompt for the login password on every access.
 struct Layered {
     memory: Arc<MemoryStore>,
     store: Arc<dyn SecretStore>,
+    use_store: bool,
 }
 
 impl SecretStore for Layered {
     fn name(&self) -> &str {
-        self.store.name()
+        if self.use_store {
+            self.store.name()
+        } else {
+            self.memory.name()
+        }
     }
 
     fn get(&self, service: &str, account: &str) -> secrets::Result<Option<Secret>> {
         match self.memory.get(service, account)? {
             Some(s) => Ok(Some(s)),
-            None => self.store.get(service, account),
+            None if self.use_store => self.store.get(service, account),
+            None => Ok(None),
         }
     }
 
     fn set(&self, service: &str, account: &str, secret: &Secret) -> secrets::Result<()> {
-        self.store.set(service, account, secret)
+        if self.use_store {
+            self.store.set(service, account, secret)
+        } else {
+            self.memory.set(service, account, secret)
+        }
     }
 
     fn delete(&self, service: &str, account: &str) -> secrets::Result<bool> {
         let a = self.memory.delete(service, account)?;
-        let b = self.store.delete(service, account)?;
+        let b = self.use_store && self.store.delete(service, account)?;
         Ok(a || b)
     }
+}
+
+/// Whether a data source's passwords may be in the configured store.
+fn keeps_in_store(save: PasswordSave) -> bool {
+    save == PasswordSave::Forever
 }
 
 /// The product's store: data sources per project, the configured secret
@@ -106,7 +123,8 @@ pub struct ProjectStore {
 }
 
 impl ProjectStore {
-    /// The store with the secret store of the secret settings.
+    /// The store with the secret store of the secret settings (the shared
+    /// one: the OS keychain is read once per secret and run).
     pub fn configured() -> Self {
         let env = secrets::process_env();
         Self::new(secrets::config::configured_store(None, env.clone()), env)
@@ -120,25 +138,35 @@ impl ProjectStore {
         }
     }
 
-    fn service(&self, project: &Path) -> DbService {
+    /// The service for one data source: it asks the configured store only
+    /// when the data source saves its password "Forever".
+    fn service(&self, project: &Path, profile: &Profile) -> DbService {
+        self.service_with(project, keeps_in_store(profile.gui_options().password_save))
+    }
+
+    fn service_with(&self, project: &Path, use_store: bool) -> DbService {
         DbService::new(
             profiles_path(project),
             Arc::new(Layered {
                 memory: self.memory.clone(),
                 store: self.store.clone(),
+                use_store,
             }),
             None,
             self.env.clone(),
         )
     }
 
-    fn move_secret(&self, from: &str, to: &str) -> Result<(), String> {
+    /// Moves the secrets of a renamed data source; the configured store is
+    /// touched only when the data source saved "Forever" before.
+    fn move_secret(&self, from: &str, to: &str, in_store: bool) -> Result<(), String> {
         for kind in [SecretKind::Password, SecretKind::WalletPassword] {
             let (from, to) = (kind.account(from), kind.account(to));
-            for store in [
-                self.memory.clone() as Arc<dyn SecretStore>,
-                self.store.clone(),
-            ] {
+            let mut stores = vec![self.memory.clone() as Arc<dyn SecretStore>];
+            if in_store {
+                stores.push(self.store.clone());
+            }
+            for store in stores {
                 if let Some(secret) = store.get(SECRET_SERVICE, &from).map_err(text)? {
                     store.set(SECRET_SERVICE, &to, &secret).map_err(text)?;
                     store.delete(SECRET_SERVICE, &from).map_err(text)?;
@@ -148,11 +176,86 @@ impl ProjectStore {
         Ok(())
     }
 
-    fn delete_secrets(&self, name: &str) -> Result<(), String> {
+    /// Deletes the secrets of a data source; the configured store is
+    /// touched only when `in_store`.
+    fn delete_secrets(&self, name: &str, in_store: bool) -> Result<(), String> {
         for kind in [SecretKind::Password, SecretKind::WalletPassword] {
             let account = kind.account(name);
             self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
-            self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
+            if in_store {
+                self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies one data source's password change. `before` is how the data
+    /// source saved before (none when it is new), `now` how it saves now;
+    /// the configured store is touched only when one of them is "Forever".
+    fn change_password(
+        &self,
+        name: &str,
+        before: Option<PasswordSave>,
+        now: PasswordSave,
+        change: &PasswordChange,
+    ) -> Result<(), String> {
+        let account = SecretKind::Password.account(name);
+        let was_stored = before.is_some_and(keeps_in_store);
+        let memory = &self.memory;
+        let store = &self.store;
+        match change {
+            PasswordChange::Set(secret) => match now {
+                PasswordSave::Forever => {
+                    store.set(SECRET_SERVICE, &account, secret).map_err(text)?;
+                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                }
+                PasswordSave::UntilRestart => {
+                    memory.set(SECRET_SERVICE, &account, secret).map_err(text)?;
+                    if was_stored {
+                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    }
+                }
+                PasswordSave::Never => {
+                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    if was_stored {
+                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    }
+                }
+            },
+            PasswordChange::Clear => {
+                memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                if was_stored || keeps_in_store(now) {
+                    store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                }
+            }
+            // The password stays; it follows the data source when the way
+            // it is saved changed.
+            PasswordChange::Keep => match now {
+                PasswordSave::Forever => {
+                    if !was_stored
+                        && let Some(secret) = memory.get(SECRET_SERVICE, &account).map_err(text)?
+                    {
+                        store.set(SECRET_SERVICE, &account, &secret).map_err(text)?;
+                        memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    }
+                }
+                PasswordSave::UntilRestart => {
+                    if was_stored
+                        && let Some(secret) = store.get(SECRET_SERVICE, &account).map_err(text)?
+                    {
+                        memory
+                            .set(SECRET_SERVICE, &account, &secret)
+                            .map_err(text)?;
+                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    }
+                }
+                PasswordSave::Never => {
+                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    if was_stored {
+                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    }
+                }
+            },
         }
         Ok(())
     }
@@ -212,6 +315,20 @@ impl DataSourceStore for ProjectStore {
     }
 
     fn save(&self, project: &Path, request: SaveRequest) -> Result<(), String> {
+        // How each data source saved its password before this save, by the
+        // name it has now (a renamed one by its old name).
+        let before = ProfilesFile::load(&profiles_path(project)).unwrap_or_default();
+        let saved_as = |name: &str| {
+            let old = request
+                .renamed
+                .iter()
+                .find(|(_, new)| new == name)
+                .map_or(name, |(old, _)| old.as_str());
+            before
+                .profiles
+                .get(old)
+                .map(|p| p.gui_options().password_save)
+        };
         let mut file = ProfilesFile::default();
         for source in &request.sources {
             db_service::profiles::validate_name(&source.name).map_err(|e| e.message)?;
@@ -220,56 +337,40 @@ impl DataSourceStore for ProjectStore {
         }
         file.save(&profiles_path(project)).map_err(|e| e.message)?;
         for (old, new) in &request.renamed {
-            self.move_secret(old, new)?;
+            let in_store = saved_as(new).is_some_and(keeps_in_store);
+            self.move_secret(old, new, in_store)?;
         }
         for name in &request.removed {
-            self.delete_secrets(name)?;
+            let in_store = before
+                .profiles
+                .get(name)
+                .is_some_and(|p| keeps_in_store(p.gui_options().password_save));
+            self.delete_secrets(name, in_store)?;
         }
         for (name, change) in &request.passwords {
-            let account = SecretKind::Password.account(name);
-            let save = request
+            let now = request
                 .sources
                 .iter()
                 .find(|s| &s.name == name)
                 .map(|s| s.profile.gui_options().password_save)
                 .unwrap_or_default();
-            match change {
-                PasswordChange::Keep if save == PasswordSave::Never => {
-                    self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
-                    self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
-                }
-                PasswordChange::Keep => {}
-                PasswordChange::Set(secret) => match save {
-                    PasswordSave::Forever => {
-                        self.store
-                            .set(SECRET_SERVICE, &account, secret)
-                            .map_err(text)?;
-                        self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
-                    }
-                    PasswordSave::UntilRestart => {
-                        self.memory
-                            .set(SECRET_SERVICE, &account, secret)
-                            .map_err(text)?;
-                        self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
-                    }
-                    PasswordSave::Never => {
-                        self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
-                        self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
-                    }
-                },
-                PasswordChange::Clear => {
-                    self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
-                    self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
-                }
-            }
+            self.change_password(name, saved_as(name), now, change)?;
         }
         Ok(())
     }
 
-    fn has_password(&self, _: &Path, name: &str) -> bool {
+    fn has_password(&self, project: &Path, name: &str) -> bool {
         let account = SecretKind::Password.account(name);
-        matches!(self.memory.get(SECRET_SERVICE, &account), Ok(Some(_)))
-            || matches!(self.store.get(SECRET_SERVICE, &account), Ok(Some(_)))
+        if matches!(self.memory.get(SECRET_SERVICE, &account), Ok(Some(_))) {
+            return true;
+        }
+        // Only a data source that saves "Forever" can have its password in
+        // the configured store; for any other the OS is not asked.
+        let forever = ProfilesFile::load(&profiles_path(project))
+            .ok()
+            .and_then(|f| f.profiles.get(name).map(|p| p.gui_options().password_save))
+            .is_some_and(keeps_in_store);
+        forever && matches!(self.store.get(SECRET_SERVICE, &account), Ok(Some(_)))
     }
 
     fn test(
@@ -278,7 +379,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<ServerInfo, Failure>> {
-        let svc = self.service(project);
+        let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
             db_service::ops::test_profile(&svc, &source.name, &source.profile, password)
@@ -300,7 +401,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<Vec<SchemaInfo>, Failure>> {
-        let svc = self.service(project);
+        let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
             db_service::ops::profile_schemas(&svc, &source.name, &source.profile, password)
@@ -315,7 +416,7 @@ impl DataSourceStore for ProjectStore {
         source: DataSource,
         password: Option<Secret>,
     ) -> BoxFuture<Result<Vec<String>, Failure>> {
-        let svc = self.service(project);
+        let svc = self.service(project, &source.profile);
         spawn(async move {
             let dialect = source.profile.dialect();
             db_service::ops::profile_databases(&svc, &source.name, &source.profile, password)
@@ -325,7 +426,9 @@ impl DataSourceStore for ProjectStore {
     }
 
     fn import_pycharm(&self, project: &Path) -> Result<ImportSummary, String> {
-        let svc = self.service(project);
+        // The import moves no passwords (`no_passwords`): the store stays
+        // closed.
+        let svc = self.service_with(project, false);
         let args = db_service::import::PycharmImportArgs {
             project: project.to_owned(),
             no_passwords: true,
@@ -355,6 +458,7 @@ impl DataSourceStore for ProjectStore {
 mod tests {
     use super::*;
     use db_core::{Backend, GuiOptions, Profile};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn store() -> (ProjectStore, Arc<MemoryStore>) {
         let os = Arc::new(MemoryStore::default());
@@ -430,7 +534,7 @@ mod tests {
         store.save(root, request).unwrap();
         assert_eq!(os_password(&os, "renamed"), None);
         assert!(store.has_password(root, "renamed"));
-        let svc = store.service(root);
+        let svc = store.service(root, &pg(PasswordSave::UntilRestart));
         let found = svc.secrets_for("renamed", &pg(PasswordSave::UntilRestart));
         assert_eq!(found.password.expose(), "other");
 
@@ -452,18 +556,206 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let (store, os) = store();
-        os.set(SECRET_SERVICE, "local", &Secret::new("old"))
+        let save = |mode, change| {
+            let request = SaveRequest {
+                sources: vec![DataSource {
+                    name: "local".into(),
+                    profile: pg(mode),
+                }],
+                passwords: vec![("local".into(), change)],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+        };
+        save(
+            PasswordSave::Forever,
+            PasswordChange::Set(Secret::new("old")),
+        );
+        assert_eq!(os_password(&os, "local").as_deref(), Some("old"));
+        save(
+            PasswordSave::Never,
+            PasswordChange::Set(Secret::new("typed")),
+        );
+        assert!(!store.has_password(root, "local"));
+        assert_eq!(os_password(&os, "local"), None);
+    }
+
+    /// Changing how a data source saves moves its password with it: from
+    /// the store to memory and back.
+    #[test]
+    fn a_changed_save_mode_moves_the_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let (store, os) = store();
+        let save = |mode, change| {
+            let request = SaveRequest {
+                sources: vec![DataSource {
+                    name: "local".into(),
+                    profile: pg(mode),
+                }],
+                passwords: vec![("local".into(), change)],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+        };
+        save(
+            PasswordSave::Forever,
+            PasswordChange::Set(Secret::new("pw")),
+        );
+        save(PasswordSave::UntilRestart, PasswordChange::Keep);
+        assert_eq!(os_password(&os, "local"), None);
+        assert!(store.has_password(root, "local"));
+        save(PasswordSave::Forever, PasswordChange::Keep);
+        assert_eq!(os_password(&os, "local").as_deref(), Some("pw"));
+        assert!(store.has_password(root, "local"));
+    }
+
+    /// A secret store that counts how often it is asked.
+    #[derive(Clone, Default)]
+    struct Counting {
+        inner: Arc<MemoryStore>,
+        calls: Arc<AtomicUsize>,
+        gets: Arc<AtomicUsize>,
+    }
+
+    impl Counting {
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+
+        fn gets(&self) -> usize {
+            self.gets.load(Ordering::SeqCst)
+        }
+    }
+
+    impl SecretStore for Counting {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+
+        fn get(&self, service: &str, account: &str) -> secrets::Result<Option<Secret>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get(service, account)
+        }
+
+        fn set(&self, service: &str, account: &str, secret: &Secret) -> secrets::Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.set(service, account, secret)
+        }
+
+        fn delete(&self, service: &str, account: &str) -> secrets::Result<bool> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.delete(service, account)
+        }
+
+        fn get_any_account(&self, service: &str) -> secrets::Result<Option<Secret>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.get_any_account(service)
+        }
+    }
+
+    /// A data source nobody listens at: connecting fails at once, after the
+    /// password was looked up.
+    fn unreachable_source(name: &str, save: PasswordSave) -> DataSource {
+        let mut profile = pg(save);
+        profile.host = "127.0.0.1".into();
+        profile.port = Some(1);
+        DataSource {
+            name: name.into(),
+            profile,
+        }
+    }
+
+    /// Opens the dialog (kept passwords), saves, tests, lists schemas and
+    /// databases of the data source, with and without a typed password.
+    fn use_data_source(store: &ProjectStore, root: &Path, source: &DataSource) {
+        store.has_password(root, &source.name);
+        for password in [None, Some(Secret::new("typed"))] {
+            let _ = futures_block_on(store.test(root, source.clone(), password.clone()));
+            let _ = futures_block_on(store.schemas(root, source.clone(), password.clone()));
+            let _ = futures_block_on(store.databases(root, source.clone(), password));
+        }
+    }
+
+    /// The OS store is asked for a data source that saves "Forever" only:
+    /// "Until restart" and "Never" make no call to it, whatever the
+    /// dialog does (a keychain prompt otherwise).
+    #[test]
+    fn until_restart_and_never_data_sources_never_ask_the_os_store() {
+        for mode in [PasswordSave::UntilRestart, PasswordSave::Never] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            let os = Counting::default();
+            let store = ProjectStore::new(Arc::new(os.clone()), Arc::new(|_| None));
+            let source = unreachable_source("local", mode);
+            let request = SaveRequest {
+                sources: vec![source.clone()],
+                passwords: vec![("local".into(), PasswordChange::Set(Secret::new("pw")))],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+            use_data_source(&store, root, &source);
+            // Saved again and edited, renamed, removed.
+            let renamed = unreachable_source("renamed", mode);
+            let request = SaveRequest {
+                sources: vec![renamed.clone()],
+                renamed: vec![("local".into(), "renamed".into())],
+                passwords: vec![("renamed".into(), PasswordChange::Keep)],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+            let request = SaveRequest {
+                sources: vec![renamed.clone()],
+                passwords: vec![("renamed".into(), PasswordChange::Clear)],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+            let request = SaveRequest {
+                removed: vec!["renamed".into()],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+            assert_eq!(os.calls(), 0, "{mode:?}");
+
+            // After a restart (nothing in memory) it is the same.
+            let fresh = ProjectStore::new(Arc::new(os.clone()), Arc::new(|_| None));
+            let request = SaveRequest {
+                sources: vec![source.clone()],
+                passwords: vec![("local".into(), PasswordChange::Keep)],
+                ..SaveRequest::default()
+            };
+            fresh.save(root, request).unwrap();
+            assert!(!fresh.has_password(root, "local"));
+            use_data_source(&fresh, root, &source);
+            assert_eq!(os.calls(), 0, "{mode:?} after a restart");
+        }
+    }
+
+    /// A data source that saves "Forever" reads the OS store once while
+    /// the IDE runs: the dialog, a test and a connect share the read.
+    #[test]
+    fn a_forever_data_source_reads_the_os_store_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let os = Counting::default();
+        os.inner
+            .set(SECRET_SERVICE, "local", &Secret::new("pw"))
             .unwrap();
+        let cached = Arc::new(secrets::CachedStore::new(Arc::new(os.clone())));
+        let store = ProjectStore::new(cached, Arc::new(|_| None));
+        let source = unreachable_source("local", PasswordSave::Forever);
         let request = SaveRequest {
-            sources: vec![DataSource {
-                name: "local".into(),
-                profile: pg(PasswordSave::Never),
-            }],
-            passwords: vec![("local".into(), PasswordChange::Set(Secret::new("typed")))],
+            sources: vec![source.clone()],
+            passwords: vec![("local".into(), PasswordChange::Keep)],
             ..SaveRequest::default()
         };
         store.save(root, request).unwrap();
-        assert!(!store.has_password(root, "local"));
+        assert_eq!(os.calls(), 0, "saving writes and does not read");
+        assert!(store.has_password(root, "local"));
+        use_data_source(&store, root, &source);
+        assert_eq!(os.gets(), 1);
+        assert_eq!(os.calls(), 1);
     }
 
     /// A test of a SQLite file that does not exist reports it and creates
