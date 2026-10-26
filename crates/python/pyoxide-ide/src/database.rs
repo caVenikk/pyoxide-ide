@@ -190,10 +190,8 @@ impl ConnectionSource for ProjectConnections {
                     .map(|p| keeps_in_store(p.gui_options().password_save))
             })
             .unwrap_or(false);
-        self.parts
-            .service(&self.project, use_store)
-            .open(data_source, purpose)
-            .await
+        let service = self.parts.service(&self.project, use_store);
+        ConnectionSource::open(&service, data_source, purpose).await
     }
 }
 

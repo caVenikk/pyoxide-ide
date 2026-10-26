@@ -5520,6 +5520,7 @@ dependencies = [
 name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "code-intel",
  "code-intel-ui",
  "db-core",
