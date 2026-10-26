@@ -47,6 +47,10 @@ Rules for AI agents and human contributors. Read this file, then
   Platform crates (`crates/platform/`) know no specific language and never
   depend on product crates (`crates/python/`, ...); see ADR 0005,
   checked by `python3 scripts/check-layers.py`.
+- The product name comes from one place: product crates use `crates/python/brand`,
+  platform crates and modules use `app_info` (installed at startup); never a
+  "Pyoxide"/"pyoxide"/`PYOXIDE_` literal in code (`python3 scripts/check-brand.py`,
+  [docs/rebrand.md](docs/rebrand.md)).
 - Every user-visible action is a command in the command registry (UI, CLI and
   agent control channel call the same functions).
 - Integration tests that need external services are `#[ignore]` and documented.
