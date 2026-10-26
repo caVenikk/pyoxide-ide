@@ -117,14 +117,10 @@ pub fn init(cx: &mut App, masks: &[&str]) {
     });
 }
 
-/// Where the settings are kept: `PYOXIDE_CONFIG_DIR`, else the
-/// configuration folder of the user, in `pyoxide/find.toml`.
+/// Where the settings are kept: `find.toml` in the application's
+/// configuration folder.
 pub fn settings_file() -> Option<PathBuf> {
-    let dir = match std::env::var_os("PYOXIDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
-        Some(dir) => PathBuf::from(dir),
-        None => dirs::config_dir()?.join("pyoxide"),
-    };
-    Some(dir.join("find.toml"))
+    Some(app_info::config_dir()?.join("find.toml"))
 }
 
 /// Reads the settings from `file` (keeping the defaults when there is none)

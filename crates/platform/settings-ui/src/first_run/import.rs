@@ -255,9 +255,10 @@ fn appearance(source: &Source) -> Applied {
                         .find(|k| k.id == reference)
                         .map(|k| k.name.to_owned())
                         .unwrap_or(reference);
-                    outcome
-                        .problems
-                        .push(format!("Pyoxide has no {reference} theme; {name} is used."));
+                    outcome.problems.push(format!(
+                        "{} has no {reference} theme; {name} is used.",
+                        app_info::name()
+                    ));
                 }
                 Some(id.to_owned())
             }
@@ -443,8 +444,9 @@ fn file_types(source: &Source) -> Applied {
 pub(super) fn notification(folder: &ConfigFolder, outcome: &Outcome) -> Notification {
     let mut text = if outcome.imported.is_empty() {
         format!(
-            "{} has no settings Pyoxide imports; the defaults are kept.",
-            folder.label()
+            "{} has no settings {} imports; the defaults are kept.",
+            folder.label(),
+            app_info::name()
         )
     } else {
         format!(

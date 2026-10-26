@@ -339,7 +339,7 @@ fn the_reference_configurations_show_in_the_run_widget(cx: &mut TestAppContext) 
         json!({"type": "idea:FutureType", "name": "later"})
     );
     assert_eq!(snapshot(&root.join(".idea")), idea);
-    assert!(root.join(".oxide/run/shared.toml").is_file());
+    assert!(root.join(".app/run/shared.toml").is_file());
 }
 
 /// Run runs the selected configuration in the Run tool window, with its
@@ -548,7 +548,7 @@ fn delete_asks_and_removes_a_shared_file(cx: &mut TestAppContext) {
     let (_dir, root) = project();
     let mut h = setup(cx, &root);
     h.loaded();
-    assert!(root.join(".oxide/run/shared.toml").is_file());
+    assert!(root.join(".app/run/shared.toml").is_file());
     h.invoke("run.configuration.delete", json!({"name": "shared"}));
     let state = h.invoke("workbench.state", json!(null));
     assert_eq!(state["dialog"]["title"], json!("Confirmation"));
@@ -558,7 +558,7 @@ fn delete_asks_and_removes_a_shared_file(cx: &mut TestAppContext) {
     );
     h.invoke("dialog.choose", json!({"button": "Yes"}));
     let s = h.wait("the file is gone", |_| {
-        !root.join(".oxide/run/shared.toml").exists()
+        !root.join(".app/run/shared.toml").exists()
     });
     assert_eq!(names(&s), ["beta", "alpha", "later"]);
     // "No" keeps it.
@@ -681,7 +681,7 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     assert_eq!(Path::new(shown.as_str().unwrap()), script.as_path());
     h.invoke("run.configurations.dialog.apply", json!(null));
     h.wait("the stored script path", |_| {
-        std::fs::read_to_string(root.join(".oxide/workspace.toml"))
+        std::fs::read_to_string(root.join(".app/workspace.toml"))
             .is_ok_and(|t| t.contains("script = \"tools/build.sh\""))
     });
     h.invoke("run.configurations.dialog.remove", json!(null));
@@ -716,13 +716,13 @@ fn the_edit_dialog_edits_configurations(cx: &mut TestAppContext) {
     );
     assert_eq!(h.cx.update(|cx| cx.windows().len()), 1);
     let s = h.wait("the shared file", |_| {
-        root.join(".oxide/run/renamed.toml").is_file()
+        root.join(".app/run/renamed.toml").is_file()
     });
     assert_eq!(names(&s), ["beta", "renamed", "shared", "Unnamed", "later"]);
-    let shared = std::fs::read_to_string(root.join(".oxide/run/renamed.toml")).unwrap();
+    let shared = std::fs::read_to_string(root.join(".app/run/renamed.toml")).unwrap();
     assert!(shared.contains("{ name = \"TOKEN\" }"), "{shared}");
     assert!(!shared.contains("secret-value"), "{shared}");
-    let personal = std::fs::read_to_string(root.join(".oxide/workspace.toml")).unwrap();
+    let personal = std::fs::read_to_string(root.join(".app/workspace.toml")).unwrap();
     assert!(personal.contains("secret-value"), "{personal}");
     // Cancel drops changes.
     h.invoke("run.configurations.edit", json!({"name": "beta"}));
@@ -749,7 +749,7 @@ fn writes_of_an_open_configuration_file_are_the_applications_own(cx: &mut TestAp
     let (_dir, root) = project();
     let mut h = setup(cx, &root);
     h.loaded();
-    let file = root.join(".oxide/run/shared.toml");
+    let file = root.join(".app/run/shared.toml");
     h.invoke(
         "project.open-file",
         json!({"path": file.display().to_string()}),

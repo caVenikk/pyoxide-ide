@@ -349,11 +349,11 @@ fn reference_exclusions_are_imported_once_and_gitignore_is_content(cx: &mut Test
     };
     assert_eq!(excluded(&s), want(true, false));
     // The import wrote Pyoxide's own settings and left `.idea` alone.
-    let settings = root.join(".oxide/project.toml");
+    let settings = root.join(".app/project.toml");
     let text = std::fs::read_to_string(&settings).unwrap();
     assert!(text.contains("paths = [\n    \"venv\",\n]"), "{text}");
 
-    // From now on only `.oxide` counts: `.idea` is not read again.
+    // From now on only `.app` counts: `.idea` is not read again.
     std::fs::write(
         &settings,
         "version = 1\n\n[exclusions]\npaths = [\"build\"]\n",
@@ -380,7 +380,7 @@ fn opening_a_project_creates_no_settings_folder(cx: &mut TestAppContext) {
     );
     let s = state(cx, window);
     assert_eq!(rows(&s)[..3], ["", ".idea", ".venv"]);
-    assert!(!dir.path().join(".oxide").exists());
+    assert!(!dir.path().join(".app").exists());
 }
 
 #[gpui::test]

@@ -12,6 +12,7 @@ rust-version.workspace = true
 test-support = ["gpui/test-support"]
 
 [dependencies]
+app-info.workspace = true
 # The time of a notification in the Notifications tool window.
 chrono.workspace = true
 code-intel-ui.workspace = true

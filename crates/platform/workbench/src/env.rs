@@ -36,14 +36,14 @@ use themes::ThemeKind;
 /// app is not activated and the window does not become key, so the person's
 /// frontmost application keeps the keyboard.
 pub fn background() -> bool {
-    std::env::var_os("PYOXIDE_BACKGROUND").is_some_and(|v| v == "1")
+    app_info::var_os("BACKGROUND").is_some_and(|v| v == "1")
 }
 
 /// Theme kind requested with `PYOXIDE_THEME` (the theme drawn before
 /// the settings are read).
 pub fn theme_kind() -> ThemeKind {
-    match std::env::var("PYOXIDE_THEME").as_deref() {
-        Ok("light") => ThemeKind::Light,
+    match app_info::var("THEME").as_deref() {
+        Some("light") => ThemeKind::Light,
         _ => ThemeKind::Dark,
     }
 }
@@ -51,15 +51,13 @@ pub fn theme_kind() -> ThemeKind {
 /// The theme `PYOXIDE_THEME` pins for this run: `light`, `dark` or a
 /// theme id.
 pub fn theme_override() -> Option<String> {
-    std::env::var("PYOXIDE_THEME")
-        .ok()
-        .filter(|t| !t.is_empty())
+    app_info::var("THEME").filter(|t| !t.is_empty())
 }
 
 /// `PYOXIDE_DEBUG_CURSOR=1`: print the system cursor after every mouse move.
 pub fn debug_cursor() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("PYOXIDE_DEBUG_CURSOR").is_some_and(|v| v == "1"))
+    *ON.get_or_init(|| app_info::var_os("DEBUG_CURSOR").is_some_and(|v| v == "1"))
 }
 
 /// Whether the first-run window shows before the main window
@@ -67,11 +65,11 @@ pub fn debug_cursor() -> bool {
 /// (`settings_exist` false) unless the run is driven by `PYOXIDE_RUN`,
 /// `PYOXIDE_SHOT` or `PYOXIDE_BENCH`.
 pub fn first_run(settings_exist: bool) -> bool {
-    let scripted = ["PYOXIDE_RUN", "PYOXIDE_SHOT", "PYOXIDE_BENCH"]
+    let scripted = ["RUN", "SHOT", "BENCH"]
         .iter()
-        .any(|v| std::env::var_os(v).is_some());
+        .any(|v| app_info::var_os(v).is_some());
     first_run_for(
-        std::env::var("PYOXIDE_FIRST_RUN").ok().as_deref(),
+        app_info::var("FIRST_RUN").as_deref(),
         scripted,
         settings_exist,
     )
@@ -88,20 +86,20 @@ fn first_run_for(asked: Option<&str>, scripted: bool, settings_exist: bool) -> b
 /// `PYOXIDE_REFERENCE_CONFIG`: the folder of the reference IDE's
 /// configuration folders to look in instead of the platform's.
 pub fn reference_config_root() -> Option<std::path::PathBuf> {
-    std::env::var_os("PYOXIDE_REFERENCE_CONFIG")
+    app_info::var_os("REFERENCE_CONFIG")
         .filter(|v| !v.is_empty())
         .map(Into::into)
 }
 
 /// `PYOXIDE_SHOT`: where to save a screenshot of the main window.
 pub fn shot_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("PYOXIDE_SHOT").map(Into::into)
+    app_info::var_os("SHOT").map(Into::into)
 }
 
 /// `PYOXIDE_WINDOW_SIZE=<width>x<height>`: the main window's content size
 /// in points; `None` when unset or not two numbers.
 pub fn window_size() -> Option<(f32, f32)> {
-    parse_window_size(&std::env::var("PYOXIDE_WINDOW_SIZE").ok()?)
+    parse_window_size(&app_info::var("WINDOW_SIZE")?)
 }
 
 fn parse_window_size(text: &str) -> Option<(f32, f32)> {
@@ -113,10 +111,10 @@ fn parse_window_size(text: &str) -> Option<(f32, f32)> {
 /// `PYOXIDE_RUN`: UI commands with their arguments to run once the window
 /// settled (a JSON list of `[id, args]` pairs); `Err` when it does not parse.
 pub fn run_commands() -> Option<Result<Vec<(String, serde_json::Value)>, String>> {
-    let text = std::env::var("PYOXIDE_RUN").ok()?;
+    let text = app_info::var("RUN")?;
     Some(
         serde_json::from_str::<Vec<(String, serde_json::Value)>>(&text)
-            .map_err(|e| format!("PYOXIDE_RUN: {e}")),
+            .map_err(|e| format!("{}: {e}", app_info::env_name("RUN"))),
     )
 }
 
@@ -156,7 +154,7 @@ pub fn bench() -> Option<&'static Bench> {
     static BENCH: OnceLock<Option<Bench>> = OnceLock::new();
     BENCH
         .get_or_init(|| {
-            let value = std::env::var("PYOXIDE_BENCH").ok()?;
+            let value = app_info::var("BENCH")?;
             match value.as_str() {
                 "startup" => Some(Bench::Startup),
                 "typing" => Some(Bench::Typing),
@@ -214,11 +212,11 @@ pub fn since_main_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Prints a measurement marker line (`PYOXIDE <text>`) and flushes stdout.
+/// Prints a measurement marker line (`<ENV PREFIX> <text>`) and flushes stdout.
 pub fn marker(text: &str) {
     use std::io::Write as _;
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "PYOXIDE {text}");
+    let _ = writeln!(out, "{} {text}", app_info::env_prefix());
     let _ = out.flush();
 }
 

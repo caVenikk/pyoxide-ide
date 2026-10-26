@@ -82,6 +82,9 @@ pub struct Product {
     pub file_associations: Vec<FileAssociation>,
     /// Name shown in the window title and the application menu.
     pub name: &'static str,
+    /// The product's names for the platform (folders, environment
+    /// variables, texts); installed when the workbench starts.
+    pub app_info: app_info::AppInfo,
     /// Icons of the product (file types, tool windows).
     pub icons: Vec<IconSvg>,
     /// Extra tool window buttons in the lower group of the left stripe.
@@ -145,6 +148,7 @@ pub const TRAFFIC_LIGHTS: (f32, f32) = (14.0, 13.0);
 /// Registers fonts, icons, the theme, commands and key bindings. Called once
 /// per application (and by tests before opening a window).
 pub fn init(cx: &mut App, product: &Product) {
+    app_info::install(product.app_info);
     project::set_auto_exclusions(product.auto_excluded);
     ui::init(cx, env::theme_kind());
     ui::icons::register(cx, &product.icons);
@@ -419,6 +423,7 @@ pub fn open_main_window_with(
 /// are opened in it. At the first start the first-run window comes before
 /// the main window (`settings_ui::first_run`, see [`env::first_run`]).
 pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
+    app_info::install(product.app_info);
     env::mark_main();
     let product = Rc::new(product);
     Application::new().run(move |cx| {
@@ -472,7 +477,7 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         .detach();
         // `PYOXIDE_NATIVE_POINTER=0` leaves the pointer to GPUI alone
         // (diagnostics, see ui::pointer).
-        if std::env::var_os("PYOXIDE_NATIVE_POINTER").is_none_or(|v| v != "0") {
+        if app_info::var_os("NATIVE_POINTER").is_none_or(|v| v != "0") {
             ui::pointer::enable_native();
         }
         let commands = match env::run_commands() {
@@ -600,8 +605,8 @@ fn run_first_run_script(
             match result {
                 Ok(Ok(value)) if !value.is_null() => env::marker(&format!("run {id} {value}")),
                 Ok(Ok(_)) => env::marker(&format!("run {id}")),
-                Ok(Err(e)) => eprintln!("PYOXIDE_RUN {id}: {e:?}"),
-                Err(e) => eprintln!("PYOXIDE_RUN {id}: {e}"),
+                Ok(Err(e)) => eprintln!("{} {id}: {e:?}", app_info::env_name("RUN")),
+                Err(e) => eprintln!("{} {id}: {e}", app_info::env_name("RUN")),
             }
             pause(400).await;
         }
@@ -652,7 +657,7 @@ fn save_shot(window: &gpui::Window, path: &std::path::Path) {
             path.display(),
             window.scale_factor()
         )),
-        Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
+        Err(e) => eprintln!("{} failed: {e}", app_info::env_name("SHOT")),
     }
 }
 
@@ -691,8 +696,8 @@ fn run_commands_and_shot(
                 match result {
                     Ok(Ok(value)) if !value.is_null() => env::marker(&format!("run {id} {value}")),
                     Ok(Ok(_)) => env::marker(&format!("run {id}")),
-                    Ok(Err(e)) => eprintln!("PYOXIDE_RUN {id}: {e:?}"),
-                    Err(e) => eprintln!("PYOXIDE_RUN {id}: {e}"),
+                    Ok(Err(e)) => eprintln!("{} {id}: {e:?}", app_info::env_name("RUN")),
+                    Err(e) => eprintln!("{} {id}: {e}", app_info::env_name("RUN")),
                 }
                 // Dialogs and popups open over the window draw what the
                 // command changed too: the next command may need their
@@ -715,8 +720,7 @@ fn run_commands_and_shot(
         // `PYOXIDE_FORCE_FRAMES=<n>`: draw `n` frames at 60 Hz after the
         // commands, as an uncovered window would (a window behind others
         // draws nothing, so memory measurements would miss the painting).
-        let frames = std::env::var("PYOXIDE_FORCE_FRAMES")
-            .ok()
+        let frames = app_info::var("FORCE_FRAMES")
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
         for _ in 0..frames {
@@ -743,7 +747,7 @@ fn run_commands_and_shot(
                     path.display(),
                     window.scale_factor()
                 )),
-                Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
+                Err(e) => eprintln!("{} failed: {e}", app_info::env_name("SHOT")),
             };
         let _ = cx.update_window(window.into(), |_, window, _| save(window, &path));
         // An open dialog window is saved next to it (`<name>-dialog.png`),

@@ -70,7 +70,7 @@ fn open(cx: &mut TestAppContext, sync: SyncSettings) -> (H<'_>, tempfile::TempDi
     (h, dir)
 }
 
-/// As the application runs with `PYOXIDE_BACKGROUND`: the window never
+/// As the application runs with `APP_BACKGROUND`: the window never
 /// gets the focus, and a file opens by its absolute path (with the folder
 /// opened as the project first when `project`).
 fn open_in_background(
@@ -676,7 +676,7 @@ fn the_watcher_reports_changes_made_outside(cx: &mut TestAppContext) {
     assert!(
         h.files_changed()
             .iter()
-            .all(|c| !c.path.to_string_lossy().contains(".pyoxide-save-")),
+            .all(|c| !c.path.to_string_lossy().contains(".app-save-")),
         "{:?}",
         h.files_changed()
     );

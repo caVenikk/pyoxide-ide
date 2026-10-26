@@ -190,8 +190,8 @@ const BUILTIN: [&str; 6] = [
     "Islands Dark",
     "Islands Light",
     "-",
-    "Pyoxide Dark",
-    "Pyoxide Light",
+    "App Dark",
+    "App Light",
     "-",
 ];
 
@@ -232,15 +232,15 @@ fn the_theme_combo_switches_at_once_and_cancel_keeps_it(cx: &mut TestAppContext)
     h.invoke("settings.open", json!({"page": "appearance"}));
     h.invoke(
         "settings.edit",
-        json!({"field": "theme", "value": "pyoxide-light"}),
+        json!({"field": "theme", "value": "app-light"}),
     );
-    assert_eq!(h.shown(), "pyoxide-light");
+    assert_eq!(h.shown(), "app-light");
     // An id the catalog does not know changes nothing.
     h.invoke(
         "settings.edit",
         json!({"field": "theme", "value": "no-such-theme"}),
     );
-    assert_eq!(h.shown(), "pyoxide-light");
+    assert_eq!(h.shown(), "app-light");
 }
 
 #[gpui::test]
@@ -272,8 +272,8 @@ fn the_editor_scheme_waits_for_apply_and_follows_the_theme(cx: &mut TestAppConte
     assert_eq!(h.shown(), "islands-dark");
     assert_eq!(editor_background(&mut h), ui::theme::color(light));
     // Another theme brings its own scheme.
-    h.invoke("settings.switch-theme", json!({"id": "pyoxide-dark"}));
-    assert_eq!(h.appearance()["editor_scheme"], json!("pyoxide-dark"));
+    h.invoke("settings.switch-theme", json!({"id": "app-dark"}));
+    assert_eq!(h.appearance()["editor_scheme"], json!("app-dark"));
 }
 
 #[gpui::test]
@@ -298,10 +298,10 @@ fn the_theme_popup_previews_the_selection_and_escape_restores(cx: &mut TestAppCo
     h.wait(300);
     assert_eq!(h.shown(), "islands-dark");
     h.wait(300);
-    assert_eq!(h.shown(), "pyoxide-dark");
+    assert_eq!(h.shown(), "app-dark");
     // Previewed, not stored.
     assert_eq!(h.appearance()["theme"], json!("islands-dark"));
-    assert_eq!(h.appearance()["shown"], json!("pyoxide-dark"));
+    assert_eq!(h.appearance()["shown"], json!("app-dark"));
     // Escape brings back the starting theme.
     h.invoke("menu.cancel", json!(null));
     assert!(h.popup().is_null());
@@ -395,8 +395,8 @@ fn the_gear_menu_and_quick_switch_open_the_theme_popup(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn the_stored_theme_is_used_at_start_and_pyoxide_theme_overrides_it(cx: &mut TestAppContext) {
-    let mut h = open_with(cx, "[appearance]\ntheme = \"pyoxide-light\"\n");
-    assert_eq!(h.shown(), "pyoxide-light");
+    let mut h = open_with(cx, "[appearance]\ntheme = \"app-light\"\n");
+    assert_eq!(h.shown(), "app-light");
     // `workbench.set-theme` stores the theme as the switchers do.
     h.invoke("workbench.set-theme", json!({"id": "islands-light"}));
     h.wait(1000);
@@ -407,14 +407,14 @@ fn the_stored_theme_is_used_at_start_and_pyoxide_theme_overrides_it(cx: &mut Tes
     );
     h.restart(None);
     assert_eq!(h.shown(), "islands-light");
-    // `PYOXIDE_THEME=dark` wins for the run, without being stored.
+    // `APP_THEME=dark` wins for the run, without being stored.
     h.restart(Some("dark"));
     assert_eq!(h.shown(), "islands-dark");
     assert_eq!(h.appearance()["pinned"], json!("islands-dark"));
     assert!(h.file_text().contains("islands-light"));
     // Until a theme is chosen.
-    h.invoke("settings.switch-theme", json!({"id": "pyoxide-dark"}));
-    assert_eq!(h.shown(), "pyoxide-dark");
+    h.invoke("settings.switch-theme", json!({"id": "app-dark"}));
+    assert_eq!(h.shown(), "app-dark");
     assert_eq!(h.appearance()["pinned"], Value::Null);
     // A theme the catalog does not know gives the default.
     h.invoke(
@@ -423,9 +423,9 @@ fn the_stored_theme_is_used_at_start_and_pyoxide_theme_overrides_it(cx: &mut Tes
     );
     assert_eq!(h.shown(), "islands-dark");
     // Switching to it changes nothing.
-    h.invoke("settings.switch-theme", json!({"id": "pyoxide-light"}));
+    h.invoke("settings.switch-theme", json!({"id": "app-light"}));
     h.invoke("settings.switch-theme", json!({"id": "gone"}));
-    assert_eq!(h.shown(), "pyoxide-light");
+    assert_eq!(h.shown(), "app-light");
 }
 
 #[gpui::test]

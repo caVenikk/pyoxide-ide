@@ -223,7 +223,7 @@ fn layout(root: &Path) {
 }
 
 fn settings(root: &Path) -> Option<String> {
-    std::fs::read_to_string(root.join(".oxide/project.toml")).ok()
+    std::fs::read_to_string(root.join(".app/project.toml")).ok()
 }
 
 /// The project root's location as the tree shows it.
@@ -485,9 +485,9 @@ fn source_folders_of_the_reference_are_imported_once(cx: &mut TestAppContext) {
     layout(&root);
     // A project Pyoxide opened before (its exclusions are stored) and the
     // reference IDE marks folders in.
-    std::fs::create_dir_all(root.join(".oxide")).unwrap();
+    std::fs::create_dir_all(root.join(".app")).unwrap();
     std::fs::write(
-        root.join(".oxide/project.toml"),
+        root.join(".app/project.toml"),
         "version = 1\n\n[exclusions]\npaths = [\"app/static\"]\n",
     )
     .unwrap();
