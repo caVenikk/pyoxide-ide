@@ -10,3 +10,8 @@ name = "DatabaseExplorer"
 [context.bindings]
 "alt-insert" = "db.explorer.new-data-source"
 "ctrl-alt-shift-s" = "db.explorer.properties"
+"up" = "db.explorer.up"
+"down" = "db.explorer.down"
+"right" = "db.explorer.expand-or-next"
+"left" = "db.explorer.collapse-or-parent"
+"enter" = "db.explorer.toggle"

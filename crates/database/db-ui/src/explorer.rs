@@ -83,6 +83,19 @@ ui::ui_commands! {
     /// Close every node of the tree.
     CollapseAll => "db.explorer.collapse-all", "Collapse All",
         "Closes every node of the Database tool window's tree, leaving the data sources.";
+    /// Select the row above.
+    SelectPrevious => "db.explorer.up", "Up", "Selects the row above in the Database tool window's tree.";
+    /// Select the row below.
+    SelectNext => "db.explorer.down", "Down", "Selects the row below in the Database tool window's tree.";
+    /// Open the selected node or go into it.
+    ExpandOrNext => "db.explorer.expand-or-next", "Expand",
+        "Opens the selected node of the Database tool window's tree, or selects its first child when it is open.";
+    /// Close the selected node or go to its parent.
+    CollapseOrParent => "db.explorer.collapse-or-parent", "Collapse",
+        "Closes the selected node of the Database tool window's tree, or selects its parent.";
+    /// Open or close the selected node.
+    ToggleSelected => "db.explorer.toggle", "Open or Close Node",
+        "Opens or closes the selected node of the Database tool window's tree (a double click does the same); nothing on a node without children.";
     /// Scroll to the selected row.
     Locate => "db.explorer.locate", "Select Opened Node",
         "Scrolls the Database tool window's tree to the selected row (the selected data source when no row is).";
@@ -195,6 +208,11 @@ pub(crate) fn init(cx: &mut App) {
     cx.on_action(|_: &ExpandAll, cx| with_target(cx, |e, _, cx| e.expand_all(cx)));
     cx.on_action(|_: &CollapseAll, cx| with_target(cx, |e, _, cx| e.collapse_all(cx)));
     cx.on_action(|_: &Locate, cx| with_target(cx, |e, _, cx| e.locate(cx)));
+    cx.on_action(|_: &SelectPrevious, cx| with_target(cx, |e, _, cx| e.move_selection(-1, cx)));
+    cx.on_action(|_: &SelectNext, cx| with_target(cx, |e, _, cx| e.move_selection(1, cx)));
+    cx.on_action(|_: &ExpandOrNext, cx| with_target(cx, |e, _, cx| e.expand_or_next(cx)));
+    cx.on_action(|_: &CollapseOrParent, cx| with_target(cx, |e, _, cx| e.collapse_or_parent(cx)));
+    cx.on_action(|_: &ToggleSelected, cx| with_target(cx, |e, _, cx| e.toggle_selected(cx)));
     ui::command::register_query(
         cx,
         "db.state",

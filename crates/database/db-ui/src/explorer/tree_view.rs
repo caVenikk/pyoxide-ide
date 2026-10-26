@@ -410,6 +410,90 @@ impl Explorer {
         cx.notify();
     }
 
+    /// The index of the selected row.
+    fn selected_ix(&self) -> Option<usize> {
+        let key = self.tree.selected.as_ref()?;
+        self.tree.rows.iter().position(|r| &r.key == key)
+    }
+
+    fn select_ix(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(row) = self.tree.rows.get(ix) else {
+            return;
+        };
+        let key = row.key.clone();
+        self.select_row(key, cx);
+        // Scrolls as little as shows the row whole.
+        let row_top = cx.theme().metric(Metric::RowHeight) * ix as f32;
+        let top = -self.scroll.0.borrow().base_handle.offset().y;
+        let strategy = if row_top < top {
+            gpui::ScrollStrategy::Top
+        } else {
+            gpui::ScrollStrategy::Bottom
+        };
+        self.scroll.scroll_to_item(ix, strategy);
+    }
+
+    /// Up and Down: the row above or below (the first one when none is
+    /// selected).
+    pub(super) fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let last = self.tree.rows.len().saturating_sub(1);
+        let ix = match self.selected_ix() {
+            Some(ix) => ix.saturating_add_signed(delta).min(last),
+            None => 0,
+        };
+        self.select_ix(ix, cx);
+    }
+
+    /// Right: opens the selected node, or selects its first child when it
+    /// is open.
+    pub(super) fn expand_or_next(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.selected_ix() else {
+            return;
+        };
+        let row = self.tree.rows[ix].clone();
+        if !row.expandable {
+            return;
+        }
+        if !row.expanded {
+            self.toggle(row.key, cx);
+        } else if self
+            .tree
+            .rows
+            .get(ix + 1)
+            .is_some_and(|n| n.depth > row.depth)
+        {
+            self.select_ix(ix + 1, cx);
+        }
+    }
+
+    /// Left: closes the selected node, or selects its parent.
+    pub(super) fn collapse_or_parent(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.selected_ix() else {
+            return;
+        };
+        let row = self.tree.rows[ix].clone();
+        if row.expandable && row.expanded {
+            self.toggle(row.key, cx);
+        } else if let Some(parent) = self.tree.rows[..ix]
+            .iter()
+            .rposition(|r| r.depth < row.depth)
+        {
+            self.select_ix(parent, cx);
+        }
+    }
+
+    /// Enter and a double click: opens or closes the selected node.
+    /// Opening anything else (a table's editor) is not there yet.
+    pub(super) fn toggle_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.selected_ix() else {
+            return;
+        };
+        let row = self.tree.rows[ix].clone();
+        if row.expandable {
+            self.toggle(row.key, cx);
+        }
+    }
+
     pub(super) fn select_row(&mut self, key: RowKey, cx: &mut Context<Self>) {
         self.selected = Some(key.source.to_string());
         self.tree.selected = Some(key);
@@ -739,7 +823,7 @@ impl Explorer {
                 window.focus(&this.focus);
                 this.select_row(click_key.clone(), cx);
                 if e.click_count() >= 2 {
-                    this.toggle(click_key.clone(), cx);
+                    this.toggle_selected(cx);
                 }
             }))
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())

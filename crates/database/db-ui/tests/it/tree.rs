@@ -220,3 +220,136 @@ fn expand_all_and_collapse_all_open_and_close_the_tree(cx: &mut TestAppContext) 
     h.invoke("db.explorer.collapse-all", Value::Null);
     assert_eq!(rows(&mut h).len(), 1);
 }
+
+/// Clicks the row `name` `count` times in a row (the last one a double click
+/// when `count` is 2).
+fn click_row(h: &mut Harness, name: &str, count: usize) {
+    use gpui::{Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
+    let row = vcx
+        .debug_bounds(Box::leak(format!("database-row:{name}").into_boxed_str()))
+        .unwrap_or_else(|| panic!("the row {name} is drawn"));
+    for click_count in 1..=count {
+        vcx.simulate_event(MouseDownEvent {
+            position: row.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count,
+            first_mouse: false,
+        });
+        vcx.simulate_event(MouseUpEvent {
+            position: row.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count,
+        });
+    }
+    h.draw();
+}
+
+fn selected(h: &mut Harness) -> Option<String> {
+    state(h)["explorer"]["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["selected"] == true)
+        .map(|r| r["path"].as_str().unwrap().to_owned())
+}
+
+fn with_cache(cx: &mut TestAppContext) -> ((tempfile::TempDir, tempfile::TempDir), Harness<'_>) {
+    let (dir, root) = project();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let cache = ModelCache::new(cache_dir.path());
+    cache
+        .store(&Model::from_snapshot(
+            DataSourceId::from(NAME),
+            demo_snapshot(),
+        ))
+        .unwrap();
+    let store = FakeStore::new("");
+    store.set_model_cache(cache_dir.path());
+    store.set_connections(Arc::new(NoServer::default()));
+    let h = open(cx, store, &root);
+    // The folders live as long as the harness is used.
+    ((dir, cache_dir), h)
+}
+
+/// A double click or Enter opens and closes a data source and any node
+/// with children; Properties stays on its command.
+#[gpui::test]
+fn double_click_and_enter_open_and_close_nodes(cx: &mut TestAppContext) {
+    let (_dir, mut h) = with_cache(cx);
+    assert_eq!(rows(&mut h).len(), 1);
+
+    // One click selects, a double click opens.
+    click_row(&mut h, NAME, 1);
+    assert_eq!(rows(&mut h).len(), 1);
+    assert_eq!(selected(&mut h).as_deref(), Some(NAME));
+    click_row(&mut h, NAME, 2);
+    wait_for(&mut h, "the cached model", |s| {
+        s["explorer"]["tree"]["data_sources"][NAME]["has_model"] == true
+    });
+    assert_eq!(rows(&mut h).len(), 2, "{:?}", rows(&mut h));
+    assert!(state(&mut h)["dialog"].is_null());
+
+    // Enter closes it and opens it again.
+    h.press("enter");
+    assert_eq!(rows(&mut h).len(), 1);
+    h.press("enter");
+    assert_eq!(rows(&mut h).len(), 2);
+
+    // A double click on a database opens it; on a leaf nothing happens.
+    click_row(&mut h, "pyoxide", 2);
+    assert_eq!(rows(&mut h).len(), 4);
+    h.invoke(
+        "db.explorer.expand",
+        json!({ "path": format!("{NAME}/pyoxide/demo/tables") }),
+    );
+    let leaf = format!("{NAME}/pyoxide/demo/tables/audit_log");
+    h.invoke(
+        "db.explorer.collapse",
+        json!({ "path": format!("{NAME}/pyoxide/demo/tables/audit_log") }),
+    );
+    click_row(&mut h, "audit_log", 1);
+    assert_eq!(selected(&mut h).as_deref(), Some(leaf.as_str()));
+    let before = rows(&mut h);
+    h.press("enter");
+    click_row(&mut h, "audit_log", 2);
+    assert_eq!(rows(&mut h), before, "a table has no children yet");
+    assert!(state(&mut h)["dialog"].is_null());
+}
+
+/// The arrow keys move through the rows, open and close nodes and go to
+/// the first child or the parent.
+#[gpui::test]
+fn arrow_keys_walk_the_tree(cx: &mut TestAppContext) {
+    let (_dir, mut h) = with_cache(cx);
+    click_row(&mut h, NAME, 1);
+    h.press("right");
+    wait_for(&mut h, "the cached model", |s| {
+        s["explorer"]["tree"]["data_sources"][NAME]["has_model"] == true
+    });
+    assert_eq!(rows(&mut h).len(), 2);
+    assert_eq!(selected(&mut h).as_deref(), Some(NAME));
+    // Right on an open node goes to its first child, then opens it.
+    h.press("right");
+    assert_eq!(selected(&mut h), Some(format!("{NAME}/pyoxide")));
+    h.press("right");
+    h.press("down");
+    assert_eq!(selected(&mut h), Some(format!("{NAME}/pyoxide/demo")));
+    // Left closes an open node, then goes to the parent.
+    h.press("right");
+    let open = rows(&mut h).len();
+    h.press("left");
+    assert!(rows(&mut h).len() < open);
+    assert_eq!(selected(&mut h), Some(format!("{NAME}/pyoxide/demo")));
+    h.press("left");
+    assert_eq!(selected(&mut h), Some(format!("{NAME}/pyoxide")));
+    h.press("left");
+    h.press("left");
+    assert_eq!(selected(&mut h).as_deref(), Some(NAME));
+    // The ends of the list stay.
+    h.press("up");
+    assert_eq!(selected(&mut h).as_deref(), Some(NAME));
+}

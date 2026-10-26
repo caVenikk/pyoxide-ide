@@ -520,8 +520,7 @@ fn the_problem_fits_the_list_and_the_splitter_drags(cx: &mut TestAppContext) {
 }
 
 /// A double click or Enter on a data source of the tool window selects
-/// it and leaves Properties to its own command (in the reference they
-/// expand the data source's tree).
+/// it and opens its tree; Properties is left to its own command.
 #[gpui::test]
 fn double_click_and_enter_do_not_open_properties(cx: &mut TestAppContext) {
     use gpui::{Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
@@ -532,7 +531,7 @@ fn double_click_and_enter_do_not_open_properties(cx: &mut TestAppContext) {
     let main: gpui::AnyWindowHandle = h.window.into();
     let row = {
         let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
-        vcx.debug_bounds("database-source-local")
+        vcx.debug_bounds("database-row:local")
             .expect("the row is drawn")
     };
     let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
