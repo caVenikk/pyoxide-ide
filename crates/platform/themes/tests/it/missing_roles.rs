@@ -70,10 +70,13 @@ fn an_old_theme_loads_with_the_values_of_its_base_and_no_message() {
 fn the_recorded_base_supplies_the_roles() {
     let text = old_file(ThemeKind::Dark, "old").replace(
         "id = \"old\"",
-        &format!("id = \"old\"\nbase = \"{}\"", builtin::DARK_ID),
+        &format!("id = \"old\"\nbase = \"{}\"", builtin::dark_id()),
     );
     let file = ThemeFile::from_toml(&text, "old.toml").unwrap();
-    assert_eq!(file.theme.base.as_deref(), Some(builtin::DARK_ID));
+    assert_eq!(
+        file.theme.base.as_deref(),
+        Some(builtin::dark_id().as_str())
+    );
     let mut registry = themes::Registry::with_builtin();
     registry.insert(file).unwrap();
     let theme = registry.resolve("old").unwrap();

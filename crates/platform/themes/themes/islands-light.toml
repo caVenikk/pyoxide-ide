@@ -16,7 +16,7 @@
 #   python/pluginResources/colorSchemes/PythonDarcula.xml
 #   python/pluginResources/colorSchemes/PythonDefault.xml
 # Roles these files do not define, metrics and fonts come from the
-# pyoxide-dark and pyoxide-light themes.
+# base themes (`base-dark.toml`, `base-light.toml`).
 
 [theme]
 format = 1

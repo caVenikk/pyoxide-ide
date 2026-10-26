@@ -15,8 +15,8 @@
 //! `ENV`, which an interactive sh reads. cmd.exe and other shells run
 //! without integration.
 //!
-//! The scripts to source go to the shell as `__PYOXIDE_SOURCE_1`,
-//! `__PYOXIDE_SOURCE_2`, ..., each `<script>\n<argument>\n...`.
+//! The scripts to source go to the shell as `__IDE_SOURCE_1`,
+//! `__IDE_SOURCE_2`, ..., each `<script>\n<argument>\n...`.
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -26,18 +26,18 @@ use crate::customizer::SourceScript;
 use crate::start::{Os, ShellCommand, ShellKind};
 
 /// The prefix of the variables naming the scripts to source
-/// (`__PYOXIDE_SOURCE_1`, ...).
-pub const SOURCE_VAR_PREFIX: &str = "__PYOXIDE_SOURCE_";
+/// (`__IDE_SOURCE_1`, ...).
+pub const SOURCE_VAR_PREFIX: &str = "__IDE_SOURCE_";
 /// zsh: the folder of the integration's startup files.
-pub const ZSH_DIR_VAR: &str = "__PYOXIDE_ZSH_DIR";
+pub const ZSH_DIR_VAR: &str = "__IDE_ZSH_DIR";
 /// zsh: the `ZDOTDIR` the shell would have had.
-pub const ORIGINAL_ZDOTDIR_VAR: &str = "__PYOXIDE_ORIGINAL_ZDOTDIR";
+pub const ORIGINAL_ZDOTDIR_VAR: &str = "__IDE_ORIGINAL_ZDOTDIR";
 /// bash: the shell was asked to be a login shell.
-pub const LOGIN_SHELL_VAR: &str = "__PYOXIDE_LOGIN_SHELL";
+pub const LOGIN_SHELL_VAR: &str = "__IDE_LOGIN_SHELL";
 /// bash: the `--rcfile` the user's command line named.
-pub const USER_RCFILE_VAR: &str = "__PYOXIDE_USER_RCFILE";
+pub const USER_RCFILE_VAR: &str = "__IDE_USER_RCFILE";
 /// sh: the `ENV` the shell would have had.
-pub const USER_ENV_VAR: &str = "__PYOXIDE_USER_ENV";
+pub const USER_ENV_VAR: &str = "__IDE_USER_ENV";
 
 /// Variables the reference sets with its integration so that Fig and
 /// Amazon Q (CodeWhisperer) do not start a nested shell without it.
@@ -48,10 +48,10 @@ const NESTED_SHELL_VARS: [(&str, &str); 3] = [
 ];
 
 const ZSH_DIR: &str = "zsh";
-const BASH_SCRIPT: &str = "bash/pyoxide-integration.bash";
-const SH_SCRIPT: &str = "bash/pyoxide-integration.sh";
-const FISH_SCRIPT: &str = "fish/pyoxide-integration.fish";
-const POWERSHELL_SCRIPT: &str = "powershell/pyoxide-integration.ps1";
+const BASH_SCRIPT: &str = "bash/shell-integration.bash";
+const SH_SCRIPT: &str = "bash/shell-integration.sh";
+const FISH_SCRIPT: &str = "fish/shell-integration.fish";
+const POWERSHELL_SCRIPT: &str = "powershell/shell-integration.ps1";
 /// Written last: the folder is complete.
 const COMPLETE: &str = ".complete";
 
@@ -83,24 +83,24 @@ const SCRIPTS: [Script; 10] = [
         text: include_str!("zsh/source-original.zsh"),
     },
     Script {
-        path: "zsh/pyoxide-integration.zsh",
-        text: include_str!("zsh/pyoxide-integration.zsh"),
+        path: "zsh/shell-integration.zsh",
+        text: include_str!("zsh/shell-integration.zsh"),
     },
     Script {
         path: BASH_SCRIPT,
-        text: include_str!("bash/pyoxide-integration.bash"),
+        text: include_str!("bash/shell-integration.bash"),
     },
     Script {
         path: SH_SCRIPT,
-        text: include_str!("bash/pyoxide-integration.sh"),
+        text: include_str!("bash/shell-integration.sh"),
     },
     Script {
         path: FISH_SCRIPT,
-        text: include_str!("fish/pyoxide-integration.fish"),
+        text: include_str!("fish/shell-integration.fish"),
     },
     Script {
         path: POWERSHELL_SCRIPT,
-        text: include_str!("powershell/pyoxide-integration.ps1"),
+        text: include_str!("powershell/shell-integration.ps1"),
     },
 ];
 
@@ -131,9 +131,10 @@ pub fn version() -> String {
 }
 
 /// Where the integration folders are written by default:
-/// `pyoxide/shell-integration` in the user's cache folder.
+/// `shell-integration` in the application's folder (`app_info::slug`) of the
+/// user's cache folder.
 pub fn default_base_dir() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("pyoxide").join("shell-integration"))
+    dirs::cache_dir().map(|d| d.join(app_info::slug()).join("shell-integration"))
 }
 
 /// The folder of this version's scripts in `base`, written unless it is
@@ -303,7 +304,7 @@ fn drop_login(args: &mut Vec<String>) -> bool {
     args.len() != before
 }
 
-/// `__PYOXIDE_SOURCE_<n>` for each script that can be passed this way (no
+/// `__IDE_SOURCE_<n>` for each script that can be passed this way (no
 /// line break or NUL in its path or arguments, a UTF-8 path).
 pub fn source_vars(sources: &[SourceScript]) -> Vec<(String, String)> {
     let passable = |s: &str| !s.contains(['\n', '\r', '\0']);
@@ -435,7 +436,7 @@ mod tests {
         assert_eq!(get(&out.env, ZSH_DIR_VAR), Some(zsh_dir.as_str()));
         assert_eq!(get(&out.env, ORIGINAL_ZDOTDIR_VAR), Some("/u/.config/zsh"));
         assert_eq!(
-            get(&out.env, "__PYOXIDE_SOURCE_1"),
+            get(&out.env, "__IDE_SOURCE_1"),
             Some("/p/.venv/bin/activate")
         );
         assert_eq!(get(&out.env, "FIG_TERM"), Some("1"));
@@ -444,7 +445,7 @@ mod tests {
         let empty = |name: &str| (name == "ZDOTDIR").then(String::new);
         let out = inject(Os::Linux, dir, &cmd, &[], &empty, None).unwrap();
         assert_eq!(get(&out.env, ORIGINAL_ZDOTDIR_VAR), None);
-        assert_eq!(get(&out.env, "__PYOXIDE_SOURCE_1"), None);
+        assert_eq!(get(&out.env, "__IDE_SOURCE_1"), None);
     }
 
     #[test]
@@ -501,7 +502,7 @@ mod tests {
         assert_eq!(get(&out.env, LOGIN_SHELL_VAR), Some("1"));
         assert_eq!(get(&out.env, USER_ENV_VAR), None);
         assert_eq!(
-            get(&out.env, "__PYOXIDE_SOURCE_1"),
+            get(&out.env, "__IDE_SOURCE_1"),
             Some("/p/.venv/bin/activate")
         );
         // The user's ENV is read by the script; an empty one is kept as it
@@ -558,7 +559,7 @@ mod tests {
             )
         );
         assert_eq!(
-            get(&out.env, "__PYOXIDE_SOURCE_1"),
+            get(&out.env, "__IDE_SOURCE_1"),
             Some("/p/.venv/bin/activate")
         );
     }
@@ -583,10 +584,10 @@ mod tests {
             source_vars(&sources),
             vec![
                 (
-                    "__PYOXIDE_SOURCE_1".to_owned(),
+                    "__IDE_SOURCE_1".to_owned(),
                     "/opt/conda/bin/activate\n/opt/conda/envs/my env".to_owned()
                 ),
-                ("__PYOXIDE_SOURCE_2".to_owned(), "/x/y.sh\n\nb".to_owned()),
+                ("__IDE_SOURCE_2".to_owned(), "/x/y.sh\n\nb".to_owned()),
             ]
         );
     }

@@ -53,7 +53,7 @@ fn scheme_colours_attributes_and_inheritance() {
     assert_eq!(t.id, "skyline");
     assert_eq!(t.kind, ThemeKind::Dark);
     assert_eq!(item.report.kind, SourceKind::Scheme);
-    assert_eq!(item.report.base, "pyoxide-dark");
+    assert_eq!(item.report.base, "app-dark");
 
     // <colors>; the child overrides the parent's CARET_ROW_COLOR, the parent
     // supplies INDENT_GUIDE, "0" is black and 8 digits are RRGGBBAA.
@@ -348,7 +348,7 @@ fn a_scheme_for_a_light_background_selects_the_light_base() {
         .unwrap();
     let item = library.import_all().remove(0);
     assert_eq!(item.theme.kind, ThemeKind::Light);
-    assert_eq!(item.report.base, "pyoxide-light");
+    assert_eq!(item.report.base, "app-light");
     assert_eq!(item.theme.ui[UiRole::EditorBackground], rgba("#fbfaf5"));
 }
 
@@ -546,7 +546,7 @@ fn unknown_parent_theme_is_a_warning() {
     let items = plugin_imports();
     let item = by_name(&items, "Orphan");
     assert_eq!(item.theme.kind, ThemeKind::Light);
-    assert_eq!(item.report.base, "pyoxide-light");
+    assert_eq!(item.report.base, "app-light");
     assert_eq!(item.theme.ui[UiRole::Surface], rgba("#f4efe6"));
     assert_eq!(item.theme.ui[UiRole::Text], rgba("#2b2723"));
     let warn = warnings(item)
@@ -1313,9 +1313,9 @@ fn other_parents_keep_the_original_base() {
     for parent in ["Darcula", "IntelliJ", "ExperimentalDark", "Unknown Theme"] {
         let item = import_leaf(parent, Some(parent != "IntelliJ"));
         let expected = if parent == "IntelliJ" {
-            "pyoxide-light"
+            "app-light"
         } else {
-            "pyoxide-dark"
+            "app-dark"
         };
         assert_eq!(item.report.base, expected, "{parent}");
     }

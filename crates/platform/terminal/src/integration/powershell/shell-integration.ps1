@@ -1,49 +1,49 @@
-# Pyoxide shell integration for PowerShell (Windows PowerShell 5.1 and
-# PowerShell 7). Pyoxide starts it as
+# The IDE shell integration for PowerShell (Windows PowerShell 5.1 and
+# PowerShell 7). the IDE starts it as
 # `pwsh -NoExit -ExecutionPolicy Bypass -File <this file>`, which runs after
 # the user's profile. The file:
-# - runs the scripts Pyoxide names (a virtual environment's `Activate.ps1`);
+# - runs the scripts the IDE names (a virtual environment's `Activate.ps1`);
 # - reports the working directory (OSC 7) and marks the prompt and the
 #   commands with their exit codes (OSC 133 A, B, C, D) for the terminal.
 # The prompt and PSReadLine hooks are adapted from the IntelliJ Community
 # terminal plugin (Apache-2.0), see NOTICE.
 
-# The scripts to run: __PYOXIDE_SOURCE_1, __PYOXIDE_SOURCE_2, ..., each
+# The scripts to run: __IDE_SOURCE_1, __IDE_SOURCE_2, ..., each
 # "<script>`n<argument>`n...", dot-sourced.
-$__PyoxideIndex = 1
+$__IdeIndex = 1
 while ($true) {
-  $__PyoxideName = "__PYOXIDE_SOURCE_$__PyoxideIndex"
-  $__PyoxideValue = [Environment]::GetEnvironmentVariable($__PyoxideName)
-  if ([string]::IsNullOrEmpty($__PyoxideValue)) {
+  $__IdeName = "__IDE_SOURCE_$__IdeIndex"
+  $__IdeValue = [Environment]::GetEnvironmentVariable($__IdeName)
+  if ([string]::IsNullOrEmpty($__IdeValue)) {
     break
   }
-  Remove-Item -LiteralPath "Env:$__PyoxideName" -ErrorAction SilentlyContinue
-  $__PyoxideParts = @($__PyoxideValue -split "`n")
-  $__PyoxideArgs = @()
-  if ($__PyoxideParts.Count -gt 1) {
-    $__PyoxideArgs = @($__PyoxideParts[1..($__PyoxideParts.Count - 1)])
+  Remove-Item -LiteralPath "Env:$__IdeName" -ErrorAction SilentlyContinue
+  $__IdeParts = @($__IdeValue -split "`n")
+  $__IdeArgs = @()
+  if ($__IdeParts.Count -gt 1) {
+    $__IdeArgs = @($__IdeParts[1..($__IdeParts.Count - 1)])
   }
-  . $__PyoxideParts[0] @__PyoxideArgs
-  $__PyoxideIndex++
+  . $__IdeParts[0] @__IdeArgs
+  $__IdeIndex++
 }
-Remove-Variable -Name __PyoxideIndex, __PyoxideName, __PyoxideValue, __PyoxideParts, __PyoxideArgs -ErrorAction SilentlyContinue
+Remove-Variable -Name __IdeIndex, __IdeName, __IdeValue, __IdeParts, __IdeArgs -ErrorAction SilentlyContinue
 
 # The hooks need the full language (not in Constrained Language Mode).
 if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
-  $Global:__PyoxideState = @{
+  $Global:__IdeState = @{
     # A command runs (between C and D).
     Running = $false
     OriginalPrompt = $function:prompt
     OriginalReadLine = $null
   }
 
-  function Global:__PyoxideOsc([string]$Body) {
+  function Global:__IdeOsc([string]$Body) {
     return "$([char]0x1B)]$Body$([char]0x07)"
   }
 
   # OSC 7: the working directory as a file URL ('%' and control characters
   # percent-encoded); only for folders of the file system.
-  function Global:__PyoxideCwd {
+  function Global:__IdeCwd {
     if ($PWD.Provider.Name -ne 'FileSystem') {
       return ''
     }
@@ -53,42 +53,42 @@ if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
     if (-not $Path.StartsWith('/')) {
       $Path = "/$Path"
     }
-    return Global:__PyoxideOsc "7;file://$([Environment]::MachineName)$Path"
+    return Global:__IdeOsc "7;file://$([Environment]::MachineName)$Path"
   }
 
   function Global:prompt {
     $Success = $Global:?
     $ExitCode = $Global:LASTEXITCODE
     $Result = ''
-    if ($Global:__PyoxideState.Running) {
-      $Global:__PyoxideState.Running = $false
+    if ($Global:__IdeState.Running) {
+      $Global:__IdeState.Running = $false
       $Code = if ($Success) { 0 } elseif ($ExitCode -is [int] -and $ExitCode -ne 0) { $ExitCode } else { 1 }
-      $Result += Global:__PyoxideOsc "133;D;$Code"
+      $Result += Global:__IdeOsc "133;D;$Code"
     }
-    $Result += Global:__PyoxideCwd
-    $Result += Global:__PyoxideOsc '133;A'
+    $Result += Global:__IdeCwd
+    $Result += Global:__IdeOsc '133;A'
     # Restores $? for the original prompt; the error is not shown.
     if ($Success -eq $false) {
       Write-Error 'error' -ErrorAction Ignore
     }
-    if ($null -ne $Global:__PyoxideState.OriginalPrompt) {
-      $Result += & $Global:__PyoxideState.OriginalPrompt
+    if ($null -ne $Global:__IdeState.OriginalPrompt) {
+      $Result += & $Global:__IdeState.OriginalPrompt
     }
     else {
       $Result += "PS $($ExecutionContext.SessionState.Path.CurrentLocation)$('>' * ($NestedPromptLevel + 1)) "
     }
-    $Result += Global:__PyoxideOsc '133;B'
+    $Result += Global:__IdeOsc '133;B'
     return $Result
   }
 
   # C: the line PSReadLine read is about to run (not an empty line).
   if ($null -ne (Get-Module -Name PSReadLine)) {
-    $Global:__PyoxideState.OriginalReadLine = $function:PSConsoleHostReadLine
+    $Global:__IdeState.OriginalReadLine = $function:PSConsoleHostReadLine
     function Global:PSConsoleHostReadLine {
-      $Line = & $Global:__PyoxideState.OriginalReadLine
+      $Line = & $Global:__IdeState.OriginalReadLine
       if (-not [string]::IsNullOrWhiteSpace($Line)) {
-        $Global:__PyoxideState.Running = $true
-        [Console]::Write((Global:__PyoxideOsc '133;C'))
+        $Global:__IdeState.Running = $true
+        [Console]::Write((Global:__IdeOsc '133;C'))
       }
       return $Line
     }

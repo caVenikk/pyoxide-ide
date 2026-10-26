@@ -1,72 +1,71 @@
-# Pyoxide Dark: the default dark theme. The colours are original to this
-# project (a cool grey-blue base with an oxidised copper accent).
+# {name} Light: the default light theme. The colours are original to this
+# project (a warm off-white base with an oxidised copper accent).
 
 [theme]
 format = 1
-id = "pyoxide-dark"
-name = "Pyoxide Dark"
-kind = "dark"
-description = "Default dark theme"
+id = "{slug}-light"
+name = "{name} Light"
+kind = "light"
+description = "Default light theme"
 
 [palette]
 # Surfaces
-bg-editor = "#15181d"
-bg-deep = "#111418"
-bg-panel = "#1b1f26"
-bg-side = "#171b21"
-bg-raised = "#252a33"
-bg-hover = "#262c36"
-bg-pressed = "#2f3640"
-bg-selected = "#2d4560"
-bg-selected-inactive = "#2a3340"
-bg-current-line = "#1b2029"
-line = "#2b313b"
-line-strong = "#667286"
+bg-editor = "#fcfbf9"
+bg-white = "#ffffff"
+bg-panel = "#f1efeb"
+bg-side = "#f6f4f1"
+bg-hover = "#e6e3de"
+bg-pressed = "#dbd7d1"
+bg-selected = "#c9dcf5"
+bg-selected-inactive = "#dde4ee"
+bg-current-line = "#f3f1ec"
+line = "#d8d4cd"
+line-strong = "#857f75"
 # Text
-fg = "#d5dae2"
-fg-bright = "#f1f4f8"
-fg-muted = "#929cab"
-fg-dim = "#6a7385"
-fg-gutter = "#7b8597"
+fg = "#1f242b"
+fg-bright = "#0f1318"
+fg-muted = "#58616e"
+fg-dim = "#7b838f"
+fg-gutter = "#667080"
 # Hues
-copper = "#e0814a"
-copper-soft = "#e58a5f"
-copper-light = "#efa774"
-gold = "#e6c36a"
-sand = "#d9c7a6"
-green = "#9bc97c"
-leaf = "#7cc98a"
-teal = "#55c9b8"
-teal-light = "#8ed1c6"
-cyan = "#6fc5e0"
-blue = "#6fb1ff"
-blue-code = "#79b4ff"
-steel = "#b4cdee"
-violet = "#c79df0"
-rose = "#e07a9b"
-red = "#f27775"
-amber = "#e8b45a"
+copper = "#b4511d"
+copper-soft = "#b0501c"
+copper-light = "#9f4515"
+gold = "#8a6200"
+sand = "#7a5a1f"
+green = "#3d7a1f"
+leaf = "#1f7a3d"
+teal = "#0b7a6e"
+teal-light = "#0f766e"
+cyan = "#0a6f94"
+blue = "#0b62d6"
+blue-code = "#1a5fc4"
+steel = "#3a5f8f"
+violet = "#7a3fc2"
+rose = "#b83a63"
+red = "#c62f2f"
+amber = "#946000"
 
 [ui]
 surface = "$bg-panel"
 surface-alt = "$bg-side"
-surface-raised = "$bg-raised"
-input = "$bg-deep"
+surface-raised = "$bg-white"
+input = "$bg-white"
 border = "$line"
 border-input = "$line-strong"
-divider = "#262c35"
-popup-border = "#3a414d"
+divider = "#e2dfd9"
+popup-border = "$line"
 text = "$fg"
 text-muted = "$fg-muted"
 text-disabled = "$fg-dim"
 text-link = "$blue"
-shortcut = "#b9c0cb"
+shortcut = "#3c434d"
 accent = "$copper"
-on-accent = "#1a110b"
-focus = "$copper-light"
+on-accent = "#ffffff"
+focus = "$copper"
 hover = "$bg-hover"
 pressed = "$bg-pressed"
-segmented-selected = "$bg-raised"
+segmented-selected = "$bg-white"
 segmented-selected-border = "$fg-dim"
 button-background = "$bg-panel"
 button-border = "$line-strong"
@@ -81,210 +80,210 @@ danger = "$red"
 warning = "$amber"
 success = "$leaf"
 info = "$blue"
-danger-bg = "#3a2224"
-warning-bg = "#38301c"
-success-bg = "#1f3326"
-info-bg = "#1d2f45"
+danger-bg = "#fbe3e3"
+warning-bg = "#fbefd2"
+success-bg = "#ddf1e3"
+info-bg = "#dbe9fb"
 
-title-bar = "$bg-deep"
-toolbar = "$bg-deep"
-status-bar = "$bg-deep"
+title-bar = "#e9e6e1"
+toolbar = "#e9e6e1"
+status-bar = "#e9e6e1"
 status-bar-text = "$fg-muted"
 tool-window = "$bg-panel"
 tool-window-header = "$bg-panel"
-tool-window-stripe = "$bg-deep"
+tool-window-stripe = "#e9e6e1"
 tab-bar = "$bg-editor"
 tab-active = "$bg-editor"
 tab-inactive = "$bg-editor"
-tab-hover = "#1f242c"
+tab-hover = "#dfdcd6"
 tab-active-text = "$fg-bright"
 tab-inactive-text = "$fg-muted"
 tab-underline = "$copper"
 tab-selected-inactive = "$bg-editor"
 tab-underline-inactive = "$line-strong"
-scrollbar = "#929cab59"
-scrollbar-hover = "#929cab8c"
+scrollbar = "#58616e59"
+scrollbar-hover = "#58616e8c"
 scrollbar-track = "#00000000"
 progress = "$copper"
 progress-track = "$line"
-notification = "$bg-raised"
-notification-border = "#3a414d"
+notification = "$bg-white"
+notification-border = "$line"
 notification-text = "$fg"
 notification-link = "$blue"
-notification-icon-hover = "#ffffff1a"
-notification-more = "#1f232b"
+notification-icon-hover = "#0000000f"
+notification-more = "#eceef2"
 notification-more-text = "$fg-muted"
-non-project-file = "#2a221d"
+non-project-file = "#fbf3e7"
 run-widget-running = "$leaf"
 run-widget-stop = "$red"
-run-widget-icon = "#ced0d6"
-run-widget-run-icon = "#57965c"
+run-widget-icon = "#6c707e"
+run-widget-run-icon = "#208a3c"
 run-widget-running-icon = "#ffffff"
-drag-and-drop-border = "#2f65ca"
-drag-and-drop-row = "#2f65ca33"
+drag-and-drop-border = "#2675bf"
+drag-and-drop-row = "#2675bf26"
 tree-text = "$fg"
-tree-indent-guide = "#505355"
-list-button-hover = "#3a5677"
-list-button-separator = "#ffffff33"
+tree-indent-guide = "#e6e6e6"
+list-button-hover = "#b3cdef"
+list-button-separator = "#ffffffb3"
 
 # Controls
-checkbox-background = "$bg-deep"
+checkbox-background = "$bg-white"
 checkbox-border = "$line-strong"
 checkbox-background-selected = "$copper"
 checkbox-border-selected = "$copper"
-checkbox-check = "#1a110b"
+checkbox-check = "#ffffff"
 checkbox-background-disabled = "$bg-panel"
 checkbox-border-disabled = "$line"
 checkbox-check-disabled = "$fg-dim"
 
-# Icons: the colours of the New UI icon palette (dark), so the icons keep
-# their own colours. Blue, Green and Red Solid have no dark colour.
-icon-gray-fill = "#43454a"
-icon-gray-secondary-stroke = "#6f737a"
-icon-gray-stroke = "#ced0d6"
-icon-blue-fill = "#25324d"
-icon-blue-solid = "#548af7"
-icon-blue-stroke = "#548af7"
-icon-green-fill = "#253627"
-icon-green-solid = "#57965c"
-icon-green-stroke = "#57965c"
-icon-red-fill = "#402929"
-icon-red-solid = "#db5c5c"
-icon-red-stroke = "#db5c5c"
-icon-yellow-fill = "#3d3223"
-icon-yellow-solid = "#f2c55c"
-icon-yellow-stroke = "#d6ae58"
-icon-orange-fill = "#45322b"
-icon-orange-stroke = "#c77d55"
-icon-purple-fill = "#2f2936"
-icon-purple-stroke = "#a571e6"
-icon-teal-fill = "#1d3838"
-icon-teal-stroke = "#24a394"
+# Icons: the colours of the New UI icon palette (light), so the icons keep
+# their own colours.
+icon-gray-fill = "#ebecf0"
+icon-gray-secondary-stroke = "#a8adbd"
+icon-gray-stroke = "#6c707e"
+icon-blue-fill = "#edf3ff"
+icon-blue-solid = "#4682fa"
+icon-blue-stroke = "#3574f0"
+icon-green-fill = "#f2fcf3"
+icon-green-solid = "#55a76a"
+icon-green-stroke = "#208a3c"
+icon-red-fill = "#fff7f7"
+icon-red-solid = "#e55765"
+icon-red-stroke = "#db3b4b"
+icon-yellow-fill = "#fffaeb"
+icon-yellow-solid = "#ffaf0f"
+icon-yellow-stroke = "#c27d04"
+icon-orange-fill = "#fff4eb"
+icon-orange-stroke = "#e56d17"
+icon-purple-fill = "#faf5ff"
+icon-purple-stroke = "#834df0"
+icon-teal-fill = "#f2fcfc"
+icon-teal-stroke = "#039ba1"
 
 editor-background = "$bg-editor"
 editor-text = "$fg"
 gutter = "$bg-editor"
 line-number = "$fg-gutter"
-line-number-active = "#c5ccd8"
+line-number-active = "#2c333c"
 caret = "$fg-bright"
 current-line = "$bg-current-line"
-editor-selection = "#3b6aa459"
-search-match = "#e0814a59"
-search-match-active = "#e0814a80"
-search-match-stripe = "#e0814a"
+editor-selection = "#3b6aa433"
+search-match = "#f2c14e73"
+search-match-active = "#f2a43ea6"
+search-match-stripe = "#d9a520"
 search-field = "$bg-editor"
 search-field-border = "$line"
 search-field-error = "$red"
 search-option-selected = "$bg-pressed"
-indent-guide = "#ffffff14"
-indent-guide-active = "#ffffff38"
-right-margin = "#ffffff14"
-tearline = "$line-strong"
-whitespace = "#ffffff33"
-soft-wrap-sign = "#ffffff33"
-completion-popup = "#232832"
-completion-selection = "#32405a"
+indent-guide = "#00000014"
+indent-guide-active = "#00000038"
+right-margin = "#00000014"
+tearline = "$line"
+whitespace = "#0000003d"
+soft-wrap-sign = "#0000003d"
+completion-popup = "#ffffff"
+completion-selection = "#d7e5f8"
 completion-match = "$copper-light"
-documentation-popup = "#232832"
-breakpoint = "#f2777547"
-execution-point = "#e8b45a47"
-execution-point-not-top = "#e8b45a24"
+documentation-popup = "#ffffff"
+breakpoint = "#c62f2f2e"
+execution-point = "#f2c14e66"
+execution-point-not-top = "#f2c14e33"
 bookmark = "$amber"
 
-gutter-added = "#5fbf7a"
+gutter-added = "#2f8f4e"
 gutter-modified = "$blue"
 gutter-deleted = "$red"
-gutter-whitespace-modified = "#5a4c3c"
-gutter-ignored-added = "#5fbf7a"
+gutter-whitespace-modified = "#e8dcc8"
+gutter-ignored-added = "#2f8f4e"
 gutter-ignored-modified = "$blue"
 gutter-ignored-deleted = "$red"
-stripe-added = "#4f9a67"
-stripe-modified = "#4d79b3"
-stripe-deleted = "#8a5a5a"
+stripe-added = "#9fd3ae"
+stripe-modified = "#a9c3ea"
+stripe-deleted = "#d6b4b4"
 marker-popup-border = "$line"
 marker-popup-toolbar = "$bg-panel"
 marker-popup-text = "$bg-current-line"
-diff-added = "#1f3a2a"
-diff-removed = "#472529"
-diff-changed = "#1f3350"
-diff-conflict = "#4a3a1c"
+diff-added = "#dff3e5"
+diff-removed = "#fbe0e0"
+diff-changed = "#dfeafa"
+diff-conflict = "#faeccb"
 git-added = "$leaf"
 git-modified = "$blue"
 git-deleted = "$red"
 git-renamed = "$violet"
 git-untracked = "$amber"
 git-ignored = "$fg-dim"
-git-conflict = "#ff8f6b"
-git-merged = "#c792d8"
+git-conflict = "#b8431c"
+git-merged = "#7a3fa8"
 
 diagnostic-error = "$red"
-diagnostic-warning = "$amber"
+diagnostic-warning = "#c47f00"
 diagnostic-info = "$blue"
 diagnostic-hint = "$fg-muted"
 diagnostic-error-stripe = "$red"
-diagnostic-warning-stripe = "$amber"
+diagnostic-warning-stripe = "#c47f00"
 diagnostic-weak-warning-stripe = "$blue"
 
 terminal-background = "$bg-editor"
 terminal-foreground = "$fg"
-terminal-black = "#76809a"
+terminal-black = "#2c333c"
 terminal-red = "$red"
 terminal-green = "$leaf"
 terminal-yellow = "$amber"
 terminal-blue = "$blue"
 terminal-magenta = "$violet"
 terminal-cyan = "$teal"
-terminal-white = "#c5ccd8"
-terminal-bright-black = "#8791a3"
-terminal-bright-red = "#ff9a98"
-terminal-bright-green = "#9fe3ab"
-terminal-bright-yellow = "#f3cb7e"
-terminal-bright-blue = "#98c9ff"
-terminal-bright-magenta = "#dbbcf7"
-terminal-bright-cyan = "#82e0d1"
-terminal-bright-white = "$fg-bright"
+terminal-white = "#5f6877"
+terminal-bright-black = "#4b5360"
+terminal-bright-red = "#b02020"
+terminal-bright-green = "#176b33"
+terminal-bright-yellow = "#7d5200"
+terminal-bright-blue = "#0950b0"
+terminal-bright-magenta = "#6a2fb0"
+terminal-bright-cyan = "#066276"
+terminal-bright-white = "#454c58"
 
 # The Terminal tool window: ANSI text and cell backgrounds, search
 # matches, command separators and the failed-command marker.
 terminal-default-background = "$bg-editor"
 terminal-default-foreground = "$fg"
-terminal-ansi-black = "#76809a"
+terminal-ansi-black = "#2c333c"
 terminal-ansi-red = "$red"
 terminal-ansi-green = "$leaf"
 terminal-ansi-yellow = "$amber"
 terminal-ansi-blue = "$blue"
 terminal-ansi-magenta = "$violet"
 terminal-ansi-cyan = "$teal"
-terminal-ansi-white = "#c5ccd8"
-terminal-ansi-bright-black = "#8791a3"
-terminal-ansi-bright-red = "#ff9a98"
-terminal-ansi-bright-green = "#9fe3ab"
-terminal-ansi-bright-yellow = "#f3cb7e"
-terminal-ansi-bright-blue = "#98c9ff"
-terminal-ansi-bright-magenta = "#dbbcf7"
-terminal-ansi-bright-cyan = "#82e0d1"
-terminal-ansi-bright-white = "$fg-bright"
-terminal-ansi-black-background = "$bg-deep"
+terminal-ansi-white = "#5f6877"
+terminal-ansi-bright-black = "#4b5360"
+terminal-ansi-bright-red = "#b02020"
+terminal-ansi-bright-green = "#176b33"
+terminal-ansi-bright-yellow = "#7d5200"
+terminal-ansi-bright-blue = "#0950b0"
+terminal-ansi-bright-magenta = "#6a2fb0"
+terminal-ansi-bright-cyan = "#066276"
+terminal-ansi-bright-white = "#454c58"
+terminal-ansi-black-background = "#2c333c"
 terminal-ansi-red-background = "$red"
 terminal-ansi-green-background = "$leaf"
 terminal-ansi-yellow-background = "$amber"
 terminal-ansi-blue-background = "$blue"
 terminal-ansi-magenta-background = "$violet"
 terminal-ansi-cyan-background = "$teal"
-terminal-ansi-white-background = "#c5ccd8"
+terminal-ansi-white-background = "#dcdfe4"
 terminal-ansi-bright-black-background = "#4b5360"
-terminal-ansi-bright-red-background = "#ff9a98"
-terminal-ansi-bright-green-background = "#9fe3ab"
-terminal-ansi-bright-yellow-background = "#f3cb7e"
-terminal-ansi-bright-blue-background = "#98c9ff"
-terminal-ansi-bright-magenta-background = "#dbbcf7"
-terminal-ansi-bright-cyan-background = "#82e0d1"
-terminal-ansi-bright-white-background = "$fg-bright"
-terminal-search-match = "#e0814a59"
+terminal-ansi-bright-red-background = "#b02020"
+terminal-ansi-bright-green-background = "#176b33"
+terminal-ansi-bright-yellow-background = "#7d5200"
+terminal-ansi-bright-blue-background = "#0950b0"
+terminal-ansi-bright-magenta-background = "#6a2fb0"
+terminal-ansi-bright-cyan-background = "#066276"
+terminal-ansi-bright-white-background = "#ffffff"
+terminal-search-match = "#f2c14e73"
 terminal-search-match-text = "$fg"
-terminal-search-match-current = "#e0814a80"
+terminal-search-match-current = "#f2a43ea6"
 terminal-search-match-current-text = "$fg"
-terminal-separator = "#262c35"
+terminal-separator = "#e2dfd9"
 terminal-error-marker = "$red"
 
 # The variables view of the debugger (Debugger.Variables.*).
@@ -304,9 +303,9 @@ string = { fg = "$green" }
 string-escape = { fg = "$teal" }
 string-escape-invalid = { fg = "$red", underline = "wavy", underline-color = "$red" }
 number = { fg = "$cyan" }
-comment = { fg = "#7e8899", italic = true }
-docstring = { fg = "#86a58f", italic = true }
-docstring-tag = { fg = "#9bb7a3", italic = true, bold = true }
+comment = { fg = "#69727f", italic = true }
+docstring = { fg = "#4f7a5c", italic = true }
+docstring-tag = { fg = "#3d6b4b", italic = true, bold = true }
 todo = { fg = "$amber", bold = true }
 function-decl = { fg = "$blue-code" }
 function-call = { fg = "$steel" }
@@ -316,46 +315,46 @@ class = { fg = "$gold" }
 class-decl = { fg = "$gold", bold = true }
 parameter = { fg = "$sand" }
 self = { fg = "$rose", italic = true }
-keyword-argument = { fg = "#c9b184" }
+keyword-argument = { fg = "#7a5d2a" }
 variable-reassigned = { underline = "single" }
-constant = { fg = "#d9a8f2" }
-attribute = { fg = "#b9c4d6" }
+constant = { fg = "#8a3fb5" }
+attribute = { fg = "#4b5a73" }
 builtin = { fg = "$teal" }
-decorator = { fg = "#d3a8f5" }
+decorator = { fg = "#7a3fc2" }
 annotation = { fg = "$teal-light" }
-dunder = { fg = "#5fc0c8", italic = true }
-fstring-expression = { bg = "#ffffff0d" }
+dunder = { fg = "#0b6b78", italic = true }
+fstring-expression = { bg = "#0000000a" }
 fstring-brace = { fg = "$amber" }
-operator = { fg = "#c2cad6" }
-punctuation = { fg = "#9aa3b2" }
-bracket = { fg = "#b4bccb" }
+operator = { fg = "#4a5361" }
+punctuation = { fg = "#5b6472" }
+bracket = { fg = "#4f5866" }
 tag = { fg = "$copper-soft" }
 tag-attribute = { fg = "$gold" }
 property-key = { fg = "$blue-code" }
 link = { fg = "$blue", underline = "single" }
 
 diagnostic-error = { underline = "wavy", underline-color = "$red" }
-diagnostic-warning = { underline = "wavy", underline-color = "$amber" }
+diagnostic-warning = { underline = "wavy", underline-color = "#c47f00" }
 diagnostic-info = { underline = "dotted", underline-color = "$blue" }
 diagnostic-hint = { underline = "dotted", underline-color = "$fg-muted" }
 diagnostic-unresolved = { fg = "$red", underline = "wavy", underline-color = "$red" }
-diagnostic-unused = { fg = "#707a8c" }
+diagnostic-unused = { fg = "#7b838f" }
 diagnostic-deprecated = { strikethrough = true }
-typo = { underline = "wavy", underline-color = "#7fbf8a" }
-matching-bracket = { bg = "#6fb1ff40", bold = true }
-unmatched-bracket = { bg = "#f2777547" }
-identifier-read = { bg = "#6fb1ff26" }
-identifier-write = { bg = "#e8b45a30" }
-folded-text = { fg = "$fg-muted", bg = "#ffffff12" }
-inlay-hint = { fg = "#8e98aa", bg = "#ffffff0d", italic = true }
+typo = { underline = "wavy", underline-color = "#2f8f4e" }
+matching-bracket = { bg = "#0b62d633", bold = true }
+unmatched-bracket = { bg = "#c62f2f33" }
+identifier-read = { bg = "#0b62d61f" }
+identifier-write = { bg = "#c47f0029" }
+folded-text = { fg = "$fg-muted", bg = "#0000000f" }
+inlay-hint = { fg = "#5f6877", bg = "#0000000a", italic = true }
 console-error = { fg = "$red" }
 console-input = { fg = "$teal-light" }
-console-system = { fg = "$fg" }
+console-system = { fg = "$blue" }
 debugger-inlined-values = { fg = "$fg-dim", italic = true }
 debugger-inlined-values-modified = { fg = "$gold", italic = true }
-debugger-inlined-values-execution-line = { fg = "#9fb4d4", italic = true }
-debugger-evaluated-expression = { bg = "#424242" }
-debugger-evaluated-expression-execution-line = { bg = "#474747" }
+debugger-inlined-values-execution-line = { fg = "#5a6f8f", italic = true }
+debugger-evaluated-expression = { bg = "#e5e5e5" }
+debugger-evaluated-expression-execution-line = { bg = "#bfbfbf" }
 reference-link = { fg = "$blue" }
 
 [font]

@@ -285,7 +285,7 @@ fn zsh() {
         "unsetunset"
     );
     assert_eq!(
-        sh.result("echo \"RESULT:${__PYOXIDE_ZSH_DIR-unset}${__PYOXIDE_SOURCE_1-unset}:END\""),
+        sh.result("echo \"RESULT:${__IDE_ZSH_DIR-unset}${__IDE_SOURCE_1-unset}:END\""),
         "unsetunset"
     );
     if login {
@@ -384,7 +384,7 @@ fn sh_on_macos() {
     let shrc = sh.home.join(".shrc").to_string_lossy().into_owned();
     assert_eq!(sh.result("echo \"RESULT:${ENV-unset}:END\""), shrc);
     assert_eq!(
-        sh.result("echo \"RESULT:${ALACRITTY_WINDOW_ID-unset}${__PYOXIDE_SOURCE_1-unset}:END\""),
+        sh.result("echo \"RESULT:${ALACRITTY_WINDOW_ID-unset}${__IDE_SOURCE_1-unset}:END\""),
         "unsetunset"
     );
     let snapshot = sh.session().snapshot();

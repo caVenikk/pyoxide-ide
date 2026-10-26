@@ -44,15 +44,15 @@ fn contrast_check_covers_many_pairs() {
 fn builtin_themes_are_registered_and_distinct() {
     let registry = Registry::with_builtin();
     let ids: Vec<&str> = registry.ids().collect();
-    assert_eq!(
-        ids,
-        [
-            builtin::ISLANDS_DARK_ID,
-            builtin::ISLANDS_LIGHT_ID,
-            builtin::DARK_ID,
-            builtin::LIGHT_ID
-        ]
-    );
+    // Sorted by id.
+    let mut expected = [
+        builtin::ISLANDS_DARK_ID.to_owned(),
+        builtin::ISLANDS_LIGHT_ID.to_owned(),
+        builtin::dark_id(),
+        builtin::light_id(),
+    ];
+    expected.sort();
+    assert_eq!(ids, expected);
     for kind in [ThemeKind::Dark, ThemeKind::Light] {
         let theme = builtin::default_theme(kind);
         assert_eq!(theme.kind, kind);

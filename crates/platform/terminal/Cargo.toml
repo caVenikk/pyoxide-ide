@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+app-info.workspace = true
 # The emulator and the pseudo-terminal; its types stay inside this crate.
 alacritty_terminal = { workspace = true }
 # The cache folder the shell integration scripts are written to.

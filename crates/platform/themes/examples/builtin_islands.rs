@@ -61,7 +61,7 @@ fn header(source: &str, commit: &str) -> String {
         out.push_str(&format!("#   {file}\n"));
     }
     out.push_str("# Roles these files do not define, metrics and fonts come from the\n");
-    out.push_str("# pyoxide-dark and pyoxide-light themes.\n\n");
+    out.push_str("# base themes (`base-dark.toml`, `base-light.toml`).\n\n");
     out
 }
 

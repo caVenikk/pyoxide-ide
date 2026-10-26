@@ -9,7 +9,7 @@ const FILE: &str = r##"
 [theme]
 id = "from-the-future"
 name = "From the future"
-extends = "pyoxide-dark"
+extends = "app-dark"
 
 [ui]
 accent = "#112233"
@@ -145,7 +145,7 @@ const NEWER: &str = r##"
 [theme]
 id = "newer"
 name = "Newer"
-extends = "pyoxide-dark"
+extends = "app-dark"
 a-new-header-field = "x"
 
 [ui]
@@ -168,7 +168,7 @@ fn unknown_attributes_and_header_fields_are_skipped_and_listed() {
         ]
     );
     assert_eq!(file.theme.id, "newer");
-    assert_eq!(file.theme.extends.as_deref(), Some("pyoxide-dark"));
+    assert_eq!(file.theme.extends.as_deref(), Some("app-dark"));
     let mut registry = Registry::with_builtin();
     registry.insert(file).unwrap();
     let theme = registry.resolve("newer").unwrap();
@@ -188,7 +188,7 @@ fn a_bad_value_of_a_known_attribute_or_header_field_is_still_an_error() {
     for text in [
         NEWER.replace("bold = true", "bold = \"loud\""),
         NEWER.replace("\"#aa0000\"", "\"red-ish\""),
-        NEWER.replace("extends = \"pyoxide-dark\"", "extends = 3"),
+        NEWER.replace("extends = \"app-dark\"", "extends = 3"),
         NEWER.replace("name = \"Newer\"", "kind = \"purple\""),
     ] {
         assert!(ThemeFile::parse_toml(&text, "bad.toml").is_err(), "{text}");

@@ -75,7 +75,7 @@ pub(crate) fn convert(inputs: Inputs<'_>) -> Imported {
             name: inputs.name.clone(),
             kind: inputs.kind,
             sources: inputs.sources,
-            base: builtin::import_id_for(base_kind, inputs.islands).to_owned(),
+            base: builtin::import_id_for(base_kind, inputs.islands),
             warnings: inputs.warnings,
             ..ImportReport::default()
         },
