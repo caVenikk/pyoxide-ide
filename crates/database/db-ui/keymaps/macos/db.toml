@@ -9,9 +9,26 @@
 name = "DatabaseExplorer"
 [context.bindings]
 "cmd-n" = "db.explorer.new-data-source"
+# Properties: the reference's menu shows ⌘I first.
+"cmd-i" = "db.explorer.properties"
 "cmd-;" = "db.explorer.properties"
 "up" = "db.explorer.up"
 "down" = "db.explorer.down"
 "right" = "db.explorer.expand-or-next"
 "left" = "db.explorer.collapse-or-parent"
 "enter" = "db.explorer.toggle"
+# The context menus' actions (refs DBCTX01-70): Refresh, Deactivate (Stop's
+# keystroke), Rename, Move, Quick Documentation, Copy Reference, Duplicate,
+# Generate DDL to Clipboard, Force Refresh, Remove Data Source / Drop
+# ($Delete).
+"cmd-r" = "db.explorer.refresh"
+"cmd-f2" = "db.explorer.deactivate"
+"shift-f6" = "db.explorer.rename"
+"alt-shift-up" = "db.explorer.move-up"
+"alt-shift-down" = "db.explorer.move-down"
+"f1" = "db.explorer.quick-doc"
+"alt-shift-cmd-c" = "db.explorer.copy-reference"
+"cmd-d" = "db.explorer.duplicate"
+"alt-shift-cmd-g" = "db.explorer.generate-ddl"
+"alt-shift-cmd-r" = "db.explorer.force-refresh"
+"delete" = "db.explorer.delete"

@@ -5,6 +5,7 @@
 //! [`DataSourceStore`]: this crate never sees a driver, `db-service` or an
 //! async runtime, and passwords only pass through it as [`db_core::Secret`].
 
+pub mod ddl;
 pub mod dialog;
 pub mod explorer;
 pub mod fixture;
@@ -76,6 +77,26 @@ pub mod icons {
     pub const PACKAGE: IconName = IconName("db/package");
     pub const SYNONYM: IconName = IconName("db/synonym");
     pub const ERROR: IconName = IconName("db/error");
+    // Rows of the tree's context menus.
+    pub const COMPARE: IconName = IconName("db/compare");
+    pub const SQL_GENERATOR: IconName = IconName("db/sqlGenerator");
+    pub const FORCE_REFRESH: IconName = IconName("db/forceRefresh");
+    pub const COLOR_NONE: IconName = IconName("db/colorNone");
+
+    /// The circle of a data source colour in the Set Color menu.
+    pub fn color(id: &str) -> IconName {
+        match id {
+            "blue" => IconName("db/color_blue"),
+            "teal" => IconName("db/color_teal"),
+            "green" => IconName("db/color_green"),
+            "yellow" => IconName("db/color_yellow"),
+            "orange" => IconName("db/color_orange"),
+            "red" => IconName("db/color_red"),
+            "purple" => IconName("db/color_purple"),
+            "gray" => IconName("db/color_gray"),
+            _ => COLOR_NONE,
+        }
+    }
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -139,6 +160,18 @@ pub const ICONS: &[IconSvg] = &[
     icon!("package", "package"),
     icon!("synonym", "synonym"),
     icon!("error", "error"),
+    icon!("compare", "compare"),
+    icon!("sqlGenerator", "sqlGenerator"),
+    icon!("forceRefresh", "forceRefresh"),
+    icon!("colorNone", "colorNone"),
+    icon!("color_blue", "color_blue"),
+    icon!("color_teal", "color_teal"),
+    icon!("color_green", "color_green"),
+    icon!("color_yellow", "color_yellow"),
+    icon!("color_orange", "color_orange"),
+    icon!("color_red", "color_red"),
+    icon!("color_purple", "color_purple"),
+    icon!("color_gray", "color_gray"),
 ];
 
 /// The product's store, for the module's views.
