@@ -99,7 +99,7 @@ impl GridPage {
                         if let Some(c) = grid_columns.get_mut(i) {
                             let len = text
                                 .as_deref()
-                                .map_or(format::NULL_TEXT.len(), |t| first_line_chars(t));
+                                .map_or(format::NULL_TEXT.len(), first_line_chars);
                             c.chars = c.chars.max(len.min(MAX_COLUMN_CHARS));
                         }
                         text.map(SharedString::from)
