@@ -518,3 +518,47 @@ fn the_problem_fits_the_list_and_the_splitter_drags(cx: &mut TestAppContext) {
     let again = dialog_bounds(&mut h, "data-sources-list").size.width;
     assert_eq!(again, after, "the width is kept");
 }
+
+/// A double click or Enter on a data source of the tool window selects
+/// it and leaves Properties to its own command (in the reference they
+/// expand the data source's tree).
+#[gpui::test]
+fn double_click_and_enter_do_not_open_properties(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
+    let (_dir, root) = project();
+    let store = FakeStore::new(SECRET);
+    store.add(&root, "local", pg());
+    let mut h = open(cx, store, &root);
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let row = {
+        let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
+        vcx.debug_bounds("database-source-local")
+            .expect("the row is drawn")
+    };
+    let mut vcx = gpui::VisualTestContext::from_window(main, h.cx);
+    for click_count in 1..=2 {
+        vcx.simulate_event(MouseDownEvent {
+            position: row.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count,
+            first_mouse: false,
+        });
+        vcx.simulate_event(MouseUpEvent {
+            position: row.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count,
+        });
+    }
+    h.draw();
+    let s = state(&mut h);
+    assert_eq!(s["explorer"]["selected"], "local", "{s}");
+    assert!(s["dialog"].is_null(), "a double click opens nothing: {s}");
+    h.press("enter");
+    let s = state(&mut h);
+    assert!(s["dialog"].is_null(), "Enter opens nothing: {s}");
+    // Properties' command still opens it.
+    h.invoke("db.explorer.properties", Value::Null);
+    assert_eq!(state(&mut h)["dialog"]["selected"]["name"], "local");
+}

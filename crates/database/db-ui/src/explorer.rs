@@ -843,12 +843,12 @@ impl Explorer {
                             .text_color(theme.color(UiRole::TextMuted))
                             .child(s.profile.target()),
                     )
-                    .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                    // A double click selects only: in the reference it
+                    // expands the data source's tree; Properties has its
+                    // own command and keystroke.
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.selected = Some(name.clone());
                         window.focus(&this.focus);
-                        if e.click_count() == 2 {
-                            this.properties(window, cx);
-                        }
                         cx.notify();
                     }))
                     .into_any_element()
