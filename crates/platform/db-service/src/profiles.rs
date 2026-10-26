@@ -12,7 +12,9 @@ pub use db_core::profile::{
 };
 
 /// Environment variable that overrides the profiles file location.
-pub const PROFILES_ENV: &str = "PYOXIDE_DB_PROFILES";
+pub fn profiles_env() -> String {
+    app_info::env_name("DB_PROFILES")
+}
 
 /// The whole profiles file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -62,8 +64,11 @@ impl ProfilesFile {
             std::fs::create_dir_all(dir).map_err(io)?;
         }
         let tmp = path.with_extension("toml.tmp");
-        let header = "# Pyoxide database connection profiles. No passwords here:\n\
-                      # they live in the OS credential store or in environment variables.\n\n";
+        let header = format!(
+            "# {} database connection profiles. No passwords here:\n\
+             # they live in the OS credential store or in environment variables.\n\n",
+            app_info::name()
+        );
         std::fs::write(&tmp, format!("{header}{}", self.to_toml()?)).map_err(io)?;
         std::fs::rename(&tmp, path).map_err(io)
     }
@@ -75,15 +80,15 @@ impl ProfilesFile {
     }
 }
 
-/// Default profiles file: `$PYOXIDE_DB_PROFILES`, else
-/// `<config dir>/pyoxide/db-profiles.toml`.
+/// Default profiles file: the `DB_PROFILES` environment variable of the
+/// product, else `<config dir>/<slug>/db-profiles.toml`.
 pub fn default_path() -> PathBuf {
-    if let Some(p) = std::env::var_os(PROFILES_ENV).filter(|p| !p.is_empty()) {
+    if let Some(p) = std::env::var_os(profiles_env()).filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("pyoxide")
+        .join(app_info::slug())
         .join("db-profiles.toml")
 }
 

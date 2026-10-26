@@ -13,11 +13,11 @@
 //! `WITH PX$Q (PX$1, ...) AS (<query>) SELECT <conversions> FROM PX$Q`; a
 //! top-level `FOR UPDATE` clause moves after the wrapper. A converted
 //! column carries a `#PXT=<tag>` suffix in its alias (see [`split_tag`]).
-//! Errors come back as a one-row cursor with the columns `PYOXIDE$ERROR` and
-//! `PYOXIDE$MESSAGE`. Queries with LOB, JSON or VECTOR columns need column
+//! Errors come back as a one-row cursor with the columns `PX$ERROR` and
+//! `PX$MESSAGE`. Queries with LOB, JSON or VECTOR columns need column
 //! defines, which a REF CURSOR fetch cannot do; for them the block returns
 //! the (converted) statement text in a cursor with the column
-//! `PYOXIDE$NATIVE`, and the driver runs it with oracle-rs directly.
+//! `PX$NATIVE`, and the driver runs it with oracle-rs directly.
 //!
 //! Statements without rows run with `DBMS_SQL.PARSE`/`EXECUTE`, values bound
 //! by placeholder name.
@@ -29,9 +29,9 @@ use db_core::{Error, ErrorKind, Result};
 use crate::literal::{PlsqlBind, pieces, quote};
 
 /// Column name of the error cursor.
-pub const ERROR_COLUMN: &str = "PYOXIDE$ERROR";
+pub const ERROR_COLUMN: &str = "PX$ERROR";
 /// Column name of the cursor that carries a statement for the LOB path.
-pub const NATIVE_COLUMN: &str = "PYOXIDE$NATIVE";
+pub const NATIVE_COLUMN: &str = "PX$NATIVE";
 /// Separator in a converted column's alias.
 pub const TAG_SEPARATOR: &str = "#PXT=";
 
@@ -146,7 +146,7 @@ FOR i IN 1..r.COUNT LOOP
 e:=r(i);
 WHILE e IS NOT NULL LOOP l.EXTEND;l(l.COUNT):=LPAD(l.COUNT,6,'0')||SUBSTR(e,1,900);e:=SUBSTR(e,901);END LOOP;
 END LOOP;
-OPEN :rc FOR SELECT COLUMN_VALUE AS "PYOXIDE$NATIVE" FROM TABLE(l);
+OPEN :rc FOR SELECT COLUMN_VALUE AS "PX$NATIVE" FROM TABLE(l);
 ELSE
 FOR i IN 1..r.COUNT LOOP q:=q||r(i);END LOOP;
 OPEN :rc FOR q/*USING*/;
@@ -154,7 +154,7 @@ END IF;
 EXCEPTION WHEN OTHERS THEN
 k:=SQLCODE;x:=SUBSTR(DBMS_UTILITY.FORMAT_ERROR_STACK,1,4000);
 IF c IS NOT NULL THEN IF DBMS_SQL.IS_OPEN(c)THEN DBMS_SQL.CLOSE_CURSOR(c);END IF;END IF;
-OPEN :rc FOR SELECT k AS "PYOXIDE$ERROR",x AS "PYOXIDE$MESSAGE" FROM dual;
+OPEN :rc FOR SELECT k AS "PX$ERROR",x AS "PX$MESSAGE" FROM dual;
 END;"#;
 
 const EXEC_BLOCK: &str = r#"DECLARE
@@ -319,7 +319,7 @@ pub fn split_tag(name: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Reassemble the statement text from the `PYOXIDE$NATIVE` rows
+/// Reassemble the statement text from the `PX$NATIVE` rows
 /// (`NNNNNN` sequence prefix + up to 900 characters each).
 pub fn join_native_chunks(rows: &[String]) -> String {
     let mut parts: Vec<(u32, &str)> = rows

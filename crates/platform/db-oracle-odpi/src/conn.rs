@@ -7,7 +7,7 @@ use db_core::{Backend, Connection, ExecOptions, Outcome, Result, TxMode, Value};
 /// worker's timer breaks the call itself.
 pub(crate) fn worker_config(call_timeout_supported: bool) -> WorkerConfig {
     WorkerConfig {
-        thread_name: "pyoxide-odpi".into(),
+        thread_name: format!("{}-odpi", app_info::slug()),
         // The outcome of an abandoned call is unknown: a fetch may have
         // consumed rows, a statement may have run. The session is closed
         // rather than continued half-way.

@@ -7,8 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+app-info.workspace = true
 db-core.workspace = true
-dirs = "7"
 name-match.workspace = true
 serde.workspace = true
 serde_json.workspace = true

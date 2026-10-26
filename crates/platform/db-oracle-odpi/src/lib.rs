@@ -110,7 +110,11 @@ pub fn init_client(lib_dir: Option<&Path>, config_dir: Option<&Path>) -> Result<
     };
     // Shown in V$SESSION_CONNECT_INFO.CLIENT_DRIVER.
     params
-        .default_driver_name(format!("pyoxide : {}", env!("CARGO_PKG_VERSION")))
+        .default_driver_name(format!(
+            "{} : {}",
+            app_info::slug(),
+            env!("CARGO_PKG_VERSION")
+        ))
         .map_err(|e| invalid("driver name", e))?;
     if let Some(dir) = lib_dir {
         params
@@ -145,7 +149,7 @@ fn open(plan: ConnectPlan, password: Secret) -> Result<(OracleSession, OracleBre
         .connect()
         .map_err(|e| errors::map_connect_error(&e, password.expose()))?;
     // Best effort: helps a DBA recognise the session in V$SESSION.
-    let _ = conn.set_module("Pyoxide IDE");
+    let _ = conn.set_module(app_info::full_name());
     // Call timeouts need a client of 18c or later; with an older one the
     // worker's timer breaks the call itself.
     let call_timeout_supported = conn.set_call_timeout(None).is_ok();

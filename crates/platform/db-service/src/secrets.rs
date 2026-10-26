@@ -7,11 +7,17 @@ use serde::{Deserialize, Serialize};
 use crate::profiles::Profile;
 
 /// Generic environment variable for the connection password.
-pub const PASSWORD_ENV: &str = "PYOXIDE_DB_PASSWORD";
+pub fn password_env() -> String {
+    app_info::env_name("DB_PASSWORD")
+}
 /// Generic environment variable for an Oracle wallet password.
-pub const WALLET_PASSWORD_ENV: &str = "PYOXIDE_DB_WALLET_PASSWORD";
+pub fn wallet_password_env() -> String {
+    app_info::env_name("DB_WALLET_PASSWORD")
+}
 /// Service under which database secrets are stored in a secret store.
-pub const SECRET_SERVICE: &str = "pyoxide-db";
+pub fn secret_service() -> String {
+    app_info::db_cli_name().to_owned()
+}
 
 /// Which secret of a profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,7 +85,7 @@ impl SecretResolver<'_> {
                 if !profile.needs_password() {
                     return (Secret::default(), SecretSource::NotNeeded, None);
                 }
-                (profile.password_env.clone(), PASSWORD_ENV)
+                (profile.password_env.clone(), password_env())
             }
             SecretKind::WalletPassword => {
                 let tls = profile.tls.as_ref();
@@ -88,17 +94,21 @@ impl SecretResolver<'_> {
                 }
                 (
                     tls.and_then(|t| t.wallet_password_env.clone()),
-                    WALLET_PASSWORD_ENV,
+                    wallet_password_env(),
                 )
             }
         };
-        for var in specific.iter().map(String::as_str).chain([generic]) {
+        for var in specific
+            .iter()
+            .map(String::as_str)
+            .chain([generic.as_str()])
+        {
             if let Some(v) = (self.env)(var) {
                 return (Secret::new(v), SecretSource::Env(var.to_owned()), None);
             }
         }
         let mut store_error = None;
-        match self.store.get(SECRET_SERVICE, &kind.account(name)) {
+        match self.store.get(&secret_service(), &kind.account(name)) {
             Ok(Some(s)) => return (s, SecretSource::Store(self.store.name().to_owned()), None),
             Ok(None) => {}
             Err(e) => store_error = Some(e),
@@ -154,7 +164,10 @@ mod tests {
     fn lookup_order() {
         let store = MemoryStore::default();
         let profile = pg();
-        let e = env(&[("MY_PG_PASS", "specific"), (PASSWORD_ENV, "generic")]);
+        let e = env(&[
+            ("MY_PG_PASS", "specific"),
+            (password_env().as_str(), "generic"),
+        ]);
         let r = SecretResolver {
             store: &store,
             prompter: None,
@@ -164,7 +177,7 @@ mod tests {
         assert_eq!(s.expose(), "specific");
         assert_eq!(src, SecretSource::Env("MY_PG_PASS".into()));
 
-        let e = env(&[(PASSWORD_ENV, "generic")]);
+        let e = env(&[(password_env().as_str(), "generic")]);
         let r = SecretResolver {
             store: &store,
             prompter: None,
@@ -177,7 +190,7 @@ mod tests {
 
         let e = env(&[]);
         store
-            .set(SECRET_SERVICE, "p", &Secret::new("stored"))
+            .set(&secret_service(), "p", &Secret::new("stored"))
             .unwrap();
         let r = SecretResolver {
             store: &store,
@@ -188,7 +201,7 @@ mod tests {
         assert_eq!(s.expose(), "stored");
         assert_eq!(src, SecretSource::Store(store.name().into()));
 
-        store.delete(SECRET_SERVICE, "p").unwrap();
+        store.delete(&secret_service(), "p").unwrap();
         let (s, src, _) = r.resolve("p", &profile, SecretKind::Password);
         assert_eq!((s.expose(), src), ("typed", SecretSource::Prompt));
 

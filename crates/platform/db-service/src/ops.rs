@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::diagnose::{self, DiagnoseOptions, Report};
 use crate::profiles::Profile;
-use crate::secrets::{SECRET_SERVICE, SecretKind, SecretSource};
+use crate::secrets::{SecretKind, SecretSource, secret_service};
 use crate::service::{DbService, Opened, Target, millis};
 
 // ---------- arguments and results ----------
@@ -230,13 +230,13 @@ pub fn secret_set(svc: &DbService, profile: &str, kind: SecretKind) -> Result<()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| Error::config("no secret entered"))?;
     svc.store
-        .set(SECRET_SERVICE, &kind.account(profile), &secret)
+        .set(&secret_service(), &kind.account(profile), &secret)
         .map_err(store_error)
 }
 
 pub fn secret_delete(svc: &DbService, profile: &str, kind: SecretKind) -> Result<bool, Error> {
     svc.store
-        .delete(SECRET_SERVICE, &kind.account(profile))
+        .delete(&secret_service(), &kind.account(profile))
         .map_err(store_error)
 }
 
@@ -596,7 +596,7 @@ pub fn register(registry: &mut Registry, svc: Arc<DbService>) {
             "db.profile.save",
             "Save Connection Profile",
             "Creates or replaces a profile.",
-            r#"{"name": "local-pg", "profile": {"backend": "postgres", "host": "localhost", "port": 55432, "database": "pyoxide", "user": "pyoxide"}}"#
+            r#"{"name": "local-pg", "profile": {"backend": "postgres", "host": "localhost", "port": 55432, "database": "mydb", "user": "me"}}"#
         ),
         move |a: SaveProfileArgs| {
             let s = s.clone();

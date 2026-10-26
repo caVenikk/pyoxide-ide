@@ -31,8 +31,6 @@ use db_core::{Backend, ConnectParams, Connection, Driver, Error, ErrorKind, Resu
 
 pub use conn::PostgresConnection;
 
-const DEFAULT_APPLICATION_NAME: &str = "pyoxide";
-
 /// Opens PostgreSQL connections.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PostgresDriver;
@@ -73,7 +71,7 @@ impl Driver for PostgresDriver {
             .application_name(
                 params
                     .option(opt::APPLICATION_NAME)
-                    .unwrap_or(DEFAULT_APPLICATION_NAME),
+                    .unwrap_or(app_info::slug()),
             )
             .ssl_mode(tls::ssl_mode(params.tls.mode))
             .keepalives_idle(Duration::from_secs(60));

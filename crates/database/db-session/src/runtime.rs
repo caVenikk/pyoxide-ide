@@ -31,7 +31,7 @@ impl Drop for Inner {
         if let Some(rt) = self.runtime.take() {
             if tokio::runtime::Handle::try_current().is_ok() {
                 let _ = std::thread::Builder::new()
-                    .name("pyoxide-db-shutdown".into())
+                    .name(format!("{}-db-shutdown", app_info::slug()))
                     .spawn(move || rt.shutdown_background());
             } else {
                 rt.shutdown_background();
@@ -47,7 +47,7 @@ impl std::fmt::Debug for DbRuntime {
 }
 
 impl DbRuntime {
-    /// Two worker threads named `pyoxide-db`: enough for many idle sessions,
+    /// Two worker threads named `<slug>-db`: enough for many idle sessions,
     /// since drivers with blocking client libraries run on threads of their
     /// own (`db_core::worker`).
     pub fn new() -> std::io::Result<Self> {
@@ -57,7 +57,7 @@ impl DbRuntime {
     pub fn with_threads(threads: usize) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(threads.max(1))
-            .thread_name("pyoxide-db")
+            .thread_name(format!("{}-db", app_info::slug()))
             .enable_all()
             .build()?;
         let handle = runtime.handle().clone();
