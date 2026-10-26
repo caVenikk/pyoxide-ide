@@ -3,267 +3,16 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use db_core::{Backend, ConnectParams, Dialect, Error, Result, Secret, TlsMode, TlsParams, opt};
+use db_core::{Error, Result};
 use serde::{Deserialize, Serialize};
+
+pub use db_core::profile::{
+    AuthMethod, GuiOptions, PasswordSave, Profile, TlsProfile, expand_home, validate_name,
+};
 
 /// Environment variable that overrides the profiles file location.
 pub const PROFILES_ENV: &str = "PYOXIDE_DB_PROFILES";
-
-/// One saved connection. Passwords are never part of a profile.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Profile {
-    pub backend: Backend,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub host: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-    /// Oracle service name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service: Option<String>,
-    /// Oracle SID (instead of `service`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sid: Option<String>,
-    /// Oracle connect string: TNS alias, Easy Connect or descriptor.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dsn: Option<String>,
-    /// PostgreSQL database.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub database: Option<String>,
-    /// SQLite file (or `:memory:`). `~` expands to the home directory.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// SQLite: create the file when it does not exist.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub create: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub user: String,
-    /// Name of an environment variable holding the password.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password_env: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connect_timeout_secs: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query_timeout_secs: Option<u64>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub read_only: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<TlsProfile>,
-    /// Extra backend options (see `db_core::opt`), never secrets.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub options: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TlsProfile {
-    #[serde(default)]
-    pub mode: TlsMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ca_file: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_cert: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wallet_dir: Option<String>,
-    /// Name of an environment variable holding the wallet password.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wallet_password_env: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_name: Option<String>,
-}
-
-fn is_false(b: &bool) -> bool {
-    !*b
-}
-
-impl Profile {
-    pub fn new(backend: Backend) -> Self {
-        Self {
-            backend,
-            host: String::new(),
-            port: None,
-            service: None,
-            sid: None,
-            dsn: None,
-            database: None,
-            path: None,
-            create: false,
-            user: String::new(),
-            password_env: None,
-            connect_timeout_secs: None,
-            query_timeout_secs: None,
-            read_only: false,
-            tls: None,
-            options: BTreeMap::new(),
-        }
-    }
-
-    pub fn dialect(&self) -> Dialect {
-        self.backend.dialect()
-    }
-
-    pub fn port_or_default(&self) -> u16 {
-        self.port
-            .or(self.backend.default_port())
-            .unwrap_or_default()
-    }
-
-    pub fn tls_mode(&self) -> TlsMode {
-        self.tls.as_ref().map(|t| t.mode).unwrap_or_default()
-    }
-
-    /// The database part of the target: service, SID, database or path.
-    pub fn database_name(&self) -> Option<&str> {
-        match self.dialect() {
-            Dialect::Oracle => self.service.as_deref().or(self.sid.as_deref()),
-            Dialect::Postgres => self.database.as_deref(),
-            Dialect::Sqlite => self.path.as_deref(),
-        }
-    }
-
-    /// Whether a password is expected. SQLite never needs one; Oracle with
-    /// no user uses external (OS or Kerberos) authentication.
-    pub fn needs_password(&self) -> bool {
-        match self.dialect() {
-            Dialect::Sqlite => false,
-            Dialect::Oracle => !self.user.is_empty(),
-            Dialect::Postgres => true,
-        }
-    }
-
-    /// Short human-readable target, e.g. `db.example.com:1521/ORCLPDB1`.
-    pub fn target(&self) -> String {
-        if let Some(dsn) = &self.dsn {
-            return dsn.clone();
-        }
-        match self.dialect() {
-            Dialect::Sqlite => self.path.clone().unwrap_or_default(),
-            _ => format!(
-                "{}:{}/{}",
-                self.host,
-                self.port_or_default(),
-                self.database_name().unwrap_or("")
-            ),
-        }
-    }
-
-    /// Check that the fields the backend needs are present and consistent.
-    pub fn validate(&self) -> Result<()> {
-        let missing = |what: &str| {
-            Err(Error::config(format!(
-                "{what} is required for backend {}",
-                self.backend
-            )))
-        };
-        match self.dialect() {
-            Dialect::Oracle => {
-                if self.service.is_some() && self.sid.is_some() {
-                    return Err(Error::config("set either service or sid, not both"));
-                }
-                if self.dsn.is_none() {
-                    if self.host.is_empty() {
-                        return missing("host (or dsn)");
-                    }
-                    if self.service.is_none() && self.sid.is_none() {
-                        return missing("service or sid (or dsn)");
-                    }
-                }
-            }
-            Dialect::Postgres => {
-                if self.host.is_empty() {
-                    return missing("host");
-                }
-                if self.database.is_none() {
-                    return missing("database");
-                }
-                if self.user.is_empty() {
-                    return missing("user");
-                }
-            }
-            Dialect::Sqlite => {
-                if self.path.is_none() {
-                    return missing("path");
-                }
-            }
-        }
-        if self.dsn.is_some() && self.dialect() != Dialect::Oracle {
-            return Err(Error::config("dsn is only valid for Oracle backends"));
-        }
-        Ok(())
-    }
-
-    /// Connection parameters with the given secrets.
-    pub fn to_params(&self, password: Secret, wallet_password: Secret) -> Result<ConnectParams> {
-        self.validate()?;
-        let mut options = self.options.clone();
-        let database = match self.dialect() {
-            Dialect::Oracle => {
-                if let Some(sid) = &self.sid {
-                    options.insert(opt::ORACLE_SID.into(), "true".into());
-                    sid.clone()
-                } else {
-                    self.service.clone().unwrap_or_default()
-                }
-            }
-            Dialect::Postgres => self.database.clone().unwrap_or_default(),
-            Dialect::Sqlite => {
-                let path = self.path.as_deref().unwrap_or_default();
-                if self.create {
-                    options.insert(opt::SQLITE_CREATE.into(), "true".into());
-                }
-                if path == ":memory:" {
-                    path.to_owned()
-                } else {
-                    expand_home(path).to_string_lossy().into_owned()
-                }
-            }
-        };
-        if let Some(dsn) = &self.dsn {
-            options.insert(opt::ORACLE_DSN.into(), dsn.clone());
-        }
-        let tls = self.tls.clone().unwrap_or_default();
-        let path = |p: &Option<String>| p.as_deref().map(expand_home);
-        Ok(ConnectParams {
-            host: self.host.clone(),
-            port: self.port_or_default(),
-            database,
-            user: self.user.clone(),
-            password,
-            tls: TlsParams {
-                mode: tls.mode,
-                ca_file: path(&tls.ca_file),
-                client_cert: path(&tls.client_cert),
-                client_key: path(&tls.client_key),
-                wallet_dir: path(&tls.wallet_dir),
-                wallet_password,
-                server_name: tls.server_name.clone(),
-            },
-            connect_timeout: Duration::from_secs(self.connect_timeout_secs.unwrap_or(10)),
-            read_only: self.read_only,
-            options,
-        })
-    }
-}
-
-/// Profile names double as keychain accounts: keep them simple.
-pub fn validate_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && name.len() <= 64
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::config(format!(
-            "invalid profile name {name:?}: use letters, digits, '-', '_' or '.' (max 64)"
-        )))
-    }
-}
 
 /// The whole profiles file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -338,20 +87,11 @@ pub fn default_path() -> PathBuf {
         .join("db-profiles.toml")
 }
 
-/// Expand a leading `~` to the home directory.
-pub fn expand_home(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~")
-        && (rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'))
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(rest.trim_start_matches(['/', '\\']));
-    }
-    PathBuf::from(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use db_core::schema::Scope;
+    use db_core::{Backend, Secret, TlsMode, TxMode, opt};
 
     const SAMPLE: &str = r#"
 [profiles.reporting]
@@ -443,6 +183,56 @@ path = ":memory:"
         assert!(validate_name("").is_err());
         assert!(validate_name("a b").is_err());
         assert!(validate_name("x/y").is_err());
+        // The IDE's default names (`postgres@localhost`).
+        assert!(validate_name("postgres@localhost").is_ok());
+    }
+
+    /// The IDE's options round-trip under `[profiles.<name>.gui]`; their
+    /// unknown keys are rejected like the profile's; a profile without
+    /// them has none.
+    #[test]
+    fn gui_options() {
+        let text = r#"
+[profiles.local-pg]
+backend = "postgres"
+host = "localhost"
+database = "pyoxide"
+user = "pyoxide"
+[profiles.local-pg.gui]
+password_save = "never"
+tx_mode = "manual"
+time_zone = "UTC"
+keep_alive_secs = 60
+startup_script = "set application_name = 'x'"
+[profiles.local-pg.gui.scope]
+filter = { list = ["public", "demo"] }
+"#;
+        let f = ProfilesFile::parse(text).unwrap();
+        let gui = f.get("local-pg").unwrap().gui_options();
+        assert_eq!(gui.password_save, PasswordSave::Never);
+        assert_eq!(gui.tx_mode, Some(TxMode::Manual));
+        assert_eq!(gui.keep_alive_secs, Some(60));
+        assert_eq!(gui.scope, Some(Scope::list(["public", "demo"])));
+        assert_eq!(ProfilesFile::parse(&f.to_toml().unwrap()).unwrap(), f);
+
+        let bad = text.replace("time_zone", "timezone");
+        let e = ProfilesFile::parse(&bad).unwrap_err();
+        assert!(e.message.contains("unknown field"), "{e}");
+
+        let plain = ProfilesFile::parse(SAMPLE).unwrap();
+        assert!(plain.profiles.values().all(|p| p.gui.is_none()));
+        assert!(!plain.to_toml().unwrap().contains("gui"));
+    }
+
+    #[test]
+    fn no_auth_needs_no_password() {
+        let mut p = Profile::new(Backend::Postgres);
+        assert!(p.needs_password());
+        p.gui = Some(GuiOptions {
+            auth: AuthMethod::None,
+            ..GuiOptions::default()
+        });
+        assert!(!p.needs_password());
     }
 
     #[test]

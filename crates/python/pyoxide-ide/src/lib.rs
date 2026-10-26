@@ -4,6 +4,7 @@
 //! engine widget, packages and source roots in the project tree, the
 //! virtual environment's activation in the terminal).
 
+pub mod database;
 mod debug;
 pub mod debugger_settings;
 pub mod interpreter;
@@ -289,7 +290,11 @@ pub fn product() -> Product {
             icon: Some(IconName("python/file")),
             tiles: welcome_tiles(),
         },
+        tool_windows: Vec::new(),
     }
+    // The database module (ADR 0022): the Database tool window and the
+    // data sources of the project.
+    .with_module(database::module())
 }
 
 /// The product with its language services finding tools only in the

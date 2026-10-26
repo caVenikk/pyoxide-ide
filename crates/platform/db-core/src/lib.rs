@@ -15,6 +15,7 @@ mod error;
 pub mod oracle;
 pub mod oracle_net;
 mod params;
+pub mod profile;
 mod render;
 pub mod schema;
 mod source;
@@ -29,6 +30,7 @@ pub use connection::{
 };
 pub use error::{Error, ErrorKind, Result};
 pub use params::{Backend, ConnectParams, Dialect, Secret, TlsMode, TlsParams, TxMode, opt};
+pub use profile::{GuiOptions, PasswordSave, Profile, TlsProfile};
 pub use render::render_table;
 pub use source::{ConnectionSource, DataSourceId, Purpose};
 pub use value::{Value, ValueKind};

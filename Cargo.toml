@@ -49,6 +49,7 @@ members = [
     "crates/database/db-model",
     "crates/database/db-session",
     "crates/database/sql-intel",
+    "crates/database/db-ui",
     "crates/python/py-debug",
     "crates/python/py-env",
     "crates/python/py-lsp",
@@ -147,6 +148,7 @@ sql-syntax = { path = "crates/database/sql-syntax" }
 db-model = { path = "crates/database/db-model" }
 db-session = { path = "crates/database/db-session" }
 sql-intel = { path = "crates/database/sql-intel" }
+db-ui = { path = "crates/database/db-ui" }
 py-debug = { path = "crates/python/py-debug" }
 py-env = { path = "crates/python/py-env" }
 py-lsp = { path = "crates/python/py-lsp" }

@@ -264,6 +264,105 @@ pub async fn connection_test(svc: &DbService, target: &Target) -> Result<TestRes
     })
 }
 
+/// Test Connection of the IDE's data source dialog: `profile` as edited,
+/// saved or not, under the name `name`, with the password typed into the
+/// dialog (`Some`) or the one found the usual way (`None`: environment,
+/// secret store). Nothing is written.
+pub async fn test_profile(
+    svc: &DbService,
+    name: &str,
+    profile: &Profile,
+    password: Option<Secret>,
+) -> Result<TestResult, Error> {
+    let opened = open_profile(svc, name, profile, password).await?;
+    let started = Instant::now();
+    let pinged = opened.conn.ping().await;
+    let ping_ms = millis(started);
+    let server_version = opened.conn.server_version().await.unwrap_or_default();
+    opened.conn.close().await.ok();
+    pinged?;
+    Ok(TestResult {
+        backend: profile.backend,
+        client: crate::driver(profile.backend)
+            .availability()
+            .unwrap_or_default(),
+        server_version,
+        password_source: opened.password_source,
+        connect_ms: opened.connect_ms,
+        ping_ms,
+    })
+}
+
+/// The schemas of `profile` as edited in the IDE, connecting as
+/// [`test_profile`] does.
+pub async fn profile_schemas(
+    svc: &DbService,
+    name: &str,
+    profile: &Profile,
+    password: Option<Secret>,
+) -> Result<Vec<SchemaInfo>, Error> {
+    let opened = open_profile(svc, name, profile, password).await?;
+    let r = schema::introspector(opened.conn.as_ref()).schemas().await;
+    opened.conn.close().await.ok();
+    r
+}
+
+/// The databases the server of `profile` offers (PostgreSQL: those that
+/// accept connections and are no templates); other engines have one, so
+/// the list is empty.
+pub async fn profile_databases(
+    svc: &DbService,
+    name: &str,
+    profile: &Profile,
+    password: Option<Secret>,
+) -> Result<Vec<String>, Error> {
+    if profile.dialect() != db_core::Dialect::Postgres {
+        return Ok(Vec::new());
+    }
+    let opened = open_profile(svc, name, profile, password).await?;
+    let r = opened
+        .conn
+        .query(
+            "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname",
+            &[],
+            1000,
+        )
+        .await;
+    opened.conn.close().await.ok();
+    Ok(r?
+        .rows
+        .into_iter()
+        .filter_map(|row| row.into_iter().next().and_then(|v| v.to_text()))
+        .collect())
+}
+
+/// Opens `profile` (saved or not) under the name `name` with the given
+/// password, else the one found the usual way.
+pub async fn open_profile(
+    svc: &DbService,
+    name: &str,
+    profile: &Profile,
+    password: Option<Secret>,
+) -> Result<Opened, Error> {
+    profile.validate()?;
+    let (params, password_source) = match password {
+        Some(password) => {
+            let wallet = svc.secrets_for(name, profile).wallet_password;
+            (profile.to_params(password, wallet)?, SecretSource::Prompt)
+        }
+        None => svc.params_for(name, profile)?,
+    };
+    let started = Instant::now();
+    let conn = crate::driver(profile.backend).connect(&params).await?;
+    Ok(Opened {
+        conn,
+        name: name.to_owned(),
+        profile: profile.clone(),
+        password_source,
+        connect_ms: millis(started),
+    })
+}
+
 pub async fn query(svc: &DbService, args: &QueryArgs) -> Result<QueryOutput, Error> {
     let Opened {
         conn,

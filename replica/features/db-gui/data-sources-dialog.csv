@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Data Sources dialog: list, General tab, Test Connection",db-gui,must,yes,no,Pro; ADR 0004 profiles plus GUI options; S-DG02
+"Data Sources dialog: list, General tab, Test Connection",db-gui,must,yes,yes,"Pro; ADR 0004 profiles plus GUI options; S-DG02. Done (db-ui, #301): list, General tab, Test Connection off the UI thread with result and failure popups; Advanced tab and templates are follow-ups"

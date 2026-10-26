@@ -1,0 +1,12 @@
+# Pyoxide keymap for macOS. Database: the Database tool window (the
+# database module, ADR 0022), joined after the workbench's keymap.
+
+# The Database tool window with the focus: New (the menu of the "+"
+# button, as New in a tree of the reference) and the Data Sources dialog
+# for the selected data source (Project Structure's keystroke, which the
+# reference gives data source properties).
+[[context]]
+name = "DatabaseExplorer"
+[context.bindings]
+"cmd-n" = "db.explorer.new-data-source"
+"cmd-;" = "db.explorer.properties"

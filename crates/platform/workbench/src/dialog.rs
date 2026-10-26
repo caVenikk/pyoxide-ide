@@ -9,7 +9,7 @@
 //!
 //! The owner keeps the [`Dialog`] entity while it is open, focuses it and
 //! draws it in its window as before: drawn there, it opens its window
-//! (`ui::dialog_window::open_popup`) and leaves nothing in the owner's.
+//! (`ui::dialog_window::open_alert`) and leaves nothing in the owner's.
 //! When a button closes it the window closes first, then
 //! [`DialogEvent::Closed`] reaches the owner, which gives the focus back
 //! where it was; a dialog dropped while open closes its window too.
@@ -287,7 +287,7 @@ impl Dialog {
         );
         let focus = this.read(cx).focus.clone();
         let content = this.clone();
-        let window = ui::dialog_window::open_popup(
+        let window = ui::dialog_window::open_alert(
             parent,
             at,
             size(px(width), px(MAX_HEIGHT)),
@@ -312,7 +312,11 @@ impl Dialog {
         let theme = cx.theme();
         let accent = theme.color(UiRole::Accent);
         let on_accent = theme.color(UiRole::OnAccent);
-        let border = theme.color(UiRole::BorderInput);
+        let border = theme.color(UiRole::ButtonBorder);
+        let default_border = theme.color(UiRole::ButtonDefaultBorder);
+        let background = theme.color(UiRole::ButtonBackground);
+        let focused_border = theme.color(UiRole::ButtonFocusedBorder);
+        let default_focused_border = theme.color(UiRole::ButtonDefaultFocusedBorder);
         let hover = theme.color(UiRole::Hover);
         let ring = theme.color(UiRole::Focus);
         let ring_width = theme.metric(Metric::FocusWidth);
@@ -339,12 +343,18 @@ impl Dialog {
                 .px(px(BUTTON_PADDING))
                 .rounded(radius)
                 .whitespace_nowrap()
+                .border_1()
                 .map(|d| {
+                    let focused = focused == Some(i);
                     if default {
-                        d.bg(accent).text_color(on_accent)
+                        d.bg(accent).text_color(on_accent).border_color(if focused {
+                            default_focused_border
+                        } else {
+                            default_border
+                        })
                     } else {
-                        d.border_1()
-                            .border_color(border)
+                        d.bg(background)
+                            .border_color(if focused { focused_border } else { border })
                             .hover(move |s| s.bg(hover))
                     }
                 })
@@ -393,6 +403,18 @@ impl Dialog {
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::choose))
             .on_action(cx.listener(Self::toggle_option))
+            // Space presses the button with the focus ring.
+            .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, _, cx| {
+                let m = &e.keystroke.modifiers;
+                if e.keystroke.key != "space" || m.control || m.alt || m.platform || m.shift {
+                    return;
+                }
+                if let Some(button) = this.focused_button().and_then(|i| this.buttons.get(i)) {
+                    let id = button.id;
+                    cx.stop_propagation();
+                    this.close(Some(id), cx);
+                }
+            }))
             .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .text_color(theme.color(UiRole::Text))

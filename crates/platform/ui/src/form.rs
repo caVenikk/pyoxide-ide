@@ -10,8 +10,9 @@
 //! `ui` is below `editor`). Every colour and size comes from the theme.
 
 use gpui::{
-    Action, AnyElement, AnyWindowHandle, App, Context, Div, ElementId, Entity, FocusHandle,
-    IntoElement, Pixels, Point, SharedString, Stateful, Subscription, Window, div, prelude::*, px,
+    Action, AnyElement, AnyWindowHandle, App, BoxShadow, Context, Div, ElementId, Entity,
+    FocusHandle, IntoElement, KeyDownEvent, Pixels, Point, SharedString, Stateful, Subscription,
+    Window, div, point, prelude::*, px,
 };
 use themes::{Metric, UiRole};
 
@@ -517,8 +518,10 @@ impl BarButton {
     fn render(self, cx: &App) -> AnyElement {
         let theme = cx.theme();
         let (accent, on_accent) = (theme.color(UiRole::Accent), theme.color(UiRole::OnAccent));
-        let (input, hover) = (theme.color(UiRole::BorderInput), theme.color(UiRole::Hover));
+        let hover = theme.color(UiRole::Hover);
         let disabled = theme.color(UiRole::TextDisabled);
+        let ring = theme.color(UiRole::Focus);
+        let ring_width = theme.metric(Metric::FocusWidth);
         let Self {
             id,
             label,
@@ -527,7 +530,26 @@ impl BarButton {
             action,
             ..
         } = self;
+        let (border, focused_border) = if primary {
+            (
+                theme.color(UiRole::ButtonDefaultBorder),
+                theme.color(UiRole::ButtonDefaultFocusedBorder),
+            )
+        } else {
+            (
+                theme.color(UiRole::ButtonBorder),
+                theme.color(UiRole::ButtonFocusedBorder),
+            )
+        };
+        // The focus ring is a shadow under the button: its inside is
+        // painted opaque over the dialog's background while focused or
+        // hovered, so that the ring shows only around it.
+        let background = theme.color(UiRole::ButtonBackground);
+        let opaque = theme.color(UiRole::Surface).blend(background);
+        let hover = opaque.blend(hover);
+        let focused_background = if primary { accent } else { opaque };
         let selector = id.clone();
+        let space_action = action.boxed_clone();
         div()
             .id(ElementId::Name(id))
             .debug_selector(move || selector.to_string())
@@ -539,19 +561,44 @@ impl BarButton {
             .min_w(px(BUTTON_WIDTH))
             .px(px(14.0))
             .rounded(field_radius(cx))
+            .border_1()
             .map(|d| {
                 if primary {
-                    d.bg(accent).text_color(on_accent)
+                    d.bg(accent).border_color(border).text_color(on_accent)
                 } else {
-                    d.border_1()
-                        .border_color(input)
+                    d.bg(background)
+                        .border_color(border)
                         .when(enabled, |d| d.hover(move |s| s.bg(hover)))
                 }
             })
             .when(!enabled, |d| d.text_color(disabled))
             .child(label)
             .when(enabled, |d| {
-                d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+                // A press focuses it (`DarculaButtonPainter`): the focus
+                // ring around it (`Component.focusColor`,
+                // `Component.focusWidth` wide), its outline in the focused
+                // colour; Space presses it, Enter stays the dialog's.
+                d.focusable()
+                    .focus(move |s| {
+                        s.bg(focused_background)
+                            .border_color(focused_border)
+                            .shadow(vec![BoxShadow {
+                                color: ring,
+                                offset: point(px(0.0), px(0.0)),
+                                blur_radius: px(0.0),
+                                spread_radius: ring_width,
+                            }])
+                    })
+                    .on_key_down(move |e: &KeyDownEvent, window, cx| {
+                        let m = &e.keystroke.modifiers;
+                        if e.keystroke.key == "space"
+                            && !(m.control || m.alt || m.platform || m.shift || m.function)
+                        {
+                            cx.stop_propagation();
+                            window.dispatch_action(space_action.boxed_clone(), cx);
+                        }
+                    })
+                    .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
             })
             .into_any_element()
     }

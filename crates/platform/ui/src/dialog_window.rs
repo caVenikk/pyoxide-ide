@@ -11,14 +11,15 @@
 //! [`DialogOptions::key`], and opening it again brings that one to the
 //! front. A modal dialog can open over a non-modal one and blocks only it.
 //!
-//! On macOS a modal dialog is a child window of its parent, so it stays
-//! above it. A non-modal dialog is a window of its own, as the reference's
-//! owned windows are: the system's window capture picks it alone (a child
-//! window is picked together with its parent) and it does not move with
-//! its parent; it comes back above its parent whenever the parent is
-//! activated. When the dialog closes, by [`close`] or by its title bar's
-//! close button, the element of the parent that had the focus gets it
-//! back.
+//! On macOS a dialog, modal or not, is a window of its own ordered above
+//! its parent, as the reference's owned windows are, not a child window:
+//! the window server groups a child window with its parent, and the
+//! system's window capture (⌘⇧4, Space) then picks the two together. It
+//! does not move with its parent. A non-modal dialog comes back above its
+//! parent whenever the parent is activated; a modal one is activated
+//! instead (the parent takes no input while it is open). When the dialog
+//! closes, by [`close`] or by its title bar's close button, the element of
+//! the parent that had the focus gets it back.
 //!
 //! The dialog's view is the root of its window: nothing of the parent
 //! window draws into it; a dialog draws [`crate::pointer::frame`] so that
@@ -111,6 +112,9 @@ struct Modal {
     /// Had the focus in the parent window.
     return_focus: Option<FocusHandle>,
     activate: bool,
+    /// Activates the dialog when its parent is activated (a dialog, not a
+    /// popup: a popup is a child window of its parent).
+    _keep_above: Option<(Entity<KeepAbove>, Subscription)>,
 }
 
 /// An open non-modal dialog window.
@@ -227,8 +231,25 @@ pub fn open<V: 'static + Render>(
                 dialog,
                 return_focus,
                 activate: options.activate,
+                _keep_above: None,
             },
         );
+        // The parent activated (its title bar clicked, say) gives the
+        // activation to its dialog, which comes above it.
+        let keeper = cx.new(|_| KeepAbove);
+        let subscription = keeper.update(cx, |_, cx| {
+            cx.observe_window_activation(parent, move |_, window, cx| {
+                if window.is_window_active() && modal_of(window.window_handle(), cx) == Some(dialog)
+                {
+                    cx.defer(move |cx| {
+                        let _ = dialog.update(cx, |_, window, _| window.activate_window());
+                    });
+                }
+            })
+        });
+        if let Some(open) = cx.global_mut::<Modals>().by_parent.get_mut(&parent_handle) {
+            open._keep_above = Some((keeper, subscription));
+        }
     } else {
         modals.non_modal.push(NonModal {
             key: options.key.clone(),
@@ -258,11 +279,7 @@ pub fn open<V: 'static + Render>(
     }
     let parent_number = native::window_number(parent);
     let _ = dialog.update(cx, |_, window, _| {
-        if options.modal {
-            native::attach(parent, window);
-        } else {
-            native::order_above(window, parent_number);
-        }
+        native::order_above(window, parent_number);
         if options.activate {
             window.activate_window();
         }
@@ -403,6 +420,33 @@ pub fn open_popup(
     cx: &mut App,
     build: impl FnOnce(&mut Window, &mut App) -> AnyView,
 ) -> Option<WindowHandle<PopupHost>> {
+    open_popup_window(parent, at, max, activate, true, cx, build)
+}
+
+/// Opens a message dialog drawn without a title bar (the reference's
+/// alerts) as [`open_popup`] does, but as a window of its own rather than
+/// a child window of `parent`: the system's window capture picks it alone,
+/// like a dialog of [`open`].
+pub fn open_alert(
+    parent: &mut Window,
+    at: Point<Pixels>,
+    max: Size<Pixels>,
+    activate: bool,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> AnyView,
+) -> Option<WindowHandle<PopupHost>> {
+    open_popup_window(parent, at, max, activate, false, cx, build)
+}
+
+fn open_popup_window(
+    parent: &mut Window,
+    at: Point<Pixels>,
+    max: Size<Pixels>,
+    activate: bool,
+    child: bool,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> AnyView,
+) -> Option<WindowHandle<PopupHost>> {
     ensure_init(cx);
     let parent_handle = parent.window_handle();
     let return_focus = parent.focused(cx);
@@ -454,10 +498,16 @@ pub fn open_popup(
             dialog: popup,
             return_focus,
             activate,
+            _keep_above: None,
         },
     );
+    let parent_number = native::window_number(parent);
     let _ = popup.update(cx, |_, window, _| {
-        native::attach(parent, window);
+        if child {
+            native::attach(parent, window);
+        } else {
+            native::order_above(window, parent_number);
+        }
         if activate {
             window.activate_window();
         }

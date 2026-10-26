@@ -624,6 +624,34 @@ impl Workbench {
         });
     }
 
+    /// Makes the tool windows of the product's modules (once, after the
+    /// workbench entity exists).
+    pub(crate) fn create_module_tool_windows(
+        this: &Entity<Self>,
+        product: &crate::app::Product,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let weak = this.downgrade();
+        let stripe = f32::from(cx.theme().metric(themes::Metric::StripeWidth));
+        let pane = f32::from(window.viewport_size().width) - 2.0 * stripe;
+        for hook in &product.tool_windows {
+            let content = (hook.create)(weak.clone(), window, cx);
+            let spec = hook.spec.clone();
+            let width = hook
+                .width
+                .filter(|_| spec.area.is_side())
+                .map(|w| w.min(crate::tool_windows::BOTTOM_WEIGHT * pane));
+            this.update(cx, |this, cx| {
+                let area = spec.area;
+                this.register_tool_window(spec, Some(content), cx);
+                if let Some(width) = width {
+                    this.tool_windows.set_size(area, width);
+                }
+            });
+        }
+    }
+
     /// The project folder, when a project is open.
     pub fn project_root(&self, cx: &App) -> Option<PathBuf> {
         self.project(cx).map(|p| p.root().to_owned())

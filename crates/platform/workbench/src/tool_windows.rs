@@ -12,7 +12,7 @@
 
 use std::rc::Rc;
 
-use gpui::{AnyView, App, Entity, FocusHandle, Focusable, Pixels, Render, px};
+use gpui::{AnyView, App, Entity, FocusHandle, Focusable, Pixels, Render, WeakEntity, Window, px};
 use serde_json::json;
 use ui::icons::IconName;
 
@@ -155,6 +155,30 @@ pub struct ToolWindowSpec {
     /// The tool window exists from the start and its button shows; Run and
     /// Debug instead are created by their first use.
     pub registered: bool,
+}
+
+/// Makes a module's tool window view for a main window.
+pub type CreateToolWindow =
+    Rc<dyn Fn(WeakEntity<crate::Workbench>, &mut Window, &mut App) -> ToolWindowContent>;
+
+/// A tool window that a product's module contributes (ADR 0022): its
+/// stripe button and how its view is made for each main window.
+#[derive(Clone)]
+pub struct ToolWindowHook {
+    pub spec: ToolWindowSpec,
+    pub create: CreateToolWindow,
+    /// The width a side area starts with for this tool window, at most the
+    /// reference's default share of the window (`BOTTOM_WEIGHT`,
+    /// `WindowInfoImpl.DEFAULT_WEIGHT`); `None` keeps the area's.
+    pub width: Option<f32>,
+}
+
+impl std::fmt::Debug for ToolWindowHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolWindowHook")
+            .field("spec", &self.spec)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A tool window of the registry.

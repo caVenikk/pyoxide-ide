@@ -246,6 +246,11 @@ attributes empty, `syntax.diagnostic-hint` is a grey dotted line
 | `ui.pressed` | `ActionButton.pressedBackground` (UI theme or scheme color) | Background of a pressed button |
 | `ui.segmented-selected` | `SegmentedButton.selectedButtonColor` | Background of the selected choice of a segmented button |
 | `ui.segmented-selected-border` | `SegmentedButton.selectedStartBorderColor` | Outline of the selected choice of a segmented button |
+| `ui.button-background` | `Button.startBackground` | Background of a dialog button |
+| `ui.button-border` | `Button.startBorderColor` | Outline of a dialog button |
+| `ui.button-focused-border` | `Button.focusedBorderColor` | Outline of a focused dialog button, inside its focus ring (`ui.focus`, `Component.focusWidth` wide) |
+| `ui.button-default-border` | `Button.default.startBorderColor` | Outline of the default dialog button (filled with `ui.accent`) |
+| `ui.button-default-focused-border` | `Button.default.focusedBorderColor` | Outline of the focused default dialog button, inside its focus ring |
 | `ui.selection` | `List.selectionBackground`, `Tree.selectionBackground`, `Table.selectionBackground` | Background of the selected row in lists and trees |
 | `ui.selection-text` | `List.selectionForeground`, `Tree.selectionForeground` | Text on the selected row |
 | `ui.selection-inactive` | `List.selectionInactiveBackground`, `Tree.selectionInactiveBackground` | Selected row in a list that has no focus |
@@ -545,7 +550,9 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.selection-inactive`, `ui.selection-light` | `ui.selection` |
 | `ui.border-input`, `ui.divider`, `ui.popup-border` | `ui.border` |
 | `ui.segmented-selected` | `ui.pressed` |
-| `ui.segmented-selected-border`, `ui.tab-underline-inactive` | `ui.border-input` |
+| `ui.segmented-selected-border`, `ui.tab-underline-inactive`, `ui.button-border` | `ui.border-input` |
+| `ui.button-background`, `ui.button-focused-border`, `ui.button-default-focused-border` | `ui.surface` |
+| `ui.button-default-border` | `ui.accent` |
 | `ui.text-disabled`, `ui.shortcut` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |

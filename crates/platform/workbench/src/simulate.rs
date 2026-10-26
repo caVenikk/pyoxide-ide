@@ -48,8 +48,9 @@ fn events(action: &SimulateMouse) -> &'static [Event] {
 
 /// Handles [`SimulateMouse`]. The view handles the events at once, which
 /// runs the window's input handling: it happens in a task, after the
-/// command's dispatch let go of the window.
-pub(crate) fn simulate_mouse(action: &SimulateMouse, window: &mut Window, cx: &mut App) {
+/// command's dispatch let go of the window. A dialog window that wants the
+/// command (shots of its states) handles it with this too.
+pub fn simulate_mouse(action: &SimulateMouse, window: &mut Window, cx: &mut App) {
     let Some(view) = native::View::of(window) else {
         return;
     };

@@ -129,6 +129,9 @@ pub struct Product {
     pub terminal: Option<TerminalHook>,
     /// The product's icon and tiles of the Welcome tab.
     pub welcome: crate::welcome::WelcomeHook,
+    /// Tool windows of the product's modules (ADR 0022): made for each
+    /// main window once the workbench exists.
+    pub tool_windows: Vec<crate::tool_windows::ToolWindowHook>,
 }
 
 /// Default size of the main window's content.
@@ -391,6 +394,7 @@ pub fn open_main_window_with(
         });
         // The product's status bar widgets get the finished workbench.
         Workbench::create_status_widgets(&workbench, &product, window, cx);
+        Workbench::create_module_tool_windows(&workbench, &product, window, cx);
         // Closing the window with changes not applied in its Settings
         // window asks first.
         window.on_window_should_close(cx, |window, cx| {
