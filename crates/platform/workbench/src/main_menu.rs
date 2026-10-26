@@ -473,7 +473,13 @@ fn window_menu() -> Menu {
                 ],
             ),
             // BackgroundTasks.
-            sub("Processes", vec![cmd("Show", "background-tasks.show")]),
+            sub(
+                "Processes",
+                vec![
+                    cmd("Show", "background-tasks.show"),
+                    cmd("Auto Show", "background-tasks.toggle-auto-show"),
+                ],
+            ),
         ],
     )
 }
