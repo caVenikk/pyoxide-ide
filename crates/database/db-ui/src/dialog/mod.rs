@@ -365,6 +365,9 @@ pub(crate) struct Item {
     comment_shown: bool,
     /// The schemas as last read, for the Schemas tab.
     schemas: Option<Vec<SchemaInfo>>,
+    /// The server's version as a successful test last reported it, shown
+    /// after the driver below the form.
+    version: Option<String>,
 }
 
 impl Item {
@@ -397,6 +400,21 @@ pub(crate) enum TestState {
 pub(crate) struct FailureMessage {
     pub name: String,
     pub failure: Failure,
+}
+
+/// The servers' versions known in this session, by project and data
+/// source (a successful test reports one): the dialog shows a data
+/// source's after its driver.
+#[derive(Default)]
+struct ServerVersions(std::collections::HashMap<(PathBuf, String), String>);
+
+impl Global for ServerVersions {}
+
+fn known_version(root: &std::path::Path, name: &str, cx: &App) -> Option<String> {
+    cx.try_global::<ServerVersions>()?
+        .0
+        .get(&(root.to_path_buf(), name.to_owned()))
+        .cloned()
 }
 
 /// The open dialog, for `db.state`.
@@ -653,6 +671,7 @@ impl DataSourcesDialog {
         let items = sources
             .into_iter()
             .map(|source| Item {
+                version: known_version(&root, &source.name, cx),
                 original: Some(source.name.clone()),
                 has_kept: false,
                 source,
@@ -891,6 +910,7 @@ impl DataSourcesDialog {
             has_kept: false,
             comment_shown: false,
             schemas: None,
+            version: None,
         });
         self.tab = Tab::General;
         self.select(Some(self.items.len() - 1), cx);
@@ -927,6 +947,7 @@ impl DataSourcesDialog {
             has_kept: false,
             comment_shown: item.comment_shown,
             schemas: None,
+            version: None,
         });
         self.select(Some(self.items.len() - 1), cx);
     }
@@ -1295,6 +1316,7 @@ impl DataSourcesDialog {
                     has_kept: false,
                     comment_shown: false,
                     schemas: None,
+                    version: None,
                 });
                 let at = self.items.len() - 1;
                 let name =
@@ -1530,6 +1552,7 @@ impl DataSourcesDialog {
     fn run_test(&mut self, item: Item, password: Option<Secret>, cx: &mut Context<Self>) {
         let at = self.selected;
         let name = item.source.name.clone();
+        let item_saved = item.original.as_deref() == Some(name.as_str());
         let test = crate::store(cx).test(&self.root, item.source, password);
         let run = cx.background_spawn(test);
         self.test = TestState::Running;
@@ -1543,6 +1566,14 @@ impl DataSourcesDialog {
                 }
                 match result {
                     Ok(info) => {
+                        if let Some(item) = at.and_then(|at| this.items.get_mut(at)) {
+                            item.version = Some(info.version.clone());
+                        }
+                        if item_saved {
+                            cx.default_global::<ServerVersions>()
+                                .0
+                                .insert((this.root.clone(), name.clone()), info.version.clone());
+                        }
                         this.test = TestState::Ok(info);
                         this.load_databases(false, None, cx);
                         this.result_shown = true;
@@ -1559,6 +1590,20 @@ impl DataSourcesDialog {
             });
         });
         cx.notify();
+    }
+
+    /// What the bar below the form says after Test Connection: the driver,
+    /// with the server's version once a test reported it and the test's
+    /// mark is gone (right after a test the mark shows with the driver).
+    pub(crate) fn driver_label(&self) -> String {
+        let Some(item) = self.item() else {
+            return String::new();
+        };
+        let driver = backend_title(item.profile().backend);
+        match (&self.test, &item.version) {
+            (TestState::Ok(_), _) | (_, None) => driver.to_owned(),
+            (_, Some(version)) => format!("{driver} {version}"),
+        }
     }
 
     /// The details of the last test, as copied.
@@ -1865,6 +1910,20 @@ impl DataSourcesDialog {
     /// After a save: the store's names and passwords are the dialog's.
     fn saved(&mut self, cx: &mut Context<Self>) {
         self.saved_sources = self.items.iter().map(|i| i.source.clone()).collect();
+        let versions = cx.default_global::<ServerVersions>();
+        for item in &self.items {
+            if let Some(version) = &item.version {
+                versions.0.insert(
+                    (self.root.clone(), item.source.name.clone()),
+                    version.clone(),
+                );
+            }
+        }
+        // The form is reset to what is kept: a finished test's mark goes.
+        if matches!(self.test, TestState::Ok(_) | TestState::Failed(_)) {
+            self.test = TestState::Idle;
+            self.result_shown = false;
+        }
         for item in &mut self.items {
             item.original = Some(item.source.name.clone());
             item.password = PasswordEdit::Keep;
@@ -1912,6 +1971,7 @@ impl DataSourcesDialog {
                 "password": self.password.read(cx).state_json(),
                 "has_kept_password": item.has_kept,
                 "comment_shown": item.comment_shown,
+                "server": self.driver_label(),
                 "schemas": item.schemas.as_ref().map(|s| s.iter().map(|s| json!({
                     "name": s.name, "system": s.is_system, "current": s.is_current,
                 })).collect::<Vec<_>>()),

@@ -121,9 +121,22 @@ fn test_connection_reports_the_reason_and_the_version(cx: &mut TestAppContext) {
     let result = s["dialog"]["result"].as_str().unwrap();
     assert!(result.contains("PostgreSQL 18.6"), "{result}");
     assert_eq!(store.saves(), 0);
+    // Right after the test the mark shows with the driver alone.
+    assert_eq!(s["dialog"]["selected"]["server"], "PostgreSQL");
 
     let dump = s.to_string();
     assert!(!dump.contains(SECRET) && !dump.contains("wrong-password"));
+
+    // Applied, the form is reset: the driver with the server's version,
+    // also when the dialog opens again.
+    dialog(&mut h, "db.data-sources.apply", Value::Null);
+    let s = state(&mut h);
+    assert_eq!(s["dialog"]["test"]["state"], "idle", "{s}");
+    assert_eq!(s["dialog"]["selected"]["server"], "PostgreSQL 18.6");
+    dialog(&mut h, "db.data-sources.cancel", Value::Null);
+    h.invoke("db.explorer.properties", Value::Null);
+    let s = state(&mut h);
+    assert_eq!(s["dialog"]["selected"]["server"], "PostgreSQL 18.6", "{s}");
 }
 
 /// A test against a server that does not answer leaves the window

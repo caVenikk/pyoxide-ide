@@ -1455,24 +1455,21 @@ impl DataSourcesDialog {
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
         let running = self.test == TestState::Running;
-        let driver = self
-            .item()
-            .map(|i| backend_title(i.profile().backend).to_owned())
-            .unwrap_or_default();
+        let driver = self.driver_label();
         let (status_icon, status_text): (Option<AnyElement>, String) = match &self.test {
             TestState::Idle => (None, driver),
             TestState::Running => (
                 Some(ui::components::spinner("data-source-test-spinner", cx).into_any_element()),
                 driver,
             ),
-            TestState::Ok(info) => (
+            TestState::Ok(_) => (
                 Some(
                     Icon::new(IconName::CHECKED)
                         .size(px(16.0))
                         .tint(theme.color(UiRole::Success))
                         .into_any_element(),
                 ),
-                format!("{} {}", info.product, info.version),
+                driver,
             ),
             TestState::Failed(_) => (
                 Some(Icon::new(IconName::ERROR).size(px(16.0)).into_any_element()),
