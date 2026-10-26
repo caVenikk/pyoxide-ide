@@ -9,7 +9,7 @@
 //!
 //! The owner keeps the [`Dialog`] entity while it is open, focuses it and
 //! draws it in its window as before: drawn there, it opens its window
-//! (`ui::dialog_window::open_popup`) and leaves nothing in the owner's.
+//! (`ui::dialog_window::open_alert`) and leaves nothing in the owner's.
 //! When a button closes it the window closes first, then
 //! [`DialogEvent::Closed`] reaches the owner, which gives the focus back
 //! where it was; a dialog dropped while open closes its window too.
@@ -287,7 +287,7 @@ impl Dialog {
         );
         let focus = this.read(cx).focus.clone();
         let content = this.clone();
-        let window = ui::dialog_window::open_popup(
+        let window = ui::dialog_window::open_alert(
             parent,
             at,
             size(px(width), px(MAX_HEIGHT)),
