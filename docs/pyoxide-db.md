@@ -40,7 +40,10 @@ pyoxide-db secret set reporting --wallet   # wallet password
 pyoxide-db secret status reporting         # where it would come from
 ```
 
-Passwords are never accepted as arguments and never printed.
+Passwords are never accepted as arguments and never printed. The OS store is
+read once per run. On macOS the item is created so that the IDE and this
+command trust each other's items; local builds need a stable signature for
+that to hold across builds (see [code-signing.md](code-signing.md)).
 
 Where stored passwords live is an IDE-wide setting (`secrets.toml` in the
 user config directory, `PYOXIDE_SECRETS_CONFIG` overrides it):
