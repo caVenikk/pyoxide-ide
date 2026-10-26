@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Editor tab context menu (close others/all/unmodified/left/right, pin, copy path, run, open in, git, rename)",editor,must,yes,partial,"Community (#366): close group, Copy Path/Reference, Pin/Unpin with pinned tabs first, Run/Debug the file, Open In, Git, Rename File, mnemonics; Split items wait for #342; Open Tab in New Window, Bookmarks, Override File Type, Local History, Add to .gitignore, Create Gist are follow-ups"
