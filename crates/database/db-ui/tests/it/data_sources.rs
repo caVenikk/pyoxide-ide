@@ -181,11 +181,18 @@ fn ok_saves_and_remove_deletes_the_secrets(cx: &mut TestAppContext) {
     assert_eq!(s["dialog"]["selected"]["name"], "pyoxide-local");
     assert_eq!(s["dialog"]["selected"]["has_kept_password"], true);
     assert_eq!(s["dialog"]["selected"]["password"]["edited"], false);
+    // Nothing differs from what is kept: Apply is disabled and does
+    // nothing.
+    assert_eq!(s["dialog"]["modified"], false, "{s}");
+    dialog(&mut h, "db.data-sources.apply", Value::Null);
+    assert_eq!(store.saves(), 1, "Apply without changes saves nothing");
 
     // "Never": Apply drops the kept password.
     set(&mut h, "save", "never");
+    assert_eq!(state(&mut h)["dialog"]["modified"], true);
     dialog(&mut h, "db.data-sources.apply", Value::Null);
     assert_eq!(store.password("pyoxide-local"), None);
+    assert_eq!(state(&mut h)["dialog"]["modified"], false, "applied");
     set(&mut h, "save", "forever");
     set(&mut h, "password", SECRET);
     dialog(&mut h, "db.data-sources.apply", Value::Null);

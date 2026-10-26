@@ -591,6 +591,9 @@ pub struct DataSourcesDialog {
     /// started and the list's width then; the width while dragging.
     resizing: Option<(Pixels, f32)>,
     drag_width: Option<f32>,
+    /// The data sources as the store keeps them (as read, or as last
+    /// saved): Apply is enabled while the list differs.
+    saved_sources: Vec<DataSource>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -646,6 +649,7 @@ impl DataSourcesDialog {
         subscriptions.push(cx.subscribe(&password, |this, _, _: &PasswordEdited, cx| {
             this.password_edited(cx)
         }));
+        let saved_sources = sources.clone();
         let items = sources
             .into_iter()
             .map(|source| Item {
@@ -690,6 +694,7 @@ impl DataSourcesDialog {
             expand_editor,
             resizing: None,
             drag_width: None,
+            saved_sources,
             _subscriptions: subscriptions,
         };
         match initial {
@@ -1841,8 +1846,25 @@ impl DataSourcesDialog {
         });
     }
 
+    /// Something differs from what the store keeps (`isModified`): a data
+    /// source added, removed, edited, reordered or a password typed.
+    pub(crate) fn modified(&self) -> bool {
+        !self.removed.is_empty()
+            || self.items.len() != self.saved_sources.len()
+            || self
+                .items
+                .iter()
+                .zip(&self.saved_sources)
+                .any(|(item, saved)| {
+                    item.original.as_deref() != Some(saved.name.as_str())
+                        || item.source != *saved
+                        || !matches!(item.password, PasswordEdit::Keep)
+                })
+    }
+
     /// After a save: the store's names and passwords are the dialog's.
     fn saved(&mut self, cx: &mut Context<Self>) {
+        self.saved_sources = self.items.iter().map(|i| i.source.clone()).collect();
         for item in &mut self.items {
             item.original = Some(item.source.name.clone());
             item.password = PasswordEdit::Keep;
@@ -1923,6 +1945,7 @@ impl DataSourcesDialog {
             "expanded": self.expanded.map(FieldId::id),
             "schemas_loading": self.schemas_loading,
             "save_error": self.save_error,
+            "modified": self.modified(),
             "problem": self.problem().map(|(_, p)| p),
             "list": self.list.as_ref().map(|l| json!({
                 "list": l.list.id(),

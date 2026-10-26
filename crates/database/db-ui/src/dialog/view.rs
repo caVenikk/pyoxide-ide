@@ -1771,12 +1771,15 @@ impl DataSourcesDialog {
                 ButtonRole::Cancel,
                 Box::new(DialogCancel),
             ))
-            .button(BarButton::new(
-                "data-sources-apply",
-                "Apply",
-                ButtonRole::Apply,
-                Box::new(DialogApply),
-            ));
+            .button(
+                BarButton::new(
+                    "data-sources-apply",
+                    "Apply",
+                    ButtonRole::Apply,
+                    Box::new(DialogApply),
+                )
+                .enabled(self.modified()),
+            );
         if let Some(status) = status {
             bar = bar.status(status);
         }
@@ -1865,9 +1868,12 @@ impl Render for DataSourcesDialog {
                 }
                 cx.notify();
             }))
-            .on_action(
-                cx.listener(|this, _: &DialogApply, window, cx| this.save(false, window, cx)),
-            )
+            .on_action(cx.listener(|this, _: &DialogApply, window, cx| {
+                // Disabled while nothing differs from what is kept.
+                if this.modified() {
+                    this.save(false, window, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &DialogOk, window, cx| this.save(true, window, cx)))
             .on_action(cx.listener(|this, _: &DialogCancel, window, cx| this.cancel(window, cx)))
             .capture_action(
