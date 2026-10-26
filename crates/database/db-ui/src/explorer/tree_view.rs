@@ -53,6 +53,29 @@ pub(crate) fn database_name(profile: &db_core::Profile) -> Option<&str> {
     }
 }
 
+/// Two profiles connect alike: they differ at most in what is shown or
+/// read (colour, comment, introspection level and scope).
+fn same_connection(a: &db_core::Profile, b: &db_core::Profile) -> bool {
+    let plain = |p: &db_core::Profile| {
+        let mut p = p.clone();
+        let mut gui = p.gui_options();
+        gui.color = None;
+        gui.comment = None;
+        gui.level = None;
+        gui.schema_levels.clear();
+        gui.scope = None;
+        gui.refresh_minutes = None;
+        p.gui = (!gui.is_default()).then_some(gui);
+        p
+    };
+    plain(a) == plain(b)
+}
+
+/// Where the name of a row at `depth` starts, from the rows' left edge.
+pub(super) fn text_x(depth: usize, cx: &App) -> gpui::Pixels {
+    px(TREE_LEFT + ICON_X + TEXT_X) + cx.theme().metric(Metric::TreeIndent) * depth as f32
+}
+
 fn icon_name(icon: RowIcon) -> IconName {
     match icon {
         RowIcon::Source => icons::DATA_SOURCE,
@@ -83,9 +106,9 @@ fn icon_name(icon: RowIcon) -> IconName {
 }
 
 /// What a row shows.
-struct RowText {
+pub(super) struct RowText {
     icon: Option<IconName>,
-    view: NodeView,
+    pub(super) view: NodeView,
     /// A failed status row: the text in the error colour, a Retry link.
     failed: bool,
 }
@@ -102,6 +125,16 @@ pub(crate) struct TreeState {
     /// (the counters after the names).
     pub totals: HashMap<String, Totals>,
     total_tasks: HashMap<String, gpui::Task<()>>,
+    /// Statements of the context menus' actions that run.
+    pub ddl: Vec<super::actions::DdlRun>,
+    /// The Quick Documentation popup.
+    pub doc: Option<super::actions::DocPopup>,
+    /// The confirmation of Remove Data Source.
+    pub confirm: Option<super::actions::Confirm>,
+    /// Where the rows are drawn (window coordinates), for popups opened
+    /// from the keyboard.
+    pub rows_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    pub search: super::speed_search::SpeedSearch,
 }
 
 /// What a server offers, as far as it is read.
@@ -155,20 +188,37 @@ impl Explorer {
                 }
             })
             .collect();
-        self.tree.rows = tree::rows(&trees, &self.tree.expanded);
+        let rows = tree::rows(&trees, &self.tree.expanded);
+        drop(trees);
+        self.tree.rows = if self.tree.search.filter && self.tree.search.active() {
+            super::speed_search::filter_rows(rows, |r| {
+                self.tree.search.find(&self.row_text(r).view.name).is_some()
+            })
+        } else {
+            rows
+        };
     }
 
     /// Keeps what still applies after the data sources were read again: a
-    /// data source whose profile changed gets a new handle.
+    /// data source whose connection or session options changed gets a new
+    /// handle; one whose display or introspection options changed (colour,
+    /// comment, level, scope) keeps its handle with the new profile.
     pub(super) fn sources_changed(&mut self) {
         let sources = self.sources.clone().unwrap_or_default();
         self.tree
             .totals
             .retain(|name, _| sources.iter().any(|s| &s.name == name));
         self.tree.lives.retain(|name, live| {
-            sources
+            match sources
                 .iter()
-                .any(|s| &s.name == name && s.profile == live.profile)
+                .find(|s| &s.name == name && same_connection(&s.profile, &live.profile))
+            {
+                Some(s) => {
+                    live.profile = s.profile.clone();
+                    true
+                }
+                None => false,
+            }
         });
         self.tree
             .expanded
@@ -182,6 +232,24 @@ impl Explorer {
             self.tree.selected = None;
         }
         self.rebuild_rows();
+    }
+
+    /// Opens again the handles of the open data sources that lost theirs
+    /// (renamed, or a connection option changed).
+    pub(super) fn reopen_expanded(&mut self, cx: &mut Context<Self>) {
+        let names: Vec<String> = self
+            .tree
+            .expanded
+            .iter()
+            .filter(|k| k.node == NodeKey::Source && !self.tree.lives.contains_key(&*k.source))
+            .map(|k| k.source.to_string())
+            .collect();
+        for name in &names {
+            self.open_live(name, cx);
+        }
+        if !names.is_empty() {
+            self.rebuild_rows();
+        }
     }
 
     /// Opens the data source's handle: its cached model first, a refresh
@@ -279,18 +347,22 @@ impl Explorer {
 
     fn on_event(&mut self, event: Event, cx: &mut Context<Self>) {
         let name = event.data_source.as_str().to_owned();
-        if matches!(
-            event.kind,
-            EventKind::Session { .. } | EventKind::Job { .. }
-        ) {
-            crate::console::route(event, cx);
-            return;
-        }
+        let kind = match event.kind {
+            EventKind::Job { job, event, .. } if self.tree.ddl.iter().any(|r| r.job == job) => {
+                self.on_job_event(job, event, cx);
+                return;
+            }
+            EventKind::Session { .. } | EventKind::Job { .. } => {
+                crate::console::route(event, cx);
+                return;
+            }
+            other => other,
+        };
         let Some(live) = self.tree.lives.get_mut(&name) else {
             return;
         };
         let mut balloon = None;
-        match event.kind {
+        match kind {
             EventKind::State { state } => live.state = state,
             EventKind::Refresh { job, event } if live.refresh == Some(job) => match event {
                 RefreshEvent::Started => {}
@@ -299,6 +371,8 @@ impl Explorer {
                     live.model = live.handle.model().get();
                     live.has_model = true;
                     live.error = None;
+                    // The schemas with a level of their own, one by one.
+                    live.refresh_next();
                     if let Some(root) = self.root.clone()
                         && let Some(cache) = crate::store(cx).model_cache(&root)
                     {
@@ -313,6 +387,7 @@ impl Explorer {
                 }
                 RefreshEvent::Failed { error } => {
                     live.refresh = None;
+                    live.queued.clear();
                     if live.shown_model().is_some() {
                         // The tree keeps the cached model; the reason goes
                         // to a balloon.
@@ -321,7 +396,10 @@ impl Explorer {
                         live.error = Some(error.message);
                     }
                 }
-                RefreshEvent::Cancelled => live.refresh = None,
+                RefreshEvent::Cancelled => {
+                    live.refresh = None;
+                    live.refresh_next();
+                }
             },
             _ => return,
         }
@@ -396,13 +474,24 @@ impl Explorer {
         cx.notify();
     }
 
-    /// Refreshes the selected data source (opening it when it is not).
+    /// Refreshes the selected data source (opening it when it is not); a
+    /// selected schema, or a node or group in one, reads that schema only.
     pub(super) fn refresh_selected(&mut self, cx: &mut Context<Self>) {
         let Some(name) = self.selected_source().map(|s| s.name.clone()) else {
             return;
         };
+        let schema = match self.tree.selected.as_ref().map(|k| k.node) {
+            Some(NodeKey::Node(id) | NodeKey::Group(id, _)) => self
+                .model_of(&name)
+                .and_then(|m| m.node(id))
+                .map(|n| n.schema().name().to_owned()),
+            _ => None,
+        };
         match self.tree.lives.get_mut(&name) {
-            Some(live) => live.refresh(),
+            Some(live) => match schema {
+                Some(schema) => live.refresh_schema(&schema),
+                None => live.refresh(),
+            },
             None => self.open_live(&name, cx),
         }
         self.rebuild_rows();
@@ -418,12 +507,12 @@ impl Explorer {
     }
 
     /// The index of the selected row.
-    fn selected_ix(&self) -> Option<usize> {
+    pub(super) fn selected_ix(&self) -> Option<usize> {
         let key = self.tree.selected.as_ref()?;
         self.tree.rows.iter().position(|r| &r.key == key)
     }
 
-    fn select_ix(&mut self, ix: usize, cx: &mut Context<Self>) {
+    pub(super) fn select_ix(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(row) = self.tree.rows.get(ix) else {
             return;
         };
@@ -443,6 +532,9 @@ impl Explorer {
     /// Up and Down: the row above or below (the first one when none is
     /// selected).
     pub(super) fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.search_step(delta, cx) {
+            return;
+        }
         let last = self.tree.rows.len().saturating_sub(1);
         let ix = match self.selected_ix() {
             Some(ix) => ix.saturating_add_signed(delta).min(last),
@@ -505,17 +597,21 @@ impl Explorer {
     }
 
     pub(super) fn select_row(&mut self, key: RowKey, cx: &mut Context<Self>) {
+        // Another row closes the documentation popup of the last one.
+        if self.tree.selected.as_ref() != Some(&key) {
+            self.tree.doc = None;
+        }
         self.selected = Some(key.source.to_string());
         self.tree.selected = Some(key);
         cx.notify();
     }
 
     /// The model a row's node is in.
-    fn model_of(&self, source: &str) -> Option<&Model> {
+    pub(super) fn model_of(&self, source: &str) -> Option<&Model> {
         self.tree.lives.get(source).and_then(Live::shown_model)
     }
 
-    fn row_text(&self, row: &Row) -> RowText {
+    pub(super) fn row_text(&self, row: &Row) -> RowText {
         let source = &*row.key.source;
         let profile = self
             .sources()
@@ -803,10 +899,15 @@ impl Explorer {
             .items_center()
             .gap(px(DETAIL_GAP))
             .whitespace_nowrap()
-            .child(div().text_color(name_color).child(text.view.name.clone()))
+            .child(
+                div()
+                    .text_color(name_color)
+                    .child(self.row_label(&text.view.name, cx)),
+            )
             .children(extra.map(|e| div().text_size(small).text_color(muted).child(e)))
             .children(retry);
         let click_key = key.clone();
+        let menu_key = key.clone();
         div()
             .id(("db-row", ix))
             .debug_selector(move || selector.clone())
@@ -836,7 +937,13 @@ impl Explorer {
                     this.toggle_selected(cx);
                 }
             }))
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_context_menu(menu_key.clone(), e.position, window, cx);
+                }),
+            )
             .into_any_element()
     }
 
@@ -865,6 +972,15 @@ impl Explorer {
             .flex_1()
             .min_h(px(0.0))
             .pt(px(TREE_TOP))
+            .relative()
+            .child({
+                let bounds = self.tree.rows_bounds.clone();
+                gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                    .absolute()
+                    .top(px(TREE_TOP))
+                    .left_0()
+                    .size_full()
+            })
             .child(rows)
             .children(self.error.clone().map(|e| {
                 div()

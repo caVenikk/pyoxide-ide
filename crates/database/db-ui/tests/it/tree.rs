@@ -109,10 +109,10 @@ fn a_cached_model_opens_without_the_database(cx: &mut TestAppContext) {
         p("tables/customers/columns/notes [text]"),
         p("tables/customers/keys 1"),
         p("tables/customers/indexes 3"),
-        // The model keeps objects by name.
-        p("tables/customers/indexes/customers_country_idx [(country) where is_active]"),
+        // Unique indexes first, then the others, by name in each part.
         p("tables/customers/indexes/customers_email_lower_idx [(lower(email::text)) UNIQUE]"),
         p("tables/customers/indexes/customers_pkey [(id) UNIQUE]"),
+        p("tables/customers/indexes/customers_country_idx [(country) where is_active]"),
         p("tables/customers/triggers 1"),
         p("tables/measurements"),
         p("tables/orders"),

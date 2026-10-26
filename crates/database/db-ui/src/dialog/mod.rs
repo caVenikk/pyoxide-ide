@@ -332,17 +332,29 @@ pub(crate) fn choices(list: ListId) -> Vec<(&'static str, &'static str)> {
     }
 }
 
-/// The colours of a data source (the names of the IDE's file colours).
-pub(crate) const COLORS: [(&str, &str); 8] = [
+/// The colours of a data source, in the order of the tree's Set Color
+/// menu.
+pub(crate) const COLORS: [(&str, &str); 9] = [
     ("none", "No color"),
     ("blue", "Blue"),
+    ("teal", "Teal"),
     ("green", "Green"),
-    ("orange", "Orange"),
-    ("rose", "Rose"),
-    ("violet", "Violet"),
     ("yellow", "Yellow"),
+    ("orange", "Orange"),
+    ("red", "Red"),
+    ("purple", "Purple"),
     ("gray", "Gray"),
 ];
+
+/// A colour name of [`COLORS`] for a name a profile holds (files written
+/// before the menu's colours hold `rose` and `violet`).
+pub(crate) fn color_id(name: &str) -> &str {
+    match name {
+        "rose" => "red",
+        "violet" => "purple",
+        other => other,
+    }
+}
 
 /// What happens to the typed password of an item.
 #[derive(Debug, Clone, Default)]
@@ -464,6 +476,24 @@ pub(crate) fn open(
     });
     if let Some(dialog) = built {
         cx.set_global(OpenDialog(Some(dialog.downgrade())));
+    }
+}
+
+/// [`open`] at the Schemas tab of the data source (the tree's Manage
+/// Shown Schemas…).
+pub(crate) fn open_schemas(
+    root: PathBuf,
+    sources: Vec<DataSource>,
+    name: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open(root, sources, Initial::Select(name), window, cx);
+    let dialog = cx
+        .try_global::<OpenDialog>()
+        .and_then(|d| d.0.as_ref()?.upgrade());
+    if let Some(dialog) = dialog {
+        dialog.update(cx, |d, cx| d.show_tab(Tab::Schemas, cx));
     }
 }
 
@@ -1677,7 +1707,7 @@ impl DataSourcesDialog {
                 TlsMode::VerifyFull => "verify-full",
             },
             ListId::Color => {
-                let color = gui.color.as_deref().unwrap_or("none");
+                let color = color_id(gui.color.as_deref().unwrap_or("none"));
                 COLORS.iter().find(|(c, _)| *c == color)?.0
             }
             ListId::Add | ListId::Database => return None,

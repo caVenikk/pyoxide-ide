@@ -139,13 +139,14 @@ const EXPANDED_HEIGHT: f32 = 120.0;
 /// The colour of a data source's colour name (the IDE's file colours of
 /// the dark themes, as a dot).
 fn color_value(name: &str) -> gpui::Hsla {
-    let rgb = match name {
+    let rgb = match super::color_id(name) {
         "blue" => 0x2f4d73,
+        "teal" => 0x29524f,
         "green" => 0x3b5139,
-        "orange" => 0x6e4b2f,
-        "rose" => 0x6e3a43,
-        "violet" => 0x55416e,
         "yellow" => 0x6b6332,
+        "orange" => 0x6e4b2f,
+        "red" => 0x6e3a43,
+        "purple" => 0x55416e,
         _ => 0x4d4f53,
     };
     gpui::rgb(rgb).into()
@@ -550,7 +551,7 @@ impl DataSourcesDialog {
         let anchors = self.anchors.clone();
         let label = color
             .as_deref()
-            .and_then(|c| COLORS.iter().find(|(id, _)| *id == c))
+            .and_then(|c| COLORS.iter().find(|(id, _)| *id == super::color_id(c)))
             .map(|(_, l)| *l)
             .unwrap_or("Color");
         div()
