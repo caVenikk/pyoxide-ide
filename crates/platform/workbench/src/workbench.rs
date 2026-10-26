@@ -9,8 +9,8 @@ use code_intel_ui::{CodeIntelEvent, CodeIntelView};
 use editor::find::FindEvent;
 use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, ClickEvent, Context, DispatchPhase, Div, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
+    AnyElement, AnyView, App, AppContext as _, Bounds, ClickEvent, Context, DispatchPhase, Div,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollHandle,
     ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
@@ -49,6 +49,7 @@ mod history;
 pub(crate) mod project_widget;
 mod remote;
 mod run_actions;
+mod tab_menu;
 pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
@@ -68,6 +69,11 @@ const TAB_PADDING: f32 = 8.0;
 const INACTIVE_TAB_ALPHA: f32 = 0.75;
 /// Diameter of the dot that marks a modified file in its tab.
 const MODIFIED_DOT: f32 = 6.0;
+/// The dot on a pinned tab's pin (`BadgeDotProvider(0.7, 0.2)` with a
+/// radius of 3 on the 16 px icon): its diameter and top left corner.
+const PIN_DOT: f32 = 6.0;
+const PIN_DOT_X: f32 = 8.2;
+const PIN_DOT_Y: f32 = 0.2;
 /// How long a notice stays in the status bar (about as long as the
 /// reference's balloons stay).
 const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
@@ -159,6 +165,8 @@ enum TabContent {
 /// An editor tab.
 struct Tab {
     content: TabContent,
+    /// Pinned (`tab_menu.rs`).
+    pinned: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -223,6 +231,11 @@ pub struct Workbench {
     /// just enough to show the whole active tab).
     tab_scroll: ScrollHandle,
     tab_scroll_shown: std::cell::Cell<Option<(usize, usize)>>,
+    /// The bounds of each tab as last drawn (a tab's menu opened from a
+    /// command opens below it).
+    tab_bounds: Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>>,
+    /// The context menu of a tab while open (`tab_menu.rs`).
+    tab_menu: Option<tab_menu::TabMenu>,
     /// Background reads and writes in flight.
     pending: usize,
     /// Last error or notice, shown in the status bar.
@@ -488,6 +501,8 @@ impl Workbench {
             commit_ui,
             terminal_ui,
             diff_tabs: Default::default(),
+            tab_bounds: Default::default(),
+            tab_menu: None,
             _subscriptions: subscriptions,
         }
     }
@@ -747,19 +762,30 @@ impl Workbench {
                         "modified": editor.read(cx).is_modified(),
                         "deleted": self.is_deleted_on_disk(path),
                     });
+                    // Only a pinned tab has the key.
+                    if t.pinned {
+                        tab["pinned"] = json!(true);
+                    }
                     // Only a coloured tab has the key.
                     if let Some(color) = self.vcs_file_colors().name_color(path, false, false) {
                         tab["color"] = json!(color.name());
                     }
                     tab
                 }
-                TabContent::View(view) => json!({
-                    "title": view.title(cx).to_string(),
-                    "preview": view.is_preview(cx),
-                    "view": view.state(cx),
-                }),
+                TabContent::View(view) => {
+                    let mut tab = json!({
+                        "title": view.title(cx).to_string(),
+                        "preview": view.is_preview(cx),
+                        "view": view.state(cx),
+                    });
+                    if t.pinned {
+                        tab["pinned"] = json!(true);
+                    }
+                    tab
+                }
             }).collect::<Vec<_>>(),
             "active_tab": self.active,
+            "tab_menu": self.tab_menu_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
@@ -1038,6 +1064,7 @@ impl Workbench {
         let index = self.tabs.len();
         self.tabs.push(Tab {
             content: TabContent::File { path, editor, find },
+            pinned: false,
             _subscriptions: vec![subscription, find_subscription, observe_find],
         });
         self.message = None;
@@ -2048,6 +2075,10 @@ impl Workbench {
 
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let tab = &self.tabs[index];
+        let pinned = tab.pinned;
+        // The tab whose context menu is open looks hovered
+        // (`JBTabsImpl.isHoveredOrWithPopup`).
+        let with_menu = self.tab_menu_index() == Some(index);
         let theme = cx.theme();
         let selected = self.active == Some(index);
         let pill_h = theme.metric(Metric::TabSelectionHeight);
@@ -2102,15 +2133,36 @@ impl Workbench {
         // do when modified tabs are marked).
         let close_group: SharedString = format!("tab-close-{index}").into();
         let dot = theme.color(UiRole::Accent);
+        // A pinned tab shows the pin there, with the dot when modified; a
+        // click unpins it (`CloseTab`, "ide.editor.tabs.interactive.pin.
+        // button").
         let close_icon = div()
             .absolute()
             .size_full()
-            .when(modified, |d| {
+            .when(pinned, |d| {
+                d.debug_selector(move || format!("tab-pin-{index}"))
+            })
+            .when(modified && !pinned, |d| {
                 d.invisible()
                     .group_hover(close_group.clone(), |s| s.visible())
             })
-            .child(Icon::new(IconName::CLOSE_SMALL));
-        let marker = modified.then(|| {
+            .child(Icon::new(if pinned {
+                IconName::PIN
+            } else {
+                IconName::CLOSE_SMALL
+            }))
+            .when(pinned && modified, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .left(px(PIN_DOT_X))
+                        .top(px(PIN_DOT_Y))
+                        .size(px(PIN_DOT))
+                        .rounded_full()
+                        .bg(dot),
+                )
+            });
+        let marker = (modified && !pinned).then(|| {
             div()
                 .debug_selector(move || format!("tab-modified-{index}"))
                 .absolute()
@@ -2128,7 +2180,7 @@ impl Workbench {
             .flex_none()
             .size(px(16.0))
             .rounded(px(3.0))
-            .when(!selected && !modified, |d| {
+            .when(!selected && !modified && !pinned, |d| {
                 d.invisible().group_hover(group.clone(), |s| s.visible())
             })
             .hover(move |s| s.bg(hover))
@@ -2136,8 +2188,26 @@ impl Workbench {
             .children(marker)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                this.close_tab(index, window, cx);
+                if this.is_tab_pinned(index) {
+                    this.toggle_pin(index, cx);
+                } else {
+                    this.close_tab(index, window, cx);
+                }
             }));
+        // Where the tab is drawn, for its menu opened from a command.
+        let tab_bounds = self.tab_bounds.clone();
+        let measure = canvas(
+            move |bounds, _, _| {
+                let mut all = tab_bounds.borrow_mut();
+                if all.len() <= index {
+                    all.resize(index + 1, Bounds::default());
+                }
+                all[index] = bounds;
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
         let pill = div()
             .id(("tab", index))
             .debug_selector(move || format!("tab-{index}"))
@@ -2151,18 +2221,30 @@ impl Workbench {
             .gap(px(6.0))
             .rounded(radius)
             .border_1()
+            .relative()
             .when(selected, |d| d.bg(active_bg).border_color(outline))
             .when(!selected, |d| {
                 d.border_color(gpui::transparent_black())
                     .hover(move |s| s.bg(hover))
+                    .when(with_menu, |d| d.bg(hover))
             })
+            .child(measure)
             .child(Icon::new(icon))
             .child(div().whitespace_nowrap().text_color(text).child(title))
             .child(close)
             .when_some(tooltip, |d, t| d.tooltip(Tooltip::text(t, None)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.activate(index, window, cx);
-            }));
+            }))
+            // The tab's context menu where the pointer is; the active tab
+            // stays.
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_editor_tab_menu(index, e.position, window, cx);
+                }),
+            );
         div()
             .flex_none()
             .px(px(TAB_H_OFFSET))
@@ -2661,6 +2743,7 @@ impl Render for Workbench {
         root = self.terminal_actions(root, cx);
         root = self.diff_actions(root, cx);
         root = self.window_actions(root, cx);
+        root = self.tab_menu_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);
         root.flex()
@@ -2707,6 +2790,7 @@ impl Render for Workbench {
             .child(self.notifications.clone())
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
+            .children(self.render_tab_menu(window))
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())

@@ -45,6 +45,12 @@ commands = [
 ]
 
 [[action]]
+id = "PinActiveEditorTab"
+text = "Pin Active Tab"
+groups = ["Main Menu > Window > Editor Tabs"]
+command = "tabs.toggle-pin"
+
+[[action]]
 id = "CloseContent"
 text = "Close Tab"
 groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
@@ -52,3 +58,39 @@ commands = [
   { command = "tabs.close" },
   { command = "run.close-tab", contexts = ["RunToolWindow", "RunConsole > Editor"] },
 ]
+
+[[action]]
+id = "CloseAllEditorsButActive"
+text = "Close Other Tabs"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-others"
+
+[[action]]
+id = "CloseAllEditors"
+text = "Close All Tabs"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-all"
+
+[[action]]
+id = "CloseAllUnmodifiedEditors"
+text = "Close Unmodified Tabs"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-unmodified"
+
+[[action]]
+id = "CloseAllUnpinnedEditors"
+text = "Close All but Pinned"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-unpinned"
+
+[[action]]
+id = "CloseAllToTheLeft"
+text = "Close Tabs to the Left"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-left"
+
+[[action]]
+id = "CloseAllToTheRight"
+text = "Close Tabs to the Right"
+groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
+command = "tabs.close-right"

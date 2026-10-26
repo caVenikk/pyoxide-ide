@@ -55,6 +55,7 @@ impl Workbench {
         let observed = cx.observe(&view, |_, _, cx| cx.notify());
         self.tabs.push(Tab {
             content: TabContent::View(Box::new(view.clone())),
+            pinned: false,
             _subscriptions: vec![observed],
         });
         self.activate(self.tabs.len() - 1, window, cx);

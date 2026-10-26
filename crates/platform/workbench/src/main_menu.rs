@@ -460,9 +460,16 @@ fn window_menu() -> Menu {
                 vec![
                     cmd("Select Next Tab", "tabs.next"),
                     cmd("Select Previous Tab", "tabs.previous"),
+                    cmd("Pin Active Tab", "tabs.toggle-pin"),
                     SEP,
                     // CloseEditorsGroup.
                     cmd("Close Tab", "tabs.close"),
+                    cmd("Close Other Tabs", "tabs.close-others"),
+                    cmd("Close All Tabs", "tabs.close-all"),
+                    cmd("Close Unmodified Tabs", "tabs.close-unmodified"),
+                    cmd("Close All but Pinned", "tabs.close-unpinned"),
+                    cmd("Close Tabs to the Left", "tabs.close-left"),
+                    cmd("Close Tabs to the Right", "tabs.close-right"),
                 ],
             ),
         ],

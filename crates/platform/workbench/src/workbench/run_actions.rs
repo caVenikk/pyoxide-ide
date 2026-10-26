@@ -99,7 +99,16 @@ impl Workbench {
     /// editor's file (Pyoxide shows one editor at a time, so it is the
     /// reference's single visible editor even without the focus).
     pub(super) fn current_run_file(&self, cx: &App) -> Option<(PathBuf, bool)> {
-        let file = self.active_file(cx)?;
+        self.run_file_of(None, cx)
+    }
+
+    /// `file` (relative to the project or absolute), else the active
+    /// editor's, and whether the product can run it.
+    pub(super) fn run_file_of(&self, file: Option<&str>, cx: &App) -> Option<(PathBuf, bool)> {
+        let file = match file {
+            Some(file) => self.resolve(file, cx),
+            None => self.active_file(cx)?,
+        };
         let runnable = self
             .product
             .run
@@ -268,6 +277,11 @@ impl Workbench {
         let Some((file, true)) = self.current_run_file(cx) else {
             return;
         };
+        self.run_path(file, window, cx);
+    }
+
+    /// Runs a file without a configuration.
+    fn run_path(&mut self, file: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let request = self.run_request(file, cx);
         self.launch_request(request, false, window, cx);
     }
@@ -373,11 +387,11 @@ impl Workbench {
     /// from the product, the file runs as Current File does.
     pub(super) fn run_current_file(
         &mut self,
-        _: &RunCurrentFile,
+        action: &RunCurrentFile,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((file, true)) = self.current_run_file(cx) else {
+        let Some((file, true)) = self.run_file_of(action.file.as_deref(), cx) else {
             return;
         };
         let key = self
@@ -385,7 +399,7 @@ impl Workbench {
             .update(cx, |c, cx| c.context_configuration(&file, cx));
         match key {
             Some(key) => self.run_configuration(&key, window, cx),
-            None => self.run_current(window, cx),
+            None => self.run_path(file, window, cx),
         }
     }
 

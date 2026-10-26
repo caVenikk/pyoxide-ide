@@ -71,6 +71,43 @@ ui::ui_commands! {
     CloseTab { index: Option<usize> } => "tabs.close", "Close Tab",
         "Closes the active editor tab, or the tab at a zero-based index; a modified file is saved first.",
         r#"{"index": 0}"#;
+    /// Close the other tabs.
+    CloseOtherTabs { index: Option<usize> } => "tabs.close-others", "Close Other Tabs",
+        "Closes every editor tab but the active one (or the one at a zero-based index); pinned tabs stay.",
+        r#"{"index": 0}"#;
+    /// Close every tab.
+    CloseAllTabs => "tabs.close-all", "Close All Tabs",
+        "Closes every editor tab, pinned ones too; modified files are saved first.";
+    /// Close the tabs without changes.
+    CloseUnmodifiedTabs => "tabs.close-unmodified", "Close Unmodified Tabs",
+        "Closes the editor tabs whose files have no version control changes; pinned tabs stay.";
+    /// Close the tabs that are not pinned.
+    CloseUnpinnedTabs => "tabs.close-unpinned", "Close All but Pinned",
+        "Closes every editor tab that is not pinned.";
+    /// Close the tabs to the left.
+    CloseTabsToLeft { index: Option<usize> } => "tabs.close-left", "Close Tabs to the Left",
+        "Closes the editor tabs to the left of the active one (or of the one at a zero-based index); pinned tabs stay.",
+        r#"{"index": 2}"#;
+    /// Close the tabs to the right.
+    CloseTabsToRight { index: Option<usize> } => "tabs.close-right", "Close Tabs to the Right",
+        "Closes the editor tabs to the right of the active one (or of the one at a zero-based index); pinned tabs stay.",
+        r#"{"index": 0}"#;
+    /// Pin or unpin a tab.
+    TogglePinTab { index: Option<usize> } => "tabs.toggle-pin", "Pin Tab",
+        "Pins the active editor tab (or the one at a zero-based index), or unpins it: pinned tabs stay on the left and stay open on Close Other Tabs, Close Tabs to the Left or Right and Close All but Pinned.",
+        r#"{"index": 0}"#;
+    /// Open the context menu of a tab.
+    ShowTabMenu { index: Option<usize> } => "tabs.context-menu", "Show Tab Context Menu",
+        "Opens the context menu of the active editor tab (or of the one at a zero-based index) below the tab, as a right click on it does.",
+        r#"{"index": 0}"#;
+    /// Show a file in the file manager.
+    RevealFile { path: Option<String> } => "project.reveal-file", "Show in File Manager",
+        "Selects a file (relative to the project or absolute; else the active editor's) in the system file manager (Finder, Explorer).",
+        r#"{"path": "src/app.py"}"#;
+    /// Open a terminal in a file's folder.
+    OpenInTerminal { path: Option<String> } => "terminal.open-in", "Open in Terminal",
+        "Opens a new tab of the Terminal tool window in the folder of a file (relative to the project or absolute; else the active editor's), or in a folder.",
+        r#"{"path": "src/app.py"}"#;
     /// Select a tab.
     SelectTab { index: usize } => "tabs.select", "Select Tab",
         "Makes the tab at a zero-based index active.", r#"{"index": 0}"#;

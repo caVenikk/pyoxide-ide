@@ -14,8 +14,9 @@ ui::ui_commands! {
     Debug => "debug.debug", "Debug",
         "Debugs the selected run configuration; with Current File selected, the file in the editor.";
     /// Debug the file in the editor.
-    DebugCurrentFile => "debug.current-file", "Debug Context Configuration",
-        "Debugs the file in the editor with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.";
+    DebugCurrentFile { file: Option<String> } => "debug.current-file", "Debug Context Configuration",
+        "Debugs the file in the editor (or `file`, relative to the project or absolute) with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.",
+        r#"{"file": "main.py"}"#;
     /// Debug the file in the editor without a configuration.
     DebugFile => "debug.file", "Debug Current File",
         "Debugs the file in the editor with its context configuration, without selecting it (the dropdown's Current File).";
