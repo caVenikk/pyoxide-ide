@@ -36,8 +36,11 @@ const SERVICE_ATTR: u32 = 0x7376_6365;
 /// `kSecAccountItemAttr` ('acct').
 const ACCOUNT_ATTR: u32 = 0x6163_6374;
 
-/// Binaries that read and write data source passwords and ship together.
-pub(crate) const TRUSTED_NAMES: [&str; 3] = ["pyoxide-ide", "pyoxide-db", "pyoxide"];
+/// Binaries that read and write data source passwords and ship together
+/// (the product's programs, `app_info::binaries`).
+fn trusted_names() -> &'static [&'static str] {
+    app_info::binaries()
+}
 
 #[link(name = "Security", kind = "framework")]
 unsafe extern "C" {
@@ -92,7 +95,7 @@ pub(crate) fn trusted_binaries() -> Vec<PathBuf> {
     };
     let mut list = vec![exe.clone()];
     if let Some(dir) = exe.parent() {
-        for name in TRUSTED_NAMES {
+        for name in trusted_names() {
             let path = dir.join(name);
             if path.is_file() && !list.contains(&path) {
                 list.push(path);

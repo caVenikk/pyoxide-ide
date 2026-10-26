@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+app-info.workspace = true
 process.workspace = true
 project.workspace = true
 quick-xml.workspace = true

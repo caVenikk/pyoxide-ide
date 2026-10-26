@@ -1,6 +1,6 @@
 //! A KeePass database (KDBX 4) as a secret store.
 //!
-//! Layout inside the database: group [`ROOT_GROUP`], one subgroup per
+//! Layout inside the database: group [`root_group`], one subgroup per
 //! `service`, one entry per `account` (title and user name = account,
 //! password = secret). Every change re-reads the file first (another
 //! process, or KeePassXC, may have written it) and saves atomically. Reads
@@ -26,8 +26,10 @@ use crate::{Result, Secret, SecretError, SecretErrorKind, SecretStore};
 
 /// Store name used in messages.
 pub const STORE_NAME: &str = "KeePass database";
-/// Group that holds every Pyoxide entry.
-pub const ROOT_GROUP: &str = "Pyoxide";
+/// Group that holds every entry of the product.
+pub fn root_group() -> &'static str {
+    app_info::name()
+}
 
 fn err(kind: SecretErrorKind, message: impl Into<String>) -> SecretError {
     SecretError::new(kind, STORE_NAME, message)
@@ -197,11 +199,11 @@ impl KeePassStore {
         self.with_current(|db| Ok(db.config.version.to_string()))
     }
 
-    /// All `(service, account)` pairs kept by Pyoxide. Names only.
+    /// All `(service, account)` pairs kept by the product. Names only.
     pub fn list(&self) -> Result<Vec<(String, String)>> {
         self.with_current(|db| {
             let mut out = Vec::new();
-            let Some(root) = child_group(db, db.root().id(), ROOT_GROUP) else {
+            let Some(root) = child_group(db, db.root().id(), root_group()) else {
                 return Ok(out);
             };
             let Some(root) = db.group(root) else {
@@ -266,8 +268,8 @@ impl KeePassStore {
             return self.load();
         }
         let mut db = Database::with_config(self.options.kdf.database_config());
-        db.meta.generator = Some("Pyoxide".into());
-        db.meta.database_name = Some("Pyoxide secrets".into());
+        db.meta.generator = Some(app_info::name().into());
+        db.meta.database_name = Some(format!("{} secrets", app_info::name()));
         self.save(&db)?;
         let stamp = self.stamp()?.ok_or_else(|| self.missing())?;
         Ok(Loaded { stamp, db })
@@ -311,9 +313,10 @@ impl KeePassStore {
                     SecretErrorKind::Format,
                     format!(
                         "{} is a {} database: it is read-only here because saving would \
-                         convert it to KDBX 4; use a KDBX 4 database for Pyoxide",
+                         convert it to KDBX 4; use a KDBX 4 database for {}",
                         self.path.display(),
-                        loaded.db.config.version
+                        loaded.db.config.version,
+                        app_info::name()
                     ),
                 ));
             }
@@ -349,7 +352,7 @@ fn entry_by_title(db: &Database, group: GroupId, title: &str) -> Option<EntryId>
 }
 
 fn find_entry(db: &Database, service: &str, account: &str) -> Option<(GroupId, EntryId)> {
-    let root = child_group(db, db.root().id(), ROOT_GROUP)?;
+    let root = child_group(db, db.root().id(), root_group())?;
     let group = child_group(db, root, service)?;
     entry_by_title(db, group, account).map(|e| (group, e))
 }
@@ -401,7 +404,7 @@ impl SecretStore for KeePassStore {
 
     fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
         self.modify(|db| {
-            let root = ensure_group(db, db.root().id(), ROOT_GROUP);
+            let root = ensure_group(db, db.root().id(), root_group());
             let group = ensure_group(db, root, service);
             match entry_by_title(db, group, account) {
                 Some(id) => {
@@ -523,7 +526,7 @@ pub(crate) mod tests {
             key("master").database_key().unwrap(),
         )
         .unwrap();
-        let root = child_group(&db, db.root().id(), ROOT_GROUP).unwrap();
+        let root = child_group(&db, db.root().id(), root_group()).unwrap();
         let svc = child_group(&db, root, "pyoxide-db").unwrap();
         let entry = db
             .entry(entry_by_title(&db, svc, "prod/wallet").unwrap())
@@ -593,7 +596,7 @@ pub(crate) mod tests {
     fn kdbx3_is_read_only() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("old.kdbx");
-        let data = crate::test_kdbx3::write("pw", &[(ROOT_GROUP, &[])]);
+        let data = crate::test_kdbx3::write("pw", &[(root_group(), &[])]);
         fs::write(&path, &data).unwrap();
 
         let e = KeePassStore::open(&path, key("bad"), KeePassOptions::default()).unwrap_err();

@@ -36,13 +36,11 @@ pub use keymap::{KeymapSettings, keymaps_dir};
 pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
 pub use terminal::TerminalSettings;
 
-/// The application's configuration folder: `PYOXIDE_CONFIG_DIR`, else
-/// `pyoxide` in the user's configuration folder.
+/// The application's configuration folder: the product's `CONFIG_DIR`
+/// environment variable, else its slug in the user's configuration folder
+/// (`app_info::config_dir`).
 pub fn config_dir() -> Option<PathBuf> {
-    match std::env::var_os("PYOXIDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
-        Some(dir) => Some(PathBuf::from(dir)),
-        None => Some(dirs::config_dir()?.join("pyoxide")),
-    }
+    app_info::config_dir()
 }
 
 /// Where the application settings are kept: `settings.toml` in

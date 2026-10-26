@@ -3,7 +3,7 @@
 //! Hidden entries never appear in the tree and are never searched: the
 //! reference IDE's default list of ignored files and folders (version
 //! control folders, byte code, tool caches, backup files) and Pyoxide's own
-//! project folder ([`STORE_DIR`]).
+//! project folder ([`store_dir`]).
 //!
 //! Excluded entries stay in the tree, marked, are not expanded on their own,
 //! and are left out of search, Go to File and indexing; everything below an
@@ -19,7 +19,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::roots::{FolderKind, FolderRules, Roots};
-use crate::store::{self, Exclusions, STORE_DIR};
+use crate::store::{self, Exclusions, store_dir};
 
 /// The reference IDE's default "Ignored Files and Folders" list: exact
 /// names, `*.ext` extensions and `*`/`?` wildcards, matched against a file
@@ -305,7 +305,7 @@ impl Filter {
     /// Never shown and never searched: the ignored names, the settings
     /// folder and the temporary files of a save a session left behind.
     pub fn is_hidden(&self, name: &str) -> bool {
-        name == STORE_DIR || default_ignored().matches(name) || crate::is_save_temp(name)
+        name == store_dir() || default_ignored().matches(name) || crate::is_save_temp(name)
     }
 
     /// Shown but excluded: the path or one of its folders is excluded.
@@ -435,7 +435,7 @@ mod tests {
             "x.rbc",
             "x.yarb",
             "notes.txt~",
-            STORE_DIR,
+            store_dir(),
         ] {
             assert!(f.is_hidden(name), "{name}");
         }
@@ -455,7 +455,7 @@ mod tests {
         }
         let root = tempfile::tempdir().unwrap();
         let f = Filter::new(root.path(), Exclusions::default(), AutoExclusions::NONE);
-        assert!(f.is_hidden(".git") && f.is_hidden(STORE_DIR) && !f.is_hidden(".idea"));
+        assert!(f.is_hidden(".git") && f.is_hidden(store_dir()) && !f.is_hidden(".idea"));
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
             "src/app.py",
             "iml",
             "x.iml.bak",
-            ".oxide/project.toml",
+            ".app/project.toml",
         ] {
             assert!(!f.is_project_config(&root.join(path)), "{path}");
         }

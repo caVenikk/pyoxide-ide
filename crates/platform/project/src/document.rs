@@ -58,14 +58,16 @@ impl Stamp {
 
 /// The marker in the names of the temporary files [`write_document`]
 /// writes before it renames them over the document:
-/// `.<name>.pyoxide-save-<process id>-<n>`.
-const SAVE_MARKER: &str = ".pyoxide-save-";
+/// `.<name>.<slug>-save-<process id>-<n>`.
+fn save_marker() -> String {
+    format!(".{}-save-", app_info::slug())
+}
 
 /// The process id in the name of a temporary file of [`write_document`]
 /// (`None`: not such a name).
 fn save_temp_pid(name: &str) -> Option<u32> {
     let rest = name.strip_prefix('.')?;
-    let (_, tail) = rest.rsplit_once(SAVE_MARKER)?;
+    let (_, tail) = rest.rsplit_once(save_marker().as_str())?;
     let (pid, attempt) = tail.split_once('-')?;
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     (digits(pid) && digits(attempt)).then(|| pid.parse().ok())?
@@ -141,7 +143,8 @@ impl TempFile {
             .unwrap_or_default();
         for attempt in 0..100u32 {
             let candidate = dir.join(format!(
-                ".{stem}{SAVE_MARKER}{}-{attempt}",
+                ".{stem}{}{}-{attempt}",
+                save_marker(),
                 std::process::id()
             ));
             match std::fs::OpenOptions::new()
@@ -272,12 +275,12 @@ mod tests {
         assert_eq!(save_temp_pid(&name), Some(std::process::id()));
         assert!(!is_save_temp("a.py"));
         assert!(!is_save_temp(".hidden.py"));
-        assert!(is_save_temp(".a.py.pyoxide-save-123-0"));
-        assert!(is_save_temp("..pyoxide-save-1-12"));
-        assert!(!is_save_temp("a.py.pyoxide-save-123-0"));
-        assert!(!is_save_temp(".a.py.pyoxide-save-x-0"));
-        assert!(!is_save_temp(".a.py.pyoxide-save-123"));
-        assert!(!is_save_temp(".a.py.pyoxide-save-123-"));
+        assert!(is_save_temp(".a.py.app-save-123-0"));
+        assert!(is_save_temp("..app-save-1-12"));
+        assert!(!is_save_temp("a.py.app-save-123-0"));
+        assert!(!is_save_temp(".a.py.app-save-x-0"));
+        assert!(!is_save_temp(".a.py.app-save-123"));
+        assert!(!is_save_temp(".a.py.app-save-123-"));
     }
 
     fn names(dir: &Path) -> Vec<String> {
@@ -364,10 +367,10 @@ mod tests {
     fn leftovers_of_a_gone_session_are_removed_and_live_ones_kept() {
         let dir = tempfile::tempdir().unwrap();
         // Not an id of a running process (see `process::is_alive`).
-        let gone = dir.path().join(".a.py.pyoxide-save-2147483632-0");
+        let gone = dir.path().join(".a.py.app-save-2147483632-0");
         let mine = dir
             .path()
-            .join(format!(".a.py.pyoxide-save-{}-7", std::process::id()));
+            .join(format!(".a.py.app-save-{}-7", std::process::id()));
         let plain = dir.path().join("a.py");
         for f in [&gone, &mine, &plain] {
             std::fs::write(f, "x").unwrap();

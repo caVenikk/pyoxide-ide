@@ -21,7 +21,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::ExitStatus;
-use crate::helper::{INTERRUPT_HELPER_ARG, interrupt_helper};
+use crate::helper::{interrupt_helper, interrupt_helper_arg};
 
 /// The exit code a killed process gets: `(UINT)-1`, as WinP's
 /// `TerminateProcess(hProcess, -1)`.
@@ -88,7 +88,7 @@ pub(crate) fn exit_status(status: std::process::ExitStatus) -> ExitStatus {
 
 /// Sends a console Ctrl+C event to the process's console the way the
 /// reference does, from a separate helper process (WinP's `sendctrlc`):
-/// starts the [`interrupt_helper`] with [`INTERRUPT_HELPER_ARG`] and the
+/// starts the [`interrupt_helper`] with [`interrupt_helper_arg`] and the
 /// process id, without a window, and waits for its exit code. This process
 /// never attaches to the child's console, so the event cannot reach it.
 /// Fails when no helper is set, the helper cannot start, does not answer in
@@ -102,7 +102,7 @@ pub(crate) fn interrupt(process: &OsProcess) -> io::Result<()> {
     })?;
     let mut child = Command::new(&helper.program)
         .args(&helper.args)
-        .arg(INTERRUPT_HELPER_ARG)
+        .arg(interrupt_helper_arg())
         .arg(process.pid.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())

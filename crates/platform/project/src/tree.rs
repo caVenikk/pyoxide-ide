@@ -403,9 +403,7 @@ mod tests {
     };
 
     fn layout(root: &Path) {
-        for dir in [
-            "src/pkg", "tests", ".git", "Zeta", ".venv", ".oxide", ".idea",
-        ] {
+        for dir in ["src/pkg", "tests", ".git", "Zeta", ".venv", ".app", ".idea"] {
             std::fs::create_dir_all(root.join(dir)).unwrap();
         }
         std::fs::write(root.join(".venv/pyvenv.cfg"), "").unwrap();
@@ -451,15 +449,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("app.py"), "").unwrap();
         // From a crashed session, and from a save in flight.
-        std::fs::write(dir.path().join(".app.py.pyoxide-save-2147483632-0"), "").unwrap();
-        let mine = format!(".app.py.pyoxide-save-{}-1", std::process::id());
+        std::fs::write(dir.path().join(".app.py.app-save-2147483632-0"), "").unwrap();
+        let mine = format!(".app.py.app-save-{}-1", std::process::id());
         std::fs::write(dir.path().join(mine), "").unwrap();
         // A file that only looks similar is a project file.
-        std::fs::write(dir.path().join(".pyoxide-save-notes"), "").unwrap();
+        std::fs::write(dir.path().join(".app-save-notes"), "").unwrap();
         let filter = Filter::new(dir.path(), Exclusions::default(), PY);
         let entries = list_dir(dir.path(), &filter).unwrap();
-        assert_eq!(names(&entries), [".pyoxide-save-notes", "app.py"]);
-        assert!(filter.is_hidden(".app.py.pyoxide-save-1-0"));
+        assert_eq!(names(&entries), [".app-save-notes", "app.py"]);
+        assert!(filter.is_hidden(".app.py.app-save-1-0"));
     }
 
     #[test]

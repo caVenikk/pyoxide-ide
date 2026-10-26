@@ -16,9 +16,6 @@ use crate::encoding::PositionEncoding;
 use crate::spec::ServerSpec;
 use crate::uri;
 
-/// The client's name and version in `initialize`.
-const CLIENT_NAME: &str = "Pyoxide IDE";
-
 pub(crate) fn client_capabilities() -> Value {
     json!({
         "general": {
@@ -112,7 +109,7 @@ pub(crate) fn initialize_params(spec: &ServerSpec) -> Value {
     let root = uri::from_path(&spec.root);
     let mut params = json!({
         "processId": std::process::id(),
-        "clientInfo": { "name": CLIENT_NAME, "version": env!("CARGO_PKG_VERSION") },
+        "clientInfo": { "name": app_info::full_name(), "version": env!("CARGO_PKG_VERSION") },
         "rootPath": spec.root.to_string_lossy(),
         "rootUri": root.as_str(),
         "capabilities": client_capabilities(),
@@ -300,7 +297,7 @@ mod tests {
         let params = initialize_params(&spec);
         let parsed: lsp_types::InitializeParams = serde_json::from_value(params.clone()).unwrap();
         assert_eq!(parsed.process_id, Some(std::process::id()));
-        assert_eq!(parsed.client_info.unwrap().name, "Pyoxide IDE");
+        assert_eq!(parsed.client_info.unwrap().name, "App");
         let folders = parsed.workspace_folders.unwrap();
         assert_eq!(folders.len(), 1);
         assert_eq!(folders[0].name, "demo");

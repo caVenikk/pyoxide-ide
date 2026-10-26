@@ -246,9 +246,9 @@ fn the_reference_configurations_are_imported_once_per_storage_class() {
     assert_eq!(snapshot(&root.join(".idea")), idea_before);
     assert_eq!(snapshot(&root.join(".run")), run_before);
 
-    // Shared configurations are files in `.oxide/run/`, the import is
+    // Shared configurations are files in `.app/run/`, the import is
     // marked in the shared settings.
-    let oxide = root.join(".oxide");
+    let oxide = root.join(".app");
     assert!(oxide.join("run/shared.toml").is_file());
     assert!(oxide.join("run/worker.toml").is_file());
     assert!(oxide.join("run/compose.toml").is_file());
@@ -318,7 +318,7 @@ fn a_teammate_with_the_shared_files_imports_only_personal_ones() {
     let (_dir, root) = project();
     open(&root, IMPORTERS, &types()).unwrap();
     // The teammate's checkout: the committed files, no personal state.
-    std::fs::remove_file(root.join(".oxide/workspace.toml")).unwrap();
+    std::fs::remove_file(root.join(".app/workspace.toml")).unwrap();
     let opened = open(&root, IMPORTERS, &types()).unwrap();
     let report = opened.report.unwrap();
     // Only `workspace.xml` is imported; the shared ones are there.
@@ -333,5 +333,5 @@ fn a_project_without_idea_gets_no_folder() {
     let opened = open(dir.path(), IMPORTERS, &types()).unwrap();
     assert!(opened.list.is_empty());
     assert_eq!(opened.report, None);
-    assert!(!dir.path().join(".oxide").exists());
+    assert!(!dir.path().join(".app").exists());
 }

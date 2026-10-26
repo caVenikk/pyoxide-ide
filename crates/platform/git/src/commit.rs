@@ -56,10 +56,14 @@ pub struct Committed {
 struct TempFile(PathBuf);
 
 impl TempFile {
-    fn new(prefix: &str, content: &[u8]) -> Result<Self, VcsError> {
+    fn new(purpose: &str, content: &[u8]) -> Result<Self, VcsError> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("{prefix}-{}-{n}.txt", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "{}-{purpose}-{}-{n}.txt",
+            app_info::slug(),
+            std::process::id()
+        ));
         std::fs::write(&path, content)
             .map_err(|e| VcsError::failed(format!("Cannot write {}: {e}", path.display())))?;
         Ok(Self(path))
@@ -80,7 +84,11 @@ impl TempIndex {
     fn new(git_dir: &Path) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        Self(git_dir.join(format!("pyoxide-index-{}-{n}", std::process::id())))
+        Self(git_dir.join(format!(
+            "{}-index-{}-{n}",
+            app_info::slug(),
+            std::process::id()
+        )))
     }
 
     fn env(&self) -> [(&str, &OsStr); 1] {
@@ -220,7 +228,7 @@ impl GitRepo {
         if paths.is_empty() && !request.amend {
             return Err(VcsError::failed("Nothing to commit"));
         }
-        let message = TempFile::new("pyoxide-commit-message", request.message.as_bytes())?;
+        let message = TempFile::new("commit-message", request.message.as_bytes())?;
         let partial = !request.partial.is_empty();
         let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "commit".into()];
         if !partial {
@@ -258,7 +266,7 @@ impl GitRepo {
                 content.extend_from_slice(p.as_bytes());
                 content.push(0);
             }
-            let list = TempFile::new("pyoxide-commit-paths", &content)?;
+            let list = TempFile::new("commit-paths", &content)?;
             args.push(format!("--pathspec-from-file={}", list.0.display()));
             args.push("--pathspec-file-nul".into());
             _list = list;
@@ -343,7 +351,7 @@ impl GitRepo {
                 &String::from_utf8_lossy(&text),
                 &part.excluded,
             );
-            let file = TempFile::new("pyoxide-partial", content.as_bytes())?;
+            let file = TempFile::new("partial", content.as_bytes())?;
             let path_arg = format!("--path={rel}");
             let file_arg = file.0.display().to_string();
             let blob = run(&["hash-object", "-w", &path_arg, "--", &file_arg])?
