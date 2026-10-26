@@ -14,7 +14,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use db_core::schema::SchemaInfo;
-use db_core::{Dialect, Error, ErrorKind, PasswordSave, Profile, Secret};
+use db_core::{
+    Connection, ConnectionSource, DataSourceId, Dialect, Error, ErrorKind, PasswordSave, Profile,
+    Purpose, Secret,
+};
+use db_model::ModelCache;
 use db_service::DbService;
 use db_service::profiles::ProfilesFile;
 use db_service::secrets::{SECRET_SERVICE, SecretKind};
@@ -67,6 +71,32 @@ fn spawn<T: Send + 'static>(work: impl Future<Output = T> + Send + 'static) -> B
     })
 }
 
+/// The folder of a project's models in the user cache: the project
+/// folder's name and a hash of its path (data source names repeat between
+/// projects).
+fn project_key(project: &Path) -> String {
+    // FNV-1a: stable between runs and platforms, unlike `DefaultHasher`.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in project.to_string_lossy().bytes() {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+    }
+    let name: String = project
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(40)
+        .collect();
+    format!("{name}-{hash:016x}")
+}
+
 /// A secret store that finds a password in memory first ("Until
 /// restart"), then, for a data source that saves "Forever", in the
 /// configured store. For any other data source the configured store is
@@ -114,6 +144,57 @@ fn keeps_in_store(save: PasswordSave) -> bool {
     save == PasswordSave::Forever
 }
 
+/// What makes a [`DbService`]: the secret stores and the environment.
+#[derive(Clone)]
+struct Parts {
+    memory: Arc<MemoryStore>,
+    store: Arc<dyn SecretStore>,
+    env: EnvLookup,
+}
+
+impl Parts {
+    fn service(&self, project: &Path, use_store: bool) -> DbService {
+        DbService::new(
+            profiles_path(project),
+            Arc::new(Layered {
+                memory: self.memory.clone(),
+                store: self.store.clone(),
+                use_store,
+            }),
+            None,
+            self.env.clone(),
+        )
+    }
+}
+
+/// The connections of a project's data sources (the tree's sessions): each
+/// opens with a service that asks the configured store only when that data
+/// source saves its password "Forever".
+struct ProjectConnections {
+    parts: Parts,
+    project: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl ConnectionSource for ProjectConnections {
+    async fn open(
+        &self,
+        data_source: &DataSourceId,
+        purpose: Purpose,
+    ) -> db_core::Result<Arc<dyn Connection>> {
+        let use_store = ProfilesFile::load(&profiles_path(&self.project))
+            .ok()
+            .and_then(|f| {
+                f.profiles
+                    .get(data_source.as_str())
+                    .map(|p| keeps_in_store(p.gui_options().password_save))
+            })
+            .unwrap_or(false);
+        let service = self.parts.service(&self.project, use_store);
+        ConnectionSource::open(&service, data_source, purpose).await
+    }
+}
+
 /// The product's store: data sources per project, the configured secret
 /// store and the passwords kept until restart.
 pub struct ProjectStore {
@@ -145,16 +226,15 @@ impl ProjectStore {
     }
 
     fn service_with(&self, project: &Path, use_store: bool) -> DbService {
-        DbService::new(
-            profiles_path(project),
-            Arc::new(Layered {
-                memory: self.memory.clone(),
-                store: self.store.clone(),
-                use_store,
-            }),
-            None,
-            self.env.clone(),
-        )
+        self.parts().service(project, use_store)
+    }
+
+    fn parts(&self) -> Parts {
+        Parts {
+            memory: self.memory.clone(),
+            store: self.store.clone(),
+            env: self.env.clone(),
+        }
     }
 
     /// Moves the secrets of a renamed data source; the configured store is
@@ -423,6 +503,18 @@ impl DataSourceStore for ProjectStore {
                 .await
                 .map_err(|e| failure(dialect, e))
         })
+    }
+
+    fn connections(&self, project: &Path) -> Arc<dyn ConnectionSource> {
+        Arc::new(ProjectConnections {
+            parts: self.parts(),
+            project: project.to_owned(),
+        })
+    }
+
+    fn model_cache(&self, project: &Path) -> Option<ModelCache> {
+        let user = ModelCache::user()?;
+        Some(ModelCache::new(user.root().join(project_key(project))))
     }
 
     fn import_pycharm(&self, project: &Path) -> Result<ImportSummary, String> {
@@ -754,6 +846,47 @@ mod tests {
         assert_eq!(os.calls(), 0, "saving writes and does not read");
         assert!(store.has_password(root, "local"));
         use_data_source(&store, root, &source);
+        assert_eq!(os.gets(), 1);
+        assert_eq!(os.calls(), 1);
+    }
+
+    /// The tree's connections follow the same rule: the OS store is asked
+    /// for a data source that saves "Forever" only, once.
+    #[test]
+    fn the_trees_connections_ask_the_os_store_only_for_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let os = Counting::default();
+        os.inner
+            .set(SECRET_SERVICE, "forever", &Secret::new("pw"))
+            .unwrap();
+        let cached = Arc::new(secrets::CachedStore::new(Arc::new(os.clone())));
+        let store = ProjectStore::new(cached, Arc::new(|_| None));
+        let sources = [
+            unreachable_source("forever", PasswordSave::Forever),
+            unreachable_source("restart", PasswordSave::UntilRestart),
+            unreachable_source("never", PasswordSave::Never),
+        ];
+        let request = SaveRequest {
+            sources: sources.to_vec(),
+            ..SaveRequest::default()
+        };
+        store.save(root, request).unwrap();
+        let connections = store.connections(root);
+        let open = |name: &str| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(connections.open(&DataSourceId::new(name), Purpose::Meta))
+        };
+        for name in ["restart", "never", "unknown"] {
+            assert!(open(name).is_err());
+        }
+        assert_eq!(os.calls(), 0);
+        for _ in 0..3 {
+            assert!(open("forever").is_err());
+        }
         assert_eq!(os.gets(), 1);
         assert_eq!(os.calls(), 1);
     }

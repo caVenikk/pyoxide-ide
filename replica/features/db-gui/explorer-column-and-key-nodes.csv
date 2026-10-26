@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: columns with type, PK, FK and NOT NULL badges; keys, indexes, triggers under tables",db-gui,must,yes,no,Pro
+"Explorer: columns with type, PK, FK and NOT NULL badges; keys, indexes, triggers under tables",db-gui,must,yes,yes,"Pro; columns with type, PK and NOT NULL marks; keys, foreign keys, indexes, checks, triggers (#302)"

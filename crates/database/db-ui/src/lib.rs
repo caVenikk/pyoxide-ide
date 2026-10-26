@@ -7,9 +7,12 @@
 
 pub mod dialog;
 pub mod explorer;
+pub mod fixture;
+mod live;
 mod password;
 pub mod prompt;
 pub mod store;
+pub mod tree;
 pub mod url;
 
 use std::sync::Arc;
@@ -51,6 +54,28 @@ pub mod icons {
     pub const URL: IconName = IconName("db/url");
     pub const FILE: IconName = IconName("db/file");
     pub const DRIVER: IconName = IconName("db/driver");
+    // Nodes of the object tree.
+    pub const DATABASE_NODE: IconName = IconName("db/databaseNode");
+    pub const SCHEMA: IconName = IconName("db/schema");
+    pub const FOLDER: IconName = IconName("db/folder");
+    pub const VIEW: IconName = IconName("db/view");
+    pub const MATERIALIZED_VIEW: IconName = IconName("db/materializedView");
+    pub const COLUMN: IconName = IconName("db/column");
+    pub const COLUMN_KEY: IconName = IconName("db/columnKey");
+    pub const COLUMN_NOT_NULL: IconName = IconName("db/columnNotNull");
+    pub const KEY: IconName = IconName("db/key");
+    pub const FOREIGN_KEY: IconName = IconName("db/foreignKey");
+    pub const INDEX: IconName = IconName("db/index");
+    pub const UNIQUE_INDEX: IconName = IconName("db/uniqueIndex");
+    pub const CHECK: IconName = IconName("db/check");
+    pub const TRIGGER: IconName = IconName("db/trigger");
+    pub const ROUTINE: IconName = IconName("db/routine");
+    pub const PROCEDURE: IconName = IconName("db/procedure");
+    pub const SEQUENCE: IconName = IconName("db/sequence");
+    pub const OBJECT_TYPE: IconName = IconName("db/objectType");
+    pub const PACKAGE: IconName = IconName("db/package");
+    pub const SYNONYM: IconName = IconName("db/synonym");
+    pub const ERROR: IconName = IconName("db/error");
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -93,6 +118,27 @@ pub const ICONS: &[IconSvg] = &[
     icon!("url", "url"),
     icon!("file", "file"),
     icon!("driver", "driver"),
+    icon!("databaseNode", "databaseNode"),
+    icon!("schema", "schema"),
+    icon!("folder", "folder"),
+    icon!("view", "view"),
+    icon!("materializedView", "materializedView"),
+    icon!("column", "column"),
+    icon!("columnKey", "columnKey"),
+    icon!("columnNotNull", "columnNotNull"),
+    icon!("key", "key"),
+    icon!("foreignKey", "foreignKey"),
+    icon!("index", "index"),
+    icon!("uniqueIndex", "uniqueIndex"),
+    icon!("check", "check"),
+    icon!("trigger", "trigger"),
+    icon!("routine", "routine"),
+    icon!("procedure", "procedure"),
+    icon!("sequence", "sequence"),
+    icon!("objectType", "objectType"),
+    icon!("package", "package"),
+    icon!("synonym", "synonym"),
+    icon!("error", "error"),
 ];
 
 /// The product's store, for the module's views.

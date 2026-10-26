@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use gpui::TestAppContext;
-use serde_json::Value;
+use serde_json::{Value, json};
 use workbench::keymap::Binding;
 use workbench::test_support::keymap::{Harness, check_area, check_joined_once};
 
@@ -29,8 +29,48 @@ fn check(h: &mut Harness, b: &Binding) -> bool {
             assert!(s["dialog"].is_null(), "{s}");
             true
         }
+        "db.explorer.up" | "db.explorer.down" => {
+            show_tool_window(h);
+            h.press(&b.keys);
+            assert_eq!(tree_selected(h).as_deref(), Some("local"));
+            true
+        }
+        "db.explorer.expand-or-next" | "db.explorer.toggle" => {
+            show_tool_window(h);
+            h.invoke("db.explorer.select", json!({ "name": "local" }));
+            h.press(&b.keys);
+            assert_eq!(tree_row(h, "local")["expanded"], true);
+            true
+        }
+        "db.explorer.collapse-or-parent" => {
+            show_tool_window(h);
+            h.invoke("db.explorer.expand", json!({ "path": "local" }));
+            h.press(&b.keys);
+            assert_eq!(tree_row(h, "local")["expanded"], false);
+            true
+        }
         _ => false,
     }
+}
+
+fn tree_row(h: &mut Harness, path: &str) -> Value {
+    let s = state(h);
+    s["explorer"]["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["path"] == path)
+        .cloned()
+        .unwrap_or_else(|| panic!("no row {path}: {s}"))
+}
+
+fn tree_selected(h: &mut Harness) -> Option<String> {
+    state(h)["explorer"]["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["selected"] == true)
+        .map(|r| r["path"].as_str().unwrap().to_owned())
 }
 
 fn run(cx: &mut TestAppContext, macos: bool) {

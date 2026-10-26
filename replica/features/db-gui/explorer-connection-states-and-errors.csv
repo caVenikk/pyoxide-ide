@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: connecting, loading and error states of a data source node",db-gui,must,yes,no,Pro
+"Explorer: connecting, loading and error states of a data source node",db-gui,must,yes,yes,"Pro; connecting, loading and error rows with Retry; a failed refresh keeps the model (#302)"
