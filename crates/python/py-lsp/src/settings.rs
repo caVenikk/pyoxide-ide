@@ -601,6 +601,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip() {
+        brand::install();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let mut settings = Settings::default();
@@ -651,6 +652,7 @@ mod tests {
 
     #[test]
     fn written_by_hand() {
+        brand::install();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".oxide")).unwrap();
@@ -689,6 +691,7 @@ mod tests {
 
     #[test]
     fn a_newer_settings_file_is_not_rewritten() {
+        brand::install();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".oxide")).unwrap();
@@ -736,6 +739,7 @@ mod tests {
 
     #[test]
     fn personal_paths_and_uvx_answers() {
+        brand::install();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         assert_eq!(custom_path(root, Tool::Ruff).unwrap(), None);

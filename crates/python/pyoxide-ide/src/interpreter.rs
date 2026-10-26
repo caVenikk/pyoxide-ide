@@ -1162,6 +1162,7 @@ mod tests {
 
     #[test]
     fn the_choice_is_kept_in_the_personal_project_state() {
+        brand::install();
         let (_dir, root) = project("demo");
         venv(&root.join(".venv"), "uv = 0.9.2\nversion_info = 3.13.1\n");
         let plain = venv(&root.join("venv"), "version = 3.12.13\n");

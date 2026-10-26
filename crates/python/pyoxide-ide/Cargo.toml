@@ -17,6 +17,7 @@ default = ["runtime-shaders"]
 runtime-shaders = ["gpui/runtime_shaders"]
 
 [dependencies]
+brand.workspace = true
 async-trait.workspace = true
 code-intel.workspace = true
 code-intel-ui.workspace = true

@@ -1,4 +1,4 @@
-//! `pyoxide-db`: the command-line front-end of the Pyoxide database engine.
+//! The database command-line front-end of the product (`brand::DB_CLI_NAME`).
 //! Every sub-command calls the same functions as the `db.*` commands.
 
 use std::io::Read;
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::Registry;
 use db_core::schema::ObjectKind;
 use db_core::{Backend, Column, Error, ResultSet, TlsMode, Value, ValueKind, render_table};
@@ -21,15 +21,9 @@ use secrets::{KeyringStore, Prompter, SecretStore, SecretsConfig};
 use serde::Serialize;
 
 #[derive(Parser)]
-#[command(
-    name = "pyoxide-db",
-    version,
-    about = "Database client of Pyoxide IDE: Oracle, PostgreSQL, SQLite",
-    after_help = "Passwords are never accepted as arguments: they come from PYOXIDE_DB_PASSWORD, \
-                  the profile's password_env, the OS credential store (`secret set`) or a prompt."
-)]
+#[command(name = brand::DB_CLI_NAME, version)]
 struct Cli {
-    /// Profiles file (default: $PYOXIDE_DB_PROFILES or the user config directory).
+    /// Profiles file (default: the product's profiles variable or the user config directory).
     #[arg(long, global = true, value_name = "PATH")]
     profiles: Option<PathBuf>,
     /// Print machine-readable JSON instead of text.
@@ -50,12 +44,12 @@ struct ConnArgs {
     /// oracle-thin | oracle-odpi | postgres | sqlite (inferred when omitted).
     #[arg(long, global = true, value_parser = parse_backend)]
     backend: Option<Backend>,
-    #[arg(long, global = true, env = "PYOXIDE_DB_HOST")]
+    #[arg(long, global = true, env = brand::env_name!("DB_HOST"))]
     host: Option<String>,
-    #[arg(long, global = true, env = "PYOXIDE_DB_PORT")]
+    #[arg(long, global = true, env = brand::env_name!("DB_PORT"))]
     port: Option<u16>,
     /// Oracle service name.
-    #[arg(long, global = true, env = "PYOXIDE_DB_SERVICE")]
+    #[arg(long, global = true, env = brand::env_name!("DB_SERVICE"))]
     service: Option<String>,
     /// Oracle SID.
     #[arg(long, global = true)]
@@ -69,7 +63,7 @@ struct ConnArgs {
     /// SQLite file or :memory:.
     #[arg(long, global = true)]
     path: Option<String>,
-    #[arg(long, global = true, env = "PYOXIDE_DB_USER")]
+    #[arg(long, global = true, env = brand::env_name!("DB_USER"))]
     user: Option<String>,
     /// TLS mode: disable | prefer | require | verify-ca | verify-full.
     #[arg(long, global = true, value_parser = parse_tls)]
@@ -345,9 +339,30 @@ impl ConnArgs {
     }
 }
 
+/// The command line definition with the texts that name the product.
+fn command() -> clap::Command {
+    Cli::command()
+        .about(format!(
+            "Database client of {}: Oracle, PostgreSQL, SQLite",
+            brand::PRODUCT_FULL_NAME
+        ))
+        .after_help(format!(
+            "Passwords are never accepted as arguments: they come from {}, \
+             the profile's password_env, the OS credential store (`secret set`) or a prompt.",
+            brand::env_name!("DB_PASSWORD")
+        ))
+        .mut_arg("profiles", |a| {
+            a.help(format!(
+                "Profiles file (default: ${} or the user config directory)",
+                brand::env_name!("DB_PROFILES")
+            ))
+        })
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    brand::install();
+    let cli = Cli::from_arg_matches(&command().get_matches()).unwrap_or_else(|e| e.exit());
     match run(cli).await {
         Ok(code) => code,
         Err(e) => {
@@ -804,7 +819,10 @@ fn profile_cmd(cli: &Cli, svc: &DbService, cmd: &ProfileCmd) -> Result<(), Error
             p.query_timeout_secs = *query_timeout;
             svc.save_profile(name, p)?;
             println!("saved profile {name} in {}", svc.profiles_path.display());
-            println!("store its password with: pyoxide-db secret set {name}");
+            println!(
+                "store its password with: {} secret set {name}",
+                brand::DB_CLI_NAME
+            );
         }
         ProfileCmd::Remove { name } => {
             if svc.remove_profile(name)? {
@@ -851,7 +869,7 @@ fn secret_store_cmd(cmd: &SecretStoreCmd) -> Result<(), Error> {
                 if kp.master_password == MasterPasswordSource::Keychain {
                     let account = kp.master_password_account();
                     let known = KeyringStore
-                        .get(secrets::config::KEEPASS_MASTER_SERVICE, &account)
+                        .get(&secrets::config::keepass_master_service(), &account)
                         .ok()
                         .flatten()
                         .is_some();
@@ -863,7 +881,11 @@ fn secret_store_cmd(cmd: &SecretStoreCmd) -> Result<(), Error> {
                             ))
                             .ok_or_else(|| Error::config("no master password entered"))?;
                         KeyringStore
-                            .set(secrets::config::KEEPASS_MASTER_SERVICE, &account, &master)
+                            .set(
+                                &secrets::config::keepass_master_service(),
+                                &account,
+                                &master,
+                            )
                             .map_err(|e| Error::config(e.to_string()))?;
                     }
                 }
@@ -933,8 +955,7 @@ mod tests {
 
     #[test]
     fn cli_definition_is_valid() {
-        use clap::CommandFactory;
-        Cli::command().debug_assert();
+        command().debug_assert();
     }
 
     #[test]
@@ -953,13 +974,20 @@ mod tests {
 
     #[test]
     fn legacy_flags_still_parse() {
-        let cli =
-            Cli::try_parse_from(["pyoxide-db", "--service", "FREEPDB1", "--user", "u", "ping"])
-                .unwrap();
+        let cli = Cli::try_parse_from([
+            brand::DB_CLI_NAME,
+            "--service",
+            "FREEPDB1",
+            "--user",
+            "u",
+            "ping",
+        ])
+        .unwrap();
         assert!(matches!(cli.cmd, Cmd::Test));
         assert!(matches!(cli.conn.target().unwrap(), Target::Connection(_)));
         let cli =
-            Cli::try_parse_from(["pyoxide-db", "describe", "HR", "EMPLOYEES", "-p", "x"]).unwrap();
+            Cli::try_parse_from([brand::DB_CLI_NAME, "describe", "HR", "EMPLOYEES", "-p", "x"])
+                .unwrap();
         assert!(matches!(cli.conn.target().unwrap(), Target::Profile(_)));
     }
 }

@@ -21,7 +21,7 @@ use db_core::{
 use db_model::ModelCache;
 use db_service::DbService;
 use db_service::profiles::ProfilesFile;
-use db_service::secrets::{SECRET_SERVICE, SecretKind};
+use db_service::secrets::{SecretKind, secret_service};
 use db_ui::store::{
     BoxFuture, DataSource, DataSourceStore, Failure, ImportSummary, PasswordChange, SaveRequest,
     ServerInfo,
@@ -33,7 +33,7 @@ pub const PROFILES_FILE: &str = "db-profiles.toml";
 
 /// The profiles file of the project at `root`.
 pub fn profiles_path(root: &Path) -> PathBuf {
-    root.join(".oxide").join(PROFILES_FILE)
+    root.join(brand::PROJECT_DIR).join(PROFILES_FILE)
 }
 
 /// The database module of the product.
@@ -48,7 +48,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("pyoxide-db")
+            .thread_name(format!("{}-db", brand::SLUG))
             .enable_all()
             .build()
             .expect("the database runtime starts")
@@ -247,9 +247,9 @@ impl ProjectStore {
                 stores.push(self.store.clone());
             }
             for store in stores {
-                if let Some(secret) = store.get(SECRET_SERVICE, &from).map_err(text)? {
-                    store.set(SECRET_SERVICE, &to, &secret).map_err(text)?;
-                    store.delete(SECRET_SERVICE, &from).map_err(text)?;
+                if let Some(secret) = store.get(&secret_service(), &from).map_err(text)? {
+                    store.set(&secret_service(), &to, &secret).map_err(text)?;
+                    store.delete(&secret_service(), &from).map_err(text)?;
                 }
             }
         }
@@ -261,9 +261,13 @@ impl ProjectStore {
     fn delete_secrets(&self, name: &str, in_store: bool) -> Result<(), String> {
         for kind in [SecretKind::Password, SecretKind::WalletPassword] {
             let account = kind.account(name);
-            self.memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+            self.memory
+                .delete(&secret_service(), &account)
+                .map_err(text)?;
             if in_store {
-                self.store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                self.store
+                    .delete(&secret_service(), &account)
+                    .map_err(text)?;
             }
         }
         Ok(())
@@ -286,26 +290,30 @@ impl ProjectStore {
         match change {
             PasswordChange::Set(secret) => match now {
                 PasswordSave::Forever => {
-                    store.set(SECRET_SERVICE, &account, secret).map_err(text)?;
-                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    store
+                        .set(&secret_service(), &account, secret)
+                        .map_err(text)?;
+                    memory.delete(&secret_service(), &account).map_err(text)?;
                 }
                 PasswordSave::UntilRestart => {
-                    memory.set(SECRET_SERVICE, &account, secret).map_err(text)?;
+                    memory
+                        .set(&secret_service(), &account, secret)
+                        .map_err(text)?;
                     if was_stored {
-                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                        store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
                 PasswordSave::Never => {
-                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    memory.delete(&secret_service(), &account).map_err(text)?;
                     if was_stored {
-                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                        store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
             },
             PasswordChange::Clear => {
-                memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                memory.delete(&secret_service(), &account).map_err(text)?;
                 if was_stored || keeps_in_store(now) {
-                    store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    store.delete(&secret_service(), &account).map_err(text)?;
                 }
             }
             // The password stays; it follows the data source when the way
@@ -313,26 +321,30 @@ impl ProjectStore {
             PasswordChange::Keep => match now {
                 PasswordSave::Forever => {
                     if !was_stored
-                        && let Some(secret) = memory.get(SECRET_SERVICE, &account).map_err(text)?
+                        && let Some(secret) =
+                            memory.get(&secret_service(), &account).map_err(text)?
                     {
-                        store.set(SECRET_SERVICE, &account, &secret).map_err(text)?;
-                        memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                        store
+                            .set(&secret_service(), &account, &secret)
+                            .map_err(text)?;
+                        memory.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
                 PasswordSave::UntilRestart => {
                     if was_stored
-                        && let Some(secret) = store.get(SECRET_SERVICE, &account).map_err(text)?
+                        && let Some(secret) =
+                            store.get(&secret_service(), &account).map_err(text)?
                     {
                         memory
-                            .set(SECRET_SERVICE, &account, &secret)
+                            .set(&secret_service(), &account, &secret)
                             .map_err(text)?;
-                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                        store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
                 PasswordSave::Never => {
-                    memory.delete(SECRET_SERVICE, &account).map_err(text)?;
+                    memory.delete(&secret_service(), &account).map_err(text)?;
                     if was_stored {
-                        store.delete(SECRET_SERVICE, &account).map_err(text)?;
+                        store.delete(&secret_service(), &account).map_err(text)?;
                     }
                 }
             },
@@ -441,7 +453,7 @@ impl DataSourceStore for ProjectStore {
 
     fn has_password(&self, project: &Path, name: &str) -> bool {
         let account = SecretKind::Password.account(name);
-        if matches!(self.memory.get(SECRET_SERVICE, &account), Ok(Some(_))) {
+        if matches!(self.memory.get(&secret_service(), &account), Ok(Some(_))) {
             return true;
         }
         // Only a data source that saves "Forever" can have its password in
@@ -450,7 +462,7 @@ impl DataSourceStore for ProjectStore {
             .ok()
             .and_then(|f| f.profiles.get(name).map(|p| p.gui_options().password_save))
             .is_some_and(keeps_in_store);
-        forever && matches!(self.store.get(SECRET_SERVICE, &account), Ok(Some(_)))
+        forever && matches!(self.store.get(&secret_service(), &account), Ok(Some(_)))
     }
 
     fn test(
@@ -570,7 +582,7 @@ mod tests {
     }
 
     fn os_password(os: &MemoryStore, name: &str) -> Option<String> {
-        os.get(SECRET_SERVICE, name)
+        os.get(&secret_service(), name)
             .unwrap()
             .map(|s| s.expose().to_owned())
     }
@@ -832,7 +844,7 @@ mod tests {
         let root = dir.path();
         let os = Counting::default();
         os.inner
-            .set(SECRET_SERVICE, "local", &Secret::new("pw"))
+            .set(&secret_service(), "local", &Secret::new("pw"))
             .unwrap();
         let cached = Arc::new(secrets::CachedStore::new(Arc::new(os.clone())));
         let store = ProjectStore::new(cached, Arc::new(|_| None));
@@ -858,7 +870,7 @@ mod tests {
         let root = dir.path();
         let os = Counting::default();
         os.inner
-            .set(SECRET_SERVICE, "forever", &Secret::new("pw"))
+            .set(&secret_service(), "forever", &Secret::new("pw"))
             .unwrap();
         let cached = Arc::new(secrets::CachedStore::new(Arc::new(os.clone())));
         let store = ProjectStore::new(cached, Arc::new(|_| None));

@@ -22,7 +22,7 @@ from _pydevd_bundle import pydevd_constants
 
 if not getattr(pydevd_constants, "PYDEVD_USE_SYS_MONITORING", False):
     result = "trace"
-elif getattr(d, "_pyoxide_task_steps", False):
+elif getattr(d, "_ide_task_steps", False):
     result = "installed"
 else:
     _steps = frozenset(
@@ -101,5 +101,5 @@ else:
 
     d.set_suspend = set_suspend
     d.do_wait_suspend = do_wait_suspend
-    d._pyoxide_task_steps = True
+    d._ide_task_steps = True
     result = "installed"

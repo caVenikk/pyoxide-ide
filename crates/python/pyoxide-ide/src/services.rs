@@ -726,6 +726,7 @@ pub(crate) mod tests {
 
     #[test]
     fn server_icons() {
+        brand::install();
         assert_eq!(server_icon("ruff"), Some(RUFF_ICON));
         assert_eq!(server_icon("basedpyright"), Some(BASEDPYRIGHT_ICON));
         assert_eq!(server_icon("ty"), Some(TY_ICON));

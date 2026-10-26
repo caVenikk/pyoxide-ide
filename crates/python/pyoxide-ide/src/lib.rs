@@ -243,7 +243,8 @@ fn init(cx: &mut gpui::App) {
 /// The Pyoxide product for the workbench.
 pub fn product() -> Product {
     Product {
-        name: "Pyoxide",
+        name: brand::PRODUCT_NAME,
+        app_info: brand::INFO,
         file_types: [python()].into_iter().chain(python_files()).collect(),
         file_associations: FILE_ASSOCIATIONS.to_vec(),
         icons: ICONS.to_vec(),

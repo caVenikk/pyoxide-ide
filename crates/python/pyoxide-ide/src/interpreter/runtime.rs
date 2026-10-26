@@ -13,7 +13,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("pyoxide-interpreters")
+            .thread_name(format!("{}-interpreters", brand::SLUG))
             .enable_all()
             .build()
             .expect("the interpreter runtime starts")

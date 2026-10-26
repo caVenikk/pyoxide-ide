@@ -1,4 +1,4 @@
-//! `pyoxide`: the command-line front-end of the Pyoxide Python IDE.
+//! The command-line front-end of the Python IDE (`brand::CLI_NAME`).
 //!
 //! It composes the platform command registry (`db.*`, from `db-service`) with
 //! the Python environment commands (`env.*`, from `py-env`). The `env`
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{CommandError, Registry};
 use py_env::ops::{
     self, AddArgs, InterpretersArgs, PackagesArgs, PathArgs, PythonInstallArgs, RemoveArgs,
@@ -24,17 +24,12 @@ use py_env::{CancellationToken, EnvError, EnvService, ErrorKind, RunContext};
 use serde::Serialize;
 
 #[derive(Parser)]
-#[command(
-    name = "pyoxide",
-    version,
-    about = "Pyoxide IDE for Python: environments, packages and the database client",
-    after_help = "`pyoxide commands` lists every command of the registry; `pyoxide call <id> <json>` runs one."
-)]
+#[command(name = brand::CLI_NAME, version)]
 struct Cli {
     /// Print machine-readable JSON instead of text.
     #[arg(long, global = true)]
     json: bool,
-    /// Profiles file of the db.* commands (default: $PYOXIDE_DB_PROFILES or the user config directory).
+    /// Profiles file of the db.* commands (default: the product's profiles variable or the user config directory).
     #[arg(long, global = true, value_name = "PATH")]
     profiles: Option<PathBuf>,
     #[command(subcommand)]
@@ -236,9 +231,29 @@ struct Target {
     frozen: bool,
 }
 
+/// The command line definition with the texts that name the product.
+fn command() -> clap::Command {
+    Cli::command()
+        .about(format!(
+            "{} for Python: environments, packages and the database client",
+            brand::PRODUCT_FULL_NAME
+        ))
+        .after_help(format!(
+            "`{0} commands` lists every command of the registry; `{0} call <id> <json>` runs one.",
+            brand::CLI_NAME
+        ))
+        .mut_arg("profiles", |a| {
+            a.help(format!(
+                "Profiles file of the db.* commands (default: ${} or the user config directory)",
+                brand::env_name!("DB_PROFILES")
+            ))
+        })
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    brand::install();
+    let cli = Cli::from_arg_matches(&command().get_matches()).unwrap_or_else(|e| e.exit());
     let json = cli.json;
     match run(cli).await {
         Ok(code) => code,
@@ -538,11 +553,10 @@ async fn env(cmd: EnvCmd, json: bool) -> Result<(), EnvError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
 
     #[test]
     fn cli_definition_is_consistent() {
-        Cli::command().debug_assert();
+        command().debug_assert();
     }
 
     #[test]

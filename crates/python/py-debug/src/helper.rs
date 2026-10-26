@@ -98,15 +98,10 @@ pub fn cache_helper(cache: &Path) -> PathBuf {
         .join(format!("debugpy-{DEBUGPY_VERSION}"))
 }
 
-/// The application's cache folder: `PYOXIDE_CACHE_DIR`, else `pyoxide` in
-/// the user's cache folder (`~/Library/Caches` on macOS,
-/// `$XDG_CACHE_HOME` or `~/.cache` on Linux, the local application data
-/// folder on Windows). `scripts/fetch-debugpy.py` computes the same.
+/// The application's cache folder (`app_info::cache_dir`).
+/// `scripts/fetch-debugpy.py` computes the same.
 pub fn cache_dir() -> Option<PathBuf> {
-    match std::env::var_os("PYOXIDE_CACHE_DIR").filter(|d| !d.is_empty()) {
-        Some(dir) => Some(PathBuf::from(dir)),
-        None => Some(dirs::cache_dir()?.join("pyoxide")),
-    }
+    app_info::cache_dir()
 }
 
 /// The helper was not found: the message names the folders looked at and

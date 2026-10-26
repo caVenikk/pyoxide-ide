@@ -251,7 +251,7 @@ impl PyPi {
             let config = ureq::Agent::config_builder()
                 .timeout_global(Some(self.timeout))
                 .http_status_as_error(false)
-                .user_agent(concat!("pyoxide-ide/", env!("CARGO_PKG_VERSION")))
+                .user_agent(format!("{}/{}", brand::IDE_NAME, env!("CARGO_PKG_VERSION")))
                 .tls_config(TlsConfig::builder().root_certs(roots).build())
                 .build();
             ureq::Agent::new_with_config(config)

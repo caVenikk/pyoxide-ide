@@ -277,7 +277,7 @@ impl Table {
     /// [`save`]).
     pub fn apply(&mut self, change: &Change) -> Result<(), String> {
         if self.newer {
-            return Err(NEWER.to_owned());
+            return Err(newer());
         }
         let mut doc = self.document();
         apply(&mut doc, change)?;
@@ -346,8 +346,12 @@ impl Table {
     }
 }
 
-const NEWER: &str =
-    "the list of interpreters was written by a newer version of Pyoxide and is not changed";
+fn newer() -> String {
+    format!(
+        "the list of interpreters was written by a newer version of {} and is not changed",
+        brand::PRODUCT_NAME
+    )
+}
 
 fn entry_of(t: &TomlTable) -> Option<Entry> {
     let text = |key: &str| {
@@ -529,7 +533,7 @@ pub fn save(path: &Path, changes: &[Change]) -> Result<Table, String> {
         .parse()
         .map_err(|e: toml_edit::TomlError| format!("{}: {e}", path.display()))?;
     if Table::of(&doc).newer {
-        return Err(NEWER.to_owned());
+        return Err(newer());
     }
     if !doc.contains_key(VERSION_KEY) {
         let mut fresh = DocumentMut::new();
