@@ -9,12 +9,11 @@ name = "DatabaseExplorer"
 "f4" = "db.explorer.open-table"
 
 # The grid's tab, its fields included: reload the page, cancel a running
-# read (Stop), close the error balloon or cancel.
+# read with Escape, close the error balloon.
 [[context]]
 name = "DatabaseGridView"
 [context.bindings]
 "ctrl-f5" = "db.grid.reload"
-"ctrl-f2" = "db.grid.stop"
 "escape" = "db.grid.dismiss"
 
 # The WHERE and ORDER BY fields: Enter reads the first page with them.
@@ -23,11 +22,13 @@ name = "DatabaseGridField > Editor"
 [context.bindings]
 "enter" = "db.grid.apply-fields"
 
-# The cells with the focus: the current cell moves, Shift extends the
-# selection.
+# The cells with the focus: Stop cancels a running read (over the global
+# Stop of a run, which binds the key without a context), the current cell
+# moves, Shift extends the selection.
 [[context]]
 name = "DatabaseGrid"
 [context.bindings]
+"ctrl-f2" = "db.grid.stop"
 "up" = "db.grid.up"
 "down" = "db.grid.down"
 "left" = "db.grid.left"

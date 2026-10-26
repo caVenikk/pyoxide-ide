@@ -84,9 +84,8 @@ impl GridPage {
                     kind: c.kind,
                     right: format::right_aligned(c.kind),
                     key: meta.map(|m| m.key).unwrap_or_default(),
-                    // The header: icon and sort mark take about four
-                    // characters next to the name.
-                    chars: c.name.chars().count() + 4,
+                    // The header's room is added when the width is laid out.
+                    chars: 0,
                 }
             })
             .collect();
@@ -338,7 +337,7 @@ mod tests {
             Some("view")
         );
         assert_eq!(p.columns[1].chars, "a long text".len());
-        assert_eq!(p.columns[0].chars, "id".len() + 4);
+        assert_eq!(p.columns[0].chars, MIN_COLUMN_CHARS);
     }
 
     #[test]

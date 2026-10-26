@@ -1,11 +1,13 @@
 //! Table pages and counts of the data grid (`ResultPager`): SQLite in every
-//! run, PostgreSQL on the demo schema of the container (ignored).
+//! run, PostgreSQL on the demo schema of the container and Oracle
+//! (ignored).
 
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use db_core::{ConnectParams, Dialect, ErrorKind, opt};
+use db_oracle_thin::ThinDriver;
 use db_postgres::PostgresDriver;
 use db_session::{
     DataSourceOptions, JobId, Page, PageError, PageSize, PagerEvent, ResultPager, SessionOptions,
@@ -189,4 +191,40 @@ fn postgres_pages_the_demo_events_and_cancels_a_count() {
         matches!(error.error.kind, ErrorKind::Cancelled | ErrorKind::Query),
         "{error:?}"
     );
+}
+
+#[test]
+#[ignore = "needs the oracle container"]
+fn oracle_pages_with_offset_and_fetch() {
+    let params = ConnectParams {
+        host: env("PYOXIDE_TEST_ORACLE_HOST", "localhost"),
+        port: env("PYOXIDE_TEST_ORACLE_PORT", "1521")
+            .parse()
+            .unwrap_or(1521),
+        database: env("PYOXIDE_TEST_ORACLE_SERVICE", "FREEPDB1"),
+        user: "pyoxide".into(),
+        password: password(),
+        ..ConnectParams::default()
+    };
+    let h = harness(Arc::new(ThinDriver), params, DataSourceOptions::default());
+    let p = pager(&h);
+    let q = TableQuery {
+        filter: "OBJECT_TYPE = 'TABLE'".into(),
+        order: "OBJECT_NAME".into(),
+        ..TableQuery::new(TableRef::new(Some("SYS"), "ALL_OBJECTS"))
+    };
+    let first = p.page(&q, 0, PageSize::Rows(2)).unwrap();
+    assert_eq!(first.rows.len(), 2);
+    assert!(first.has_more);
+    assert!(
+        first
+            .sql
+            .ends_with("ORDER BY OBJECT_NAME\nFETCH NEXT 3 ROWS ONLY"),
+        "{}",
+        first.sql
+    );
+    let second = p.page(&q, 2, PageSize::Rows(2)).unwrap();
+    assert_eq!(second.first_row, 2);
+    assert!(second.sql.contains("OFFSET 2 ROWS"));
+    assert!(p.count(&q).unwrap() > 2);
 }

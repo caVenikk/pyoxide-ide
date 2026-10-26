@@ -290,7 +290,10 @@ impl TableGrid {
         let mut x = px(0.0);
         if let Some(page) = &self.page {
             for c in &page.columns {
-                let auto = char_width * c.chars as f32 + px(2.0 * CELL_PAD + 2.0);
+                // The content, or the header: name, icon, gaps, sort mark.
+                let header = char_width * c.name.chars().count() as f32
+                    + px(2.0 * CELL_PAD + 2.0 + HEADER_ICON + SORT_MARK + 2.0 + 8.0);
+                let auto = (char_width * c.chars as f32 + px(2.0 * CELL_PAD + 2.0)).max(header);
                 let w = self
                     .widths
                     .get(&c.name)

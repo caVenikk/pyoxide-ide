@@ -109,6 +109,10 @@ ui::ui_commands! {
     ClearField { field: String } => "db.grid.clear-field", "Clear",
         "Empties the `where` or `order` field of the active table grid and reads the first page again.",
         r#"{"field": "where"}"#;
+    /// Put the focus into a field.
+    FocusField { field: String } => "db.grid.focus-field", "Focus Field",
+        "Puts the focus into the `where` or `order` field of the active table grid, or into its cells with `cells`.",
+        r#"{"field": "where"}"#;
     /// Sort by a column.
     SortByColumn { column: usize } => "db.grid.sort", "Sort",
         "Sorts the active table grid by column `column` (zero-based) on the server: ascending, then descending, then unsorted; the ORDER BY field shows the order.",
@@ -151,6 +155,9 @@ ui::ui_commands! {
     LastRow => "db.grid.last-row", "Move to Last Row", "Moves the current cell of the active table grid to the last row of the page.";
     /// Select everything.
     SelectAll => "db.grid.select-all", "Select All", "Selects every cell of the page of the active table grid.";
+    /// The state of the grid.
+    GridState => "db.grid.state", "Table Grid State",
+        "Returns the state of the most recently used table grid of the window: its table, fields, statement, page, columns, the first rows' texts, selection and status.";
     /// Close the balloon.
     Dismiss => "db.grid.dismiss", "Close Message",
         "Closes the error balloon of the active table grid, or cancels its running read.";
@@ -328,6 +335,7 @@ pub(crate) fn init(cx: &mut App) {
     ));
     on!(SelectAll, |g, a, w, cx| g.select_all(cx));
     on!(Dismiss, |g, a, w, cx| g.dismiss(cx));
+    on!(FocusField, |g, a, w, cx| g.focus_field(&a.field, w, cx));
     ui::command::register_query(
         cx,
         "db.grid.state",
@@ -832,6 +840,16 @@ impl TableGrid {
         };
         editor.update(cx, |e, cx| e.set_text_selected(text, cx));
         self.apply_fields(cx);
+    }
+
+    fn focus_field(&mut self, field: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = match field {
+            "where" => self.filter.focus_handle(cx),
+            "order" => self.order.focus_handle(cx),
+            _ => self.focus.clone(),
+        };
+        window.focus(&handle);
+        cx.notify();
     }
 
     fn sort_by(&mut self, column: usize, window: &mut Window, cx: &mut Context<Self>) {
