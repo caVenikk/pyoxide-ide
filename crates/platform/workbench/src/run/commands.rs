@@ -9,8 +9,9 @@ ui::ui_commands! {
     Run => "run.run", "Run",
         "Runs the selected run configuration; with Current File selected, the file in the editor.";
     /// Run the file in the editor.
-    RunCurrentFile => "run.current-file", "Run Context Configuration",
-        "Runs the file in the editor with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.";
+    RunCurrentFile { file: Option<String> } => "run.current-file", "Run Context Configuration",
+        "Runs the file in the editor (or `file`, relative to the project or absolute) with its context configuration: an existing one that runs it, else a new temporary one, which becomes the selected one.",
+        r#"{"file": "main.py"}"#;
     /// Stop a run.
     Stop { tab: Option<usize> } => "run.stop", "Stop",
         "Stops the process of a Run tab (zero-based), or of the only running one; a second Stop kills it. With several running and no tab, offers them in a popup.",

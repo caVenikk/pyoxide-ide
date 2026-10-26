@@ -4,6 +4,8 @@
 //! a running command closes, and its commands (`workbench.toggle-terminal`,
 //! `terminal.open`, `terminal.type`, `terminal.state`).
 
+use std::path::PathBuf;
+
 use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
 use terminal_ui::{SessionView, TerminalToolWindow, TerminalToolWindowEvent};
 use ui::icons::IconName;
@@ -174,7 +176,20 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.new_terminal_tab_in(input, None, window, cx);
+    }
+
+    /// [`Self::new_terminal_tab`] started in `directory` (Open In >
+    /// Terminal).
+    pub(super) fn new_terminal_tab_in(
+        &mut self,
+        input: Option<String>,
+        directory: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut request = crate::terminal::request(self.project_root(cx), cx);
+        request.requested_directory = directory;
         if let Some(shell) = &self.terminal_ui.shell {
             request.shell_path = Some(shell.clone());
         }

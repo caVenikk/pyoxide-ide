@@ -296,6 +296,10 @@ pub struct RowExtra {
     /// A project's branch on a third line, after the branch icon (a row
     /// with an avatar: `ProjectWidgetRenderer`'s branch row).
     pub branch: Option<SharedString>,
+    /// The char (index in the label) underlined as the row's mnemonic; the
+    /// key of that letter runs the row while its level is the innermost
+    /// one (`TextWithMnemonic`, Swing's menu item mnemonics).
+    pub mnemonic: Option<usize>,
 }
 
 impl RowExtra {
@@ -314,6 +318,7 @@ impl Clone for RowExtra {
             icon_size: self.icon_size,
             avatar: self.avatar.clone(),
             branch: self.branch.clone(),
+            mnemonic: self.mnemonic,
             secondary: self.secondary.clone(),
             secondary_small: self.secondary_small,
             icon_alpha: self.icon_alpha,
@@ -628,6 +633,22 @@ impl MenuItem {
             extra.shortcut = Some(text.into());
         }
         self
+    }
+
+    /// Underlines the char at `index` of the label as the row's mnemonic
+    /// ([`RowExtra::mnemonic`]).
+    pub fn mnemonic(mut self, index: usize) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.mnemonic = Some(index);
+        }
+        self
+    }
+
+    /// The mnemonic letter, lowercase.
+    fn mnemonic_char(&self) -> Option<char> {
+        let index = self.extra()?.mnemonic?;
+        let c = self.label()?.chars().nth(index)?;
+        c.to_lowercase().next()
     }
 
     pub fn label(&self) -> Option<&SharedString> {
@@ -1080,11 +1101,28 @@ impl ContextMenu {
     /// A typed char goes to the speed search, Backspace deletes the last
     /// one (`SpeedSearch.processKeyEvent`).
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.innermost() > 0 {
-            return;
-        }
         let k = &event.keystroke;
         if k.modifiers.control || k.modifiers.platform || k.modifiers.alt || k.modifiers.function {
+            return;
+        }
+        // A mnemonic runs its row of the innermost level (a menu without
+        // speed search).
+        if !self.speed_search
+            && let Some(typed) = k.key_char.as_deref().and_then(|t| t.chars().next())
+        {
+            let level = self.innermost();
+            let typed = typed.to_lowercase().next();
+            let hit = self.level_items(level).iter().position(|item| {
+                item.selectable() && item.mnemonic_char().is_some() && item.mnemonic_char() == typed
+            });
+            if let Some(ix) = hit {
+                self.select(level, ix, false, cx);
+                self.activate(level, ix, window, cx);
+                cx.stop_propagation();
+                return;
+            }
+        }
+        if self.innermost() > 0 {
             return;
         }
         // A digit chooses the row with that number.
@@ -1525,6 +1563,9 @@ impl ContextMenu {
                             if let Some(shortcut) = &extra.shortcut {
                                 row["shortcut"] = json!(shortcut.as_ref());
                             }
+                            if let Some(c) = item.mnemonic_char() {
+                                row["mnemonic"] = json!(c.to_string());
+                            }
                             if !extra.inline.is_empty() {
                                 row["inline"] = extra
                                     .inline
@@ -1740,8 +1781,16 @@ impl ContextMenu {
                     (Some(matcher), 0) => matcher.find(&label).unwrap_or_default(),
                     _ => Vec::new(),
                 };
-                let label = StyledText::new(label.clone())
-                    .with_highlights(highlights(&label, &fragments, match_bg));
+                let mut label_highlights = highlights(&label, &fragments, match_bg);
+                if fragments.is_empty()
+                    && let Some(range) = extra
+                        .and_then(|e| e.mnemonic)
+                        .and_then(|i| label.char_indices().nth(i))
+                        .map(|(at, c)| at..at + c.len_utf8())
+                {
+                    label_highlights.push((range, mnemonic_style()));
+                }
+                let label = StyledText::new(label.clone()).with_highlights(label_highlights);
                 let label_row = div()
                     .flex_1()
                     .min_w(px(0.0))
@@ -2258,6 +2307,17 @@ fn movement_towards(
 }
 
 /// Char ranges of `text` as byte ranges with a background.
+/// The underline of a mnemonic letter.
+fn mnemonic_style() -> HighlightStyle {
+    HighlightStyle {
+        underline: Some(gpui::UnderlineStyle {
+            thickness: px(1.0),
+            ..Default::default()
+        }),
+        ..HighlightStyle::default()
+    }
+}
+
 fn highlights(
     text: &str,
     ranges: &[std::ops::Range<usize>],
@@ -2826,6 +2886,23 @@ mod tests {
         // The digits are gone from the rows while they are filtered.
         let state = menu.read_with(cx, |m, _| m.state_json());
         assert!(state["levels"][0]["items"][0].get("number").is_none());
+    }
+
+    /// A mnemonic letter runs its row; the state shows the letter.
+    #[gpui::test]
+    fn a_mnemonic_runs_its_row(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = open_with(cx, |window, cx| {
+            let items = vec![
+                MenuItem::action("First", First).mnemonic(0),
+                MenuItem::action("Second", Second).mnemonic(1),
+            ];
+            ContextMenu::build(items, window, cx)
+        });
+        let state = menu.read_with(cx, |m, _| m.state_json());
+        assert_eq!(state["levels"][0]["items"][1]["mnemonic"], json!("e"));
+        cx.simulate_input("E");
+        assert!(menu.read_with(cx, |m, _| m.dismissed));
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
     }
 
     #[gpui::test]

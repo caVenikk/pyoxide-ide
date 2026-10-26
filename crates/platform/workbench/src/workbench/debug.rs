@@ -9,7 +9,7 @@
 //! parallel is stopped first, as Run and Debug share it
 //! (`ExecutionManagerImpl.restartRunProfile`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -403,11 +403,11 @@ impl Workbench {
     /// configuration (an existing one or a new temporary one, selected).
     fn debug_current_file(
         &mut self,
-        _: &DebugCurrentFile,
+        action: &DebugCurrentFile,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((file, true)) = self.current_run_file(cx) else {
+        let Some((file, true)) = self.run_file_of(action.file.as_deref(), cx) else {
             return;
         };
         let key = self
@@ -415,7 +415,7 @@ impl Workbench {
             .update(cx, |c, cx| c.context_configuration(&file, cx));
         match key {
             Some(key) => self.debug_configuration_key(&key, window, cx),
-            None => self.debug_current(window, cx),
+            None => self.debug_path(file, window, cx),
         }
     }
 
@@ -447,6 +447,11 @@ impl Workbench {
         let Some((file, true)) = self.current_run_file(cx) else {
             return;
         };
+        self.debug_path(file, window, cx);
+    }
+
+    /// Debugs a file with its context configuration, which is not kept.
+    fn debug_path(&mut self, file: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(root) = self.project_root(cx) else {
             return;
         };

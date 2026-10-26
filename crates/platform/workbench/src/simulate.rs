@@ -15,7 +15,7 @@ ui::ui_commands! {
     COMMANDS, scope = "Workbench";
     /// A synthetic mouse event in the window.
     SimulateMouse { x: f32, y: f32, action: Option<String> } => "workbench.simulate-mouse", "Simulate Mouse",
-        "Moves the window's mouse to a position (logical pixels from the window's top left corner), or clicks there with the left button (`action`: `move`, the default, or `click`; `down`, `drag` and `up` press the button there, move with it pressed and let it go, for drags), with synthetic events (macOS); the system pointer does not move and the window is not activated.",
+        "Moves the window's mouse to a position (logical pixels from the window's top left corner), or clicks there with the left button (`action`: `move`, the default, or `click`; `down`, `drag` and `up` press the button there, move with it pressed and let it go, for drags; `right-click` clicks with the right button), with synthetic events (macOS); the system pointer does not move and the window is not activated.",
         r#"{"x": 400, "y": 300, "action": "click"}"#;
 }
 
@@ -30,6 +30,8 @@ enum Event {
     Down,
     Drag,
     Up,
+    RightDown,
+    RightUp,
 }
 
 /// The events of [`SimulateMouse`], in order.
@@ -39,6 +41,7 @@ fn events(action: &SimulateMouse) -> &'static [Event] {
         Some("down") => &[Event::Move, Event::Down],
         Some("drag") => &[Event::Drag],
         Some("up") => &[Event::Drag, Event::Up],
+        Some("right-click") => &[Event::Move, Event::RightDown, Event::RightUp],
         _ => &[Event::Move],
     }
 }
@@ -91,11 +94,13 @@ mod native {
         /// Hands a mouse event at a window position (from the top left) to
         /// the view.
         pub(super) fn send(&self, event: Event, x: f32, y: f32) {
-            // NSEventType: left mouse down, left mouse up, mouse moved,
-            // left mouse dragged.
+            // NSEventType: left mouse down, left mouse up, right mouse
+            // down, right mouse up, mouse moved, left mouse dragged.
             let (kind, clicks, pressure): (usize, isize, f32) = match event {
                 Event::Down => (1, 1, 1.0),
                 Event::Up => (2, 1, 0.0),
+                Event::RightDown => (3, 1, 1.0),
+                Event::RightUp => (4, 1, 0.0),
                 Event::Move => (5, 0, 0.0),
                 Event::Drag => (6, 0, 1.0),
             };
@@ -135,6 +140,12 @@ mod native {
                     }
                     Event::Drag => {
                         let _: () = msg_send![self.view, mouseDragged: native];
+                    }
+                    Event::RightDown => {
+                        let _: () = msg_send![self.view, rightMouseDown: native];
+                    }
+                    Event::RightUp => {
+                        let _: () = msg_send![self.view, rightMouseUp: native];
                     }
                 }
             }
@@ -183,5 +194,9 @@ mod tests {
         assert_eq!(events(&at("down")), [Event::Move, Event::Down]);
         assert_eq!(events(&at("drag")), [Event::Drag]);
         assert_eq!(events(&at("up")), [Event::Drag, Event::Up]);
+        assert_eq!(
+            events(&at("right-click")),
+            [Event::Move, Event::RightDown, Event::RightUp]
+        );
     }
 }

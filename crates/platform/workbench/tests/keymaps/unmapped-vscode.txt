@@ -6,8 +6,6 @@ BuildSolutionAction
 CallHierarchy
 ChangeSplitOrientation
 ChangesView.Rename
-CloseAllEditors
-CloseAllEditorsButActive
 CollapseAllRegions
 CollapseBlock
 CollapseDocComments

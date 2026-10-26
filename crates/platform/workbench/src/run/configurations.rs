@@ -207,6 +207,21 @@ impl RunConfigs {
         true
     }
 
+    /// The name of the configuration [`Self::context_configuration`] would
+    /// run `file` with (an existing one's, else the new one's), without
+    /// making it (the reference's `RunContextAction` text).
+    pub fn context_name(&self, file: &Path) -> Option<String> {
+        let root = self.root.as_ref()?;
+        let provider = self.provider.as_ref()?;
+        let context = provider.0.context_configuration(file, root)?;
+        let existing = self
+            .list
+            .all()
+            .iter()
+            .find(|c| provider.0.same_context(c, &context));
+        Some(existing.map_or(context.name.clone(), |c| c.name.clone()))
+    }
+
     /// The configuration that runs `file` from its context: an existing
     /// one that runs the same, else a new temporary one (the oldest
     /// temporary ones above the limit go). It becomes the selected one

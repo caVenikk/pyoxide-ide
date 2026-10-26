@@ -151,8 +151,15 @@ Window
   Editor Tabs >
     Select Next Tab  ⌘}
     Select Previous Tab  ⌘{
+    Pin Active Tab
     ---
     Close Tab  ⌘W
+    Close Other Tabs
+    Close All Tabs
+    Close Unmodified Tabs
+    Close All but Pinned
+    Close Tabs to the Left
+    Close Tabs to the Right
 Help
   Welcome
   Find Action…  ⇧⌘A
