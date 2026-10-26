@@ -91,6 +91,8 @@ const PROBLEMS: &str = "Problems";
 /// The Problems row under the list: the gap above its line, its indent.
 const PROBLEMS_GAP: f32 = 22.0;
 const PROBLEMS_INDENT: f32 = 26.0;
+/// Where a problem's text starts, after its icon.
+const PROBLEM_TEXT_LEFT: f32 = 20.0;
 /// The pointer of the test result towards the status icon (width,
 /// height) and where its tip is from the result's left edge.
 const POINTER: (f32, f32) = (14.0, 7.0);
@@ -183,6 +185,14 @@ impl DataSourcesDialog {
         let focused = self.focus.contains_focused(window, cx);
         let has_item = self.item().is_some();
         let anchors = self.anchors.clone();
+        // The list's sides, the Problems indent, the icon and the gap at
+        // the right.
+        let problem_width = (self.list_width(window, cx)
+            - 2.0 * LIST_SIDE
+            - PROBLEMS_INDENT
+            - PROBLEM_TEXT_LEFT
+            - LIST_SIDE)
+            .max(0.0);
         let add = small_icon_button("data-sources-add", IconName::ADD, true, cx)
             .debug_selector(|| "data-sources-add".into())
             .tooltip(Tooltip::text("Add", None))
@@ -344,14 +354,14 @@ impl DataSourcesDialog {
                             // edge; the whole text in its tooltip.
                             .children(self.problem().map(|(_, p)| {
                                 let tip = p.clone();
+                                // The text's width is set: text is cut at a
+                                // known width only.
                                 div()
                                     .id("data-sources-problem")
                                     .debug_selector(|| "data-sources-problem".into())
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap(px(6.0))
+                                    .relative()
                                     .min_w(px(0.0))
+                                    .pl(px(PROBLEM_TEXT_LEFT))
                                     .pr(px(LIST_SIDE))
                                     .text_color(theme.color(UiRole::Danger))
                                     .tooltip(move |window, cx| {
@@ -359,13 +369,17 @@ impl DataSourcesDialog {
                                     })
                                     .child(
                                         div()
-                                            .flex_none()
+                                            .absolute()
+                                            .left_0()
+                                            .top_0()
+                                            .bottom_0()
+                                            .flex()
+                                            .items_center()
                                             .child(Icon::new(IconName::ERROR).size(px(14.0))),
                                     )
                                     .child(
                                         div()
-                                            .flex_1()
-                                            .min_w(px(0.0))
+                                            .w(px(problem_width))
                                             .overflow_hidden()
                                             .whitespace_nowrap()
                                             .text_ellipsis()
@@ -1813,6 +1827,10 @@ impl Render for DataSourcesDialog {
             .key_context("DataSourcesDialog")
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_set))
+            // Synthetic mouse input reaches the dialog's window too.
+            .on_action(|a: &workbench::simulate::SimulateMouse, window, cx| {
+                workbench::simulate::simulate_mouse(a, window, cx)
+            })
             .on_action(cx.listener(|this, a: &DialogOpenList, window, cx| {
                 if let Some(list) = ListId::from_id(&a.list) {
                     this.open_list(list, window, cx);
