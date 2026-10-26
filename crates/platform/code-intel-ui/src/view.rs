@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use code_intel::{
@@ -15,7 +16,7 @@ use gpui::{
     Focusable as _, InteractiveElement, SharedString, Subscription, Task, Window,
 };
 use serde_json::{Value as Json, json};
-use text::{CaretPlacement, EditKind, Point, SelectionSet};
+use text::{CaretPlacement, Edit, EditKind, Point, SelectionSet};
 use themes::TextRole;
 
 use crate::actions::Reported;
@@ -318,8 +319,28 @@ impl CodeIntelView {
             self.editor_closed(path, cx);
         }
         let key = path.to_owned();
-        let events = cx.subscribe(editor, move |this, _, event: &EditorEvent, cx| {
-            this.editor_event(&key, event, cx)
+        let events = cx.subscribe(editor, {
+            let key = key.clone();
+            move |this, _, event: &EditorEvent, cx| this.editor_event(&key, event, cx)
+        });
+        let view = cx.weak_entity();
+        editor.update(cx, |e, _| {
+            e.set_type_hook(Some(Rc::new(move |editor, c, cx| {
+                let plan = view
+                    .update(cx, |this, cx| this.completion_char(&key, editor, c, cx))
+                    .ok()
+                    .flatten();
+                let Some(plan) = plan else {
+                    return false;
+                };
+                editor.edit(
+                    plan.edits,
+                    plan.kind,
+                    CaretPlacement::Explicit(SelectionSet::caret(plan.caret)),
+                    cx,
+                );
+                plan.consumed
+            })));
         });
         let blur = cx.on_blur(&editor.focus_handle(cx), window, {
             let editor = editor.entity_id();
@@ -717,8 +738,10 @@ impl CodeIntelView {
         if selections.len() != 1 || !selections.primary().is_empty() || caret < session.start {
             return None;
         }
-        Some(editor.buffer().slice(session.start..caret))
-            .filter(|p| p.chars().all(is_identifier_char))
+        Some(editor.buffer().slice(session.start..caret)).filter(|p| {
+            p.chars()
+                .all(|c| is_identifier_char(c) || session.through.contains(&c))
+        })
     }
 
     /// The caret or the text of the session's editor changed: the popup
@@ -885,6 +908,71 @@ impl CodeIntelView {
                 cx,
             );
         });
+    }
+
+    /// A character is about to be typed in the editor of a document (the
+    /// editor's type hook; the reference's `LookupTypedHandler`). When the
+    /// popup's selection is the person's and the character is a completion
+    /// character, the selected item goes in first and the character is
+    /// typed after it, unless the insertion took it over (a function's
+    /// `(`). Returns the edit the hook makes in the editor (the editor is
+    /// the one being updated: it is read here, never reached through its
+    /// entity), `None` to type the character as usual.
+    fn completion_char(
+        &mut self,
+        path: &Path,
+        editor: &Editor,
+        c: char,
+        cx: &mut Context<Self>,
+    ) -> Option<CharInsertion> {
+        let session = self.completion.as_ref().filter(|s| s.path == path)?;
+        let selections = editor.selections();
+        let caret = selections.primary().head;
+        if !self.completion_shown()
+            || !session.inserts_on(c)
+            || selections.len() != 1
+            || !selections.primary().is_empty()
+            || caret < session.start
+            // The popup follows what is typed; an older one is not trusted.
+            || editor.buffer().slice(session.start..caret) != session.prefix
+        {
+            return None;
+        }
+        if let Some(through) = session.prefix_through(c) {
+            // The popup stays open and follows the longer prefix.
+            let start = session.start;
+            if let Some(session) = self.completion.as_mut() {
+                session.through.push(c);
+            }
+            return Some(CharInsertion {
+                caret: start + through.chars().count(),
+                edits: vec![Edit::new(start..caret, through)],
+                kind: EditKind::Typing,
+                consumed: true,
+            });
+        }
+        let index = session.selected_item()?;
+        let doc = self.documents.get(path)?;
+        let parentheses = self.hook_for(&doc.language).0.parentheses(&doc.language);
+        let session = self.completion.take()?;
+        self.popups.hide(completion::CONTEXT);
+        cx.notify();
+        let (edits, caret, consumed) = completion::insertion_by_char(
+            &session.items[index],
+            &doc.versions,
+            session.answer_version,
+            editor.buffer(),
+            session.start,
+            caret,
+            parentheses,
+            c,
+        );
+        Some(CharInsertion {
+            edits,
+            kind: EditKind::Other,
+            caret,
+            consumed,
+        })
     }
 
     /// A click on a row of the completion popup inserts its item.
@@ -1243,6 +1331,15 @@ impl CodeIntelView {
 
 /// The char typed by an edit: one char inserted without replacing
 /// anything (`None` for anything else, such as a paste or a deletion).
+/// What the popup does to the editor when a completion character is typed:
+/// the edits, the caret after them and whether they took the character over.
+struct CharInsertion {
+    edits: Vec<Edit>,
+    kind: EditKind,
+    caret: usize,
+    consumed: bool,
+}
+
 fn typed_char(applied: &[AppliedEdit]) -> Option<char> {
     let [edit] = applied else {
         return None;

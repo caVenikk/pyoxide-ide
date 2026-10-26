@@ -188,6 +188,9 @@ pub struct Session {
     pub request: Option<Task<()>>,
     /// An answer came.
     pub answered: bool,
+    /// Characters besides identifier chars the prefix holds: the ones a
+    /// name was completed through (the `=` of `key=`).
+    pub through: Vec<char>,
 }
 
 impl Session {
@@ -215,6 +218,7 @@ impl Session {
             selected: 0,
             request: None,
             answered: false,
+            through: Vec::new(),
         }
     }
 
@@ -246,6 +250,45 @@ impl Session {
         if index < self.shown.len() {
             self.selected = index;
         }
+    }
+
+    /// Whether typing `c` inserts the selected item: the person chose it
+    /// (Basic Completion, a key or a click moved the selection; an
+    /// automatic popup only preselects its first item), and `c` is one of
+    /// the reference's completion characters (`DefaultCharFilter`). Any
+    /// other character just closes the popup, or grows the prefix when it
+    /// is part of an identifier.
+    pub fn inserts_on(&self, c: char) -> bool {
+        self.focused
+            && self.selected_item().is_some()
+            && matches!(c, '.' | ',' | ';' | '=' | ' ' | ':' | '(')
+    }
+
+    /// The prefix to type instead of `prefix` + `c` when the selected item
+    /// has the character in its name after the prefix (`foo=` for a
+    /// keyword argument): the popup stays open and the item is not
+    /// inserted (the reference's `completeTillTypedCharOccurrence`).
+    pub fn prefix_through(&self, c: char) -> Option<String> {
+        let item = &self.items[self.selected_item()?];
+        let expanded = PrefixMatcher::new(&format!("{}{c}", self.prefix));
+        let names = [item.filter_text(), item.label.as_str()];
+        names.iter().find(|n| expanded.matches(n).is_some())?;
+        let current = PrefixMatcher::new(&self.prefix);
+        for name in names {
+            if current.matches(name).is_none() {
+                continue;
+            }
+            for (i, found) in name.char_indices() {
+                if found != c {
+                    continue;
+                }
+                let through = &name[..i + found.len_utf8()];
+                if expanded.matches(through).is_some() {
+                    return Some(through.to_owned());
+                }
+            }
+        }
+        None
     }
 
     /// The state reported by `code.state`.
@@ -329,6 +372,63 @@ pub fn insertion(
     replace: bool,
     parentheses: Option<Parentheses>,
 ) -> (Vec<Edit>, usize) {
+    let (edits, caret, _) = build(
+        item,
+        versions,
+        version,
+        buffer,
+        start,
+        caret,
+        replace,
+        parentheses,
+        None,
+    );
+    (edits, caret)
+}
+
+/// [`insertion`] for an item chosen by typing a completion character (the
+/// reference's `LookupTypedHandler`): the item goes in as with Enter, before
+/// the character, which is not in the text yet. The last result tells
+/// whether the insertion consumed the character: a function's `(` becomes
+/// part of its parentheses (the reference's `ParenthesesInsertHandler` does
+/// not add the completion character then); any other character is typed
+/// after the item, at the caret returned.
+#[allow(clippy::too_many_arguments)]
+pub fn insertion_by_char(
+    item: &CompletionItem,
+    versions: &Versions,
+    version: u64,
+    buffer: &Buffer,
+    start: usize,
+    caret: usize,
+    parentheses: Option<Parentheses>,
+    typed: char,
+) -> (Vec<Edit>, usize, bool) {
+    build(
+        item,
+        versions,
+        version,
+        buffer,
+        start,
+        caret,
+        false,
+        parentheses,
+        Some(typed),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build(
+    item: &CompletionItem,
+    versions: &Versions,
+    version: u64,
+    buffer: &Buffer,
+    start: usize,
+    caret: usize,
+    replace: bool,
+    parentheses: Option<Parentheses>,
+    typed: Option<char>,
+) -> (Vec<Edit>, usize, bool) {
     let end = if replace {
         identifier_end(buffer, caret)
     } else {
@@ -365,8 +465,12 @@ pub fn insertion(
     let after = |old: usize| old - range.end + tail;
     let mut caret_after = snippet_caret.map_or(tail, |c| range.start + c);
     let callable = matches!(item.kind, Some(SymbolKind::Function | SymbolKind::Method));
+    let mut consumed = false;
     if let Some(parens) = parentheses.filter(|_| callable && !item.snippet && !text.contains('(')) {
-        let inside = has_parameters(item, parens);
+        // A typed `(` always goes into the parentheses and is not typed
+        // again.
+        consumed = typed == Some('(');
+        let inside = consumed || has_parameters(item, parens);
         let mut next = range.end;
         while matches!(buffer.char_at(next), Some(' ' | '\t')) {
             next += 1;
@@ -388,6 +492,10 @@ pub fn insertion(
                     caret_after = after(next + 1);
                 }
             }
+        } else if consumed && buffer.char_at(range.end).is_some_and(is_identifier_char) {
+            // Right before an identifier: the opening one only.
+            text.push('(');
+            caret_after = tail + 1;
         } else {
             text.push_str("()");
             caret_after = tail + if inside { 1 } else { 2 };
@@ -408,7 +516,7 @@ pub fn insertion(
         }
         edits.push(Edit::new(r, extra.text.clone()));
     }
-    (edits, caret_after.max(0) as usize)
+    (edits, caret_after.max(0) as usize, consumed)
 }
 
 /// Whether a function or method item takes parameters, from the first
@@ -794,5 +902,80 @@ mod tests {
         assert!(has(&item), "an import tail is not a parameter list");
         item.detail = Some("def f(self, /)".into());
         assert!(!has(&item));
+    }
+
+    /// Chooses `item` by typing `c` at `|` in `marked`, the typed prefix
+    /// from `start`; the text after the insertion (the character is typed
+    /// after it unless consumed), `|` at the caret.
+    fn insert_by_char(item: &CompletionItem, marked: &str, start: usize, c: char) -> String {
+        let caret = marked.find('|').unwrap();
+        let mut buffer = Buffer::new(&marked.replace('|', ""));
+        let versions = Versions::new(buffer.rope().clone());
+        let (edits, caret, consumed) =
+            insertion_by_char(item, &versions, 1, &buffer, start, caret, PYTHON, c);
+        let mut selections = text::SelectionSet::caret(0);
+        buffer.transact(
+            &mut selections,
+            edits,
+            text::EditKind::Other,
+            text::CaretPlacement::AfterEachEdit,
+        );
+        let mut text = buffer.text();
+        if !consumed {
+            text.insert(caret, c);
+        }
+        text.insert(caret + usize::from(!consumed), '|');
+        text
+    }
+
+    #[test]
+    fn a_completion_character_follows_the_inserted_item() {
+        let field = function("alpha", SymbolKind::Field, None);
+        for c in ['.', ',', '=', ':', ' ', '('] {
+            assert_eq!(
+                insert_by_char(&field, "x = al|", 4, c),
+                format!("x = alpha{c}|"),
+                "{c}"
+            );
+        }
+        let long = function("alphabet", SymbolKind::Variable, None);
+        assert_eq!(insert_by_char(&long, "f(al|)", 2, ','), "f(alphabet,|)");
+    }
+
+    #[test]
+    fn a_typed_paren_is_the_functions_own() {
+        let print = function("print", SymbolKind::Function, None);
+        let norm = function(
+            "norm",
+            SymbolKind::Method,
+            Some("bound method P.norm() -> float"),
+        );
+        // Never typed again: the parentheses are inserted around the caret,
+        // for functions without parameters too.
+        assert_eq!(insert_by_char(&print, "pri|", 0, '('), "print(|)");
+        assert_eq!(insert_by_char(&norm, "p.no|", 2, '('), "p.norm(|)");
+        // Right before an identifier the opening one only.
+        assert_eq!(insert_by_char(&print, "pri|nt", 0, '('), "print(|nt");
+        // Parentheses there already: the caret goes into them.
+        assert_eq!(insert_by_char(&norm, "p.no|()", 2, '('), "p.norm(|)");
+        assert_eq!(insert_by_char(&print, "pri| (1)", 0, '('), "print (|1)");
+        // Not a function: the paren is typed after the name.
+        let field = function("x", SymbolKind::Field, None);
+        assert_eq!(insert_by_char(&field, "p.|", 2, '('), "p.x(|");
+    }
+
+    #[test]
+    fn other_characters_follow_the_functions_parentheses() {
+        let print = function("print", SymbolKind::Function, None);
+        let norm = function(
+            "norm",
+            SymbolKind::Method,
+            Some("bound method P.norm() -> float"),
+        );
+        // As after Enter: the caret between the parentheses when the
+        // function takes parameters, after them when not; the character
+        // is typed there.
+        assert_eq!(insert_by_char(&print, "pri|", 0, ','), "print(,|)");
+        assert_eq!(insert_by_char(&norm, "p.no|", 2, '.'), "p.norm().|");
     }
 }

@@ -547,8 +547,9 @@ fn typing_filters_on_the_client_unless_the_answer_is_incomplete(cx: &mut TestApp
     h.press("backspace");
     assert_eq!(h.labels(), ["norm", "name"]);
     assert_eq!(h.completion_requests().len(), 1);
-    // A character that is not part of an identifier closes the popup.
-    h.type_text(" ");
+    // A character that is not part of an identifier (nor a completion
+    // character) closes the popup.
+    h.type_text("+");
     assert!(!h.popup_shown());
 
     // An incomplete answer is asked for again as the prefix grows.
@@ -751,6 +752,108 @@ fn functions_get_parentheses(cx: &mut TestAppContext) {
     h.press("ctrl-space");
     h.press("enter");
     assert_eq!(h.text(), "p.norm()\np.scaled()\nprint(p.norm()|)\n");
+}
+
+impl H<'_> {
+    /// Answers completion requests with these items.
+    fn complete_items(&mut self, items: Vec<CompletionItem>) {
+        self.fake.on_completion(move |_, _, _| {
+            Ok(Completions {
+                items: items.clone(),
+                incomplete: false,
+            })
+        });
+    }
+}
+
+#[gpui::test]
+fn a_completion_character_inserts_the_chosen_item_first(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "pri\nx = al\nf(al)\ng(al)\n")]);
+    h.complete_items(vec![
+        CompletionItem::new("print").with_kind(SymbolKind::Function),
+        CompletionItem::new("alpha").with_kind(SymbolKind::Variable),
+    ]);
+    // Basic Completion focuses the popup: `(` makes `print()` and goes
+    // into the parentheses, once.
+    h.open("app.py", "pri");
+    h.press("ctrl-space");
+    assert_eq!(h.labels(), ["print"]);
+    h.type_text("(");
+    assert!(!h.popup_shown());
+    assert_eq!(h.text().lines().next(), Some("print(|)"));
+    h.invoke("editor.undo", json!(null));
+    // `.`, `,` and `=` follow the item.
+    h.open("app.py", "x = al");
+    h.press("ctrl-space");
+    h.type_text(".");
+    assert_eq!(h.text().lines().nth(1), Some("x = alpha.|"));
+    h.open("app.py", "f(al");
+    h.press("ctrl-space");
+    h.type_text(",");
+    assert_eq!(h.text().lines().nth(2), Some("f(alpha,|)"));
+    h.open("app.py", "g(al");
+    h.press("ctrl-space");
+    h.type_text("=");
+    assert_eq!(h.text().lines().nth(3), Some("g(alpha=|)"));
+    // One undo step for the item, one for the character.
+    h.invoke("editor.undo", json!(null));
+    assert_eq!(h.text().lines().nth(3), Some("g(alpha|)"));
+    h.invoke("editor.undo", json!(null));
+    assert_eq!(h.text().lines().nth(3), Some("g(al|)"));
+}
+
+#[gpui::test]
+fn characters_that_do_not_choose_close_the_popup_as_they_are(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", "x = al\ny = al\nz = al\nw = al\n")]);
+    h.complete_items(vec![
+        CompletionItem::new("alpha").with_kind(SymbolKind::Variable),
+    ]);
+    // Not a completion character: the popup closes, the character is
+    // typed, nothing inserted.
+    h.open("app.py", "x = al");
+    h.press("ctrl-space");
+    h.type_text("+");
+    assert!(!h.popup_shown());
+    assert_eq!(h.text().lines().next(), Some("x = al+|"));
+    // An identifier character grows the prefix and keeps the popup.
+    h.open("app.py", "y = al");
+    h.press("ctrl-space");
+    h.type_text("p");
+    assert!(h.popup_shown());
+    assert_eq!(h.text().lines().nth(1), Some("y = alp|"));
+    h.press("escape");
+    // An automatic popup only preselects its first item: a completion
+    // character closes it without inserting.
+    h.open("app.py", "z = al");
+    h.type_text("p");
+    assert!(h.popup_shown());
+    assert_eq!(h.completion()["focused"], json!(false));
+    h.type_text(".");
+    assert!(!h.popup_shown());
+    assert_eq!(h.text().lines().nth(2), Some("z = alp.|"));
+    // Moving the selection makes it the person's choice.
+    h.open("app.py", "w = al");
+    h.type_text("p");
+    h.press("down");
+    assert_eq!(h.completion()["focused"], json!(true));
+    h.type_text(",");
+    assert_eq!(h.text().lines().nth(3), Some("w = alpha,|"));
+}
+
+#[gpui::test]
+fn a_characters_place_in_the_chosen_names_keeps_the_popup(cx: &mut TestAppContext) {
+    // A keyword argument item: `=` completes it up to the `=` instead of
+    // inserting and typing another.
+    let mut h = H::new(cx, &[("app.py", "f(al)\n")]);
+    h.complete_items(vec![
+        CompletionItem::new("alpha=").with_kind(SymbolKind::Variable),
+    ]);
+    h.open("app.py", "f(al");
+    h.press("ctrl-space");
+    h.type_text("=");
+    assert_eq!(h.text(), "f(alpha=|)\n");
+    assert!(h.popup_shown());
+    assert_eq!(h.completion()["prefix"], json!("alpha="));
 }
 
 /// A server status with a version and documents.

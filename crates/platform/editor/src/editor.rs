@@ -264,6 +264,13 @@ pub enum ForwardedInput {
     Delete,
 }
 
+/// What an editor's owner does with a typed character before the editor
+/// does ([`Editor::set_type_hook`]): `true` when it consumed the
+/// character (the owner edited the text itself), `false` to type it as
+/// usual. It runs inside the editor's update, so it works on the editor it
+/// is given and never reaches the editor through its entity.
+pub type TypeHook = std::rc::Rc<dyn Fn(&mut Editor, char, &mut Context<Editor>) -> bool>;
+
 /// Clipboard metadata: the text is whole lines copied without a selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct LineCopy {
@@ -343,6 +350,8 @@ pub struct Editor {
     /// Typing, Enter, Tab, Backspace, Delete and Paste are reported as
     /// [`EditorEvent::Input`] instead of editing the text.
     pub(crate) forward_input: bool,
+    /// The owner's say over a single typed character, before it is typed.
+    pub(crate) type_hook: Option<TypeHook>,
     /// Scroll to the end of the text on the next frame.
     pub(crate) scroll_to_end: bool,
     /// Undoing or redoing a reload from disk asks the owner first.
@@ -489,6 +498,7 @@ impl Editor {
             reveal: None,
             console: false,
             forward_input: false,
+            type_hook: None,
             scroll_to_end: false,
             confirm_reload_undo: false,
             pressed_link: None,
@@ -540,6 +550,12 @@ impl Editor {
     /// them to a process).
     pub fn set_forward_input(&mut self, forward: bool) {
         self.forward_input = forward;
+    }
+
+    /// Sets the owner's hook on typed characters (a completion popup
+    /// that inserts its item on a completion character).
+    pub fn set_type_hook(&mut self, hook: Option<TypeHook>) {
+        self.type_hook = hook;
     }
 
     /// Undo and Redo of a reload from disk emit
@@ -1810,12 +1826,19 @@ impl Editor {
         self.type_str(&a.text, cx);
     }
 
-    /// Typed text: a single character goes through bracket and quote
-    /// pairing, anything else is inserted as it is.
+    /// Typed text: a single character goes through the owner's hook, then
+    /// bracket and quote pairing, anything else is inserted as it is.
     pub(crate) fn type_str(&mut self, text: &str, cx: &mut Context<Self>) {
         let mut chars = text.chars();
         match (chars.next(), chars.next()) {
-            (Some(c), None) if self.marked.is_none() => self.type_char(c, cx),
+            (Some(c), None) if self.marked.is_none() => {
+                if let Some(hook) = self.type_hook.clone()
+                    && hook(self, c, cx)
+                {
+                    return;
+                }
+                self.type_char(c, cx)
+            }
             _ => self.insert(text, cx),
         }
     }
