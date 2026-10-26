@@ -236,7 +236,7 @@ fn a_pinned_tab_moves_left_and_stays_on_close_all_but_pinned(cx: &mut TestAppCon
     // The pin on the tab unpins it.
     h.invoke("project.open-file", json!({ "path": "a.py" }));
     click(&mut h, "tab-pin-0");
-    assert_eq!(h.state()["tabs"][0]["pinned"], json!(false));
+    assert!(h.state()["tabs"][0].get("pinned").is_none());
     // Close All Tabs closes pinned tabs too (`CloseAllEditorsAction`).
     h.invoke("tabs.toggle-pin", json!({ "index": 0 }));
     right_click(&mut h, 1);

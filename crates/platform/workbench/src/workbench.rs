@@ -761,20 +761,28 @@ impl Workbench {
                         "path": rel(path),
                         "modified": editor.read(cx).is_modified(),
                         "deleted": self.is_deleted_on_disk(path),
-                        "pinned": t.pinned,
                     });
+                    // Only a pinned tab has the key.
+                    if t.pinned {
+                        tab["pinned"] = json!(true);
+                    }
                     // Only a coloured tab has the key.
                     if let Some(color) = self.vcs_file_colors().name_color(path, false, false) {
                         tab["color"] = json!(color.name());
                     }
                     tab
                 }
-                TabContent::View(view) => json!({
-                    "title": view.title(cx).to_string(),
-                    "preview": view.is_preview(cx),
-                    "pinned": t.pinned,
-                    "view": view.state(cx),
-                }),
+                TabContent::View(view) => {
+                    let mut tab = json!({
+                        "title": view.title(cx).to_string(),
+                        "preview": view.is_preview(cx),
+                        "view": view.state(cx),
+                    });
+                    if t.pinned {
+                        tab["pinned"] = json!(true);
+                    }
+                    tab
+                }
             }).collect::<Vec<_>>(),
             "active_tab": self.active,
             "tab_menu": self.tab_menu_json(cx),
