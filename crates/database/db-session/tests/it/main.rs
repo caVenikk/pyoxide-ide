@@ -14,6 +14,7 @@
 //! `PYOXIDE_DB_PASSWORD` (default `pyoxide`).
 
 mod oracle;
+mod pager;
 mod postgres;
 mod sqlite;
 mod support;
