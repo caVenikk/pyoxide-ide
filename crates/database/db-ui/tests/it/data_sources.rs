@@ -432,3 +432,69 @@ fn the_tool_window_asks_for_a_password_that_is_not_kept(cx: &mut TestAppContext)
     }
     assert_eq!(store.password("local"), None);
 }
+
+/// The bounds of an element of the open dialog, by its debug selector.
+fn dialog_bounds(h: &mut Harness, selector: &'static str) -> gpui::Bounds<gpui::Pixels> {
+    let dialog = h.target();
+    let mut vcx = gpui::VisualTestContext::from_window(dialog, h.cx);
+    vcx.debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is drawn"))
+}
+
+/// A problem too long for the list is cut at the list's edge (the whole
+/// text in its tooltip); the splitter right of the list drags its width,
+/// which the dialog keeps for its next opening.
+#[gpui::test]
+fn the_problem_fits_the_list_and_the_splitter_drags(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, point, px};
+    let (_dir, root) = project();
+    let mut h = open(cx, FakeStore::new(SECRET), &root);
+    h.invoke(
+        "db.explorer.add-data-source",
+        json!({"backend": "postgres"}),
+    );
+    let s = state(&mut h);
+    assert!(
+        s["dialog"]["problem"]
+            .as_str()
+            .is_some_and(|p| p.contains("user")),
+        "{s}"
+    );
+    let splitter = dialog_bounds(&mut h, "data-sources-splitter");
+    let problem = dialog_bounds(&mut h, "data-sources-problem");
+    assert!(
+        problem.right() <= splitter.left() + px(4.0),
+        "the problem stays left of the splitter: {problem:?} {splitter:?}"
+    );
+    let list = dialog_bounds(&mut h, "data-sources-list");
+    let before = list.size.width;
+
+    // Drag the splitter 80 px to the right.
+    let dialog = h.target();
+    let start = splitter.center();
+    let mut vcx = gpui::VisualTestContext::from_window(dialog, h.cx);
+    vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+    vcx.simulate_mouse_move(
+        point(start.x + px(80.0), start.y),
+        Some(MouseButton::Left),
+        Modifiers::none(),
+    );
+    vcx.simulate_mouse_up(
+        point(start.x + px(80.0), start.y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    h.draw();
+    let after = dialog_bounds(&mut h, "data-sources-list").size.width;
+    assert_eq!(after, before + px(80.0), "the list is wider");
+
+    // The next opening keeps the width.
+    h.invoke("db.data-sources.cancel", Value::Null);
+    assert!(state(&mut h)["dialog"].is_null());
+    h.invoke(
+        "db.explorer.add-data-source",
+        json!({"backend": "postgres"}),
+    );
+    let again = dialog_bounds(&mut h, "data-sources-list").size.width;
+    assert_eq!(again, after, "the width is kept");
+}

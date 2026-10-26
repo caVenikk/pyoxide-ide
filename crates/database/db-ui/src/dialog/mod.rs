@@ -10,6 +10,7 @@
 //! list connect through the store off the UI thread; closing the dialog or
 //! starting another test cancels a running one.
 
+mod layout;
 mod view;
 
 use std::path::PathBuf;
@@ -425,6 +426,7 @@ pub(crate) fn open(
     window: &mut Window,
     cx: &mut App,
 ) {
+    layout::load(cx);
     let options = ui::dialog_window::DialogOptions {
         title: view::WINDOW_TITLE.into(),
         size: gpui::size(
@@ -585,6 +587,10 @@ pub struct DataSourcesDialog {
     /// (`ExpandableTextField`), and that editor.
     expanded: Option<FieldId>,
     expand_editor: Entity<Editor>,
+    /// The splitter right of the list being dragged: where the drag
+    /// started and the list's width then; the width while dragging.
+    resizing: Option<(Pixels, f32)>,
+    drag_width: Option<f32>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -682,6 +688,8 @@ impl DataSourcesDialog {
             databases_task: Task::ready(()),
             expanded: None,
             expand_editor,
+            resizing: None,
+            drag_width: None,
             _subscriptions: subscriptions,
         };
         match initial {

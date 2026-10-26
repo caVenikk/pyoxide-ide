@@ -24,6 +24,11 @@ pub(super) const MIN_SIZE: (f32, f32) = (760.0, 520.0);
 /// The columns: the pages' icons, the list, the data source.
 const ICON_COLUMN: f32 = 44.0;
 const LIST_WIDTH: f32 = 248.0;
+/// The narrowest the list and the page get when the splitter is dragged,
+/// and the width of the splitter's handle over the one-pixel line.
+const LIST_MIN_WIDTH: f32 = 150.0;
+const PAGE_MIN_WIDTH: f32 = 460.0;
+const SPLITTER_HANDLE: f32 = 6.0;
 const PAGE_ICON: f32 = 27.0;
 /// The list: header, toolbar, group label, rows.
 const LIST_SIDE: f32 = 10.0;
@@ -244,9 +249,7 @@ impl DataSourcesDialog {
             .flex()
             .flex_col()
             .flex_none()
-            .w(px(LIST_WIDTH))
-            .border_r_1()
-            .border_color(theme.color(UiRole::Border))
+            .w(px(self.list_width(window, cx)))
             .child(
                 div()
                     .flex()
@@ -310,6 +313,7 @@ impl DataSourcesDialog {
             .child(
                 div()
                     .id("data-sources-list")
+                    .debug_selector(|| "data-sources-list".into())
                     .flex()
                     .flex_col()
                     .flex_1()
@@ -326,6 +330,7 @@ impl DataSourcesDialog {
                         div()
                             .id("data-sources-problems")
                             .debug_selector(|| "data-sources-problems".into())
+                            .min_w(px(0.0))
                             .mt(px(PROBLEMS_GAP))
                             .pt(px(PROBLEMS_GAP - 6.0))
                             .border_t_1()
@@ -335,18 +340,126 @@ impl DataSourcesDialog {
                             .flex_col()
                             .gap(px(4.0))
                             .child(PROBLEMS)
+                            // One line cut with an ellipsis at the list's
+                            // edge; the whole text in its tooltip.
                             .children(self.problem().map(|(_, p)| {
+                                let tip = p.clone();
                                 div()
+                                    .id("data-sources-problem")
+                                    .debug_selector(|| "data-sources-problem".into())
                                     .flex()
                                     .flex_row()
+                                    .items_center()
                                     .gap(px(6.0))
+                                    .min_w(px(0.0))
+                                    .pr(px(LIST_SIDE))
                                     .text_color(theme.color(UiRole::Danger))
-                                    .child(Icon::new(IconName::ERROR).size(px(14.0)))
-                                    .child(div().flex_1().child(p))
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::text(tip.clone(), None)(window, cx)
+                                    })
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .child(Icon::new(IconName::ERROR).size(px(14.0))),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .child(p),
+                                    )
                             })),
                     ),
             )
             .into_any_element()
+    }
+
+    /// The list's width: as dragged, else as last left, kept so that the
+    /// page keeps its least width.
+    pub(super) fn list_width(&self, window: &Window, cx: &App) -> f32 {
+        let width = self
+            .drag_width
+            .or_else(|| super::layout::list_width(cx))
+            .unwrap_or(LIST_WIDTH);
+        let room = f32::from(window.viewport_size().width) - ICON_COLUMN - PAGE_MIN_WIDTH;
+        width.min(room).max(LIST_MIN_WIDTH).round()
+    }
+
+    /// The one-pixel line between the list and the page, with a wider
+    /// handle that drags it (the reference's `OnePixelSplitter`).
+    fn render_splitter(&self, cx: &mut Context<Self>) -> AnyElement {
+        let border = cx.theme().color(UiRole::Border);
+        div()
+            .relative()
+            .flex_none()
+            .w(px(1.0))
+            .h_full()
+            .bg(border)
+            .child(
+                div()
+                    .id("data-sources-splitter")
+                    .debug_selector(|| "data-sources-splitter".into())
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(-(SPLITTER_HANDLE - 1.0) / 2.0))
+                    .w(px(SPLITTER_HANDLE))
+                    .child(
+                        canvas(
+                            |bounds, window, _| {
+                                window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal)
+                            },
+                            |_, hitbox, window, _| {
+                                ui::pointer::request(
+                                    gpui::CursorStyle::ResizeLeftRight,
+                                    &hitbox,
+                                    window,
+                                )
+                            },
+                        )
+                        .size_full(),
+                    )
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, e: &gpui::MouseDownEvent, window, cx| {
+                            let from = this.list_width(window, cx);
+                            this.resizing = Some((e.position.x, from));
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn drag_splitter(
+        &mut self,
+        e: &gpui::MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((start, from)) = self.resizing else {
+            return;
+        };
+        if e.pressed_button != Some(gpui::MouseButton::Left) {
+            self.end_splitter(cx);
+            return;
+        }
+        self.drag_width = Some(from + f32::from(e.position.x - start));
+        self.drag_width = Some(self.list_width(window, cx));
+        cx.notify();
+    }
+
+    fn end_splitter(&mut self, cx: &mut Context<Self>) {
+        if self.resizing.take().is_some() {
+            if let Some(width) = self.drag_width.take() {
+                super::layout::set_list_width(width, cx);
+            }
+            cx.notify();
+        }
     }
 
     /// A text field of the form.
@@ -1683,6 +1796,17 @@ impl Render for DataSourcesDialog {
         let page = self.render_page(window, cx);
         let footer = self.render_footer(cx);
         let expanded = self.render_expanded(window, cx);
+        let splitter = self.render_splitter(cx);
+        let resizing = self.resizing.is_some().then(|| {
+            canvas(
+                |_, _, _| {},
+                |_, _, window, _| {
+                    ui::pointer::request_window(gpui::CursorStyle::ResizeLeftRight, window)
+                },
+            )
+            .absolute()
+            .size_full()
+        });
         div()
             .id("data-sources-dialog")
             .debug_selector(|| "data-sources-dialog".into())
@@ -1782,6 +1906,11 @@ impl Render for DataSourcesDialog {
                 }
                 cx.stop_propagation();
             }))
+            .on_mouse_move(cx.listener(Self::drag_splitter))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.end_splitter(cx)),
+            )
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -1809,10 +1938,12 @@ impl Render for DataSourcesDialog {
                     .border_color(border)
                     .child(icons_column)
                     .child(list)
+                    .child(splitter)
                     .child(page),
             )
             .child(footer)
             .children(expanded)
+            .children(resizing)
             .child(ui::pointer::frame())
             .children(ui::dialog_window::blocker(window, cx))
     }
