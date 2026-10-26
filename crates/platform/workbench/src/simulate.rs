@@ -73,6 +73,14 @@ mod native {
 
     use super::Event;
 
+    /// `kCGMouseEventButtonNumber`.
+    const MOUSE_EVENT_BUTTON_NUMBER: u32 = 3;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventSetIntegerValueField(event: *mut std::ffi::c_void, field: u32, value: i64);
+    }
+
     /// The window's content view and the height of its content.
     pub(super) struct View {
         view: *mut Object,
@@ -128,6 +136,23 @@ mod native {
                 if native.is_null() {
                     return;
                 }
+                // An event made this way reports button 0 (left), which
+                // GPUI reads from `buttonNumber`; a right button event gets
+                // button 1 through its CGEvent.
+                let native = if matches!(event, Event::RightDown | Event::RightUp) {
+                    let cg: *mut std::ffi::c_void = msg_send![native, CGEvent];
+                    if cg.is_null() {
+                        return;
+                    }
+                    CGEventSetIntegerValueField(cg, MOUSE_EVENT_BUTTON_NUMBER, 1);
+                    let right: *mut Object = msg_send![class!(NSEvent), eventWithCGEvent: cg];
+                    if right.is_null() {
+                        return;
+                    }
+                    right
+                } else {
+                    native
+                };
                 match event {
                     Event::Down => {
                         let _: () = msg_send![self.view, mouseDown: native];
