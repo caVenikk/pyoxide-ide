@@ -111,8 +111,10 @@ impl TreeGroup {
         }
     }
 
-    /// The nodes of the group under `parent`, in tree order (routines by
-    /// name, the others as the model keeps them).
+    /// The nodes of the group under `parent`, in tree order: routines by
+    /// name, indexes unique first (the primary key's among them), then the
+    /// others, each part in the model's order (by name; the model stays
+    /// sorted by name for lookups), the others as the model keeps them.
     pub fn nodes<'a>(self, parent: NodeRef<'a>) -> Vec<NodeRef<'a>> {
         let mut out = Vec::new();
         for g in self.model_groups() {
@@ -123,6 +125,10 @@ impl TreeGroup {
         }
         if self.model_groups().len() > 1 {
             out.sort_by_cached_key(|n| (n.name().to_lowercase(), n.signature().to_owned()));
+        }
+        if self == TreeGroup::Indexes {
+            // A stable sort: the order inside each part stays the model's.
+            out.sort_by_key(|n| !n.index().is_some_and(|i| i.unique));
         }
         out
     }
