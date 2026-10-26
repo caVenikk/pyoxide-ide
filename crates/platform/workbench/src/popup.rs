@@ -37,11 +37,11 @@ pub struct PopupPlace {
 
 /// Which edges a resize moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Edges {
-    left: bool,
-    right: bool,
-    top: bool,
-    bottom: bool,
+pub(crate) struct Edges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -251,7 +251,9 @@ impl PopupFrame {
             |_, _| {},
             cursor,
         );
-        let grips = grips(owner, frame);
+        let grips = grips(owner, move |this: &mut T, edges, mouse| {
+            frame(this).start_resize(edges, mouse)
+        });
         div()
             .absolute()
             .occlude()
@@ -287,7 +289,7 @@ pub fn no_move(_: &MouseDownEvent, window: &mut Window, cx: &mut App) {
 }
 
 impl Edges {
-    fn cursor(self) -> CursorStyle {
+    pub(crate) fn cursor(self) -> CursorStyle {
         match (self.left || self.right, self.top || self.bottom) {
             (true, false) => CursorStyle::ResizeLeftRight,
             (false, true) => CursorStyle::ResizeUpDown,
@@ -297,8 +299,12 @@ impl Edges {
     }
 }
 
-/// The bands along the edges and the corners that resize the popup.
-fn grips<T: 'static>(owner: Entity<T>, frame: fn(&mut T) -> &mut PopupFrame) -> Vec<AnyElement> {
+/// The bands along the edges and the corners that resize a popup; a press
+/// on one calls `start` with the edges it moves and the mouse position.
+pub(crate) fn grips<T: 'static>(
+    owner: Entity<T>,
+    start: impl Fn(&mut T, Edges, Point<Pixels>) + Clone + 'static,
+) -> Vec<AnyElement> {
     let edges = |left, right, top, bottom| Edges {
         left,
         right,
@@ -320,6 +326,7 @@ fn grips<T: 'static>(owner: Entity<T>, frame: fn(&mut T) -> &mut PopupFrame) -> 
     all.into_iter()
         .map(|(id, e)| {
             let owner = owner.clone();
+            let start = start.clone();
             let cursor = e.cursor();
             let el = div()
                 .id(id)
@@ -336,7 +343,7 @@ fn grips<T: 'static>(owner: Entity<T>, frame: fn(&mut T) -> &mut PopupFrame) -> 
                     window.prevent_default();
                     cx.stop_propagation();
                     owner.update(cx, |this, cx| {
-                        frame(this).start_resize(e, ev.position);
+                        start(this, e, ev.position);
                         cx.notify();
                     });
                 });

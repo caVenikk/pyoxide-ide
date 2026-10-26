@@ -96,9 +96,21 @@ impl FileIndex {
         non_project: bool,
         cancel: &AtomicBool,
     ) -> Option<Self> {
+        Self::build_pausable(root, filter, non_project, cancel, &|| {})
+    }
+
+    /// [`FileIndex::build`] that calls `pause` for every item it lists,
+    /// from the walking threads: the work waits there while it is paused.
+    pub fn build_pausable(
+        root: &Path,
+        filter: &Filter,
+        non_project: bool,
+        cancel: &AtomicBool,
+        pause: &(dyn Fn() + Sync),
+    ) -> Option<Self> {
         let mut index = Self::empty(root);
         index.non_project = non_project;
-        let (found, temps) = walk(root, filter, non_project, cancel)?;
+        let (found, temps) = walk(root, filter, non_project, cancel, pause)?;
         index.insert_found(found);
         remove_stale_save_temps(&temps, filter);
         Some(index)
@@ -120,7 +132,7 @@ impl FileIndex {
         index.non_project = true;
         for id in unlisted {
             let dir = index.path(id);
-            let (found, _) = walk(&dir, filter, true, cancel)?;
+            let (found, _) = walk(&dir, filter, true, cancel, &|| {})?;
             index.entries[id as usize].unlisted = false;
             index.insert_found(found);
         }
@@ -429,6 +441,7 @@ fn walk(
     filter: &Filter,
     non_project: bool,
     cancel: &AtomicBool,
+    pause: &(dyn Fn() + Sync),
 ) -> Option<(Vec<Found>, SaveTemps)> {
     let found = Mutex::new(Vec::new());
     let temps = Arc::new(Mutex::new(Vec::new()));
@@ -451,6 +464,7 @@ fn walk(
     });
     builder.build_parallel().run(|| {
         Box::new(|entry| {
+            pause();
             if cancel.load(Ordering::Relaxed) {
                 return WalkState::Quit;
             }

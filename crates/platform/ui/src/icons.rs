@@ -59,6 +59,12 @@ impl IconName {
     /// New UI's `AllIcons.Process.Stop`, `StopHovered`).
     pub const PROGRESS_STOP: Self = Self("progress/stop");
     pub const PROGRESS_STOP_HOVERED: Self = Self("progress/stopHovered");
+    /// The pause button of a pausable background task, and its resume
+    /// button while paused (`AllIcons.Process.ProgressPause`, `ProgressResume`).
+    pub const PROGRESS_PAUSE: Self = Self("progress/pause");
+    pub const PROGRESS_PAUSE_HOVERED: Self = Self("progress/pauseHovered");
+    pub const PROGRESS_RESUME: Self = Self("progress/resume");
+    pub const PROGRESS_RESUME_HOVERED: Self = Self("progress/resumeHovered");
     /// White variants for the coloured buttons of the run widget.
     pub const RUN_STROKE: Self = Self("run/run_stroke");
     pub const RERUN_STROKE: Self = Self("run/rerun_stroke");
@@ -325,6 +331,7 @@ platform_icons! {
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
+        "progress/pause", "progress/pauseHovered", "progress/resume", "progress/resumeHovered",
         "progress/stop", "progress/stopHovered",
         "run/debug", "run/killProcess",
         "startup/configFile", "run/rerun", "run/run", "run/stop",

@@ -21,6 +21,8 @@ use project::Filter;
 /// The title of the build's background task
 /// (`IndexingBundle` `progress.indexing.scanning`).
 pub const SCANNING: &str = "Scanning files\u{2026}";
+/// Its text while paused (`progress.indexing.scanning.paused`).
+pub const SCANNING_PAUSED: &str = "Scanning paused";
 
 pub struct ProjectFiles {
     index: Option<Arc<FileIndex>>,
@@ -164,14 +166,18 @@ impl ProjectFiles {
         let generation = self.generation;
         let non_project = self.non_project;
         // In the status bar while it runs (the reference's scanning task).
+        // It has a pause button, no cancel button, as the reference's.
         let scanning = progress::global()
             .task(SCANNING)
             .project(root.clone())
+            .pausable(SCANNING_PAUSED)
             .start();
         let build = cx.background_spawn(async move {
-            let _scanning = scanning;
+            let pause = scanning.pause_token().unwrap_or_default();
+            let wait = || pause.wait_while_paused(&|| cancel.load(Ordering::Relaxed));
             let start = std::time::Instant::now();
-            let index = FileIndex::build(&root, &filter, non_project, &cancel);
+            let index = FileIndex::build_pausable(&root, &filter, non_project, &cancel, &wait);
+            drop(scanning);
             index.map(|i| (i, start.elapsed()))
         });
         self.task = Some(cx.spawn(async move |this, cx| {

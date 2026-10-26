@@ -836,7 +836,7 @@ impl Workbench {
             "message": self.message.as_ref().map(|m| m.to_string()),
             "notice": self.notice.as_ref().map(|m| m.to_string()),
             "notifications": self.notifications.read(cx).state_json(cx),
-            "background_tasks": self.background_tasks.read(cx).state_json(),
+            "background_tasks": self.background_tasks.read(cx).state_json(cx),
             "theme": cx.theme().id(),
             "vcs": self.vcs_state_json(cx),
             "diff": self.diff_state_json(cx),

@@ -8,7 +8,11 @@
 //! determinate. Cancelling sets the task's [`CancelToken`], which the work
 //! checks (or forwards to its own cancellation with
 //! [`CancelToken::on_cancel`]); the task stays, "stopping", until the work
-//! ends. A task ends when its handle is dropped.
+//! ends. A task ends when its handle is dropped. A pausable task has a
+//! pause button instead (or besides): pausing sets its [`PauseToken`], at
+//! which the work waits ([`PauseToken::wait_while_paused`]) until it is
+//! resumed, and the task shows its paused text meanwhile
+//! (`ProgressSuspender`).
 //!
 //! Observers (the status bar of each main window) [`Tasks::subscribe`]
 //! with a waker: it is called once after a change, not again until the
@@ -21,7 +25,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 /// How long a task runs before it is shown
@@ -72,6 +76,8 @@ struct Shared {
     started: Instant,
     state: Mutex<State>,
     cancel: CancelToken,
+    /// The pause button's token and the text shown while paused.
+    pause: Option<(PauseToken, String)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,6 +125,7 @@ impl Tasks {
             cancellable: false,
             text: String::new(),
             cancel: None,
+            pause: None,
         }
     }
 
@@ -151,6 +158,24 @@ impl Tasks {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Pauses a pausable task, or resumes it when it is paused (its pause
+    /// button). `false` when there is no such task or it cannot be paused.
+    pub fn toggle_pause(&self, id: TaskId) -> bool {
+        let task = lock(&self.inner.tasks).iter().find(|t| t.id == id).cloned();
+        match task.as_ref().and_then(|t| t.pause.as_ref()) {
+            Some((token, _)) => {
+                if token.is_paused() {
+                    token.resume();
+                } else {
+                    token.pause();
+                }
+                self.inner.changed();
+                true
+            }
+            None => false,
         }
     }
 
@@ -187,6 +212,7 @@ pub struct TaskBuilder<'a> {
     cancellable: bool,
     text: String,
     cancel: Option<CancelToken>,
+    pause: Option<String>,
 }
 
 impl TaskBuilder<'_> {
@@ -200,6 +226,14 @@ impl TaskBuilder<'_> {
     /// The task has a cancel button.
     pub fn cancellable(mut self) -> Self {
         self.cancellable = true;
+        self
+    }
+
+    /// The task has a pause button; `paused_text` replaces its text while
+    /// it is paused (`ProgressSuspender.markSuspendable`). The work waits at
+    /// [`Task::pause_token`].
+    pub fn pausable(mut self, paused_text: impl Into<String>) -> Self {
+        self.pause = Some(paused_text.into());
         self
     }
 
@@ -229,6 +263,7 @@ impl TaskBuilder<'_> {
                 ..State::default()
             }),
             cancel: self.cancel.unwrap_or_default(),
+            pause: self.pause.map(|text| (PauseToken::new(), text)),
         });
         lock(&registry.tasks).push(shared.clone());
         registry.changed();
@@ -316,6 +351,11 @@ impl Task {
         self.shared.cancel.is_cancelled()
     }
 
+    /// The pause token of a pausable task, for the work to wait at.
+    pub fn pause_token(&self) -> Option<PauseToken> {
+        self.shared.pause.as_ref().map(|(token, _)| token.clone())
+    }
+
     /// Ends the task (as dropping it does).
     pub fn finish(self) {}
 }
@@ -345,6 +385,13 @@ impl Shared {
             fraction: state.fraction,
             cancellable: self.cancellable,
             stopping: self.cancel.is_cancelled(),
+            pausable: self.pause.is_some(),
+            paused: self.pause.as_ref().is_some_and(|(t, _)| t.is_paused()),
+            paused_text: self
+                .pause
+                .as_ref()
+                .map(|(_, text)| text.clone())
+                .unwrap_or_default(),
             project: self.project.clone(),
             started: self.started,
         }
@@ -363,6 +410,11 @@ pub struct TaskSnapshot {
     pub cancellable: bool,
     /// Cancelled, the work not ended yet.
     pub stopping: bool,
+    /// The task has a pause button.
+    pub pausable: bool,
+    pub paused: bool,
+    /// The text shown while paused.
+    pub paused_text: String,
     /// The project the task belongs to; `None` for every window.
     pub project: Option<PathBuf>,
     pub started: Instant,
@@ -475,6 +527,70 @@ impl fmt::Debug for CancelToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("CancelToken")
             .field(&self.is_cancelled())
+            .finish()
+    }
+}
+
+/// Pausing of a piece of work (`ProgressSuspender`): cloned into the work,
+/// which waits at [`PauseToken::wait_while_paused`] while it is set.
+#[derive(Clone, Default)]
+pub struct PauseToken {
+    inner: Arc<PauseInner>,
+}
+
+#[derive(Default)]
+struct PauseInner {
+    /// Read without the lock on every call of the work.
+    paused: AtomicBool,
+    lock: Mutex<()>,
+    resumed: Condvar,
+}
+
+impl PauseToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.inner.paused.load(Ordering::Acquire)
+    }
+
+    pub fn pause(&self) {
+        let _guard = lock(&self.inner.lock);
+        self.inner.paused.store(true, Ordering::Release);
+    }
+
+    /// Lets the waiting work go on.
+    pub fn resume(&self) {
+        let _guard = lock(&self.inner.lock);
+        self.inner.paused.store(false, Ordering::Release);
+        self.inner.resumed.notify_all();
+    }
+
+    /// Blocks the calling thread while the token is set; returns at once
+    /// when it is not, and soon after `cancelled` turns true.
+    pub fn wait_while_paused(&self, cancelled: &dyn Fn() -> bool) {
+        if !self.is_paused() {
+            return;
+        }
+        let mut guard = lock(&self.inner.lock);
+        while self.is_paused() && !cancelled() {
+            guard = match self
+                .inner
+                .resumed
+                .wait_timeout(guard, Duration::from_millis(100))
+            {
+                Ok((g, _)) => g,
+                Err(e) => e.into_inner().0,
+            };
+        }
+    }
+}
+
+impl fmt::Debug for PauseToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PauseToken")
+            .field(&self.is_paused())
             .finish()
     }
 }

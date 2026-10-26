@@ -164,3 +164,53 @@ fn a_task_outliving_its_registry() {
     task.set_text("still fine");
     drop(task);
 }
+
+#[test]
+fn pausing_holds_the_work_until_resumed() {
+    let tasks = Tasks::new();
+    let task = tasks
+        .task("Scanning files…")
+        .pausable("Scanning paused")
+        .start();
+    let token = task.pause_token().unwrap();
+    assert!(!tasks.snapshot()[0].paused);
+    assert!(tasks.toggle_pause(task.id()));
+    let snap = &tasks.snapshot()[0];
+    assert!(snap.pausable && snap.paused);
+    assert_eq!(snap.paused_text, "Scanning paused");
+    let passed = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let passed = passed.clone();
+        let token = token.clone();
+        std::thread::spawn(move || {
+            token.wait_while_paused(&|| false);
+            passed.store(true, Ordering::SeqCst);
+        })
+    };
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(!passed.load(Ordering::SeqCst));
+    assert!(tasks.toggle_pause(task.id()));
+    worker.join().unwrap();
+    assert!(passed.load(Ordering::SeqCst));
+    assert!(!tasks.snapshot()[0].paused);
+}
+
+#[test]
+fn a_paused_wait_ends_when_cancelled() {
+    let token = PauseToken::new();
+    token.pause();
+    let cancel = CancelToken::new();
+    let c = cancel.clone();
+    let worker = std::thread::spawn(move || token.wait_while_paused(&|| c.is_cancelled()));
+    cancel.cancel();
+    worker.join().unwrap();
+}
+
+#[test]
+fn a_task_without_pause_button_is_not_paused() {
+    let tasks = Tasks::new();
+    let task = tasks.task("Updating").start();
+    assert!(task.pause_token().is_none());
+    assert!(!tasks.toggle_pause(task.id()));
+    assert!(!tasks.snapshot()[0].pausable);
+}

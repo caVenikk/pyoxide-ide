@@ -100,3 +100,9 @@ id = "ShowProcessWindow"
 text = "Show"
 groups = ["Main Menu > Window > Processes"]
 command = "background-tasks.show"
+
+[[action]]
+id = "AutoShowProcessWindow"
+text = "Auto Show"
+groups = ["Main Menu > Window > Processes"]
+command = "background-tasks.toggle-auto-show"
