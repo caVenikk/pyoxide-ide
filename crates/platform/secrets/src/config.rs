@@ -203,7 +203,9 @@ pub fn open_store_with(
     os_store: &dyn SecretStore,
 ) -> Result<Arc<dyn SecretStore>> {
     match config.store {
-        StoreKind::Keychain => Ok(Arc::new(KeyringStore)),
+        // Cached: each secret is read from the OS store once per run, since
+        // every read may ask the person for the login password.
+        StoreKind::Keychain => Ok(Arc::new(crate::CachedStore::new(Arc::new(KeyringStore)))),
         StoreKind::Memory => Ok(Arc::new(MemoryStore::default())),
         StoreKind::KeePass => {
             let kp = config.keepass.as_ref().ok_or_else(|| {

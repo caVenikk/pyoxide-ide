@@ -16,6 +16,8 @@ pub mod config;
 mod fsutil;
 pub mod intellij;
 pub mod keepass;
+#[cfg(target_os = "macos")]
+mod macos_acl;
 pub mod terminal;
 #[cfg(test)]
 mod test_kdbx3;
@@ -146,10 +148,25 @@ impl SecretStore for KeyringStore {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
     fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
         keyring::Entry::new(service, account)
             .and_then(|e| e.set_password(secret.expose()))
             .map_err(keyring_err)
+    }
+
+    /// The item gets an access list naming the IDE and the CLI, so neither
+    /// asks for the login password for what the other stored.
+    #[cfg(target_os = "macos")]
+    fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
+        macos_acl::set_trusted(
+            None,
+            service,
+            account,
+            secret.expose().as_bytes(),
+            &macos_acl::trusted_binaries(),
+        )
+        .map_err(|m| SecretError::new(SecretErrorKind::Io, KEYRING, m))
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool> {
@@ -239,6 +256,87 @@ impl SecretStore for MemoryStore {
         let mut found: Vec<_> = map.iter().filter(|((s, _), _)| s == service).collect();
         found.sort_by(|a, b| a.0.1.cmp(&b.0.1));
         Ok(found.first().map(|(_, v)| (*v).clone()))
+    }
+}
+
+/// Reads each secret from the wrapped store at most once while the process
+/// lives. The OS credential store may ask the person for the login password
+/// on every read, so connecting, reconnecting and keep-alive use the copy in
+/// memory (wiped on drop, like every [`Secret`]).
+///
+/// `set` and `delete` through this store keep the copy current. A change made
+/// by another process is not seen until the IDE restarts. Failures and
+/// missing entries are not remembered: they cost no prompt and may be fixed
+/// meanwhile.
+pub struct CachedStore {
+    inner: Arc<dyn SecretStore>,
+    entries: Mutex<HashMap<(String, String), Secret>>,
+    by_service: Mutex<HashMap<String, Secret>>,
+}
+
+impl CachedStore {
+    pub fn new(inner: Arc<dyn SecretStore>) -> Self {
+        Self {
+            inner,
+            entries: Mutex::default(),
+            by_service: Mutex::default(),
+        }
+    }
+
+    /// Forget every remembered secret; the next read goes to the store.
+    pub fn clear(&self) {
+        self.entries.lock().expect("poisoned").clear();
+        self.by_service.lock().expect("poisoned").clear();
+    }
+}
+
+impl SecretStore for CachedStore {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn get(&self, service: &str, account: &str) -> Result<Option<Secret>> {
+        // The lock is held across the read, so two threads asking at once
+        // cause one read (one prompt), not two.
+        let mut entries = self.entries.lock().expect("poisoned");
+        let key = (service.to_owned(), account.to_owned());
+        if let Some(secret) = entries.get(&key) {
+            return Ok(Some(secret.clone()));
+        }
+        let found = self.inner.get(service, account)?;
+        if let Some(secret) = &found {
+            entries.insert(key, secret.clone());
+        }
+        Ok(found)
+    }
+
+    fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
+        let mut entries = self.entries.lock().expect("poisoned");
+        let key = (service.to_owned(), account.to_owned());
+        entries.remove(&key);
+        self.by_service.lock().expect("poisoned").remove(service);
+        self.inner.set(service, account, secret)?;
+        entries.insert(key, secret.clone());
+        Ok(())
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        let mut entries = self.entries.lock().expect("poisoned");
+        entries.remove(&(service.to_owned(), account.to_owned()));
+        self.by_service.lock().expect("poisoned").remove(service);
+        self.inner.delete(service, account)
+    }
+
+    fn get_any_account(&self, service: &str) -> Result<Option<Secret>> {
+        let mut by_service = self.by_service.lock().expect("poisoned");
+        if let Some(secret) = by_service.get(service) {
+            return Ok(Some(secret.clone()));
+        }
+        let found = self.inner.get_any_account(service)?;
+        if let Some(secret) = &found {
+            by_service.insert(service.to_owned(), secret.clone());
+        }
+        Ok(found)
     }
 }
 
@@ -347,6 +445,117 @@ mod tests {
         lazy.set("s", "a", &Secret::new("x")).unwrap();
         assert_eq!(lazy.get("s", "a").unwrap().unwrap().expose(), "x");
         assert_eq!(opened.load(Ordering::SeqCst), 1);
+    }
+
+    /// Counts reads of the wrapped store.
+    struct Counting {
+        inner: MemoryStore,
+        gets: std::sync::atomic::AtomicUsize,
+        any: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Counting {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                inner: MemoryStore::default(),
+                gets: Default::default(),
+                any: Default::default(),
+            })
+        }
+
+        fn gets(&self) -> usize {
+            self.gets.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl SecretStore for Arc<Counting> {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+
+        fn get(&self, service: &str, account: &str) -> Result<Option<Secret>> {
+            self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.get(service, account)
+        }
+
+        fn set(&self, service: &str, account: &str, secret: &Secret) -> Result<()> {
+            self.inner.set(service, account, secret)
+        }
+
+        fn delete(&self, service: &str, account: &str) -> Result<bool> {
+            self.inner.delete(service, account)
+        }
+
+        fn get_any_account(&self, service: &str) -> Result<Option<Secret>> {
+            self.any.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.get_any_account(service)
+        }
+    }
+
+    #[test]
+    fn cached_store_reads_each_secret_once() {
+        let counting = Counting::new();
+        counting.inner.set("svc", "a", &Secret::new("x")).unwrap();
+        let cached = CachedStore::new(Arc::new(counting.clone()));
+        for _ in 0..5 {
+            assert_eq!(cached.get("svc", "a").unwrap().unwrap().expose(), "x");
+        }
+        assert_eq!(counting.gets(), 1);
+        // Another account is another read.
+        assert!(cached.get("svc", "b").unwrap().is_none());
+        assert_eq!(counting.gets(), 2);
+        // Missing entries are looked up again (no prompt, may appear later).
+        counting.inner.set("svc", "b", &Secret::new("y")).unwrap();
+        assert_eq!(cached.get("svc", "b").unwrap().unwrap().expose(), "y");
+        assert_eq!(counting.gets(), 3);
+    }
+
+    #[test]
+    fn cached_store_writes_through() {
+        let counting = Counting::new();
+        let cached = CachedStore::new(Arc::new(counting.clone()));
+        cached.set("svc", "a", &Secret::new("one")).unwrap();
+        assert_eq!(cached.get("svc", "a").unwrap().unwrap().expose(), "one");
+        cached.set("svc", "a", &Secret::new("two")).unwrap();
+        assert_eq!(cached.get("svc", "a").unwrap().unwrap().expose(), "two");
+        assert_eq!(counting.gets(), 0, "values written here are not read back");
+        assert!(cached.delete("svc", "a").unwrap());
+        assert!(cached.get("svc", "a").unwrap().is_none());
+        assert_eq!(counting.gets(), 1);
+        cached.clear();
+        cached.set("svc", "a", &Secret::new("three")).unwrap();
+        cached.clear();
+        assert_eq!(cached.get("svc", "a").unwrap().unwrap().expose(), "three");
+        assert_eq!(counting.gets(), 2);
+    }
+
+    #[test]
+    fn cached_store_any_account_is_read_once() {
+        let counting = Counting::new();
+        counting.inner.set("svc", "a", &Secret::new("x")).unwrap();
+        let cached = CachedStore::new(Arc::new(counting.clone()));
+        for _ in 0..3 {
+            assert_eq!(
+                cached.get_any_account("svc").unwrap().unwrap().expose(),
+                "x"
+            );
+        }
+        assert_eq!(counting.any.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cached_store_concurrent_readers_cause_one_read() {
+        let counting = Counting::new();
+        counting.inner.set("svc", "a", &Secret::new("x")).unwrap();
+        let cached = Arc::new(CachedStore::new(Arc::new(counting.clone())));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let cached = cached.clone();
+                std::thread::spawn(move || cached.get("svc", "a").unwrap().is_some())
+            })
+            .collect();
+        assert!(threads.into_iter().all(|t| t.join().unwrap()));
+        assert_eq!(counting.gets(), 1);
     }
 
     /// Touches the real OS store: `cargo test -p secrets -- --ignored`.

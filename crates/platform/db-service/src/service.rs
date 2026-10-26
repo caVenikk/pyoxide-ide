@@ -301,6 +301,62 @@ mod tests {
         assert!(e.message.contains("secret set pg"));
     }
 
+    /// Counts reads, which is what the OS credential store charges a prompt for.
+    struct CountingStore {
+        inner: MemoryStore,
+        gets: std::sync::atomic::AtomicUsize,
+    }
+
+    impl SecretStore for CountingStore {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+
+        fn get(&self, service: &str, account: &str) -> secrets::Result<Option<Secret>> {
+            self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.get(service, account)
+        }
+
+        fn set(&self, service: &str, account: &str, secret: &Secret) -> secrets::Result<()> {
+            self.inner.set(service, account, secret)
+        }
+
+        fn delete(&self, service: &str, account: &str) -> secrets::Result<bool> {
+            self.inner.delete(service, account)
+        }
+    }
+
+    #[test]
+    fn repeated_connects_read_the_stored_password_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let counting = Arc::new(CountingStore {
+            inner: MemoryStore::default(),
+            gets: Default::default(),
+        });
+        counting
+            .set(crate::secrets::SECRET_SERVICE, "pg", &Secret::new("stored"))
+            .unwrap();
+        // The stores the front-ends hand to the service are cached.
+        let store = Arc::new(secrets::CachedStore::new(counting.clone()));
+        let svc = DbService::new(
+            dir.path().join("db-profiles.toml"),
+            store,
+            None,
+            Arc::new(|_| None),
+        );
+        let mut p = Profile::new(Backend::Postgres);
+        p.host = "localhost".into();
+        p.database = Some("d".into());
+        p.user = "u".into();
+        // Connect, reconnect, keep-alive, a second data source window.
+        for _ in 0..6 {
+            let (params, source) = svc.params_for("pg", &p).unwrap();
+            assert_eq!(params.password.expose(), "stored");
+            assert!(matches!(source, SecretSource::Store(_)));
+        }
+        assert_eq!(counting.gets.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn session_names() {
         assert_eq!(
