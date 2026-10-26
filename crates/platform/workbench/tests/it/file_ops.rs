@@ -608,6 +608,17 @@ fn delete_asks_and_closes_tabs(cx: &mut TestAppContext) {
     assert!(h.root.join("src").exists());
     assert_eq!(h.state()["dialog"], Value::Null);
     assert_eq!(h.tree()["selected"], json!("src"));
+    // Space presses the button with the focus ring: Cancel on macOS;
+    // elsewhere none has it and Space does nothing.
+    h.invoke("project.tree.delete", json!(null));
+    h.press("space");
+    if cfg!(target_os = "macos") {
+        assert_eq!(h.state()["dialog"], Value::Null);
+    } else {
+        assert_eq!(h.state()["dialog"]["title"], json!("Delete"));
+        h.press("escape");
+    }
+    assert!(h.root.join("src").exists());
     // Enter deletes; the tabs of its files close, the row below is
     // selected.
     h.invoke("project.tree.delete", json!(null));

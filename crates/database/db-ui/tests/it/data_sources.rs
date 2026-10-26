@@ -562,3 +562,54 @@ fn double_click_and_enter_do_not_open_properties(cx: &mut TestAppContext) {
     h.invoke("db.explorer.properties", Value::Null);
     assert_eq!(state(&mut h)["dialog"]["selected"]["name"], "local");
 }
+
+/// Presses the left button on an element of the dialog and lets it go
+/// outside: the element takes the focus and is not clicked.
+fn press_and_leave(h: &mut Harness, selector: &'static str) {
+    use gpui::{Modifiers, MouseButton, point, px};
+    let at = dialog_bounds(h, selector).center();
+    let dialog = h.target();
+    let mut vcx = gpui::VisualTestContext::from_window(dialog, h.cx);
+    vcx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    let away = point(px(5.0), px(5.0));
+    vcx.simulate_mouse_move(away, Some(MouseButton::Left), Modifiers::none());
+    vcx.simulate_mouse_up(away, MouseButton::Left, Modifiers::none());
+    h.draw();
+}
+
+/// A pressed dialog button takes the focus; Space presses the focused
+/// button, Enter the default one (OK).
+#[gpui::test]
+fn space_presses_the_focused_button_and_enter_the_default(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let store = FakeStore::new(SECRET);
+    let mut h = open(cx, store.clone(), &root);
+    h.invoke(
+        "db.explorer.add-data-source",
+        json!({"backend": "postgres"}),
+    );
+    set(&mut h, "name", "pyoxide-local");
+    set(&mut h, "user", "pyoxide");
+    assert_eq!(state(&mut h)["dialog"]["modified"], true);
+
+    press_and_leave(&mut h, "data-sources-apply");
+    assert_eq!(store.saves(), 0, "pressed and let go outside: no click");
+    h.press("space");
+    let s = state(&mut h);
+    assert_eq!(store.saves(), 1, "Space pressed Apply: {s}");
+    assert!(!s["dialog"].is_null(), "Apply keeps the dialog open");
+    assert_eq!(s["dialog"]["modified"], false);
+
+    press_and_leave(&mut h, "data-sources-cancel");
+    h.press("space");
+    assert!(state(&mut h)["dialog"].is_null(), "Space pressed Cancel");
+
+    // Enter: the default button, OK, saves and closes.
+    h.invoke("db.explorer.properties", Value::Null);
+    set(&mut h, "host", "db.example.com");
+    h.press("enter");
+    let s = state(&mut h);
+    assert!(s["dialog"].is_null(), "Enter pressed OK: {s}");
+    assert_eq!(store.saves(), 2);
+    assert_eq!(store.sources(&root)[0].profile.host, "db.example.com");
+}

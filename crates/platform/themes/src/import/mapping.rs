@@ -91,6 +91,11 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         Pressed => &[Key("ActionButton.pressedBackground")],
         SegmentedSelected => &[Ui("SegmentedButton.selectedButtonColor")],
         SegmentedSelectedBorder => &[Ui("SegmentedButton.selectedStartBorderColor")],
+        ButtonBackground => &[Ui("Button.startBackground")],
+        ButtonBorder => &[Ui("Button.startBorderColor")],
+        ButtonFocusedBorder => &[Ui("Button.focusedBorderColor")],
+        ButtonDefaultBorder => &[Ui("Button.default.startBorderColor")],
+        ButtonDefaultFocusedBorder => &[Ui("Button.default.focusedBorderColor")],
         Selection => &[
             Ui("List.selectionBackground"),
             Ui("Tree.selectionBackground"),
