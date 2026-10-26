@@ -87,7 +87,10 @@ fn sqlite_pages_count_and_keep_errors_apart() {
     assert_eq!(first.rows.len(), 10);
     assert!(first.has_more);
     assert_eq!(first.columns[0].name, "id");
-    assert_eq!(first.sql, q.page_sql(Dialect::Sqlite, 0, PageSize::Rows(10)));
+    assert_eq!(
+        first.sql,
+        q.page_sql(Dialect::Sqlite, 0, PageSize::Rows(10))
+    );
     let last = p.page(&q, 20, PageSize::Rows(10)).unwrap();
     assert_eq!(last.rows.len(), 5);
     assert!(!last.has_more);
@@ -116,7 +119,11 @@ fn sqlite_pages_count_and_keep_errors_apart() {
     assert_eq!(error.error.kind, ErrorKind::Query, "{error:?}");
     assert!(error.sql.contains("WHERE nonexistent = 1"), "{error:?}");
     // The data connection is still usable.
-    assert_eq!(p.count(&TableQuery::new(TableRef::new(None, "items"))).unwrap(), 25);
+    assert_eq!(
+        p.count(&TableQuery::new(TableRef::new(None, "items")))
+            .unwrap(),
+        25
+    );
 }
 
 fn pg() -> Harness {
@@ -128,7 +135,11 @@ fn pg() -> Harness {
         password: password(),
         ..ConnectParams::default()
     };
-    harness(Arc::new(PostgresDriver), params, DataSourceOptions::default())
+    harness(
+        Arc::new(PostgresDriver),
+        params,
+        DataSourceOptions::default(),
+    )
 }
 
 #[test]
@@ -168,7 +179,11 @@ fn postgres_pages_the_demo_events_and_cancels_a_count() {
     let PagerEvent::Count { result, .. } = p.wait(job) else {
         panic!("a count")
     };
-    assert!(asked.elapsed() < Duration::from_secs(1), "{:?}", asked.elapsed());
+    assert!(
+        asked.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        asked.elapsed()
+    );
     let error = result.unwrap_err();
     assert!(
         matches!(error.error.kind, ErrorKind::Cancelled | ErrorKind::Query),

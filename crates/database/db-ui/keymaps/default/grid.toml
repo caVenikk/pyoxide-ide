@@ -1,0 +1,45 @@
+# Pyoxide keymap for Windows and Linux. Database: the data grid of a table
+# (the database module, ADR 0021), joined after the workbench's keymap.
+
+# The Database tool window: the selected table's data in an editor tab
+# (Jump to Source).
+[[context]]
+name = "DatabaseExplorer"
+[context.bindings]
+"f4" = "db.explorer.open-table"
+
+# The grid's tab, its fields included: reload the page, cancel a running
+# read (Stop), close the error balloon or cancel.
+[[context]]
+name = "DatabaseGridView"
+[context.bindings]
+"ctrl-f5" = "db.grid.reload"
+"ctrl-f2" = "db.grid.stop"
+"escape" = "db.grid.dismiss"
+
+# The WHERE and ORDER BY fields: Enter reads the first page with them.
+[[context]]
+name = "DatabaseGridField > Editor"
+[context.bindings]
+"enter" = "db.grid.apply-fields"
+
+# The cells with the focus: the current cell moves, Shift extends the
+# selection.
+[[context]]
+name = "DatabaseGrid"
+[context.bindings]
+"up" = "db.grid.up"
+"down" = "db.grid.down"
+"left" = "db.grid.left"
+"right" = "db.grid.right"
+"shift-up" = "db.grid.select-up"
+"shift-down" = "db.grid.select-down"
+"shift-left" = "db.grid.select-left"
+"shift-right" = "db.grid.select-right"
+"pageup" = "db.grid.page-up"
+"pagedown" = "db.grid.page-down"
+"home" = "db.grid.row-start"
+"end" = "db.grid.row-end"
+"ctrl-home" = "db.grid.first-row"
+"ctrl-end" = "db.grid.last-row"
+"ctrl-a" = "db.grid.select-all"

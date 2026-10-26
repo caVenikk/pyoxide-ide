@@ -52,7 +52,9 @@ pub use event::{
 };
 pub use job::{ErrorPolicy, Job, JobStatement, syntax_dialect};
 pub use options::{DataSourceOptions, SessionOptions, TxPolicy};
-pub use pager::{Page, PageError, PageSize, PagerEvent, PagerSink, ResultPager, TableQuery, TableRef};
+pub use pager::{
+    Page, PageError, PageSize, PagerEvent, PagerSink, ResultPager, TableQuery, TableRef,
+};
 pub use runtime::DbRuntime;
 pub use session::{Session, SessionStatus};
 
