@@ -1,0 +1,10 @@
+[package]
+name = "app-info"
+description = "What the running product calls itself: name, slug, environment prefix, project folder, set once at startup by the product"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dirs = "7"
