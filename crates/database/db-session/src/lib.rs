@@ -23,6 +23,10 @@
 //! - Jobs report, per statement, `Started`, then `ResultOpened` (with the
 //!   first page) or `Affected`, then `Finished` with execute and fetch time
 //!   or `Failed` with the server's error and its position ([`JobEvent`]).
+//! - [`ResultPager`]: pages of a table for the data grid on the data
+//!   connections (a generated `SELECT` with the user's WHERE and ORDER BY,
+//!   offset paging, one row more than the page to know whether more
+//!   follow) and `COUNT(*)` on request; every read is cancellable.
 //! - [`commands::register`]: the headless `db.session.run` command.
 //! - `fake` (feature `test-support`): a scripted connection source for tests
 //!   (hangs, lost connections, cancel support, a statement log).
@@ -37,6 +41,7 @@ mod event;
 pub mod fake;
 mod job;
 mod options;
+mod pager;
 mod runtime;
 mod session;
 
@@ -47,6 +52,9 @@ pub use event::{
 };
 pub use job::{ErrorPolicy, Job, JobStatement, syntax_dialect};
 pub use options::{DataSourceOptions, SessionOptions, TxPolicy};
+pub use pager::{
+    Page, PageError, PageSize, PagerEvent, PagerSink, ResultPager, TableQuery, TableRef,
+};
 pub use runtime::DbRuntime;
 pub use session::{Session, SessionStatus};
 

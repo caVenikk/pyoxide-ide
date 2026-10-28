@@ -8,6 +8,7 @@
 pub mod dialog;
 pub mod explorer;
 pub mod fixture;
+pub mod grid;
 mod live;
 mod password;
 pub mod prompt;
@@ -30,8 +31,14 @@ pub const TOOL_WINDOW: ToolWindow = ToolWindow("database");
 
 /// The module's key bindings: its keymap folders, joined.
 pub const KEYMAPS: KeymapFiles = KeymapFiles {
-    macos: concat!(include_str!("../keymaps/macos/db.toml")),
-    default: concat!(include_str!("../keymaps/default/db.toml")),
+    macos: concat!(
+        include_str!("../keymaps/macos/db.toml"),
+        include_str!("../keymaps/macos/grid.toml")
+    ),
+    default: concat!(
+        include_str!("../keymaps/default/db.toml"),
+        include_str!("../keymaps/default/grid.toml")
+    ),
 };
 
 /// Icons of the module (drawn for it; the reference's database plugin is
@@ -76,6 +83,13 @@ pub mod icons {
     pub const PACKAGE: IconName = IconName("db/package");
     pub const SYNONYM: IconName = IconName("db/synonym");
     pub const ERROR: IconName = IconName("db/error");
+    // The data grid.
+    pub const COLUMN_FOREIGN: IconName = IconName("db/columnForeign");
+    pub const SORTABLE: IconName = IconName("db/sortable");
+    pub const ORDER_BY: IconName = IconName("db/orderBy");
+    pub const FIRST_PAGE: IconName = IconName("db/firstPage");
+    pub const LAST_PAGE: IconName = IconName("db/lastPage");
+    pub const STOP_DISABLED: IconName = IconName("db/stopDisabled");
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -139,6 +153,12 @@ pub const ICONS: &[IconSvg] = &[
     icon!("package", "package"),
     icon!("synonym", "synonym"),
     icon!("error", "error"),
+    icon!("columnForeign", "columnForeign"),
+    icon!("sortable", "sortable"),
+    icon!("orderBy", "orderBy"),
+    icon!("firstPage", "firstPage"),
+    icon!("lastPage", "lastPage"),
+    icon!("stopDisabled", "stopDisabled"),
 ];
 
 /// The product's store, for the module's views.
@@ -167,7 +187,9 @@ pub fn module(config: DbUiConfig) -> Module {
             explorer::init(cx);
             dialog::init(cx);
             prompt::init(cx);
+            grid::init(cx);
         })),
+        status_widgets: vec![grid::status_widget()],
         keymaps: Some(KEYMAPS),
         tool_windows: vec![ToolWindowHook {
             spec: ToolWindowSpec {

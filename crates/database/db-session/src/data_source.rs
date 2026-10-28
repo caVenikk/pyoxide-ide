@@ -28,7 +28,7 @@ use crate::session::{Cmd, Session, SessionInner, SessionState};
 /// given to [`DbRuntime::data_source`]. Cheap to clone.
 #[derive(Clone)]
 pub struct DataSourceHandle {
-    shared: Arc<Shared>,
+    pub(crate) shared: Arc<Shared>,
 }
 
 impl std::fmt::Debug for DataSourceHandle {
@@ -240,9 +240,7 @@ impl DataSourceHandle {
     /// Cancel a refresh or a read. Statement jobs are cancelled with
     /// [`Session::cancel`].
     pub fn cancel_job(&self, job: JobId) {
-        if let Some(tx) = lock(&self.shared.jobs).get(&job) {
-            let _ = tx.send(true);
-        }
+        self.shared.cancel_job(job);
     }
 }
 
@@ -298,14 +296,20 @@ impl Shared {
             .collect()
     }
 
-    fn new_job(&self) -> (JobId, watch::Receiver<bool>) {
+    pub(crate) fn new_job(&self) -> (JobId, watch::Receiver<bool>) {
         let job = JobId::next();
         let (tx, rx) = watch::channel(false);
         lock(&self.jobs).insert(job, tx);
         (job, rx)
     }
 
-    fn end_job(&self, job: JobId) {
+    pub(crate) fn cancel_job(&self, job: JobId) {
+        if let Some(tx) = lock(&self.jobs).get(&job) {
+            let _ = tx.send(true);
+        }
+    }
+
+    pub(crate) fn end_job(&self, job: JobId) {
         lock(&self.jobs).remove(&job);
     }
 

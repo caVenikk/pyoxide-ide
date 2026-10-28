@@ -482,13 +482,16 @@ impl Explorer {
         }
     }
 
-    /// Enter and a double click: opens or closes the selected node.
-    /// Opening anything else (a table's editor) is not there yet.
+    /// Enter and a double click: opens the data of a table, view or
+    /// materialized view, else opens or closes the selected node.
     pub(super) fn toggle_selected(&mut self, cx: &mut Context<Self>) {
         let Some(ix) = self.selected_ix() else {
             return;
         };
         let row = self.tree.rows[ix].clone();
+        if self.open_row_table(&row.key, cx) {
+            return;
+        }
         if row.expandable {
             self.toggle(row.key, cx);
         }

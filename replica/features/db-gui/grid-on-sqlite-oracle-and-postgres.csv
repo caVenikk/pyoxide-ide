@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Grid works the same on PostgreSQL, Oracle and SQLite (typed values, paging)",db-gui,must,yes,no,Pro; conformance through db-testkit
+"Grid works the same on PostgreSQL, Oracle and SQLite (typed values, paging)",db-gui,must,yes,partial,Pro; conformance through db-testkit

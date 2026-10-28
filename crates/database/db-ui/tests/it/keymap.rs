@@ -78,9 +78,9 @@ fn run(cx: &mut TestAppContext, macos: bool) {
     let store = FakeStore::new("pw");
     store.add(&root, "local", pg());
     let area = if macos {
-        db_ui::KEYMAPS.macos
+        include_str!("../../keymaps/macos/db.toml")
     } else {
-        db_ui::KEYMAPS.default
+        include_str!("../../keymaps/default/db.toml")
     };
     check_area(cx, product(store), macos, area, Some(&root), check);
 }

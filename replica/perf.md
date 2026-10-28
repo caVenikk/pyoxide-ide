@@ -95,6 +95,14 @@ rows of (integer, text, timestamp, decimal), pages of 500, median of 5 runs.
 | 2026-10-11 | mac-1 | oracle-thin (Free 23) | 39.1 ms | 2.7 ms | 276.6 ms | 0.36 M | PL/SQL wrapper and REF CURSOR fetch around oracle-rs bugs; 64 KiB packets |
 | | | oracle-odpi | | | | | needs Oracle Instant Client |
 
+### Table grid (#303)
+Time from the pager's request to the page in memory (`ResultPager`, `SELECT t.* FROM demo.events t LIMIT 501`, 500 rows shown), PostgreSQL 18.6 in the local container. The first request opens the connection. Test `postgres_first_page_of_the_demo_events_is_fast` in `db-session`, debug build of the test, 4 runs (the first at load average 12).
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-28 | mac-1 | first page of `demo.events`, with connecting | 34-42 ms (110 ms at high load) | | 4 runs |
+| 2026-10-28 | mac-1 | next page of 500 rows on the open connection | 2.6-3.8 ms median (max 5.1) | 100 ms (asserted) | 20 pages per run |
+
 ### SQL parser
 `cargo bench -p sql-syntax` (`crates/database/sql-syntax/benches/parse.rs`):
 a generated script of queries (joins, CTEs, window functions, subqueries,

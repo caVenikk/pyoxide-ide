@@ -1,9 +1,10 @@
 //! The database module's interface in a headless main window: the key
 //! bindings of `keymaps/*/db.toml` (`keymap`) and the Database tool window
-//! with the Data Sources dialog over a fake store (`data_sources`), and its
-//! object tree (`tree`).
+//! with the Data Sources dialog over a fake store (`data_sources`), its
+//! object tree (`tree`) and the data grid of a table (`grid`).
 
 mod data_sources;
+mod grid;
 mod keymap;
 mod tree;
 

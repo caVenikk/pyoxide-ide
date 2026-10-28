@@ -36,7 +36,10 @@ use crate::store::DataSource;
 use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
+mod open_table;
 mod tree_view;
+
+pub(crate) use open_table::{open_selected_command, open_table_command};
 
 /// The key context of the tool window (its bindings in `db.toml`).
 pub const KEY_CONTEXT: &str = "DatabaseExplorer";

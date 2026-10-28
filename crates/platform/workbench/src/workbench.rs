@@ -53,6 +53,7 @@ mod tab_menu;
 pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
+mod views;
 mod welcome;
 mod window_actions;
 
