@@ -22,7 +22,7 @@ use gpui::{
     Subscription, WeakEntity, Window,
 };
 use serde_json::{Value as Json, json};
-use sql_syntax::{Dialect, TokenKind};
+use sql_syntax::{Dialect, Statement, TokenKind};
 use themes::{TextRole, UiRole};
 use workbench::Workbench;
 
@@ -286,12 +286,18 @@ impl Console {
 
     /// Runs the statement at the caret, or the selection's statements.
     pub fn execute_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let statements = self.statements_at_caret(cx);
+        self.submit(statements, window, cx);
+    }
+
+    /// The statement at the caret, or the selection's statements.
+    pub(super) fn statements_at_caret(&self, cx: &Context<Self>) -> Vec<Statement> {
         let Some(editor) = self
             .workbench
             .upgrade()
             .and_then(|wb| wb.read(cx).editor_for(&self.path))
         else {
-            return;
+            return Vec::new();
         };
         let (text, selection) = {
             let editor = editor.read(cx);
@@ -306,14 +312,13 @@ impl Console {
         };
         let dialect = self.dialect();
         let (range, caret) = selection;
-        let statements = if range.is_empty() {
+        if range.is_empty() {
             sql_syntax::statement_at(&text, caret, dialect)
                 .into_iter()
                 .collect()
         } else {
             sql_syntax::statements_in(&text, range, dialect)
-        };
-        self.submit(statements, window, cx);
+        }
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {

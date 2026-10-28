@@ -187,6 +187,7 @@ impl Render for Params {
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
         let complete = self.complete(cx);
+        let mono = theme.mono_family();
         let rows: Vec<_> = self
             .rows
             .iter()
@@ -206,6 +207,7 @@ impl Render for Params {
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .italic()
+                            .font_family(mono.clone())
                             .child(r.slot.label.clone()),
                     )
                     .child(
@@ -213,6 +215,7 @@ impl Render for Params {
                             .flex_none()
                             .whitespace_nowrap()
                             .text_color(muted)
+                            .font_family(mono.clone())
                             .child(r.slot.context.clone()),
                     )
                     .child(
@@ -237,6 +240,7 @@ impl Render for Params {
                     ButtonRole::Ok,
                     Box::new(ParamsExecute),
                 )
+                .primary(complete)
                 .enabled(complete),
             )
             .render(cx);

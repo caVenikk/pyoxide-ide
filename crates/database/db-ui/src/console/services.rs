@@ -16,7 +16,7 @@ use gpui::{
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip, header_tab, icon_button};
 use ui::icons::{Icon, IconName};
-use ui::menu::{ContextMenu, PopupOptions};
+use ui::menu::ContextMenu;
 use ui::theme::ThemeExt;
 use workbench::Workbench;
 use workbench::tool_windows::{
@@ -181,7 +181,7 @@ impl ServicesPanel {
             return;
         }
         let items = console.read(cx).tx_menu_items();
-        let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
+        let menu = ContextMenu::popup(items, crate::console::tx_ui::popup_options(), window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.tx_menu = None;
             cx.notify();
@@ -464,10 +464,15 @@ impl ServicesPanel {
         // Stop; the reference has no divider between the tabs and them.
         tabs = tabs
             .child(
-                crate::console::tx_ui::mode_button("services-tx", "Tx", self.tx_bounds.clone(), cx)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.open_tx(&tx_console, window, cx)
-                    })),
+                crate::console::tx_ui::mode_icon_button(
+                    "services-tx",
+                    px(BUTTON),
+                    self.tx_bounds.clone(),
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.open_tx(&tx_console, window, cx)
+                })),
             )
             .children(crate::console::tx_ui::commit_buttons(
                 "services",

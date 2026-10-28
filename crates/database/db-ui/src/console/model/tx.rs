@@ -174,10 +174,13 @@ impl Console {
             });
         }
         items.push(MenuItem::separator());
-        items.push(MenuItem::unavailable(match self.tx.mode {
-            TxMode::Auto => "Changes submitted to the database are auto-committed",
-            TxMode::Manual => "Changes submitted to the database are committed manually",
-        }));
+        items.push(
+            MenuItem::unavailable(match self.tx.mode {
+                TxMode::Auto => "Changes submitted to the database are auto-committed",
+                TxMode::Manual => "Changes submitted to the database are committed manually",
+            })
+            .wrapped(),
+        );
         items
     }
 

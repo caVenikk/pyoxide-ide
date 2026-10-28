@@ -11,7 +11,7 @@ mod model;
 mod params;
 mod params_dialog;
 pub(crate) mod services;
-mod transactions;
+pub(crate) mod transactions;
 pub(crate) mod tx_ui;
 
 use std::path::PathBuf;

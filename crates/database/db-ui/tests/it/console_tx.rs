@@ -235,6 +235,13 @@ fn the_schema_is_switched_by_the_session_and_shown_by_the_toolbar(cx: &mut TestA
     let server = server();
     let (mut h, _cache, _consoles) = harness(cx, &root, &server);
     open_console(&mut h);
+    // Before the session reports a schema the chip shows the placeholder.
+    h.draw();
+    let chip = h.invoke("sql.state", Value::Null)["schema-text"].clone();
+    assert!(
+        chip.as_str().is_some_and(|t| t.ends_with(".<schema>")),
+        "{chip}"
+    );
     run_all(&mut h, "select 1;");
     let s = wait_for(&mut h, "the schema", |s| s["schema"] == "public");
     assert!(output(&s).contains("public> select 1"), "{s}");
@@ -388,6 +395,49 @@ fn parameters_are_asked_remembered_and_bound_never_pasted(cx: &mut TestAppContex
     h.invoke("db.params.close", Value::Null);
     h.draw();
     assert!(console_state_parameters(&mut h).is_null());
+    assert_eq!(server.bound().len(), 1);
+}
+
+#[gpui::test]
+fn the_parameters_button_asks_for_the_values_of_the_statement_at_the_caret(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, root) = project();
+    let server = server();
+    server.on("from orders", Reaction::column("id", &["7"]));
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+
+    // A statement without parameters: nothing opens, nothing runs.
+    h.invoke("editor.select-all", Value::Null);
+    h.invoke("editor.type", json!({ "text": "select 1" }));
+    h.invoke("db.console.parameters", Value::Null);
+    h.draw();
+    assert!(console_state_parameters(&mut h).is_null());
+    assert!(server.bound().is_empty());
+
+    h.invoke("editor.select-all", Value::Null);
+    h.invoke(
+        "editor.type",
+        json!({ "text": "select * from orders where id = :id" }),
+    );
+    h.invoke("db.console.parameters", Value::Null);
+    let started = Instant::now();
+    let dialog = loop {
+        let d = console_state_parameters(&mut h);
+        if !d.is_null() {
+            break d;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "the dialog");
+        std::thread::sleep(Duration::from_millis(10));
+        h.draw();
+    };
+    assert_eq!(dialog["rows"][0]["name"], "id", "{dialog}");
+    h.invoke("db.params.set", json!({ "name": "id", "value": "7" }));
+    h.invoke("db.params.execute", Value::Null);
+    wait_for(&mut h, "the statement", |s| {
+        idle(s) && output(s).contains("retrieved")
+    });
     assert_eq!(server.bound().len(), 1);
 }
 
