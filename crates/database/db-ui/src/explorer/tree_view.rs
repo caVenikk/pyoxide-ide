@@ -269,6 +269,9 @@ impl Explorer {
             Some(model) if live.handle.model().generation() == 0 => {
                 live.model = live.handle.model().set(model);
                 live.has_model = true;
+                if let Some(root) = &self.root {
+                    crate::sql::publish_model(cx, root, name, &live.model);
+                }
             }
             Some(_) => {}
             None => live.refresh(),
@@ -299,6 +302,9 @@ impl Explorer {
                     live.model = live.handle.model().get();
                     live.has_model = true;
                     live.error = None;
+                    if let Some(root) = &self.root {
+                        crate::sql::publish_model(cx, root, &name, &live.model);
+                    }
                     if let Some(root) = self.root.clone()
                         && let Some(cache) = crate::store(cx).model_cache(&root)
                     {
