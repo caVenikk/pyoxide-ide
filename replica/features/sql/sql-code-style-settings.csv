@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"SQL code style settings for the formatter, shared and per dialect",sql,should,yes,no,Pro; ADR 0022
+"SQL code style settings for the formatter, shared and per dialect",sql,should,yes,partial,"Pro; ADR 0022; the CodeStyle model with the reference defaults and names for the project file is there, the settings page and per-dialect overrides are not"

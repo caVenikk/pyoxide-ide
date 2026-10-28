@@ -1,0 +1,8 @@
+# style: comma=trailing
+select a
+     , b
+     , c
+from t;
+=====
+select a, b, c
+from t;

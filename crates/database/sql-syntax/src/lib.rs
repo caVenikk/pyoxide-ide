@@ -1,6 +1,7 @@
 mod classify;
 mod dialect;
 mod explain;
+mod format;
 mod keywords;
 mod lexer;
 mod params;
@@ -16,6 +17,10 @@ pub use classify::{
 };
 pub use dialect::{Dialect, Grammar, KeywordClass, LexRules, ParamForms};
 pub use explain::{ExplainOptions, explain_statements, supports_analyze};
+pub use format::{
+    AndOr, Case, ClauseElements, CodeStyle, Collapse, CommaPlacement, FunctionCase, SelectItems,
+    StyleError, format, format_range,
+};
 pub use lexer::{Attached, HOLE, Lexer, Token, TokenKind, attach_trivia, lex, lex_with};
 pub use params::{ParamKind, Parameter, parameters};
 pub use script::{Script, SyntaxError, SyntaxErrorKind, TextEdit, parse, reparse};

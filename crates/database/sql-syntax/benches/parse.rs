@@ -5,7 +5,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use sql_syntax::{Dialect, TextEdit, lex, parse};
+use sql_syntax::{CodeStyle, Dialect, TextEdit, format, lex, parse};
 
 /// Statements of about ten lines each, varied by `i`.
 fn statement(i: usize) -> String {
@@ -101,6 +101,74 @@ fn main() {
     bench(&script_of(5000, 0, mixed_statement), &queries);
     println!("PL/SQL:");
     bench(&script_of(5000, 0, plsql_statement), &[Dialect::Oracle]);
+    bench_format();
+}
+
+/// One query of about 100 lines: 30 select items, 8 joins, a condition of
+/// 57 terms, grouping and ordering.
+fn long_statement() -> String {
+    let mut s = String::from("select\n");
+    for i in 0..30 {
+        s.push_str(&format!(
+            "    case when t{}.v > {i} then sum(t{}.x) else max(t{}.y) end as c{i},\n",
+            i % 8,
+            i % 8,
+            i % 8
+        ));
+    }
+    s.push_str("    t0.id\nfrom t0\n");
+    for i in 1..8 {
+        s.push_str(&format!(
+            "  join t{i} on t{i}.id = t{}.id and t{i}.k = t0.k\n",
+            i - 1
+        ));
+    }
+    s.push_str("where t0.a = 1\n");
+    for i in 0..57 {
+        s.push_str(&format!("  and t{}.f{i} in ({i}, {}, 'x')\n", i % 8, i + 1));
+    }
+    s.push_str("group by t0.id\norder by t0.id desc;\n");
+    s
+}
+
+fn bench_format() {
+    let style = CodeStyle::default();
+    println!("format (parse included, the default style):");
+    let long = long_statement();
+    let lines = long.lines().count();
+    let (med, max) = measure(300, || {
+        black_box(format(black_box(&long), Dialect::Postgres, &style));
+    });
+    println!(
+        "  one statement of {lines} lines   median {} max {}",
+        ms(med),
+        ms(max)
+    );
+    let formatted = format(&long, Dialect::Postgres, &style);
+    assert_eq!(format(&formatted, Dialect::Postgres, &style), formatted);
+    for (name, text, dialect) in [
+        ("queries", script(5000, 0), Dialect::Postgres),
+        ("queries, 250 KB", script(0, 250 * 1024), Dialect::Postgres),
+        (
+            "data modification, DDL, PL/pgSQL",
+            script_of(5000, 0, mixed_statement),
+            Dialect::Postgres,
+        ),
+    ] {
+        let (med, max) = measure(30, || {
+            black_box(format(black_box(&text), dialect, &style));
+        });
+        let out = format(&text, dialect, &style);
+        assert_eq!(format(&out, dialect, &style), out, "{name}: idempotent");
+        println!(
+            "  {name}: {} lines -> {} lines, {} KB   median {} max {}",
+            text.lines().count(),
+            out.lines().count(),
+            text.len() / 1024,
+            ms(med),
+            ms(max)
+        );
+    }
 }
 
 fn bench(text: &str, dialects: &[Dialect]) {

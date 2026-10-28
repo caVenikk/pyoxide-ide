@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Reformat SQL (keywords, clauses, indentation)",db-gui,could,yes,no,Pro
+"Reformat SQL (keywords, clauses, indentation)",db-gui,could,yes,partial,"Pro; the formatter of sql-syntax lays out queries, data modification and the common DDL (others are left as written); the Reformat Code command is not wired yet"
