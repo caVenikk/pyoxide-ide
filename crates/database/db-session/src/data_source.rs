@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use db_core::schema::{Level, Scope, introspector};
+use db_core::schema::{Level, ObjectRef, Scope, introspector};
 use db_core::{
     Connection, ConnectionSource, DataSourceId, Error, ExecOptions, Outcome, Purpose, ResultSet,
 };
@@ -16,6 +16,7 @@ use crate::event::{
 };
 use crate::job::syntax_dialect;
 use crate::options::{DataSourceOptions, SessionOptions, TxPolicy};
+use crate::refresh::{self, RefreshMode, Request};
 use crate::runtime::DbRuntime;
 use crate::session::{Cmd, Session, SessionInner, SessionState};
 
@@ -200,11 +201,35 @@ impl DataSourceHandle {
     /// stay. Reported as [`EventKind::Refresh`]; cancel with
     /// [`DataSourceHandle::cancel_job`], which leaves the model unchanged.
     pub fn refresh(&self, scope: Scope, level: Level) -> JobId {
+        self.refresh_with(scope, level, RefreshMode::Full)
+    }
+
+    /// As [`refresh`](Self::refresh), reading the whole scope
+    /// ([`RefreshMode::Full`]) or only what changed since the model was made
+    /// ([`RefreshMode::Incremental`]: unchanged schemas and objects stay as
+    /// they are, a cheap change query tells which are which).
+    pub fn refresh_with(&self, scope: Scope, level: Level, mode: RefreshMode) -> JobId {
+        self.start_refresh(Request::Scope { scope, level, mode })
+    }
+
+    /// Read just `objects` of `schema` again (a table with its columns,
+    /// keys, indexes and triggers; a routine; a type) and merge them into
+    /// the model; an object that is gone is removed. An index or trigger is
+    /// refreshed through its table.
+    pub fn refresh_objects(&self, schema: &str, objects: Vec<ObjectRef>, level: Level) -> JobId {
+        self.start_refresh(Request::Objects {
+            schema: schema.to_owned(),
+            objects,
+            level,
+        })
+    }
+
+    fn start_refresh(&self, request: Request) -> JobId {
         let (job, rx) = self.shared.new_job();
         let shared = self.shared.clone();
         self.shared.runtime.spawn(async move {
             let inner = shared.clone();
-            let run = tokio::spawn(async move { inner.run_refresh(job, scope, level, rx).await });
+            let run = tokio::spawn(async move { inner.run_refresh(job, request, rx).await });
             if let Err(e) = run.await {
                 shared.emit(EventKind::Refresh {
                     job,
@@ -464,8 +489,7 @@ impl Shared {
     async fn run_refresh(
         self: &Arc<Self>,
         job: JobId,
-        scope: Scope,
-        level: Level,
+        request: Request,
         mut rx: watch::Receiver<bool>,
     ) {
         let emit = |event| self.emit(EventKind::Refresh { job, event });
@@ -487,8 +511,9 @@ impl Shared {
         };
         let loaded = {
             let intro = introspector(&*conn);
-            let load = intro.load(&scope, level);
-            match crate::session::guarded(&conn, load, Some(&mut rx), self.options.cancel_grace)
+            let base = self.model.get();
+            let read = refresh::read(&*intro, request, &base);
+            match crate::session::guarded(&conn, read, Some(&mut rx), self.options.cancel_grace)
                 .await
             {
                 crate::session::Guarded::Done(r) => Some(r),
@@ -496,7 +521,7 @@ impl Shared {
             }
         };
         close_in_background(&self.runtime, conn);
-        let snapshot = match loaded {
+        let read = match loaded {
             _ if *rx.borrow() => {
                 emit(RefreshEvent::Cancelled);
                 return;
@@ -509,21 +534,26 @@ impl Shared {
                 emit(RefreshEvent::Failed { error });
                 return;
             }
-            Some(Ok(snapshot)) => snapshot,
+            Some(Ok(read)) => read,
         };
         let model = self.model.clone();
         let flag = rx.clone();
         let built = tokio::task::spawn_blocking(move || {
-            model.update(|m| {
-                m.with_snapshot_cancellable(snapshot, &|| *flag.borrow())
-                    .map(Some)
-            })
+            let mut summary = None;
+            let swapped = model.update(|m| {
+                refresh::merge(m, read, &|| *flag.borrow()).map(|(next, done)| {
+                    summary = Some(done);
+                    Some(next)
+                })
+            });
+            swapped.map(|model| (model, summary.unwrap_or_default()))
         })
         .await;
         match built {
-            Ok(Ok(model)) => emit(RefreshEvent::Finished {
+            Ok(Ok((model, summary))) => emit(RefreshEvent::Finished {
                 generation: self.model.generation(),
                 objects: model.len(),
+                summary,
             }),
             Ok(Err(_)) => emit(RefreshEvent::Cancelled),
             Err(e) => emit(RefreshEvent::Failed {

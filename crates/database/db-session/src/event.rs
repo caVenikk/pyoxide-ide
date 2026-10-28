@@ -318,6 +318,8 @@ pub enum RefreshEvent {
         /// The model handle's generation after the swap.
         generation: u64,
         objects: usize,
+        /// What the refresh read and dropped.
+        summary: crate::refresh::RefreshSummary,
     },
     Failed {
         error: Error,

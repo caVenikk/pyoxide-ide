@@ -646,6 +646,47 @@ fn no_call_blocks_the_caller_while_connections_hang() {
 }
 
 #[test]
+fn a_cancelled_incremental_refresh_keeps_the_model() {
+    let h = harness(Backend::Postgres, DataSourceOptions::default());
+    h.source.set_open(OpenBehavior::Hang);
+    let generation = h.handle.model().generation();
+    let before = h.handle.model().get();
+    let cancel = |job: JobId| {
+        h.wait_for(|k| match k {
+            EventKind::Refresh {
+                job: j,
+                event: RefreshEvent::Started,
+            } if *j == job => Some(()),
+            _ => None,
+        });
+        h.handle.cancel_job(job);
+        h.wait_for(|k| match k {
+            EventKind::Refresh {
+                job: j,
+                event: RefreshEvent::Cancelled,
+            } if *j == job => Some(()),
+            _ => None,
+        });
+    };
+    cancel(h.handle.refresh_with(
+        db_core::schema::Scope::current(),
+        db_core::schema::Level::Structure,
+        RefreshMode::Incremental,
+    ));
+    cancel(h.handle.refresh_objects(
+        "public",
+        vec![db_core::schema::ObjectRef {
+            schema: "public".into(),
+            name: "t".into(),
+            kind: db_core::schema::ObjectKind::Table,
+        }],
+        db_core::schema::Level::Structure,
+    ));
+    assert_eq!(h.handle.model().generation(), generation);
+    assert_eq!(h.handle.model().get(), before);
+}
+
+#[test]
 fn every_new_connection_gets_time_zone_startup_script_and_read_only_mode() {
     let h = harness(
         Backend::Postgres,
