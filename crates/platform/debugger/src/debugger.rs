@@ -17,6 +17,7 @@ use crate::breakpoints::{
 };
 use crate::provider::{
     DebugAdapterProvider, DebugRequest, ExceptionFilter, ExceptionFilterSetting,
+    ExceptionOptionSetting,
 };
 use crate::session::{BreakpointStatus, Phase, Session, SessionId};
 use crate::storage::{self, Stored};
@@ -120,22 +121,34 @@ impl Inner {
         &self,
         available: &[ExceptionFilter],
     ) -> Vec<ExceptionFilterSetting> {
-        let enabled: Vec<ExceptionBreakpoint> = {
-            let state = self.state();
-            if state.stored.muted {
-                return Vec::new();
-            }
-            state
-                .stored
-                .breakpoints
-                .exception()
-                .iter()
-                .filter(|b| b.enabled)
-                .cloned()
-                .collect()
-        };
+        let enabled = self.enabled_exception_breakpoints();
         let enabled: Vec<&ExceptionBreakpoint> = enabled.iter().collect();
         self.provider.exception_filters(&enabled, available)
+    }
+
+    /// The enabled exception breakpoints as exception options when the
+    /// provider needs them (see [`DebugAdapterProvider::exception_options`]);
+    /// `None` while muted and when the filters do.
+    pub(crate) fn exception_options(&self) -> Option<Vec<ExceptionOptionSetting>> {
+        let enabled = self.enabled_exception_breakpoints();
+        let enabled: Vec<&ExceptionBreakpoint> = enabled.iter().collect();
+        self.provider.exception_options(&enabled)
+    }
+
+    /// The enabled exception breakpoints (none while muted).
+    fn enabled_exception_breakpoints(&self) -> Vec<ExceptionBreakpoint> {
+        let state = self.state();
+        if state.stored.muted {
+            return Vec::new();
+        }
+        state
+            .stored
+            .breakpoints
+            .exception()
+            .iter()
+            .filter(|b| b.enabled)
+            .cloned()
+            .collect()
     }
 
     /// Temporary breakpoints that were hit are removed.

@@ -11,7 +11,8 @@ use debugger::values::ValueNode;
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, EvaluationError,
     ExceptionBreakpoint, ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting,
-    ExtraValueAction, IdeaTypes, LaunchKind, LineBreakpointType, StepIntoMyCode, Variable,
+    ExceptionOptionSetting, ExtraValueAction, IdeaTypes, LaunchKind, LineBreakpointType,
+    StepIntoMyCode, Variable,
 };
 use py_run::PythonRun;
 use py_run::config::{LaunchContext, PythonOptions};
@@ -159,6 +160,13 @@ impl DebugAdapterProvider for PythonDebugProvider {
         available: &[ExceptionFilter],
     ) -> Vec<ExceptionFilterSetting> {
         breakpoints::filters(breakpoints, available)
+    }
+
+    fn exception_options(
+        &self,
+        breakpoints: &[&ExceptionBreakpoint],
+    ) -> Option<Vec<ExceptionOptionSetting>> {
+        breakpoints::options(breakpoints)
     }
 
     fn default_exception_breakpoints(&self) -> Vec<ExceptionBreakpoint> {

@@ -849,10 +849,22 @@ impl Session {
             .run_to
             .as_ref()
             .is_some_and(|r| r.ignore_breakpoints);
+        let capabilities = client.capabilities();
+        // Exception options replace the filters where the adapter takes them
+        // and a breakpoint needs them (one for a single class).
+        let options = if ignored || !capabilities.exception_options {
+            None
+        } else {
+            debugger.exception_options()
+        };
+        if let Some(options) = options {
+            client.set_exception_options(&options).detach();
+            return;
+        }
         let filters = if ignored {
             Vec::new()
         } else {
-            debugger.exception_filters(&client.capabilities().exception_filters)
+            debugger.exception_filters(&capabilities.exception_filters)
         };
         client.set_exception_breakpoints(&filters).detach();
     }
