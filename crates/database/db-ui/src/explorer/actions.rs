@@ -824,6 +824,7 @@ impl Explorer {
                 sql_dialog::open(
                     RENAME_TITLE,
                     message,
+                    sql_syntax::Dialect::Generic,
                     Ask::Rename {
                         old: old.clone(),
                         statements: None,
@@ -867,6 +868,7 @@ impl Explorer {
                 sql_dialog::open(
                     RENAME_TITLE,
                     message,
+                    dialect,
                     Ask::Rename {
                         old,
                         statements: Some(Box::new(statements)),
@@ -1015,14 +1017,6 @@ impl Explorer {
         {
             return;
         }
-        let message = match nodes.as_slice() {
-            [one] => format!(
-                "Drop {} \u{201c}{}\u{201d}?",
-                ddl::kind_word(one.kind()),
-                one.name()
-            ),
-            many => format!("Drop {} objects?", many.len()),
-        };
         let ids: Vec<_> = nodes.iter().map(|n| n.id()).collect();
         let make_model = model.clone();
         let statements = move |options: DropOptions| -> Vec<String> {
@@ -1036,7 +1030,8 @@ impl Explorer {
         let this = cx.entity().downgrade();
         sql_dialog::open(
             DROP_TITLE,
-            message,
+            String::new(),
+            dialect,
             Ask::Drop(Box::new(statements)),
             window,
             cx,
@@ -1059,21 +1054,29 @@ impl Explorer {
             return;
         };
         let dialect = self.dialect_of(&key.source);
-        let Some(node) = self
-            .model_of(&key.source)
-            .and_then(|m| m.node(id))
-            .filter(|n| n.kind() == NodeKind::Table)
-        else {
+        let Some(make_model) = self.model_arc(&key.source) else {
             return;
         };
-        let statements = vec![ddl::truncate_statement(dialect, node)];
-        let message = format!("Delete every row of table \u{201c}{}\u{201d}?", node.name());
+        if make_model
+            .node(id)
+            .is_none_or(|n| n.kind() != NodeKind::Table)
+        {
+            return;
+        }
+        let statements = move |options: DropOptions| -> Vec<String> {
+            make_model
+                .node(id)
+                .map(|n| ddl::truncate_statement(dialect, n, options.qualify))
+                .into_iter()
+                .collect()
+        };
         let source = key.source.to_string();
         let this = cx.entity().downgrade();
         sql_dialog::open(
             TRUNCATE_TITLE,
-            message,
-            Ask::Confirm(statements),
+            String::new(),
+            dialect,
+            Ask::Confirm(Box::new(statements)),
             window,
             cx,
             move |answer, cx| {

@@ -53,9 +53,54 @@ pub fn reference(dialect: Dialect, node: NodeRef<'_>) -> String {
     }
 }
 
+/// How the statements of the Drop and Truncate dialogs qualify the
+/// objects they name (the dialog's "Qualify objects with schema names").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Qualify {
+    /// As the other statements: with the schema (SQLite: without).
+    #[default]
+    Auto,
+    /// Always with the schema.
+    Always,
+    /// Never: the bare name.
+    Never,
+}
+
+impl Qualify {
+    pub const ALL: [Qualify; 3] = [Qualify::Auto, Qualify::Always, Qualify::Never];
+
+    /// The text in the dialog's combo box.
+    pub fn label(self) -> &'static str {
+        match self {
+            Qualify::Auto => "Auto",
+            Qualify::Always => "Always",
+            Qualify::Never => "Never",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|q| q.label().eq_ignore_ascii_case(label))
+    }
+}
+
+/// `schema.name` or `name` as `how` asks.
+fn qualified(dialect: Dialect, schema: &str, name: &str, how: Qualify) -> String {
+    match how {
+        Qualify::Auto => qualify(dialect, schema, name),
+        Qualify::Always => format!("{}.{}", quote(dialect, schema), quote(dialect, name)),
+        Qualify::Never => quote(dialect, name),
+    }
+}
+
 /// The qualified name of a node that is a schema object itself.
 fn object_name(dialect: Dialect, node: NodeRef<'_>) -> String {
-    qualify(dialect, node.schema().name(), node.name())
+    object_name_as(dialect, node, Qualify::Auto)
+}
+
+fn object_name_as(dialect: Dialect, node: NodeRef<'_>, how: Qualify) -> String {
+    qualified(dialect, node.schema().name(), node.name(), how)
 }
 
 /// The table (or view) a column, key, index or trigger belongs to.
@@ -71,11 +116,15 @@ fn owner<'a>(node: NodeRef<'a>) -> Option<NodeRef<'a>> {
 /// The table of an index or trigger listed under its schema (its table is
 /// not in the model): from the object's parent name.
 fn owner_name(dialect: Dialect, node: NodeRef<'_>) -> Option<String> {
+    owner_name_as(dialect, node, Qualify::Auto)
+}
+
+fn owner_name_as(dialect: Dialect, node: NodeRef<'_>, how: Qualify) -> Option<String> {
     if let Some(table) = owner(node) {
-        return Some(object_name(dialect, table));
+        return Some(object_name_as(dialect, table, how));
     }
     let parent = node.object()?.parent.as_deref()?;
-    Some(qualify(dialect, node.schema().name(), parent))
+    Some(qualified(dialect, node.schema().name(), parent, how))
 }
 
 /// The identity arguments of a routine: the model's signature, else the
@@ -123,6 +172,7 @@ pub fn kind_word(kind: NodeKind) -> &'static str {
 pub struct DropOptions {
     pub if_exists: bool,
     pub cascade: bool,
+    pub qualify: Qualify,
 }
 
 /// The statement that drops `node`; `None` for what cannot be dropped on
@@ -138,7 +188,7 @@ pub fn drop_statement(dialect: Dialect, node: NodeRef<'_>, options: DropOptions)
         },
         (true, _) => " cascade",
     };
-    let name = || object_name(dialect, node);
+    let name = || object_name_as(dialect, node, options.qualify);
     let text = match node.kind() {
         NodeKind::Schema => match dialect {
             Dialect::Oracle => format!(
@@ -168,7 +218,7 @@ pub fn drop_statement(dialect: Dialect, node: NodeRef<'_>, options: DropOptions)
             Dialect::Postgres => format!(
                 "drop trigger {if_exists}{} on {}{cascade}",
                 quote(dialect, node.name()),
-                owner_name(dialect, node)?
+                owner_name_as(dialect, node, options.qualify)?
             ),
             _ => format!("drop trigger {if_exists}{}", name()),
         },
@@ -183,13 +233,13 @@ pub fn drop_statement(dialect: Dialect, node: NodeRef<'_>, options: DropOptions)
         },
         NodeKind::Column => format!(
             "alter table {} drop column {if_exists}{}{cascade}",
-            object_name(dialect, owner(node)?),
+            object_name_as(dialect, owner(node)?, options.qualify),
             quote(dialect, node.name())
         ),
         NodeKind::PrimaryKey | NodeKind::UniqueKey | NodeKind::ForeignKey | NodeKind::Check => {
             format!(
                 "alter table {} drop constraint {if_exists}{}{cascade}",
-                object_name(dialect, owner(node)?),
+                object_name_as(dialect, owner(node)?, options.qualify),
                 quote(dialect, node.name())
             )
         }
@@ -275,10 +325,11 @@ pub fn rename_database(dialect: Dialect, name: &str, to: &str) -> String {
 }
 
 /// The statement that empties a table (SQLite has no `TRUNCATE`).
-pub fn truncate_statement(dialect: Dialect, node: NodeRef<'_>) -> String {
+pub fn truncate_statement(dialect: Dialect, node: NodeRef<'_>, how: Qualify) -> String {
+    let name = object_name_as(dialect, node, how);
     match dialect {
-        Dialect::Sqlite => format!("delete from {};", object_name(dialect, node)),
-        _ => format!("truncate table {};", object_name(dialect, node)),
+        Dialect::Sqlite => format!("delete from {name};"),
+        _ => format!("truncate table {name};"),
     }
 }
 
