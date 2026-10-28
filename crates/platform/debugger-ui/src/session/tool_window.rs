@@ -872,12 +872,16 @@ impl DebugToolWindow {
                 .items_center()
                 .rounded(theme.metric(Metric::ButtonRadius))
                 .whitespace_nowrap()
+                .border_1()
+                // The selected content tab is an outlined box without a
+                // fill (`XDebugSessionTabNewUI`'s tabs in the reference).
                 .when(selected, |d| {
-                    d.bg(theme.color(UiRole::TabActive))
+                    d.border_color(theme.color(UiRole::Border))
                         .text_color(theme.color(UiRole::TabActiveText))
                 })
                 .when(!selected, |d| {
-                    d.text_color(theme.color(UiRole::TabInactiveText))
+                    d.border_color(gpui::transparent_black())
+                        .text_color(theme.color(UiRole::TabInactiveText))
                         .hover(move |s| s.bg(hover))
                 })
                 .child(content.title())

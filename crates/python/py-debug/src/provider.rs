@@ -268,6 +268,10 @@ impl DebugAdapterProvider for PythonDebugProvider {
         values::present(variable)
     }
 
+    fn present_child(&self, variable: &Variable, scope: bool) -> ValueNode {
+        values::present_child(variable, scope)
+    }
+
     fn sizes_expression(&self, expressions: &[&str]) -> Option<String> {
         values::sizes_expression(expressions)
     }

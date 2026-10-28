@@ -123,6 +123,8 @@ pub const PRIMITIVE: IconName = IconName("values/dbPrimitive");
 pub const ARRAY: IconName = IconName("values/dbArray");
 pub const OBJECT: IconName = IconName("values/value");
 pub const SPECIAL_VARIABLES: IconName = IconName("values/specialVar");
+/// The Protected Attributes group (`AllIcons.Nodes.C_protected`).
+pub const PROTECTED: IconName = IconName("values/accessProtected");
 pub const RETURN_VALUES: IconName = IconName("values/watchLastReturnValue");
 pub const WATCH: IconName = IconName("values/watch");
 pub const ADD_TO_WATCHES: IconName = IconName("values/addToWatch");
@@ -153,6 +155,7 @@ value_icons![
     "dbArray",
     "value",
     "specialVar",
+    "accessProtected",
     "watchLastReturnValue",
     "watch",
     "addToWatch",

@@ -36,8 +36,9 @@ pub enum GroupIcon {
     /// Return values of the calls just made
     /// (`AllIcons.Debugger.WatchLastReturnValue`).
     ReturnValues,
-    /// Any other group (`AllIcons.Nodes.Folder` in the reference's
-    /// protected attributes, a plain group here).
+    /// Protected attributes (`AllIcons.Nodes.C_protected`, a key).
+    Protected,
+    /// Any other group (a plain group here).
     Plain,
 }
 
@@ -46,6 +47,7 @@ impl GroupIcon {
         match self {
             GroupIcon::Special => "special",
             GroupIcon::ReturnValues => "return-values",
+            GroupIcon::Protected => "protected",
             GroupIcon::Plain => "plain",
         }
     }
@@ -59,6 +61,15 @@ pub enum ValueRole {
     /// A group of other values of the parent (its children are the
     /// group's), shown after the values under `title`.
     Group { title: String, icon: GroupIcon },
+    /// A value the parent shows in its group `title` (among the group's
+    /// children, before those of the groups the adapter reports under the
+    /// same title) instead of among its own, as the reference moves the
+    /// protected attributes of a value.
+    Grouped {
+        kind: ValueKind,
+        title: String,
+        icon: GroupIcon,
+    },
     /// A value a call returned: shown in a group of the parent titled
     /// `group`, after the values.
     ReturnValue { group: String },

@@ -261,7 +261,7 @@ fn frames_and_variables_at_a_stop(cx: &mut TestAppContext) {
         ],
         "{texts:?}"
     );
-    // A list's items, its len() and its special variables, in this order.
+    // A list's items, its __len__ and its protected attributes, in this order.
     h.invoke(
         "debug.variables.expand",
         json!({"path": ["items"], "expanded": true}),
@@ -274,8 +274,8 @@ fn frames_and_variables_at_a_stop(cx: &mut TestAppContext) {
             "1 = {int} 2",
             "2 = {int} 3",
             "3 = {int} 4",
-            "len() = {int} 4",
-            "Special Variables",
+            "__len__ = {int} 4",
+            "Protected Attributes",
         ],
         "{texts:?}"
     );
@@ -321,7 +321,7 @@ fn frames_and_variables_at_a_stop(cx: &mut TestAppContext) {
     h.invoke("debug.variables.expand", json!({"path": more}));
     let texts = h.variable_texts(1);
     assert_eq!(texts[999], "999 = {int} 999", "{texts:?}");
-    assert_eq!(texts[1000], "len() = {int} 1000", "{texts:?}");
+    assert_eq!(texts[1000], "__len__ = {int} 1000", "{texts:?}");
     // Back to the top frame, then a step: the sum changed.
     h.invoke("debug.previous-frame", json!(null));
     h.wait("the top frame", |s| {

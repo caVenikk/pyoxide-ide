@@ -258,6 +258,13 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         ValueNode::plain(variable)
     }
 
+    /// How a child is shown: of a value (`scope` false), or of a frame's
+    /// scope or a group (`scope` true); [`Self::present_value`] by default.
+    fn present_child(&self, variable: &Variable, scope: bool) -> ValueNode {
+        let _ = scope;
+        self.present_value(variable)
+    }
+
     /// An expression that evaluates, in a frame, to the sizes of the
     /// values of `expressions` (the length shown with a container's type,
     /// `{list: 4}`); `None` when the product shows no sizes.
