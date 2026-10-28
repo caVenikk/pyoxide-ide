@@ -35,12 +35,12 @@ fn server() -> FakeSource {
     source
 }
 
-fn console_state(h: &mut Harness) -> Value {
+pub(super) fn console_state(h: &mut Harness) -> Value {
     h.invoke("db.console.state", Value::Null)["consoles"][0].clone()
 }
 
 /// Draws until the console's state satisfies `f`.
-fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+pub(super) fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
     let started = Instant::now();
     loop {
         let s = console_state(h);
@@ -56,11 +56,11 @@ fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Valu
     }
 }
 
-fn idle(s: &Value) -> bool {
+pub(super) fn idle(s: &Value) -> bool {
     s["running"] == false && s["output"].as_array().is_some_and(|o| !o.is_empty())
 }
 
-fn output(s: &Value) -> String {
+pub(super) fn output(s: &Value) -> String {
     s["output"]
         .as_array()
         .unwrap()
@@ -72,7 +72,7 @@ fn output(s: &Value) -> String {
 
 /// Shows the tree with the cached model and opens the console of the
 /// data source.
-fn open_console(h: &mut Harness) -> Value {
+pub(super) fn open_console(h: &mut Harness) -> Value {
     show_tool_window(h);
     h.invoke("db.explorer.expand", json!({ "path": NAME }));
     let started = Instant::now();
@@ -95,7 +95,7 @@ fn open_console(h: &mut Harness) -> Value {
     }
 }
 
-fn harness<'a>(
+pub(super) fn harness<'a>(
     cx: &'a mut TestAppContext,
     root: &Path,
     server: &FakeSource,

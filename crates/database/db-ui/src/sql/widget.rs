@@ -45,6 +45,12 @@ ui::ui_commands! {
     AttachDataSource { name: Option<String>, schema: Option<String>, target: Option<String>, shared: Option<bool> } => "sql.attach-data-source", "Attach Data Source",
         "Attaches the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to the data source `name` and the optional `schema`; without `name` the attachment is removed. Names in the file then mean what that data source's metadata says. Personal unless `shared` is true.",
         r#"{"name": "local", "schema": "public"}"#;
+    /// Open the transaction popup of a console.
+    OpenTxMenu => "db.console.tx-menu", "Transaction Mode and Isolation",
+        "Opens the popup of the console toolbar's transaction button: the mode (Auto, Manual) and the isolation level, the current ones checked.";
+    /// Open the schema popup of a console.
+    OpenSchemaMenu => "db.console.schema-menu", "Current Schema",
+        "Opens the list of the schemas the console can switch to, the current one checked. Nothing where the engine has no schemas to switch (SQLite).";
     /// Describe the toolbar.
     SqlState => "sql.state", "SQL State",
         "Returns the SQL toolbar's state as JSON: whether it shows, its chips and banner, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
@@ -107,6 +113,26 @@ pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 widget.update(cx, |w, cx| w.open(ChipId::Source, window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenTxMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open_tx(window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenSchemaMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open(ChipId::Schema, window, cx));
             });
         });
     });
@@ -547,6 +573,15 @@ impl SqlWidget {
                 .map(|r| self.hub.source_names(r))
                 .unwrap_or_default(),
             "popup": self.menu.as_ref().map(|(m, _)| m.read(cx).state_json()),
+            "console": self.console(cx).map(|c| {
+                let c = c.read(cx);
+                json!({
+                    "tx": c.tx_label(),
+                    "commit-buttons": c.is_manual(),
+                    "pending": c.pending(),
+                    "unsafe-banner": c.unsafe_run.as_ref().map(|u| u.message.clone()),
+                })
+            }),
         })
     }
 }
