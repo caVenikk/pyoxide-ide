@@ -144,10 +144,10 @@ fn a_folder_mapping_changes_the_dialect_and_is_kept(cx: &mut TestAppContext) {
     );
 
     // Personal: in the workspace file, never in the shared settings.
-    let workspace = std::fs::read_to_string(root.join(".oxide/workspace.toml")).unwrap();
+    let workspace = std::fs::read_to_string(project::workspace::workspace_file(&root)).unwrap();
     assert!(workspace.contains("[[sql.mappings]]"), "{workspace}");
     assert!(workspace.contains("path = \"migrations\""), "{workspace}");
-    assert!(!root.join(".oxide/project.toml").exists());
+    assert!(!project::store::settings_file(&root).exists());
 
     // A restart reads the same mapping.
     let hub = db_ui::sql::Hub::new(FakeStore::new("secret"));
@@ -194,7 +194,7 @@ fn attaching_a_data_source_gives_the_dialect_and_a_shared_mapping_goes_to_the_pr
     );
     let s = wait_for(&mut h, "the project default", |s| s["dialect"] == "oracle");
     assert_eq!(s["dialect-origin"], json!({"kind": "project"}));
-    let shared = std::fs::read_to_string(root.join(".oxide/project.toml")).unwrap();
+    let shared = std::fs::read_to_string(project::store::settings_file(&root)).unwrap();
     assert!(shared.contains("[sql]"), "{shared}");
     assert!(shared.contains("dialect = \"oracle\""), "{shared}");
 }

@@ -40,7 +40,7 @@ ui::ui_commands! {
     /// Attach a data source to a file, folder or the project.
     AttachDataSource { name: Option<String>, schema: Option<String>, target: Option<String>, shared: Option<bool> } => "sql.attach-data-source", "Attach Data Source",
         "Attaches the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to the data source `name` and the optional `schema`; without `name` the attachment is removed. Names in the file then mean what that data source's metadata says. Personal unless `shared` is true.",
-        r#"{"name": "pyoxide-local", "schema": "public"}"#;
+        r#"{"name": "local", "schema": "public"}"#;
     /// Describe the widget.
     SqlState => "sql.state", "SQL State",
         "Returns the SQL widget's state as JSON: whether it shows, its text, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
