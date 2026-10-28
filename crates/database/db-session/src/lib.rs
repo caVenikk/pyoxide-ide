@@ -38,8 +38,10 @@ pub mod commands;
 mod data_source;
 mod dialect;
 mod event;
+pub mod export;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;
+pub mod import;
 mod job;
 mod options;
 mod pager;
@@ -52,6 +54,14 @@ pub use data_source::DataSourceHandle;
 pub use event::{
     Command, DataSourceState, DecisionReason, Event, EventKind, EventSink, JobEvent, JobId,
     JobOutcome, RefreshEvent, ResultId, SessionEvent, SessionId, StatementError, Timing, TxStatus,
+};
+pub use export::{
+    ExportDone, ExportEvent, ExportOptions, ExportOutcome, ExportRequest, ExportSink, ExportSource,
+    ExportTarget, Format,
+};
+pub use import::{
+    ColumnMap, Encoding, ImportDone, ImportEvent, ImportFailure, ImportFormat, ImportOutcome,
+    ImportRequest, ImportSink,
 };
 pub use job::{ErrorPolicy, Job, JobStatement, syntax_dialect};
 pub use options::{DataSourceOptions, SessionOptions, TxPolicy};
