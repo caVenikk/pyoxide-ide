@@ -6,15 +6,15 @@
 //! Written from the PostgreSQL documentation (System Catalogs, System
 //! Information Functions). Needs PostgreSQL 12 or later (`attgenerated`).
 
-use super::{PostgresIntrospector, flag, on_delete_action, relation_kind, text_list};
-use crate::schema::Cells;
+use super::{array_literal, flag, on_delete_action, relation_kind, text_list};
+use crate::schema::change::{SchemaStamps, Stamp, Units};
 use crate::schema::{
     ArgumentInfo, ArgumentMode, AttributeInfo, ColumnInfo, ConstraintInfo, ConstraintKind,
     GeneratedColumn, IdentityKind, IndexInfo, Level, ObjectDetail, ObjectInfo, ObjectKind,
-    PartitionOf, RelationInfo, RoutineDetail, SchemaInfo, SchemaSnapshot, Scope, SequenceDetail,
-    Snapshot, SourceInfo, TableDetail, TriggerDetail, TypeCategory, TypeDetail, ViewDetail,
-    fetch_all, text,
+    PartitionOf, RelationInfo, RoutineDetail, SchemaInfo, SchemaSnapshot, SequenceDetail,
+    SourceInfo, TableDetail, TriggerDetail, TypeCategory, TypeDetail, ViewDetail, fetch_all, text,
 };
+use crate::schema::{Cells, restrict};
 use crate::{Connection, Error, ErrorKind, Result, Value};
 
 const SCHEMAS: &str = "\
@@ -48,6 +48,7 @@ LEFT JOIN pg_catalog.pg_class pc ON pc.oid = inh.inhparent \
 LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace \
 LEFT JOIN pg_catalog.pg_sequence sq ON sq.seqrelid = c.oid \
 WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S', 'i', 'I') \
+/*only:(c.relname = ANY(@) OR pt.relname = ANY(@))*/ \
 ORDER BY c.relname";
 
 const TRIGGERS: &str = "\
@@ -62,6 +63,7 @@ LEFT JOIN pg_catalog.pg_namespace fn ON fn.oid = p.pronamespace \
 LEFT JOIN pg_catalog.pg_description d \
        ON d.objoid = t.oid AND d.classoid = 'pg_catalog.pg_trigger'::regclass AND d.objsubid = 0 \
 WHERE n.nspname = $1 AND NOT t.tgisinternal \
+/*only:c.relname = ANY(@)*/ \
 ORDER BY t.tgname, c.relname";
 
 /// Argument types, names and modes come as arrays of the same length (all
@@ -81,6 +83,7 @@ JOIN pg_catalog.pg_language l ON l.oid = p.prolang \
 LEFT JOIN pg_catalog.pg_description d \
        ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_proc'::regclass AND d.objsubid = 0 \
 WHERE n.nspname = $1 AND p.prokind IN ('f', 'p', 'w') \
+/*only:p.proname = ANY(@)*/ \
 ORDER BY p.proname, p.oid";
 
 const TYPES: &str = "\
@@ -109,6 +112,7 @@ WHERE n.nspname = $1 \
   AND (t.typtype IN ('e', 'd', 'r') \
        OR (t.typtype = 'c' AND EXISTS (SELECT 1 FROM pg_catalog.pg_class rc \
                                        WHERE rc.oid = t.typrelid AND rc.relkind = 'c'))) \
+/*only:t.typname = ANY(@)*/ \
 ORDER BY t.typname";
 
 const COLUMNS: &str = "\
@@ -124,6 +128,7 @@ LEFT JOIN pg_catalog.pg_description d \
       AND d.objsubid = a.attnum \
 WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'f', 'v', 'm') \
   AND a.attnum > 0 AND NOT a.attisdropped \
+/*only:c.relname = ANY(@)*/ \
 ORDER BY c.relname, a.attnum";
 
 /// Key columns only in the second array (`INCLUDE` columns in the third).
@@ -144,6 +149,7 @@ JOIN pg_catalog.pg_class tc ON tc.oid = i.indrelid \
 JOIN pg_catalog.pg_namespace n ON n.oid = tc.relnamespace \
 JOIN pg_catalog.pg_am am ON am.oid = ic.relam \
 WHERE n.nspname = $1 \
+/*only:tc.relname = ANY(@)*/ \
 ORDER BY tc.relname, ic.relname";
 
 const CONSTRAINTS: &str = "\
@@ -165,6 +171,7 @@ JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
 LEFT JOIN pg_catalog.pg_class fc ON fc.oid = con.confrelid \
 LEFT JOIN pg_catalog.pg_namespace fn ON fn.oid = fc.relnamespace \
 WHERE n.nspname = $1 AND con.contype IN ('p', 'u', 'f', 'c') \
+/*only:c.relname = ANY(@)*/ \
 ORDER BY c.relname, \
          CASE con.contype WHEN 'p' THEN 0 WHEN 'u' THEN 1 WHEN 'f' THEN 2 ELSE 3 END, con.conname";
 
@@ -175,6 +182,7 @@ SELECT c.relname, c.relkind::text, \
 FROM pg_catalog.pg_class c \
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
 WHERE n.nspname = $1 AND c.relkind IN ('v', 'm') \
+/*only:c.relname = ANY(@)*/ \
 ORDER BY c.relname";
 
 const ROUTINE_SOURCES: &str = "\
@@ -183,6 +191,7 @@ SELECT p.proname, p.prokind::text, pg_catalog.pg_get_function_identity_arguments
 FROM pg_catalog.pg_proc p \
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
 WHERE n.nspname = $1 AND p.prokind IN ('f', 'p', 'w') \
+/*only:p.proname = ANY(@)*/ \
 ORDER BY p.proname, p.oid";
 
 const TRIGGER_SOURCES: &str = "\
@@ -191,31 +200,167 @@ FROM pg_catalog.pg_trigger t \
 JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid \
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
 WHERE n.nspname = $1 AND NOT t.tgisinternal \
+/*only:c.relname = ANY(@)*/ \
 ORDER BY t.tgname, c.relname";
 
-pub(super) async fn load(
-    intro: &PostgresIntrospector<'_>,
-    scope: &Scope,
-    level: Level,
-) -> Result<Snapshot> {
-    let conn = intro.conn;
+/// The rows of a query restricted to `names`: every row when `None`, none
+/// when the list is empty.
+async fn rows(
+    conn: &dyn Connection,
+    name: &'static str,
+    sql: &str,
+    schema: &str,
+    names: Option<&[String]>,
+) -> Result<Vec<Cells>> {
+    match names {
+        None => fetch_all(conn, name, sql, &[Value::from(schema)]).await,
+        Some([]) => Ok(Vec::new()),
+        Some(list) => {
+            let sql = restrict(sql, "$2::text[]");
+            let args = [Value::from(schema), Value::from(array_literal(list))];
+            fetch_all(conn, name, &sql, &args).await
+        }
+    }
+}
+
+/// Every schema with its owner and comment.
+pub(super) async fn schema_infos(conn: &dyn Connection) -> Result<Vec<SchemaInfo>> {
     let mut schemas = Vec::new();
     for r in fetch_all(conn, "schemas", SCHEMAS, &[]).await? {
-        let info = SchemaInfo {
+        schemas.push(SchemaInfo {
             name: r.text(0)?,
             is_system: flag(r.value(1)?),
             is_current: flag(r.value(2)?),
             owner: r.opt_text(3)?,
             comment: r.opt_text(4)?,
-        };
-        if scope.selects(&info) {
-            schemas.push(load_schema_retrying(conn, info, level).await?);
-        }
+        });
     }
-    Ok(Snapshot {
+    Ok(schemas)
+}
+
+/// A stamp of the schema row (owner, comment).
+const SCHEMA_STAMP: &str = "\
+SELECT pg_catalog.hashtextextended(pg_catalog.concat_ws(':', n.oid::text, n.xmin::text, \
+         (SELECT COALESCE(sum(pg_catalog.hashtextextended( \
+                    d.objsubid::text || ':' || d.xmin::text, 0)::numeric), 0) \
+          FROM pg_catalog.pg_description d \
+          WHERE d.objoid = n.oid AND d.classoid = 'pg_catalog.pg_namespace'::regclass)), 0)::text \
+FROM pg_catalog.pg_namespace n WHERE n.nspname = $1";
+
+/// A stamp per table, view, materialized view and sequence that covers
+/// everything the load reads of it: the row versions (`xmin`) of its catalog
+/// row and of its columns, defaults, constraints, indexes (and their rows),
+/// triggers, comments and sequence parameters. A row that was added,
+/// replaced or removed changes the sum; the rows PostgreSQL updates in place
+/// (statistics) do not.
+const RELATION_STAMPS: &str = "\
+SELECT c.relname, c.relkind::text, \
+  pg_catalog.hashtextextended(pg_catalog.concat_ws(':', c.oid::text, c.xmin::text, \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(a.attnum::text || ':' || a.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(x.adnum::text || ':' || x.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_attrdef x WHERE x.adrelid = c.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(k.oid::text || ':' || k.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_constraint k WHERE k.conrelid = c.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended( \
+              i.indexrelid::text || ':' || i.xmin::text || ':' || ic.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid \
+       WHERE i.indrelid = c.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(t.oid::text || ':' || t.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_trigger t WHERE t.tgrelid = c.oid AND NOT t.tgisinternal), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(d.objsubid::text || ':' || d.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_description d \
+       WHERE d.objoid = c.oid AND d.classoid = 'pg_catalog.pg_class'::regclass), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(s.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_sequence s WHERE s.seqrelid = c.oid)), 0)::text \
+FROM pg_catalog.pg_class c \
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S')";
+
+/// A stamp per routine overload: its row and its comment.
+const ROUTINE_STAMPS: &str = "\
+SELECT p.proname, p.prokind::text, pg_catalog.pg_get_function_identity_arguments(p.oid), \
+  pg_catalog.hashtextextended(pg_catalog.concat_ws(':', p.oid::text, p.xmin::text, \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(d.objsubid::text || ':' || d.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_description d \
+       WHERE d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_proc'::regclass)), 0)::text \
+FROM pg_catalog.pg_proc p \
+JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+WHERE n.nspname = $1 AND p.prokind IN ('f', 'p', 'w')";
+
+/// A stamp per type: its row, enum labels, attributes of a composite, domain
+/// constraints, range and comment.
+const TYPE_STAMPS: &str = "\
+SELECT t.typname, \
+  pg_catalog.hashtextextended(pg_catalog.concat_ws(':', t.oid::text, t.xmin::text, \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(e.oid::text || ':' || e.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_enum e WHERE e.enumtypid = t.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(a.attnum::text || ':' || a.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_attribute a WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND t.typrelid <> 0), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(k.oid::text || ':' || k.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_constraint k WHERE k.contypid = t.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(r.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_range r WHERE r.rngtypid = t.oid), \
+    (SELECT COALESCE(sum(pg_catalog.hashtextextended(d.objsubid::text || ':' || d.xmin::text, 0)::numeric), 0) \
+       FROM pg_catalog.pg_description d \
+       WHERE d.objoid = t.oid AND d.classoid = 'pg_catalog.pg_type'::regclass)), 0)::text \
+FROM pg_catalog.pg_type t \
+JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace \
+WHERE n.nspname = $1 \
+  AND (t.typtype IN ('e', 'd', 'r') \
+       OR (t.typtype = 'c' AND EXISTS (SELECT 1 FROM pg_catalog.pg_class rc \
+                                       WHERE rc.oid = t.typrelid AND rc.relkind = 'c')))";
+
+/// The change query of a schema: one stamp per object, in four statements.
+pub(super) async fn stamps(
+    conn: &dyn Connection,
+    info: &SchemaInfo,
+    level: Level,
+) -> Result<SchemaStamps> {
+    retry_vanished(|| stamps_once(conn, info, level)).await
+}
+
+async fn stamps_once(
+    conn: &dyn Connection,
+    info: &SchemaInfo,
+    level: Level,
+) -> Result<SchemaStamps> {
+    let arg = [Value::from(info.name.as_str())];
+    let row = fetch_all(conn, "schema_stamp", SCHEMA_STAMP, &arg)
+        .await?
+        .first()
+        .map(|r| r.text(0))
+        .transpose()?
+        .unwrap_or_default();
+    let mut objects = Vec::new();
+    for r in fetch_all(conn, "relation_stamps", RELATION_STAMPS, &arg).await? {
+        let Some(kind) = relation_kind(&r.text(1)?) else {
+            continue;
+        };
+        objects.push(Stamp(kind, r.text(0)?, String::new(), None, r.text(2)?));
+    }
+    for r in fetch_all(conn, "routine_stamps", ROUTINE_STAMPS, &arg).await? {
+        let kind = if r.text(1)? == "p" {
+            ObjectKind::Procedure
+        } else {
+            ObjectKind::Function
+        };
+        objects.push(Stamp(kind, r.text(0)?, r.text(2)?, None, r.text(3)?));
+    }
+    for r in fetch_all(conn, "type_stamps", TYPE_STAMPS, &arg).await? {
+        objects.push(Stamp(
+            ObjectKind::Type,
+            r.text(0)?,
+            String::new(),
+            None,
+            r.text(1)?,
+        ));
+    }
+    Ok(SchemaStamps {
         level,
-        token: None,
-        schemas,
+        system: info.is_system,
+        row,
+        objects,
     })
 }
 
@@ -239,36 +384,50 @@ fn vanished_object(err: &Error) -> bool {
         }
 }
 
-/// Loads one schema again when an object was dropped during the load: the
-/// queries are bulk, so the dropped object cannot be skipped on its own, and
-/// the second pass no longer sees it. The attempts are limited, so a
-/// persistent catalog fault is still reported. A schema that is gone itself
-/// has no objects and comes back empty.
-async fn load_schema_retrying(
-    conn: &dyn Connection,
-    info: SchemaInfo,
-    level: Level,
-) -> Result<SchemaSnapshot> {
-    let mut attempt = 1;
+/// Runs `attempt` again when an object was dropped during it: the queries
+/// are bulk, so the dropped object cannot be skipped on its own, and the
+/// second pass no longer sees it. The attempts are limited, so a persistent
+/// catalog fault is still reported. A schema that is gone itself has no
+/// objects and comes back empty.
+async fn retry_vanished<T, F, Fut>(attempt: F) -> Result<T>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let mut attempts = 1;
     loop {
-        match load_schema(conn, info.clone(), level).await {
-            Err(err) if attempt < LOAD_ATTEMPTS && vanished_object(&err) => attempt += 1,
+        match attempt().await {
+            Err(err) if attempts < LOAD_ATTEMPTS && vanished_object(&err) => attempts += 1,
             other => return other,
         }
     }
+}
+
+/// Reads a schema, again when an object vanished under the read. `units`
+/// restricts the read to some objects and what belongs to them.
+pub(super) async fn load_schema_retrying(
+    conn: &dyn Connection,
+    info: SchemaInfo,
+    level: Level,
+    units: Option<&Units>,
+) -> Result<SchemaSnapshot> {
+    retry_vanished(|| load_schema(conn, info.clone(), level, units)).await
 }
 
 async fn load_schema(
     conn: &dyn Connection,
     info: SchemaInfo,
     level: Level,
+    units: Option<&Units>,
 ) -> Result<SchemaSnapshot> {
     let schema = info.name.clone();
-    let arg = [Value::from(schema.as_str())];
     let structure = level >= Level::Structure;
     let mut objects = Vec::new();
+    let relation_names = units.map(|u| u.relations.as_slice());
+    let routine_names = units.map(|u| u.routines.as_slice());
+    let type_names = units.map(|u| u.types.as_slice());
 
-    for r in fetch_all(conn, "relations", RELATIONS, &arg).await? {
+    for r in rows(conn, "relations", RELATIONS, &schema, relation_names).await? {
         let code = r.text(1)?;
         let Some(kind) = relation_kind(&code) else {
             continue;
@@ -289,7 +448,7 @@ async fn load_schema(
         });
     }
 
-    for r in fetch_all(conn, "triggers", TRIGGERS, &arg).await? {
+    for r in rows(conn, "triggers", TRIGGERS, &schema, relation_names).await? {
         objects.push(ObjectInfo {
             schema: schema.clone(),
             name: r.text(0)?,
@@ -301,7 +460,7 @@ async fn load_schema(
         });
     }
 
-    for r in fetch_all(conn, "routines", ROUTINES, &arg).await? {
+    for r in rows(conn, "routines", ROUTINES, &schema, routine_names).await? {
         let kind = if r.text(1)? == "p" {
             ObjectKind::Procedure
         } else {
@@ -318,7 +477,7 @@ async fn load_schema(
         });
     }
 
-    for r in fetch_all(conn, "types", TYPES, &arg).await? {
+    for r in rows(conn, "types", TYPES, &schema, type_names).await? {
         objects.push(ObjectInfo {
             schema: schema.clone(),
             name: r.text(0)?,
@@ -350,12 +509,12 @@ async fn load_schema(
 
     let mut relations = Vec::new();
     if structure {
-        relations = relations_of(conn, &arg, &objects).await?;
+        relations = relations_of(conn, &schema, relation_names, &objects).await?;
     }
 
     let mut sources = Vec::new();
     if level >= Level::Full {
-        sources = read_sources(conn, &arg).await?;
+        sources = read_sources(conn, &schema, relation_names, routine_names).await?;
     }
 
     Ok(SchemaSnapshot {
@@ -560,7 +719,8 @@ fn type_detail(r: &Cells) -> Result<TypeDetail> {
 /// view of the schema, in the order of the objects.
 async fn relations_of(
     conn: &dyn Connection,
-    arg: &[Value],
+    schema: &str,
+    names: Option<&[String]>,
     objects: &[ObjectInfo],
 ) -> Result<Vec<RelationInfo>> {
     let mut relations: Vec<RelationInfo> = objects
@@ -577,7 +737,7 @@ async fn relations_of(
         .map(|(i, r)| (r.name.clone(), i))
         .collect();
 
-    for r in fetch_all(conn, "columns", COLUMNS, arg).await? {
+    for r in rows(conn, "columns", COLUMNS, schema, names).await? {
         let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
@@ -609,7 +769,7 @@ async fn relations_of(
         });
     }
 
-    for r in fetch_all(conn, "indexes", INDEXES, arg).await? {
+    for r in rows(conn, "indexes", INDEXES, schema, names).await? {
         let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
@@ -631,7 +791,7 @@ async fn relations_of(
         });
     }
 
-    for r in fetch_all(conn, "constraints", CONSTRAINTS, arg).await? {
+    for r in rows(conn, "constraints", CONSTRAINTS, schema, names).await? {
         let Some(&at) = index.get(&r.text(0)?) else {
             continue;
         };
@@ -684,9 +844,14 @@ async fn relations_of(
 
 /// The texts `source` returns, one per object (per overload for routines,
 /// per table for triggers of the same name).
-async fn read_sources(conn: &dyn Connection, arg: &[Value]) -> Result<Vec<SourceInfo>> {
+async fn read_sources(
+    conn: &dyn Connection,
+    schema: &str,
+    relation_names: Option<&[String]>,
+    routine_names: Option<&[String]>,
+) -> Result<Vec<SourceInfo>> {
     let mut out = Vec::new();
-    for r in fetch_all(conn, "view_sources", VIEW_SOURCES, arg).await? {
+    for r in rows(conn, "view_sources", VIEW_SOURCES, schema, relation_names).await? {
         let (kind, create) = if r.text(1)? == "m" {
             (ObjectKind::MaterializedView, "CREATE MATERIALIZED VIEW")
         } else {
@@ -699,7 +864,15 @@ async fn read_sources(conn: &dyn Connection, arg: &[Value]) -> Result<Vec<Source
             text: format!("{create} {} AS\n{}", r.text(2)?, r.text(3)?),
         });
     }
-    for r in fetch_all(conn, "routine_sources", ROUTINE_SOURCES, arg).await? {
+    for r in rows(
+        conn,
+        "routine_sources",
+        ROUTINE_SOURCES,
+        schema,
+        routine_names,
+    )
+    .await?
+    {
         let Some(body) = r.opt_text(3)? else {
             continue;
         };
@@ -714,7 +887,15 @@ async fn read_sources(conn: &dyn Connection, arg: &[Value]) -> Result<Vec<Source
             text: body,
         });
     }
-    for r in fetch_all(conn, "trigger_sources", TRIGGER_SOURCES, arg).await? {
+    for r in rows(
+        conn,
+        "trigger_sources",
+        TRIGGER_SOURCES,
+        schema,
+        relation_names,
+    )
+    .await?
+    {
         let Some(body) = r.opt_text(2)? else {
             continue;
         };
@@ -735,6 +916,7 @@ mod tests {
     use async_trait::async_trait;
 
     use super::*;
+    use crate::schema::{PostgresIntrospector, Scope, Snapshot};
     use crate::{Backend, Column, Cursor, ExecOptions, Outcome, Row, TxMode};
 
     /// A server that answers the schema list, fails the relations query

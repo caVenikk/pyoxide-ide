@@ -2,6 +2,7 @@
 //! dialect. Implementations only use [`Connection::query`], so every driver
 //! of a dialect shares the same SQL.
 
+mod change;
 mod detail;
 mod oracle;
 mod postgres;
@@ -202,15 +203,59 @@ pub trait Introspector: Send + Sync {
     /// the database tells. Use a connection with no open cursor.
     async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot>;
 
-    /// What changed in `scope` since `since`. The default says that this
-    /// introspector cannot tell, and the caller reloads with
-    /// [`Introspector::load`].
+    /// What changed in `scope` since `since`, read from the change query
+    /// alone (a statement or a few per schema, whatever the number of
+    /// objects) plus a read of just the objects that changed. The delta
+    /// holds the new or changed objects whole (a table with its columns,
+    /// keys, indexes and triggers) at the level each schema was read at, the
+    /// objects that are gone, the schemas that are gone, and the schemas of
+    /// the scope the token knows nothing of ([`Delta::unseen`], to be read
+    /// with [`Introspector::load`]). Its token covers everything `since`
+    /// did, with the schemas it looked at brought up to date. Fails with
+    /// `Unsupported` when the token is not one this introspector can
+    /// compare, and the caller reloads with [`Introspector::load`].
     async fn changes(&self, since: &ChangeToken, scope: &Scope) -> Result<Delta> {
         let _ = (since, scope);
         Err(Error::unsupported(
             "this database cannot report schema changes; reload the schema",
         ))
     }
+
+    /// Reads just `objects` of `schema` at `level`: a table, view, sequence,
+    /// routine, package or type each, with what belongs to it (a table's
+    /// columns, keys, indexes and triggers). An object that is not there any
+    /// more comes back in [`SchemaDelta::dropped`]. An index or a trigger is
+    /// read with its table: name the table. The default reads the whole
+    /// schema and keeps those objects; the dialects with a bulk path read
+    /// only them.
+    async fn load_objects(
+        &self,
+        schema: &str,
+        objects: &[ObjectRef],
+        level: Level,
+    ) -> Result<SchemaDelta> {
+        change::load_objects_by_load(self, schema, objects, level).await
+    }
+}
+
+/// `sql` with each `/*only:CONDITION*/` marker turned into `AND CONDITION`,
+/// where `@` in the condition is `placeholder`: a statement that reads every
+/// object of a schema becomes one that reads the ones named in a list bound
+/// to the placeholder. A statement without the marker is returned as it is.
+pub(crate) fn restrict(sql: &str, placeholder: &str) -> String {
+    const OPEN: &str = "/*only:";
+    let mut out = String::with_capacity(sql.len() + 64);
+    let mut rest = sql;
+    while let Some(at) = rest.find(OPEN) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + OPEN.len()..];
+        let end = after.find("*/").unwrap_or(after.len());
+        out.push_str("AND ");
+        out.push_str(&after[..end].replace('@', placeholder));
+        rest = after.get(end + 2..).unwrap_or("");
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The introspector for a connection's dialect.
@@ -245,4 +290,19 @@ pub(crate) fn opt_text(v: &Value) -> Option<String> {
 
 pub(crate) fn wants(kinds: &[ObjectKind], kind: ObjectKind) -> bool {
     kinds.is_empty() || kinds.contains(&kind)
+}
+
+#[cfg(test)]
+mod restrict_tests {
+    use super::restrict;
+
+    #[test]
+    fn markers_become_conditions() {
+        let sql = "SELECT 1 WHERE a = $1 /*only:(x = ANY(@) OR y = ANY(@))*/ ORDER BY 1";
+        assert_eq!(
+            restrict(sql, "$2::text[]"),
+            "SELECT 1 WHERE a = $1 AND (x = ANY($2::text[]) OR y = ANY($2::text[])) ORDER BY 1"
+        );
+        assert_eq!(restrict("SELECT 1", ":2"), "SELECT 1");
+    }
 }

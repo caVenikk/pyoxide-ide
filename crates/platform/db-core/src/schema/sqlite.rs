@@ -6,11 +6,13 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
+use super::change::{self, SchemaStamps, Stamper, Units};
 use super::{
-    ColumnInfo, ConstraintInfo, ConstraintKind, GeneratedColumn, IndexInfo, Introspector, Level,
-    ObjectInfo, ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, wants,
+    ChangeToken, ColumnInfo, ConstraintInfo, ConstraintKind, Delta, GeneratedColumn, IndexInfo,
+    Introspector, Level, ObjectInfo, ObjectKind, SchemaInfo, SchemaSnapshot, Scope, Snapshot,
+    fetch_all, wants,
 };
-use crate::{Connection, Error, Result};
+use crate::{Connection, Dialect, Error, Result};
 
 pub struct SqliteIntrospector<'a> {
     conn: &'a dyn Connection,
@@ -346,7 +348,43 @@ impl Introspector for SqliteIntrospector<'_> {
     }
 
     async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
-        load::load(self, scope, level).await
+        change::load(self, scope, level).await
+    }
+
+    async fn changes(&self, since: &ChangeToken, scope: &Scope) -> Result<Delta> {
+        change::changes(self, since, scope).await
+    }
+}
+
+#[async_trait]
+impl Stamper for SqliteIntrospector<'_> {
+    fn dialect(&self) -> Dialect {
+        Dialect::Sqlite
+    }
+
+    async fn schema_infos(&self) -> Result<Vec<SchemaInfo>> {
+        self.schemas().await
+    }
+
+    async fn stamps(&self, info: &SchemaInfo, level: Level) -> Result<SchemaStamps> {
+        load::stamps(self.conn, info, level).await
+    }
+
+    async fn stamped_read(
+        &self,
+        info: SchemaInfo,
+        level: Level,
+    ) -> Result<(SchemaStamps, SchemaSnapshot)> {
+        load::stamped_read(self.conn, info, level).await
+    }
+
+    async fn read(
+        &self,
+        info: SchemaInfo,
+        level: Level,
+        units: Option<&Units>,
+    ) -> Result<SchemaSnapshot> {
+        load::read(self.conn, info, level, units).await
     }
 }
 

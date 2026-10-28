@@ -291,3 +291,202 @@ pub async fn assert_load_matches_per_object(
     }
     bulk
 }
+
+async fn run(conn: &dyn Connection, sql: &str) {
+    match conn.execute(sql, &[], &ExecOptions::default()).await {
+        Ok(Outcome::Rows(cursor)) => {
+            let _ = cursor.close().await;
+        }
+        Ok(_) => {}
+        Err(e) => panic!("{sql}: {e:?}"),
+    }
+}
+
+/// The checks of the `incremental_changes` case, on a fixture of the
+/// introspection cases created with `prefix` in the current schema.
+/// `add_column(table, column)` is the statement that adds a column.
+///
+/// Other cases may create and drop objects in the same schema meanwhile, so
+/// every claim is about the objects named after `prefix`.
+pub async fn incremental_changes_case(
+    conn: &dyn Connection,
+    prefix: &str,
+    add_column: &dyn Fn(&str, &str) -> String,
+) {
+    use db_core::schema::{ChangeToken, Delta, ObjectKind, ObjectRef};
+
+    let own = |name: &str| name.to_lowercase().starts_with(prefix);
+    let intro = introspector(conn);
+    let scope = Scope::current();
+    let base = intro.load(&scope, Level::Structure).await.expect("load");
+    let token = base.token.clone().expect("a load leaves a change token");
+    let current = base
+        .schemas
+        .iter()
+        .find(|s| s.info.is_current)
+        .expect("the current schema")
+        .info
+        .name
+        .clone();
+    let child = base
+        .schema(&current)
+        .unwrap()
+        .objects
+        .iter()
+        .find(|o| {
+            own(&o.name)
+                && o.kind == ObjectKind::Table
+                && (o.name.to_lowercase().ends_with("_child")
+                    || o.name.to_lowercase().ends_with("_chi"))
+        })
+        .expect("the child table of the fixture")
+        .name
+        .clone();
+
+    let own_of = |delta: &Delta| -> Vec<(ObjectKind, String)> {
+        let mut out: Vec<_> = delta
+            .schemas
+            .iter()
+            .filter(|s| s.info.name == current)
+            .flat_map(|s| s.objects.iter())
+            .filter(|o| own(&o.name))
+            .map(|o| (o.kind, o.name.clone()))
+            .collect();
+        out.sort();
+        out
+    };
+    let changes = async |token: &ChangeToken| -> Delta {
+        intro
+            .changes(token, &scope)
+            .await
+            .unwrap_or_else(|e| panic!("changes: {e:?}"))
+    };
+
+    // Nothing changed: nothing comes back, and finding out costs a fixed
+    // number of statements. Other tests change the same schema at the same
+    // time, which costs statements to read what they changed: the least of a
+    // few tries is the one that counts.
+    let mut quiet = usize::MAX;
+    for _ in 0..10 {
+        let counting = CountingConnection::new(conn);
+        let delta = introspector(&counting)
+            .changes(&token, &scope)
+            .await
+            .expect("changes");
+        assert!(own_of(&delta).is_empty(), "{:?}", own_of(&delta));
+        assert!(delta.unseen.is_empty() && delta.dropped_schemas.is_empty());
+        quiet = quiet.min(counting.statements());
+        if quiet <= 12 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    }
+    assert!(
+        quiet <= 12,
+        "{quiet} statements to find that nothing changed"
+    );
+
+    // A new column: that table is read again, with its children, and no
+    // other table of the fixture.
+    run(conn, &add_column(&child, &format!("{prefix}_x"))).await;
+    let delta = changes(&token).await;
+    let touched = own_of(&delta);
+    assert!(
+        touched.contains(&(ObjectKind::Table, child.clone())),
+        "{touched:?}"
+    );
+    assert!(
+        touched.iter().all(|(kind, name)| *name == child
+            || matches!(kind, ObjectKind::Index | ObjectKind::Trigger)),
+        "only {child} and what belongs to it: {touched:?}"
+    );
+    let schema = delta
+        .schemas
+        .iter()
+        .find(|s| s.info.name == current)
+        .unwrap();
+    let relation = schema
+        .relations
+        .iter()
+        .find(|r| r.name == child)
+        .expect("the structure of the table");
+    assert!(
+        relation
+            .columns
+            .iter()
+            .any(|c| c.name.to_lowercase() == format!("{prefix}_x")),
+        "the new column: {:?}",
+        relation.columns
+    );
+    assert!(
+        schema.relations.iter().filter(|r| own(&r.name)).count() == 1,
+        "one table of the fixture was read"
+    );
+
+    // From the new token nothing is left to find.
+    let again = changes(&delta.token).await;
+    assert!(own_of(&again).is_empty(), "{:?}", own_of(&again));
+
+    // A dropped view is dropped.
+    let view = base
+        .schema(&current)
+        .unwrap()
+        .objects
+        .iter()
+        .find(|o| own(&o.name) && o.kind == ObjectKind::View)
+        .expect("the view of the fixture")
+        .name
+        .clone();
+    run(conn, &format!("DROP VIEW {view}")).await;
+    let delta = changes(&delta.token).await;
+    let schema = delta
+        .schemas
+        .iter()
+        .find(|s| s.info.name == current)
+        .unwrap();
+    assert!(
+        schema
+            .dropped
+            .iter()
+            .any(|d| d.kind == ObjectKind::View && d.name == view),
+        "{:?}",
+        schema.dropped
+    );
+
+    // One table on its own.
+    let asked = [ObjectRef {
+        schema: current.clone(),
+        name: child.clone(),
+        kind: ObjectKind::Table,
+    }];
+    let one = intro
+        .load_objects(&current, &asked, Level::Structure)
+        .await
+        .expect("load_objects");
+    assert!(
+        one.objects
+            .iter()
+            .any(|o| o.kind == ObjectKind::Table && o.name == child)
+    );
+    assert!(
+        one.objects
+            .iter()
+            .all(|o| o.name == child || o.parent.as_deref() == Some(child.as_str())),
+        "{:?}",
+        one.objects.iter().map(|o| &o.name).collect::<Vec<_>>()
+    );
+    assert_eq!(one.relations.len(), 1);
+    assert!(one.dropped.is_empty());
+
+    // An object that is gone comes back dropped.
+    let gone = [ObjectRef {
+        schema: current.clone(),
+        name: view.clone(),
+        kind: ObjectKind::View,
+    }];
+    let none = intro
+        .load_objects(&current, &gone, Level::Structure)
+        .await
+        .expect("load_objects");
+    assert!(none.objects.is_empty() && none.dropped.len() == 1);
+}

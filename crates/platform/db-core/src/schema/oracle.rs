@@ -14,11 +14,13 @@
 
 use async_trait::async_trait;
 
+use super::change::{self, SchemaStamps, Stamper, Units};
 use super::{
-    Cells, ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
-    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, opt_text, text, wants,
+    Cells, ChangeToken, ColumnInfo, ConstraintInfo, ConstraintKind, Delta, IndexInfo, Introspector,
+    Level, ObjectInfo, ObjectKind, ObjectRef, SchemaDelta, SchemaInfo, SchemaSnapshot, Scope,
+    Snapshot, fetch_all, opt_text, text, wants,
 };
-use crate::{Connection, Result, Value};
+use crate::{Connection, Dialect, Result, Value};
 
 /// PL/SQL functions for a `WITH` clause (the first one follows `WITH `, the
 /// others are separated by the `;` that ends each). They copy a LONG or a
@@ -433,7 +435,44 @@ impl Introspector for OracleIntrospector<'_> {
     }
 
     async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
-        load::load(self, scope, level).await
+        change::load(self, scope, level).await
+    }
+
+    async fn changes(&self, since: &ChangeToken, scope: &Scope) -> Result<Delta> {
+        change::changes(self, since, scope).await
+    }
+
+    async fn load_objects(
+        &self,
+        schema: &str,
+        objects: &[ObjectRef],
+        level: Level,
+    ) -> Result<SchemaDelta> {
+        change::load_objects(self, schema, objects, level).await
+    }
+}
+
+#[async_trait]
+impl Stamper for OracleIntrospector<'_> {
+    fn dialect(&self) -> Dialect {
+        Dialect::Oracle
+    }
+
+    async fn schema_infos(&self) -> Result<Vec<SchemaInfo>> {
+        self.schemas().await
+    }
+
+    async fn stamps(&self, info: &SchemaInfo, level: Level) -> Result<SchemaStamps> {
+        load::stamps(self.conn, info, level).await
+    }
+
+    async fn read(
+        &self,
+        info: SchemaInfo,
+        level: Level,
+        units: Option<&Units>,
+    ) -> Result<SchemaSnapshot> {
+        load::load_schema(self, info, level, units).await
     }
 }
 

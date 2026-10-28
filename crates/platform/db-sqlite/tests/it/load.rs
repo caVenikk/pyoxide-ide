@@ -35,7 +35,7 @@ async fn names_level_reads_objects_only() {
     assert!(main.relations.is_empty() && main.sources.is_empty());
     assert!(main.objects.iter().all(|o| o.detail.is_none()));
     assert_eq!(snapshot.level, Level::Names);
-    assert_eq!(snapshot.token, None);
+    assert!(snapshot.token.is_some(), "a load leaves a change token");
 }
 
 #[tokio::test]

@@ -7,11 +7,13 @@ mod load;
 
 use async_trait::async_trait;
 
+use super::change::{self, SchemaStamps, Stamper, Units};
 use super::{
-    Cells, ColumnInfo, ConstraintInfo, ConstraintKind, IndexInfo, Introspector, Level, ObjectInfo,
-    ObjectKind, SchemaInfo, Scope, Snapshot, fetch_all, text, wants,
+    Cells, ChangeToken, ColumnInfo, ConstraintInfo, ConstraintKind, Delta, IndexInfo, Introspector,
+    Level, ObjectInfo, ObjectKind, ObjectRef, SchemaDelta, SchemaInfo, SchemaSnapshot, Scope,
+    Snapshot, fetch_all, text, wants,
 };
-use crate::{Connection, Result, Value};
+use crate::{Connection, Dialect, Result, Value};
 
 pub struct PostgresIntrospector<'a> {
     conn: &'a dyn Connection,
@@ -152,6 +154,26 @@ FROM pg_catalog.pg_index i \
 JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid \
 JOIN pg_catalog.pg_namespace n ON n.oid = ic.relnamespace \
 WHERE n.nspname = $1 AND ic.relname = $2";
+
+/// A `text[]` literal of `names`, to bind where `$n::text[]` is written.
+fn array_literal(names: &[String]) -> String {
+    let mut out = String::from("{");
+    for (i, name) in names.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for c in name.chars() {
+            if c == '"' || c == '\\' {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('"');
+    }
+    out.push('}');
+    out
+}
 
 fn flag(v: &Value) -> bool {
     matches!(v, Value::Bool(true))
@@ -409,7 +431,44 @@ impl Introspector for PostgresIntrospector<'_> {
     }
 
     async fn load(&self, scope: &Scope, level: Level) -> Result<Snapshot> {
-        load::load(self, scope, level).await
+        change::load(self, scope, level).await
+    }
+
+    async fn changes(&self, since: &ChangeToken, scope: &Scope) -> Result<Delta> {
+        change::changes(self, since, scope).await
+    }
+
+    async fn load_objects(
+        &self,
+        schema: &str,
+        objects: &[ObjectRef],
+        level: Level,
+    ) -> Result<SchemaDelta> {
+        change::load_objects(self, schema, objects, level).await
+    }
+}
+
+#[async_trait]
+impl Stamper for PostgresIntrospector<'_> {
+    fn dialect(&self) -> Dialect {
+        Dialect::Postgres
+    }
+
+    async fn schema_infos(&self) -> Result<Vec<SchemaInfo>> {
+        load::schema_infos(self.conn).await
+    }
+
+    async fn stamps(&self, info: &SchemaInfo, level: Level) -> Result<SchemaStamps> {
+        load::stamps(self.conn, info, level).await
+    }
+
+    async fn read(
+        &self,
+        info: SchemaInfo,
+        level: Level,
+        units: Option<&Units>,
+    ) -> Result<SchemaSnapshot> {
+        load::load_schema_retrying(self.conn, info, level, units).await
     }
 }
 
@@ -437,6 +496,20 @@ mod tests {
         assert_eq!(relation_kind("i"), Some(ObjectKind::Index));
         assert_eq!(relation_kind("I"), Some(ObjectKind::Index));
         assert_eq!(relation_kind("c"), None);
+    }
+
+    #[test]
+    fn array_literals_quote_every_name() {
+        assert_eq!(array_literal(&[]), "{}");
+        assert_eq!(
+            array_literal(&[
+                "a".into(),
+                "b c".into(),
+                "q\"x".into(),
+                "back\\slash".into()
+            ]),
+            r#"{"a","b c","q\"x","back\\slash"}"#
+        );
     }
 
     #[test]

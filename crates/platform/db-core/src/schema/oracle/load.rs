@@ -16,12 +16,13 @@ use super::{
     OracleIntrospector, column_info, fold_constraint_row, index_column_parts, join_unit_lines,
     qualified_type, sized_type, view_source,
 };
+use crate::schema::change::{SchemaStamps, Stamp, Units, digest, retain_units};
 use crate::schema::{
     ArgumentInfo, ArgumentMode, AttributeInfo, Cells, ColumnInfo, GeneratedColumn, IdentityKind,
     IndexInfo, Introspector, Level, ObjectDetail, ObjectInfo, ObjectKind, RelationInfo,
-    RoutineDetail, SchemaInfo, SchemaSnapshot, Scope, SequenceDetail, Snapshot, SourceInfo,
-    TableDetail, TriggerDetail, TypeCategory, TypeDetail, fetch_all, has_columns, has_source,
-    opt_text,
+    RoutineDetail, SchemaInfo, SchemaSnapshot, SequenceDetail, SourceInfo, TableDetail,
+    TriggerDetail, TypeCategory, TypeDetail, fetch_all, has_columns, has_source, opt_text,
+    restrict,
 };
 use crate::{Connection, Dialect, Result, Value};
 
@@ -35,18 +36,21 @@ SELECT t.table_name, t.temporary, t.iot_type, p.partitioning_type, \
              WHERE k.owner = t.owner AND k.name = t.table_name AND k.object_type = 'TABLE') END \
 FROM all_tables t \
 LEFT JOIN all_part_tables p ON p.owner = t.owner AND p.table_name = t.table_name \
-WHERE t.owner = :1 AND t.nested = 'NO' AND t.secondary = 'N' AND t.dropped = 'NO'";
+WHERE t.owner = :1 AND t.nested = 'NO' AND t.secondary = 'N' AND t.dropped = 'NO' \
+/*only:INSTR(@, '\"' || t.table_name || '\"') > 0*/";
 
 const SEQUENCES: &str = "\
 SELECT s.sequence_name, s.min_value, s.max_value, s.increment_by, s.cycle_flag, s.order_flag, \
        s.cache_size \
-FROM all_sequences s WHERE s.sequence_owner = :1";
+FROM all_sequences s WHERE s.sequence_owner = :1 \
+/*only:INSTR(@, '\"' || s.sequence_name || '\"') > 0*/";
 
 /// Standalone functions and procedures (a row without `PROCEDURE_NAME`).
 const ROUTINES: &str = "\
 SELECT p.object_name, p.deterministic, p.pipelined, p.authid, p.parallel \
 FROM all_procedures p \
-WHERE p.owner = :1 AND p.procedure_name IS NULL AND p.object_type IN ('FUNCTION', 'PROCEDURE')";
+WHERE p.owner = :1 AND p.procedure_name IS NULL AND p.object_type IN ('FUNCTION', 'PROCEDURE') \
+/*only:INSTR(@, '\"' || p.object_name || '\"') > 0*/";
 
 /// Arguments of standalone routines in declaration order; position 0 is the
 /// return value of a function. A routine without arguments has one row
@@ -56,6 +60,7 @@ SELECT a.object_name, a.argument_name, a.position, a.data_type, a.in_out, a.defa
        a.type_owner, a.type_name \
 FROM all_arguments a \
 WHERE a.owner = :1 AND a.package_name IS NULL AND a.data_level = 0 \
+/*only:INSTR(@, '\"' || a.object_name || '\"') > 0*/ \
 ORDER BY a.object_name, a.sequence";
 
 const TRIGGERS: &str = concat!(
@@ -63,21 +68,24 @@ const TRIGGERS: &str = concat!(
     px_when_fn!(),
     "SELECT t.trigger_name, t.trigger_type, t.triggering_event, t.status, \
             px_when(t.owner, t.trigger_name) \
-     FROM all_triggers t WHERE t.owner = :1"
+     FROM all_triggers t WHERE t.owner = :1 /*only:INSTR(@, '\"' || NVL(t.table_name, t.trigger_name) || '\"') > 0*/"
 );
 
-const TYPES: &str = "SELECT t.type_name, t.typecode FROM all_types t WHERE t.owner = :1";
+const TYPES: &str = "SELECT t.type_name, t.typecode FROM all_types t WHERE t.owner = :1 \
+/*only:INSTR(@, '\"' || t.type_name || '\"') > 0*/";
 
 const TYPE_ATTRIBUTES: &str = "\
 SELECT a.type_name, a.attr_name, a.attr_type_mod, a.attr_type_owner, a.attr_type_name, \
        a.length, a.precision, a.scale, a.char_used \
 FROM all_type_attrs a WHERE a.owner = :1 AND a.inherited = 'NO' \
+/*only:INSTR(@, '\"' || a.type_name || '\"') > 0*/ \
 ORDER BY a.type_name, a.attr_no";
 
 const COLLECTION_TYPES: &str = "\
 SELECT c.type_name, c.coll_type, c.elem_type_mod, c.elem_type_owner, c.elem_type_name, \
        c.length, c.precision, c.scale, c.char_used \
-FROM all_coll_types c WHERE c.owner = :1";
+FROM all_coll_types c WHERE c.owner = :1 \
+/*only:INSTR(@, '\"' || c.type_name || '\"') > 0*/";
 
 /// The query of `columns` for every table and view of the schema; the table
 /// name is the last column.
@@ -94,18 +102,21 @@ const COLUMNS: &str = concat!(
             ON cc.owner = c.owner AND cc.table_name = c.table_name \
            AND cc.column_name = c.column_name \
      WHERE c.owner = :1 \
+     /*only:INSTR(@, '\"' || c.table_name || '\"') > 0*/ \
      ORDER BY c.table_name, c.column_id"
 );
 
 const IDENTITY_COLUMNS: &str = "\
 SELECT i.table_name, i.column_name, i.generation_type \
-FROM all_tab_identity_cols i WHERE i.owner = :1";
+FROM all_tab_identity_cols i WHERE i.owner = :1 \
+/*only:INSTR(@, '\"' || i.table_name || '\"') > 0*/";
 
 /// Virtual columns; `ALL_TAB_COLUMNS` does not say which they are.
 const VIRTUAL_COLUMNS: &str = "\
 SELECT c.table_name, c.column_name \
 FROM all_tab_cols c \
-WHERE c.owner = :1 AND c.virtual_column = 'YES' AND c.hidden_column = 'NO'";
+WHERE c.owner = :1 AND c.virtual_column = 'YES' AND c.hidden_column = 'NO' \
+/*only:INSTR(@, '\"' || c.table_name || '\"') > 0*/";
 
 /// The query of `indexes` for every table of the schema; the table name is
 /// the last column.
@@ -119,6 +130,7 @@ const INDEXES: &str = concat!(
      FROM all_indexes i \
      JOIN all_ind_columns c ON c.index_owner = i.owner AND c.index_name = i.index_name \
      WHERE i.table_owner = :1 AND i.index_type <> 'LOB' \
+     /*only:INSTR(@, '\"' || i.table_name || '\"') > 0*/ \
      ORDER BY i.table_name, i.index_name, c.column_position"
 );
 
@@ -138,6 +150,7 @@ LEFT JOIN all_cons_columns rc \
        ON rc.owner = r.owner AND rc.constraint_name = r.constraint_name \
       AND rc.position = cc.position \
 WHERE c.owner = :1 AND c.constraint_type IN ('P', 'U', 'R', 'C') \
+/*only:INSTR(@, '\"' || c.table_name || '\"') > 0*/ \
 ORDER BY c.table_name, \
          CASE c.constraint_type WHEN 'P' THEN 0 WHEN 'U' THEN 1 WHEN 'R' THEN 2 ELSE 3 END, \
          c.constraint_name, cc.position, cc.column_name";
@@ -149,7 +162,7 @@ const VIEW_SOURCES: &str = concat!(
     px_ddl_fn!(),
     "SELECT v.view_name, v.text_length, v.text_vc, \
             CASE WHEN v.text_length > 4000 THEN px_ddl('VIEW', v.view_name, v.owner) END \
-     FROM all_views v WHERE v.owner = :1 ORDER BY v.view_name"
+     FROM all_views v WHERE v.owner = :1 /*only:INSTR(@, '\"' || v.view_name || '\"') > 0*/ ORDER BY v.view_name"
 );
 
 /// The stored text of PL/SQL units, line by line, a spec before its body.
@@ -158,39 +171,168 @@ SELECT s.name, s.type, s.text FROM all_source s \
 WHERE s.owner = :1 \
   AND s.type IN ('PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'TYPE', 'TYPE BODY', \
                  'TRIGGER') \
+/*only:INSTR(@, '\"' || s.name || '\"') > 0*/ \
 ORDER BY s.name, s.type, s.line";
 
-pub(super) async fn load(
-    intro: &OracleIntrospector<'_>,
-    scope: &Scope,
-    level: Level,
-) -> Result<Snapshot> {
-    let mut schemas = Vec::new();
-    for info in intro.schemas().await? {
-        if scope.selects(&info) {
-            schemas.push(load_schema(intro, info, level).await?);
+/// The schema a statement asks about and the objects it is restricted to:
+/// the list is what the `only` markers of the statements look for, `"A","B"`
+/// (`None`: every object).
+pub(super) struct Scoped<'a> {
+    schema: &'a str,
+    list: Option<&'a str>,
+}
+
+impl Scoped<'_> {
+    async fn rows(
+        &self,
+        conn: &dyn Connection,
+        name: &'static str,
+        sql: &str,
+    ) -> Result<Vec<Cells>> {
+        match self.list {
+            None => fetch_all(conn, name, sql, &[Value::from(self.schema)]).await,
+            Some(list) => {
+                let sql = restrict(sql, ":2");
+                fetch_all(
+                    conn,
+                    name,
+                    &sql,
+                    &[Value::from(self.schema), Value::from(list)],
+                )
+                .await
+            }
         }
     }
-    Ok(Snapshot {
+}
+
+/// The longest list of names bound to a statement: a `VARCHAR2` bind of a
+/// SQL statement holds 4000 bytes.
+const MAX_LIST: usize = 3800;
+
+/// `"A","B"`: the names in quotes, which no identifier can contain, so
+/// `INSTR(list, '"' || name || '"')` finds exactly the names in the list.
+/// `None` when the list does not fit a bind.
+fn name_list(names: &[String]) -> Option<String> {
+    if names.iter().any(|n| n.contains('"')) {
+        return None;
+    }
+    let list = names
+        .iter()
+        .map(|n| format!("\"{n}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    (list.len() <= MAX_LIST).then_some(list)
+}
+
+/// The kinds a stamp is taken of, as `ALL_OBJECTS` calls them. A package or
+/// type body is stamped with its spec.
+const STAMPED_TYPES: &str = "'TABLE', 'VIEW', 'MATERIALIZED VIEW', 'SEQUENCE', 'SYNONYM', \
+     'PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'TYPE', 'TYPE BODY', 'TRIGGER'";
+
+/// The change query: when each object last had DDL run on it (a comment, a
+/// new column, a dropped index or a disabled trigger count) and which object
+/// it is (an id: a table dropped and made again is another one). The last
+/// column is the time of the database, to tell whether a time can still be
+/// shared by a later change.
+const STAMPS: &str = "\
+SELECT o.object_type, o.object_name, \
+       TO_CHAR(o.last_ddl_time, 'YYYYMMDDHH24MISS') || ':' || o.object_id, \
+       (SELECT g.table_name FROM all_triggers g \
+        WHERE o.object_type = 'TRIGGER' AND g.owner = o.owner AND g.trigger_name = o.object_name), \
+       TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS') \
+FROM all_objects o \
+WHERE o.owner = :1 AND o.generated = 'N' AND o.object_name NOT LIKE 'BIN$%' \
+  AND o.object_type IN (";
+
+pub(super) async fn stamps(
+    conn: &dyn Connection,
+    info: &SchemaInfo,
+    level: Level,
+) -> Result<SchemaStamps> {
+    let sql = format!("{STAMPS}{STAMPED_TYPES})");
+    let mut parts: std::collections::BTreeMap<(ObjectKind, String, Option<String>), Vec<String>> =
+        std::collections::BTreeMap::new();
+    // The time of a change has a resolution of one second. A change made in
+    // the second the stamps are taken in could be followed by another one in
+    // that second that no stamp shows, so wait for the second to pass.
+    let mut rows = fetch_all(conn, "stamps", &sql, &[Value::from(info.name.as_str())]).await?;
+    for _ in 0..2 {
+        let in_this_second = rows.iter().any(|r| {
+            let (Ok(stamp), Ok(now)) = (r.text(2), r.text(4)) else {
+                return false;
+            };
+            stamp.get(..14) == Some(now.as_str())
+        });
+        if !in_this_second {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
+        rows = fetch_all(conn, "stamps", &sql, &[Value::from(info.name.as_str())]).await?;
+    }
+    for r in rows {
+        let kind = match r.text(0)?.trim() {
+            "PACKAGE BODY" => ObjectKind::Package,
+            "TYPE BODY" => ObjectKind::Type,
+            other => match super::object_kind(other) {
+                Some(kind) => kind,
+                None => continue,
+            },
+        };
+        parts
+            .entry((kind, r.text(1)?, r.opt_text(3)?))
+            .or_default()
+            .push(r.text(2)?);
+    }
+    let objects = parts
+        .into_iter()
+        .map(|((kind, name, parent), mut stamps)| {
+            stamps.sort();
+            let parts: Vec<&str> = stamps.iter().map(String::as_str).collect();
+            Stamp(kind, name, String::new(), parent, digest(&parts))
+        })
+        .collect();
+    Ok(SchemaStamps {
         level,
-        token: None,
-        schemas,
+        system: info.is_system,
+        row: String::new(),
+        objects,
     })
 }
 
-async fn load_schema(
+/// Reads a schema, or the objects of `units` and what belongs to them. The
+/// list of objects is read whole (names are cheap) and reduced; the queries
+/// that cost per object, and the ones that read text, ask for the names.
+pub(super) async fn load_schema(
     intro: &OracleIntrospector<'_>,
     info: SchemaInfo,
     level: Level,
+    units: Option<&Units>,
 ) -> Result<SchemaSnapshot> {
     let conn = intro.conn;
     let schema = info.name.clone();
-    let arg = [Value::from(schema.as_str())];
+    let list = match units {
+        None => None,
+        Some(units) => match name_list(&units.names()) {
+            Some(list) => Some(list),
+            // Too many names for a bind: read the schema whole, then reduce.
+            None => {
+                let whole = Box::pin(load_schema(intro, info, level, None)).await?;
+                return Ok(retain_units(whole, units));
+            }
+        },
+    };
+    let arg = Scoped {
+        schema: &schema,
+        list: list.as_deref(),
+    };
 
     // The same queries as `objects`, so the base fields are the same.
     let mut objects = intro.objects(&schema, &[]).await?;
     for object in &mut objects {
         object.owner = Some(schema.clone());
+    }
+    if let Some(units) = units {
+        objects.retain(|o| units.selects(o));
     }
 
     let mut relations = Vec::new();
@@ -227,30 +369,30 @@ struct Details {
 }
 
 impl Details {
-    async fn read(conn: &dyn Connection, arg: &[Value], schema: &str) -> Result<Self> {
+    async fn read(conn: &dyn Connection, arg: &Scoped<'_>, schema: &str) -> Result<Self> {
         let mut d = Details::default();
 
-        for r in fetch_all(conn, "tables", TABLES, arg).await? {
+        for r in arg.rows(conn, "tables", TABLES).await? {
             d.tables.insert(r.text(0)?, table_detail(&r)?);
         }
-        for r in fetch_all(conn, "sequences", SEQUENCES, arg).await? {
+        for r in arg.rows(conn, "sequences", SEQUENCES).await? {
             d.sequences.insert(r.text(0)?, sequence_detail(&r)?);
         }
 
-        for r in fetch_all(conn, "routines", ROUTINES, arg).await? {
+        for r in arg.rows(conn, "routines", ROUTINES).await? {
             d.routines.insert(r.text(0)?, routine_detail(&r)?);
         }
-        for r in fetch_all(conn, "arguments", ARGUMENTS, arg).await? {
+        for r in arg.rows(conn, "arguments", ARGUMENTS).await? {
             if let Some(routine) = d.routines.get_mut(&r.text(0)?) {
                 add_argument(routine, &r, schema)?;
             }
         }
 
-        for r in fetch_all(conn, "triggers", TRIGGERS, arg).await? {
+        for r in arg.rows(conn, "triggers", TRIGGERS).await? {
             d.triggers.insert(r.text(0)?, trigger_detail(&r)?);
         }
 
-        for r in fetch_all(conn, "types", TYPES, arg).await? {
+        for r in arg.rows(conn, "types", TYPES).await? {
             d.types.insert(
                 r.text(0)?,
                 TypeDetail {
@@ -263,7 +405,7 @@ impl Details {
                 },
             );
         }
-        for r in fetch_all(conn, "type_attributes", TYPE_ATTRIBUTES, arg).await? {
+        for r in arg.rows(conn, "type_attributes", TYPE_ATTRIBUTES).await? {
             if let Some(t) = d.types.get_mut(&r.text(0)?) {
                 t.attributes.push(AttributeInfo {
                     name: r.text(1)?,
@@ -271,7 +413,7 @@ impl Details {
                 });
             }
         }
-        for r in fetch_all(conn, "collection_types", COLLECTION_TYPES, arg).await? {
+        for r in arg.rows(conn, "collection_types", COLLECTION_TYPES).await? {
             if let Some(t) = d.types.get_mut(&r.text(0)?) {
                 let element = member_type(&r, schema)?;
                 t.base_type = Some(match r.text(1)?.as_str() {
@@ -434,7 +576,7 @@ fn member_type(r: &Cells, schema: &str) -> Result<String> {
 /// view of the schema, in the order of the objects.
 async fn relations_of(
     conn: &dyn Connection,
-    arg: &[Value],
+    arg: &Scoped<'_>,
     schema: &str,
     objects: &[ObjectInfo],
 ) -> Result<Vec<RelationInfo>> {
@@ -453,7 +595,7 @@ async fn relations_of(
         .collect();
 
     let mut identity: HashMap<(String, String), IdentityKind> = HashMap::new();
-    for r in fetch_all(conn, "identity_columns", IDENTITY_COLUMNS, arg).await? {
+    for r in arg.rows(conn, "identity_columns", IDENTITY_COLUMNS).await? {
         identity.insert(
             (r.text(0)?, r.text(1)?),
             if r.text(2)? == "ALWAYS" {
@@ -463,13 +605,14 @@ async fn relations_of(
             },
         );
     }
-    let virtual_columns = fetch_all(conn, "virtual_columns", VIRTUAL_COLUMNS, arg)
+    let virtual_columns = arg
+        .rows(conn, "virtual_columns", VIRTUAL_COLUMNS)
         .await?
         .iter()
         .map(|r| Ok((r.text(0)?, r.text(1)?)))
         .collect::<Result<Vec<(String, String)>>>()?;
 
-    for r in fetch_all(conn, "columns", COLUMNS, arg).await? {
+    for r in arg.rows(conn, "columns", COLUMNS).await? {
         let table = r.text(13)?;
         let Some(&at) = index.get(&table) else {
             continue;
@@ -487,14 +630,14 @@ async fn relations_of(
         relations[at].columns.push(column);
     }
 
-    for r in fetch_all(conn, "indexes", INDEXES, arg).await? {
+    for r in arg.rows(conn, "indexes", INDEXES).await? {
         let Some(&at) = index.get(&r.text(6)?) else {
             continue;
         };
         add_index_row(&mut relations[at].indexes, &r)?;
     }
 
-    for r in fetch_all(conn, "constraints", CONSTRAINTS, arg).await? {
+    for r in arg.rows(conn, "constraints", CONSTRAINTS).await? {
         let Some(&at) = index.get(&r.text(13)?) else {
             continue;
         };
@@ -531,7 +674,7 @@ fn add_index_row(indexes: &mut Vec<IndexInfo>, r: &Cells) -> Result<()> {
 /// PL/SQL units (a package with its body, a type with its body).
 async fn read_sources(
     conn: &dyn Connection,
-    arg: &[Value],
+    arg: &Scoped<'_>,
     schema: &str,
     objects: &[ObjectInfo],
 ) -> Result<Vec<SourceInfo>> {
@@ -541,7 +684,7 @@ async fn read_sources(
     };
     let mut out = Vec::new();
 
-    for r in fetch_all(conn, "view_sources", VIEW_SOURCES, arg).await? {
+    for r in arg.rows(conn, "view_sources", VIEW_SOURCES).await? {
         let name = r.text(0)?;
         if !known(&name, ObjectKind::View) {
             continue;
@@ -564,7 +707,7 @@ async fn read_sources(
     type Unit = (String, ObjectKind, Vec<(String, String)>);
     let mut units: Vec<Unit> = Vec::new();
     let mut at: HashMap<(String, ObjectKind), usize> = HashMap::new();
-    for r in fetch_all(conn, "unit_sources", UNIT_SOURCES, arg).await? {
+    for r in arg.rows(conn, "unit_sources", UNIT_SOURCES).await? {
         let (name, ty) = (r.text(0)?, r.text(1)?);
         let Some(kind) = unit_kind(&ty) else {
             continue;
@@ -610,7 +753,7 @@ mod tests {
     use async_trait::async_trait;
 
     use super::*;
-    use crate::schema::{ConstraintKind, SchemaFilter};
+    use crate::schema::{ConstraintKind, SchemaFilter, Scope, Snapshot};
     use crate::{
         Backend, Column, Cursor, ExecOptions, Outcome, Result as DbResult, Row, TxMode, ValueKind,
     };

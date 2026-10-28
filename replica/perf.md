@@ -173,6 +173,25 @@ db-postgres --release --test it load::bench -- --ignored --nocapture`.
 | 2026-10-23 | mac-1 | postgres 18.6 | 203 ms | 1248 ms | 1004 ms | 5 / 8 / 11 | `ANALYZE` run before; the same count of statements for 3 and for 60 tables is a conformance case (`load_query_count`) |
 | | | oracle (19c / Free 23) | | | | about 8 / 21 / 23 | not measured: the bulk load is covered by unit tests with canned rows and by ignored integration tests |
 
+### Incremental refresh (5000 tables)
+Issue #309: the same 5000-table schema as above, PostgreSQL 18 in Docker on
+the same machine, release build, median of 5 runs, little other load.
+`cargo test -p db-postgres --release --test it load::bench_incremental --
+--ignored --nocapture` (and `load::bench_load_5000` for the full read).
+`changes` compares the stamps of the token with the catalogs and reads only
+the tables whose stamp differs; `load_objects` reads one table by name.
+
+| date | machine | what | time | notes |
+|---|---|---|---|---|
+| 2026-10-28 | mac-1 | full read, structure level | 569 ms | `Introspector::load`, now with the stamp queries (9 / 12 / 15 statements per schema instead of 5 / 8 / 11) |
+| 2026-10-28 | mac-1 | `changes`, nothing changed | 71 ms | 8x less than the full read; nothing is read or merged |
+| 2026-10-28 | mac-1 | `changes`, one table changed | 84 ms | the stamps plus the read of that one table and its children |
+| 2026-10-28 | mac-1 | `load_objects`, one table | 13 ms | refresh of one object from the tree |
+
+A small schema (the 42 objects of a demo data source) is dominated by round
+trips to the server, so the gain there is the count of rows read, not time;
+it was not measured separately.
+
 ### Metadata model (10 000 tables)
 Issue #300: `cargo bench -p db-model` (`crates/database/db-model/benches/model.rs`)
 on a synthetic schema of 10 000 tables with eight columns, a primary key, a
