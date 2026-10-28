@@ -522,3 +522,68 @@ fn oracle_violation_in_the_last_row_leaves_the_table_unchanged() {
 fn oracle_conversion_failures() {
     conversion_failure_names_the_row(&oracle(), &case_oracle());
 }
+
+/// The resident memory of this process in KiB, from `ps` (the test has no
+/// platform API to ask).
+fn rss_kib() -> u64 {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("a number")
+}
+
+#[test]
+#[ignore = "needs the postgres container"]
+fn postgres_export_memory_stays_flat() {
+    let h = postgres();
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = ExportOptions::new(Format::Csv, Dialect::Postgres);
+    options.column_header = true;
+    let run = |rows: u64, name: &str| {
+        let file = dir.path().join(name);
+        let (_, rx) = export(
+            &h,
+            ExportRequest {
+                source: ExportSource::Sql(format!(
+                    "select g as id, md5(g::text) || md5((g + 1)::text) as name, now() as at from generate_series(1, {rows}) g"
+                )),
+                options: options.clone(),
+                target: ExportTarget::File(file.clone()),
+                limit: None,
+            },
+        );
+        let mut peak = rss_kib();
+        let outcome = loop {
+            match rx.recv_timeout(WAIT).expect("an event") {
+                ExportEvent::Progress { .. } => peak = peak.max(rss_kib()),
+                ExportEvent::Finished { outcome, .. } => break outcome,
+            }
+        };
+        let ExportOutcome::Done(done) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(done.rows, rows);
+        let size = std::fs::metadata(&file).unwrap().len();
+        std::fs::remove_file(&file).unwrap();
+        (peak.max(rss_kib()), size)
+    };
+    // Warm up: connection, buffers.
+    let (small, small_size) = run(100_000, "a.csv");
+    let (large, large_size) = run(2_000_000, "b.csv");
+    eprintln!(
+        "100 000 rows: {} MiB file, peak RSS {} MiB; 2 000 000 rows: {} MiB file, peak RSS {} MiB",
+        small_size >> 20,
+        small >> 10,
+        large_size >> 20,
+        large >> 10
+    );
+    // Twenty times the rows, the same memory (a few MiB of slack).
+    assert!(
+        large < small + 20 * 1024,
+        "RSS grew from {small} KiB to {large} KiB"
+    );
+}
