@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: SQL Scripts (generate SELECT, INSERT, UPDATE, DELETE, CREATE for an object)",db-gui,could,yes,no,Pro
+"Explorer: SQL Scripts (generate SELECT, INSERT, UPDATE, DELETE, CREATE for an object)",db-gui,could,yes,no,Pro; only Generate DDL to Clipboard so far (#371); SQL Generator and the data statements remain

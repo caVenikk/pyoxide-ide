@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Explorer: context menus per node kind (data source rename/move/colour/duplicate/remove; Rename and Set Color of objects),db-gui,should,yes,partial,"Pro; menus in the reference's order for data source, database, schema, group and object; New, Copy/Paste, Refresh, Rename, Move, Set Color, Introspection Level, SQL Scripts, Object Actions (Truncate), Tools, Diagnostics, Drop (#371); Modify Table, Edit Data, Compare, Navigation, Find Usages, Import/Export, Diagrams, DDL Mapping, Copy/Cut Data Source and Paste remain"

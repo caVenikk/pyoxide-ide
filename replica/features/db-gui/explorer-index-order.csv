@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Explorer: indexes listed unique first, then by name",db-gui,could,yes,yes,Pro; as in the reference (#372)
