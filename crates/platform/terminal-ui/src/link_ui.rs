@@ -538,14 +538,11 @@ impl SessionView {
             .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .child(
-                div()
-                    .id("terminal-link-open")
-                    .cursor_pointer()
-                    .text_color(theme.color(UiRole::TextLink))
-                    .child("Open")
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                ui::link::link("terminal-link-open", "Open", cx).on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.open_target(target.clone(), cx);
-                    })),
+                    },
+                )),
             )
             .child(
                 div()

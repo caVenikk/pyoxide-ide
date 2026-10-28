@@ -42,10 +42,10 @@ pub(crate) fn open<'a>(
     open_with(cx, options(program, args))
 }
 
-pub(crate) fn open_with<'a>(
-    cx: &'a mut TestAppContext,
+pub(crate) fn open_with(
+    cx: &mut TestAppContext,
     options: SessionOptions,
-) -> (Entity<SessionView>, &'a mut VisualTestContext) {
+) -> (Entity<SessionView>, &mut VisualTestContext) {
     cx.executor().allow_parking();
     cx.update(|cx| {
         ui::init(cx, themes::ThemeKind::Dark);

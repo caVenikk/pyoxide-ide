@@ -820,7 +820,7 @@ fn paths_in_the_output_open_in_the_editor_and_the_project_view(cx: &mut TestAppC
     // The command line also holds the path; the output is the line that
     // starts with the word. (A long path may wrap: the click is on its
     // start.)
-    let mut link_cell = |h: &mut H, word: &str, path: String| {
+    let link_cell = |h: &mut H, word: &str, path: String| {
         h.invoke(
             "terminal.type",
             json!({ "text": format!("echo {word} {path}\r") }),

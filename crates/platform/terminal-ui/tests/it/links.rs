@@ -62,7 +62,7 @@ fn project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("pyoxide-links-{}-{name}", std::process::id()));
     std::fs::create_dir_all(dir.join("pkg")).unwrap();
     std::fs::write(dir.join("pkg").join("app.py"), "print(1)\n").unwrap();
-    dir.canonicalize().unwrap()
+    dir
 }
 
 /// Draws frames for about `ms` of the real clock (the hint's delay is
