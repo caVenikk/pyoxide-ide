@@ -43,6 +43,7 @@ fn manual() -> SessionOptions {
     SessionOptions {
         tx_mode: Some(TxMode::Manual),
         schema: None,
+        isolation: None,
     }
 }
 
@@ -820,6 +821,44 @@ fn schema_is_read_after_connecting_and_after_set_schema() {
         h.console_sql()
             .contains(&"SET search_path TO \"Sales\"".to_owned())
     );
+}
+
+#[test]
+fn isolation_is_set_now_and_after_a_reconnect_and_refused_where_unsupported() {
+    let h = harness(Backend::Postgres, DataSourceOptions::default());
+    let session = h.handle.open_session(SessionOptions::default());
+    h.run(&session, "select 1");
+    session.set_isolation(Isolation::Serializable);
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event:
+                SessionEvent::CommandDone {
+                    command: Command::SetIsolation,
+                },
+            ..
+        } => Some(()),
+        _ => None,
+    });
+    assert!(h.console_sql().contains(
+        &"SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE".to_owned()
+    ));
+
+    let h = harness(Backend::OracleThin, DataSourceOptions::default());
+    let session = h.handle.open_session(SessionOptions::default());
+    h.run(&session, "select 1 from dual");
+    session.set_isolation(Isolation::RepeatableRead);
+    let error = h.wait_for(|k| match k {
+        EventKind::Session {
+            event:
+                SessionEvent::CommandFailed {
+                    command: Command::SetIsolation,
+                    error,
+                },
+            ..
+        } => Some(error.clone()),
+        _ => None,
+    });
+    assert_eq!(error.kind, ErrorKind::Unsupported);
 }
 
 #[test]

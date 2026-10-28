@@ -84,6 +84,7 @@ async fn run(
     let session = handle.open_session(SessionOptions {
         tx_mode: args.tx_mode,
         schema: None,
+        isolation: None,
     });
     let policy = if args.continue_on_error {
         ErrorPolicy::Continue
