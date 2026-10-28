@@ -171,6 +171,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "app-info"
+version = "0.0.1"
+dependencies = [
+ "dirs 7.0.0",
+]
+
+[[package]]
 name = "ar_archive_writer"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -882,6 +889,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "brand"
+version = "0.0.1"
+dependencies = [
+ "app-info",
+]
+
+[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1235,6 +1249,7 @@ dependencies = [
 name = "code-intel-ui"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "code-intel",
  "editor",
  "flume",
@@ -1682,6 +1697,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "dap-client"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "flume",
  "futures",
  "process",
@@ -1741,6 +1757,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "db-cli"
 version = "0.0.1"
 dependencies = [
+ "brand",
  "clap",
  "commands",
  "db-core",
@@ -1769,8 +1786,8 @@ dependencies = [
 name = "db-model"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "db-core",
- "dirs 7.0.0",
  "name-match",
  "serde",
  "serde_json",
@@ -1781,6 +1798,7 @@ dependencies = [
 name = "db-oracle-odpi"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "async-trait",
  "chrono",
  "db-core",
@@ -1806,6 +1824,7 @@ dependencies = [
 name = "db-postgres"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "async-trait",
  "bytes",
  "chrono",
@@ -1824,6 +1843,7 @@ dependencies = [
 name = "db-service"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "async-trait",
  "commands",
  "db-core",
@@ -1848,6 +1868,7 @@ dependencies = [
 name = "db-session"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "async-trait",
  "commands",
  "db-core",
@@ -2864,6 +2885,7 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 name = "git"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "commands",
  "flume",
  "futures",
@@ -4130,6 +4152,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 name = "lsp-client"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "code-intel",
  "flume",
  "futures",
@@ -5313,6 +5336,7 @@ dependencies = [
 name = "process"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "flume",
  "libc",
  "native-path",
@@ -5342,6 +5366,7 @@ dependencies = [
 name = "project"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "native-path",
  "process",
  "quick-xml 0.42.0",
@@ -5419,8 +5444,8 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 name = "py-debug"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "debugger",
- "dirs 7.0.0",
  "futures",
  "process",
  "project",
@@ -5440,6 +5465,7 @@ name = "py-env"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "brand",
  "commands",
  "dirs 7.0.0",
  "native-path",
@@ -5458,6 +5484,7 @@ dependencies = [
 name = "py-lsp"
 version = "0.0.1"
 dependencies = [
+ "brand",
  "code-intel",
  "dirs 7.0.0",
  "futures",
@@ -5504,6 +5531,7 @@ dependencies = [
 name = "pyoxide-cli"
 version = "0.0.1"
 dependencies = [
+ "brand",
  "clap",
  "commands",
  "db-service",
@@ -5521,6 +5549,7 @@ name = "pyoxide-ide"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "brand",
  "code-intel",
  "code-intel-ui",
  "db-core",
@@ -6052,6 +6081,7 @@ dependencies = [
 name = "run-config"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "process",
  "project",
  "quick-xml 0.42.0",
@@ -6458,6 +6488,7 @@ name = "secrets"
 version = "0.0.1"
 dependencies = [
  "aes 0.9.3",
+ "app-info",
  "base64 0.23.1",
  "cbc 0.2.1",
  "chacha20",
@@ -6648,7 +6679,7 @@ dependencies = [
 name = "settings"
 version = "0.0.1"
 dependencies = [
- "dirs 7.0.0",
+ "app-info",
  "serde",
  "serde_json",
  "tempfile",
@@ -6679,6 +6710,7 @@ dependencies = [
 name = "settings-ui"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "editor",
  "gpui",
  "serde",
@@ -7361,6 +7393,7 @@ name = "terminal"
 version = "0.0.1"
 dependencies = [
  "alacritty_terminal",
+ "app-info",
  "dirs 7.0.0",
  "flume",
  "libc",
@@ -7399,6 +7432,7 @@ dependencies = [
 name = "themes"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "flate2",
  "quick-xml 0.42.0",
  "serde",
@@ -9178,6 +9212,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workbench"
 version = "0.0.1"
 dependencies = [
+ "app-info",
  "chrono",
  "code-intel",
  "code-intel-ui",

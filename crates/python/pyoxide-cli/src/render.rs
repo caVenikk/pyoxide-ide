@@ -207,9 +207,10 @@ pub fn project(info: &ProjectInfo) -> String {
         Some(v) => {
             let _ = writeln!(out, "environment: {}", v.display());
         }
-        None => out.push_str(
-            "environment: none (create one with `pyoxide env venv` or `pyoxide env sync`)\n",
-        ),
+        None => out.push_str(&format!(
+            "environment: none (create one with `{0} env venv` or `{0} env sync`)\n",
+            brand::CLI_NAME
+        )),
     }
     if !info.managers.is_empty() {
         let names: Vec<String> = info

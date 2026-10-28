@@ -76,8 +76,8 @@ pub const SEARCH_TERMS: &[&str] = &[
 ];
 
 /// The preview's text (`FontPreviewService.fontPreviewText`, with the
-/// product's name): `<bold>` marks the parts shown in bold.
-const PREVIEW_TEXT: &str = "Pyoxide is an <bold>Integrated \n\
+/// product's name for `{name}`): `<bold>` marks the parts shown in bold.
+const PREVIEW_TEXT: &str = "{name} is an <bold>Integrated \n\
 Development Environment (IDE)</bold> designed\n\
 to maximize productivity. It provides\n\
 <bold>clever code completion, static code\n\
@@ -294,7 +294,8 @@ fn preview_text() -> (String, Vec<Range<usize>>) {
     const CLOSE: &str = "</bold>";
     let mut text = String::new();
     let mut bold = Vec::new();
-    let mut rest = PREVIEW_TEXT;
+    let template = PREVIEW_TEXT.replace("{name}", app_info::name());
+    let mut rest = template.as_str();
     while let Some(start) = rest.find(OPEN) {
         text.push_str(&rest[..start]);
         let from = text.chars().count();
@@ -1381,7 +1382,7 @@ mod tests {
     #[test]
     fn the_preview_text_has_its_bold_parts() {
         let (text, bold) = preview_text();
-        assert!(text.starts_with("Pyoxide is an Integrated \nDevelopment"));
+        assert!(text.starts_with("App is an Integrated \nDevelopment"));
         assert!(!text.contains("<bold>") && !text.contains("</bold>"));
         let part = |r: &Range<usize>| text.chars().skip(r.start).take(r.len()).collect::<String>();
         assert_eq!(part(&bold[0]), "Integrated \nDevelopment Environment (IDE)");
@@ -1394,12 +1395,12 @@ mod tests {
             lines: Vec::new(),
         };
         h.reset(&buffer);
-        assert_eq!(h.lines[0], [(0..14, false), (14..25, true)]);
+        assert_eq!(h.lines[0], [(0..10, false), (10..21, true)]);
         assert_eq!(h.lines[1], [(0..29, true), (29..38, false)]);
         // Typing before a bold part moves it.
         let edit = buffer.replace_untracked(0..0, "Hi ");
         h.edited(&buffer, &[edit]);
-        assert_eq!(h.lines[0], [(0..17, false), (17..28, true)]);
+        assert_eq!(h.lines[0], [(0..13, false), (13..24, true)]);
     }
 
     #[test]

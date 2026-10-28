@@ -1,5 +1,5 @@
 //! Personal project state (ADR 0009): `workspace.toml` in Pyoxide's
-//! project folder ([`STORE_DIR`]) holds what belongs to one person on one
+//! project folder ([`store_dir`]) holds what belongs to one person on one
 //! machine, such as the chosen interpreter. It is never meant to be
 //! committed, like the reference IDE's `.idea/workspace.xml`.
 //!
@@ -27,19 +27,23 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item};
 
 use crate::store::{
-    STORE_DIR, StoreError, find_table, find_table_mut, lock_root, read_document, version_of,
+    StoreError, find_table, find_table_mut, lock_root, read_document, store_dir, version_of,
     write_atomic,
 };
 
-/// The personal state in [`STORE_DIR`].
+/// The personal state in [`store_dir`].
 pub const WORKSPACE_FILE: &str = "workspace.toml";
 /// Version of the personal state format this build reads and writes.
 pub const WORKSPACE_VERSION: i64 = 1;
 /// The ignore file Pyoxide writes next to [`WORKSPACE_FILE`].
 pub const GITIGNORE_FILE: &str = ".gitignore";
 
-const HEADER: &str =
-    "# Pyoxide personal project state (this person, this machine). Not meant to be committed.\n";
+fn header() -> String {
+    format!(
+        "# {} personal project state (this person, this machine). Not meant to be committed.\n",
+        app_info::name()
+    )
+}
 
 /// What `.oxide/.gitignore` holds when Pyoxide creates it: the reference
 /// IDE's group comment and the entry relative to the folder.
@@ -47,7 +51,7 @@ pub const GITIGNORE_TEXT: &str = "# Default ignored files\n/workspace.toml\n";
 
 /// The personal state file of a project.
 pub fn workspace_file(root: &Path) -> PathBuf {
-    root.join(STORE_DIR).join(WORKSPACE_FILE)
+    root.join(store_dir()).join(WORKSPACE_FILE)
 }
 
 /// The string value of `key` in `[table]` (a dotted path such as
@@ -180,7 +184,7 @@ fn save_items(
     }
     let mut doc = match existing {
         Some(doc) => doc,
-        None => format!("{HEADER}version = {WORKSPACE_VERSION}\n")
+        None => format!("{}version = {WORKSPACE_VERSION}\n", header())
             .parse::<DocumentMut>()
             .expect("the header is valid TOML"),
     };
@@ -263,7 +267,7 @@ pub fn save_table(
     }
     let mut doc = match existing {
         Some(doc) => doc,
-        None => format!("{HEADER}version = {WORKSPACE_VERSION}\n")
+        None => format!("{}version = {WORKSPACE_VERSION}\n", header())
             .parse::<DocumentMut>()
             .expect("the header is valid TOML"),
     };
@@ -303,7 +307,7 @@ pub fn save_table(
 /// Writes `.oxide/.gitignore` unless it exists (any file there, even an
 /// empty one, is the person's and stays as it is).
 fn write_gitignore(root: &Path) -> Result<(), StoreError> {
-    let path = root.join(STORE_DIR).join(GITIGNORE_FILE);
+    let path = root.join(store_dir()).join(GITIGNORE_FILE);
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -324,7 +328,7 @@ mod tests {
     use crate::store;
 
     fn gitignore(root: &Path) -> Option<String> {
-        std::fs::read_to_string(root.join(STORE_DIR).join(GITIGNORE_FILE)).ok()
+        std::fs::read_to_string(root.join(store_dir()).join(GITIGNORE_FILE)).ok()
     }
 
     #[test]
@@ -333,7 +337,7 @@ mod tests {
         let root = dir.path();
         // Nothing to store: nothing is created.
         assert!(!save_value(root, "python", "interpreter", None).unwrap());
-        assert!(!root.join(STORE_DIR).exists());
+        assert!(!root.join(store_dir()).exists());
         assert_eq!(load_value(root, "python", "interpreter").unwrap(), None);
 
         assert!(save_value(root, "python", "interpreter", Some(".venv/bin/python")).unwrap());
@@ -346,7 +350,10 @@ mod tests {
         let text = std::fs::read_to_string(workspace_file(root)).unwrap();
         assert_eq!(
             text,
-            format!("{HEADER}version = 1\n\n[python]\ninterpreter = \".venv/bin/python\"\n")
+            format!(
+                "{}version = 1\n\n[python]\ninterpreter = \".venv/bin/python\"\n",
+                header()
+            )
         );
         // Replaced, then removed: the file stays without the key.
         save_value(root, "python", "interpreter", Some("venv/bin/python")).unwrap();
@@ -361,7 +368,7 @@ mod tests {
         assert!(!save_value(root, "python", "interpreter", None).unwrap());
         assert!(workspace_file(root).is_file());
         // No temporary files are left behind.
-        let mut files: Vec<_> = std::fs::read_dir(root.join(STORE_DIR))
+        let mut files: Vec<_> = std::fs::read_dir(root.join(store_dir()))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
@@ -399,7 +406,7 @@ mod tests {
         save_value(root, "python", "interpreter", Some("a")).unwrap();
         assert_eq!(gitignore(root).as_deref(), Some(GITIGNORE_TEXT));
         // Deleted by the person: not written again while the state exists.
-        std::fs::remove_file(root.join(STORE_DIR).join(GITIGNORE_FILE)).unwrap();
+        std::fs::remove_file(root.join(store_dir()).join(GITIGNORE_FILE)).unwrap();
         save_value(root, "python", "interpreter", Some("b")).unwrap();
         assert_eq!(gitignore(root), None);
     }
@@ -408,13 +415,13 @@ mod tests {
     fn an_existing_gitignore_is_never_rewritten() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         let own = "# mine\n*.toml\n";
-        std::fs::write(root.join(STORE_DIR).join(GITIGNORE_FILE), own).unwrap();
+        std::fs::write(root.join(store_dir()).join(GITIGNORE_FILE), own).unwrap();
         save_value(root, "python", "interpreter", Some("a")).unwrap();
         assert_eq!(gitignore(root).as_deref(), Some(own));
         // An empty one is the person's as well.
-        std::fs::write(root.join(STORE_DIR).join(GITIGNORE_FILE), "").unwrap();
+        std::fs::write(root.join(store_dir()).join(GITIGNORE_FILE), "").unwrap();
         std::fs::remove_file(workspace_file(root)).unwrap();
         save_value(root, "python", "interpreter", Some("a")).unwrap();
         assert_eq!(gitignore(root).as_deref(), Some(""));
@@ -424,7 +431,7 @@ mod tests {
     fn unknown_keys_survive_and_newer_files_are_kept() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         let original = "# my notes\nversion = 1\nlayout = \"wide\"\n\n[python]\ninterpreter = \"old\" # keep me\nother = 3\n\n[run]\nlast = \"app\"\n";
         std::fs::write(workspace_file(root), original).unwrap();
         save_value(root, "python", "interpreter", Some("new")).unwrap();
@@ -511,7 +518,7 @@ mod tests {
         let root = dir.path();
         assert!(!save_table(root, "run", None).unwrap());
         assert!(!save_table(root, "run", Some(toml_edit::Table::new())).unwrap());
-        assert!(!root.join(STORE_DIR).exists());
+        assert!(!root.join(store_dir()).exists());
         save_value(root, "python", "interpreter", Some("a")).unwrap();
         let mut table = toml_edit::Table::new();
         table.insert("selected", toml_edit::value("x"));

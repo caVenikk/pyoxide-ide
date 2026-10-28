@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+app-info.workspace = true
 # zip only selects the flate2 API; this picks its pure Rust backend.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 quick-xml.workspace = true

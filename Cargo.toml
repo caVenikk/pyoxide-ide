@@ -2,6 +2,7 @@
 resolver = "3"
 exclude = ["vendor/oracle-rs"]
 members = [
+    "crates/platform/app-info",
     "crates/platform/code-intel",
     "crates/platform/code-intel-ui",
     "crates/platform/commands",
@@ -24,7 +25,6 @@ members = [
     "crates/platform/project-search",
     "crates/platform/run-config",
     "crates/platform/search",
-    "crates/platform/db-cli",
     "crates/platform/editor",
     "crates/platform/file-index",
     "crates/platform/file-watcher",
@@ -50,6 +50,8 @@ members = [
     "crates/database/db-session",
     "crates/database/sql-intel",
     "crates/database/db-ui",
+    "crates/python/brand",
+    "crates/python/db-cli",
     "crates/python/py-debug",
     "crates/python/py-env",
     "crates/python/py-lsp",
@@ -103,6 +105,7 @@ resvg = { version = "0.45", default-features = false }
 # Test oracle of the SQL parser (ADR 0022, Apache-2.0): a development
 # dependency of `sql-syntax` only, never linked into the application.
 sqlparser = { version = "0.63", default-features = false, features = ["std"] }
+app-info = { path = "crates/platform/app-info" }
 code-intel = { path = "crates/platform/code-intel" }
 code-intel-ui = { path = "crates/platform/code-intel-ui" }
 commands = { path = "crates/platform/commands" }
@@ -149,6 +152,7 @@ db-model = { path = "crates/database/db-model" }
 db-session = { path = "crates/database/db-session" }
 sql-intel = { path = "crates/database/sql-intel" }
 db-ui = { path = "crates/database/db-ui" }
+brand = { path = "crates/python/brand" }
 py-debug = { path = "crates/python/py-debug" }
 py-env = { path = "crates/python/py-env" }
 py-lsp = { path = "crates/python/py-lsp" }

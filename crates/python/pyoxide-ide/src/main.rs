@@ -5,9 +5,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // The platform learns the product's names before anything reads a
+    // setting.
+    brand::install();
     // On Windows the IDE is also its own Ctrl+C sender for the Run tool
     // window (the reference uses a helper program the same way): started
-    // with `--pyoxide-send-ctrl-c <pid>` it only sends Ctrl+C and exits.
+    // with `--<slug>-send-ctrl-c <pid>` it only sends Ctrl+C and exits.
     process::run_interrupt_helper_if_requested();
     process::set_interrupt_helper(process::InterruptHelper::current_exe());
     // The configured Python interpreters live in the configuration folder.

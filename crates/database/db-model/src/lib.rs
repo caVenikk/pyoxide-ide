@@ -38,7 +38,7 @@ mod name;
 mod schema;
 mod source;
 
-pub use cache::{CACHE_FORMAT, CACHE_VERSION, CacheMiss, ModelCache};
+pub use cache::{CACHE_VERSION, CacheMiss, ModelCache, cache_format};
 pub use id::{NodeId, ParseNodeIdError};
 pub use kind::{Group, NodeKind};
 pub use model::{Found, Model, ModelHandle};

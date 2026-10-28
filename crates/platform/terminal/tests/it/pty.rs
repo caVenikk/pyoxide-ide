@@ -214,7 +214,7 @@ fn environment_and_working_directory() {
     let text = snapshot.text();
     assert!(text.contains("PYOXIDE_TERMINAL_TEST=yes"), "{text}");
     assert!(text.contains("COLORTERM=truecolor"), "{text}");
-    assert!(text.contains("TERMINAL_EMULATOR=Pyoxide"), "{text}");
+    assert!(text.contains("TERMINAL_EMULATOR=App"), "{text}");
     // Not Alacritty's window id (`tty` sets it on Unix; the session
     // removes it).
     assert!(text.contains("ALACRITTY_WINDOW_ID=<unset>"), "{text}");

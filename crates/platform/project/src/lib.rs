@@ -29,7 +29,7 @@ pub use filter::{
     wildcard_match,
 };
 pub use roots::{DetectRoots, FolderKind, FolderRules, Roots};
-pub use store::{Exclusions, STORE_DIR, StoreError};
+pub use store::{Exclusions, StoreError, store_dir};
 pub use tree::{Entry, EntryKind, FileTree, Node, NodeId, list_dir};
 
 use std::path::{Path, PathBuf};

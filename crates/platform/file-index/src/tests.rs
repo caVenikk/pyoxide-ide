@@ -51,14 +51,12 @@ fn project() -> Project {
 #[test]
 fn leftovers_of_interrupted_saves_are_hidden_and_removed_when_safe() {
     let p = project();
-    let gone = p.root.join(".app.py.pyoxide-save-2147483632-0");
-    let nested_gone = p
-        .root
-        .join("src/flask/.helpers.py.pyoxide-save-2147483632-3");
-    let in_venv = p.root.join(".venv/lib/.site.py.pyoxide-save-2147483632-0");
+    let gone = p.root.join(".app.py.app-save-2147483632-0");
+    let nested_gone = p.root.join("src/flask/.helpers.py.app-save-2147483632-3");
+    let in_venv = p.root.join(".venv/lib/.site.py.app-save-2147483632-0");
     let mine = p
         .root
-        .join(format!(".app.py.pyoxide-save-{}-1", std::process::id()));
+        .join(format!(".app.py.app-save-{}-1", std::process::id()));
     for f in [&gone, &nested_gone, &in_venv, &mine] {
         std::fs::write(f, "x").unwrap();
     }

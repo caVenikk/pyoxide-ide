@@ -68,7 +68,8 @@ async fn open(
 /// `flood done`.
 fn flood_file(bytes: usize) -> std::io::Result<PathBuf> {
     use std::io::Write as _;
-    let dir = std::env::temp_dir().join(format!("pyoxide-bench-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("{}-bench-{}", app_info::slug(), std::process::id()));
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("flood-{bytes}.txt"));
     let mut f = std::io::BufWriter::new(std::fs::File::create(&path)?);
@@ -445,5 +446,5 @@ pub(super) async fn start_flood(window: WindowHandle<Workbench>, cx: &mut AsyncA
 
 /// Whether the typing measurement runs with a flooding terminal.
 pub(super) fn flood_requested() -> bool {
-    std::env::var_os("PYOXIDE_BENCH_FLOOD").is_some_and(|v| v == "1")
+    app_info::var_os("BENCH_FLOOD").is_some_and(|v| v == "1")
 }

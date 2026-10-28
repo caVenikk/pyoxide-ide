@@ -17,8 +17,10 @@ use crate::model::Model;
 use crate::schema::Cancelled;
 use crate::source::SourceStore;
 
-/// The `format` field of a cache file.
-pub const CACHE_FORMAT: &str = "pyoxide-db-model";
+/// The `format` field of a cache file: `<slug>-db-model`.
+pub fn cache_format() -> String {
+    format!("{}-db-model", app_info::slug())
+}
 
 /// The version of the cache file. Raise it with every change of the file's
 /// shape or of what the model derives from it (node ids included): older
@@ -106,16 +108,11 @@ impl ModelCache {
         Self { root: root.into() }
     }
 
-    /// `db` in the application's cache folder: `PYOXIDE_CACHE_DIR`, else
-    /// `pyoxide` in the user's cache folder (`~/Library/Caches` on macOS,
-    /// `$XDG_CACHE_HOME` or `~/.cache` on Linux, the local application data
-    /// folder on Windows). Never the project folder.
+    /// `db` in the application's cache folder (`app_info::cache_dir`: the
+    /// product's `CACHE_DIR` environment variable, else its slug in the
+    /// user's cache folder). Never the project folder.
     pub fn user() -> Option<Self> {
-        let app = match std::env::var_os("PYOXIDE_CACHE_DIR").filter(|d| !d.is_empty()) {
-            Some(dir) => PathBuf::from(dir),
-            None => dirs::cache_dir()?.join("pyoxide"),
-        };
-        Some(Self::new(app.join("db")))
+        Some(Self::new(app_info::cache_dir()?.join("db")))
     }
 
     pub fn root(&self) -> &Path {
@@ -160,17 +157,18 @@ impl ModelCache {
                 // A file of another version may not parse as this one: say
                 // which version it was.
                 return Err(match serde_json::from_slice::<Header>(&bytes) {
-                    Ok(h) if h.format == CACHE_FORMAT && h.version != CACHE_VERSION => {
+                    Ok(h) if h.format == cache_format() && h.version != CACHE_VERSION => {
                         CacheMiss::Version(h.version)
                     }
                     _ => CacheMiss::Corrupt(e.to_string()),
                 });
             }
         };
-        if file.format != CACHE_FORMAT {
+        if file.format != cache_format() {
             return Err(CacheMiss::Corrupt(format!(
-                "format {:?} instead of {CACHE_FORMAT:?}",
-                file.format
+                "format {:?} instead of {:?}",
+                file.format,
+                cache_format()
             )));
         }
         if file.version != CACHE_VERSION {
@@ -190,8 +188,9 @@ impl ModelCache {
         let dir = self.dir(model.data_source());
         fs::create_dir_all(&dir)?;
         let snapshot = model.to_snapshot();
+        let format = cache_format();
         let file = FileOut {
-            format: CACHE_FORMAT,
+            format: &format,
             version: CACHE_VERSION,
             data_source: model.data_source(),
             token: model.token(),

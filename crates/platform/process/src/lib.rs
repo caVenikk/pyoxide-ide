@@ -35,7 +35,7 @@ pub use exit::ExitStatus;
 pub use flume::{self, Receiver};
 pub use handle::{ProcessHandle, spawn};
 pub use helper::{
-    INTERRUPT_HELPER_ARG, InterruptHelper, run_interrupt_helper_if_requested, set_interrupt_helper,
+    InterruptHelper, interrupt_helper_arg, run_interrupt_helper_if_requested, set_interrupt_helper,
 };
 
 /// A process with this id is running (any process of the system, not only

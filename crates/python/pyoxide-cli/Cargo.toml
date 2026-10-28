@@ -11,6 +11,7 @@ name = "pyoxide"
 path = "src/main.rs"
 
 [dependencies]
+brand.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 commands.workspace = true
 db-service.workspace = true

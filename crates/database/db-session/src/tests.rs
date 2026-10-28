@@ -325,16 +325,16 @@ fn manual_mode_keeps_the_transaction_after_a_failed_statement() {
         [
             "<tx manual>",
             "BEGIN",
-            "SAVEPOINT pyoxide_stmt",
+            "SAVEPOINT px_stmt",
             "insert into t values (1)",
-            "RELEASE SAVEPOINT pyoxide_stmt",
-            "SAVEPOINT pyoxide_stmt",
+            "RELEASE SAVEPOINT px_stmt",
+            "SAVEPOINT px_stmt",
             "select 1/0",
-            "ROLLBACK TO SAVEPOINT pyoxide_stmt",
-            "RELEASE SAVEPOINT pyoxide_stmt",
-            "SAVEPOINT pyoxide_stmt",
+            "ROLLBACK TO SAVEPOINT px_stmt",
+            "RELEASE SAVEPOINT px_stmt",
+            "SAVEPOINT px_stmt",
             "insert into t values (2)",
-            "RELEASE SAVEPOINT pyoxide_stmt",
+            "RELEASE SAVEPOINT px_stmt",
         ]
     );
 
@@ -384,12 +384,7 @@ fn oracle_moves_one_savepoint_and_ddl_ends_the_transaction() {
     assert_eq!(session.status().tx.pending, 2);
     let sql = h.console_sql();
     assert!(!sql.iter().any(|s| s.starts_with("RELEASE") || s == "BEGIN"));
-    assert_eq!(
-        sql.iter()
-            .filter(|s| *s == "SAVEPOINT pyoxide_stmt")
-            .count(),
-        2
-    );
+    assert_eq!(sql.iter().filter(|s| *s == "SAVEPOINT px_stmt").count(), 2);
     h.run(&session, "create table x (a number)");
     assert_eq!(session.status().tx.pending, 0, "DDL commits on Oracle");
 }

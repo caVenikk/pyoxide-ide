@@ -1,0 +1,10 @@
+[package]
+name = "brand"
+description = "The product's name in one place: display names, technical slug, environment prefix, project folder, bundle id (docs/rebrand.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+app-info.workspace = true

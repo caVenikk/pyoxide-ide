@@ -878,7 +878,11 @@ impl Drop for Responder {
             shared.send_response(
                 self.request_seq,
                 &self.command,
-                Err(format!("Pyoxide does not handle '{}'", self.command)),
+                Err(format!(
+                    "{} does not handle '{}'",
+                    app_info::name(),
+                    self.command
+                )),
             );
         }
     }

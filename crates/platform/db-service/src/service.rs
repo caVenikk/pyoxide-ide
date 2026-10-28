@@ -152,8 +152,9 @@ impl DbService {
         let s = self.secrets_for(name, profile);
         if s.password_source == SecretSource::Missing {
             let mut msg = format!(
-                "no password for profile {name:?}: set {} or the profile's password_env, or run `pyoxide-db secret set {name}`",
-                crate::secrets::PASSWORD_ENV
+                "no password for profile {name:?}: set {} or the profile's password_env, or run `{} secret set {name}`",
+                crate::secrets::password_env(),
+                app_info::db_cli_name()
             );
             if let Some(e) = s.store_error {
                 msg.push_str(&format!(" ({e})"));
@@ -176,9 +177,11 @@ impl DbService {
         let (mut params, password_source) = self.params_for(&name, &profile)?;
         let dialect = profile.backend.dialect();
         let session = purpose.map(|purpose| {
+            // The product's slug is the name in a session name unless the
+            // profile sets an application name.
             let base = params
                 .option(opt::APPLICATION_NAME)
-                .unwrap_or(DEFAULT_SESSION_PREFIX);
+                .unwrap_or(app_info::slug());
             session_name(base, &name, purpose, name_limit(dialect))
         });
         if let (Some(session), Dialect::Postgres) = (&session, dialect) {
@@ -210,9 +213,6 @@ impl DbService {
     }
 }
 
-/// The IDE's name in a session name.
-const DEFAULT_SESSION_PREFIX: &str = "pyoxide";
-
 /// Longest session name the engine keeps: PostgreSQL `application_name`
 /// (`NAMEDATALEN - 1`), Oracle `MODULE`; SQLite has no sessions to name.
 fn name_limit(dialect: Dialect) -> usize {
@@ -223,7 +223,7 @@ fn name_limit(dialect: Dialect) -> usize {
     }
 }
 
-/// `pyoxide:<data source>:<purpose>`, at most `limit` bytes and plain ASCII
+/// `<slug>:<data source>:<purpose>`, at most `limit` bytes and plain ASCII
 /// (servers replace other characters): the data source name is shortened
 /// first so that the purpose stays visible.
 pub fn session_name(prefix: &str, data_source: &str, purpose: Purpose, limit: usize) -> String {
@@ -334,7 +334,11 @@ mod tests {
             gets: Default::default(),
         });
         counting
-            .set(crate::secrets::SECRET_SERVICE, "pg", &Secret::new("stored"))
+            .set(
+                &crate::secrets::secret_service(),
+                "pg",
+                &Secret::new("stored"),
+            )
             .unwrap();
         // The stores the front-ends hand to the service are cached.
         let store = Arc::new(secrets::CachedStore::new(counting.clone()));

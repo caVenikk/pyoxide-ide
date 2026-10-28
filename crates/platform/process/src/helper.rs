@@ -2,18 +2,21 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-/// The argument that makes a program act as the interrupt helper; the
-/// process id to interrupt follows it as the last argument.
-pub const INTERRUPT_HELPER_ARG: &str = "--pyoxide-send-ctrl-c";
+/// The argument that makes a program act as the interrupt helper
+/// (`--<slug>-send-ctrl-c`); the process id to interrupt follows it as the
+/// last argument.
+pub fn interrupt_helper_arg() -> String {
+    format!("--{}-send-ctrl-c", app_info::slug())
+}
 
 /// The program that sends Ctrl+C on Windows (see
 /// [`set_interrupt_helper`]): started as `<program> <args...>
-/// --pyoxide-send-ctrl-c <pid>`.
+/// --<slug>-send-ctrl-c <pid>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterruptHelper {
     /// The executable.
     pub program: PathBuf,
-    /// Arguments before [`INTERRUPT_HELPER_ARG`].
+    /// Arguments before [`interrupt_helper_arg`].
     pub args: Vec<OsString>,
 }
 
@@ -53,7 +56,7 @@ pub(crate) fn interrupt_helper() -> Option<InterruptHelper> {
 }
 
 /// Call first thing in `main` of a program used as the interrupt helper. On
-/// Windows, when the arguments end with `--pyoxide-send-ctrl-c <pid>`, sends
+/// Windows, when the arguments end with `--<slug>-send-ctrl-c <pid>`, sends
 /// Ctrl+C to the console of process `<pid>` (leaving its own console,
 /// attaching to the target's, ignoring Ctrl+C itself, generating the event)
 /// and exits: with 0, or with the Windows error code of the step that
@@ -66,13 +69,13 @@ pub fn run_interrupt_helper_if_requested() {
 }
 
 /// The process id when `args` (without the program) end with
-/// [`INTERRUPT_HELPER_ARG`] and a number.
+/// [`interrupt_helper_arg`] and a number.
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
 fn requested_pid(args: Vec<OsString>) -> Option<u32> {
     let [.., flag, pid] = args.as_slice() else {
         return None;
     };
-    if flag != INTERRUPT_HELPER_ARG {
+    if *flag != *interrupt_helper_arg() {
         return None;
     }
     pid.to_str()?.parse().ok()
@@ -89,17 +92,17 @@ mod tests {
     #[test]
     fn the_helper_is_requested_by_the_last_two_arguments() {
         assert_eq!(
-            requested_pid(args(&["--pyoxide-send-ctrl-c", "1234"])),
+            requested_pid(args(&["--app-send-ctrl-c", "1234"])),
             Some(1234)
         );
         assert_eq!(
-            requested_pid(args(&["sub", "--pyoxide-send-ctrl-c", "7"])),
+            requested_pid(args(&["sub", "--app-send-ctrl-c", "7"])),
             Some(7)
         );
         assert_eq!(requested_pid(args(&[])), None);
         assert_eq!(requested_pid(args(&["project"])), None);
-        assert_eq!(requested_pid(args(&["--pyoxide-send-ctrl-c", "x"])), None);
-        assert_eq!(requested_pid(args(&["--pyoxide-send-ctrl-c"])), None);
+        assert_eq!(requested_pid(args(&["--app-send-ctrl-c", "x"])), None);
+        assert_eq!(requested_pid(args(&["--app-send-ctrl-c"])), None);
         assert_eq!(requested_pid(args(&["a", "b"])), None);
     }
 }

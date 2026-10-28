@@ -54,7 +54,7 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     let script = steps([vec![
         json!({"expect": "initialize", "params": {
             "processId": "$any",
-            "clientInfo": {"name": "Pyoxide IDE", "version": "$any"},
+            "clientInfo": {"name": "App", "version": "$any"},
             "rootUri": file_uri(&root),
             "workspaceFolders": [{"uri": file_uri(&root), "name": name}],
             "initializationOptions": {"settings": {"lineLength": 100}},

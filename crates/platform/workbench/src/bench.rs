@@ -246,8 +246,7 @@ async fn typing(window: WindowHandle<Workbench>, cx: &mut AsyncApp) {
     let Some(editor) = active_editor(window, cx) else {
         return;
     };
-    let marks = std::env::var("PYOXIDE_BENCH_MARKS")
-        .ok()
+    let marks = app_info::var("BENCH_MARKS")
         .and_then(|n| n.parse::<usize>().ok())
         .unwrap_or(0);
     let _ = editor.update(cx, |e, cx| {
@@ -1022,7 +1021,7 @@ async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut Asyn
         let _ = cx.update_window(window.into(), |_, window, _| {
             match crate::shot::save(window, &path) {
                 Ok((w, h)) => env::marker(&format!("shot {} {w}x{h}", path.display())),
-                Err(e) => eprintln!("PYOXIDE_SHOT failed: {e}"),
+                Err(e) => eprintln!("{} failed: {e}", app_info::env_name("SHOT")),
             }
         });
     }

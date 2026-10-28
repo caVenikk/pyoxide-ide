@@ -266,6 +266,16 @@ Python product.
 `scripts/check-layers.py` checks these rules from `cargo metadata` and has
 a self-test.
 
+### The product name
+Only the product layer spells the name out: the `brand` crate
+(`crates/python/brand`) holds the display names, the slug, the environment
+variable prefix, the project folder and the bundle id. Platform crates and
+modules read them at run time from `app-info`, a platform crate with a neutral
+default that the product fills at startup (`brand::install()`, and
+`Product::app_info` for the workbench). `scripts/check-brand.py` fails on the
+name anywhere else in the code; `docs/rebrand.md` lists what a rename still
+needs by hand.
+
 ## Language services (M3, ADR 0010, 0011)
 First version done (#82-#87): `lsp-client` (framing over `process`,
 cancellation, document sync, position encodings, pull and push

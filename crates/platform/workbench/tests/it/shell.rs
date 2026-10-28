@@ -99,10 +99,10 @@ fn switches_the_theme_by_command(cx: &mut TestAppContext) {
         cx,
         window,
         "workbench.set-theme",
-        json!({"id": "pyoxide-light"}),
+        json!({"id": "app-light"}),
     );
     let state = invoke(cx, window, "workbench.state", json!(null));
-    assert_eq!(state["theme"], json!("pyoxide-light"));
+    assert_eq!(state["theme"], json!("app-light"));
 }
 
 #[gpui::test]

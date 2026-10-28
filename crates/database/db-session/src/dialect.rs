@@ -6,7 +6,7 @@ use crate::job::syntax_dialect;
 
 /// The one savepoint name a console uses (ADR 0021): PostgreSQL and SQLite
 /// release it after every statement, Oracle moves it by issuing it again.
-pub(crate) const SAVEPOINT: &str = "pyoxide_stmt";
+pub(crate) const SAVEPOINT: &str = "px_stmt";
 
 pub(crate) fn savepoint() -> String {
     format!("SAVEPOINT {SAVEPOINT}")
@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(release_savepoint(Dialect::Oracle), None);
         assert_eq!(
             release_savepoint(Dialect::Postgres).unwrap(),
-            "RELEASE SAVEPOINT pyoxide_stmt"
+            "RELEASE SAVEPOINT px_stmt"
         );
         assert_eq!(
             time_zone(Dialect::Postgres, "it's").unwrap(),

@@ -118,9 +118,12 @@ fn deleted_text(name: &str) -> String {
 /// panel.label.stash.text`) with the files.
 fn problem_message(files: &[String]) -> String {
     let mut text = String::from(
-        "Your local changes to the following files would be overwritten by checkout.\n\
-         Pyoxide can stash the changes, checkout and unstash them after that.\n",
+        "Your local changes to the following files would be overwritten by checkout.\n",
     );
+    text.push_str(&format!(
+        "{} can stash the changes, checkout and unstash them after that.\n",
+        app_info::name()
+    ));
     for f in files.iter().take(20) {
         text.push('\n');
         text.push_str(f);

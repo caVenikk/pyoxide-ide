@@ -13,8 +13,8 @@
 //! ```
 //!
 //! The file never holds secret values. The master password is kept in the
-//! OS credential store (service [`KEEPASS_MASTER_SERVICE`], account = the
-//! database path), read from [`KEEPASS_MASTER_ENV`], or typed at a prompt.
+//! OS credential store (service [`keepass_master_service`], account = the
+//! database path), read from [`keepass_master_env`], or typed at a prompt.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -29,11 +29,17 @@ use crate::{
 };
 
 /// Environment variable that overrides the settings file location.
-pub const CONFIG_ENV: &str = "PYOXIDE_SECRETS_CONFIG";
+pub fn config_env() -> String {
+    app_info::env_name("SECRETS_CONFIG")
+}
 /// Environment variable with the KeePass master password (`master_password = "env"`).
-pub const KEEPASS_MASTER_ENV: &str = "PYOXIDE_KEEPASS_PASSWORD";
+pub fn keepass_master_env() -> String {
+    app_info::env_name("KEEPASS_PASSWORD")
+}
 /// OS credential store service that keeps KeePass master passwords.
-pub const KEEPASS_MASTER_SERVICE: &str = "pyoxide-keepass";
+pub fn keepass_master_service() -> String {
+    format!("{}-keepass", app_info::slug())
+}
 
 const SETTINGS: &str = "secret settings";
 
@@ -57,11 +63,11 @@ pub enum StoreKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MasterPasswordSource {
-    /// The OS credential store, service [`KEEPASS_MASTER_SERVICE`]. Falls
+    /// The OS credential store, service [`keepass_master_service`]. Falls
     /// back to the prompt when it has no entry.
     #[default]
     Keychain,
-    /// The environment variable [`KEEPASS_MASTER_ENV`].
+    /// The environment variable [`keepass_master_env`].
     Env,
     /// Ask every time the store is opened.
     Prompt,
@@ -106,7 +112,7 @@ impl KeePassConfig {
     }
 
     /// Account under which the master password is kept in the OS store
-    /// (service [`KEEPASS_MASTER_SERVICE`]).
+    /// (service [`keepass_master_service`]).
     pub fn master_password_account(&self) -> String {
         self.db_path().to_string_lossy().into_owned()
     }
@@ -161,7 +167,10 @@ impl SecretsConfig {
 
     /// Write atomically, creating parent directories.
     pub fn save(&self, path: &Path) -> Result<()> {
-        let header = "# Pyoxide secret settings. No passwords here.\n\n";
+        let header = format!(
+            "# {} secret settings. No passwords here.\n\n",
+            app_info::name()
+        );
         let text = format!("{header}{}", self.to_toml()?);
         atomic_write(path, text.as_bytes(), false).map_err(|e| {
             settings_err(
@@ -172,15 +181,15 @@ impl SecretsConfig {
     }
 }
 
-/// Settings file location: `$PYOXIDE_SECRETS_CONFIG`, else
-/// `<config dir>/pyoxide/secrets.toml`.
+/// Settings file location: the `SECRETS_CONFIG` environment variable of the
+/// product, else `<config dir>/<slug>/secrets.toml`.
 pub fn config_path(env: &EnvLookup) -> PathBuf {
-    if let Some(p) = env(CONFIG_ENV) {
+    if let Some(p) = env(&config_env()) {
         return PathBuf::from(p);
     }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("pyoxide")
+        .join(app_info::slug())
         .join("secrets.toml")
 }
 
@@ -282,20 +291,24 @@ pub fn keepass_master_password(
         .ok_or_else(|| settings_err(SecretErrorKind::Locked, "no master password entered"))
     };
     match kp.master_password {
-        MasterPasswordSource::Env => match env(KEEPASS_MASTER_ENV) {
+        MasterPasswordSource::Env => match env(&keepass_master_env()) {
             Some(v) => Ok(Secret::new(v)),
             None => Err(settings_err(
                 SecretErrorKind::Locked,
-                format!("set {KEEPASS_MASTER_ENV} to the KeePass master password"),
+                format!(
+                    "set {} to the KeePass master password",
+                    keepass_master_env()
+                ),
             )),
         },
         MasterPasswordSource::Prompt => prompt("no interactive prompt available"),
         MasterPasswordSource::Keychain => {
-            match os_store.get(KEEPASS_MASTER_SERVICE, &kp.master_password_account()) {
+            match os_store.get(&keepass_master_service(), &kp.master_password_account()) {
                 Ok(Some(s)) => Ok(s),
                 Ok(None) => prompt(&format!(
-                    "not found in {} (service {KEEPASS_MASTER_SERVICE})",
-                    os_store.name()
+                    "not found in {} (service {})",
+                    os_store.name(),
+                    keepass_master_service()
                 )),
                 Err(e) if prompter.is_some() => prompt(&e.to_string()),
                 Err(e) => Err(e),
@@ -388,9 +401,9 @@ create = true
 
     #[test]
     fn config_path_env_override() {
-        let e = env(&[(CONFIG_ENV, "/tmp/x/secrets.toml")]);
+        let e = env(&[(config_env().as_str(), "/tmp/x/secrets.toml")]);
         assert_eq!(config_path(&e), PathBuf::from("/tmp/x/secrets.toml"));
-        assert!(config_path(&env(&[])).ends_with("pyoxide/secrets.toml"));
+        assert!(config_path(&env(&[])).ends_with("app/secrets.toml"));
     }
 
     #[test]
@@ -439,11 +452,17 @@ create = true
         let c = keepass_config(dir.path(), MasterPasswordSource::Env);
         let err = open_store_with(&c, None, &env(&[]), &os).err().unwrap();
         assert_eq!(err.kind, SecretErrorKind::Locked);
-        let s = open_store_with(&c, None, &env(&[(KEEPASS_MASTER_ENV, "m")]), &os).unwrap();
+        let s =
+            open_store_with(&c, None, &env(&[(keepass_master_env().as_str(), "m")]), &os).unwrap();
         assert_eq!(s.get("svc", "acc").unwrap().unwrap().expose(), "value");
-        let err = open_store_with(&c, None, &env(&[(KEEPASS_MASTER_ENV, "bad")]), &os)
-            .err()
-            .unwrap();
+        let err = open_store_with(
+            &c,
+            None,
+            &env(&[(keepass_master_env().as_str(), "bad")]),
+            &os,
+        )
+        .err()
+        .unwrap();
         assert_eq!(err.kind, SecretErrorKind::Locked);
 
         // prompt
@@ -459,7 +478,7 @@ create = true
         assert_eq!(err.kind, SecretErrorKind::Locked);
         assert!(open_store_with(&c, Some(&Typed("m")), &env(&[]), &os).is_ok());
         let account = c.keepass.as_ref().unwrap().master_password_account();
-        os.set(KEEPASS_MASTER_SERVICE, &account, &Secret::new("m"))
+        os.set(&keepass_master_service(), &account, &Secret::new("m"))
             .unwrap();
         let s = open_store_with(&c, None, &env(&[]), &os).unwrap();
         assert_eq!(s.get("svc", "acc").unwrap().unwrap().expose(), "value");

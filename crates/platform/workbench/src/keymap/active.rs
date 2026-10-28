@@ -39,7 +39,7 @@ ui::ui_commands! {
         r#"{"name": "VSCode"}"#;
     /// Import a keymap of the reference.
     ImportKeymap { path: Option<String> } => "settings.import-keymap", "Import Keymap\u{2026}",
-        "Imports a PyCharm keymap file (`keymaps/<name>.xml` of its configuration folder; a parent keymap next to it is imported first) into the `keymaps` folder of the configuration and switches to it; a balloon lists the shortcuts of actions Pyoxide does not have. Without a path a file chooser is shown.",
+        "Imports a PyCharm keymap file (`keymaps/<name>.xml` of its configuration folder; a parent keymap next to it is imported first) into the `keymaps` folder of the configuration and switches to it; a balloon lists the shortcuts of actions the IDE does not have. Without a path a file chooser is shown.",
         r#"{"path": "/path/to/keymaps/macOS copy.xml"}"#;
 }
 
@@ -672,7 +672,8 @@ pub fn import_notification(name: &str, imported: &Imported) -> Notification {
             text.push_str(&format!(" It names no parent keymap; {used} is used."));
         } else {
             text.push_str(&format!(
-                " Pyoxide has no {reference} keymap; {used} is used."
+                " {} has no {reference} keymap; {used} is used.",
+                app_info::name()
             ));
         }
     }
@@ -685,7 +686,8 @@ pub fn import_notification(name: &str, imported: &Imported) -> Notification {
             .collect();
         let more = unmapped.len() - shown.len();
         text.push_str(&format!(
-            " Shortcuts of actions Pyoxide does not have: {}{}.",
+            " Shortcuts of actions {} does not have: {}{}.",
+            app_info::name(),
             shown.join("; "),
             if more > 0 {
                 format!(" and {more} more")

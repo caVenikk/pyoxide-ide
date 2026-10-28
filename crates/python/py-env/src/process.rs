@@ -443,7 +443,13 @@ mod tests {
         ] {
             assert!(is_steering_var(OsStr::new(name)), "{name}");
         }
-        for name in ["PATH", "HOME", "PYOXIDE_UV", "NO_COLOR", "UVICORN_PORT"] {
+        for name in [
+            "PATH",
+            "HOME",
+            brand::env_name!("UV"),
+            "NO_COLOR",
+            "UVICORN_PORT",
+        ] {
             assert!(!is_steering_var(OsStr::new(name)), "{name}");
         }
     }

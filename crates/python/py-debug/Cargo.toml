@@ -7,8 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+app-info.workspace = true
 debugger.workspace = true
-dirs = "7"
 process.workspace = true
 project.workspace = true
 py-env.workspace = true

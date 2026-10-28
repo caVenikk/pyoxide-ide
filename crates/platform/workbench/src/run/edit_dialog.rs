@@ -2078,11 +2078,10 @@ impl EditDialog {
                 .gap(px(6.0))
                 .mt(px(20.0))
                 .child(format!("{type_name}: not supported yet"))
-                .child(
-                    div()
-                        .text_color(c.muted)
-                        .child("Kept as the reference IDE wrote it; it cannot run in Pyoxide yet."),
-                )
+                .child(div().text_color(c.muted).child(format!(
+                    "Kept as the reference IDE wrote it; it cannot run in {} yet.",
+                    app_info::name()
+                )))
                 .children(details.into_iter().map(|(k, v)| {
                     div()
                         .flex()

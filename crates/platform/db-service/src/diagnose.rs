@@ -178,7 +178,7 @@ pub async fn diagnose(svc: &DbService, target: &Target, opts: &DiagnoseOptions) 
         Status::Ok
     };
     Report {
-        tool: format!("pyoxide-db {}", env!("CARGO_PKG_VERSION")),
+        tool: format!("{} {}", app_info::db_cli_name(), env!("CARGO_PKG_VERSION")),
         platform: platform(),
         steps,
         result,
@@ -188,10 +188,10 @@ pub async fn diagnose(svc: &DbService, target: &Target, opts: &DiagnoseOptions) 
 
 fn environment(d: &mut Diag) {
     let vars = [
-        "TNS_ADMIN",
-        "ORACLE_HOME",
-        "PYOXIDE_DB_PASSWORD",
-        "PYOXIDE_DB_PROFILES",
+        "TNS_ADMIN".to_owned(),
+        "ORACLE_HOME".to_owned(),
+        crate::secrets::password_env(),
+        crate::profiles::profiles_env(),
     ];
     let set: Vec<String> = vars
         .iter()
@@ -266,8 +266,9 @@ async fn run(
                 Some(Hint {
                     cause: "the profile needs a password and none was found".into(),
                     next: format!(
-                        "store it with `pyoxide-db secret set {name}` or set {}",
-                        crate::secrets::PASSWORD_ENV
+                        "store it with `{} secret set {name}` or set {}",
+                        app_info::db_cli_name(),
+                        crate::secrets::password_env()
                     ),
                 }),
             );
@@ -1202,7 +1203,7 @@ mod tests {
             ..Default::default()
         };
         let r = diagnose(
-            &svc(dir.path(), &[("PYOXIDE_DB_PASSWORD", "hunter2-secret")]),
+            &svc(dir.path(), &[("APP_DB_PASSWORD", "hunter2-secret")]),
             &Target::Connection(Box::new(p)),
             &opts,
         )

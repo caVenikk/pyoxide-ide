@@ -3,7 +3,7 @@ use std::fs;
 
 use db_core::DataSourceId;
 use db_core::schema::Level;
-use db_model::{CACHE_FORMAT, CACHE_VERSION, CacheMiss, Model, ModelCache, NameMatch};
+use db_model::{CACHE_VERSION, CacheMiss, Model, ModelCache, NameMatch, cache_format};
 
 use crate::fixture::{Rng, random_snapshot, shop, synthetic};
 
@@ -71,7 +71,7 @@ fn the_file_holds_the_model_and_the_data_source_id_only() {
         keys,
         ["data_source", "format", "schemas", "token", "version"]
     );
-    assert_eq!(json["format"], CACHE_FORMAT);
+    assert_eq!(json["format"], cache_format());
     assert_eq!(json["version"], CACHE_VERSION);
     assert_eq!(json["data_source"], "reporting");
     // Nothing about the connection anywhere in the file.
@@ -112,26 +112,25 @@ fn damaged_old_and_foreign_files_are_ignored() {
         (vec![0xff, 0xfe, 0x00, 0x12], "corrupt"),
         (b"[1, 2, 3]".to_vec(), "corrupt"),
         (
-            br#"{"format":"something-else","version":1,"data_source":"shop","schemas":[]}"#.to_vec(),
+            br#"{"format":"something-else","version":1,"data_source":"shop","schemas":[]}"#
+                .to_vec(),
             "corrupt",
         ),
         (
-            br#"{"format":"pyoxide-db-model","version":0,"data_source":"shop","model":{"tables":[]}}"#
+            br#"{"format":"app-db-model","version":0,"data_source":"shop","model":{"tables":[]}}"#
                 .to_vec(),
             "version",
         ),
         (
-            br#"{"format":"pyoxide-db-model","version":99,"data_source":"shop","schemas":[]}"#
-                .to_vec(),
+            br#"{"format":"app-db-model","version":99,"data_source":"shop","schemas":[]}"#.to_vec(),
             "version",
         ),
         (
-            br#"{"format":"pyoxide-db-model","version":1,"data_source":"other","schemas":[]}"#
-                .to_vec(),
+            br#"{"format":"app-db-model","version":1,"data_source":"other","schemas":[]}"#.to_vec(),
             "other",
         ),
         (
-            br#"{"format":"pyoxide-db-model","version":1,"data_source":"shop","schemas":[{"info":1}]}"#
+            br#"{"format":"app-db-model","version":1,"data_source":"shop","schemas":[{"info":1}]}"#
                 .to_vec(),
             "corrupt",
         ),
@@ -196,10 +195,10 @@ fn data_sources_have_folders_of_their_own_and_can_be_forgotten() {
 
 #[test]
 fn the_user_cache_is_outside_the_project() {
-    // `PYOXIDE_CACHE_DIR` is not set by the tests; the folder is the user's
+    // `APP_CACHE_DIR` is not set by the tests; the folder is the user's
     // cache folder or nothing.
     if let Some(cache) = ModelCache::user() {
         assert!(cache.root().ends_with("db"));
-        assert!(cache.root().is_absolute() || std::env::var_os("PYOXIDE_CACHE_DIR").is_some());
+        assert!(cache.root().is_absolute() || std::env::var_os("APP_CACHE_DIR").is_some());
     }
 }

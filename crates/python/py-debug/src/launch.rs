@@ -44,7 +44,7 @@ fn with_pydevd(body: &str) -> (String, Value) {
 
 /// Where the library filter's value before Step Into My Code is kept in
 /// pydevd's debugger.
-const KEPT_FILTER: &str = "_pyoxide_libraries_filter";
+const KEPT_FILTER: &str = "_ide_libraries_filter";
 
 /// Step Into My Code with debugpy: pydevd's `stepIn` is a step into the
 /// program's own code while its library filter is on

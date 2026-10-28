@@ -441,7 +441,10 @@ pub fn save(window: &gpui::Window, path: &Path) -> Result<(u32, u32), String> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn save(_: &gpui::Window, _: &Path) -> Result<(u32, u32), String> {
-    Err("PYOXIDE_SHOT is implemented on macOS only".into())
+    Err(format!(
+        "{} is implemented on macOS only",
+        app_info::env_name("SHOT")
+    ))
 }
 
 /// Straight alpha for PNG (only the rounded window corners are translucent).

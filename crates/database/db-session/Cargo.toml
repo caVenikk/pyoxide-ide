@@ -12,6 +12,7 @@ rust-version.workspace = true
 test-support = []
 
 [dependencies]
+app-info.workspace = true
 async-trait.workspace = true
 commands.workspace = true
 db-core.workspace = true

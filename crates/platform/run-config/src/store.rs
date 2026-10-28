@@ -48,7 +48,12 @@ pub const VERSION: i64 = 1;
 /// done for the shared and the personal configurations.
 pub const IMPORTED_KEY: &str = "imported-from-idea";
 
-const HEADER: &str = "# Pyoxide run configuration, shared with the project. Paths are relative to the project folder.\n";
+fn header() -> String {
+    format!(
+        "# {} run configuration, shared with the project. Paths are relative to the project folder.\n",
+        app_info::name()
+    )
+}
 
 /// Keys of a stored configuration.
 const KNOWN: &[&str] = &[
@@ -96,7 +101,7 @@ pub enum StoreError {
 
 /// The shared folder of a project.
 pub fn shared_dir(root: &Path) -> PathBuf {
-    root.join(project::STORE_DIR).join(SHARED_DIR)
+    root.join(project::store_dir()).join(SHARED_DIR)
 }
 
 /// What is stored for a project.
@@ -613,7 +618,7 @@ fn shared_text(existing: Option<&str>, table: &toml::Table) -> String {
             for (k, item) in new.iter() {
                 doc.insert(k, item.clone());
             }
-            return format!("{HEADER}{doc}");
+            return format!("{}{doc}", header());
         }
     };
     let old_keys: Vec<String> = doc.iter().map(|(k, _)| k.to_owned()).collect();
@@ -800,7 +805,7 @@ mod tests {
             ]
         );
         let text = std::fs::read_to_string(shared_dir(root).join("server.toml")).unwrap();
-        assert!(text.starts_with(HEADER), "{text}");
+        assert!(text.starts_with(&header()), "{text}");
         assert!(text.contains("{ name = \"API_TOKEN\" }"), "{text}");
         assert!(
             text.contains("{ name = \"PYTHONUNBUFFERED\", value = \"1\" }"),

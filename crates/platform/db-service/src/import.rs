@@ -13,7 +13,7 @@ use settings_import::pycharm::{
 };
 
 use crate::profiles::{Profile, TlsProfile};
-use crate::secrets::SECRET_SERVICE;
+use crate::secrets::secret_service;
 use crate::service::DbService;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -285,7 +285,7 @@ pub fn import_pycharm(svc: &DbService, args: &PycharmImportArgs) -> Result<Impor
         });
         if !args.dry_run {
             if let Some(secret) = secrets_by_uuid.get(&ds.uuid) {
-                match svc.store.set(SECRET_SERVICE, &name, secret) {
+                match svc.store.set(&secret_service(), &name, secret) {
                     Ok(()) => password = format!("stored in {}", svc.store.name()),
                     Err(e) => password = format!("not stored: {e}"),
                 }

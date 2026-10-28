@@ -285,14 +285,11 @@ mod tests {
         // activation.
         assert!(plan.shell_integration);
         let dir = scripts.path().join(integration::version());
-        let rcfile = dir.join("bash").join("pyoxide-integration.bash");
+        let rcfile = dir.join("bash").join("shell-integration.bash");
         assert_eq!(plan.options.command.args[0], "--rcfile");
         assert_eq!(Path::new(&plan.options.command.args[1]), rcfile);
         assert!(rcfile.is_file());
-        assert_eq!(
-            get(&plan, "__PYOXIDE_SOURCE_1"),
-            Some("/p/.venv/bin/activate")
-        );
+        assert_eq!(get(&plan, "__IDE_SOURCE_1"), Some("/p/.venv/bin/activate"));
     }
 
     #[test]
@@ -324,7 +321,7 @@ mod tests {
         let plan = plan_session(&request, &[&venv]);
         assert!(!plan.shell_integration);
         assert_eq!(get(&plan, "VIRTUAL_ENV"), Some("/p/.venv"));
-        assert_eq!(get(&plan, "__PYOXIDE_SOURCE_1"), None);
+        assert_eq!(get(&plan, "__IDE_SOURCE_1"), None);
         assert_eq!(*venv.seen.lock().unwrap(), [(true, false)]);
 
         // zsh: ZDOTDIR points to the integration, the project's ZDOTDIR

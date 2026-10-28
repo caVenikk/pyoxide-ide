@@ -24,7 +24,7 @@
 #   test            the tests (cargo nextest run, profile `ci`)
 #   throughput      terminal throughput (ADR 0014), numbers to the log
 #   doc             doctests, which nextest does not run
-#   repo            progress, layer and notice checks, the tests of the CI
+#   repo            progress, layer, brand and notice checks, the tests of the CI
 #                   scope script (job `progress`)
 #
 # Needs cargo-nextest (`cargo install cargo-nextest --locked`) and python3.
@@ -172,6 +172,7 @@ run_step() {
         repo)
             "$PYTHON" scripts/progress.py --check-data
             "$PYTHON" scripts/check-layers.py
+            "$PYTHON" scripts/check-brand.py
             "$PYTHON" scripts/notice.py --check
             bash scripts/test-ci-scope.sh
             ;;

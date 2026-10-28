@@ -476,7 +476,7 @@ pub struct ThemeHeader {
 /// [theme]
 /// id = "my-dark"
 /// name = "My Dark"
-/// extends = "pyoxide-dark"
+/// extends = "app-dark"
 ///
 /// [palette]
 /// rust = "#c8643c"
@@ -762,7 +762,7 @@ mod tests {
         file.theme.id = "t".into();
         file.theme.name = "T".into();
         file.theme.kind = Some(ThemeKind::Dark);
-        file.theme.extends = Some("pyoxide-dark".into());
+        file.theme.extends = Some("app-dark".into());
         file.palette.insert("red".into(), Rgba::rgb(200, 0, 0));
         file.ui
             .insert(UiRole::Accent, ColorRef::Palette("red".into()));

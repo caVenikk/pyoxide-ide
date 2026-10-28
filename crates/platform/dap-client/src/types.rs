@@ -75,12 +75,12 @@ pub struct ClientInfo {
 }
 
 impl ClientInfo {
-    /// Pyoxide as the client of an adapter of type `adapter_id`.
+    /// The product as the client of an adapter of type `adapter_id`.
     pub fn new(adapter_id: impl Into<String>) -> Self {
         Self {
             adapter_id: adapter_id.into(),
-            client_id: "pyoxide".to_owned(),
-            client_name: "Pyoxide IDE".to_owned(),
+            client_id: app_info::slug().to_owned(),
+            client_name: app_info::full_name().to_owned(),
             locale: "en".to_owned(),
             run_in_terminal: true,
             start_debugging: false,

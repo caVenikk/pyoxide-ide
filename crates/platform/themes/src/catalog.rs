@@ -355,12 +355,7 @@ mod tests {
         let catalog = Catalog::builtin();
         assert_eq!(
             ids(&catalog),
-            [
-                "islands-dark",
-                "islands-light",
-                "pyoxide-dark",
-                "pyoxide-light"
-            ]
+            ["islands-dark", "islands-light", "app-dark", "app-light"]
         );
         let groups: Vec<ThemeGroup> = catalog.themes().map(|e| e.group).collect();
         assert_eq!(
@@ -396,8 +391,8 @@ mod tests {
             [
                 "islands-dark",
                 "islands-light",
-                "pyoxide-dark",
-                "pyoxide-light",
+                "app-dark",
+                "app-light",
                 "alpha",
                 "zeta"
             ]
@@ -457,7 +452,7 @@ mod tests {
         std::fs::write(dir.path().join("broken.toml"), "[theme\n").unwrap();
         std::fs::write(
             dir.path().join("clash.toml"),
-            custom("pyoxide-dark", "Clash", false).to_toml(),
+            custom("app-dark", "Clash", false).to_toml(),
         )
         .unwrap();
         let (catalog, problems) = Catalog::load(dir.path());
@@ -467,7 +462,7 @@ mod tests {
             Some(dir.path().join("mine.toml").as_path())
         );
         assert_eq!(problems.len(), 2, "{problems:?}");
-        assert_eq!(catalog.get("pyoxide-dark").unwrap().name, "Pyoxide Dark");
+        assert_eq!(catalog.get("app-dark").unwrap().name, "App Dark");
         // No folder: the built-in themes.
         let (catalog, problems) = Catalog::load(&dir.path().join("none"));
         assert_eq!(catalog.themes().count(), 4);

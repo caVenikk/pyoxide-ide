@@ -135,12 +135,10 @@ impl H<'_> {
         }
         let state = self.commit();
         let on_disk = git(&self.root, &["status", "--porcelain", "-uall"]);
-        let store: Vec<_> = std::fs::read_dir(self.root.join(".oxide"))
+        let store: Vec<_> = std::fs::read_dir(self.root.join(".app"))
             .map(|d| d.flatten().map(|e| e.file_name()).collect())
             .unwrap_or_default();
-        panic!(
-            "timed out waiting for {what}: {state:#}\ngit status:\n{on_disk}\n.oxide: {store:?}"
-        );
+        panic!("timed out waiting for {what}: {state:#}\ngit status:\n{on_disk}\n.app: {store:?}");
     }
 
     /// Waits for a notification whose title is `title`.
@@ -278,8 +276,8 @@ fn a_commit_takes_the_included_files(cx: &mut TestAppContext) {
     let n = h.wait_notification("2 files committed");
     assert_eq!(n["content"], "Fix");
     assert_eq!(n["kind"], "information");
-    // The recent messages are kept in `.oxide/workspace.toml`, which its
-    // new `.oxide/.gitignore` ignores (the ignore file is unversioned).
+    // The recent messages are kept in `.app/workspace.toml`, which its
+    // new `.app/.gitignore` ignores (the ignore file is unversioned).
     let commit = h.wait("the committed files to leave", |c| {
         c["rows"].as_array().unwrap().len() == 3 && c["rows"][2]["count"] == "2 files"
     });

@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 /// The variable that names the terminal emulator to the programs in it
 /// (the reference sets `TERMINAL_EMULATOR=JetBrains-JediTerm`).
 pub const TERMINAL_EMULATOR_VAR: &str = "TERMINAL_EMULATOR";
-/// Pyoxide's value of [`TERMINAL_EMULATOR_VAR`].
-pub const TERMINAL_EMULATOR_NAME: &str = "Pyoxide";
+/// The product's value of [`TERMINAL_EMULATOR_VAR`].
+pub fn terminal_emulator_name() -> &'static str {
+    app_info::name()
+}
 /// A random id per session (as the reference sets it).
 pub const TERM_SESSION_ID_VAR: &str = "TERM_SESSION_ID";
 
@@ -262,7 +264,7 @@ pub fn environment(
         env.set("TERM", "xterm-256color");
     }
     env.set("COLORTERM", "truecolor");
-    env.set(TERMINAL_EMULATOR_VAR, TERMINAL_EMULATOR_NAME);
+    env.set(TERMINAL_EMULATOR_VAR, terminal_emulator_name());
     env.set(TERM_SESSION_ID_VAR, &session_id());
     if os == Os::MacOs {
         // The reference's default character encoding (UTF-8).
@@ -554,7 +556,7 @@ mod tests {
         assert_eq!(get("TERM"), Some("xterm-256color"));
         assert_eq!(get("VIRTUAL_ENV"), Some("/p/.venv"));
         assert_eq!(get("COLORTERM"), Some("24bit"));
-        assert_eq!(get(TERMINAL_EMULATOR_VAR), Some(TERMINAL_EMULATOR_NAME));
+        assert_eq!(get(TERMINAL_EMULATOR_VAR), Some(terminal_emulator_name()));
         assert_eq!(get("LC_CTYPE"), Some("UTF-8"));
         let id = get(TERM_SESSION_ID_VAR).unwrap();
         assert_eq!(id.len(), 36);

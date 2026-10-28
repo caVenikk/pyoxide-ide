@@ -56,9 +56,10 @@ fn import_keymap(source: &Source) -> Applied {
             }
             outcome.imported.push(format!("the keymap {ours}"));
             if approximated {
-                outcome
-                    .problems
-                    .push(format!("Pyoxide has no {name} keymap; {ours} is used."));
+                outcome.problems.push(format!(
+                    "{} has no {name} keymap; {ours} is used.",
+                    app_info::name()
+                ));
             }
             outcome
         });
@@ -89,14 +90,16 @@ fn import_keymap(source: &Source) -> Applied {
             for (reference, used) in &imported.approximated {
                 if !reference.is_empty() {
                     outcome.problems.push(format!(
-                        "Pyoxide has no {reference} keymap; {used} is used."
+                        "{} has no {reference} keymap; {used} is used.",
+                        app_info::name()
                     ));
                 }
             }
             let unmapped: usize = imported.unmapped.iter().map(|u| u.shortcuts.len()).sum();
             if unmapped > 0 {
                 outcome.problems.push(format!(
-                    "{unmapped} of its shortcuts are for actions Pyoxide does not have."
+                    "{unmapped} of its shortcuts are for actions {} does not have.",
+                    app_info::name()
                 ));
             }
             outcome

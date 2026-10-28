@@ -11,6 +11,7 @@ name = "pyoxide-db"
 path = "src/main.rs"
 
 [dependencies]
+brand.workspace = true
 commands.workspace = true
 db-core.workspace = true
 db-service.workspace = true

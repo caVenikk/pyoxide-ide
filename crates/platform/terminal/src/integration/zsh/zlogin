@@ -1,15 +1,15 @@
-# Pyoxide shell integration for zsh: a safety net (see .zshenv). .zshrc
+# The IDE shell integration for zsh: a safety net (see .zshenv). .zshrc
 # restores ZDOTDIR, so zsh reads the user's .zlogin and not this file; should
 # it read this one, the user's .zlogin is sourced from here.
 
-__pyoxide_original="${__PYOXIDE_ORIGINAL_ZDOTDIR:-$HOME}/.zlogin"
-if [[ -n "${__PYOXIDE_ORIGINAL_ZDOTDIR-}" ]]; then
-  ZDOTDIR="$__PYOXIDE_ORIGINAL_ZDOTDIR"
-  builtin unset __PYOXIDE_ORIGINAL_ZDOTDIR
+__ide_original="${__IDE_ORIGINAL_ZDOTDIR:-$HOME}/.zlogin"
+if [[ -n "${__IDE_ORIGINAL_ZDOTDIR-}" ]]; then
+  ZDOTDIR="$__IDE_ORIGINAL_ZDOTDIR"
+  builtin unset __IDE_ORIGINAL_ZDOTDIR
 else
   builtin unset ZDOTDIR
 fi
-if [[ -f "$__pyoxide_original" ]]; then
-  builtin source "$__pyoxide_original"
+if [[ -f "$__ide_original" ]]; then
+  builtin source "$__ide_original"
 fi
-builtin unset __pyoxide_original
+builtin unset __ide_original

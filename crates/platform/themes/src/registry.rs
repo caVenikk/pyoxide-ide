@@ -167,13 +167,14 @@ fn fallback_theme(chain: &[&ThemeFile]) -> Option<Theme> {
     let recorded = chain
         .iter()
         .find_map(|f| f.theme.base.as_deref())
-        .filter(|id| crate::builtin::IDS.contains(id));
+        .filter(|id| crate::builtin::ids().iter().any(|b| b == id))
+        .map(str::to_owned);
     let id = recorded.unwrap_or_else(|| {
         let controls = chain.iter().find_map(|f| f.theme.controls);
         crate::builtin::import_id_for(kind, controls.unwrap_or_default() == Controls::New)
     });
     let registry = Registry::with_builtin();
-    let file = registry.get(id)?;
+    let file = registry.get(&id)?;
     let chain = [file];
     merge_chain(&chain, None).ok()
 }
@@ -286,8 +287,8 @@ mod tests {
     #[test]
     fn child_overrides_parent_and_inherits_the_rest() {
         let registry = Registry::with_builtin();
-        let base = registry.resolve("pyoxide-dark").unwrap();
-        let mut file = leaf("pyoxide-dark");
+        let base = registry.resolve("app-dark").unwrap();
+        let mut file = leaf("app-dark");
         file.palette.insert("mine".into(), Rgba::rgb(1, 2, 3));
         file.ui
             .insert(UiRole::Accent, ColorRef::Palette("mine".into()));
@@ -317,7 +318,7 @@ mod tests {
     #[test]
     fn palette_of_the_parent_is_visible_to_the_child() {
         let mut registry = Registry::with_builtin();
-        let mut parent = leaf("pyoxide-dark");
+        let mut parent = leaf("app-dark");
         parent.theme.id = "parent".into();
         parent.palette.insert("shared".into(), Rgba::rgb(9, 8, 7));
         registry.insert(parent).unwrap();
@@ -352,7 +353,7 @@ mod tests {
             Err(ThemeError::ExtendsCycle(_))
         ));
 
-        let mut bad = leaf("pyoxide-dark");
+        let mut bad = leaf("app-dark");
         bad.ui
             .insert(UiRole::Accent, ColorRef::Palette("ghost".into()));
         assert!(matches!(
@@ -381,7 +382,7 @@ mod tests {
     #[test]
     fn load_dir_reads_toml_files() {
         let dir = tempfile::tempdir().unwrap();
-        let mut file = leaf("pyoxide-light");
+        let mut file = leaf("app-light");
         file.theme.id = "from-disk".into();
         std::fs::write(dir.path().join("a.toml"), file.to_toml()).unwrap();
         std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();

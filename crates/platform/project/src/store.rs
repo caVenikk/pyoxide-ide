@@ -1,4 +1,4 @@
-//! Pyoxide's own project folder ([`STORE_DIR`] in the project root) and the
+//! Pyoxide's own project folder ([`store_dir`] in the project root) and the
 //! shared project settings in it (ADR 0008). The personal project state
 //! next to them is [`crate::workspace`] (ADR 0009).
 //!
@@ -47,14 +47,21 @@ use toml_edit::{Array, DocumentMut, Item, Table, TableLike, Value};
 use crate::idea;
 use crate::roots::{DetectRoots, Roots, detected_roots};
 
-/// Name of Pyoxide's project folder in the project root.
-pub const STORE_DIR: &str = ".oxide";
-/// The shared project settings in [`STORE_DIR`].
+/// Name of the product's project folder in the project root.
+pub fn store_dir() -> &'static str {
+    app_info::project_dir()
+}
+/// The shared project settings in [`store_dir`].
 pub const SETTINGS_FILE: &str = "project.toml";
 /// Version of the settings format this build reads and writes.
 pub const SETTINGS_VERSION: i64 = 1;
 
-const HEADER: &str = "# Pyoxide project settings. Paths are relative to the project folder.\n";
+fn header() -> String {
+    format!(
+        "# {} project settings. Paths are relative to the project folder.\n",
+        app_info::name()
+    )
+}
 
 /// Folders and files left out of search, Go to File and indexing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -153,15 +160,16 @@ pub enum StoreError {
     #[error("{}: {message}", path.display())]
     Invalid { path: PathBuf, message: String },
     #[error(
-        "{} was written by a newer version of Pyoxide (settings version {version})",
-        path.display()
+        "{} was written by a newer version of {} (settings version {version})",
+        path.display(),
+        app_info::name()
     )]
     Newer { path: PathBuf, version: i64 },
 }
 
 /// The settings file of a project.
 pub fn settings_file(root: &Path) -> PathBuf {
-    root.join(STORE_DIR).join(SETTINGS_FILE)
+    root.join(store_dir()).join(SETTINGS_FILE)
 }
 
 /// Whether the project has shared settings yet. Only the shared settings
@@ -279,7 +287,7 @@ fn save_locked(root: &Path, exclusions: &Exclusions) -> Result<bool, StoreError>
     }
     let mut doc = match existing {
         Some(doc) => doc,
-        None => format!("{HEADER}version = {SETTINGS_VERSION}\n")
+        None => format!("{}version = {SETTINGS_VERSION}\n", header())
             .parse()
             .expect("the header is valid TOML"),
     };
@@ -390,7 +398,7 @@ fn save_roots_locked(root: &Path, roots: &Roots) -> Result<bool, StoreError> {
     let path = settings_file(root);
     let mut doc = match read_document(&path)? {
         Some(doc) => doc,
-        None => format!("{HEADER}version = {SETTINGS_VERSION}\n")
+        None => format!("{}version = {SETTINGS_VERSION}\n", header())
             .parse()
             .expect("the header is valid TOML"),
     };
@@ -532,7 +540,7 @@ pub fn save_values(
     }
     let mut doc = match existing {
         Some(doc) => doc,
-        None => format!("{HEADER}version = {SETTINGS_VERSION}\n")
+        None => format!("{}version = {SETTINGS_VERSION}\n", header())
             .parse()
             .expect("the header is valid TOML"),
     };
@@ -687,7 +695,7 @@ mod tests {
         let root = dir.path();
         // Nothing to store: no folder.
         assert!(!save(root, &Exclusions::default()).unwrap());
-        assert!(!root.join(STORE_DIR).exists());
+        assert!(!root.join(store_dir()).exists());
         assert_eq!(load(root).unwrap(), None);
 
         let mut e = ex(&["venv", "docs/build"]);
@@ -695,13 +703,13 @@ mod tests {
         assert!(save(root, &e).unwrap());
         assert_eq!(load(root).unwrap(), Some(e.clone()));
         let text = std::fs::read_to_string(settings_file(root)).unwrap();
-        assert!(text.starts_with(HEADER), "{text}");
+        assert!(text.starts_with(&header()), "{text}");
         assert!(
             text.contains("version = 1\n\n[exclusions]\npaths = [\n    \"docs/build\",\n    \"venv\",\n]\npatterns = [\"*.egg-info\"]\n"),
             "{text}"
         );
         // No temporary files are left behind.
-        let files: Vec<_> = std::fs::read_dir(root.join(STORE_DIR))
+        let files: Vec<_> = std::fs::read_dir(root.join(store_dir()))
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
@@ -716,7 +724,7 @@ mod tests {
     fn unknown_keys_and_comments_survive_a_rewrite() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         let original = "# shared settings\nversion = 1\nfuture = \"keep\"\n\n[exclusions]\npaths = [\"old\"]\nnote = 3 # mine\n\n[run]\nname = \"app\"\n";
         std::fs::write(settings_file(root), original).unwrap();
         assert_eq!(load(root).unwrap(), Some(ex(&["old"])));
@@ -737,7 +745,7 @@ mod tests {
     fn refuses_newer_and_broken_files() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         let newer = "version = 2\n[exclusions]\npaths = [\"a\"]\n";
         std::fs::write(settings_file(root), newer).unwrap();
         // Read what is understood, but never downgrade the file.
@@ -767,7 +775,7 @@ mod tests {
         let root = dir.path();
         // Nothing to store: nothing is created.
         assert!(!save_values(root, "python.tools.ruff", &[("enabled", None)]).unwrap());
-        assert!(!root.join(STORE_DIR).exists());
+        assert!(!root.join(store_dir()).exists());
         assert_eq!(load_table(root, "python.tools.ruff").unwrap(), None);
         assert_eq!(
             load_value(root, "python.tools.ruff", "enabled").unwrap(),
@@ -786,7 +794,7 @@ mod tests {
             .unwrap()
         );
         let text = std::fs::read_to_string(settings_file(root)).unwrap();
-        assert!(text.starts_with(HEADER), "{text}");
+        assert!(text.starts_with(&header()), "{text}");
         // Parents are implicit: only the table itself gets a header.
         assert!(
             text.ends_with(
@@ -830,7 +838,7 @@ mod tests {
     fn values_keep_the_rest_of_the_file_and_refuse_newer_ones() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         let original = "# shared\nversion = 1\n\n[exclusions]\npaths = [\"a\"]\n\n[python.tools.ruff]\nenabled = false # off for now\nfuture = \"keep\"\n";
         std::fs::write(settings_file(root), original).unwrap();
         save_values(root, "python.tools.ruff", &[("enabled", Some(true.into()))]).unwrap();
@@ -879,7 +887,7 @@ mod tests {
     fn stored_paths_are_cleaned_on_load() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(STORE_DIR)).unwrap();
+        std::fs::create_dir_all(root.join(store_dir())).unwrap();
         std::fs::write(
             settings_file(root),
             "[exclusions]\npaths = [\"./a/\", \"../out\", \"\", \"b//c\", 7]\npatterns = [\"*.tmp\", \"*.tmp\", \" \"]\n",
@@ -955,7 +963,7 @@ mod tests {
             marked(&[(SOURCES, "src")])
         );
         assert_eq!(import_idea_roots(root, Some(detect)).unwrap(), None);
-        assert!(!root.join(STORE_DIR).exists());
+        assert!(!root.join(store_dir()).exists());
 
         std::fs::create_dir_all(root.join(".idea")).unwrap();
         std::fs::write(

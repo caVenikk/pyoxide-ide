@@ -183,7 +183,7 @@ fn layout(root: &Path) {
 }
 
 fn settings(root: &Path) -> Option<String> {
-    std::fs::read_to_string(root.join(".oxide/project.toml")).ok()
+    std::fs::read_to_string(root.join(".app/project.toml")).ok()
 }
 
 #[gpui::test]
