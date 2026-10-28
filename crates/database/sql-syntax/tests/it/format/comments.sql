@@ -14,6 +14,6 @@ select a, -- first
 /* before from */
 from t -- source
 where a = 1 -- one
-    and b = 2
+  and b = 2
 /* tail */;
 -- last

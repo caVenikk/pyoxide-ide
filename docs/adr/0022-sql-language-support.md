@@ -422,7 +422,9 @@ statements of a range (whole statements only in the first version), as the
   apart from whitespace and the case of keywords; strings, quoted
   identifiers, comments, `$$` bodies and Oracle `q'[..]'` strings are not
   touched; the formatter is idempotent; a statement with syntax errors or
-  an `Opaque` node is left as it is.
+  an `Opaque` node is left as it is; so is a query with a `WITH` clause
+  whose text already has line breaks (the reference keeps such a statement
+  as written).
 - Code style settings, shared (`.oxide/project.toml`) with per-dialect
   overrides, edited on *Editor > Code Style > SQL*:
 
@@ -441,6 +443,7 @@ comma = "auto"                    # auto (as the text has it) | trailing | leadi
 select-items = "wrap-if-long"     # wrap-if-long | one-per-line
 clause-elements = "same-line"     # same-line (aligned under the first) | new-line
 and-or = "line-start"             # line-start | line-end
+break-conditions = true           # every AND / OR of a WHERE starts a line, aligned under the first condition
 collapse-short-statement = "subqueries-only"   # never | subqueries-only | always
 keep-line-breaks = true           # the text's line breaks inside clauses
 keep-blank-lines = 2
@@ -450,7 +453,7 @@ space-before-parenthesis = true   # `t (a, b)`
 parentheses-padding = false
 space-before-comma = false
 space-after-comma = true
-align-ddl-columns = true
+align-ddl-columns = true          # the names of CREATE TABLE columns
 
 [sql.code-style.oracle]
 keyword-case = "upper"
@@ -464,7 +467,9 @@ keyword-case = "upper"
   is not in the list. `CodeStyle::set(key, value)` takes one option by its
   key, so the layers that read the project file and the settings page need
   no list of their own. Every option has a fixture that shows its effect
-  (`crates/database/sql-syntax/tests/it/format/opt-*.sql`).
+  (`crates/database/sql-syntax/tests/it/format/opt-*.sql`). The layout of
+  the defaults is pinned by `reference-probe.sql` there: the output of the
+  reference's Reformat Code for one script of each statement kind.
 - First version: queries (with `WITH`, set operations, joins, subqueries,
   `CASE`), `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE TABLE`, `ALTER
   TABLE`, views and the common one-line DDL are laid out. Routines, packages,

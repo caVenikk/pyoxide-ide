@@ -35,8 +35,9 @@ pub enum CommaPlacement {
 /// How the items of a select list are put on lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SelectItems {
-    /// Items stay on a line until it is too long, or until the text had a line
-    /// break between them (see `keep_line_breaks`).
+    /// Items stay on one line while the list fits; a list that is too long
+    /// (or whose text had line breaks between the items, see
+    /// `keep_line_breaks`) puts one item per line.
     #[default]
     WrapIfLong,
     OnePerLine,
@@ -93,6 +94,9 @@ pub struct CodeStyle {
     pub select_items: SelectItems,
     pub clause_elements: ClauseElements,
     pub and_or: AndOr,
+    /// Every top-level `AND` / `OR` of a `WHERE` condition starts a line, the
+    /// conditions aligned under the first one.
+    pub break_conditions: bool,
     pub collapse_short_statement: Collapse,
     /// Keep the line breaks of the text inside clauses (not the layout of the
     /// clauses themselves).
@@ -108,7 +112,8 @@ pub struct CodeStyle {
     pub parentheses_padding: bool,
     pub space_before_comma: bool,
     pub space_after_comma: bool,
-    /// Align names, types and constraints of `CREATE TABLE` columns.
+    /// Align the names of `CREATE TABLE` columns (the types and constraints
+    /// follow after one space).
     pub align_ddl_columns: bool,
 }
 
@@ -129,6 +134,7 @@ impl Default for CodeStyle {
             select_items: SelectItems::WrapIfLong,
             clause_elements: ClauseElements::SameLine,
             and_or: AndOr::LineStart,
+            break_conditions: true,
             collapse_short_statement: Collapse::SubqueriesOnly,
             keep_line_breaks: true,
             keep_blank_lines: 2,
@@ -185,7 +191,7 @@ impl CodeStyle {
     /// `identifier-case`, `use-tab`, `tab-size`, `indent`, `continuation-indent`,
     /// `right-margin`, `comma` (`auto|trailing|leading`), `select-items`
     /// (`wrap-if-long|one-per-line`), `clause-elements` (`same-line|new-line`),
-    /// `and-or` (`line-start|line-end`), `collapse-short-statement`
+    /// `and-or` (`line-start|line-end`), `break-conditions`, `collapse-short-statement`
     /// (`never|subqueries-only|always`), `keep-line-breaks`, `keep-blank-lines`,
     /// `blank-lines-between-statements` (a number or `keep`),
     /// `spaces-around-operators`, `space-before-parenthesis`, `parentheses-padding`,
@@ -258,6 +264,7 @@ impl CodeStyle {
                     _ => return Err(word("line-start, line-end")),
                 }
             }
+            "break-conditions" => self.break_conditions = flag()?,
             "collapse-short-statement" => {
                 self.collapse_short_statement = match value {
                     "never" => Collapse::Never,

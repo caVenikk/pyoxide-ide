@@ -13,6 +13,10 @@ use super::words;
 
 type El<'a> = SyntaxElement<'a>;
 
+/// The most columns a select list takes on one line before it puts one item
+/// per line (never more than the right margin).
+const SELECT_LIST_WIDTH: usize = 100;
+
 /// How a list breaks between its items.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Policy {
@@ -30,16 +34,14 @@ enum Role {
 fn role(kind: K) -> Role {
     match kind {
         K::WhereClause | K::HavingClause | K::OnClause => Role::Cond,
-        K::WithClause => Role::List(Policy::OnePerLine),
+        K::WithClause | K::SetClause | K::Values => Role::List(Policy::OnePerLine),
         K::FromClause
         | K::UsingSource
         | K::GroupByClause
         | K::OrderByClause
-        | K::SetClause
         | K::ReturningClause
         | K::WindowClause
-        | K::IntoClause
-        | K::Values => Role::List(Policy::Wrap),
+        | K::IntoClause => Role::List(Policy::Wrap),
         _ => Role::Flow,
     }
 }
@@ -127,6 +129,9 @@ pub(crate) struct Layout<'a> {
     base: usize,
     /// Break before every `AND` / `OR` of the condition being laid out.
     chain_break: bool,
+    /// The column the conditions of the `WHERE` being laid out start at: every
+    /// `AND` / `OR` starts a line, right-aligned to it.
+    cond_align: Option<usize>,
     last_lparen: bool,
     prev_fn: bool,
     prev_op: bool,
@@ -142,6 +147,7 @@ pub(crate) fn run(script: &Script, style: &CodeStyle) -> String {
         src: script.text(),
         base: 0,
         chain_break: false,
+        cond_align: None,
         last_lparen: false,
         prev_fn: false,
         prev_op: false,
@@ -167,7 +173,7 @@ pub(crate) fn run(script: &Script, style: &CodeStyle) -> String {
 
 impl<'a> Layout<'a> {
     fn unit(&mut self, root: SyntaxNode<'a>) {
-        let verbatim = !self.formattable(root);
+        let verbatim = !self.formattable(root) || self.kept_as_written(root);
         for el in root.children() {
             match el {
                 El::Token(t) => {
@@ -221,6 +227,15 @@ impl<'a> Layout<'a> {
             return false;
         }
         !all_tokens(root).iter().any(|t| t.unterminated())
+    }
+
+    /// A query with a `WITH` clause whose text already has line breaks is
+    /// kept as it is (the reference leaves such a statement alone).
+    fn kept_as_written(&self, root: SyntaxNode<'a>) -> bool {
+        self.style.keep_line_breaks
+            && root
+                .child_nodes()
+                .any(|n| n.child(K::WithClause).is_some() && self.has_newline(n))
     }
 
     fn statement(&mut self, n: SyntaxNode<'a>) {
@@ -535,11 +550,14 @@ impl<'a> Layout<'a> {
                 } else {
                     base + "select".len() + 1
                 };
-                let policy = if st.select_items == SelectItems::OnePerLine {
+                let mut policy = if st.select_items == SelectItems::OnePerLine {
                     Policy::OnePerLine
                 } else {
                     Policy::Wrap
                 };
+                if policy == Policy::Wrap && self.list_too_long(c, base) {
+                    policy = Policy::OnePerLine;
+                }
                 let kids: Vec<El<'a>> = c.children().collect();
                 self.list_items(&kids, align, policy, new_line);
             }
@@ -573,6 +591,25 @@ impl<'a> Layout<'a> {
             }
             _ => self.node(c),
         }
+    }
+
+    /// Whether the select list `c` of a query at `base` does not fit a line.
+    fn list_too_long(&mut self, c: SyntaxNode<'a>, base: usize) -> bool {
+        let margin = self.style.right_margin;
+        if margin == 0
+            || self.out.flat > 0
+            || all_tokens(c)
+                .iter()
+                .any(|t| matches!(t.kind(), TokenKind::LineComment | TokenKind::BlockComment))
+        {
+            return false;
+        }
+        let first = if self.style.clause_elements == ClauseElements::NewLine {
+            base + self.style.indent
+        } else {
+            self.out.col().max(base) + 1
+        };
+        first + self.measure(c) > margin.min(SELECT_LIST_WIDTH)
     }
 
     fn merge_clause(&mut self, c: SyntaxNode<'a>, base: usize) {
@@ -616,13 +653,15 @@ impl<'a> Layout<'a> {
         let saved = self.out.cont;
         match role(c.kind()) {
             Role::Cond => {
+                let aligned = (c.kind() == K::WhereClause && st.break_conditions && !new_line)
+                    .then_some(align);
                 for &e in &kids[i..] {
                     match e {
                         El::Node(x) => {
                             if new_line {
                                 self.out.request(Brk::at(base + st.indent));
                             }
-                            self.cond(x, base + st.indent);
+                            self.cond(x, base + st.indent, aligned);
                         }
                         other => self.el(other),
                     }
@@ -657,6 +696,7 @@ impl<'a> Layout<'a> {
         let st = self.style;
         let saved = self.out.cont;
         let leading = self.leading_commas(kids);
+        let set_w = self.target_width(kids);
         let mut after_comma = false;
         let mut first = true;
         let mut deferred: Option<SyntaxToken<'a>> = None;
@@ -698,7 +738,14 @@ impl<'a> Layout<'a> {
                     }
                     self.out.cont = align + st.indent;
                     if c.kind() == K::Join {
-                        self.join(c);
+                        let col = if first_break {
+                            self.base + st.indent
+                        } else {
+                            align + st.indent
+                        };
+                        self.join(c, col);
+                    } else if c.kind() == K::Assignment && policy == Policy::OnePerLine {
+                        self.assignment(c, align, set_w);
                     } else {
                         self.node(c);
                     }
@@ -713,8 +760,55 @@ impl<'a> Layout<'a> {
         self.out.cont = saved;
     }
 
-    fn join(&mut self, c: SyntaxNode<'a>) {
-        let col = self.base + self.style.indent;
+    /// The widest target of the assignments of a `SET` list, to align the `=`.
+    fn target_width(&mut self, kids: &[El<'a>]) -> usize {
+        let mut w = 0;
+        for &e in kids {
+            if let El::Node(a) = e
+                && a.kind() == K::Assignment
+            {
+                match self.target_of(a) {
+                    Some(t) => w = w.max(t),
+                    None => return 0,
+                }
+            }
+        }
+        w
+    }
+
+    /// The width of what stands before the `=` of an assignment; `None` when
+    /// that is not plain names.
+    fn target_of(&mut self, a: SyntaxNode<'a>) -> Option<usize> {
+        let mut w = 0;
+        for e in a.children() {
+            match e {
+                El::Token(t) if t.kind() == TokenKind::Operator && t.text() == "=" => {
+                    return Some(w);
+                }
+                El::Token(t) if t.kind() == TokenKind::Whitespace => {}
+                El::Node(n) => w += self.measure(n),
+                El::Token(_) => return None,
+            }
+        }
+        None
+    }
+
+    /// `target = value` with the `=` in the column of the widest target.
+    fn assignment(&mut self, a: SyntaxNode<'a>, start: usize, width: usize) {
+        for e in a.children() {
+            match e {
+                El::Token(t) if t.kind() == TokenKind::Operator && t.text() == "=" => {
+                    if width > 0 {
+                        self.out.pad_to(start + width + 1);
+                    }
+                    self.tok(t);
+                }
+                other => self.el(other),
+            }
+        }
+    }
+
+    fn join(&mut self, c: SyntaxNode<'a>, col: usize) {
         let mut left_seen = false;
         let mut broke = false;
         for e in c.children() {
@@ -729,7 +823,7 @@ impl<'a> Layout<'a> {
                 }
                 El::Node(k) => match k.kind() {
                     K::Join => {
-                        self.join(k);
+                        self.join(k, col);
                         left_seen = true;
                     }
                     K::OnClause => self.on_clause(k, col),
@@ -747,7 +841,7 @@ impl<'a> Layout<'a> {
         self.out.cont = self.base + self.style.continuation_indent;
         for e in c.children() {
             match e {
-                El::Node(x) => self.cond(x, col + self.style.indent),
+                El::Node(x) => self.cond(x, col + self.style.indent, None),
                 other => self.el(other),
             }
         }
@@ -757,11 +851,14 @@ impl<'a> Layout<'a> {
     /// A condition: `AND` / `OR` of the top level go to a line of their own
     /// at `col` where the text had a break (or, with `keep_line_breaks` off,
     /// where the condition does not fit a line).
-    fn cond(&mut self, e: SyntaxNode<'a>, col: usize) {
-        let saved = (self.out.cont, self.chain_break);
+    fn cond(&mut self, e: SyntaxNode<'a>, col: usize, aligned: Option<usize>) {
+        let saved = (self.out.cont, self.chain_break, self.cond_align);
         self.out.cont = self.base + self.style.continuation_indent;
+        self.cond_align = aligned;
         let mut done = false;
-        if !self.style.keep_line_breaks && self.out.flat == 0 {
+        if aligned.is_some() {
+            self.chain_break = true;
+        } else if !self.style.keep_line_breaks && self.out.flat == 0 {
             if self.try_flat(0, |s| s.cond_inner(e, col)) {
                 done = true;
             } else {
@@ -775,6 +872,7 @@ impl<'a> Layout<'a> {
         }
         self.out.cont = saved.0;
         self.chain_break = saved.1;
+        self.cond_align = saved.2;
     }
 
     fn cond_inner(&mut self, e: SyntaxNode<'a>, col: usize) {
@@ -794,12 +892,23 @@ impl<'a> Layout<'a> {
     fn and_or(&mut self, t: SyntaxToken<'a>, col: usize) {
         let flat = self.out.flat > 0;
         let keep = self.style.keep_line_breaks;
+        let aligned = self.cond_align;
         let want = !flat
-            && if keep {
+            && if aligned.is_some() {
+                true
+            } else if keep {
                 self.out.nl_seen > 0
             } else {
                 self.chain_break
             };
+        // With aligned conditions the word ends under the end of the clause
+        // keyword (`  and`, `   or` under `where`), the condition after it
+        // starts where the first one did.
+        let col = match (aligned, self.style.and_or) {
+            (Some(a), AndOr::LineStart) => a.saturating_sub(t.text().len() + 1),
+            (Some(a), AndOr::LineEnd) => a,
+            (None, _) => col,
+        };
         match self.style.and_or {
             AndOr::LineStart => {
                 if want {
@@ -871,15 +980,14 @@ impl<'a> Layout<'a> {
         for &e in &kids[..lp] {
             self.el(e);
         }
-        let (mut name_w, mut type_w) = (0, 0);
+        let mut name_w = 0;
         if st.align_ddl_columns {
             for &e in &kids[lp..rp] {
                 if let El::Node(c) = e
                     && c.kind() == K::ColumnDef
-                    && let (Some(name), Some(ty)) = (c.child(K::DefName), c.child(K::TypeRef))
+                    && let (Some(name), Some(_)) = (c.child(K::DefName), c.child(K::TypeRef))
                 {
                     name_w = name_w.max(text_width(name.text()));
-                    type_w = type_w.max(self.measure(ty));
                 }
             }
         }
@@ -894,7 +1002,7 @@ impl<'a> Layout<'a> {
                     self.out.request(Brk::at(st.indent));
                     self.out.cont = st.indent + st.indent;
                     if c.kind() == K::ColumnDef && st.align_ddl_columns {
-                        self.column_def(c, name_w, type_w);
+                        self.column_def(c, name_w);
                     } else {
                         self.node(c);
                     }
@@ -912,8 +1020,8 @@ impl<'a> Layout<'a> {
         }
     }
 
-    /// `name type constraints` with the type and the constraints in columns.
-    fn column_def(&mut self, c: SyntaxNode<'a>, name_w: usize, type_w: usize) {
+    /// `name type constraints` with the types in a column.
+    fn column_def(&mut self, c: SyntaxNode<'a>, name_w: usize) {
         let ind = self.style.indent;
         let kids: Vec<El<'a>> = c.children().collect();
         let significant: Vec<usize> = (0..kids.len()).filter(|&i| !is_trivia(&kids[i])).collect();
@@ -929,8 +1037,6 @@ impl<'a> Layout<'a> {
             self.el(e);
             if i == significant[0] && significant.len() > 1 {
                 self.out.pad_to(ind + name_w + 1);
-            } else if i == significant[1] && significant.len() > 2 {
-                self.out.pad_to(ind + name_w + 1 + type_w + 1);
             }
         }
     }

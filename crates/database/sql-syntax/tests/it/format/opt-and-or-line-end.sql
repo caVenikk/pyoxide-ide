@@ -4,5 +4,5 @@ select * from t where a = 1 and b = 2 or c = 3;
 select *
 from t
 where a = 1 and
-    b = 2 or
-    c = 3;
+      b = 2 or
+      c = 3;

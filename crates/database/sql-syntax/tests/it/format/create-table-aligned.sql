@@ -2,8 +2,8 @@ create table items (id bigint not null primary key, name varchar(100) not null d
 =====
 create table items
 (
-    id    bigint         not null primary key,
-    name  varchar(100)   not null default 'x',
+    id    bigint not null primary key,
+    name  varchar(100) not null default 'x',
     total numeric(12, 2) check (total >= 0),
     note  text,
     constraint uq unique (name),

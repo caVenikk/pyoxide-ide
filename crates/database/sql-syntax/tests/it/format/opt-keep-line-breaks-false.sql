@@ -1,4 +1,4 @@
-# style: keep-line-breaks=false
+# style: keep-line-breaks=false break-conditions=false
 select a,
  b
 from t
