@@ -422,30 +422,59 @@ statements of a range (whole statements only in the first version), as the
   apart from whitespace and the case of keywords; strings, quoted
   identifiers, comments, `$$` bodies and Oracle `q'[..]'` strings are not
   touched; the formatter is idempotent; a statement with syntax errors or
-  an `Opaque` node is left as it is.
+  an `Opaque` node is left as it is; so is a query with a `WITH` clause
+  whose text already has line breaks (the reference keeps such a statement
+  as written).
 - Code style settings, shared (`.oxide/project.toml`) with per-dialect
   overrides, edited on *Editor > Code Style > SQL*:
 
 ```toml
 [sql.code-style]
-keyword-case = "upper"            # upper | lower | keep
-identifier-case = "keep"          # keep only for quoted names
-indent = 4                        # spaces; follows the editor when absent
-right-margin = 100
-comma = "trailing"                # trailing | leading
-select-items = "one-per-line"     # one-per-line | wrap
-join-layout = "indent"            # indent | align
+keyword-case = "keep"             # keep | upper | lower; the reference default is "do not change"
+builtin-type-case = "keep"
+builtin-function-case = "as-keywords"   # as-keywords | keep | upper | lower
+identifier-case = "keep"          # unquoted names; quoted names never change
+indent = 4                        # spaces
+continuation-indent = 8           # lines that continue a condition or an expression
+use-tab = false
+tab-size = 4
+right-margin = 120
+comma = "auto"                    # auto (as the text has it) | trailing | leading
+select-items = "wrap-if-long"     # wrap-if-long | one-per-line
+clause-elements = "same-line"     # same-line (aligned under the first) | new-line
 and-or = "line-start"             # line-start | line-end
-blank-lines-between-statements = 1
-keep-existing-line-breaks = false
+break-conditions = true           # every AND / OR of a WHERE starts a line, aligned under the first condition
+collapse-short-statement = "subqueries-only"   # never | subqueries-only | always
+keep-line-breaks = true           # the text's line breaks inside clauses
+keep-blank-lines = 2
+blank-lines-between-statements = "keep"        # a number, or keep
+spaces-around-operators = true
+space-before-parenthesis = true   # `t (a, b)`
 parentheses-padding = false
+space-before-comma = false
+space-after-comma = true
+align-ddl-columns = true          # the names of CREATE TABLE columns
 
 [sql.code-style.oracle]
 keyword-case = "upper"
 ```
 
-  The exact option list is settled by observing the reference's SQL code
-  style page; every option has a test that shows its effect.
+  The defaults and the names follow the reference's *Editor > Code Style >
+  SQL* page (its Case, Queries, DDL, Code, Expressions, Tabs and Indents and
+  Wrapping tabs); an option of the reference that the formatter does not
+  have yet (join alignment, clause alignment to the right, `CASE` and `INSERT`
+  variants, `ALTER` and routine layouts, name templates of code generation)
+  is not in the list. `CodeStyle::set(key, value)` takes one option by its
+  key, so the layers that read the project file and the settings page need
+  no list of their own. Every option has a fixture that shows its effect
+  (`crates/database/sql-syntax/tests/it/format/opt-*.sql`). The layout of
+  the defaults is pinned by `reference-probe.sql` there: the output of the
+  reference's Reformat Code for one script of each statement kind.
+- First version: queries (with `WITH`, set operations, joins, subqueries,
+  `CASE`), `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE TABLE`, `ALTER
+  TABLE`, views and the common one-line DDL are laid out. Routines, packages,
+  triggers, `DO` blocks and PL/SQL blocks are left as written until their
+  layouts are added.
 - Comments stay attached to the tokens they were attached to. The
   formatter is also used for *Reformat selection* in the console.
 

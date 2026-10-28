@@ -6,6 +6,7 @@ mod ddl;
 mod dialect;
 mod dml;
 mod explain;
+mod format;
 mod lexer;
 mod params;
 mod soup;

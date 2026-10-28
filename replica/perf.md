@@ -127,6 +127,20 @@ with other builds (load average 30-50), so the numbers are upper bounds.
 | 2026-10-26 | mac-1 | memory of the trees, mixed / PL/SQL | 3.9 MB / 2.8 MB | 30 MB | |
 | 2026-10-26 | mac-1 | parse, queries again, 5000 lines / 250 KB (after #317) | 19 ms / 18 ms | 40 ms | measured at load average 35-55, so an upper bound; 12.2 / 19.7 ms on 2026-10-24 |
 
+### SQL formatter
+`cargo bench -p sql-syntax` (`crates/database/sql-syntax/benches/parse.rs`,
+`bench_format`): the default code style, parse included, on the scripts of the
+parser bench and on one query of 100 lines (30 select items with `case`, 8
+joins, a condition of 57 terms). Median and worst of 30 runs (scripts) and 300
+runs (the statement). Release build, Rust 1.99.0, load average about 3.
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-28 | mac-1 | format, a statement of 100 lines | 0.21 ms (max 0.27) | 5 ms | idempotent: the bench formats the result again and compares |
+| 2026-10-28 | mac-1 | format, 5000 lines of queries (141 KB, 4100 lines after) | 6.1 ms (max 6.9) | 200 ms | PostgreSQL dialect |
+| 2026-10-28 | mac-1 | format, 8810 lines of queries (250 KB) | 11.0 ms (max 12.8) | 200 ms | the size ADR 0022 assumes for 5000 lines |
+| 2026-10-28 | mac-1 | format, 5000 lines of data modification, DDL, PL/pgSQL (177 KB) | 5.8 ms (max 6.0) | 200 ms | functions with `$$` bodies are left as written |
+
 ### SQL diagnostics
 `cargo bench -p sql-intel` (`crates/database/sql-intel/benches/analysis.rs`):
 a generated 5000-line script of queries, CTEs, correlated subqueries,
