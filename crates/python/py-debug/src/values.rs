@@ -142,6 +142,15 @@ fn remaining(range: &str) -> Option<usize> {
     end.checked_sub(start)
 }
 
+/// The expression for the objects that refer to the value of `expression`
+/// (pydevd's `get_referrer_info` for debugpy, which has none): the garbage
+/// collector's referrers without the frames of the evaluation itself.
+pub(crate) fn referrers_expression(expression: &str) -> String {
+    format!(
+        "[__r for __r in __import__('gc').get_referrers({expression}) if type(__r).__name__ != 'frame']"
+    )
+}
+
 /// One Python expression for the sizes of several values: a tuple with the
 /// length of each value that has one (`__len__` on its type, not a string
 /// or bytes), `None` for the others, as a string (debugpy shows at most
@@ -276,6 +285,13 @@ mod tests {
         assert_eq!(node.role, ValueRole::Value(ValueKind::Primitive));
         let node = present_child(&variable("__exception__", "tuple", "()", 5), false);
         assert!(matches!(node.role, ValueRole::Value(_)));
+    }
+
+    #[test]
+    fn referrers_leave_out_the_evaluation_frames() {
+        let e = referrers_expression("summary['sum']");
+        assert!(e.contains("gc').get_referrers(summary['sum'])"), "{e}");
+        assert!(e.contains("!= 'frame'"), "{e}");
     }
 
     #[test]

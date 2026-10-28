@@ -349,6 +349,14 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// An expression that evaluates, in a frame, to a list of the objects
+    /// that refer to the value of `expression` (Show Referring Objects);
+    /// `None` when the product's runtime cannot tell.
+    fn referrers_expression(&self, expression: &str) -> Option<String> {
+        let _ = expression;
+        None
+    }
+
     /// The file and the line (from 1) read from the value of
     /// [`Self::type_source_expression`].
     fn parse_type_source(&self, value: &str) -> Option<(PathBuf, u32)> {

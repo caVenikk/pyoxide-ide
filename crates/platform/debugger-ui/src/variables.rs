@@ -302,6 +302,9 @@ pub struct VariablesView {
     /// A popup's tree: its one value instead of the frame's, without the
     /// evaluate field, the watches and the context menu.
     pub(crate) popup: Option<PopupRoot>,
+    /// A popup's tree in a window of its own (Inspect): its menu has no
+    /// Evaluate Expression.
+    pub(crate) in_dialog: bool,
 }
 
 impl VariablesView {
@@ -359,6 +362,7 @@ impl VariablesView {
             highlighted: None,
             line_height: px(16.0),
             popup: None,
+            in_dialog: false,
         }
     }
 
@@ -1080,9 +1084,7 @@ impl VariablesView {
                     }
                     window.focus(&this.focus);
                     this.select(&menu_path, cx);
-                    if this.popup.is_none() {
-                        this.open_menu(e.position, window, cx);
-                    }
+                    this.open_menu(e.position, window, cx);
                 }),
             )
             .into_any_element()

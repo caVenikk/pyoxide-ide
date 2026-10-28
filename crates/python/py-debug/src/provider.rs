@@ -272,6 +272,10 @@ impl DebugAdapterProvider for PythonDebugProvider {
         values::present_child(variable, scope)
     }
 
+    fn referrers_expression(&self, expression: &str) -> Option<String> {
+        Some(values::referrers_expression(expression))
+    }
+
     fn sizes_expression(&self, expressions: &[&str]) -> Option<String> {
         values::sizes_expression(expressions)
     }

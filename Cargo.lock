@@ -2010,6 +2010,7 @@ dependencies = [
  "text",
  "themes",
  "ui",
+ "vcs-ui",
 ]
 
 [[package]]

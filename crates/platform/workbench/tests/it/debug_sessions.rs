@@ -690,9 +690,9 @@ fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
         "Edit…",
         "Pause Watch",
         "-",
-        "(Inspect…)",
+        "Inspect…",
         "Copy Value",
-        "(Compare Value with Clipboard)",
+        "Compare Value with Clipboard",
         "Copy Name",
         "-",
         "Evaluate Expression…",
@@ -722,10 +722,10 @@ fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
             "New Watch…",
             "Remove All Watches",
             "-",
-            "(Inspect…)",
+            "Inspect…",
             "Set Value…",
             "Copy Value",
-            "(Compare Value with Clipboard)",
+            "Compare Value with Clipboard",
             "Copy Name",
             "-",
             "Evaluate Expression…",
@@ -981,6 +981,54 @@ fn every_window_follows_show_variable_values_in_editor(cx: &mut TestAppContext) 
         h.cx.update(|cx| workbench::open_main_window(cx, Rc::new(product())));
     h.draw();
     assert_eq!(shown(&mut h, third), json!(false));
+}
+
+/// Inspect: a dialog on the selected value with its own tree and a
+/// history of roots.
+#[gpui::test]
+fn inspect_opens_a_dialog_on_the_selected_value(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    let main = h.file("main.py");
+    let mut script = support::debug_start_ignoring(
+        &h.root,
+        None,
+        &["setBreakpoints", "setExceptionBreakpoints", "source"],
+    );
+    script.extend(debug_stop(&main, 3, "breakpoint"));
+    script.extend([
+        json!({"expect": "scopes", "arguments": {"frameId": 103}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0,
+                "evaluateName": "a"},
+            {"name": "b", "value": "[2]", "type": "list", "variablesReference": 7,
+                "evaluateName": "b"}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 7}}),
+        json!({"respond": {"variables": [
+            {"name": "0", "value": "2", "type": "int", "variablesReference": 0}]}}),
+    ]);
+    push_debug_script(script);
+    h.invoke("debug.debug", json!(null));
+    h.wait("the values of the stop", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
+    });
+    assert_eq!(h.debug()["inspect_dialogs"], json!([]));
+    h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+    h.invoke("debug.variables.inspect", json!(null));
+    let s = h.wait("the Inspect dialog", |s| {
+        s["inspect_dialogs"]
+            .as_array()
+            .is_some_and(|d| d.len() == 1)
+    });
+    let dialog = &s["inspect_dialogs"][0];
+    assert_eq!(dialog["title"], json!("Inspect 'b'"), "{dialog:#}");
+    assert_eq!(dialog["history"], json!(["b"]), "{dialog:#}");
+    assert_eq!(dialog["can_back"], json!(false), "{dialog:#}");
+    assert_eq!(dialog["can_forward"], json!(false), "{dialog:#}");
 }
 
 /// debugger-values-in-editor.md: the mouse resting on `b` of `return b`
