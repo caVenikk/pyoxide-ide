@@ -17,10 +17,11 @@ use ui::icons::IconName;
 use ui::menu::MenuItem;
 
 use super::actions::{
-    CopyReference, Deactivate, Delete, Duplicate, ForceRefresh, ForgetCachedSchemas, GenerateDdl,
-    HideSchema, ManageShownSchemas, MoveDown, MoveUp, QuickDocumentation, Rename, SetColor,
-    SetIntrospectionLevel, Truncate,
+    ApplyColorToChildren, CopyReference, Deactivate, Delete, Duplicate, ForceRefresh,
+    ForgetCachedSchemas, GenerateDdl, HideSchema, ManageShownSchemas, MoveDown, MoveUp,
+    QuickDocumentation, Rename, SetColor, SetIntrospectionLevel, Truncate,
 };
+use super::colors;
 use super::{AddDataSource, ImportDataSources, Properties, Refresh};
 use crate::dialog::COLORS;
 use crate::{BACKENDS, backend_title, icons};
@@ -34,6 +35,12 @@ pub const DEACTIVATE: &str = "Deactivate";
 pub const RENAME: &str = "Rename\u{2026}";
 pub const MOVE: &str = "Move";
 pub const SET_COLOR: &str = "Set Color";
+const AUTO_COLOR: &str = "Auto";
+const NO_COLOR: &str = "No Color";
+const CUSTOM_COLOR: &str = "Custom";
+const SHARE_THROUGH_VCS: &str = "Share through VCS";
+const APPLY_TO_CHILDREN: &str = "Apply to Children";
+const SETTINGS: &str = "Settings\u{2026}";
 pub const QUICK_DOC: &str = "Quick Documentation";
 pub const COMPARE: &str = "Compare Schema Structure";
 pub const INTROSPECTION_LEVEL: &str = "Introspection Level";
@@ -92,8 +99,10 @@ pub struct MenuInput {
     /// The data source's place among the project's (Move Up and Down).
     pub index: usize,
     pub count: usize,
-    /// The data source's colour.
+    /// The colour of the row's own: a name, `none`, or nothing (Auto).
     pub color: Option<String>,
+    /// The row has a colour to give what is below it.
+    pub apply_to_children: bool,
     /// The data source's introspection level (`None`: chosen
     /// automatically).
     pub level: Option<Level>,
@@ -172,30 +181,46 @@ fn move_items(input: &MenuInput) -> MenuItem {
     )
 }
 
+/// The Set Color submenu of a row: Auto, the colours, Custom and Share
+/// through VCS (not there yet), Apply to Children, Settings.
 fn color_items(input: &MenuInput) -> MenuItem {
-    let current = input
-        .color
-        .as_deref()
-        .map(crate::dialog::color_id)
-        .unwrap_or("none");
-    let items = COLORS
-        .iter()
-        .map(|(id, label)| {
-            let label = match (*id, *id == current) {
-                ("none", true) => "No Color (Current)".to_owned(),
-                ("none", false) => "No Color".to_owned(),
-                (_, true) => format!("{label} (Current)"),
-                (_, false) => (*label).to_owned(),
-            };
-            MenuItem::action(
-                label,
-                SetColor {
-                    color: (*id).to_owned(),
-                },
-            )
-            .icon(icons::color(id))
-        })
-        .collect();
+    let current = input.color.as_deref().map(crate::dialog::color_id);
+    let current_label = |label: &str, here: bool| {
+        if here {
+            format!("{label} (Current)")
+        } else {
+            label.to_owned()
+        }
+    };
+    let mut items = vec![MenuItem::action(
+        current_label(AUTO_COLOR, current.is_none()),
+        SetColor {
+            color: colors::AUTO.to_owned(),
+        },
+    )];
+    items.push(MenuItem::separator());
+    items.extend(COLORS.iter().map(|(id, label)| {
+        let label = if *id == colors::NO_COLOR {
+            NO_COLOR
+        } else {
+            *label
+        };
+        MenuItem::action(
+            current_label(label, current == Some(*id)),
+            SetColor {
+                color: (*id).to_owned(),
+            },
+        )
+        .icon(icons::color(id))
+    }));
+    items.push(MenuItem::unavailable(CUSTOM_COLOR).icon(IconName::EDIT));
+    items.push(MenuItem::separator());
+    items.push(MenuItem::unavailable(SHARE_THROUGH_VCS));
+    items.push(
+        MenuItem::action(APPLY_TO_CHILDREN, ApplyColorToChildren).enabled(input.apply_to_children),
+    );
+    items.push(MenuItem::separator());
+    items.push(MenuItem::action(SETTINGS, Properties).icon(IconName::SETTINGS_SMALL));
     MenuItem::submenu(SET_COLOR, items)
 }
 
@@ -303,6 +328,8 @@ pub fn items(input: &MenuInput) -> Vec<MenuItem> {
             out.push(copy_paste(input));
             out.push(refresh());
             out.push(sep());
+            out.push(color_items(input));
+            out.push(sep());
             out.push(quick_doc());
             out.push(sep());
             out.push(level_items(input));
@@ -323,6 +350,7 @@ pub fn items(input: &MenuInput) -> Vec<MenuItem> {
             if input.rename {
                 out.push(rename());
             }
+            out.push(color_items(input));
             out.push(sep());
             out.push(quick_doc());
             out.push(sep());
@@ -376,6 +404,7 @@ pub fn items(input: &MenuInput) -> Vec<MenuItem> {
             if input.rename {
                 out.push(rename());
             }
+            out.push(color_items(input));
             out.push(sep());
             out.push(quick_doc());
             out.push(sep());
@@ -439,6 +468,7 @@ mod tests {
             index: 0,
             count: 1,
             color: None,
+            apply_to_children: false,
             level: None,
             schema_level: None,
             rename: true,
@@ -489,6 +519,7 @@ mod tests {
                 "Refresh",
                 "|",
                 "Rename\u{2026}",
+                "Set Color",
                 "|",
                 "Quick Documentation",
                 "|",
@@ -506,8 +537,48 @@ mod tests {
         let got = labels(&items_of(&no_rename));
         assert_eq!(
             &got[..5],
-            ["New", "Copy/Paste", "Refresh", "|", "Quick Documentation"]
+            ["New", "Copy/Paste", "Refresh", "|", "Set Color"]
         );
+    }
+
+    #[test]
+    fn set_color_menu_as_in_the_reference() {
+        let mut data = input(Target::Object { table: true });
+        data.apply_to_children = true;
+        let MenuItem::Submenu { items, .. } = color_items(&data) else {
+            panic!("a submenu");
+        };
+        assert_eq!(
+            labels(&items),
+            [
+                "Auto (Current)",
+                "|",
+                "No Color",
+                "Blue",
+                "Teal",
+                "Green",
+                "Yellow",
+                "Orange",
+                "Red",
+                "Purple",
+                "Gray",
+                "Custom",
+                "|",
+                "Share through VCS",
+                "Apply to Children",
+                "|",
+                "Settings\u{2026}",
+            ]
+        );
+        // The current colour is marked, and Apply to Children needs one.
+        data.color = Some("blue".into());
+        data.apply_to_children = false;
+        let MenuItem::Submenu { items, .. } = color_items(&data) else {
+            panic!("a submenu");
+        };
+        let got = labels(&items);
+        assert_eq!(got[0], "Auto");
+        assert_eq!(got[3], "Blue (Current)");
     }
 
     fn items_of(input: &MenuInput) -> Vec<MenuItem> {

@@ -37,6 +37,7 @@ use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
 mod actions;
+mod colors;
 mod connect;
 mod context_menu;
 mod model_load;

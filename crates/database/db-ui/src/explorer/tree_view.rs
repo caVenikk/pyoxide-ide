@@ -64,6 +64,7 @@ fn same_connection(a: &db_core::Profile, b: &db_core::Profile) -> bool {
         let mut gui = p.gui_options();
         gui.password_save = db_core::PasswordSave::default();
         gui.color = None;
+        gui.object_colors.clear();
         gui.comment = None;
         gui.level = None;
         gui.schema_levels.clear();
@@ -859,7 +860,7 @@ impl Explorer {
             .zip(paths)
             .map(|(row, path)| {
                 let text = self.row_text(row);
-                json!({
+                let mut json = json!({
                     "path": path,
                     "depth": row.depth,
                     "text": text.view.name,
@@ -869,7 +870,12 @@ impl Explorer {
                     "expanded": row.expanded,
                     "failed": text.failed,
                     "selected": self.tree.selected.as_ref() == Some(&row.key),
-                })
+                });
+                // Only a coloured row has the key (Set Color).
+                if let Some(color) = self.row_color(&row.key) {
+                    json["color"] = json!(color);
+                }
+                json
             })
             .collect();
         let lives: serde_json::Map<String, Json> = self
@@ -1045,6 +1051,12 @@ impl Explorer {
         // The pointer's row, also while it is on the rest of the row shown
         // over the edge.
         let hovered = !selected && self.expansion.hovered() == Some(&row.key);
+        // A coloured row is painted across the tree's width, square; the
+        // selection and the hover take its place.
+        let tint = self
+            .row_color(&row.key)
+            .filter(|_| !selected)
+            .map(|c| super::colors::tint(c, theme.is_dark()));
         let name_color: Hsla = if text.failed {
             theme.color(UiRole::Danger)
         } else if row.key.node == NodeKey::Status {
@@ -1134,10 +1146,20 @@ impl Explorer {
         div()
             .id(("db-row", ix))
             .debug_selector(move || selector.clone())
+            .group("database-row")
             .relative()
             .w_full()
             .h(row_height)
             .overflow_hidden()
+            .when_some(tint, |d, color| {
+                d.child(
+                    div()
+                        .absolute()
+                        .size_full()
+                        .bg(color)
+                        .group_hover("database-row", |s| s.bg(gpui::transparent_black())),
+                )
+            })
             .when(selected || hovered, |d| {
                 d.child(
                     frame
