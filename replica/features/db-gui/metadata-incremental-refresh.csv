@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Incremental metadata refresh (only changed objects) on PostgreSQL,db-gui,could,yes,no,Pro; ADR 0021; full refresh first
+"Incremental metadata refresh (only changed objects)",db-gui,could,yes,partial,"Pro; ADR 0021. Engine side done: Introspector::changes compares per-object stamps (PostgreSQL, Oracle, SQLite), load_objects reads one table, routine or type, db-session refreshes a scope incrementally or by objects and falls back to a full read when the database cannot compare; the tree actions and the auto-refresh hook come with the database UI"

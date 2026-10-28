@@ -56,6 +56,8 @@ db_testkit::conformance_tests! {
     #[ignore = "needs an Oracle Client and the oracle container"]
     load_query_count => Expect::Run;
     #[ignore = "needs an Oracle Client and the oracle container"]
+    incremental_changes => Expect::Run;
+    #[ignore = "needs an Oracle Client and the oracle container"]
     savepoint_round_trip => Expect::Run;
     #[ignore = "needs an Oracle Client and the oracle container"]
     cursor_closed_by_next_statement => Expect::Run;

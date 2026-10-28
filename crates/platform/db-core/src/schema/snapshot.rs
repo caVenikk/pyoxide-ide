@@ -202,12 +202,14 @@ impl Snapshot {
     }
 }
 
-/// An opaque position in the history of a database's metadata. Only the
-/// introspector that made it understands it: PostgreSQL the catalog row
-/// versions, Oracle the `LAST_DDL_TIME` of the objects, SQLite the schema
-/// version. A token of another dialect, or one the database can no longer
-/// compare (a restart, a wrap-around), makes
-/// [`Introspector::changes`] fail with `Unsupported`, and the caller reloads.
+/// An opaque position in the history of a database's metadata: per schema
+/// read, a stamp of every object (PostgreSQL the row versions of the catalog
+/// rows that describe it, Oracle its `LAST_DDL_TIME`, SQLite the text in
+/// `sqlite_schema`) and the level the schema was read at. Only the
+/// introspector that made it understands it. A token of another dialect or
+/// version makes [`Introspector::changes`] fail with `Unsupported`, and the
+/// caller reloads. The stamps of a pass are taken before its data is read, so
+/// a change made meanwhile is found by the next comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangeToken {
     pub dialect: Dialect,
@@ -241,6 +243,10 @@ pub struct Delta {
     pub token: ChangeToken,
     pub schemas: Vec<SchemaDelta>,
     pub dropped_schemas: Vec<String>,
+    /// Schemas of the scope the token has no stamps of (new ones, or ones
+    /// never read): the caller reads them with [`Introspector::load`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unseen: Vec<String>,
 }
 
 /// Kinds whose source text a pass at [`Level::Full`] reads.

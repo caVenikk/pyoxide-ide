@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use db_core::DataSourceId;
-use db_core::schema::{Delta, Level, ObjectRef, SchemaDelta, Snapshot};
+use db_core::schema::{Delta, Level, ObjectKind, ObjectRef, SchemaDelta, Snapshot};
 use db_model::{Model, NodeId, NodeKind};
 
 use crate::fixture::{Rng, mutate, random_snapshot};
@@ -30,10 +30,25 @@ fn delta(old: &Snapshot, new: &Snapshot) -> Delta {
         .iter()
         .map(|s1| {
             let s0 = old.schema(&s1.info.name);
-            let objects = s1
+            let changed: Vec<_> = s1
                 .objects
                 .iter()
                 .filter(|o| !s0.is_some_and(|s0| s0.objects.contains(o)))
+                .collect();
+            // A table comes whole, with all its indexes and triggers.
+            let tables: Vec<&str> = changed
+                .iter()
+                .filter(|o| !matches!(o.kind, ObjectKind::Index | ObjectKind::Trigger))
+                .map(|o| o.name.as_str())
+                .collect();
+            let objects: Vec<_> = s1
+                .objects
+                .iter()
+                .filter(|o| {
+                    changed.contains(o)
+                        || (matches!(o.kind, ObjectKind::Index | ObjectKind::Trigger)
+                            && o.parent.as_deref().is_some_and(|p| tables.contains(&p)))
+                })
                 .cloned()
                 .collect();
             let dropped = s0
@@ -72,6 +87,7 @@ fn delta(old: &Snapshot, new: &Snapshot) -> Delta {
         token: new.token.clone().expect("random snapshots have tokens"),
         schemas,
         dropped_schemas,
+        unseen: vec![],
     }
 }
 

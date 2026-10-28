@@ -6,35 +6,18 @@ use std::collections::HashMap;
 
 use super::sql_text;
 use super::{
-    ForeignKey, RawColumn, SqliteIntrospector, TableFacts, build_constraints, column_infos,
-    foreign_key_groups, primary_key, quote_ident,
+    ForeignKey, RawColumn, TableFacts, build_constraints, column_infos, foreign_key_groups,
+    primary_key, quote_ident,
 };
+use crate::schema::change::{SchemaStamps, Stamp, Units, digest, retain_units};
 use crate::schema::{
-    IndexInfo, Introspector, Level, ObjectDetail, ObjectInfo, ObjectKind, RelationInfo, SchemaInfo,
-    SchemaSnapshot, Scope, Snapshot, SourceInfo, TableDetail, TriggerDetail, fetch_all, has_source,
+    IndexInfo, Level, ObjectDetail, ObjectInfo, ObjectKind, RelationInfo, SchemaInfo,
+    SchemaSnapshot, SourceInfo, TableDetail, TriggerDetail, fetch_all, has_source,
 };
 use crate::{Connection, Dialect, Result};
 
 /// Tables SQLite keeps for itself (`sqlite_sequence`, `sqlite_stat1`, ...).
 const NOT_INTERNAL: &str = "NOT (m.type = 'table' AND m.name LIKE 'sqlite\\_%' ESCAPE '\\')";
-
-pub(super) async fn load(
-    intro: &SqliteIntrospector<'_>,
-    scope: &Scope,
-    level: Level,
-) -> Result<Snapshot> {
-    let mut schemas = Vec::new();
-    for info in intro.schemas().await? {
-        if scope.selects(&info) {
-            schemas.push(load_schema(intro.conn, info, level).await?);
-        }
-    }
-    Ok(Snapshot {
-        level,
-        token: None,
-        schemas,
-    })
-}
 
 /// One row of `sqlite_schema`.
 struct Entry {
@@ -44,14 +27,67 @@ struct Entry {
     sql: Option<String>,
 }
 
-async fn load_schema(
+/// The change query: the text of every object in `sqlite_schema`, which
+/// changes whenever the object does. An index or trigger stands for its table.
+pub(super) async fn stamps(
+    conn: &dyn Connection,
+    info: &SchemaInfo,
+    level: Level,
+) -> Result<SchemaStamps> {
+    let entries = read_entries(conn, &quote_ident(&info.name)).await?;
+    Ok(stamps_of(info, level, &entries))
+}
+
+/// The stamps and the schema from one read of `sqlite_schema`.
+pub(super) async fn stamped_read(
     conn: &dyn Connection,
     info: SchemaInfo,
     level: Level,
+) -> Result<(SchemaStamps, SchemaSnapshot)> {
+    let entries = read_entries(conn, &quote_ident(&info.name)).await?;
+    let stamps = stamps_of(&info, level, &entries);
+    Ok((stamps, load_entries(conn, info, level, entries).await?))
+}
+
+fn stamps_of(info: &SchemaInfo, level: Level, entries: &[Entry]) -> SchemaStamps {
+    let objects = entries
+        .iter()
+        .map(|e| {
+            let child = matches!(e.kind, ObjectKind::Index | ObjectKind::Trigger);
+            Stamp(
+                e.kind,
+                e.name.clone(),
+                String::new(),
+                child.then(|| e.table.clone()),
+                digest(&[e.sql.as_deref().unwrap_or_default(), &e.table]),
+            )
+        })
+        .collect();
+    SchemaStamps {
+        level,
+        system: info.is_system,
+        row: String::new(),
+        objects,
+    }
+}
+
+/// A schema is small and read whole; `units` reduces the result.
+pub(super) async fn read(
+    conn: &dyn Connection,
+    info: SchemaInfo,
+    level: Level,
+    units: Option<&Units>,
 ) -> Result<SchemaSnapshot> {
-    let schema = info.name.clone();
-    let quoted = quote_ident(&schema);
-    // Same set and order as `objects`.
+    let whole = load_schema(conn, info, level).await?;
+    Ok(match units {
+        Some(units) => retain_units(whole, units),
+        None => whole,
+    })
+}
+
+/// The rows of `sqlite_schema` that are objects to show: same set and order
+/// as `objects`.
+async fn read_entries(conn: &dyn Connection, quoted: &str) -> Result<Vec<Entry>> {
     let master = fetch_all(
         conn,
         "master",
@@ -80,6 +116,26 @@ async fn load_schema(
             sql: row.opt_text(3)?,
         });
     }
+    Ok(entries)
+}
+
+async fn load_schema(
+    conn: &dyn Connection,
+    info: SchemaInfo,
+    level: Level,
+) -> Result<SchemaSnapshot> {
+    let entries = read_entries(conn, &quote_ident(&info.name)).await?;
+    load_entries(conn, info, level, entries).await
+}
+
+async fn load_entries(
+    conn: &dyn Connection,
+    info: SchemaInfo,
+    level: Level,
+    entries: Vec<Entry>,
+) -> Result<SchemaSnapshot> {
+    let schema = info.name.clone();
+    let quoted = quote_ident(&schema);
 
     let mut objects: Vec<ObjectInfo> = entries
         .iter()

@@ -42,6 +42,7 @@ pub mod fake;
 mod job;
 mod options;
 mod pager;
+mod refresh;
 mod runtime;
 mod session;
 
@@ -55,6 +56,7 @@ pub use options::{DataSourceOptions, SessionOptions, TxPolicy};
 pub use pager::{
     Page, PageError, PageSize, PagerEvent, PagerSink, ResultPager, TableQuery, TableRef,
 };
+pub use refresh::{RefreshMode, RefreshSummary};
 pub use runtime::DbRuntime;
 pub use session::{Session, SessionStatus};
 

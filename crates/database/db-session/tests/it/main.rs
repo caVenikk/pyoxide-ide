@@ -16,5 +16,6 @@
 mod oracle;
 mod pager;
 mod postgres;
+mod refresh;
 mod sqlite;
 mod support;

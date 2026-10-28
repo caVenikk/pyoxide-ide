@@ -575,7 +575,11 @@ async fn statements_do_not_depend_on_the_tables() {
         many.push(load_statements(&*conn, &scope, level).await);
     }
     assert_eq!(few, many);
-    assert_eq!(many, [5, 8, 11], "schema list, then the queries per family");
+    assert_eq!(
+        many,
+        [9, 12, 15],
+        "schema list, the four change queries, then the queries per family"
+    );
     drop_schema(&*conn, BIG).await;
 }
 
@@ -610,5 +614,76 @@ async fn bench_load_5000_tables() {
             times[0].as_secs_f64() * 1000.0
         );
     }
+    drop_schema(&*conn, BIG).await;
+}
+
+/// `cargo test -p db-postgres --release --test it load::bench_incremental -- --ignored --nocapture`
+#[tokio::test]
+#[ignore = "measurement, needs the postgres container, run on demand"]
+async fn bench_incremental_5000_tables() {
+    let conn = connect().await;
+    big_schema(&*conn, 5000).await;
+    exec(&*conn, "ANALYZE").await;
+    let intro = introspector(&*conn);
+    let scope = Scope::list([BIG]);
+    let token = intro
+        .load(&scope, Level::Structure)
+        .await
+        .unwrap()
+        .token
+        .expect("a token");
+
+    let median = |mut times: Vec<std::time::Duration>| {
+        times.sort();
+        times[times.len() / 2].as_secs_f64() * 1000.0
+    };
+    let mut quiet = Vec::new();
+    for _ in 0..5 {
+        let started = Instant::now();
+        let delta = intro.changes(&token, &scope).await.unwrap();
+        quiet.push(started.elapsed());
+        assert!(delta.schemas.is_empty() && delta.dropped_schemas.is_empty());
+    }
+    println!(
+        "postgres changes, nothing changed: 5000 tables: median {:.0} ms",
+        median(quiet)
+    );
+
+    let mut changed = Vec::new();
+    for i in 0..5 {
+        exec(
+            &*conn,
+            &format!("ALTER TABLE {BIG}.t0042 ADD COLUMN extra{i} integer"),
+        )
+        .await;
+        let started = Instant::now();
+        let delta = intro.changes(&token, &scope).await.unwrap();
+        changed.push(started.elapsed());
+        assert_eq!(delta.schemas.len(), 1);
+    }
+    println!(
+        "postgres changes, one table changed: 5000 tables: median {:.0} ms",
+        median(changed)
+    );
+
+    let mut one = Vec::new();
+    let table = db_core::schema::ObjectRef {
+        schema: BIG.into(),
+        name: "t0042".into(),
+        kind: ObjectKind::Table,
+    };
+    for _ in 0..5 {
+        let started = Instant::now();
+        let delta = intro
+            .load_objects(BIG, std::slice::from_ref(&table), Level::Structure)
+            .await
+            .unwrap();
+        one.push(started.elapsed());
+        assert!(!delta.objects.is_empty());
+    }
+    println!(
+        "postgres load_objects, one table: 5000 tables: median {:.0} ms",
+        median(one)
+    );
     drop_schema(&*conn, BIG).await;
 }

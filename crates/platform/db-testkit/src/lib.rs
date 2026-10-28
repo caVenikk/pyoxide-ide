@@ -33,7 +33,9 @@ use db_core::{
     Value, ValueKind,
 };
 
-pub use introspection::{CountingConnection, assert_load_matches_per_object, load_statements};
+pub use introspection::{
+    CountingConnection, assert_load_matches_per_object, incremental_changes_case, load_statements,
+};
 
 /// Whether a case ran.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +90,8 @@ pub struct Hooks {
     /// (text).
     pub create_table: fn(&str) -> String,
     pub drop_table: fn(&str) -> String,
+    /// Add an integer column (`table`, `column`) to an existing table.
+    pub add_column: fn(&str, &str) -> String,
     /// The bind placeholder of parameter `n` (from 1).
     pub placeholder: fn(usize) -> String,
     /// A one-row query with typed values and what they read back as.
@@ -148,6 +152,7 @@ impl Hooks {
             }),
             create_table: |name| format!("CREATE TABLE {name} (id INTEGER, label TEXT)"),
             drop_table: |name| format!("DROP TABLE IF EXISTS {name}"),
+            add_column: |table, column| format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER"),
             placeholder: |n| format!("?{n}"),
             savepoint: |name| format!("SAVEPOINT {name}"),
             rollback_to: |name| format!("ROLLBACK TO {name}"),
@@ -207,6 +212,7 @@ impl Hooks {
             sleep: Some(|secs| format!("SELECT pg_sleep({secs})")),
             create_table: |name| format!("CREATE TABLE {name} (id bigint, label text)"),
             drop_table: |name| format!("DROP TABLE IF EXISTS {name}"),
+            add_column: |table, column| format!("ALTER TABLE {table} ADD COLUMN {column} integer"),
             placeholder: |n| format!("${n}"),
             savepoint: |name| format!("SAVEPOINT {name}"),
             rollback_to: |name| format!("ROLLBACK TO SAVEPOINT {name}"),
@@ -307,6 +313,7 @@ impl Hooks {
                 format!("CREATE TABLE {name} (id NUMBER(18), label VARCHAR2(200))")
             },
             drop_table: |name| format!("DROP TABLE {name} PURGE"),
+            add_column: |table, column| format!("ALTER TABLE {table} ADD ({column} NUMBER)"),
             placeholder: |n| format!(":{n}"),
             savepoint: |name| format!("SAVEPOINT {name}"),
             rollback_to: |name| format!("ROLLBACK TO SAVEPOINT {name}"),
@@ -1008,16 +1015,26 @@ pub async fn load_query_count(t: &Target) -> Ran {
         }
     };
     let levels = [Level::Names, Level::Structure, Level::Full];
+    // A change made in the second the stamps are taken in makes the stamp
+    // query run again after the second (Oracle), whoever made it; that is
+    // not what is counted, so the least of three loads is.
+    let least = async |level: Level| {
+        let mut least = usize::MAX;
+        for _ in 0..3 {
+            least = least.min(load_statements(&*conn, &Scope::current(), level).await);
+        }
+        least
+    };
 
     grow_to(3).await;
     let mut few = Vec::new();
     for level in levels {
-        few.push(load_statements(&*conn, &Scope::current(), level).await);
+        few.push(least(level).await);
     }
     grow_to(60).await;
     let mut many = Vec::new();
     for level in levels {
-        many.push(load_statements(&*conn, &Scope::current(), level).await);
+        many.push(least(level).await);
     }
 
     for i in 0..made {
@@ -1035,6 +1052,30 @@ pub async fn load_query_count(t: &Target) -> Ran {
         many.windows(2).all(|w| w[0] <= w[1]),
         "a higher level reads more: {many:?}"
     );
+    let _ = conn.close().await;
+    Ran::Yes
+}
+
+/// Change detection: nothing changed is found with a few statements, a new
+/// column is found in that table alone, a dropped view is reported dropped,
+/// and one table can be read again on its own.
+pub async fn incremental_changes(t: &Target) -> Ran {
+    let conn = t.connect().await;
+    let prefix = unique("ic");
+    let fixture = (t.hooks.fixture)(&prefix);
+    for sql in &fixture.drop {
+        try_exec(&*conn, sql).await;
+    }
+    for sql in &fixture.create {
+        exec(&*conn, sql, &[]).await;
+    }
+    incremental_changes_case(&*conn, &prefix, &|table, column| {
+        (t.hooks.add_column)(table, column)
+    })
+    .await;
+    for sql in &fixture.drop {
+        try_exec(&*conn, sql).await;
+    }
     let _ = conn.close().await;
     Ran::Yes
 }

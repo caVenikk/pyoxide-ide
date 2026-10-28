@@ -220,6 +220,18 @@ checked already.
   failing parse is ignored and rebuilt. The tree and completion read it before
   any connection exists. The format may move to a binary encoding if
   measurements of a 10 000-table schema require it.
+- **Change tokens** are per-object stamps taken before the data is read, so a
+  change that lands during a read is found by the next pass and never lost.
+  `Introspector::changes` compares them with the catalogs (PostgreSQL: a hash
+  of the catalog row versions per relation, routine and type; Oracle: the DDL
+  time and object id from `ALL_OBJECTS`, with a wait until the second the
+  stamps were taken in has passed, because that time has a resolution of one
+  second; SQLite: the schema entries) and returns a table whole with its
+  indexes and triggers, or the name of what is gone. A token the database
+  cannot compare (another version or dialect) makes the refresh read the
+  whole scope. `Introspector::load_objects` reads single objects by name.
+  Changes made in an uncommitted transaction of a console are not seen by a
+  refresh, which runs on a connection of its own.
 - DDL run in a console schedules a refresh of the objects the statement names
   (from `sql-syntax` classification), not a full pass.
 - Refresh passes report progress (database, schema) and are cancellable.
