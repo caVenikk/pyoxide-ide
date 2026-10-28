@@ -160,6 +160,9 @@ Window
     Close All but Pinned
     Close Tabs to the Left
     Close Tabs to the Right
+  Processes >
+    Show
+    Auto Show
 Help
   Welcome
   Find Action…  ⇧⌘A

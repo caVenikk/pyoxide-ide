@@ -289,6 +289,8 @@ attributes empty, `syntax.diagnostic-hint` is a grey dotted line
 | `ui.scrollbar-track` | `ScrollBar.trackColor` (UI theme or scheme color), `ScrollBar.Transparent.trackColor` (UI theme or scheme color), `ScrollBar.Mac.trackColor` (UI theme or scheme color), `ScrollBar.Mac.Transparent.trackColor` (UI theme or scheme color) | Scrollbar track |
 | `ui.progress` | `ProgressBar.progressColor` | Progress bar fill |
 | `ui.progress-track` | `ProgressBar.trackColor` | Progress bar track |
+| `ui.progress-indeterminate-start` | `ProgressBar.indeterminateStartColor` | First colour of the moving gradient of an indeterminate progress bar |
+| `ui.progress-indeterminate-end` | `ProgressBar.indeterminateEndColor` | Second colour of the moving gradient of an indeterminate progress bar |
 | `ui.notification` | `Notification.background` | Background of notification balloons (the scheme colour `NOTIFICATION_BACKGROUND` is the editor's notification panel, not a balloon) |
 | `ui.notification-border` | `Notification.borderColor` | Border of notification balloons |
 | `ui.notification-text` | `Notification.foreground` | Title and content of notification balloons |
@@ -556,6 +558,8 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.text-disabled`, `ui.shortcut` | `ui.text-muted` |
 | `ui.text-link`, `ui.focus`, `ui.progress`, `ui.tab-underline`, `ui.completion-match` | `ui.accent` |
 | `ui.scrollbar-hover` | `ui.scrollbar` |
+| `ui.progress-indeterminate-start` | `ui.progress-track` |
+| `ui.progress-indeterminate-end` | `ui.progress` |
 | `ui.completion-popup`, `ui.documentation-popup` | `ui.surface-raised` |
 | `ui.completion-selection` | `ui.selection` |
 | `ui.gutter`, `ui.terminal-background` | `ui.editor-background` |

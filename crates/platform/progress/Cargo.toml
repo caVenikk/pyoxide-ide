@@ -1,0 +1,9 @@
+[package]
+name = "progress"
+description = "Background tasks of Pyoxide IDE without a UI toolkit: tasks with a title, a text, details and a fraction updated from any thread, cancellation, and the registry the status bar observes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Background tasks in the status bar and the Processes popup (cancel / pause),editor,must,yes,partial,project scan language server start wired; interpreter git debugger and database tasks not yet

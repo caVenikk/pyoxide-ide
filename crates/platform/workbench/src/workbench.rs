@@ -23,6 +23,7 @@ use ui::notification::Notification;
 use ui::theme::ThemeExt;
 
 use crate::app::Product;
+use crate::background_tasks::{BackgroundTasks, ProcessesPopup};
 use crate::chrome;
 use crate::commands::*;
 use crate::env;
@@ -297,6 +298,9 @@ pub struct Workbench {
     file_sync: file_sync::FileSync,
     /// Notification balloons.
     notifications: Entity<Notifications>,
+    /// The background tasks in the status bar and the Processes popup.
+    background_tasks: Entity<BackgroundTasks>,
+    processes_popup: Entity<ProcessesPopup>,
     /// The project's Git repository and its statuses.
     version_control: version_control::VersionControl,
     /// The VCS widget's popups and dialogs.
@@ -440,6 +444,8 @@ impl Workbench {
             Self::new_debugger_view(&product, file_types.clone(), window, cx);
         subscriptions.extend(debug_subscriptions);
         let notifications = cx.new(|cx| Notifications::new(window, cx));
+        let background_tasks = cx.new(|cx| BackgroundTasks::new(window, cx));
+        let processes_popup = cx.new(|cx| ProcessesPopup::new(background_tasks.clone(), cx));
         let notifications_window =
             cx.new(|cx| NotificationsToolWindow::new(notifications.clone(), cx));
         let mut tool_windows =
@@ -494,6 +500,8 @@ impl Workbench {
             navigation: Default::default(),
             file_sync: Default::default(),
             notifications,
+            background_tasks,
+            processes_popup,
             version_control,
             branch_ui: Default::default(),
             project_widget: Default::default(),
@@ -828,6 +836,7 @@ impl Workbench {
             "message": self.message.as_ref().map(|m| m.to_string()),
             "notice": self.notice.as_ref().map(|m| m.to_string()),
             "notifications": self.notifications.read(cx).state_json(cx),
+            "background_tasks": self.background_tasks.read(cx).state_json(cx),
             "theme": cx.theme().id(),
             "vcs": self.vcs_state_json(cx),
             "diff": self.diff_state_json(cx),
@@ -2594,6 +2603,7 @@ impl Workbench {
             .text_size(text_size)
             .text_color(theme.color(UiRole::StatusBarText))
             .child(left)
+            .child(self.background_tasks.clone())
             .child(right.debug_selector(|| "status-right".into()).flex_none())
     }
 }
@@ -2610,6 +2620,9 @@ impl Render for Workbench {
         if bench {
             crate::bench::frame_started();
         }
+        let project_root = self.project_root(cx);
+        self.background_tasks
+            .update(cx, |tasks, cx| tasks.set_project(project_root, cx));
         let layout = self.frame_layout(window, cx);
         let run_widget = self.run_widget_state(window, cx);
         if let Some(tool_window) = self.focused_tool_window(window, cx) {
@@ -2713,6 +2726,7 @@ impl Render for Workbench {
             .on_action(cx.listener(Self::run_pin_configuration))
             .on_action(cx.listener(Self::notify_action))
             .on_action(cx.listener(Self::clear_notifications))
+            .map(|root| crate::background_tasks::on_actions(root, &self.background_tasks))
             // Keyboard input for the idle save; any key hides the find
             // bar's hint.
             .capture_key_down(cx.listener(|this, _, _, cx| {
@@ -2817,6 +2831,7 @@ impl Render for Workbench {
             )
             .child(self.render_status_bar(cx))
             .child(self.notifications.clone())
+            .child(self.processes_popup.clone())
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_tab_menu(window))

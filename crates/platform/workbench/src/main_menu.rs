@@ -472,6 +472,14 @@ fn window_menu() -> Menu {
                     cmd("Close Tabs to the Right", "tabs.close-right"),
                 ],
             ),
+            // BackgroundTasks.
+            sub(
+                "Processes",
+                vec![
+                    cmd("Show", "background-tasks.show"),
+                    cmd("Auto Show", "background-tasks.toggle-auto-show"),
+                ],
+            ),
         ],
     )
 }

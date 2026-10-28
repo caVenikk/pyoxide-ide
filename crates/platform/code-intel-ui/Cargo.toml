@@ -14,6 +14,7 @@ flume.workspace = true
 futures.workspace = true
 gpui.workspace = true
 name-match.workspace = true
+progress.workspace = true
 project.workspace = true
 serde_json.workspace = true
 settings.workspace = true

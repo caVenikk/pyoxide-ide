@@ -73,6 +73,21 @@ fn leftovers_of_interrupted_saves_are_hidden_and_removed_when_safe() {
     assert!(index.find(&in_venv).is_none() && index.find(&mine).is_none());
 }
 
+#[test]
+fn a_pausable_build_waits_at_every_item() {
+    let p = project();
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let pause = || {
+        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    };
+    let index =
+        FileIndex::build_pausable(&p.root, &p.filter, false, &AtomicBool::new(false), &pause)
+            .unwrap();
+    assert_eq!(index.len(), p.index.len());
+    // Once for every item the walk lists, and for the root.
+    assert!(calls.into_inner() >= index.len());
+}
+
 /// Relative paths of what `text` finds, ranked as the popup shows them.
 fn find(index: &FileIndex, text: &str) -> Vec<String> {
     find_with(

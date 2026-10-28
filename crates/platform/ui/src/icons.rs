@@ -55,6 +55,16 @@ impl IconName {
     pub const RERUN: Self = Self("run/rerun");
     pub const STOP: Self = Self("run/stop");
     pub const KILL_PROCESS: Self = Self("run/killProcess");
+    /// The cancel button of a background task and under the pointer (the
+    /// New UI's `AllIcons.Process.Stop`, `StopHovered`).
+    pub const PROGRESS_STOP: Self = Self("progress/stop");
+    pub const PROGRESS_STOP_HOVERED: Self = Self("progress/stopHovered");
+    /// The pause button of a pausable background task, and its resume
+    /// button while paused (`AllIcons.Process.ProgressPause`, `ProgressResume`).
+    pub const PROGRESS_PAUSE: Self = Self("progress/pause");
+    pub const PROGRESS_PAUSE_HOVERED: Self = Self("progress/pauseHovered");
+    pub const PROGRESS_RESUME: Self = Self("progress/resume");
+    pub const PROGRESS_RESUME_HOVERED: Self = Self("progress/resumeHovered");
     /// White variants for the coloured buttons of the run widget.
     pub const RUN_STROKE: Self = Self("run/run_stroke");
     pub const RERUN_STROKE: Self = Self("run/rerun_stroke");
@@ -198,6 +208,8 @@ impl IconName {
     /// Balloon icons of information and warning notifications.
     pub const INFO: Self = Self("status/info");
     pub const WARNING: Self = Self("status/warning");
+    /// `AllIcons.Status.Success` (all background tasks completed).
+    pub const STATUS_SUCCESS: Self = Self("status/success");
     pub const ERROR_MARK: Self = Self("nodes/errorMark");
     // The toolbar of the Run/Debug Configurations dialog.
     pub const REMOVE: Self = Self("general/remove");
@@ -319,9 +331,11 @@ platform_icons! {
         "nodes/textArea", "nodes/type", "nodes/variable", "nodes/word",
         "nodes/sourceRoot", "nodes/star", "nodes/testRoot",
         "objectBrowser/sortAlphabetically",
+        "progress/pause", "progress/pauseHovered", "progress/resume", "progress/resumeHovered",
+        "progress/stop", "progress/stopHovered",
         "run/debug", "run/killProcess",
         "startup/configFile", "run/rerun", "run/run", "run/stop",
-        "status/error", "status/info", "status/warning",
+        "status/error", "status/info", "status/success", "status/warning",
         "toolwindows/bookmarks@20x20", "toolwindows/commit@20x20", "toolwindows/debug@20x20",
         "toolwindows/documentation@20x20",
         "toolwindows/find@20x20", "toolwindows/notifications@20x20",

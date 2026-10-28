@@ -48,6 +48,7 @@ pub mod list_popup;
 mod marks;
 pub mod navigation;
 pub mod popup;
+pub mod server_tasks;
 pub mod services;
 pub mod signature;
 mod view;

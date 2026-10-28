@@ -7,6 +7,7 @@ mod mouse;
 mod support;
 
 mod appearance;
+mod background_tasks;
 mod branches;
 mod breakpoints;
 mod code_intel;

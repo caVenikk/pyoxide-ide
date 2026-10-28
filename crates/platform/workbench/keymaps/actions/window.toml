@@ -94,3 +94,15 @@ id = "CloseAllToTheRight"
 text = "Close Tabs to the Right"
 groups = ["Main Menu > Window > Editor Tabs > Editor Close Actions"]
 command = "tabs.close-right"
+
+[[action]]
+id = "ShowProcessWindow"
+text = "Show"
+groups = ["Main Menu > Window > Processes"]
+command = "background-tasks.show"
+
+[[action]]
+id = "AutoShowProcessWindow"
+text = "Auto Show"
+groups = ["Main Menu > Window > Processes"]
+command = "background-tasks.toggle-auto-show"
