@@ -373,6 +373,14 @@ pub struct GuiOptions {
     /// `rose` and `violet`, shown as red and purple).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Colours of the objects in the tree (Set Color of a node), by the
+    /// node's path: the names from its schema down joined with `/`, `@`
+    /// for the database node. `<path>/*` colours what is below the node
+    /// that has no colour of its own (Apply to Children; `*` for what is
+    /// below the data source). The value is a colour name as in `color`,
+    /// or `none` for an object left uncoloured under a coloured parent.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub object_colors: BTreeMap<String, String>,
     /// Transaction mode of new consoles (auto when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_mode: Option<TxMode>,

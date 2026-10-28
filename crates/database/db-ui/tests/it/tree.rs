@@ -353,3 +353,111 @@ fn arrow_keys_walk_the_tree(cx: &mut TestAppContext) {
     h.press("up");
     assert_eq!(selected(&mut h).as_deref(), Some(NAME));
 }
+
+/// The colour of the rows by name.
+fn colors(h: &mut Harness) -> Vec<(String, String)> {
+    state(h)["explorer"]["tree"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| {
+            Some((
+                r["text"].as_str()?.to_owned(),
+                r["color"].as_str()?.to_owned(),
+            ))
+        })
+        .collect()
+}
+
+fn colored(h: &mut Harness, name: &str) -> Option<String> {
+    colors(h)
+        .into_iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, c)| c)
+}
+
+/// Set Color paints the row of the data source, of a schema and of an
+/// object, keeps the colours with the data source's settings, and Apply to
+/// Children colours what is below.
+#[gpui::test]
+fn set_color_paints_the_rows_and_is_saved_with_the_data_source(cx: &mut TestAppContext) {
+    let (dir, root) = project();
+    let cache_dir = tempfile::tempdir().unwrap();
+    let cache = ModelCache::new(cache_dir.path());
+    cache
+        .store(&Model::from_snapshot(
+            DataSourceId::from(NAME),
+            demo_snapshot(),
+        ))
+        .unwrap();
+    let store = FakeStore::new("");
+    store.set_model_cache(cache_dir.path());
+    store.set_connections(Arc::new(NoServer::default()));
+    let mut h = open(cx, store.clone(), &root);
+    let _keep = (dir, cache_dir);
+    h.invoke("db.explorer.expand", json!({ "path": NAME }));
+    wait_for(&mut h, "the cached model", |s| {
+        s["explorer"]["tree"]["data_sources"][NAME]["has_model"] == true
+    });
+    h.invoke(
+        "db.explorer.expand",
+        json!({ "path": format!("{NAME}/pyoxide/demo") }),
+    );
+    h.invoke(
+        "db.explorer.expand",
+        json!({ "path": format!("{NAME}/pyoxide/demo/tables") }),
+    );
+    let saved = |store: &Arc<FakeStore>| store.sources(&root)[0].profile.gui_options();
+    assert!(colors(&mut h).is_empty());
+
+    // The data source.
+    click_row(&mut h, NAME, 1);
+    h.invoke("db.explorer.set-color", json!({ "color": "blue" }));
+    assert_eq!(colored(&mut h, NAME).as_deref(), Some("blue"));
+    assert_eq!(saved(&store).color.as_deref(), Some("blue"));
+    // Nothing else: the colour of a data source is its own.
+    assert_eq!(colors(&mut h).len(), 1);
+
+    // An object.
+    click_row(&mut h, "orders", 1);
+    h.invoke("db.explorer.set-color", json!({ "color": "yellow" }));
+    assert_eq!(colored(&mut h, "orders").as_deref(), Some("yellow"));
+    assert_eq!(
+        saved(&store)
+            .object_colors
+            .get("demo/orders")
+            .map(String::as_str),
+        Some("yellow")
+    );
+
+    // A schema, then Apply to Children over what is below.
+    click_row(&mut h, "demo", 1);
+    h.invoke("db.explorer.set-color", json!({ "color": "green" }));
+    assert_eq!(colored(&mut h, "demo").as_deref(), Some("green"));
+    assert_eq!(colored(&mut h, "customers"), None);
+    h.invoke("db.explorer.apply-color-to-children", Value::Null);
+    assert_eq!(colored(&mut h, "customers").as_deref(), Some("green"));
+    assert_eq!(colored(&mut h, "orders").as_deref(), Some("green"));
+    assert_eq!(colored(&mut h, "tables").as_deref(), Some("green"));
+    // The data source is not below the schema.
+    assert_eq!(colored(&mut h, NAME).as_deref(), Some("blue"));
+
+    // No Color keeps one object off, Auto gives it back what is above.
+    click_row(&mut h, "customers", 1);
+    h.invoke("db.explorer.set-color", json!({ "color": "none" }));
+    assert_eq!(colored(&mut h, "customers"), None);
+    assert_eq!(colored(&mut h, "orders").as_deref(), Some("green"));
+    h.invoke("db.explorer.set-color", json!({ "color": "auto" }));
+    assert_eq!(colored(&mut h, "customers").as_deref(), Some("green"));
+
+    // A colour no menu has changes nothing.
+    h.invoke("db.explorer.set-color", json!({ "color": "magenta" }));
+    assert_eq!(colored(&mut h, "customers").as_deref(), Some("green"));
+    // The settings file keeps all of it.
+    let gui = saved(&store);
+    assert_eq!(gui.color.as_deref(), Some("blue"));
+    assert_eq!(
+        gui.object_colors.get("demo/*").map(String::as_str),
+        Some("green")
+    );
+}

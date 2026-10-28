@@ -28,6 +28,7 @@ use ui::notification::{Notification, NotificationKind};
 use ui::theme::ThemeExt;
 use workbench::dialog::{Dialog, DialogButton, DialogEvent};
 
+use super::colors::{self, Slot, resolve};
 use super::context_menu::{self, MenuInput, Target};
 use super::sql_dialog::{self, Ask};
 use super::tree_view::database_name;
@@ -59,10 +60,13 @@ ui::ui_commands! {
     /// Move the data source down.
     MoveDown => "db.explorer.move-down", "Move Down",
         "Moves the selected data source one place down in the Database tool window.";
-    /// Set the data source's colour.
+    /// Set the colour of a row of the tree.
     SetColor { color: String } => "db.explorer.set-color", "Set Color",
-        "Sets the colour of the selected data source: `none`, `blue`, `teal`, `green`, `yellow`, `orange`, `red`, `purple` or `gray`.",
+        "Sets the colour of the selected row of the Database tool window (a data source, database, schema or object), which its row is painted with: `auto` (none of its own, what its parents give), `none`, `blue`, `teal`, `green`, `yellow`, `orange`, `red`, `purple` or `gray`.",
         r#"{"color": "blue"}"#;
+    /// Give what is below the selected node its colour.
+    ApplyColorToChildren => "db.explorer.apply-color-to-children", "Apply to Children",
+        "Gives the nodes below the selected one of the Database tool window the colour it is shown with, over the colours they have.";
     /// Show the selected node's documentation.
     QuickDocumentation => "db.explorer.quick-doc", "Quick Documentation",
         "Shows a popup with what the local model knows of the selected node of the Database tool window: its kind, name, comment and DDL.";
@@ -110,6 +114,9 @@ pub(super) fn init(cx: &mut App) {
     cx.on_action(|_: &Rename, cx| with_target(cx, |e, window, cx| e.rename(window, cx)));
     cx.on_action(|_: &MoveUp, cx| with_target(cx, |e, _, cx| e.move_source(-1, cx)));
     cx.on_action(|_: &MoveDown, cx| with_target(cx, |e, _, cx| e.move_source(1, cx)));
+    cx.on_action(|_: &ApplyColorToChildren, cx| {
+        with_target(cx, |e, _, cx| e.apply_color_to_children(cx))
+    });
     cx.on_action(|a: &SetColor, cx| {
         let color = a.color.clone();
         with_target(cx, move |e, _, cx| e.set_color(&color, cx))
@@ -250,6 +257,7 @@ impl Explorer {
                 (Target::Group, false, drop, None)
             }
         };
+        let slot = self.slot_of(key);
         let sources = self.sources();
         Some(MenuInput {
             target,
@@ -260,7 +268,11 @@ impl Explorer {
                 .is_some_and(|l| l.state == DataSourceState::Connected),
             index: sources.iter().position(|s| s.name == source).unwrap_or(0),
             count: sources.len(),
-            color: gui.color.clone(),
+            color: slot
+                .as_ref()
+                .and_then(|s| colors::own(&gui, s))
+                .map(str::to_owned),
+            apply_to_children: slot.as_ref().is_some_and(|s| colors::can_apply(&gui, s)),
             level: gui.level,
             schema_level,
             rename,
@@ -546,15 +558,55 @@ impl Explorer {
     }
 
     fn set_color(&mut self, color: &str, cx: &mut Context<Self>) {
-        let Some(name) = self.selected_source_name() else {
+        let known = color == colors::AUTO || crate::dialog::COLORS.iter().any(|(c, _)| *c == color);
+        let Some(key) = self.target_key().filter(|_| known) else {
             return;
         };
-        let known = crate::dialog::COLORS.iter().any(|(c, _)| *c == color);
-        if !known {
+        let Some(slot) = self.slot_of(&key) else {
             return;
+        };
+        let color = color.to_owned();
+        self.update_source(
+            &key.source,
+            move |s| set_gui(s, |g| colors::set(g, &slot, &color)),
+            cx,
+        );
+    }
+
+    fn apply_color_to_children(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.target_key() else {
+            return;
+        };
+        let Some(slot) = self.slot_of(&key) else {
+            return;
+        };
+        self.update_source(
+            &key.source,
+            move |s| set_gui(s, |g| colors::apply_to_children(g, &slot)),
+            cx,
+        );
+    }
+
+    /// Where the colour of a row is kept; `None` for the status row.
+    pub(super) fn slot_of(&self, key: &RowKey) -> Option<Slot> {
+        let node = |id| {
+            self.model_of(&key.source)
+                .and_then(|m| m.node(id))
+                .map(colors::node_path)
+        };
+        match key.node {
+            NodeKey::Source => Some(Slot::Source),
+            NodeKey::Database => Some(Slot::Database),
+            NodeKey::Node(id) => node(id).map(Slot::Node),
+            NodeKey::Group(parent, _) => node(parent).map(Slot::Group),
+            NodeKey::Status => None,
         }
-        let color = (color != "none").then(|| color.to_owned());
-        self.update_source(&name, |s| set_gui(s, |g| g.color = color), cx);
+    }
+
+    /// The colour the row of `key` is painted with.
+    pub(super) fn row_color(&self, key: &RowKey) -> Option<&'static str> {
+        let gui = self.source_named(&key.source)?.profile.gui.as_ref()?;
+        resolve(gui, &self.slot_of(key)?)
     }
 
     fn set_level(&mut self, level: &str, cx: &mut Context<Self>) {

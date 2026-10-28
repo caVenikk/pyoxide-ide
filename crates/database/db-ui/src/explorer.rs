@@ -39,6 +39,7 @@ use crate::{BACKENDS, backend_title, icons};
 mod open_console;
 mod open_table;
 mod actions;
+mod colors;
 mod context_menu;
 mod speed_search;
 mod sql_dialog;
