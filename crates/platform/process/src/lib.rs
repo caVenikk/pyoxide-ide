@@ -63,6 +63,29 @@ pub fn has_child_processes(pid: u32) -> bool {
     !child_processes(pid).is_empty()
 }
 
+/// All descendants of the process `pid` (children, their children, ...),
+/// deepest first, so that signalling them in order ends a child before its
+/// parent can restart it. Empty when there are none or the system cannot list
+/// them (see [`child_processes`]). Reads the process table: call it off the
+/// UI thread unless the application is quitting.
+pub fn descendants(pid: u32) -> Vec<u32> {
+    sys::descendants_of(pid)
+}
+
+/// Asks the process `pid` to end, without waiting: `SIGHUP` on Unix (what a
+/// closed terminal sends), `TerminateProcess` on Windows, which has no
+/// equivalent for a process without a window. For a process that is not our
+/// child too; does nothing when it is gone.
+pub fn hang_up_process(pid: u32) {
+    sys::hang_up_pid(pid)
+}
+
+/// Ends the process `pid` at once (`SIGKILL`, `TerminateProcess`), without
+/// waiting. Does nothing when it is gone.
+pub fn kill_process(pid: u32) {
+    sys::kill_pid(pid)
+}
+
 /// An event of a running process, in the order the process produced it
 /// (per stream). [`ProcessEvent::Exited`] is always the last event.
 #[derive(Debug, Clone, PartialEq, Eq)]

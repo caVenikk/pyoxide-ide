@@ -187,6 +187,32 @@ pub(crate) fn kill(process: &OsProcess) -> io::Result<()> {
     if exited { Ok(()) } else { Err(err) }
 }
 
+/// The descendants of `pid`, deepest first (see [`descendants`]).
+pub(crate) fn descendants_of(pid: u32) -> Vec<u32> {
+    let mut tree = creation_time_of(pid).map_or_else(Vec::new, |t| descendants(pid, t));
+    tree.reverse();
+    tree
+}
+
+/// Windows has no hang-up for a process without a window.
+pub(crate) fn hang_up_pid(pid: u32) {
+    kill_pid(pid);
+}
+
+pub(crate) fn kill_pid(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    // SAFETY: a handle opened, used and closed here.
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+        if !h.is_null() {
+            TerminateProcess(h, KILLED_EXIT_CODE);
+            CloseHandle(h);
+        }
+    }
+}
+
 fn creation_time(handle: HANDLE) -> Option<u64> {
     let zero = FILETIME {
         dwLowDateTime: 0,

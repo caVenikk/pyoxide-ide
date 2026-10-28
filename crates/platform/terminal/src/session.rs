@@ -513,6 +513,8 @@ impl Session {
             })?
             .map_err(SpawnError::Io)?;
         let pid = io_loop::child_pid(&pty);
+        #[cfg(windows)]
+        crate::ending::join_job(io_loop::child_handle(&pty));
 
         let (events_tx, events_rx) = flume::unbounded();
         let (loop_tx, loop_rx) = io_loop::channel().map_err(SpawnError::Io)?;
@@ -540,6 +542,7 @@ impl Session {
             ..term::Config::default()
         };
         let notifier_exited = notifier.exited.clone();
+        crate::ending::register(pid, notifier_exited.clone());
         let term = Term::new(config, &size, Listener(notifier.clone()));
         let shared = Arc::new(Shared {
             state: FairMutex::new(State { term, search: None }),
