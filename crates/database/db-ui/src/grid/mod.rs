@@ -64,7 +64,7 @@ ui::ui_commands! {
     /// Open the data of a table in a tab.
     OpenTable { source: String, schema: Option<String>, table: String } => "db.grid.open", "Open Table",
         "Opens the data of table or view `table` of `schema` in data source `source` in an editor tab (or selects its open tab) and reads its first page; the data source must be shown in the Database tool window.",
-        r#"{"source": "pyoxide-local", "schema": "demo", "table": "events"}"#;
+        r#"{"source": "local-pg", "schema": "demo", "table": "events"}"#;
     /// Open the selected table of the Database tool window.
     OpenSelected => "db.explorer.open-table", "Jump to Data",
         "Opens the data of the table or view selected in the Database tool window in an editor tab (F4); on any other node it does nothing.";
