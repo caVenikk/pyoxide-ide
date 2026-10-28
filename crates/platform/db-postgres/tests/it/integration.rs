@@ -98,8 +98,10 @@ async fn connect_and_server_version() {
 #[ignore]
 async fn application_name_defaults_and_can_be_set() {
     let conn = connect().await;
+    // The product installs its names at start; a platform test runs with none,
+    // so the default is the neutral slug.
     let r = row(&*conn, "SHOW application_name", &[]).await;
-    assert_eq!(r[0], Value::from("pyoxide"));
+    assert_eq!(r[0], Value::from(app_info::slug()));
 
     let mut p = params();
     p.options
