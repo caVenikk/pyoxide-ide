@@ -880,7 +880,12 @@ fn merged(a: &[Range<usize>], b: &[Range<usize>]) -> Vec<Range<usize>> {
 
 /// Copies an edit of `from` (as applied) to `to`, which held the same text
 /// before it; `to` keeps its carets where its text kept them.
-fn mirror(applied: &[AppliedEdit], from: &Entity<Editor>, to: &Entity<Editor>, cx: &mut App) {
+pub(crate) fn mirror(
+    applied: &[AppliedEdit],
+    from: &Entity<Editor>,
+    to: &Entity<Editor>,
+    cx: &mut App,
+) {
     let edits = replayed(applied, from.read(cx).buffer());
     let delta: isize = edits
         .iter()

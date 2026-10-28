@@ -99,7 +99,7 @@ impl Workbench {
     /// Close Other Tabs: all but `index` and the pinned ones.
     fn others_of(&self, index: usize) -> Vec<usize> {
         (0..self.tabs.len())
-            .filter(|&i| i != index && !self.tabs[i].pinned)
+            .filter(|&i| i != index && self.same_group(i, index) && !self.tabs[i].pinned)
             .collect()
     }
 
@@ -107,6 +107,7 @@ impl Workbench {
     /// ones there.
     fn beside(&self, index: usize, left: bool) -> Vec<usize> {
         (0..self.tabs.len())
+            .filter(|&i| self.same_group(i, index))
             .filter(|&i| if left { i < index } else { i > index })
             .filter(|&i| !self.tabs[i].pinned)
             .collect()
@@ -227,12 +228,24 @@ impl Workbench {
             return;
         }
         self.tabs[index].pinned = !self.tabs[index].pinned;
-        let pinned: Vec<bool> = self.tabs.iter().map(|t| t.pinned).collect();
+        // The pinned tabs go first within the tab's group; the tabs of the
+        // other groups stay where they are.
+        let slots = self.group_tabs(self.tabs[index].group);
+        let pinned: Vec<bool> = slots.iter().map(|&i| self.tabs[i].pinned).collect();
         let order = group_pinned_first(&pinned);
         if order.iter().enumerate().any(|(i, &o)| i != o) {
+            let mut permutation: Vec<usize> = (0..self.tabs.len()).collect();
+            for (slot, &o) in slots.iter().zip(&order) {
+                permutation[*slot] = slots[o];
+            }
             let mut old: Vec<Option<super::Tab>> = self.tabs.drain(..).map(Some).collect();
-            self.tabs = order.iter().map(|&o| old[o].take().unwrap()).collect();
-            self.active = self.active.and_then(|a| order.iter().position(|&o| o == a));
+            self.tabs = permutation
+                .iter()
+                .map(|&o| old[o].take().unwrap())
+                .collect();
+            self.active = self
+                .active
+                .and_then(|a| permutation.iter().position(|&o| o == a));
         }
         cx.notify();
     }
@@ -402,6 +415,11 @@ impl Workbench {
                     copy("Path from Content Root", "content-root"),
                 ],
             ));
+        }
+        let split = self.tab_split_items(index, &keys);
+        if !split.is_empty() {
+            items.push(MenuItem::separator());
+            items.extend(split);
         }
         items.push(MenuItem::separator());
         let (pin, mnemonic) = if self.tabs[index].pinned {

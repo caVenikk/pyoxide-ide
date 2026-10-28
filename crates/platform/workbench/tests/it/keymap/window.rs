@@ -52,6 +52,28 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.press(keys);
             assert_eq!(h.state()["active_tab"], json!(2), "{what}");
         }
+        "tabs.next-splitter" | "tabs.previous-splitter" => {
+            // Three splits, the last one has the focus.
+            h.invoke("tabs.split-right", json!(null));
+            h.invoke("tabs.split-right", json!(null));
+            let state = h.state();
+            let ids: Vec<Value> = state["splits"]["groups"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|g| g["id"].clone())
+                .collect();
+            assert_eq!(ids.len(), 3, "{what}");
+            assert_eq!(state["splits"]["focused"], ids[2], "{what}");
+            h.press(keys);
+            // Next goes round to the first, previous to the one before.
+            let expected = if b.command == "tabs.next-splitter" {
+                &ids[0]
+            } else {
+                &ids[1]
+            };
+            assert_eq!(&h.state()["splits"]["focused"], expected, "{what}");
+        }
         "menu.down" | "menu.up" => {
             h.open_menu("src");
             h.press(keys);

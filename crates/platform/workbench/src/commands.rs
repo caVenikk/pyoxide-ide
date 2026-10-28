@@ -96,6 +96,37 @@ ui::ui_commands! {
     TogglePinTab { index: Option<usize> } => "tabs.toggle-pin", "Pin Tab",
         "Pins the active editor tab (or the one at a zero-based index), or unpins it: pinned tabs stay on the left and stay open on Close Other Tabs, Close Tabs to the Left or Right and Close All but Pinned.",
         r#"{"index": 0}"#;
+    /// Split the editor area, showing the tab's file again at the right.
+    SplitRight { index: Option<usize> } => "tabs.split-right", "Split Right",
+        "Splits the editor area: a new tab group at the right of the active tab's (or of the tab at a zero-based index) shows the file again, with its own caret and scroll position, and has the focus.",
+        r#"{"index": 0}"#;
+    /// Split the editor area, showing the tab's file again below.
+    SplitDown { index: Option<usize> } => "tabs.split-down", "Split Down",
+        "Splits the editor area: a new tab group below the active tab's (or the tab at a zero-based index) shows the file again, with its own caret and scroll position, and has the focus.",
+        r#"{"index": 0}"#;
+    /// Split the editor area, moving the tab to the right.
+    SplitAndMoveRight { index: Option<usize> } => "tabs.split-move-right", "Split and Move Right",
+        "Splits the editor area: the active tab (or the tab at a zero-based index) moves to a new tab group at the right of its group; needs another tab in the group.",
+        r#"{"index": 0}"#;
+    /// Split the editor area, moving the tab down.
+    SplitAndMoveDown { index: Option<usize> } => "tabs.split-move-down", "Split and Move Down",
+        "Splits the editor area: the active tab (or the tab at a zero-based index) moves to a new tab group below its group; needs another tab in the group.",
+        r#"{"index": 0}"#;
+    /// Merge the splits beside the focused one into it.
+    Unsplit => "tabs.unsplit", "Unsplit",
+        "Merges the tab groups beside the focused one into it, their tabs after its own (a file it shows already is not opened twice), and removes the splitter.";
+    /// Merge all splits into the focused one.
+    UnsplitAll => "tabs.unsplit-all", "Unsplit All",
+        "Merges all tab groups of the editor area into the focused one.";
+    /// Turn the focused split's splitter.
+    ChangeSplitterOrientation => "tabs.change-splitter-orientation", "Change Splitter Orientation",
+        "Turns the splitter of the focused tab group: groups side by side are stacked, stacked groups are put side by side.";
+    /// Move the focus to the next split.
+    NextSplitter => "tabs.next-splitter", "Go to Next Splitter",
+        "Moves the focus to the next tab group of a split editor area (left to right, top to bottom), round.";
+    /// Move the focus to the previous split.
+    PreviousSplitter => "tabs.previous-splitter", "Go to Previous Splitter",
+        "Moves the focus to the previous tab group of a split editor area, round.";
     /// Open the context menu of a tab.
     ShowTabMenu { index: Option<usize> } => "tabs.context-menu", "Show Tab Context Menu",
         "Opens the context menu of the active editor tab (or of the one at a zero-based index) below the tab, as a right click on it does.",

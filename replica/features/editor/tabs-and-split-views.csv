@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Tabs and split views,editor,must,yes,partial,tabs with modified marker and keyboard switching; no split views
+Tabs and split views,editor,must,yes,partial,"tabs with modified marker and keyboard switching; Split Right/Down and Split and Move Right/Down (tab menu, Window > Editor Tabs), a tab strip per split, the same file in two splits with separate carets, Go to Next/Previous Splitter, a draggable splitter (#342); drag a tab to an edge, Unsplit, splits saved with the workspace are follow-ups"
