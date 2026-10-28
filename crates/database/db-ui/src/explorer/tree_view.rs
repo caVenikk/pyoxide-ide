@@ -281,7 +281,7 @@ impl Explorer {
         let name = event.data_source.as_str().to_owned();
         if matches!(
             event.kind,
-            EventKind::Session { .. } | EventKind::Job { .. }
+            EventKind::Session { .. } | EventKind::Job { .. } | EventKind::DecisionNeeded { .. }
         ) {
             crate::console::route(event, cx);
             return;

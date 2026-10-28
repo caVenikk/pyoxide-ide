@@ -3,6 +3,7 @@
 //! toolbar of its editor observe it; events of its session come in through
 //! [`super::route`].
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use console::ContentKind;
 use console_ui::ConsoleView;
 use db_core::Backend;
 use db_session::{
-    DataSourceHandle, ErrorPolicy, Event, EventKind, Job, JobEvent, JobId, JobOutcome,
+    DataSourceHandle, ErrorPolicy, Event, EventKind, Isolation, Job, JobEvent, JobId, JobOutcome,
     JobStatement, ResultId, Session, SessionEvent, SessionOptions, StatementError, Timing,
     TxStatus,
 };
@@ -21,13 +22,18 @@ use gpui::{
     Subscription, WeakEntity, Window,
 };
 use serde_json::{Value as Json, json};
-use sql_syntax::{Dialect, Statement, TokenKind};
+use sql_syntax::{Dialect, TokenKind};
 use themes::{TextRole, UiRole};
 use workbench::Workbench;
 
 use crate::grid::{GridTarget, TableGrid};
 use crate::sql::Hub;
 use crate::sql::hub::{ConsoleBinding, Source};
+
+pub(crate) mod safety;
+mod tx;
+
+pub(crate) use tx::parse_mode;
 
 /// What opens a console: the data source of the Database tool window.
 #[derive(Clone)]
@@ -113,6 +119,13 @@ pub(crate) struct Console {
     pub pane: Pane,
     pub schema: Option<String>,
     pub tx: TxStatus,
+    pub isolation: Isolation,
+    pending_isolation: Option<Isolation>,
+    /// Values typed into the Parameters dialog, by parameter: the next run
+    /// starts from them.
+    pub param_values: HashMap<String, String>,
+    /// The statements the unsafe-query banner waits for.
+    pub unsafe_run: Option<safety::UnsafeRun>,
     pub running: Option<JobId>,
     /// How long the last statement took, for the Services tree.
     pub last_ms: Option<u64>,
@@ -158,6 +171,10 @@ impl Console {
             pane: Pane::Output,
             schema: None,
             tx: TxStatus::default(),
+            isolation: Isolation::default(),
+            pending_isolation: None,
+            param_values: HashMap::new(),
+            unsafe_run: None,
             running: None,
             last_ms: None,
             current: None,
@@ -215,7 +232,7 @@ impl Console {
 
     // ---- output -----------------------------------------------------------------
 
-    fn print(&mut self, kind: ContentKind, text: &str, cx: &mut Context<Self>) {
+    pub(super) fn print(&mut self, kind: ContentKind, text: &str, cx: &mut Context<Self>) {
         let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let line = format!("[{stamp}] {text}\n");
         self.lines.push(line.clone());
@@ -251,8 +268,8 @@ impl Console {
 
     // ---- running ----------------------------------------------------------------
 
-    /// Runs `statements` as one job, in a script's order.
-    pub fn run(&mut self, statements: Vec<Statement>, cx: &mut Context<Self>) {
+    /// Runs statements, their values bound, as one job in a script's order.
+    pub(super) fn run_jobs(&mut self, statements: Vec<JobStatement>, cx: &mut Context<Self>) {
         if statements.is_empty() {
             return;
         }
@@ -260,8 +277,7 @@ impl Console {
             self.print(ContentKind::Error, "A statement is still running", cx);
             return;
         }
-        let job = Job::statements(statements.into_iter().map(JobStatement::from))
-            .on_error(ErrorPolicy::Stop);
+        let job = Job::statements(statements).on_error(ErrorPolicy::Stop);
         self.running = Some(self.session.execute(job));
         self.pane = Pane::Output;
         cx.emit(ConsoleEvent::Started);
@@ -269,7 +285,7 @@ impl Console {
     }
 
     /// Runs the statement at the caret, or the selection's statements.
-    pub fn execute_at_caret(&mut self, cx: &mut Context<Self>) {
+    pub fn execute_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self
             .workbench
             .upgrade()
@@ -297,7 +313,7 @@ impl Console {
         } else {
             sql_syntax::statements_in(&text, range, dialect)
         };
-        self.run(statements, cx);
+        self.submit(statements, window, cx);
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
@@ -326,7 +342,8 @@ impl Console {
                 cx.notify();
             }
             SessionEvent::Transaction { status } => {
-                self.tx = status;
+                let old = std::mem::replace(&mut self.tx, status);
+                self.tx_changed(old, status, cx);
                 cx.notify();
             }
             SessionEvent::TransactionLost { pending } => {
@@ -352,10 +369,12 @@ impl Console {
                     tab.grid.update(cx, |g, cx| g.result_closed(cx));
                 }
             }
-            SessionEvent::CommandFailed { error, .. } => {
+            SessionEvent::CommandFailed { command, error } => {
+                self.command_failed(command);
                 self.print(ContentKind::Error, &error.message, cx)
             }
-            SessionEvent::CommandDone { .. } | SessionEvent::Closed => {}
+            SessionEvent::CommandDone { command } => self.command_done(command, cx),
+            SessionEvent::Closed => {}
         }
     }
 
@@ -499,6 +518,7 @@ impl Console {
             return;
         };
         let range = mark.range.clone();
+        let show_time = crate::query_settings::get(cx).show_execution_time;
         editor.update(cx, |e, cx| {
             let first = e.buffer().char_to_line(range.start);
             let last = e.buffer().char_to_line(range.end.max(range.start));
@@ -507,10 +527,13 @@ impl Console {
             } else {
                 crate::icons::ERROR
             };
-            let decoration = Decoration::default().lane_icon(icon).after_text(
-                vec![TextPiece::new(format!("{ms} ms"), TextRole::Comment)],
-                false,
-            );
+            let mut decoration = Decoration::default().lane_icon(icon);
+            if show_time {
+                decoration = decoration.after_text(
+                    vec![TextPiece::new(format!("{ms} ms"), TextRole::Comment)],
+                    false,
+                );
+            }
             e.set_decorations(MARK_GROUP, vec![(first..last + 1, decoration)], cx);
         });
     }
@@ -640,7 +663,8 @@ impl Console {
             "schema": self.schema,
             "running": self.running.is_some(),
             "soft_wrap": self.soft_wrap,
-            "tx": {"open": self.tx.open, "pending": self.tx.pending},
+            "tx": self.tx_json(),
+            "safety": self.safety_json(),
             "output": self.lines,
             "pane": match self.pane {
                 Pane::Output => json!("output"),

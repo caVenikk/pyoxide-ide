@@ -109,6 +109,7 @@ fn manual_mode_survives_a_failed_statement_and_a_refresh() {
     let session = h.handle.open_session(SessionOptions {
         tx_mode: Some(TxMode::Manual),
         schema: None,
+        isolation: None,
     });
     let job = session.execute(
         Job::script(format!(

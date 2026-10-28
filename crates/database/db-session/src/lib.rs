@@ -64,7 +64,7 @@ pub use import::{
     ImportRequest, ImportSink,
 };
 pub use job::{ErrorPolicy, Job, JobStatement, syntax_dialect};
-pub use options::{DataSourceOptions, SessionOptions, TxPolicy};
+pub use options::{DataSourceOptions, Isolation, SessionOptions, TxPolicy};
 pub use pager::{
     Page, PageError, PageSize, PagerEvent, PagerSink, ResultPager, TableQuery, TableRef,
 };

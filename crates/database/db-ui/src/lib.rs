@@ -14,6 +14,8 @@ pub mod grid;
 mod live;
 mod password;
 pub mod prompt;
+pub mod query_settings;
+mod settings_page;
 pub mod sql;
 pub mod store;
 pub mod transfer;
@@ -205,8 +207,10 @@ pub fn module(config: DbUiConfig) -> Module {
         file_types: vec![sql::file_type(hub)],
         status_widgets: vec![grid::status_widget()],
         editor_headers: vec![sql::widget::editor_header()],
+        settings_pages: settings_page::pages(),
         init: Some(Init::new(move |cx| {
             cx.set_global(Store(store.clone()));
+            settings_ui::store::register::<query_settings::QueryExecutionSettings>(cx);
             sql::widget::init(cx, init_hub.clone());
             explorer::init(cx);
             dialog::init(cx);

@@ -5,9 +5,14 @@
 //! log and the result tabs show in the Services tool window under the
 //! editor.
 
+mod decision;
 mod files;
 mod model;
+mod params;
+mod params_dialog;
 pub(crate) mod services;
+mod transactions;
+pub(crate) mod tx_ui;
 
 use std::path::PathBuf;
 
@@ -103,6 +108,10 @@ fn target_window(cx: &App) -> Option<AnyWindowHandle> {
 /// Hands a session event to the console it belongs to (the module's
 /// data source handles send every event to the Database tool window).
 pub(crate) fn route(event: db_session::Event, cx: &mut App) {
+    if matches!(event.kind, db_session::EventKind::DecisionNeeded { .. }) {
+        transactions::route_decision(event, cx);
+        return;
+    }
     let (db_session::EventKind::Session { session, .. }
     | db_session::EventKind::Job { session, .. }) = &event.kind
     else {
@@ -292,6 +301,7 @@ pub(crate) fn init(cx: &mut App) {
         "db.console.state",
         std::rc::Rc::new(|_, window, cx| Ok(state_json(window.window_handle(), cx))),
     );
+    transactions::init(cx);
     services::init(cx);
 }
 
@@ -304,5 +314,7 @@ fn state_json(window: AnyWindowHandle, cx: &App) -> Json {
             .map(|c| c.read(cx).state_json(cx))
             .collect::<Vec<_>>(),
         "services": {"collapsed": services::collapsed(main, cx)},
+        "tx_decision": decision::state_json(cx),
+        "parameters": params_dialog::state_json(cx),
     })
 }

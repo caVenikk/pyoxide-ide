@@ -225,6 +225,7 @@ pub enum Command {
     Rollback,
     SetSchema,
     SetTxMode,
+    SetIsolation,
     Fetch,
     Close,
 }

@@ -193,6 +193,9 @@ pub(crate) struct SqlWidget {
     dialect_bounds: Rc<Cell<Bounds<Pixels>>>,
     schema_bounds: Rc<Cell<Bounds<Pixels>>>,
     source_bounds: Rc<Cell<Bounds<Pixels>>>,
+    tx_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The consoles whose changes redraw the toolbar.
+    observed: HashSet<gpui::EntityId>,
     popup_anchor: Rc<Cell<Bounds<Pixels>>>,
     /// Files whose "dialect is not configured" banner was cancelled.
     dismissed: HashSet<PathBuf>,
@@ -230,6 +233,8 @@ impl SqlWidget {
             dialect_bounds: Rc::default(),
             schema_bounds: Rc::default(),
             source_bounds: Rc::default(),
+            tx_bounds: Rc::default(),
+            observed: HashSet::new(),
             popup_anchor: Rc::default(),
             dismissed: HashSet::new(),
             load: Task::ready(()),
@@ -385,8 +390,52 @@ impl SqlWidget {
         text
     }
 
+    /// The console of the visible file, when it has one.
+    fn console(&self, cx: &App) -> Option<Entity<crate::console::Console>> {
+        let file = self.visible_file()?;
+        crate::console::console_of(file, cx)
+    }
+
+    /// Opens a popup of `items` under `anchor`.
+    fn show_items(
+        &mut self,
+        items: Vec<MenuItem>,
+        anchor: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.menu.is_some() || items.is_empty() {
+            return;
+        }
+        self.popup_anchor.set(anchor);
+        let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.menu = None;
+            cx.notify();
+        });
+        self.menu = Some((menu, subscription));
+        cx.notify();
+    }
+
+    /// The console's transaction mode and isolation popup.
+    fn open_tx(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(console) = self.console(cx) else {
+            return;
+        };
+        let items = console.read(cx).tx_menu_items();
+        self.show_items(items, self.tx_bounds.get(), window, cx);
+    }
+
     fn open(&mut self, chip: ChipId, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.is_some() {
+            return;
+        }
+        // The schema of a console is the session's: its list switches it.
+        if chip == ChipId::Schema
+            && let Some(console) = self.console(cx)
+        {
+            let items = console.read(cx).schema_menu_items();
+            self.show_items(items, self.schema_bounds.get(), window, cx);
             return;
         }
         let anchor = match chip {
@@ -737,13 +786,9 @@ impl SqlWidget {
         // A file attached to a data source has the same controls; a file
         // without one only Execute (it asks for a data source).
         let attached = resolved.data_source.is_some();
-        let running = self
-            .visible_file()
-            .and_then(|f| {
-                crate::console::consoles(cx)
-                    .into_iter()
-                    .find(|c| c.read(cx).path == f)
-            })
+        let console_entity = self.console(cx);
+        let running = console_entity
+            .as_ref()
             .is_some_and(|c| c.read(cx).running.is_some());
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
@@ -763,32 +808,51 @@ impl SqlWidget {
         if !console && !attached {
             return vec![execute];
         }
-        vec![
-            execute,
-            div()
-                .flex_none()
-                .px(px(6.0))
-                .text_size(px(CHIP_TEXT))
-                .text_color(muted)
-                .child("Tx: Auto")
-                .into_any_element(),
-            button(
-                "sql-stop",
-                if running {
-                    IconName::STOP
-                } else {
-                    icons::STOP_DISABLED
-                },
-                "Cancel Running Statements",
-                running,
-            )
-            .when(running, |d| {
-                d.on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(crate::console::Stop), cx)
-                })
-            })
-            .into_any_element(),
-        ]
+        let stop = button(
+            "sql-stop",
+            if running {
+                IconName::STOP
+            } else {
+                icons::STOP_DISABLED
+            },
+            "Cancel Running Statements",
+            running,
+        )
+        .when(running, |d| {
+            d.on_click(|_, window, cx| window.dispatch_action(Box::new(crate::console::Stop), cx))
+        })
+        .into_any_element();
+        let mut buttons = vec![execute];
+        match &console_entity {
+            Some(console) => {
+                let label = console.read(cx).tx_label();
+                buttons.push(
+                    crate::console::tx_ui::mode_button("sql-tx", label, self.tx_bounds.clone(), cx)
+                        .on_click(cx.listener(|this, _, window, cx| this.open_tx(window, cx)))
+                        .into_any_element(),
+                );
+                buttons.extend(crate::console::tx_ui::commit_buttons(
+                    "sql",
+                    console,
+                    px(24.0),
+                    px(16.0),
+                    cx,
+                ));
+            }
+            // A file attached to a data source has no session before its
+            // first run.
+            None => buttons.push(
+                div()
+                    .flex_none()
+                    .px(px(6.0))
+                    .text_size(px(CHIP_TEXT))
+                    .text_color(muted)
+                    .child("Tx: Auto")
+                    .into_any_element(),
+            ),
+        }
+        buttons.push(stop);
+        buttons
     }
 }
 
@@ -797,6 +861,20 @@ impl Render for SqlWidget {
         let Some(resolved) = self.resolved() else {
             return div().into_any_element();
         };
+        if let Some(console) = self.console(cx)
+            && self.observed.insert(console.entity_id())
+        {
+            self._subscriptions
+                .push(cx.observe(&console, |_, _, cx| cx.notify()));
+        }
+        let unsafe_banner = self
+            .console(cx)
+            .and_then(|c| {
+                c.read(cx)
+                    .unsafe_run
+                    .as_ref()
+                    .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
+            });
         let tooltip = SharedString::from(Self::tooltip(&resolved));
         let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
         let chips: Vec<_> = self
@@ -832,6 +910,7 @@ impl Render for SqlWidget {
             .flex_col()
             .children(banner)
             .child(toolbar)
+            .children(unsafe_banner)
             .children(overlay)
             .into_any_element()
     }

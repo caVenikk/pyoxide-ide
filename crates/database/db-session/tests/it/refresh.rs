@@ -285,6 +285,7 @@ fn postgres_uncommitted_ddl_is_seen_after_the_commit() {
     let session = h.handle.open_session(SessionOptions {
         tx_mode: Some(TxMode::Manual),
         schema: None,
+        isolation: None,
     });
     h.run_ok(&session, &format!("create table {tag} (id integer)"));
     let pending = refresh(&h, RefreshMode::Incremental, Level::Structure);

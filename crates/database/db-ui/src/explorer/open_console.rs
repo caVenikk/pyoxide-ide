@@ -80,7 +80,7 @@ impl Explorer {
             .clone()
             .filter(|c| c.read(cx).kind == ConsoleKind::Console)
         {
-            console.update(cx, |c, cx| c.execute_at_caret(cx));
+            console.update(cx, |c, cx| c.execute_at_caret(window, cx));
             return;
         }
         let hub = cx.global::<SqlGlobal>().0.clone();
@@ -89,14 +89,14 @@ impl Explorer {
             return;
         };
         if let Some(console) = existing.filter(|c| c.read(cx).source == source) {
-            console.update(cx, |c, cx| c.execute_at_caret(cx));
+            console.update(cx, |c, cx| c.execute_at_caret(window, cx));
             return;
         }
         let Some(target) = self.console_target(&source, cx) else {
             return;
         };
         let console = console::attach_file(workbench, target, file, window, cx);
-        console.update(cx, |c, cx| c.execute_at_caret(cx));
+        console.update(cx, |c, cx| c.execute_at_caret(window, cx));
         cx.notify();
     }
 }
