@@ -368,8 +368,9 @@ pub struct GuiOptions {
     /// A note shown with the data source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
-    /// The data source's colour (`blue`, `green`, `orange`, `rose`,
-    /// `violet`, `yellow`, `gray`).
+    /// The data source's colour (`blue`, `teal`, `green`, `yellow`,
+    /// `orange`, `red`, `purple`, `gray`; files written before also hold
+    /// `rose` and `violet`, shown as red and purple).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Transaction mode of new consoles (auto when absent).
@@ -401,6 +402,10 @@ pub struct GuiOptions {
     /// when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<Level>,
+    /// Schemas read at a level of their own instead of `level` (the
+    /// Introspection Level of a schema node), by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub schema_levels: BTreeMap<String, Level>,
     /// Refresh the metadata every this many minutes (off when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_minutes: Option<u64>,

@@ -66,6 +66,9 @@ pub(crate) struct Live {
     pub has_model: bool,
     pub cache_loading: bool,
     pub refresh: Option<JobId>,
+    /// Refreshes that run after the current one: the schemas read at a
+    /// level of their own (`GuiOptions::schema_levels`).
+    pub queued: Vec<(Scope, Level)>,
     pub state: DataSourceState,
     /// Why the last refresh failed.
     pub error: Option<String>,
@@ -81,6 +84,7 @@ impl Live {
             has_model: false,
             cache_loading: false,
             refresh: None,
+            queued: Vec::new(),
             state: DataSourceState::Disconnected,
             error: None,
         }
@@ -90,14 +94,53 @@ impl Live {
         self.handle.id()
     }
 
-    /// Starts a refresh of the data source's scope unless one runs.
+    /// Starts a refresh of the data source's scope unless one runs; the
+    /// schemas with a level of their own are read again at it afterwards.
     pub fn refresh(&mut self) {
         if self.refresh.is_some() {
             return;
         }
         let (scope, level) = refresh_scope(&self.profile);
+        self.queued = self
+            .profile
+            .gui_options()
+            .schema_levels
+            .into_iter()
+            .filter(|(_, l)| *l != level)
+            .map(|(schema, l)| (Scope::list([schema]), l))
+            .collect();
         self.error = None;
         self.refresh = Some(self.handle.refresh(scope, level));
+    }
+
+    /// Reads one schema again at its level, after the refresh that runs.
+    pub fn refresh_schema(&mut self, schema: &str) {
+        let gui = self.profile.gui_options();
+        let level = gui
+            .schema_levels
+            .get(schema)
+            .copied()
+            .unwrap_or_else(|| refresh_scope(&self.profile).1);
+        let scope = Scope::list([schema.to_owned()]);
+        if self.refresh.is_some() {
+            if !self.queued.iter().any(|(s, _)| *s == scope) {
+                self.queued.push((scope, level));
+            }
+            return;
+        }
+        self.error = None;
+        self.refresh = Some(self.handle.refresh(scope, level));
+    }
+
+    /// Starts the next queued refresh when one is queued; `false` when
+    /// none is.
+    pub fn refresh_next(&mut self) -> bool {
+        if self.queued.is_empty() {
+            return false;
+        }
+        let (scope, level) = self.queued.remove(0);
+        self.refresh = Some(self.handle.refresh(scope, level));
+        true
     }
 
     /// The model to show: `None` while there is none or it holds no schema.

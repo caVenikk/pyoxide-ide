@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Introspection levels per schema (names only, no source, everything)",db-gui,could,yes,partial,"Pro; for very large schemas. Engine side done (#298): Introspector::load at Names / Structure / Full for Oracle, PostgreSQL and SQLite in a fixed number of queries per schema; the per-schema level setting and the tree come with the database UI"
+"Introspection levels per schema (names only, no source, everything)",db-gui,could,yes,yes,"Pro; for very large schemas. Engine side done (#298): Introspector::load at Names / Structure / Full for Oracle, PostgreSQL and SQLite in a fixed number of queries per schema; the Introspection Level menu of a data source and of a schema sets the level (#371)"

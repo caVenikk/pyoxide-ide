@@ -65,6 +65,22 @@ pub fn set(h: &mut Harness, field: &str, value: &str) {
     );
 }
 
+/// Runs a command of the registry in the open modal dialog's window and
+/// draws.
+pub fn invoke_in_modal(h: &mut Harness, id: &str, args: Value) {
+    use gpui::AppContext as _;
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let dialog =
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .expect("a dialog");
+    h.cx.update_window(dialog, |_, window, cx| {
+        ui::command::invoke(id, args, window, cx)
+    })
+    .unwrap()
+    .unwrap_or_else(|e| panic!("{id}: {e:?}"));
+    h.draw();
+}
+
 /// Chooses a row of the dialog's open list: the row's command runs in the
 /// dialog, as a click on it does (commands sent to the window go to the
 /// popup over the dialog).

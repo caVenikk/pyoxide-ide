@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: Refresh (incremental), full refresh and invalidate cache",db-gui,should,yes,partial,Pro; engine rows in area database; Refresh only; full refresh and invalidate cache remain (#302)
+"Explorer: Refresh (incremental), full refresh and invalidate cache",db-gui,should,yes,yes,"Pro; engine rows in area database; Refresh, Force Refresh and Forget All Cached Schemas in the context menu (#371)"

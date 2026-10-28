@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Explorer: show the DDL of an object, Copy DDL",db-gui,should,yes,no,Pro; needs object-source-and-ddl in area database
+"Explorer: show the DDL of an object, Copy DDL",db-gui,should,yes,no,Pro; needs object-source-and-ddl in area database; Generate DDL to Clipboard is in the SQL Scripts menu (#371); the DDL viewer remains
