@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 code-intel.workspace = true
+db-core.workspace = true
 db-model.workspace = true
 flume.workspace = true
 futures.workspace = true
@@ -17,9 +18,12 @@ sql-syntax.workspace = true
 text.workspace = true
 
 [dev-dependencies]
-db-core.workspace = true
 serde_json.workspace = true
 
 [[bench]]
 name = "analysis"
+harness = false
+
+[[bench]]
+name = "completion"
 harness = false

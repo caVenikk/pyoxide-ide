@@ -14,17 +14,21 @@ use std::thread;
 use code_intel::{
     AppliedEdit, CodeAction, CodeActionContext, CodeActionKind, CodeIntel, Command, CompletionItem,
     CompletionTrigger, Completions, Diagnostic, DocumentId, EventHub, Feature, Features,
-    FileChange, FileEdits, FormatOptions, Hover, Intel, IntelError, IntelEvent, Location, Point,
-    Rope, ServerId, ServerState, ServerStatus, SignatureContext, SignatureHelp, TextEdit, Token,
-    WorkspaceEdit, positions, ready, unsupported,
+    FileChange, FileEdits, FormatOptions, Hover, InsertText, Intel, IntelError, IntelEvent,
+    Location, Markup, Point, Rope, ServerId, ServerState, ServerStatus, SignatureContext,
+    SignatureHelp, TextEdit, Token, WorkspaceEdit, positions, ready, unsupported,
 };
 use futures::channel::oneshot;
 use sql_syntax::{Dialect, Script};
 
 use crate::analysis::{Analyzer, DocumentAnalysis};
+use crate::complete::{self, Resolve, ScriptObjects};
 use crate::context::ScopeProvider;
+use crate::docs;
+use crate::hover as quick_doc;
 use crate::inspect::{Fix, Problem};
 use crate::profile::{Inspection, InspectionProfile};
+use crate::signature;
 
 /// The id of the services in the Language Services widget.
 pub const SERVER_ID: &str = "sql";
@@ -77,6 +81,21 @@ enum Job {
         range: Range<Point>,
         reply: oneshot::Sender<Result<Vec<CodeAction>, IntelError>>,
     },
+    Completion {
+        doc: DocumentId,
+        at: Point,
+        reply: oneshot::Sender<Result<Completions, IntelError>>,
+    },
+    Hover {
+        doc: DocumentId,
+        at: Point,
+        reply: oneshot::Sender<Result<Option<Hover>, IntelError>>,
+    },
+    Signature {
+        doc: DocumentId,
+        at: Point,
+        reply: oneshot::Sender<Result<Option<SignatureHelp>, IntelError>>,
+    },
     Shutdown(oneshot::Sender<()>),
 }
 
@@ -106,6 +125,8 @@ impl SqlCodeIntel {
         let worker = Worker {
             shared: shared.clone(),
             docs: HashMap::new(),
+            pending: rx.clone(),
+            retry: Vec::new(),
         };
         thread::Builder::new()
             .name("sql-intel".into())
@@ -213,25 +234,81 @@ impl CodeIntel for SqlCodeIntel {
 
     fn files_changed(&self, _changes: &[FileChange]) {}
 
-    fn completion(&self, _: &DocumentId, _: Point, _: CompletionTrigger) -> Intel<Completions> {
-        unsupported()
+    fn completion(&self, doc: &DocumentId, at: Point, _: CompletionTrigger) -> Intel<Completions> {
+        let (reply, rx) = oneshot::channel();
+        let job = Job::Completion {
+            doc: doc.clone(),
+            at,
+            reply,
+        };
+        if self.jobs.send(job).is_err() {
+            return ready(Err(IntelError::NotRunning));
+        }
+        Box::pin(async move { rx.await.unwrap_or(Err(IntelError::Cancelled)) })
     }
 
-    fn resolve_completion(&self, _: &DocumentId, item: CompletionItem) -> Intel<CompletionItem> {
+    fn resolve_completion(
+        &self,
+        doc: &DocumentId,
+        mut item: CompletionItem,
+    ) -> Intel<CompletionItem> {
+        let Some(resolve) = item
+            .token
+            .as_ref()
+            .and_then(|t| t.downcast_ref::<Resolve>())
+        else {
+            return ready(Ok(item));
+        };
+        let ctx = self.shared.provider.context(doc);
+        let text = match resolve {
+            Resolve::Node(id) => ctx
+                .scope
+                .as_ref()
+                .and_then(|s| docs::node_doc(&s.model, *id, ctx.dialect)),
+            Resolve::Function(f) => {
+                let overloads = crate::builtins::function(ctx.dialect, f.name);
+                Some(docs::function_doc(f, &overloads))
+            }
+            Resolve::Type(t) => Some(docs::type_doc(t)),
+            Resolve::Keyword(k) => docs::keyword_text(k),
+        };
+        item.documentation = text.map(Markup::markdown);
         ready(Ok(item))
     }
 
-    fn hover(&self, _: &DocumentId, _: Point) -> Intel<Option<Hover>> {
-        unsupported()
+    fn completion_triggers(&self, _: &DocumentId) -> Vec<char> {
+        vec!['.']
+    }
+
+    fn hover(&self, doc: &DocumentId, at: Point) -> Intel<Option<Hover>> {
+        let (reply, rx) = oneshot::channel();
+        let job = Job::Hover {
+            doc: doc.clone(),
+            at,
+            reply,
+        };
+        if self.jobs.send(job).is_err() {
+            return ready(Err(IntelError::NotRunning));
+        }
+        Box::pin(async move { rx.await.unwrap_or(Err(IntelError::Cancelled)) })
     }
 
     fn signature_help(
         &self,
-        _: &DocumentId,
-        _: Point,
+        doc: &DocumentId,
+        at: Point,
         _: SignatureContext,
     ) -> Intel<Option<SignatureHelp>> {
-        unsupported()
+        let (reply, rx) = oneshot::channel();
+        let job = Job::Signature {
+            doc: doc.clone(),
+            at,
+            reply,
+        };
+        if self.jobs.send(job).is_err() {
+            return ready(Err(IntelError::NotRunning));
+        }
+        Box::pin(async move { rx.await.unwrap_or(Err(IntelError::Cancelled)) })
     }
 
     fn definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
@@ -312,7 +389,13 @@ impl CodeIntel for SqlCodeIntel {
     fn status(&self) -> Vec<ServerStatus> {
         let mut status = ServerStatus::new(ServerId::new(SERVER_ID), "SQL");
         status.state = ServerState::Running;
-        status.features = Features::of(&[Feature::Diagnostics, Feature::CodeActions]);
+        status.features = Features::of(&[
+            Feature::Diagnostics,
+            Feature::CodeActions,
+            Feature::Completion,
+            Feature::Hover,
+            Feature::SignatureHelp,
+        ]);
         status.documents = self.shared.inputs().keys().cloned().collect();
         status.documents.sort();
         vec![status]
@@ -351,21 +434,35 @@ struct Work {
     analyzer: Analyzer,
     /// The analysis of `script`; `None` when it was cancelled.
     analysis: Option<DocumentAnalysis>,
+    /// What the script creates, for completion; built on first use.
+    objects: Option<ScriptObjects>,
 }
 
 struct Worker {
     shared: Arc<Shared>,
     docs: HashMap<DocumentId, Work>,
+    /// The queue of jobs, to see whether somebody waits (an analysis gives
+    /// way to a request).
+    pending: flume::Receiver<Job>,
+    /// Documents whose analysis gave way to a request.
+    retry: Vec<DocumentId>,
 }
 
 impl Worker {
     fn run(mut self, rx: flume::Receiver<Job>) {
-        while let Ok(first) = rx.recv() {
-            let mut jobs = vec![first];
+        loop {
+            let mut jobs = Vec::new();
+            if self.retry.is_empty() {
+                match rx.recv() {
+                    Ok(first) => jobs.push(first),
+                    Err(_) => break,
+                }
+            }
             jobs.extend(rx.try_iter());
-            let mut changed: Vec<DocumentId> = Vec::new();
+            let mut changed: Vec<DocumentId> = std::mem::take(&mut self.retry);
             let mut republish = false;
             let mut actions = Vec::new();
+            let mut asks = Vec::new();
             let mut shutdown = Vec::new();
             for job in jobs {
                 match job {
@@ -386,6 +483,9 @@ impl Worker {
                     }
                     Job::Republish => republish = true,
                     a @ Job::Actions { .. } => actions.push(a),
+                    a @ (Job::Completion { .. } | Job::Hover { .. } | Job::Signature { .. }) => {
+                        asks.push(a);
+                    }
                     Job::Shutdown(tx) => shutdown.push(tx),
                 }
             }
@@ -395,8 +495,12 @@ impl Worker {
                 }
                 return;
             }
+            // Somebody waits for these: before the analysis of changes.
+            for job in asks {
+                self.answer(job);
+            }
             for d in &changed {
-                self.update(d);
+                self.update(d, true);
             }
             if republish {
                 let docs: Vec<DocumentId> = self.docs.keys().cloned().collect();
@@ -408,7 +512,7 @@ impl Worker {
             }
             for job in actions {
                 if let Job::Actions { doc, range, reply } = job {
-                    self.update(&doc);
+                    self.update(&doc, false);
                     let _ = reply.send(Ok(self.actions(&doc, range)));
                 }
             }
@@ -416,35 +520,41 @@ impl Worker {
     }
 
     /// Brings the analysis of `doc` to its latest text and publishes it.
-    fn update(&mut self, doc: &DocumentId) {
-        let (version, rope, epoch, latest) = {
+    ///
+    /// With `yielding` the analysis stops when a request is waiting and
+    /// goes on after it.
+    fn update(&mut self, doc: &DocumentId, yielding: bool) {
+        if self.sync(doc) {
+            self.analyse(doc, yielding);
+        }
+    }
+
+    /// Brings the script of `doc` to its latest text (parsing what changed);
+    /// `false` when the document is not open.
+    fn sync(&mut self, doc: &DocumentId) -> bool {
+        let (version, rope, epoch) = {
             let inputs = self.shared.inputs();
             let Some(input) = inputs.get(doc) else {
-                return;
+                return false;
             };
-            (
-                input.version,
-                input.rope.clone(),
-                input.epoch,
-                input.latest.clone(),
-            )
+            (input.version, input.rope.clone(), input.epoch)
         };
         if let Some(w) = self.docs.get(doc)
             && w.version == version
             && w.epoch == epoch
-            && w.analysis.is_some()
         {
-            return;
+            return true;
         }
         let ctx = self.shared.provider.context(doc);
         let text = rope.to_string();
-        let mut work = match self.docs.remove(doc) {
+        let work = match self.docs.remove(doc) {
             Some(mut w) => {
                 w.script = next_script(&w.script, &text, ctx.dialect);
                 w.version = version;
                 w.epoch = epoch;
                 w.rope = rope;
                 w.analysis = None;
+                w.objects = None;
                 w
             }
             None => Work {
@@ -454,15 +564,114 @@ impl Worker {
                 script: sql_syntax::parse(&text, ctx.dialect),
                 analyzer: Analyzer::with_counter(self.shared.analysed.clone()),
                 analysis: None,
+                objects: None,
             },
         };
-        let cancel = || latest.load(Ordering::Acquire) != version;
-        work.analysis = work.analyzer.analyze(&work.script, &ctx, &cancel);
-        let done = work.analysis.is_some();
         self.docs.insert(doc.clone(), work);
-        if done {
+        true
+    }
+
+    /// Analyses the script of `doc` (when that is not done) and publishes
+    /// the problems.
+    fn analyse(&mut self, doc: &DocumentId, yielding: bool) {
+        let latest = {
+            let inputs = self.shared.inputs();
+            let Some(input) = inputs.get(doc) else {
+                return;
+            };
+            input.latest.clone()
+        };
+        let Some(mut work) = self.docs.remove(doc) else {
+            return;
+        };
+        let mut fresh = false;
+        if work.analysis.is_none() {
+            let ctx = self.shared.provider.context(doc);
+            let version = work.version;
+            let pending = &self.pending;
+            let cancel =
+                || latest.load(Ordering::Acquire) != version || (yielding && !pending.is_empty());
+            work.analysis = work.analyzer.analyze(&work.script, &ctx, &cancel);
+            fresh = work.analysis.is_some();
+            if !fresh && yielding && latest.load(Ordering::Acquire) == version {
+                // Somebody waits for an answer: this goes on afterwards.
+                self.retry.push(doc.clone());
+            }
+        }
+        self.docs.insert(doc.clone(), work);
+        if fresh {
             self.publish(doc);
         }
+    }
+
+    /// Answers a request for completion, quick documentation or parameter
+    /// info.
+    fn answer(&mut self, job: Job) {
+        match job {
+            Job::Completion { doc, at, reply } => {
+                let _ = reply.send(self.complete(&doc, at));
+            }
+            Job::Hover { doc, at, reply } => {
+                let _ = reply.send(self.hover(&doc, at));
+            }
+            Job::Signature { doc, at, reply } => {
+                let _ = reply.send(self.signature(&doc, at));
+            }
+            _ => {}
+        }
+    }
+
+    fn complete(&mut self, doc: &DocumentId, at: Point) -> Result<Completions, IntelError> {
+        if !self.sync(doc) {
+            return Err(IntelError::Unsupported);
+        }
+        let ctx = self.shared.provider.context(doc);
+        let Some(w) = self.docs.get_mut(doc) else {
+            return Err(IntelError::Unsupported);
+        };
+        let offset = point_to_byte(&w.rope, at);
+        if w.objects.is_none() {
+            w.objects = Some(ScriptObjects::build(&w.script, &ctx));
+        }
+        let objects = w.objects.as_ref().expect("built above");
+        let answer = complete::complete(&w.script, &ctx, objects, offset);
+        Ok(completions(&w.rope, offset, answer))
+    }
+
+    fn hover(&mut self, doc: &DocumentId, at: Point) -> Result<Option<Hover>, IntelError> {
+        self.update(doc, false);
+        let ctx = self.shared.provider.context(doc);
+        let Some(w) = self.docs.get(doc) else {
+            return Err(IntelError::Unsupported);
+        };
+        let Some(analysis) = &w.analysis else {
+            return Ok(None);
+        };
+        let offset = point_to_byte(&w.rope, at);
+        Ok(
+            quick_doc::hover(&w.script, &ctx, analysis, offset).map(|d| Hover {
+                contents: Markup::markdown(d.text),
+                range: Some(
+                    byte_to_point(&w.rope, d.range.start)..byte_to_point(&w.rope, d.range.end),
+                ),
+            }),
+        )
+    }
+
+    fn signature(
+        &mut self,
+        doc: &DocumentId,
+        at: Point,
+    ) -> Result<Option<SignatureHelp>, IntelError> {
+        if !self.sync(doc) {
+            return Err(IntelError::Unsupported);
+        }
+        let ctx = self.shared.provider.context(doc);
+        let Some(w) = self.docs.get(doc) else {
+            return Err(IntelError::Unsupported);
+        };
+        let offset = point_to_byte(&w.rope, at);
+        Ok(signature::signature_help(&w.script, &ctx, offset))
     }
 
     fn publish(&self, doc: &DocumentId) {
@@ -564,6 +773,39 @@ fn next_script(old: &Script, text: &str, dialect: Dialect) -> Script {
         range: prefix..a.len() - suffix,
         text: text[prefix..b.len() - suffix].to_string(),
     })
+}
+
+/// The `code-intel` answer for the engine's items.
+fn completions(rope: &Rope, caret: usize, answer: complete::Answer) -> Completions {
+    let insert = byte_to_point(rope, answer.start)..byte_to_point(rope, caret);
+    let replace =
+        byte_to_point(rope, answer.start)..byte_to_point(rope, answer.word_end.max(caret));
+    let server = ServerId::new(SERVER_ID);
+    let items = answer
+        .items
+        .into_iter()
+        .map(|i| {
+            let mut item = CompletionItem::new(i.label).with_kind(i.kind);
+            item.insert = InsertText::Edit {
+                insert: insert.clone(),
+                replace: replace.clone(),
+                text: i.insert,
+            };
+            item.snippet = i.snippet;
+            item.tail_text = i.tail;
+            item.type_text = i.detail;
+            item.filter_text = i.filter;
+            item.sort_text = Some(i.sort);
+            item.deprecated = i.deprecated;
+            item.server = Some(server.clone());
+            item.token = i.resolve.map(Token::new);
+            item
+        })
+        .collect();
+    Completions {
+        items,
+        incomplete: answer.incomplete,
+    }
 }
 
 fn byte_to_point(rope: &Rope, byte: usize) -> Point {

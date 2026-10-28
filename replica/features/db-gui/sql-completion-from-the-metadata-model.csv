@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"SQL completion of tables, columns, aliases and schemas from the model",db-gui,should,yes,no,Pro
+"SQL completion of tables, columns, aliases and schemas from the model",db-gui,should,yes,partial,"Pro; engine done (sql-intel, #320): columns, aliases, schemas, CTEs, routines, types, keywords in the file's case; the editor shows it when the database module registers the services"
