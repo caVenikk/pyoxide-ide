@@ -45,10 +45,11 @@ fn colors() -> TerminalColors {
     TerminalColors::from_theme(&themes::builtin::default_theme(themes::ThemeKind::Dark))
 }
 
-fn options() -> PlanOptions {
+fn options() -> PlanOptions<'static> {
     PlanOptions {
         focused: true,
         blink_on: true,
+        underlines: &[],
     }
 }
 

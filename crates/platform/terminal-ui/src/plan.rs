@@ -93,11 +93,13 @@ pub struct GridPlan {
 
 /// What the view adds to the snapshot.
 #[derive(Clone, Copy, Debug)]
-pub struct PlanOptions {
+pub struct PlanOptions<'a> {
     pub focused: bool,
     /// The blinking cursor is in its visible phase (always true for a
     /// cursor that does not blink).
     pub blink_on: bool,
+    /// Cells drawn underlined: the links (`(row, columns)`).
+    pub underlines: &'a [(usize, Range<usize>)],
 }
 
 /// Search highlight of a cell.
@@ -248,7 +250,7 @@ pub fn plan(
     snapshot: &Snapshot,
     colors: &TerminalColors,
     resolver: &mut Resolver,
-    options: PlanOptions,
+    options: PlanOptions<'_>,
     fits: &mut dyn FnMut(char) -> bool,
 ) -> GridPlan {
     let mut out = GridPlan::default();
@@ -257,6 +259,7 @@ pub fn plan(
         return out;
     }
     let mut matches: Vec<Range<usize>> = Vec::new();
+    let mut link_columns: Vec<Range<usize>> = Vec::new();
     let mut extras = Extras {
         all: &snapshot.extras,
         next: 0,
@@ -278,6 +281,14 @@ pub fn plan(
                 .matches
                 .iter()
                 .filter_map(|s| span_columns(s, line, columns)),
+        );
+        link_columns.clear();
+        link_columns.extend(
+            options
+                .underlines
+                .iter()
+                .filter(|(l, _)| *l == line)
+                .map(|(_, c)| c.clone()),
         );
         let mut next_match = 0;
         let found = |column: usize, next_match: &mut usize| -> Found {
@@ -350,7 +361,10 @@ pub fn plan(
             let underline_color = extra
                 .and_then(|e| e.underline_color)
                 .map(|c| underline_color(colors, c));
-            let style = run_style(cell.flags, look.text, underline_color);
+            let mut style = run_style(cell.flags, look.text, underline_color);
+            if style.underline.is_none() && link_columns.iter().any(|r| r.contains(&column)) {
+                style.underline = Some((UnderlineKind::Single, look.text));
+            }
             let decorated = style.underline.is_some() || style.strikethrough;
             let hidden = cell.flags.contains(CellFlags::HIDDEN)
                 || cell.flags.contains(CellFlags::LEADING_WIDE_SPACER);
@@ -421,7 +435,7 @@ fn cursor_plan(
     snapshot: &Snapshot,
     colors: &TerminalColors,
     resolver: &mut Resolver,
-    options: PlanOptions,
+    options: PlanOptions<'_>,
 ) -> Option<CursorPlan> {
     let cursor = snapshot.cursor?;
     if cursor.shape == CursorShape::Hidden || !snapshot.modes.show_cursor {
@@ -522,10 +536,11 @@ mod tests {
         }
     }
 
-    fn opts() -> PlanOptions {
+    fn opts() -> PlanOptions<'static> {
         PlanOptions {
             focused: true,
             blink_on: true,
+            underlines: &[],
         }
     }
 
@@ -694,6 +709,7 @@ mod tests {
             PlanOptions {
                 focused: false,
                 blink_on: false,
+                underlines: &[],
             },
             &mut |_| true,
         );
@@ -708,6 +724,7 @@ mod tests {
             PlanOptions {
                 focused: true,
                 blink_on: false,
+                underlines: &[],
             },
             &mut |_| true,
         );
@@ -721,6 +738,7 @@ mod tests {
             PlanOptions {
                 focused: false,
                 blink_on: true,
+                underlines: &[],
             },
             &mut |_| true,
         );

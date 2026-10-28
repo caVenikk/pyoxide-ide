@@ -83,6 +83,7 @@ text = "Find…"
 groups = ["Main Menu > Edit > Find"]
 commands = [
   { command = "find.open", context = "Editor" },
+  { command = "terminal.find", contexts = ["Terminal", "TerminalFind > Editor"] },
   { command = "settings.find", contexts = ["SettingsWindow", "SettingsWindow > Editor"] },
 ]
 
@@ -99,6 +100,7 @@ text = "Find Next / Move to Next Occurrence"
 groups = ["Main Menu > Edit > Find"]
 commands = [
   { command = "find.next", contexts = ["Editor", "FindInFilesPreview > Editor"] },
+  { command = "terminal.find-next", contexts = ["Terminal", "TerminalFind > Editor"] },
   { command = "find-in-files.next-result", context = "FindInFiles > Editor" },
 ]
 
@@ -108,6 +110,7 @@ text = "Find Previous / Move to Previous Occurrence"
 groups = ["Main Menu > Edit > Find"]
 commands = [
   { command = "find.previous", contexts = ["Editor", "FindInFilesPreview > Editor"] },
+  { command = "terminal.find-previous", contexts = ["Terminal", "TerminalFind > Editor"] },
   { command = "find-in-files.previous-result", context = "FindInFiles > Editor" },
 ]
 

@@ -20,8 +20,9 @@
 
 ## Commands
 `terminal.find {"text": ...}`, `terminal.find-next`,
-`terminal.find-previous`, `terminal.state` (find: query, matches,
-current).
+`terminal.find-previous`, `terminal.find-close`, `terminal.find-toggle-case`,
+`terminal.find-toggle-regex`, `terminal.state` (`find`: query, options,
+matches, current).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/terminal-emulator.html; IntelliJ

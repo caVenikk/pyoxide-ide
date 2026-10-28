@@ -92,11 +92,11 @@ impl EntityInputHandler for SessionView {
     ) -> Option<Bounds<Pixels>> {
         // The composition starts at the cursor; the candidate window goes
         // below the character the range starts at.
-        let geometry = self.geometry?;
+        let geometry = self.geometry.as_ref()?;
         let cursor = self.snapshot.cursor?.point;
         let x =
             geometry.origin.x + geometry.cell.width * (cursor.column + range_utf16.start) as f32;
-        let y = geometry.origin.y + geometry.cell.height * cursor.line as f32;
+        let y = geometry.top_of(cursor.line);
         Some(Bounds::new(
             point(x, y),
             size(geometry.cell.width, geometry.cell.height),

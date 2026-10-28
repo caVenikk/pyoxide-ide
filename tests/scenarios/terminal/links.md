@@ -24,8 +24,10 @@
   the relative path resolves against the tracked working directory.
 
 ## Commands
-`terminal.type {"text": ...}`, `terminal.state` (links on visible lines),
-`workbench.state` (active editor, caret).
+`terminal.type {"text": ...}`, `terminal.open-link {"line": ..., "column": ...}`
+(the link at a cell of the screen), `terminal.state` (`links` on visible
+lines, `link_hint`), `workbench.state` (active editor, caret, project tree
+selection).
 
 ## Source
 https://www.jetbrains.com/help/pycharm/terminal-emulator.html; IntelliJ

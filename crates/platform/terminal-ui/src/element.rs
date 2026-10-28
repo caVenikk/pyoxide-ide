@@ -11,6 +11,7 @@
 //! left; the alternate screen (full-screen programs) starts 4 px from the
 //! left edge and has no scrollbar.
 
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use gpui::{
@@ -25,6 +26,10 @@ use terminal::TerminalSize;
 use themes::{Metric, Rgba, UiRole};
 use ui::theme::ThemeExt;
 
+use crate::blocks::{
+    self, ERROR_LEFT, ERROR_RADIUS, ERROR_WIDTH, ERROR_Y_OFFSET, SEPARATOR_ABOVE,
+    SEPARATOR_RIGHT_OFFSET,
+};
 use crate::colors::TerminalColors;
 use crate::plan::{self, CursorDraw, GlyphRun, GridPlan, PlanOptions, RunStyle, UnderlineKind};
 use crate::view::{Geometry, ScrollbarGeometry, SessionView};
@@ -235,6 +240,11 @@ pub struct Frame {
     hitbox: Hitbox,
     background: Hsla,
     quads: Vec<(Bounds<Pixels>, Hsla)>,
+    /// The lines between command blocks and the markers of failed ones,
+    /// with their corner radius.
+    decor: Vec<(Bounds<Pixels>, Hsla, Pixels)>,
+    /// The pointer is over a link.
+    link_pointer: bool,
     texts: Vec<PaintedText>,
     cursor: Option<CursorPaint>,
     cursor_text: Option<PaintedText>,
@@ -247,7 +257,7 @@ pub struct Frame {
 fn shape(
     run: &GlyphRun,
     metrics: &CellMetrics,
-    origin: gpui::Point<Pixels>,
+    geometry: &Geometry,
     window: &mut Window,
 ) -> PaintedText {
     let font = font_for(&metrics.font, &run.style);
@@ -280,8 +290,8 @@ fn shape(
     );
     PaintedText {
         origin: point(
-            origin.x + cell.width * run.column as f32,
-            origin.y + cell.height * run.line as f32,
+            geometry.origin.x + cell.width * run.column as f32,
+            geometry.top_of(run.line),
         ),
         shaped,
     }
@@ -300,21 +310,74 @@ fn font_for(base: &Font, style: &RunStyle) -> Font {
 
 /// The cells `columns` of `line` as bounds.
 fn cells_bounds(
-    origin: gpui::Point<Pixels>,
-    cell: Size<Pixels>,
+    geometry: &Geometry,
     line: usize,
     columns: std::ops::Range<usize>,
 ) -> Bounds<Pixels> {
+    let (origin, cell) = (geometry.origin, geometry.cell);
+    let top = geometry.top_of(line);
     Bounds::from_corners(
-        point(
-            origin.x + cell.width * columns.start as f32,
-            origin.y + cell.height * line as f32,
-        ),
+        point(origin.x + cell.width * columns.start as f32, top),
         point(
             origin.x + cell.width * columns.end as f32,
-            origin.y + cell.height * (line + 1) as f32,
+            top + cell.height,
         ),
     )
+}
+
+/// The line above each command block after the first, and the marker
+/// beside each block whose command failed (`BlockSeparatorRenderer`,
+/// `TerminalBlockLeftErrorRenderer`).
+fn block_decor(
+    shown: &[blocks::VisibleBlock],
+    geometry: &Geometry,
+    snapshot: &terminal::Snapshot,
+    separator: Hsla,
+    marker: Hsla,
+) -> Vec<(Bounds<Pixels>, Hsla, Pixels)> {
+    let mut out = Vec::new();
+    let bounds = geometry.bounds;
+    for block in shown {
+        if block.separated
+            && let Some(row) = block.start_row
+        {
+            let y = geometry.top_of(row) - px(SEPARATOR_ABOVE);
+            // The line above the prompt in use runs to the edge.
+            let right = if block.current {
+                0.0
+            } else {
+                SEPARATOR_RIGHT_OFFSET
+            };
+            out.push((
+                Bounds::from_corners(
+                    point(bounds.left(), y),
+                    point(bounds.right() - px(right), y + px(1.0)),
+                ),
+                separator,
+                px(0.0),
+            ));
+        }
+        if block.failed {
+            let (first, inset) = match block.start_row {
+                Some(row) => (
+                    blocks::first_text_row(snapshot, row, block.end_row),
+                    ERROR_Y_OFFSET,
+                ),
+                None => (0, 0.0),
+            };
+            let top = geometry.top_of(first) + px(inset);
+            let bottom = geometry.top_of(block.end_row) + geometry.cell.height - px(ERROR_Y_OFFSET);
+            if bottom > top {
+                let left = bounds.left() + px(ERROR_LEFT);
+                out.push((
+                    Bounds::from_corners(point(left, top), point(left + px(ERROR_WIDTH), bottom)),
+                    marker,
+                    px(ERROR_RADIUS),
+                ));
+            }
+        }
+    }
+    out
 }
 
 impl Element for TerminalElement {
@@ -359,103 +422,129 @@ impl Element for TerminalElement {
             theme.color(UiRole::Scrollbar),
             theme.color(UiRole::ScrollbarHover),
         );
+        let decor_colors = (
+            hsla(theme.raw().ui[UiRole::TerminalSeparator]),
+            hsla(theme.raw().ui[UiRole::TerminalErrorMarker]),
+        );
         let focused = self.view.read(cx).is_focused(window);
         let font_id = window.text_system().resolve_font(&metrics.font);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
-        let (plan, geometry, colors, marked) = self.view.update(cx, |view, cx| {
-            let alternate = view.snapshot.modes.alt_screen;
-            let (grid, _) = grid_layout(bounds, metrics.cell, alternate);
-            view.window = window.window_handle();
-            view.prepare(grid, &base_colors, cx);
-            // The screen may have switched with this snapshot.
-            let alternate = view.snapshot.modes.alt_screen;
-            let (_, origin) = grid_layout(bounds, metrics.cell, alternate);
-            let colors = base_colors.with_overrides(&view.snapshot.color_overrides);
-            let key = (metrics.font.family.clone(), metrics.font_size);
-            if view.fits_font.as_ref() != Some(&key) {
-                view.fits.clear();
-                view.fits_font = Some(key);
-            }
-            let cell_width = f32::from(metrics.cell.width);
-            let ts = window.text_system().clone();
-            let fits_cache = &mut view.fits;
-            let mut fits = |c: char| {
-                *fits_cache.entry(c).or_insert_with(|| {
-                    ts.advance(font_id, metrics.font_size, c)
-                        .is_ok_and(|s| (f32::from(s.width) - cell_width).abs() < 0.5)
-                })
-            };
-            let options = PlanOptions {
-                focused,
-                blink_on: view.blink_on,
-            };
-            let plan = plan::plan(
-                &view.snapshot,
-                &colors,
-                &mut view.resolver,
-                options,
-                &mut fits,
-            );
-            let snapshot = &view.snapshot;
-            let scrollbar = (!snapshot.modes.alt_screen && snapshot.history_size > 0).then(|| {
-                let track = Bounds::new(
-                    point(bounds.right() - scrollbar_width, bounds.top()),
-                    size(scrollbar_width, bounds.size.height),
-                );
-                let total = (snapshot.history_size + snapshot.rows) as f32;
-                let height = (track.size.height * (snapshot.rows as f32 / total))
-                    .max(px(MIN_THUMB))
-                    .min(track.size.height);
-                let ratio = 1.0 - snapshot.display_offset as f32 / snapshot.history_size as f32;
-                let top = track.top() + (track.size.height - height) * ratio;
-                ScrollbarGeometry {
-                    track,
-                    thumb: Bounds::new(
-                        point(track.left() + px(2.0), top),
-                        size(scrollbar_width - px(4.0), height),
-                    ),
-                    history: snapshot.history_size,
+        let (plan, geometry, colors, marked, decor, link_pointer) =
+            self.view.update(cx, |view, cx| {
+                let alternate = view.snapshot.modes.alt_screen;
+                let (grid, _) = grid_layout(bounds, metrics.cell, alternate);
+                view.window = window.window_handle();
+                view.prepare(grid, &base_colors, cx);
+                // The screen may have switched with this snapshot.
+                let alternate = view.snapshot.modes.alt_screen;
+                let (_, origin) = grid_layout(bounds, metrics.cell, alternate);
+                let colors = base_colors.with_overrides(&view.snapshot.color_overrides);
+                let key = (metrics.font.family.clone(), metrics.font_size);
+                if view.fits_font.as_ref() != Some(&key) {
+                    view.fits.clear();
+                    view.fits_font = Some(key);
                 }
+                let underlines = view.link_underlines();
+                let cell_width = f32::from(metrics.cell.width);
+                let ts = window.text_system().clone();
+                let fits_cache = &mut view.fits;
+                let mut fits = |c: char| {
+                    *fits_cache.entry(c).or_insert_with(|| {
+                        ts.advance(font_id, metrics.font_size, c)
+                            .is_ok_and(|s| (f32::from(s.width) - cell_width).abs() < 0.5)
+                    })
+                };
+                let options = PlanOptions {
+                    focused,
+                    blink_on: view.blink_on,
+                    underlines: &underlines,
+                };
+                let plan = plan::plan(
+                    &view.snapshot,
+                    &colors,
+                    &mut view.resolver,
+                    options,
+                    &mut fits,
+                );
+                let snapshot = &view.snapshot;
+                let scrollbar =
+                    (!snapshot.modes.alt_screen && snapshot.history_size > 0).then(|| {
+                        let track = Bounds::new(
+                            point(bounds.right() - scrollbar_width, bounds.top()),
+                            size(scrollbar_width, bounds.size.height),
+                        );
+                        let total = (snapshot.history_size + snapshot.rows) as f32;
+                        let height = (track.size.height * (snapshot.rows as f32 / total))
+                            .max(px(MIN_THUMB))
+                            .min(track.size.height);
+                        let ratio =
+                            1.0 - snapshot.display_offset as f32 / snapshot.history_size as f32;
+                        let top = track.top() + (track.size.height - height) * ratio;
+                        ScrollbarGeometry {
+                            track,
+                            thumb: Bounds::new(
+                                point(track.left() + px(2.0), top),
+                                size(scrollbar_width - px(4.0), height),
+                            ),
+                            history: snapshot.history_size,
+                        }
+                    });
+                let avail = f32::from(bounds.size.height) - TOP_INSET - BOTTOM_INSET;
+                let (layout, shown) = view.block_layout(f32::from(metrics.cell.height), avail);
+                let geometry = Geometry {
+                    bounds,
+                    origin,
+                    cell: metrics.cell,
+                    columns: snapshot.columns,
+                    rows: snapshot.rows,
+                    scrollbar,
+                    layout: Rc::new(layout),
+                };
+                let decor = block_decor(
+                    &shown,
+                    &geometry,
+                    &view.snapshot,
+                    decor_colors.0,
+                    decor_colors.1,
+                );
+                let link_pointer = view.link_pointer();
+                view.set_geometry(geometry.clone());
+                view.note_frame();
+                (
+                    plan,
+                    geometry,
+                    colors,
+                    view.marked.clone(),
+                    decor,
+                    link_pointer,
+                )
             });
-            let geometry = Geometry {
-                bounds,
-                origin,
-                cell: metrics.cell,
-                columns: snapshot.columns,
-                rows: snapshot.rows,
-                scrollbar,
-            };
-            view.set_geometry(geometry);
-            view.note_frame();
-            (plan, geometry, colors, view.marked.clone())
-        });
 
         let GridPlan {
             backgrounds,
             runs,
             cursor,
         } = plan;
-        let origin = geometry.origin;
         let cell = metrics.cell;
         let quads = backgrounds
             .iter()
             .map(|q| {
                 (
-                    cells_bounds(origin, cell, q.line, q.columns.clone()),
+                    cells_bounds(&geometry, q.line, q.columns.clone()),
                     hsla(q.color),
                 )
             })
             .collect();
         let texts = runs
             .iter()
-            .map(|r| shape(r, &metrics, origin, window))
+            .map(|r| shape(r, &metrics, &geometry, window))
             .collect();
         let mut cursor_paint = None;
         let mut cursor_text = None;
         let mut marked_paint = None;
         if let Some(c) = cursor {
-            let b = cells_bounds(origin, cell, c.line, c.column..c.column + c.cells);
+            let b = cells_bounds(&geometry, c.line, c.column..c.column + c.cells);
             let color = hsla(c.color);
             match &marked {
                 // Composed text replaces the cursor: it is drawn there,
@@ -475,7 +564,7 @@ impl Element for TerminalElement {
                         },
                         grid: false,
                     };
-                    let painted = shape(&run, &metrics, origin, window);
+                    let painted = shape(&run, &metrics, &geometry, window);
                     let width = painted.shaped.width.max(cell.width);
                     let back = Bounds::new(b.origin, size(width, cell.height));
                     marked_paint = Some((back, hsla(colors.background), painted));
@@ -496,7 +585,10 @@ impl Element for TerminalElement {
                             color,
                         ),
                     });
-                    cursor_text = c.text.as_ref().map(|r| shape(r, &metrics, origin, window));
+                    cursor_text = c
+                        .text
+                        .as_ref()
+                        .map(|r| shape(r, &metrics, &geometry, window));
                 }
             }
         }
@@ -504,6 +596,8 @@ impl Element for TerminalElement {
             hitbox,
             background: hsla(colors.background),
             quads,
+            decor,
+            link_pointer,
             texts,
             cursor: cursor_paint,
             cursor_text,
@@ -531,13 +625,21 @@ impl Element for TerminalElement {
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
-        ui::pointer::request(CursorStyle::IBeam, &frame.hitbox, window);
+        let style = if frame.link_pointer {
+            CursorStyle::PointingHand
+        } else {
+            CursorStyle::IBeam
+        };
+        ui::pointer::request(style, &frame.hitbox, window);
 
         let lh = frame.line_height;
         window.paint_quad(fill(bounds, frame.background));
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             for (b, color) in &frame.quads {
                 window.paint_quad(fill(*b, *color));
+            }
+            for (b, color, radius) in &frame.decor {
+                window.paint_quad(fill(*b, *color).corner_radii(*radius));
             }
             for t in &frame.texts {
                 let _ = t.shaped.paint(t.origin, lh, window, cx);

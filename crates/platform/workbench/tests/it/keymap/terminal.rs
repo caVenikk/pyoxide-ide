@@ -248,6 +248,79 @@ fn check_rename(h: &mut H, command: &str, keys: &str, what: &str) {
     assert!(h.terminal_focused(), "{what}: the focus is in the tool window");
 }
 
+/// The keys of the find bar over the output: Cmd+F (Ctrl+F) opens it,
+/// the next and previous keys step through the matches (from the session
+/// and from the bar's field), Escape closes it and gives the focus back to
+/// the session, the option keys flip the options.
+fn check_find(h: &mut H, b: &Binding, what: &str) {
+    let command = b.command.as_str();
+    let keys = b.keys.as_str();
+    let in_bar = b
+        .context
+        .as_deref()
+        .is_some_and(|c| c.starts_with("TerminalFind"));
+    BINDING.with(|bd| *bd.borrow_mut() = what.to_owned());
+    let find = |s: &Value| s["find"].clone();
+    let current = |s: &Value| s["find"]["current"].as_u64();
+    let total = |s: &Value| s["find"]["matches"].as_u64().unwrap_or(0);
+    h.terminal_with_history();
+    match command {
+        "terminal.find" => {
+            if in_bar {
+                h.invoke("terminal.find", json!({"text": "line4"}));
+                h.wait_terminal("the bar", |s| find(s)["open"] == json!(true));
+            }
+            h.press(keys);
+            let s = h.wait_terminal(what, |s| find(s)["open"] == json!(true));
+            if in_bar {
+                assert_eq!(find(&s)["query"], json!("line4"), "{what}: the query stays");
+            } else {
+                assert!(h.terminal_focused(), "{what}: the focus is in the bar");
+                assert!(!h.session_focused(), "{what}: not in the session");
+            }
+        }
+        "terminal.find-next" | "terminal.find-previous" => {
+            h.invoke("terminal.find", json!({"text": "line4"}));
+            let s = h.wait_terminal("the matches", |s| total(s) >= 2 && current(s).is_some());
+            let (before, n) = (current(&s).unwrap(), total(&s));
+            if !in_bar {
+                h.focus_session();
+            }
+            h.press(keys);
+            let expected = if command == "terminal.find-next" {
+                before % n + 1
+            } else if before == 1 {
+                n
+            } else {
+                before - 1
+            };
+            h.wait_terminal(what, |s| current(s) == Some(expected));
+        }
+        "terminal.find-close" => {
+            h.invoke("terminal.find", json!({"text": "line4"}));
+            h.wait_terminal("the bar", |s| find(s)["open"] == json!(true));
+            h.press(keys);
+            h.wait_terminal(what, |s| find(s)["open"] == json!(false));
+            assert!(h.session_focused(), "{what}: the focus goes back to the session");
+        }
+        "terminal.find-toggle-case" | "terminal.find-toggle-regex" => {
+            let (option, text) = if command == "terminal.find-toggle-case" {
+                ("match_case", "LINE4")
+            } else {
+                ("regex", "line4[0-9]")
+            };
+            h.invoke("terminal.find", json!({"text": text}));
+            let s = h.wait_terminal("the bar", |s| find(s)["open"] == json!(true));
+            let was = find(&s)[option].clone();
+            h.press(keys);
+            h.wait_terminal(what, |s| find(s)[option] == json!(!was.as_bool().unwrap()));
+            h.press(keys);
+            h.wait_terminal(what, |s| find(s)[option] == was);
+        }
+        _ => unreachable!("{command}"),
+    }
+}
+
 /// The number of scrollback lines in a terminal state.
 fn history(s: &Value) -> u64 {
     s["history"].as_u64().unwrap()
@@ -581,12 +654,43 @@ fn check(h: &mut H, b: &Binding) -> bool {
         "terminal.rename-confirm" | "terminal.rename-cancel" => {
             check_rename(h, &b.command, keys, &what)
         }
+        "terminal.find"
+        | "terminal.find-next"
+        | "terminal.find-previous"
+        | "terminal.find-close"
+        | "terminal.find-toggle-case"
+        | "terminal.find-toggle-regex" => check_find(h, b, &what),
         _ => return false,
     }
     true
 }
 
 impl H<'_> {
+    /// The focus is in the selected session itself (not in its find bar).
+    fn session_focused(&mut self) -> bool {
+        let session = self
+            .workbench(|w, cx| w.terminal_session(cx))
+            .expect("a session");
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                gpui::Focusable::focus_handle(session.read(cx), cx).is_focused(window)
+            })
+            .unwrap()
+    }
+
+    /// Gives the focus to the selected session.
+    fn focus_session(&mut self) {
+        let session = self
+            .workbench(|w, cx| w.terminal_session(cx))
+            .expect("a session");
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                let focus = gpui::Focusable::focus_handle(session.read(cx), cx);
+                window.focus(&focus);
+            })
+            .unwrap();
+    }
+
     /// The selected tab's title in the header.
     fn selected_tab_name(&mut self) -> String {
         let s = self.terminal();
@@ -703,4 +807,69 @@ fn the_options_menu(cx: &mut TestAppContext) {
     let terminal = h.state()["tool_windows"]["terminal"].clone();
     assert_eq!(terminal["visible"], json!(true), "{terminal}");
     assert_eq!(terminal["registered"], json!(true), "{terminal}");
+}
+
+/// A path in the terminal's output opens: a file in the editor at its line
+/// and column, a folder of the project in the Project view.
+#[cfg(unix)]
+#[gpui::test]
+fn paths_in_the_output_open_in_the_editor_and_the_project_view(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx, keymap::MACOS);
+    let root = h.root.clone();
+    h.open_terminal(None);
+    // The command line also holds the path; the output is the line that
+    // starts with the word. (A long path may wrap: the click is on its
+    // start.)
+    let mut link_cell = |h: &mut H, word: &str, path: String| {
+        h.invoke(
+            "terminal.type",
+            json!({ "text": format!("echo {word} {path}\r") }),
+        );
+        let prefix = format!("{word} ");
+        let row_of = |s: &Value| {
+            s["lines"].as_array().and_then(|l| {
+                l.iter()
+                    .position(|l| l.as_str().unwrap().starts_with(&prefix))
+            })
+        };
+        let s = h.wait_terminal("the output", |s| row_of(s).is_some());
+        let row = row_of(&s).unwrap();
+        let line = s["lines"][row].as_str().unwrap();
+        json!({"line": row, "column": line.find('/').unwrap() + 2})
+    };
+
+    // The file, at its line and column.
+    let file = root.join("src").join("m.py");
+    let cell = link_cell(&mut h, "file", format!("{}:1:3", file.display()));
+    h.invoke("terminal.open-link", cell);
+    for _ in 0..2000 {
+        support::tick(h.cx);
+        h.draw();
+        if h.state()["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("m.py"))
+        {
+            break;
+        }
+    }
+    let state = h.state();
+    assert!(
+        state["editor"]["path"].as_str().unwrap().ends_with("m.py"),
+        "{state:#}"
+    );
+    assert_eq!(h.caret_line().1, 0, "line 1");
+
+    // The folder is revealed in the Project view.
+    let cell = link_cell(&mut h, "folder", root.join("src").display().to_string());
+    h.invoke("terminal.open-link", cell);
+    for _ in 0..2000 {
+        support::tick(h.cx);
+        h.draw();
+        if h.state()["tree"]["selected"] == json!("src") {
+            break;
+        }
+    }
+    let state = h.state();
+    assert_eq!(state["tree"]["selected"], json!("src"), "{state:#}");
+    assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
 }

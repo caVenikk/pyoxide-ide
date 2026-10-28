@@ -32,7 +32,7 @@ use ::terminal::start::Os;
 use ::terminal::{Customization, ShellContext, ShellCustomizer, ShellKind, SourceScript};
 use gpui::App;
 use py_env::venv::{EnvDir, EnvLayout};
-use workbench::{TerminalHook, TerminalProvider};
+use workbench::{LinkFilter, LinkFilters, TerminalHook, TerminalProvider};
 
 use crate::interpreter;
 
@@ -58,6 +58,12 @@ impl TerminalProvider for Provider {
             .map(|root| interpreter::ProjectChoice::of(root, cx))
             .unwrap_or_default();
         vec![Arc::new(VirtualEnvCustomizer { choice })]
+    }
+
+    fn link_filters(&self) -> Option<LinkFilters> {
+        Some(Arc::new(|working_dir| {
+            vec![Arc::new(py_run::TracebackFilter::new(working_dir)) as Arc<dyn LinkFilter>]
+        }))
     }
 }
 

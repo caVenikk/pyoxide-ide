@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -28,10 +29,16 @@ use terminal::{
 use themes::UiRole;
 use ui::theme::ThemeExt;
 
+use crate::blocks::{Blocks, RowLayout};
 use crate::colors::{Resolver, TerminalColors};
-use crate::commands::{Clear, Copy, LineDown, LineUp, PageDown, PageUp, Paste, SelectAll};
+use crate::commands::{
+    Clear, Copy, LineDown, LineUp, OpenLink, PageDown, PageUp, Paste, SelectAll,
+};
 use crate::element::TerminalElement;
+use crate::find::{FindPrefs, FindState};
 use crate::keys;
+use crate::link_ui::LinkState;
+use crate::links::LinkTarget;
 
 /// The key context of the view (keymaps' `Terminal` sections).
 pub const KEY_CONTEXT: &str = "Terminal";
@@ -67,6 +74,10 @@ pub struct TerminalOptions {
     /// The wheel sends arrow keys on the alternate screen when the program
     /// does not report the mouse.
     pub alternate_scroll: bool,
+    /// "Show separators between executed commands": a line above each
+    /// command block of a shell with integration, and a marker beside the
+    /// commands that failed.
+    pub show_separators: bool,
 }
 
 impl Default for TerminalOptions {
@@ -78,6 +89,7 @@ impl Default for TerminalOptions {
             paste_on_middle_click: true,
             blink: true,
             alternate_scroll: true,
+            show_separators: true,
         }
     }
 }
@@ -96,10 +108,13 @@ pub enum SessionViewEvent {
     WorkingDirectoryChanged(PathBuf),
     Bell,
     Exited(ExitStatus),
+    /// The user opened a link: a URL, or a file (with its line and column)
+    /// or a folder; the owner opens it.
+    OpenLink(LinkTarget),
 }
 
 /// Where the grid was laid out in the last frame.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Geometry {
     pub bounds: Bounds<Pixels>,
     /// The top left corner of cell (0, 0).
@@ -109,6 +124,8 @@ pub struct Geometry {
     pub columns: usize,
     pub rows: usize,
     pub scrollbar: Option<ScrollbarGeometry>,
+    /// The room between rows (the separators of command blocks).
+    pub layout: Rc<RowLayout>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -124,9 +141,11 @@ impl Geometry {
     /// cell it is on.
     pub fn cell_at(&self, position: GpuiPoint<Pixels>) -> (Point, Side) {
         let x = f32::from(position.x - self.origin.x) / f32::from(self.cell.width);
-        let y = f32::from(position.y - self.origin.y) / f32::from(self.cell.height);
+        let y = f32::from(position.y - self.origin.y);
         let column = (x.max(0.0) as usize).min(self.columns.saturating_sub(1));
-        let line = (y.max(0.0) as usize).min(self.rows.saturating_sub(1));
+        let line = self
+            .layout
+            .row_at(y, self.rows, f32::from(self.cell.height));
         let side = if x - x.floor() < 0.5 || x < 0.0 {
             Side::Left
         } else {
@@ -138,6 +157,16 @@ impl Geometry {
             side
         };
         (Point::new(line, column), side)
+    }
+
+    /// The top of a row of the grid.
+    pub fn top_of(&self, line: usize) -> Pixels {
+        self.origin.y + px(self.layout.top(line, f32::from(self.cell.height)))
+    }
+
+    /// The bottom of the last row.
+    pub fn grid_bottom(&self) -> Pixels {
+        self.top_of(self.rows.saturating_sub(1)) + self.cell.height
     }
 }
 
@@ -185,7 +214,7 @@ enum Gesture {
 
 /// A terminal session in a view.
 pub struct SessionView {
-    session: Option<Session>,
+    pub(crate) session: Option<Session>,
     /// A session to start once the first frame gives its size.
     pending: Option<SessionOptions>,
     /// Text typed before the session started.
@@ -197,8 +226,8 @@ pub struct SessionView {
     /// The shell runs a command: between its integration's marks C (the
     /// command runs) and D or A (it finished, the next prompt).
     command_running: bool,
-    focus: FocusHandle,
-    options: TerminalOptions,
+    pub(crate) focus: FocusHandle,
+    pub(crate) options: TerminalOptions,
     pub(crate) snapshot: Snapshot,
     /// The buffers of the next copy (the snapshot shown before).
     spare: Snapshot,
@@ -245,13 +274,20 @@ pub struct SessionView {
     pub(crate) fits_font: Option<(gpui::SharedString, Pixels)>,
     /// Frames painted and snapshots taken (for measurements and tests).
     pub(crate) frames: u64,
-    snapshots: u64,
+    pub(crate) snapshots: u64,
     /// What each frame showed, while a measurement records it.
     frame_log: Option<Vec<FrameRecord>>,
     /// The first wakeup since the last snapshot, and the wakeup and copy
     /// times of the snapshot shown (measurements).
     woke: Option<Instant>,
     shown_times: (Option<Instant>, Option<Instant>),
+    /// The command blocks of a shell with integration.
+    pub(crate) blocks: Blocks,
+    /// Lines the session keeps in its scrollback.
+    scrollback_cap: usize,
+    pub(crate) links: LinkState,
+    pub(crate) find: Option<FindState>,
+    pub(crate) find_prefs: FindPrefs,
     _events: Option<Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -357,6 +393,11 @@ impl SessionView {
             frame_log: None,
             woke: None,
             shown_times: (None, None),
+            blocks: Blocks::default(),
+            scrollback_cap: terminal::DEFAULT_SCROLLBACK,
+            links: LinkState::default(),
+            find: None,
+            find_prefs: FindPrefs::default(),
             _events: None,
             _subscriptions: subscriptions,
         }
@@ -394,6 +435,9 @@ impl SessionView {
         };
         options.size = size;
         self.size = Some(size);
+        if options.scrollback_lines > 0 {
+            self.scrollback_cap = options.scrollback_lines;
+        }
         let spawn = cx
             .background_executor()
             .spawn(async move { Session::spawn(options) });
@@ -425,6 +469,16 @@ impl SessionView {
                 cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
             }
             SessionEvent::Mark(mark) => {
+                // The full-screen programs' screen has no history to follow.
+                if !self.snapshot.modes.alt_screen {
+                    self.blocks.mark(
+                        mark.kind,
+                        mark.history_size as u64 + mark.cursor_line as u64,
+                        mark.history_size,
+                        self.scrollback_cap,
+                    );
+                    cx.notify();
+                }
                 let running = match mark.kind {
                     MarkKind::CommandExecuted => true,
                     MarkKind::CommandFinished { .. } | MarkKind::PromptStart => false,
@@ -539,6 +593,7 @@ impl SessionView {
         }
         self.spare = std::mem::replace(&mut self.snapshot, snapshot);
         self.snapshots += 1;
+        self.find_output_changed(cx);
         self.shown_times = (woke, Some(Instant::now()));
         self.unshown = true;
         if self.flooding() {
@@ -581,7 +636,7 @@ impl SessionView {
 
     /// The user changed what the screen shows (scrolling, selecting): copy
     /// it in the next frame.
-    fn show_now(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn show_now(&mut self, cx: &mut Context<Self>) {
         self.busy_since = None;
         self.copy_in_frame = true;
         cx.notify();
@@ -603,6 +658,9 @@ impl SessionView {
             return;
         };
         if self.size != Some(size) {
+            if self.size.is_some_and(|s| s.columns != size.columns) {
+                self.blocks.reflowed();
+            }
             self.size = Some(size);
             session.resize(size);
             self.copy_in_frame = true;
@@ -625,6 +683,7 @@ impl SessionView {
         }
         self.unshown = false;
         self.pump(cx);
+        self.refresh_links(cx);
     }
 
     // ---- state ----------------------------------------------------------
@@ -685,7 +744,7 @@ impl SessionView {
     }
 
     pub fn geometry(&self) -> Option<Geometry> {
-        self.geometry
+        self.geometry.clone()
     }
 
     /// Frames painted and snapshots taken so far.
@@ -727,6 +786,10 @@ impl SessionView {
             "command_running": self.command_running(),
             "exit_code": self.exit.and_then(|e| e.code),
             "exited": self.exit.is_some(),
+            "links": self.links_json(),
+            "link_hint": self.hint_json(),
+            "find": self.find_json(),
+            "blocks": self.blocks_json(),
         })
     }
 
@@ -766,6 +829,7 @@ impl SessionView {
     }
 
     fn key_down(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.hide_hint(cx);
         if self.send_keystroke(&e.keystroke, cx) {
             cx.stop_propagation();
         }
@@ -824,6 +888,7 @@ impl SessionView {
     fn clear(&mut self, _: &Clear, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(s) = &self.session {
             s.clear();
+            self.blocks.cleared();
             self.show_now(cx);
         }
     }
@@ -874,7 +939,7 @@ impl SessionView {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus);
-        let (Some(geometry), Some(session)) = (self.geometry, self.session.as_ref()) else {
+        let (Some(geometry), Some(session)) = (self.geometry.clone(), self.session.as_ref()) else {
             return;
         };
         if let Some(bar) = geometry.scrollbar
@@ -911,6 +976,13 @@ impl SessionView {
                 // The session's selection: the snapshot may not show a
                 // click's empty one yet.
                 let has_selection = session.has_selection();
+                // The hint is for a click with no text selected (the anchor
+                // an earlier click left is not one).
+                let selected_text = session.selection_text().is_some();
+                self.link_pressed(e, point, selected_text, cx);
+                let Some(session) = self.session.as_ref() else {
+                    return;
+                };
                 if e.modifiers.shift && !e.modifiers.alt && has_selection && e.click_count == 1 {
                     session.update_selection(point, side);
                 } else {
@@ -940,7 +1012,14 @@ impl SessionView {
     }
 
     pub(crate) fn mouse_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
-        let (Some(geometry), Some(session)) = (self.geometry, self.session.as_ref()) else {
+        let (Some(geometry), Some(_)) = (self.geometry.clone(), self.session.as_ref()) else {
+            return;
+        };
+        if self.gesture == Gesture::None {
+            let over = geometry.bounds.contains(&e.position).then_some(e.position);
+            self.pointer_moved(over, &e.modifiers, cx);
+        }
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         match self.gesture {
@@ -949,9 +1028,7 @@ impl SessionView {
                 // Dragging above or below the grid scrolls the history.
                 if e.position.y < geometry.origin.y {
                     session.scroll(Scroll::Lines(1));
-                } else if e.position.y
-                    > geometry.origin.y + geometry.cell.height * geometry.rows as f32
-                {
+                } else if e.position.y > geometry.grid_bottom() {
                     session.scroll(Scroll::Lines(-1));
                 }
                 let (point, side) = geometry.cell_at(e.position);
@@ -992,7 +1069,14 @@ impl SessionView {
 
     pub(crate) fn mouse_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
         let gesture = std::mem::replace(&mut self.gesture, Gesture::None);
-        let (Some(geometry), Some(session)) = (self.geometry, self.session.as_ref()) else {
+        let (Some(geometry), Some(_)) = (self.geometry.clone(), self.session.as_ref()) else {
+            return;
+        };
+        if gesture == Gesture::Selecting {
+            let (cell, _) = geometry.cell_at(e.position);
+            self.link_released(e, cell, cx);
+        }
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         match gesture {
@@ -1024,7 +1108,11 @@ impl SessionView {
     /// The wheel over the view: reported to the program, arrow keys on the
     /// alternate screen, or the history scrolled.
     pub fn scroll_wheel(&mut self, e: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        let (Some(geometry), Some(session)) = (self.geometry, self.session.as_ref()) else {
+        let (Some(geometry), Some(_)) = (self.geometry.clone(), self.session.as_ref()) else {
+            return;
+        };
+        self.hide_hint(cx);
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         let line_height = geometry.cell.height;
@@ -1059,7 +1147,7 @@ impl SessionView {
 
     fn drag_scrollbar(&mut self, y: Pixels, cx: &mut Context<Self>) {
         let (Gesture::Scrollbar(grab), Some(geometry), Some(session)) =
-            (self.gesture, self.geometry, self.session.as_ref())
+            (self.gesture, self.geometry.clone(), self.session.as_ref())
         else {
             return;
         };
@@ -1156,14 +1244,67 @@ impl SessionView {
     }
 }
 
+impl SessionView {
+    /// The rows' layout with room for the command blocks' separators, and
+    /// the blocks the screen shows. `height` is the room for the grid.
+    pub(crate) fn block_layout(
+        &self,
+        cell_height: f32,
+        height: f32,
+    ) -> (RowLayout, Vec<crate::blocks::VisibleBlock>) {
+        let s = &self.snapshot;
+        if !self.options.show_separators || s.modes.alt_screen || self.blocks.is_empty() {
+            return (RowLayout::plain(s.rows), Vec::new());
+        }
+        let top = (s.history_size - s.display_offset.min(s.history_size)) as u64;
+        let shown = self.blocks.visible(top, s.rows);
+        let gaps = shown
+            .iter()
+            .filter(|b| b.separated)
+            .filter_map(|b| b.start_row);
+        // Scrolled back, the whole screen is output.
+        let last = if s.display_offset > 0 {
+            s.rows.saturating_sub(1)
+        } else {
+            crate::blocks::last_content_row(s)
+        };
+        let layout = RowLayout::new(s.rows, gaps, cell_height, last, height);
+        (layout, shown)
+    }
+
+    /// The command blocks on the screen as JSON (`terminal.state`).
+    fn blocks_json(&self) -> Value {
+        let s = &self.snapshot;
+        let top = (s.history_size - s.display_offset.min(s.history_size)) as u64;
+        json!({
+            "count": self.blocks.len(),
+            "visible": self.blocks.visible(top, s.rows).iter().map(|b| json!({
+                "start_row": b.start_row,
+                "end_row": b.end_row,
+                "separated": b.separated,
+                "failed": b.failed,
+                "current": b.current,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    fn open_link_action(&mut self, action: &OpenLink, _: &mut Window, cx: &mut Context<Self>) {
+        self.open_link_at(Point::new(action.line, action.column), cx);
+    }
+}
+
 impl Render for SessionView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let background = ui::theme::color(theme.raw().ui[UiRole::TerminalDefaultBackground]);
+        let danger = theme.color(UiRole::Danger);
         let base = div()
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .on_modifiers_changed(cx.listener(|this, e: &gpui::ModifiersChangedEvent, _, cx| {
+                this.modifiers_changed(&e.modifiers, cx)
+            }))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::select_all))
@@ -1174,14 +1315,32 @@ impl Render for SessionView {
             .on_action(cx.listener(Self::page_down))
             .size_full()
             .bg(background);
-        match &self.error {
+        let grid = match &self.error {
             Some(error) => base
                 .p(px(12.0))
-                .text_color(theme.color(UiRole::Danger))
+                .text_color(danger)
                 .child(format!(
                     "The terminal session could not be started: {error}"
-                )),
-            None => base.child(TerminalElement::new(cx.entity())),
-        }
+                ))
+                .into_any_element(),
+            None => base
+                .child(TerminalElement::new(cx.entity()))
+                .into_any_element(),
+        };
+        // The find bar and the hint lie over the output, outside the
+        // terminal's key context: their keys are not the shell's.
+        div()
+            .relative()
+            .size_full()
+            .on_action(cx.listener(Self::find_action))
+            .on_action(cx.listener(Self::find_next_action))
+            .on_action(cx.listener(Self::find_previous_action))
+            .on_action(cx.listener(Self::find_close_action))
+            .on_action(cx.listener(Self::find_case_action))
+            .on_action(cx.listener(Self::find_regex_action))
+            .on_action(cx.listener(Self::open_link_action))
+            .child(grid)
+            .children(self.render_find(window, cx))
+            .children(self.render_hint(cx))
     }
 }

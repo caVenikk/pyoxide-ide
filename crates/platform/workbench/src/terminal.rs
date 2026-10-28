@@ -19,6 +19,14 @@ pub trait TerminalProvider {
     /// the product knows there (an interpreter chosen in this session);
     /// they run off it, in [`terminal::plan_session`].
     fn customizers(&self, project_root: Option<&Path>, cx: &App) -> Vec<Arc<dyn ShellCustomizer>>;
+
+    /// What the product links in the output of a session: the filters for a
+    /// shell working in a folder (the Python product links the files of
+    /// tracebacks). The terminal itself links URLs and, with Cmd (Ctrl)
+    /// held, paths.
+    fn link_filters(&self) -> Option<terminal_ui::LinkFilters> {
+        None
+    }
 }
 
 /// A product's [`TerminalProvider`].
@@ -109,6 +117,13 @@ pub fn customizers(project_root: Option<&Path>, cx: &App) -> Vec<Arc<dyn ShellCu
         Some(hook) => hook.0.customizers(project_root, cx),
         None => Vec::new(),
     }
+}
+
+/// The product's link filters for the sessions of this application.
+pub fn link_filters(cx: &App) -> Option<terminal_ui::LinkFilters> {
+    cx.try_global::<Hook>()
+        .and_then(|h| h.0.clone())
+        .and_then(|hook| hook.0.link_filters())
 }
 
 /// A request for a new session in the project at `project_root` with the
