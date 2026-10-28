@@ -77,9 +77,9 @@ ui::ui_commands! {
     /// Refresh the selected data source's metadata.
     Refresh => "db.explorer.refresh", "Refresh",
         "Reads the metadata of the data source selected in the Database tool window again (its introspection scope) and shows it in the tree; the tree keeps the previous model until the new one is complete.";
-    /// Disconnect the selected data source.
+    /// Close the connections of the selected data source.
     Disconnect => "db.explorer.disconnect", "Disconnect",
-        "Closes the connections of the data source selected in the Database tool window and ends the sessions of its consoles; the data source stays in the tree with its metadata, and connects again with the next use (asking for a password that is not kept). Does nothing for a data source that is not connected; a console with uncommitted changes holds it back and a balloon says so.";
+        "Closes the connections of the data source selected in the Database tool window. With changes pending in a console's manual transaction it asks whether to commit them, roll them back or cancel.";
     /// Open nodes of the tree.
     Expand { path: String } => "db.explorer.expand", "Expand",
         "Opens every node along `path` in the Database tool window's tree and selects the last: the rows' texts from the data source down, joined by `/`. Opening a node reads the local model, never the database; opening a data source the first time shows its cached model, or reads it when there is none.",

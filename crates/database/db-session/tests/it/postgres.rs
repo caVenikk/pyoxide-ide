@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use db_core::{ConnectParams, ErrorKind, TxMode};
 use db_postgres::PostgresDriver;
 use db_session::{
-    DataSourceOptions, ErrorPolicy, Job, JobEvent, JobOutcome, Session, SessionOptions,
+    Command, DataSourceOptions, ErrorPolicy, EventKind, Isolation, Job, JobEvent, JobOutcome,
+    Session, SessionEvent, SessionOptions,
 };
 
 use crate::support::{Harness, env, failure, harness, int, outcome, password, unique};
@@ -158,4 +159,42 @@ fn read_only_mode_is_enforced_by_the_server() {
         failure(&h.run(&session, "select 1/0"), 0).error.kind,
         ErrorKind::Query
     );
+}
+
+/// Waits for the end of a session command.
+fn command_done(h: &Harness, command: Command) {
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event: SessionEvent::CommandDone { command: c },
+            ..
+        } if *c == command => Some(()),
+        _ => None,
+    });
+}
+
+fn isolation_of(h: &Harness, session: &Session) -> String {
+    let events = h.run_ok(session, "show transaction_isolation");
+    let JobEvent::ResultOpened { rows, .. } = &events[1] else {
+        panic!("{events:?}")
+    };
+    rows[0][0].as_str().expect("text").to_owned()
+}
+
+#[test]
+#[ignore = "needs the postgres container"]
+fn the_isolation_level_applies_to_the_session_and_is_kept_by_a_reconnect() {
+    let h = pg(DataSourceOptions::default());
+    let session = h.handle.open_session(SessionOptions {
+        isolation: Some(Isolation::RepeatableRead),
+        ..SessionOptions::default()
+    });
+    assert_eq!(isolation_of(&h, &session), "repeatable read");
+
+    session.set_isolation(Isolation::Serializable);
+    command_done(&h, Command::SetIsolation);
+    assert_eq!(isolation_of(&h, &session), "serializable");
+
+    session.set_isolation(Isolation::DatabaseDefault);
+    command_done(&h, Command::SetIsolation);
+    assert_eq!(isolation_of(&h, &session), "read committed");
 }
