@@ -15,3 +15,9 @@
 
 ## Source
 https://www.jetbrains.com/help/pycharm/managing-connection-sessions.html; observed
+
+## Engine differences
+- PostgreSQL: all four isolation levels; Database Default resets `default_transaction_isolation`. Savepoints keep a transaction usable after a failed statement.
+- Oracle: Read Committed and Serializable (`ALTER SESSION SET ISOLATION_LEVEL`); Repeatable Read is refused with a message. DDL commits the open transaction, so the pending count resets.
+- SQLite: no isolation menu items (they are disabled); transactions have no levels.
+- Closing a console tab does not prompt (the connection session stays); disconnecting and switching to auto mode do.
