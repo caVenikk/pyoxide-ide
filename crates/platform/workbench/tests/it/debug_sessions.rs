@@ -1136,6 +1136,18 @@ fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppC
         h.debug()["value_hint"]["tree"]["selected"],
         json!(["b", "0"])
     );
+    // Its context menu is the value group of the variables view's.
+    h.invoke("debug.variables.context-menu", json!(null));
+    let menu = h.debug()["value_hint"]["tree"]["menu"].clone();
+    let labels: Vec<&str> = menu["levels"][0]["items"]
+        .as_array()
+        .expect("the popup tree's menu is open")
+        .iter()
+        .filter_map(|i| i["label"].as_str())
+        .collect();
+    assert_eq!(labels.first(), Some(&"Inspect…"), "{labels:?}");
+    assert!(!labels.contains(&"New Watch…"), "{labels:?}");
+    h.invoke("menu.cancel", json!(null));
     h.invoke("debug.value-popup.close", json!(null));
     assert!(h.debug()["value_hint"].is_null());
     assert_eq!(h.cx.update(|cx| editor.read(cx).range_background()), None);
