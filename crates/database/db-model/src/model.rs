@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use db_core::DataSourceId;
-use db_core::schema::{ChangeToken, Delta, ObjectKind, ObjectRef, SchemaSnapshot, Snapshot};
+use db_core::schema::{
+    ChangeToken, Delta, ObjectKind, ObjectRef, SchemaDelta, SchemaSnapshot, Snapshot,
+};
 use name_match::Matcher;
 
 use crate::id::{NodeId, PassThroughMap};
@@ -143,7 +145,11 @@ impl Model {
             let built = SchemaModel::build(schema, cancel)?;
             replaced.push(self.reuse(built));
         }
-        Ok(self.replace(snapshot.token, replaced, &[]))
+        // The stamps of the schemas just read come from this pass, those of
+        // the others stay.
+        let names: Vec<&str> = replaced.iter().map(|s| s.name()).collect();
+        let token = ChangeToken::merged(self.token.as_ref(), snapshot.token.as_ref(), &names);
+        Ok(self.replace(token, replaced, &[]))
     }
 
     /// This model with `delta` merged: changed and new objects replaced or
@@ -170,6 +176,27 @@ impl Model {
         }
         let dropped: Vec<&str> = delta.dropped_schemas.iter().map(String::as_str).collect();
         Ok(self.replace(Some(delta.token), replaced, &dropped))
+    }
+
+    /// This model with the changes to one schema merged and the token left
+    /// as it is: the way to apply a partial read (`load_objects`). The
+    /// objects read have newer stamps than the token holds, so the next
+    /// incremental pass reads them once more; nothing is lost.
+    pub fn with_schema_delta(&self, delta: SchemaDelta) -> Self {
+        self.with_schema_delta_cancellable(delta, &never)
+            .expect("never cancelled")
+    }
+
+    pub fn with_schema_delta_cancellable(
+        &self,
+        delta: SchemaDelta,
+        cancel: &dyn Fn() -> bool,
+    ) -> Result<Self, Cancelled> {
+        let old = self.schema_arc(&delta.info.name).map(|s| s.to_snapshot());
+        let merged = merge::apply_delta(old, delta);
+        let built = SchemaModel::build(merged, cancel)?;
+        let replaced = vec![self.reuse(built)];
+        Ok(self.replace(self.token.clone(), replaced, &[]))
     }
 
     /// This model without the objects of `schema` of `kinds` (all when

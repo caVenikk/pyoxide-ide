@@ -50,6 +50,7 @@ fn add_column_delta() -> Delta {
             }],
         }],
         dropped_schemas: vec![],
+        unseen: vec![],
     }
 }
 
@@ -130,6 +131,7 @@ fn a_delta_drops_and_creates_schemas() {
             dropped: vec![],
         }],
         dropped_schemas: vec!["app".into()],
+        unseen: vec![],
     };
     let after = model.with_delta(delta);
     let names: Vec<_> = after.schemas().map(|s| s.name()).collect();
@@ -315,4 +317,92 @@ fn readers_see_whole_models_while_refreshes_swap() {
             .find("public", "orders", NameMatch::Exact, &NodeKind::RELATIONS)
             .is_some()
     );
+}
+
+#[test]
+fn a_table_in_a_delta_brings_its_children_whole() {
+    let before = Model::from_snapshot(ds(), shop());
+    assert!(
+        before
+            .find("public", "orders_audit", NameMatch::Exact, &[])
+            .is_some()
+    );
+    // `orders` comes again without its trigger and with another index: the
+    // trigger is gone, the old index is gone, the new one is there.
+    let delta = Delta {
+        token: token("2"),
+        schemas: vec![SchemaDelta {
+            info: schema_info("public"),
+            objects: vec![
+                object("public", "orders", ObjectKind::Table),
+                crate::fixture::child("public", "orders_total_idx", ObjectKind::Index, "orders"),
+            ],
+            relations: vec![],
+            sources: vec![],
+            dropped: vec![],
+        }],
+        dropped_schemas: vec![],
+        unseen: vec![],
+    };
+    let after = before.with_delta(delta.clone());
+    for gone in ["orders_audit", "orders_customer_idx"] {
+        assert!(
+            after.find("public", gone, NameMatch::Exact, &[]).is_none(),
+            "{gone}"
+        );
+    }
+    assert!(
+        after
+            .find("public", "orders_total_idx", NameMatch::Exact, &[])
+            .is_some()
+    );
+    // Idempotent, and the other tables keep their children.
+    assert_eq!(after.with_delta(delta), after);
+    assert!(
+        after
+            .find("public", "events_eu", NameMatch::Exact, &[])
+            .is_some()
+    );
+}
+
+#[test]
+fn the_token_keeps_the_stamps_of_schemas_a_pass_did_not_read() {
+    use db_core::Dialect;
+    use db_core::schema::ChangeToken;
+
+    // Tokens of passes over different schemas, in the shape the PostgreSQL
+    // introspector writes them.
+    let stamps = |schema: &str, stamp: &str| ChangeToken {
+        dialect: Dialect::Postgres,
+        value: format!(
+            r#"{{"v":1,"schemas":{{"{schema}":{{"level":"structure","objects":[["table","t","",null,"{stamp}"]]}}}}}}"#
+        ),
+    };
+    let mut full = shop();
+    full.token = Some(stamps("public", "a"));
+    let model = Model::from_snapshot(ds(), full);
+
+    let mut one = shop();
+    one.schemas.truncate(1);
+    one.token = Some(stamps("public", "b"));
+    let model = model.with_snapshot(one);
+    assert_eq!(
+        model.token().unwrap().schemas(),
+        [("public".to_owned(), Level::Structure)]
+    );
+
+    // A second schema read later is added to the token, not substituted.
+    let mut other = shop();
+    other.schemas.truncate(1);
+    other.schemas[0].info.name = "app".into();
+    other.token = Some(stamps("app", "c"));
+    let model = model.with_snapshot(other);
+    let names: Vec<_> = model
+        .token()
+        .unwrap()
+        .schemas()
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(names, ["app", "public"]);
 }

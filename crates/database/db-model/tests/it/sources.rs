@@ -116,6 +116,7 @@ fn a_delta_drops_changed_and_dropped_texts() {
             }],
         }],
         dropped_schemas: vec![],
+        unseen: vec![],
     };
     store.absorb_delta(&delta).unwrap();
     let reread = SourceStore::on_disk(dir.path().join("sources"));
@@ -133,6 +134,7 @@ fn a_delta_drops_changed_and_dropped_texts() {
         token: token("6"),
         schemas: vec![],
         dropped_schemas: vec!["public".into()],
+        unseen: vec![],
     };
     store.absorb_delta(&dropped).unwrap();
     assert_eq!(fs::read_dir(dir.path().join("sources")).unwrap().count(), 0);

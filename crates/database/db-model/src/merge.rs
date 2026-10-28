@@ -45,8 +45,10 @@ fn level_of(delta: &SchemaDelta) -> Level {
 /// `old` with `delta` applied: dropped objects removed (by name and kind, so
 /// every overload of a dropped routine and every trigger of that name),
 /// changed objects replaced by identity (kind, name, signature, table), new
-/// ones added, structure replaced per relation. Applying the same delta
-/// twice gives the same result.
+/// ones added, structure replaced per relation. A table, view or
+/// materialized view in the delta stands for everything that belongs to it:
+/// its indexes and triggers that the delta does not list are removed.
+/// Applying the same delta twice gives the same result.
 pub(crate) fn apply_delta(old: Option<SchemaSnapshot>, delta: SchemaDelta) -> SchemaSnapshot {
     let level = level_of(&delta);
     let SchemaDelta {
@@ -70,6 +72,29 @@ pub(crate) fn apply_delta(old: Option<SchemaSnapshot>, delta: SchemaDelta) -> Sc
     if !dropped.is_empty() {
         drop_objects(&mut snapshot, |o| {
             dropped.contains(&(o.kind, o.name.as_str()))
+        });
+    }
+
+    // A table, view or materialized view that comes whole brings all its
+    // indexes and triggers: the ones it no longer has are gone.
+    let relations_given: HashSet<&str> = objects
+        .iter()
+        .filter(|o| NodeKind::from_object(o.kind).is_relation())
+        .map(|o| o.name.as_str())
+        .collect();
+    if !relations_given.is_empty() {
+        let given: HashSet<(ObjectKind, &str, Option<&str>)> = objects
+            .iter()
+            .filter(|o| matches!(o.kind, ObjectKind::Index | ObjectKind::Trigger))
+            .map(|o| (o.kind, o.name.as_str(), o.parent.as_deref()))
+            .collect();
+        snapshot.objects.retain(|o| {
+            let child = matches!(o.kind, ObjectKind::Index | ObjectKind::Trigger);
+            !(child
+                && o.parent
+                    .as_deref()
+                    .is_some_and(|p| relations_given.contains(p))
+                && !given.contains(&(o.kind, o.name.as_str(), o.parent.as_deref())))
         });
     }
 
