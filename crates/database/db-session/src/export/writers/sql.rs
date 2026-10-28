@@ -63,7 +63,7 @@ impl Updates {
         let mut keys: Vec<usize> = columns
             .iter()
             .enumerate()
-            .filter(|(_, c)| options.key_columns.iter().any(|k| *k == c.name))
+            .filter(|(_, c)| options.key_columns.contains(&c.name))
             .map(|(i, _)| i)
             .collect();
         if keys.is_empty() {

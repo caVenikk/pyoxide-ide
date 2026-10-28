@@ -185,7 +185,7 @@ enum End {
 /// A comma when none does.
 pub fn guess_delimiter(sample: &[u8]) -> u8 {
     let mut best = (0usize, 0usize, b',');
-    for delimiter in [b',', b';', b'\t', b'|'] {
+    for &delimiter in b",;\t|" {
         let mut reader = CsvReader::new(
             io::Cursor::new(sample),
             CsvFormat {

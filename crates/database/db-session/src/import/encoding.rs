@@ -187,7 +187,7 @@ impl<R: Read> Utf16Reader<R> {
         if total % 2 == 1 {
             self.odd = Some(raw[total - 1]);
         }
-        for pair in raw[..usable].chunks_exact(2) {
+        for pair in raw[..usable].as_chunks::<2>().0 {
             let u = if self.big_endian {
                 u16::from_be_bytes([pair[0], pair[1]])
             } else {

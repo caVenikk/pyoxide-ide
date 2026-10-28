@@ -158,6 +158,7 @@ struct Reading {
 }
 
 impl Reading {
+    #[allow(clippy::result_large_err)]
     fn next_batch(&mut self, max: usize) -> Result<Batch, ImportFailure> {
         let first_row = self.rows + 1;
         let mut rows = Vec::new();
@@ -548,6 +549,7 @@ impl Shared {
     /// large (`Unsupported`) gets smaller ones, and `size` follows. A
     /// server error is traced to its row by inserting the failing statement's
     /// rows one by one.
+    #[allow(clippy::result_large_err)]
     async fn insert_batch(
         &self,
         conn: &Arc<dyn Connection>,
