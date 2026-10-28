@@ -364,6 +364,10 @@ roles! {
         TagAttribute => ("tag-attribute", "Syntax", "Markup attributes"),
         PropertyKey => ("property-key", "Syntax", "Keys in JSON, YAML, TOML and similar"),
         Link => ("link", "Syntax", "Hyperlinks in the editor"),
+        SqlTable => ("sql-table", "Syntax", "Table, view and CTE names in SQL"),
+        SqlColumn => ("sql-column", "Syntax", "Column names in SQL"),
+        SqlAlias => ("sql-alias", "Syntax", "Table and column aliases in SQL"),
+        SqlSchema => ("sql-schema", "Syntax", "Schema and database names in SQL"),
 
         DiagnosticError => ("diagnostic-error", "Editor decoration", "Code with an error"),
         DiagnosticWarning => ("diagnostic-warning", "Editor decoration", "Code with a warning"),
@@ -449,6 +453,10 @@ impl TextRole {
         use TextRole::*;
         match self {
             ConstantBuiltin | Builtin => Some(Keyword),
+            SqlTable => Some(Class),
+            SqlColumn => Some(Attribute),
+            SqlAlias => Some(Variable),
+            SqlSchema => Some(Module),
             StringEscape => Some(String),
             Docstring | Todo => Some(Comment),
             DocstringTag => Some(Docstring),

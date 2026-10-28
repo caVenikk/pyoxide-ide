@@ -45,10 +45,14 @@ pub mod welcome;
 pub mod workbench;
 
 pub use crate::settings::{SaveSettings, SyncSettings};
-pub use app::{NavigationHooks, Product, StatusWidget, StripeItem, init, open_main_window, run};
+pub use app::{
+    EditorHeader, NavigationHooks, Product, StatusWidget, StripeItem, init, open_main_window, run,
+};
 pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use debugger_ui::DebugHook;
-pub use file_types::{FileAssociation, FileType, HighlighterFactory};
+pub use file_types::{
+    FileAssociation, FileDecoration, FileDecorator, FileType, HighlighterFactory,
+};
 pub use keymap::KeymapFiles;
 pub use module::{Init, Module};
 pub use project::AutoExclusions;

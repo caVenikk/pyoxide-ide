@@ -12,6 +12,7 @@ pub mod grid;
 mod live;
 mod password;
 pub mod prompt;
+pub mod sql;
 pub mod store;
 pub mod tree;
 pub mod url;
@@ -179,17 +180,22 @@ pub struct DbUiConfig {
 /// The database module for `Product::with_module`.
 pub fn module(config: DbUiConfig) -> Module {
     let store = config.store;
+    let hub = Arc::new(sql::Hub::new(store.clone()));
+    let init_hub = hub.clone();
     Module {
         name: "database",
         icons: ICONS,
+        file_types: vec![sql::file_type(hub)],
+        status_widgets: vec![grid::status_widget()],
+        editor_headers: vec![sql::widget::editor_header()],
         init: Some(Init::new(move |cx| {
             cx.set_global(Store(store.clone()));
+            sql::widget::init(cx, init_hub.clone());
             explorer::init(cx);
             dialog::init(cx);
             prompt::init(cx);
             grid::init(cx);
         })),
-        status_widgets: vec![grid::status_widget()],
         keymaps: Some(KEYMAPS),
         tool_windows: vec![ToolWindowHook {
             spec: ToolWindowSpec {

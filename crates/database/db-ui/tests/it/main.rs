@@ -1,11 +1,13 @@
 //! The database module's interface in a headless main window: the key
 //! bindings of `keymaps/*/db.toml` (`keymap`) and the Database tool window
 //! with the Data Sources dialog over a fake store (`data_sources`), its
-//! object tree (`tree`) and the data grid of a table (`grid`).
+//! object tree (`tree`), the data grid of a table (`grid`) and the SQL editor
+//! glue (`sql`).
 
 mod data_sources;
 mod grid;
 mod keymap;
+mod sql;
 mod tree;
 
 use std::path::{Path, PathBuf};

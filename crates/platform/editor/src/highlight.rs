@@ -41,6 +41,11 @@ pub type JobResult = Box<dyn Any + Send>;
 pub type Job = Box<dyn FnOnce() -> JobResult + Send>;
 
 pub trait Highlighter: 'static {
+    /// The editor's file changed (also called when the highlighter is
+    /// given to an editor that has one), for a language whose colours
+    /// depend on the file (the SQL dialect of a folder).
+    fn set_path(&mut self, _path: Option<&std::path::Path>) {}
+
     /// The whole text was (re)loaded.
     fn reset(&mut self, buffer: &Buffer);
 

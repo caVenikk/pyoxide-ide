@@ -384,6 +384,18 @@ fg = "#548af7"
 underline = "single"
 underline-color = "#548af7"
 
+[syntax.sql-table]
+fg = "#bcbec4"
+
+[syntax.sql-column]
+fg = "#c77dbb"
+
+[syntax.sql-alias]
+fg = "#bcbec4"
+
+[syntax.sql-schema]
+fg = "#bcbec4"
+
 [syntax.diagnostic-error]
 underline = "wavy"
 underline-color = "#fa6675"

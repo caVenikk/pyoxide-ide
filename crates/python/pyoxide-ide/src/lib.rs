@@ -262,6 +262,7 @@ pub fn product() -> Product {
         ],
         // The reference's order: the type engine, then the interpreter.
         status_widgets: vec![type_engine::status_widget(), interpreter::status_widget()],
+        editor_headers: Vec::new(),
         // The reference IDE's masks for Python: the language's files, then
         // markup and styles, then notebooks, stubs and Cython.
         find_file_masks: vec![

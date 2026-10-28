@@ -1099,6 +1099,9 @@ impl Editor {
 
     pub fn set_path(&mut self, path: Option<PathBuf>) {
         self.path = path;
+        if let Some(h) = &mut self.highlighter {
+            h.set_path(self.path.as_deref());
+        }
     }
 
     pub fn is_modified(&self) -> bool {
@@ -1115,8 +1118,16 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         self.highlighter = highlighter;
+        self.reset_highlighting(cx);
+    }
+
+    /// Colours the text again from scratch, for a highlighter whose
+    /// colours depend on something outside the text (the file's path, a
+    /// setting).
+    pub fn reset_highlighting(&mut self, cx: &mut Context<Self>) {
         self.highlight_task = None;
         if let Some(h) = &mut self.highlighter {
+            h.set_path(self.path.as_deref());
             h.reset(&self.buffer);
         }
         self.schedule_highlighting(cx);

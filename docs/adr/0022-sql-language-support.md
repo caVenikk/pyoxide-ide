@@ -90,7 +90,9 @@ products share, composed at compile time like everything else.
   depend on each other. The script has a self-test of these rules.
 - A module reaches the application through `workbench::Module`, a plain
   struct of the same shape as the contribution fields of `Product`
-  (file types and associations, icons, settings pages, status widgets, the
+  (file types and associations, icons, settings pages, status widgets, editor headers (a view between the tab
+  strip and the text of a file tab), a file type's decorator (the icon and
+  the hint a file gets from state outside its name), the
   `init` function that registers commands, tool windows and globals, keymap
   files, code intelligence for languages, injection sources). `Product`
   gets `with_module(Module)`, which merges them in order: lists are
@@ -114,7 +116,7 @@ products share, composed at compile time like everything else.
 | `sql-syntax` | database | no | the SQL text layer: lexer, dialect tables, statement splitting, classification, parameter scan, the lossless error-tolerant syntax tree and its statement-level incremental reparse, the formatter, the explain wrapper. Depends on nothing but `std` (and small utility crates). |
 | `sql-intel` | database | no | the SQL language services over `db-model`: scopes and reference resolution, completion, inspections and quick fixes, quick documentation, parameter info, navigation, usages and rename inside a file, structure, the injection engine (virtual documents), code style, `SqlCodeIntel: CodeIntel`. Depends on `sql-syntax`, `db-model`, `code-intel`, `name-match`, `text`. |
 | `db-model` | database | no | as ADR 0021; knows no SQL syntax. |
-| `db-ui` | database | yes | gets the SQL editor glue: the SQL file type, the editor highlighter (lexer spans at once, tree roles from a background pass, mapping of injected fragments), the dialect and scope widget, the Settings pages (SQL Dialects, SQL Resolution Scopes, Code Style > SQL, Inspections), the bindings of files and consoles to data sources. |
+| `db-ui` | database | yes | gets the SQL editor glue: the SQL file type, the editor highlighter (lexer spans at once, tree roles from a background pass, mapping of injected fragments), the dialect and scope toolbar of SQL files, the Settings pages (SQL Dialects, SQL Resolution Scopes, Code Style > SQL, Inspections), the bindings of files and consoles to data sources. |
 
 Dependencies: `sql-intel` -> `sql-syntax`, `db-model`, `code-intel`;
 `db-session` -> `sql-syntax`; `db-ui` -> `sql-intel`, `sql-syntax`,
@@ -205,10 +207,17 @@ path = "warehouse/oracle/"       # a file or a folder, relative to the project
 dialect = "oracle"
 ```
 
-The status bar shows the dialect of the current SQL file and changes its
-mapping from a popup (personal by default, shared on request); the
-Settings page *SQL Dialects* lists and edits the mappings. Switching the
-dialect re-parses the document.
+The toolbar above the editor of a SQL file shows the dialect of the file
+(a file attached to a data source shows its schema and data source
+instead) as chips at its right end and changes the mapping from a popup
+(personal by default, shared on request); a file without any dialect also
+gets a banner above the toolbar with the same popup. The reference IDE has
+no dialect widget in the status bar, so the glue puts none there. The
+toolbar's left end belongs to the run controls of consoles and query
+files. A file attached to a data source takes that data source's icon in
+its tab, the project tree and the toolbar title, and its name in brackets
+after the file name. The Settings page *SQL Dialects* lists and edits the
+mappings. Switching the dialect re-parses the document.
 
 ### Resolution scope
 A **scope** says what names in a document mean: a data source and an

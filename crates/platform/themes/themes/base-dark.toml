@@ -335,6 +335,10 @@ tag = { fg = "$copper-soft" }
 tag-attribute = { fg = "$gold" }
 property-key = { fg = "$blue-code" }
 link = { fg = "$blue", underline = "single" }
+sql-table = { fg = "$gold" }
+sql-column = { fg = "#b9c4d6" }
+sql-alias = { fg = "$sand" }
+sql-schema = { fg = "$steel" }
 
 diagnostic-error = { underline = "wavy", underline-color = "$red" }
 diagnostic-warning = { underline = "wavy", underline-color = "$amber" }

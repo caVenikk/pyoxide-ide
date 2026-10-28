@@ -420,18 +420,7 @@ impl Dialect {
     /// is the union of the dialects: reserved in any of them is reserved.
     pub fn keyword(self, word: &str) -> Option<KeywordClass> {
         match self {
-            Dialect::Generic => {
-                let all = [Dialect::Postgres, Dialect::Oracle, Dialect::Sqlite];
-                let mut found = None;
-                for d in all {
-                    match d.keyword(word) {
-                        Some(KeywordClass::Reserved) => return Some(KeywordClass::Reserved),
-                        Some(c) => found = Some(c),
-                        None => {}
-                    }
-                }
-                found
-            }
+            Dialect::Generic => keywords::lookup_union(word),
             Dialect::Postgres => keywords::lookup(
                 word,
                 keywords::POSTGRES_RESERVED,

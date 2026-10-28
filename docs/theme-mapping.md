@@ -646,6 +646,10 @@ the token.
 | `syntax.tag-attribute` | `HTML_ATTRIBUTE_NAME`, `XML_ATTRIBUTE_NAME`, `DEFAULT_ATTRIBUTE` | Markup attributes |
 | `syntax.property-key` | `JSON.PROPERTY_KEY`, `YAML_SCALAR_KEY`, `PROPERTIES.KEY` | Keys in JSON, YAML, TOML and similar |
 | `syntax.link` | `HYPERLINK_ATTRIBUTES` | Hyperlinks in the editor |
+| `syntax.sql-table` | none (derived, see below) | Table, view and CTE names in SQL |
+| `syntax.sql-column` | none (derived, see below) | Column names in SQL |
+| `syntax.sql-alias` | none (derived, see below) | Table and column aliases in SQL |
+| `syntax.sql-schema` | none (derived, see below) | Schema and database names in SQL |
 
 ### Editor decoration
 
@@ -694,6 +698,10 @@ Editor decorations have no fallback except where listed.
 | `syntax.decorator` | `syntax.annotation` |
 | `syntax.dunder` | `syntax.builtin` |
 | `syntax.fstring-brace` | `syntax.punctuation` |
+| `syntax.sql-table` | `syntax.class` |
+| `syntax.sql-column` | `syntax.attribute` |
+| `syntax.sql-alias` | `syntax.variable` |
+| `syntax.sql-schema` | `syntax.module` |
 | `syntax.diagnostic-unresolved` | `syntax.diagnostic-error` |
 | `syntax.reference-link` | `syntax.link` |
 
