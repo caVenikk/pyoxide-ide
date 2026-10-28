@@ -535,6 +535,10 @@ pub(crate) fn text_sources(role: TextRole) -> &'static [&'static str] {
         ],
         PropertyKey => &["JSON.PROPERTY_KEY", "YAML_SCALAR_KEY", "PROPERTIES.KEY"],
         Link => &["HYPERLINK_ATTRIBUTES"],
+        SqlTable => &[],
+        SqlColumn => &[],
+        SqlAlias => &[],
+        SqlSchema => &[],
 
         DiagnosticError => &["ERRORS_ATTRIBUTES"],
         DiagnosticWarning => &["WARNING_ATTRIBUTES"],

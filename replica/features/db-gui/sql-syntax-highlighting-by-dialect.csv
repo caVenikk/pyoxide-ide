@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"SQL syntax highlighting by dialect: keywords, literals, comments, tables, columns, aliases and schemas",db-gui,should,yes,yes,"Pro; lexical colours at once, names from a background parse (#321, ADR 0022)"

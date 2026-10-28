@@ -4,6 +4,7 @@ mod explain;
 mod format;
 mod keywords;
 mod lexer;
+mod line;
 mod params;
 mod parser;
 mod script;
@@ -22,6 +23,7 @@ pub use format::{
     StyleError, format, format_range,
 };
 pub use lexer::{Attached, HOLE, Lexer, Token, TokenKind, attach_trivia, lex, lex_with};
+pub use line::LineLexer;
 pub use params::{ParamKind, Parameter, parameters};
 pub use script::{Script, SyntaxError, SyntaxErrorKind, TextEdit, parse, reparse};
 pub use split::{
