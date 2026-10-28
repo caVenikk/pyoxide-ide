@@ -16,7 +16,7 @@ pub mod settings;
 pub mod widget;
 
 pub use highlight::{SqlHighlighter, SqlLexer};
-pub use hub::{Hub, Kind, Source};
+pub use hub::{ConsoleBinding, Hub, Kind, Source};
 pub use intel::{HubScope, SqlIntelProvider};
 pub use widget::{dialect_title, is_sql_file};
 
