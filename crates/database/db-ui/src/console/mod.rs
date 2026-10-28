@@ -7,6 +7,8 @@
 
 mod files;
 mod model;
+mod plan;
+pub(crate) use plan::{ExplainAnalyze, ExplainPlan};
 pub(crate) mod services;
 
 use std::path::PathBuf;
@@ -15,7 +17,7 @@ use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, WeakEntity};
 use serde_json::{Value as Json, json};
 use workbench::Workbench;
 
-pub(crate) use model::{Console, ConsoleEvent, ConsoleKind, ConsoleTarget, Pane};
+pub(crate) use model::{Console, ConsoleEvent, ConsoleKind, ConsoleTarget, Pane, RunMode};
 
 use crate::explorer;
 
@@ -293,6 +295,7 @@ pub(crate) fn init(cx: &mut App) {
         std::rc::Rc::new(|_, window, cx| Ok(state_json(window.window_handle(), cx))),
     );
     services::init(cx);
+    plan::init(cx);
 }
 
 fn state_json(window: AnyWindowHandle, cx: &App) -> Json {
