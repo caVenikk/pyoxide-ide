@@ -14,11 +14,24 @@ use gpui::{
 use themes::UiRole;
 use ui::components::{DISABLED_ALPHA, Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
+use ui::menu::PopupOptions;
 use ui::theme::ThemeExt;
 
 use super::Console;
 use super::transactions::{DismissUnsafe, RunUnsafe};
 use crate::icons;
+
+/// The least width of the transaction popup: about that of its longest
+/// item, so that the footer wraps to two lines as in the reference.
+const POPUP_MIN_WIDTH: f32 = 210.0;
+
+/// How the transaction popup opens.
+pub(crate) fn popup_options() -> PopupOptions {
+    PopupOptions {
+        min_width: Some(POPUP_MIN_WIDTH),
+        ..PopupOptions::default()
+    }
+}
 
 /// The mode button: its text, a drop-down arrow, the hover. `bounds`
 /// receives where it is drawn (the popup opens under it).
@@ -48,6 +61,25 @@ pub(crate) fn mode_button(
         .hover(move |s| s.bg(hover))
         .child(label.into())
         .child(Icon::new(IconName::CHEVRON_DOWN).size(px(12.0)))
+        .tooltip(Tooltip::text("Transaction Mode and Isolation", None))
+        .child(
+            canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                .absolute()
+                .size_full(),
+        )
+}
+
+/// The mode button of the Services tool window's strip: a small square
+/// icon button (the reference draws `Tx` with a corner mark, no text).
+pub(crate) fn mode_icon_button(
+    id: &'static str,
+    size: Pixels,
+    bounds: Rc<Cell<Bounds<Pixels>>>,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    icon_button(id, icons::TX, size, px(16.0), false, cx)
+        .debug_selector(move || id.to_owned())
+        .relative()
         .tooltip(Tooltip::text("Transaction Mode and Isolation", None))
         .child(
             canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})

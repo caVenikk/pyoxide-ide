@@ -100,6 +100,9 @@ pub mod icons {
     pub const FIRST_PAGE: IconName = IconName("db/firstPage");
     pub const LAST_PAGE: IconName = IconName("db/lastPage");
     pub const STOP_DISABLED: IconName = IconName("db/stopDisabled");
+    // The console's transactions and parameters.
+    pub const TX: IconName = IconName("db/tx");
+    pub const PARAMETERS: IconName = IconName("db/parameters");
     // The marks of an executed statement in the console's gutter.
     pub const STATEMENT_OK: IconName = IconName("db/statementOk");
     // The Services tool window.
@@ -176,6 +179,8 @@ pub const ICONS: &[IconSvg] = &[
     icon!("firstPage", "firstPage"),
     icon!("lastPage", "lastPage"),
     icon!("stopDisabled", "stopDisabled"),
+    icon!("tx", "tx"),
+    icon!("parameters", "parameters"),
     icon!("services@20x20", "services@20x20"),
     icon!("exportData", "exportData"),
     icon!("importData", "importData"),

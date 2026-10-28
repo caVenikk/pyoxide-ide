@@ -33,6 +33,9 @@ ui::ui_commands! {
     RunUnsafe { suppress: Option<bool> } => "db.console.run-unsafe", "Execute Unsafe Query",
         "Runs the statement the banner of the active console warns about; with `suppress` true the warning is turned off in the settings as well.",
         r#"{"suppress": false}"#;
+    /// Ask for the parameters of the statement at the caret.
+    EditParameters => "db.console.parameters", "Parameters",
+        "Opens the Parameters dialog of the statement at the caret of the active console (the values it asks for, remembered from the last run); its Execute runs the statement with them. Nothing happens for a statement without parameters.";
     /// Close the unsafe-query banner.
     DismissUnsafe => "db.console.dismiss-unsafe", "Dismiss Unsafe Query Warning",
         "Closes the unsafe-query banner of the active console without running the statement.";
@@ -75,6 +78,17 @@ pub(super) fn init(cx: &mut App) {
             let schema = a.schema.clone();
             console.update(cx, |c, cx| c.set_schema(schema, cx));
         }
+    });
+    cx.on_action(|_: &EditParameters, cx| {
+        let Some(console) = target(cx) else {
+            return;
+        };
+        let window = console.read(cx).window;
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                console.update(cx, |c, cx| c.edit_parameters(window, cx));
+            });
+        });
     });
     cx.on_action(|a: &RunUnsafe, cx| {
         let Some(console) = target(cx) else {

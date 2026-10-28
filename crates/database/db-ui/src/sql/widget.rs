@@ -388,11 +388,18 @@ impl SqlWidget {
         });
         match attached {
             Some((name, icon, database)) => {
-                let schema = resolved.schema.as_ref().map(|schema| Chip {
-                    id: ChipId::Schema,
-                    icon: Some(icons::SCHEMA),
-                    text: format!("{database}.{schema}"),
-                });
+                // A console whose session has not reported a schema yet
+                // shows the placeholder, as the reference does.
+                let console = matches!(resolved.scope_origin, settings::Origin::Console);
+                let schema = resolved
+                    .schema
+                    .clone()
+                    .or_else(|| console.then(|| "<schema>".to_owned()))
+                    .map(|schema| Chip {
+                        id: ChipId::Schema,
+                        icon: Some(icons::SCHEMA),
+                        text: format!("{database}.{schema}"),
+                    });
                 // A console is bound to its data source: no chip for it.
                 let source = (!matches!(resolved.scope_origin, settings::Origin::Console))
                     .then_some(Chip {
@@ -474,6 +481,7 @@ impl SqlWidget {
         &mut self,
         items: Vec<MenuItem>,
         anchor: Bounds<Pixels>,
+        options: PopupOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -481,7 +489,7 @@ impl SqlWidget {
             return;
         }
         self.popup_anchor.set(anchor);
-        let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
+        let menu = ContextMenu::popup(items, options, window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
@@ -496,7 +504,13 @@ impl SqlWidget {
             return;
         };
         let items = console.read(cx).tx_menu_items();
-        self.show_items(items, self.tx_bounds.get(), window, cx);
+        self.show_items(
+            items,
+            self.tx_bounds.get(),
+            crate::console::tx_ui::popup_options(),
+            window,
+            cx,
+        );
     }
 
     fn open(&mut self, chip: ChipId, window: &mut Window, cx: &mut Context<Self>) {
@@ -508,7 +522,13 @@ impl SqlWidget {
             && let Some(console) = self.console(cx)
         {
             let items = console.read(cx).schema_menu_items();
-            self.show_items(items, self.schema_bounds.get(), window, cx);
+            self.show_items(
+                items,
+                self.schema_bounds.get(),
+                PopupOptions::default(),
+                window,
+                cx,
+            );
             return;
         }
         let anchor = match chip {
@@ -945,6 +965,36 @@ impl SqlWidget {
         })
         .into_any_element();
         let mut buttons = vec![execute];
+        if console_entity.is_some() {
+            buttons.push(
+                button("sql-parameters", icons::PARAMETERS, "Parameters", !running)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(
+                            Box::new(crate::console::transactions::EditParameters),
+                            cx,
+                        )
+                    })
+                    .into_any_element(),
+            );
+            buttons.push(
+                button(
+                    "sql-settings",
+                    IconName::SETTINGS_SMALL,
+                    "Query Execution Settings",
+                    true,
+                )
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(
+                        Box::new(settings_ui::commands::OpenSettings {
+                            page: Some(crate::settings_page::QUERY_EXECUTION.to_owned()),
+                            filter: None,
+                        }),
+                        cx,
+                    )
+                })
+                .into_any_element(),
+            );
+        }
         match &console_entity {
             Some(console) => {
                 let label = console.read(cx).tx_label();

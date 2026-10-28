@@ -85,6 +85,17 @@ impl Console {
         }
     }
 
+    /// The Parameters button: asks for the values of the statement at the
+    /// caret whatever the setting says, then runs it. Nothing happens for
+    /// a statement without parameters.
+    pub fn edit_parameters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let statements = self.statements_at_caret(cx);
+        if self.running.is_some() || statements.is_empty() {
+            return;
+        }
+        self.ask_parameters(statements, true, window, cx);
+    }
+
     /// Asks for the values the statements need (always when the setting is
     /// on, else when one is missing), then runs them with the values bound.
     fn review_parameters(
@@ -93,13 +104,25 @@ impl Console {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.ask_parameters(statements, false, window, cx);
+    }
+
+    fn ask_parameters(
+        &mut self,
+        statements: Vec<Statement>,
+        force: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let dialect = self.dialect();
         let slots = params::slots(&statements, dialect);
         if slots.is_empty() {
-            self.run_with(statements, &HashMap::new(), cx);
+            if !force {
+                self.run_with(statements, &HashMap::new(), cx);
+            }
             return;
         }
-        let review = query_settings::get(cx).review_parameters;
+        let review = force || query_settings::get(cx).review_parameters;
         let missing = slots
             .iter()
             .any(|s| !self.param_values.contains_key(&s.key));
