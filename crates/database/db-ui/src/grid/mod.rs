@@ -26,6 +26,7 @@
 pub mod aggregate;
 mod body;
 mod cell_menu;
+mod copy;
 pub mod data;
 pub mod format;
 pub mod formats;
@@ -56,6 +57,7 @@ use workbench::tab_view::TabView;
 
 use data::{ColumnMeta, GridPage, Selection};
 
+pub(crate) use copy::{export_active, import_active, reload_table};
 pub use status::status_widget;
 
 /// The key context of the grid's cells with the focus (its bindings in
@@ -388,6 +390,7 @@ pub(crate) fn init(cx: &mut App) {
         }),
     );
     status::init(cx);
+    copy::init(cx);
 }
 
 /// What a grid opens: a table of a data source, with what the metadata
@@ -492,6 +495,9 @@ pub struct TableGrid {
     backend: Backend,
     table: TableRef,
     meta: Vec<ColumnMeta>,
+    handle: DataSourceHandle,
+    /// The data extractor of the toolbar: what Copy writes.
+    extractor: db_session::Format,
     pager: ResultPager,
     /// The cells' focus (what the tab focuses).
     focus: FocusHandle,
@@ -638,6 +644,8 @@ impl TableGrid {
             query: TableQuery::new(target.table.clone()),
             table: target.table,
             meta: target.columns,
+            handle: target.handle,
+            extractor: db_session::Format::Csv,
             pager,
             focus,
             outer,

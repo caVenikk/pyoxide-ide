@@ -34,7 +34,7 @@ pub(crate) fn rows(values: &[(&str, &str)]) -> Reaction {
 
 /// A server with `demo.customers`: three rows; the page from offset 2
 /// holds one; a count of 3; an unknown column; a condition that hangs.
-fn server() -> FakeSource {
+pub fn server() -> FakeSource {
     let source = FakeSource::new(Backend::Postgres);
     source.on(
         "nonexistent",
@@ -298,6 +298,14 @@ fn check(h: &mut Harness, b: &Binding) -> bool {
         "db.grid.reload" | "db.grid.stop" | "db.grid.dismiss" => {
             h.invoke("db.grid.focus-field", json!({"field": "cells"}));
             h.press(&b.keys);
+            true
+        }
+        "db.grid.copy" => {
+            h.invoke("db.grid.focus-field", json!({"field": "cells"}));
+            h.invoke("db.grid.select", json!({"row": 1, "column": 1}));
+            h.press(&b.keys);
+            let text = h.cx.read_from_clipboard().and_then(|c| c.text());
+            assert_eq!(text.as_deref(), Some("y\n"), "{command}");
             true
         }
         c if c.starts_with("db.grid.") => {

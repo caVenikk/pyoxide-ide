@@ -1926,6 +1926,7 @@ dependencies = [
  "gpui",
  "native-path",
  "project",
+ "progress",
  "serde",
  "serde_json",
  "settings",
