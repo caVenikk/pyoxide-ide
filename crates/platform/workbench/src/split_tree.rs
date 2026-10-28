@@ -147,6 +147,27 @@ impl Node {
         }
     }
 
+    /// The first group of the second side, when group `id` is the first
+    /// side of its splitter (`EditorsSplitters.openInRightSplit`: the
+    /// window's parent splitter has another second component). `None` when
+    /// `id` is not in a splitter or is its second side.
+    pub fn second_side_of(&self, id: GroupId) -> Option<GroupId> {
+        let Node::Split(s) = self else {
+            return None;
+        };
+        if matches!(s.first, Node::Leaf(l) if l == id) {
+            return s.second.leaves().first().copied();
+        }
+        if matches!(s.second, Node::Leaf(l) if l == id) {
+            return None;
+        }
+        if s.first.contains(id) {
+            s.first.second_side_of(id)
+        } else {
+            s.second.second_side_of(id)
+        }
+    }
+
     /// The splitter whose side is group `id` itself.
     pub fn parent_mut(&mut self, id: GroupId) -> Option<&mut Splitter> {
         let Node::Split(s) = self else {
@@ -247,6 +268,20 @@ mod tests {
         let Node::Split(s) = &n else { panic!() };
         assert!(!s.vertical);
         assert_eq!(s.proportion, 0.5);
+    }
+
+    #[test]
+    fn the_second_side_is_beside_the_first_sides_group_only() {
+        let mut n = two();
+        assert_eq!(n.second_side_of(0), Some(1));
+        assert_eq!(n.second_side_of(1), None);
+        // (0 | (1 / 2)): 0 has the first of the second side; 1 is the
+        // first side of its own splitter.
+        assert!(n.split(1, true, 2, false));
+        assert_eq!(n.second_side_of(0), Some(1));
+        assert_eq!(n.second_side_of(1), Some(2));
+        assert_eq!(n.second_side_of(2), None);
+        assert_eq!(Node::Leaf(0).second_side_of(0), None);
     }
 
     #[test]

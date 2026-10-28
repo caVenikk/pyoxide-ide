@@ -21,6 +21,8 @@ name = "ProjectTree"
 "cmd-down" = "project.tree.open"
 "f4" = "project.tree.open"
 "enter" = "project.tree.open"
+# Open in Right Split (`OpenInRightSplit`).
+"shift-enter" = "project.open-in-right-split"
 "cmd--" = "project.tree.collapse-all"
 "cmd-=" = "project.tree.expand-all"
 "escape" = "workbench.focus-editor"

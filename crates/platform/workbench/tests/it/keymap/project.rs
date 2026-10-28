@@ -114,6 +114,21 @@ fn check(h: &mut H, b: &Binding) -> bool {
             assert_eq!(s["tabs"][active]["path"], json!("src/m.py"), "{what}");
             h.invoke("tabs.close", json!(null));
         }
+        "project.open-in-right-split" => {
+            // With a file open, so there is a group to split.
+            h.invoke("project.open-file", json!({ "path": "src/pkg/n.py" }));
+            h.select_in_tree("src/m.py");
+            h.press(keys);
+            let s = h.state();
+            // A new group at the right shows the file and has the focus.
+            let groups = s["splits"]["groups"].as_array().unwrap();
+            assert_eq!(groups.len(), 2, "{what}: {s}");
+            let active = s["active_tab"].as_u64().unwrap() as usize;
+            assert_eq!(s["tabs"][active]["path"], json!("src/m.py"), "{what}");
+            assert_eq!(s["splits"]["focused"], groups[1]["id"], "{what}");
+            h.invoke("tabs.unsplit-all", json!(null));
+            h.invoke("tabs.close-all", json!(null));
+        }
         "project.tree.collapse-all" => {
             h.select_in_tree("src/pkg/n.py");
             h.press(keys);
@@ -138,7 +153,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
                 "{what}"
             );
             assert_eq!(
-                levels[0]["items"][17]["label"],
+                levels[0]["items"][19]["label"],
                 json!("Mark Directory As"),
                 "{what}"
             );

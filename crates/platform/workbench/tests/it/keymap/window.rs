@@ -78,7 +78,7 @@ fn check(h: &mut H, b: &Binding) -> bool {
             h.open_menu("src");
             h.press(keys);
             // Down from no row selects the first one, Up the last one.
-            let expected = if b.command == "menu.down" { 0 } else { 17 };
+            let expected = if b.command == "menu.down" { 0 } else { 19 };
             assert_eq!(h.menu_levels()[0]["selected"], json!(expected), "{what}");
         }
         "menu.open-submenu" => {

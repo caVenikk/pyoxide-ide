@@ -76,14 +76,17 @@ ui::ui_commands! {
         "Closes every editor tab but the active one (or the one at a zero-based index); pinned tabs stay.",
         r#"{"index": 0}"#;
     /// Close every tab.
-    CloseAllTabs => "tabs.close-all", "Close All Tabs",
-        "Closes every editor tab, pinned ones too; modified files are saved first.";
+    CloseAllTabs { index: Option<usize> } => "tabs.close-all", "Close All Tabs",
+        "Closes every tab of the active tab group (or of the group of the tab at a zero-based index), pinned ones too; modified files are saved first. In a split editor area the other groups stay open.",
+        r#"{"index": 0}"#;
     /// Close the tabs without changes.
-    CloseUnmodifiedTabs => "tabs.close-unmodified", "Close Unmodified Tabs",
-        "Closes the editor tabs whose files have no version control changes; pinned tabs stay.";
+    CloseUnmodifiedTabs { index: Option<usize> } => "tabs.close-unmodified", "Close Unmodified Tabs",
+        "Closes the tabs of the active tab group (or of the group of the tab at a zero-based index) whose files have no version control changes; pinned tabs stay.",
+        r#"{"index": 0}"#;
     /// Close the tabs that are not pinned.
-    CloseUnpinnedTabs => "tabs.close-unpinned", "Close All but Pinned",
-        "Closes every editor tab that is not pinned.";
+    CloseUnpinnedTabs { index: Option<usize> } => "tabs.close-unpinned", "Close All but Pinned",
+        "Closes every tab that is not pinned in the active tab group (or in the group of the tab at a zero-based index).",
+        r#"{"index": 0}"#;
     /// Close the tabs to the left.
     CloseTabsToLeft { index: Option<usize> } => "tabs.close-left", "Close Tabs to the Left",
         "Closes the editor tabs to the left of the active one (or of the one at a zero-based index); pinned tabs stay.",
@@ -112,6 +115,18 @@ ui::ui_commands! {
     SplitAndMoveDown { index: Option<usize> } => "tabs.split-move-down", "Split and Move Down",
         "Splits the editor area: the active tab (or the tab at a zero-based index) moves to a new tab group below its group; needs another tab in the group.",
         r#"{"index": 0}"#;
+    /// Move a tab to the other group of its splitter.
+    MoveToOppositeGroup { index: Option<usize> } => "tabs.move-to-opposite-group", "Move to Opposite Group",
+        "Moves the active tab (or the tab at a zero-based index) to the other tab group beside its group, which then has the focus; a file the other group shows already is not opened twice. Needs exactly one other group beside the tab's.",
+        r#"{"index": 0}"#;
+    /// Open a tab's file in the other group of its splitter.
+    OpenInOppositeGroup { index: Option<usize> } => "tabs.open-in-opposite-group", "Open in Opposite Group",
+        "Opens the file of the active tab (or of the tab at a zero-based index) in the other tab group beside its group, which then has the focus; the tab stays. Needs exactly one other group beside the tab's.",
+        r#"{"index": 0}"#;
+    /// Open a file in the split at the right of the focused group.
+    OpenInRightSplit { path: Option<String> } => "project.open-in-right-split", "Open in Right Split",
+        "Opens a file (a path relative to the project or absolute; the selected file of the Project tree without one) in the tab group at the right of the focused one, splitting the editor area when there is none. Closes nothing.",
+        r#"{"path": "src/app.py"}"#;
     /// Merge the splits beside the focused one into it.
     Unsplit => "tabs.unsplit", "Unsplit",
         "Merges the tab groups beside the focused one into it, their tabs after its own (a file it shows already is not opened twice), and removes the splitter.";

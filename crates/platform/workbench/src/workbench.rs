@@ -51,7 +51,7 @@ pub(crate) mod project_widget;
 mod remote;
 mod run_actions;
 mod splits;
-mod tab_menu;
+pub(crate) mod tab_menu;
 pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
@@ -279,6 +279,9 @@ pub struct Workbench {
     /// A file being opened gives the focus back to this element once it
     /// is loaded (the debugger shows a line without taking the focus).
     pub(crate) focus_after_open: Option<(PathBuf, FocusHandle)>,
+    /// A file being read that opens in a given group, not the focused one
+    /// (Open in Right Split).
+    pub(crate) open_target: Option<(PathBuf, splits::OpenTarget)>,
     /// Files shown in editors and files edited, most recent first (the
     /// Recently Viewed and Recently Changed scopes of Find in Files).
     recently_viewed: Vec<PathBuf>,
@@ -497,6 +500,7 @@ impl Workbench {
             return_focus: None,
             pending_go_to: None,
             focus_after_open: None,
+            open_target: None,
             recently_viewed: Vec::new(),
             recently_changed: Vec::new(),
             run_window,
@@ -784,11 +788,20 @@ impl Workbench {
     /// group, else the first view's.
     fn file_tab(&self, path: &Path) -> Option<usize> {
         let focused = self.splits.focused;
+        // The advanced setting "When navigating to a file, prefer
+        // selecting existing tab in inactive split pane"
+        // (`editor.open.inactive.splitter`, on by default): a file that is
+        // open in another group is not opened again, its tab is selected
+        // (`FileEditorManagerImpl.findWindowInAllSplitters`: the focused
+        // group first, then the groups in the order they were made).
         self.tabs
             .iter()
             .position(|t| t.is_file(path) && t.group == focused)
-            .or_else(|| self.tabs.iter().position(|t| t.is_file(path) && !t.mirror))
-            .or_else(|| self.tabs.iter().position(|t| t.is_file(path)))
+            .or_else(|| {
+                (0..self.tabs.len())
+                    .filter(|&i| self.tabs[i].is_file(path))
+                    .min_by_key(|&i| self.tabs[i].group)
+            })
     }
 
     /// The Find in Files popup (drawn while it is open).
@@ -952,9 +965,32 @@ impl Workbench {
     /// Opens a file in a tab (or selects its tab); reading happens off the
     /// UI thread.
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(i) = self.file_tab(&path) {
-            self.activate(i, window, cx);
-            return;
+        self.open_file_in(path, None, window, cx);
+    }
+
+    /// Opens a file in a tab of the focused group, or in `target`'s; a file
+    /// that is open already has its tab selected, unless `target` says
+    /// where it should show.
+    pub(crate) fn open_file_in(
+        &mut self,
+        path: PathBuf,
+        target: Option<splits::OpenTarget>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            Some(target) => {
+                if self.show_in_target(&path, target, window, cx) {
+                    return;
+                }
+                self.open_target = Some((path.clone(), target));
+            }
+            None => {
+                if let Some(i) = self.file_tab(&path) {
+                    self.activate(i, window, cx);
+                    return;
+                }
+            }
         }
         // A diff that edits the file's document: the tab continues with it.
         if let Some(buffer) = self.diff_document(&path, cx) {
@@ -1163,10 +1199,28 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(i) = self.file_tab(&path) {
-            self.activate(i, window, cx);
-            return;
+        let target = self
+            .open_target
+            .take_if(|(p, _)| *p == path)
+            .map(|(_, t)| t);
+        match target {
+            // The file may have been opened while it was read.
+            Some(target) => {
+                if self.show_in_target(&path, target, window, cx) {
+                    return;
+                }
+            }
+            None => {
+                if let Some(i) = self.file_tab(&path) {
+                    self.activate(i, window, cx);
+                    return;
+                }
+            }
         }
+        let group = match target {
+            Some(target) => self.target_group(target),
+            None => self.splits.focused,
+        };
         let file_type = self.file_types.for_path(&path).cloned();
         let editor = self.new_file_editor(&path, buffer, window, cx);
         let (find, subscriptions) = self.file_tab_parts(&editor, window, cx);
@@ -1195,7 +1249,7 @@ impl Workbench {
         self.tabs.push(Tab {
             content: TabContent::File { path, editor, find },
             pinned: false,
-            group: self.splits.focused,
+            group,
             mirror: false,
             _subscriptions: subscriptions,
         });
@@ -2269,8 +2323,20 @@ impl Workbench {
         let pill_h = theme.metric(Metric::TabSelectionHeight);
         let radius = theme.metric(Metric::ButtonRadius);
         let hover = theme.color(UiRole::TabHover);
-        let active_bg = theme.color(UiRole::TabActive);
-        let outline = theme.color(UiRole::TabUnderline);
+        // The selected tab of a group without the focus has no outline,
+        // as the selected tab of a strip without the focus
+        // (`EditorTabs.inactiveUnderlinedTabBackground`).
+        let in_focused_group = tab.group == self.splits.focused;
+        let active_bg = if in_focused_group {
+            theme.color(UiRole::TabActive)
+        } else {
+            theme.color(UiRole::TabSelectedInactive)
+        };
+        let outline = if in_focused_group {
+            theme.color(UiRole::TabUnderline)
+        } else {
+            theme.color(UiRole::TabUnderlineInactive)
+        };
         let (title, icon, text, modified, tooltip) = match &tab.content {
             TabContent::File { path, editor, .. } => {
                 // A file gone from disk whose editor keeps its changes;

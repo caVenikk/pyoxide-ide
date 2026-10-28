@@ -28,6 +28,9 @@ impl IconName {
     pub const CUT: Self = Self("general/cut");
     pub const PASTE: Self = Self("general/paste");
     pub const REFRESH: Self = Self("general/refresh");
+    /// Split Right and Split Down.
+    pub const SPLIT_VERTICALLY: Self = Self("general/splitVertically");
+    pub const SPLIT_HORIZONTALLY: Self = Self("general/splitHorizontally");
     pub const CHEVRON_DOWN: Self = Self("general/chevronDown");
     pub const CHEVRON_LEFT: Self = Self("general/chevronLeft");
     pub const CHEVRON_RIGHT: Self = Self("general/chevronRight");
@@ -308,7 +311,7 @@ platform_icons! {
         "general/chevronUp", "general/close", "general/closeSmall", "general/closeSmallHovered",
         "general/collapseAll", "general/copy", "general/cut", "general/delete", "general/down",
         "general/dropdown", "general/edit", "general/expandAll", "general/filter",
-        "general/help", "general/hide", "general/history",
+        "general/help", "general/hide", "general/history", "general/splitHorizontally", "general/splitVertically",
         "general/inspections/inspectionsOK", "general/left", "general/locate", "general/locked",
         "general/moreHorizontal", "general/moreVertical", "general/openInToolWindow", "general/paste", "general/pin",
         "general/previewHorizontally", "general/print", "general/projectConfigurable",

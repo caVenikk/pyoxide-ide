@@ -26,6 +26,7 @@ use gpui::{
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;
+use ui::icons::IconName;
 use ui::menu::MenuItem;
 use ui::theme::ThemeExt;
 
@@ -37,6 +38,15 @@ use crate::split_tree::{GroupId, Node, Path, clamp_proportion};
 /// mouse.
 const SPLITTER_LINE: f32 = 1.0;
 const SPLITTER_GRAB: f32 = 7.0;
+
+/// Where a file that is being opened shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    /// This group.
+    Group(GroupId),
+    /// A new group at the right of this one (a split).
+    RightOf(GroupId),
+}
 
 /// The tab strip's scroll position of a group, and the selected tab and
 /// tab count it was last brought to show (a change of either scrolls the
@@ -126,6 +136,9 @@ impl Workbench {
             .on_action(cx.listener(Self::split_down))
             .on_action(cx.listener(Self::split_and_move_right))
             .on_action(cx.listener(Self::split_and_move_down))
+            .on_action(cx.listener(Self::move_to_opposite_group))
+            .on_action(cx.listener(Self::open_in_opposite_group))
+            .on_action(cx.listener(Self::open_in_right_split))
             .on_action(cx.listener(Self::unsplit))
             .on_action(cx.listener(Self::unsplit_all))
             .on_action(cx.listener(Self::change_splitter_orientation))
@@ -355,6 +368,7 @@ impl Workbench {
         if self.can_split(index, false) {
             items.push(
                 MenuItem::action("Split Right", SplitRight { index: some })
+                    .icon(IconName::SPLIT_VERTICALLY)
                     .shortcut(keys(&SplitRight { index: None })),
             );
         }
@@ -367,6 +381,7 @@ impl Workbench {
         if self.can_split(index, false) {
             items.push(
                 MenuItem::action("Split Down", SplitDown { index: some })
+                    .icon(IconName::SPLIT_HORIZONTALLY)
                     .shortcut(keys(&SplitDown { index: None })),
             );
         }
@@ -375,6 +390,23 @@ impl Workbench {
                 MenuItem::action("Split and Move Down", SplitAndMoveDown { index: some })
                     .shortcut(keys(&SplitAndMoveDown { index: None })),
             );
+        }
+        // With one group beside the tab's: Move to Opposite Group, Open in
+        // Opposite Group (`MoveEditorToOppositeTabGroupAction.update`).
+        if self.opposite_group(self.tabs[index].group).is_some() {
+            items.push(MenuItem::action(
+                "Move to Opposite Group",
+                MoveToOppositeGroup { index: some },
+            ));
+            if self.can_split(index, false) {
+                items.push(
+                    MenuItem::action(
+                        "Open in Opposite Group",
+                        OpenInOppositeGroup { index: some },
+                    )
+                    .mnemonic(0),
+                );
+            }
         }
         // In a split: the splitter's rows (`SplitterAction`), Unsplit All
         // only with more than two groups.
@@ -398,6 +430,187 @@ impl Workbench {
             }
         }
         items
+    }
+
+    /// The one group beside `group` in its splitter, when there is exactly
+    /// one (`EditorWindow.getSiblings().size == 1`).
+    pub(super) fn opposite_group(&self, group: GroupId) -> Option<GroupId> {
+        match self.splits.root.siblings(group).as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
+    }
+
+    fn move_to_opposite_group(
+        &mut self,
+        a: &MoveToOppositeGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self.tab_of(a.index) {
+            self.send_to_opposite_group(index, true, window, cx);
+        }
+    }
+
+    fn open_in_opposite_group(
+        &mut self,
+        a: &OpenInOppositeGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(index) = self.tab_of(a.index) {
+            self.send_to_opposite_group(index, false, window, cx);
+        }
+    }
+
+    /// `MoveEditorToOppositeTabGroupAction`: the tab's file shows in the
+    /// other group, which has the focus; the tab leaves its group
+    /// (`close_source`) or stays. A file the other group shows already is
+    /// not opened twice: its tab is selected.
+    fn send_to_opposite_group(
+        &mut self,
+        index: usize,
+        close_source: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let group = self.tabs[index].group;
+        let Some(target) = self.opposite_group(group) else {
+            return;
+        };
+        if !close_source && !self.can_split(index, false) {
+            return;
+        }
+        let key = self.tabs[index].key();
+        let existing = self.tabs[index].path().and_then(|path| {
+            self.group_tabs(target)
+                .into_iter()
+                .find(|&i| self.tabs[i].is_file(path))
+        });
+        if let Some(existing) = existing {
+            let existing = self.tabs[existing].key();
+            if close_source {
+                self.close_tab(index, window, cx);
+            }
+            if let Some(i) = self.tabs.iter().position(|t| t.key() == existing) {
+                self.activate(i, window, cx);
+            }
+            return;
+        }
+        if !close_source {
+            if let Some(copy) = self.open_mirror(index, target, window, cx) {
+                self.activate(copy, window, cx);
+            }
+            return;
+        }
+        // The tab goes to the end of the other group, not pinned there; its
+        // group selects a neighbour.
+        let order = self.group_tabs(group);
+        if order.len() > 1
+            && (self.splits.selected.get(&group) == Some(&key) || self.active == Some(index))
+        {
+            let at = order.iter().position(|&i| i == index).unwrap_or(0);
+            let neighbour = if at > 0 { order[at - 1] } else { order[1] };
+            self.splits
+                .selected
+                .insert(group, self.tabs[neighbour].key());
+        }
+        self.tabs[index].group = target;
+        self.tabs[index].pinned = false;
+        let rest = (0..self.tabs.len()).filter(|&i| i != index);
+        self.permute_tabs(rest.chain([index]).collect());
+        if self.group_tabs(group).is_empty() {
+            self.remove_group(group);
+        }
+        if let Some(moved) = self.tabs.iter().position(|t| t.key() == key) {
+            self.activate(moved, window, cx);
+        }
+    }
+
+    // ---- Open in Right Split ----------------------------------------------------------
+
+    fn open_in_right_split(
+        &mut self,
+        a: &OpenInRightSplit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = match &a.path {
+            Some(p) => self.resolve(p, cx),
+            None => match self.panel.read(cx).selected_path() {
+                Some((path, false)) => path.to_owned(),
+                _ => return,
+            },
+        };
+        if path.is_dir() {
+            return;
+        }
+        // `EditorsSplitters.openInRightSplit`: the split at the right of
+        // the focused group when it has one (the focused group is the
+        // first side of its splitter), else a new one; with nothing open
+        // the file opens as usual.
+        if self.group_tabs(self.splits.focused).is_empty() {
+            self.open_file(path, window, cx);
+            return;
+        }
+        let focused = self.splits.focused;
+        let target = match self.splits.root.second_side_of(focused) {
+            Some(group) => OpenTarget::Group(group),
+            None => OpenTarget::RightOf(focused),
+        };
+        self.open_file_in(path, Some(target), window, cx);
+    }
+
+    /// The group a target names; a split is made for `RightOf` (its group
+    /// then holds nothing yet).
+    pub(super) fn target_group(&mut self, target: OpenTarget) -> GroupId {
+        match target {
+            OpenTarget::Group(group) if self.splits.root.contains(group) => group,
+            OpenTarget::RightOf(group) if self.splits.root.contains(group) => {
+                let new = self.splits.new_group();
+                let mut root = std::mem::replace(&mut self.splits.root, Node::Leaf(0));
+                root.split(group, false, new, false);
+                self.splits.root = root;
+                new
+            }
+            _ => self.splits.focused,
+        }
+    }
+
+    /// Shows a file that is open already in `target` (a second view, or
+    /// its tab when the group has one) and gives the group the focus.
+    /// `false` when the file is not open.
+    pub(super) fn show_in_target(
+        &mut self,
+        path: &std::path::Path,
+        target: OpenTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(source) = self.file_tab(path) else {
+            return false;
+        };
+        if let OpenTarget::Group(group) = target
+            && let Some(own) = self
+                .group_tabs(group)
+                .into_iter()
+                .find(|&i| self.tabs[i].is_file(path))
+        {
+            self.activate(own, window, cx);
+            return true;
+        }
+        let group = self.target_group(target);
+        match self.open_mirror(source, group, window, cx) {
+            Some(copy) => self.activate(copy, window, cx),
+            None => {
+                // Not a file after all: nothing to show in a new group.
+                if self.group_tabs(group).is_empty() {
+                    let root = std::mem::replace(&mut self.splits.root, Node::Leaf(0));
+                    self.splits.root = root.without(group).unwrap_or(Node::Leaf(0));
+                }
+            }
+        }
+        true
     }
 
     /// `EditorWindow.split`: the tab's group is divided in two, below or
@@ -630,31 +843,46 @@ impl Workbench {
         if beside.is_empty() {
             return;
         }
-        let select = self
+        let selected = self
             .group_selected(group)
-            .or_else(|| beside.iter().find_map(|&g| self.group_selected(g)))
-            .map(|i| self.tabs[i].key());
-        // The tabs of files the group shows already close (the tab of the
-        // first view when it is the other group's: the group's takes over).
-        let mut shown: Vec<std::path::PathBuf> = self
+            .or_else(|| beside.iter().find_map(|&g| self.group_selected(g)));
+        // The tabs of files the group shows already (or an earlier group
+        // beside it does) are not taken over; the tab that stays is the
+        // one that shows the file first.
+        let mut shown: Vec<(std::path::PathBuf, EntityId)> = self
             .group_tabs(group)
             .into_iter()
-            .filter_map(|i| self.tabs[i].path().cloned())
+            .filter_map(|i| Some((self.tabs[i].path()?.clone(), self.tabs[i].key())))
             .collect();
-        let mut duplicates = Vec::new();
+        let mut duplicates: Vec<EntityId> = Vec::new();
+        let kept_for = |tabs: &[Tab], i: usize, shown: &mut Vec<(std::path::PathBuf, EntityId)>| {
+            let path = tabs[i].path()?;
+            match shown.iter().find(|(p, _)| p == path) {
+                Some((_, key)) => Some((true, *key)),
+                None => {
+                    shown.push((path.clone(), tabs[i].key()));
+                    Some((false, tabs[i].key()))
+                }
+            }
+        };
+        let mut select = selected.map(|i| self.tabs[i].key());
         for &g in &beside {
             for i in self.group_tabs(g) {
-                match self.tabs[i].path() {
-                    Some(path) if shown.contains(path) => duplicates.push(i),
-                    Some(path) => shown.push(path.clone()),
-                    None => {}
+                if let Some((duplicate, kept)) = kept_for(&self.tabs, i, &mut shown)
+                    && duplicate
+                {
+                    let key = self.tabs[i].key();
+                    duplicates.push(key);
+                    // The tab that was selected goes: the one that stays
+                    // is selected instead.
+                    if select == Some(key) {
+                        select = Some(kept);
+                    }
                 }
             }
         }
-        for index in duplicates.into_iter().rev() {
-            self.close_tab(index, window, cx);
-        }
-        // The rest move to the end of the list: after the group's tabs.
+        // The tabs of the groups beside move to the end of the list: after
+        // the group's tabs.
         let (moved, kept): (Vec<usize>, Vec<usize>) =
             (0..self.tabs.len()).partition(|&i| beside.contains(&self.tabs[i].group));
         for &i in &moved {
@@ -666,10 +894,17 @@ impl Workbench {
             self.splits.selected.remove(&g);
             self.splits.scroll.borrow_mut().remove(&g);
         }
+        self.splits.focused = group;
+        // Only now the duplicates close, in the one group: a tab of the
+        // first view makes the second take over.
+        for key in duplicates {
+            if let Some(index) = self.tabs.iter().position(|t| t.key() == key) {
+                self.close_tab(index, window, cx);
+            }
+        }
         if let Some(key) = select {
             self.splits.selected.insert(group, key);
         }
-        self.splits.focused = group;
         self.normalize_single();
         if let Some(index) = self.recorded_selection(self.splits.focused) {
             self.activate(index, window, cx);
