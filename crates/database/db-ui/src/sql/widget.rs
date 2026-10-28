@@ -49,6 +49,12 @@ ui::ui_commands! {
     /// Connect the data source the active file is attached to.
     ConnectDataSource => "sql.connect", "Connect Data Source",
         "Connects the data source the active SQL file is attached to, for its table and column names: the \"Connect\" link of the hint above the editor, which shows while the data source has no metadata and needs a password. Asks for the password first when none is kept; nothing when the toolbar shows no hint.";
+    /// Open the transaction popup of a console.
+    OpenTxMenu => "db.console.tx-menu", "Transaction Mode and Isolation",
+        "Opens the popup of the console toolbar's transaction button: the mode (Auto, Manual) and the isolation level, the current ones checked.";
+    /// Open the schema popup of a console.
+    OpenSchemaMenu => "db.console.schema-menu", "Current Schema",
+        "Opens the list of the schemas the console can switch to, the current one checked. Nothing where the engine has no schemas to switch (SQLite).";
     /// Describe the toolbar.
     SqlState => "sql.state", "SQL State",
         "Returns the SQL toolbar's state as JSON: whether it shows, its chips and banner, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
@@ -133,6 +139,26 @@ pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 widget.update(cx, |w, cx| w.open(ChipId::Source, window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenTxMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open_tx(window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenSchemaMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open(ChipId::Schema, window, cx));
             });
         });
     });
@@ -595,6 +621,15 @@ impl SqlWidget {
                 .map(|r| self.hub.source_names(r))
                 .unwrap_or_default(),
             "popup": self.menu.as_ref().map(|(m, _)| m.read(cx).state_json()),
+            "console": self.console(cx).map(|c| {
+                let c = c.read(cx);
+                json!({
+                    "tx": c.tx_label(),
+                    "commit-buttons": c.is_manual(),
+                    "pending": c.pending(),
+                    "unsafe-banner": c.unsafe_run.as_ref().map(|u| u.message.clone()),
+                })
+            }),
         })
     }
 }
@@ -954,14 +989,12 @@ impl Render for SqlWidget {
             self._subscriptions
                 .push(cx.observe(&console, |_, _, cx| cx.notify()));
         }
-        let unsafe_banner = self
-            .console(cx)
-            .and_then(|c| {
-                c.read(cx)
-                    .unsafe_run
-                    .as_ref()
-                    .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
-            });
+        let unsafe_banner = self.console(cx).and_then(|c| {
+            c.read(cx)
+                .unsafe_run
+                .as_ref()
+                .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
+        });
         let tooltip = SharedString::from(Self::tooltip(&resolved));
         let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
         let hint = self

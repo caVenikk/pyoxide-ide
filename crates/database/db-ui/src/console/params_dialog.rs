@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use editor::Editor;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, Global, IntoElement, Render,
-    WeakEntity, Window, div, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable, Global, IntoElement, Render, WeakEntity, Window,
+    div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;

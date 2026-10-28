@@ -100,7 +100,9 @@ impl Console {
             return;
         }
         let review = query_settings::get(cx).review_parameters;
-        let missing = slots.iter().any(|s| !self.param_values.contains_key(&s.key));
+        let missing = slots
+            .iter()
+            .any(|s| !self.param_values.contains_key(&s.key));
         if !review && !missing {
             let values = self.param_values.clone();
             self.run_with(statements, &values, cx);

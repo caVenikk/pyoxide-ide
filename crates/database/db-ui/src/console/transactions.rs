@@ -110,7 +110,14 @@ pub(crate) fn route_decision(event: Event, cx: &mut App) {
         return;
     };
     let pending: u32 = concerned.iter().map(|c| c.read(cx).pending()).sum();
-    let message = question(reason, pending, &concerned.iter().map(|c| c.read(cx).label()).collect::<Vec<_>>());
+    let message = question(
+        reason,
+        pending,
+        &concerned
+            .iter()
+            .map(|c| c.read(cx).label())
+            .collect::<Vec<_>>(),
+    );
     let window = first.read(cx).window;
     let ids: Vec<SessionId> = concerned.iter().map(|c| c.read(cx).session.id()).collect();
     cx.defer(move |cx| {
@@ -164,4 +171,3 @@ fn repeat(reason: DecisionReason, sessions: &[SessionId], policy: TxPolicy, cx: 
         }
     }
 }
-

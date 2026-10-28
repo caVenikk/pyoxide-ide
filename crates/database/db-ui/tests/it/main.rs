@@ -7,10 +7,12 @@
 //! result tabs (`console`), the metadata the editor loads for a data source on
 //! its own (`autoload`), the password prompt of every connect with Disconnect
 //! (`connect`) and the copy and transfer dialogs of the grid (`transfer`).
+//! Console transactions, schemas and safety checks are covered by `console_tx`.
 
 mod autoload;
 mod connect;
 mod console;
+mod console_tx;
 mod data_sources;
 mod grid;
 mod grid_values;

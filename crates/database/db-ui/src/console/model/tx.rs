@@ -212,10 +212,7 @@ impl Console {
                 item
             })
             .collect();
-        let database = self
-            .database
-            .clone()
-            .unwrap_or_else(|| self.source.clone());
+        let database = self.database.clone().unwrap_or_else(|| self.source.clone());
         vec![MenuItem::submenu(database, rows).icon(crate::icons::DATABASE_NODE)]
     }
 
