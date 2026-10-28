@@ -1,0 +1,11 @@
+# Pyoxide keymap for Windows and Linux. Database: values in the data grid,
+# joined after the grid's keys (the database module, ADR 0021).
+
+# The cells with the focus: the side panel on the current cell, the current
+# row as a record, the sum of the selection to the clipboard.
+[[context]]
+name = "DatabaseGrid"
+[context.bindings]
+"shift-enter" = "db.grid.value-editor"
+"ctrl-shift-enter" = "db.grid.record-view"
+"ctrl-shift-c" = "db.grid.copy-aggregation"

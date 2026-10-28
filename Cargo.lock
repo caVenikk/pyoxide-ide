@@ -1928,6 +1928,7 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "settings-ui",
  "sql-syntax",
  "syntax",
  "tempfile",

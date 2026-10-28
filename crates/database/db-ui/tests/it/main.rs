@@ -1,13 +1,15 @@
 //! The database module's interface in a headless main window: the key
 //! bindings of `keymaps/*/db.toml` (`keymap`) and the Database tool window
 //! with the Data Sources dialog over a fake store (`data_sources`), its
-//! object tree (`tree`), the data grid of a table (`grid`) and the SQL editor
-//! glue (`sql`) and the SQL consoles with their output log and result tabs
+//! object tree (`tree`), the data grid of a table (`grid`) and what it shows
+//! for values, with its panel and views (`grid_values`), the SQL editor glue
+//! (`sql`) and the SQL consoles with their output log and result tabs
 //! (`console`).
 
 mod console;
 mod data_sources;
 mod grid;
+mod grid_values;
 mod keymap;
 mod sql;
 mod tree;

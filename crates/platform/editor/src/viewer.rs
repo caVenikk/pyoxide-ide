@@ -32,6 +32,12 @@ impl Editor {
         self.viewer = viewer;
     }
 
+    /// Hides the line numbers and the marks column (a view of one value, as
+    /// the database grid's value panel); the colours stay the editor's.
+    pub fn set_bare(&mut self, bare: bool) {
+        self.bare = bare;
+    }
+
     pub fn is_viewer(&self) -> bool {
         self.viewer
     }

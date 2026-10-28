@@ -940,7 +940,7 @@ impl Element for EditorElement {
 
         // Gutter: line numbers right-aligned in a column wide enough for the
         // largest number.
-        let (len_lines, tab_size, single_line, error, console) = {
+        let (len_lines, tab_size, single_line, error, console, bare) = {
             let e = self.editor.read(cx);
             (
                 e.buffer.len_lines(),
@@ -948,6 +948,7 @@ impl Element for EditorElement {
                 e.single_line,
                 e.error,
                 e.console,
+                e.bare,
             )
         };
         if single_line {
@@ -970,14 +971,16 @@ impl Element for EditorElement {
         let digits = len_lines.to_string().len().max(2);
         // A mirrored editor has its gutter at the right and its scrollbar's
         // strip at the left, the text between them.
-        let mirrored = self.editor.read(cx).mirrored && !single_line && !console;
+        // Without line numbers (a console, or a view that asks for none).
+        let gutterless = console || bare;
+        let mirrored = self.editor.read(cx).mirrored && !single_line && !gutterless;
         let diff_gutter = self.editor.read(cx).diff_gutter;
         let diff_actions = diff_gutter == crate::side_by_side::DiffGutter::Actions;
         let diff_gutter =
-            diff_gutter != crate::side_by_side::DiffGutter::Off && !single_line && !console;
+            diff_gutter != crate::side_by_side::DiffGutter::Off && !single_line && !gutterless;
         let (gutter_width, text_left) = if single_line {
             (px(0.0), px(0.0))
-        } else if console {
+        } else if gutterless {
             (px(CONSOLE_GUTTER), px(0.0))
         } else if diff_gutter {
             // The text starts at the diff gutter's edge (after the
@@ -1574,7 +1577,7 @@ impl Element for EditorElement {
         // The caret row is highlighted when nothing is selected (not in a
         // console).
         let current_lines = if !single_line
-            && !console
+            && !gutterless
             && editor.caret_row_shown
             && editor.selections.iter().all(|s| s.is_empty())
         {
@@ -1620,7 +1623,7 @@ impl Element for EditorElement {
                 numbers_right,
                 lines: &lines,
                 total_rows,
-                gutter: !single_line && !console,
+                gutter: !single_line && !gutterless,
                 diff_gutter,
                 diff_actions: diff_gutter && diff_actions,
             },
@@ -1632,7 +1635,7 @@ impl Element for EditorElement {
             .filter(|l| {
                 l.sub == 0
                     && !single_line
-                    && !console
+                    && !gutterless
                     && !decoration_paint.hidden_numbers.contains(&l.line)
             })
             .map(|l| {
@@ -1703,7 +1706,7 @@ impl Element for EditorElement {
                 .iter()
                 .any(|e| e.decoration.stripe.is_some());
         let stripe = scrollbar.map(|s| s.track).or_else(|| {
-            (!single_line && !console && shows_problems).then(|| {
+            (!single_line && !gutterless && shows_problems).then(|| {
                 Bounds::new(
                     point(strip_x, bounds.top()),
                     size(scrollbar_width, bounds.size.height),

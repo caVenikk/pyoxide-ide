@@ -18,16 +18,24 @@
 //! come from the session's statement, the WHERE and ORDER BY fields are
 //! not there, and the pages are the ones the session has fetched.
 //!
-//! Read-only: editing is a later issue; the value panel, display types and
-//! copy formats come with the value issue (the selection and the page's
-//! values are kept for them).
+//! Read-only: editing is a later issue. Values are shown typed and in the
+//! formats of the settings ([`value`], [`formats`]); the side panel
+//! ([`panel`]: record, value, aggregates), the other views ([`views`]) and
+//! the whole value of a cut cell are in [`values`].
 
+pub mod aggregate;
 mod body;
+mod cell_menu;
 pub mod data;
 pub mod format;
+pub mod formats;
+mod panel;
 mod render;
 mod sql_highlight;
 mod status;
+pub mod value;
+mod values;
+pub mod views;
 
 use std::sync::Arc;
 
@@ -365,6 +373,7 @@ pub(crate) fn init(cx: &mut App) {
     on!(SelectAll, |g, a, w, cx| g.select_all(cx));
     on!(Dismiss, |g, a, w, cx| g.dismiss(cx));
     on!(FocusField, |g, a, w, cx| g.focus_field(&a.field, w, cx));
+    values::init(cx);
     ui::command::register_query(
         cx,
         "db.grid.state",
@@ -464,6 +473,8 @@ pub(crate) struct GridError {
 struct OpenMenu {
     menu: Entity<ui::menu::ContextMenu>,
     position: Point<Pixels>,
+    /// The menu's corner that is at `position`.
+    corner: gpui::Corner,
     _subscription: Subscription,
 }
 
@@ -513,6 +524,8 @@ pub struct TableGrid {
     page_bar_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<Pixels>>>,
     hover: Option<data::Pos>,
     menu: Option<OpenMenu>,
+    /// The value panel, views and whole values ([`values`]).
+    values: values::ValueState,
     body: body::BodyState,
     build_task: Task<()>,
     /// Set for the grid of a console's result.
@@ -646,6 +659,7 @@ impl TableGrid {
             page_bar_bounds: Default::default(),
             hover: None,
             menu: None,
+            values: Default::default(),
             body: body::BodyState::default(),
             build_task: Task::ready(()),
             result: None,
@@ -676,8 +690,9 @@ impl TableGrid {
             return;
         };
         let meta = self.meta.clone();
+        let fmt = self.cell_format(cx);
         let build = cx.background_spawn(async move {
-            GridPage::build(&columns, rows, first_row, has_more, &meta)
+            GridPage::build(&columns, rows, first_row, has_more, &meta, &fmt)
         });
         self.build_task = cx.spawn(async move |this, cx| {
             let page = Arc::new(build.await);
@@ -802,6 +817,7 @@ impl TableGrid {
                         // The cell texts are made off the UI thread; the
                         // read counts as running until they are there.
                         let meta = self.meta.clone();
+                        let fmt = self.cell_format(cx);
                         let build = cx.background_spawn(async move {
                             GridPage::build(
                                 &page.columns,
@@ -809,6 +825,7 @@ impl TableGrid {
                                 page.first_row,
                                 page.has_more,
                                 &meta,
+                                &fmt,
                             )
                         });
                         self.build_task = cx.spawn(async move |this, cx| {
@@ -823,6 +840,7 @@ impl TableGrid {
                     }
                 }
             }
+            PagerEvent::Cell { job, result } => self.on_cell(job, result, cx),
             PagerEvent::Count { job, result } => {
                 let Some((_, query)) = self.counting.clone().filter(|(j, _)| *j == job) else {
                     return;
@@ -868,6 +886,7 @@ impl TableGrid {
             self.scroll.y = px(0.0);
         }
         self.page = Some(Arc::new(page));
+        self.values_page_changed();
         self.hover = None;
         status::changed(cx);
         cx.notify();
@@ -942,6 +961,7 @@ impl TableGrid {
             self.pager.cancel(job);
             self.last_after_count = false;
         }
+        self.cancel_full();
         cx.notify();
     }
 
@@ -1093,7 +1113,7 @@ impl TableGrid {
             self.sort_result(column, cx);
             return;
         }
-        let Some(page) = self.page.clone() else {
+        let Some(page) = self.page.clone().filter(|_| !self.is_transposed()) else {
             return;
         };
         let Some(c) = page.columns.get(column) else {
@@ -1112,7 +1132,7 @@ impl TableGrid {
     // ---- selection --------------------------------------------------------------
 
     pub(crate) fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
-        let Some(page) = &self.page else {
+        let Some(page) = self.shown_page() else {
             return;
         };
         self.selection = selection.clamp(page.row_count(), page.column_count());
@@ -1122,7 +1142,7 @@ impl TableGrid {
     }
 
     fn select_column(&mut self, column: usize, cx: &mut Context<Self>) {
-        let Some(page) = &self.page else {
+        let Some(page) = self.shown_page() else {
             return;
         };
         let last = page.row_count().saturating_sub(1);
@@ -1142,7 +1162,7 @@ impl TableGrid {
     }
 
     fn select_all(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = &self.page else {
+        let Some(page) = self.shown_page() else {
             return;
         };
         let rows = page.row_count();
@@ -1160,7 +1180,7 @@ impl TableGrid {
 
     /// Moves the current cell, or the selection's lead with `extend`.
     fn move_by(&mut self, rows: isize, columns: isize, extend: bool, cx: &mut Context<Self>) {
-        let Some(page) = &self.page else {
+        let Some(page) = self.shown_page() else {
             return;
         };
         let (n_rows, n_columns) = (page.row_count(), page.column_count());
@@ -1192,6 +1212,10 @@ impl TableGrid {
 
     /// Whether column `column` is hidden.
     fn is_hidden(&self, column: usize) -> bool {
+        // Hidden columns are the table view's.
+        if self.is_transposed() {
+            return false;
+        }
         self.page
             .as_ref()
             .and_then(|p| p.columns.get(column))
@@ -1229,7 +1253,7 @@ impl TableGrid {
     /// Hides `column` (or every other column with `others`); with `None`
     /// shows all columns again.
     fn hide_columns(&mut self, column: Option<usize>, others: bool, cx: &mut Context<Self>) {
-        let Some(page) = &self.page else {
+        let Some(page) = self.page.as_ref().filter(|_| !self.is_transposed()) else {
             return;
         };
         match column {
@@ -1287,6 +1311,7 @@ impl TableGrid {
         self.menu = Some(OpenMenu {
             menu,
             position: at,
+            corner: gpui::Corner::BottomLeft,
             _subscription: subscription,
         });
         cx.notify();
@@ -1398,12 +1423,13 @@ impl TableGrid {
                 "sum": s.sum, "counts": s.counts, "position": s.position,
             })),
             "page_menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
+            "values": self.values_state_json(cx),
         })
     }
 
     pub(crate) fn summary(&self) -> Option<data::SelectionSummary> {
         Some(data::summary(
-            self.page.as_ref()?,
+            self.shown_page()?,
             self.selection.as_ref()?,
             &|c| !self.is_hidden(c),
         ))

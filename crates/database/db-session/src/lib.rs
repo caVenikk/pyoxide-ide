@@ -33,6 +33,7 @@
 //!
 //! No UI toolkit; tokio stays inside.
 
+mod cell;
 pub mod commands;
 mod data_source;
 mod dialect;
@@ -46,6 +47,7 @@ mod refresh;
 mod runtime;
 mod session;
 
+pub use cell::{CellQuery, FULL_VALUE_LIMIT, is_keyable, literal};
 pub use data_source::DataSourceHandle;
 pub use event::{
     Command, DataSourceState, DecisionReason, Event, EventKind, EventSink, JobEvent, JobId,

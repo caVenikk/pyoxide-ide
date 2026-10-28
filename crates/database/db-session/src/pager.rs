@@ -16,6 +16,7 @@ use db_core::{Column, Dialect, Error, ErrorKind, Row, Value};
 use serde::Serialize;
 use tokio::sync::watch;
 
+use crate::cell::CellQuery;
 use crate::data_source::{DataSourceHandle, Shared, cancelled};
 use crate::event::JobId;
 use crate::job::syntax_dialect;
@@ -182,6 +183,11 @@ pub enum PagerEvent {
         job: JobId,
         result: Result<u64, PageError>,
     },
+    /// A cell's whole value, read by [`ResultPager::cell`].
+    Cell {
+        job: JobId,
+        result: Result<Value, PageError>,
+    },
 }
 
 /// Receives a pager's events; it must return quickly (the UI crate turns an
@@ -240,6 +246,16 @@ impl ResultPager {
         self.spawn(move |shared, job, rx| async move {
             let result = shared.run_count(&query, rx).await;
             PagerEvent::Count { job, result }
+        })
+    }
+
+    /// Reads the whole value of one cell, found by its row's key (see
+    /// [`CellQuery`]); reported as [`PagerEvent::Cell`].
+    pub fn cell(&self, query: &CellQuery) -> JobId {
+        let query = query.clone();
+        self.spawn(move |shared, job, rx| async move {
+            let result = shared.run_cell(&query, rx).await;
+            PagerEvent::Cell { job, result }
         })
     }
 
@@ -303,7 +319,7 @@ impl Shared {
     ) -> Result<Page, PageError> {
         let max_rows = size.rows().map_or(usize::MAX, |n| n + 1);
         let (columns, mut rows, sql) = self
-            .run_select(|d| query.page_sql(d, first_row, size), max_rows, rx)
+            .run_select(|d| query.page_sql(d, first_row, size), max_rows, None, rx)
             .await?;
         let has_more = size.rows().is_some_and(|n| rows.len() > n);
         if let Some(n) = size.rows() {
@@ -323,7 +339,7 @@ impl Shared {
         query: &TableQuery,
         rx: watch::Receiver<bool>,
     ) -> Result<u64, PageError> {
-        let (_, rows, sql) = self.run_select(|d| query.count_sql(d), 1, rx).await?;
+        let (_, rows, sql) = self.run_select(|d| query.count_sql(d), 1, None, rx).await?;
         let value = rows.first().and_then(|r| r.first());
         count_of(value).ok_or_else(|| PageError {
             error: Error::internal(format!("the count is not a number: {value:?}")),
@@ -333,10 +349,11 @@ impl Shared {
 
     /// Runs the statement `sql` makes for the connection's dialect on a data
     /// connection, collecting up to `max_rows` rows.
-    async fn run_select(
+    pub(crate) async fn run_select(
         self: &Arc<Self>,
         sql: impl FnOnce(Dialect) -> String,
         max_rows: usize,
+        max_value_bytes: Option<usize>,
         mut rx: watch::Receiver<bool>,
     ) -> Result<(Vec<Column>, Vec<Row>, String), PageError> {
         self.touch();
@@ -348,7 +365,10 @@ impl Shared {
         };
         let conn = lease.conn().clone();
         let sql = sql(conn.dialect());
-        let opts = self.exec_options();
+        let mut opts = self.exec_options();
+        if let Some(limit) = max_value_bytes {
+            opts.max_value_bytes = limit;
+        }
         let read = conn.query_with(&sql, &[], max_rows, &opts);
         let result = match guarded(&conn, read, Some(&mut rx), self.options.cancel_grace).await {
             Guarded::Done(r) => {
