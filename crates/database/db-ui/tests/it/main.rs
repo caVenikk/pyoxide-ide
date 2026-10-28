@@ -17,6 +17,7 @@ mod data_sources;
 mod grid;
 mod grid_values;
 mod keymap;
+mod navigation;
 mod query_execution;
 mod services;
 mod sql;

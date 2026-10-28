@@ -31,14 +31,17 @@ mod inspect;
 mod intel;
 mod locals;
 mod names;
+mod navigate;
 mod profile;
 mod reference;
 mod resolve;
 mod signature;
+mod structure;
 
 pub use analysis::{Analyzer, DocumentAnalysis, analyze};
 pub use context::{CompletionOptions, FixedScope, KeywordCase, Scope, ScopeProvider, SqlContext};
 pub use inspect::{Fix, FixEdit, Problem};
 pub use intel::{SERVER_ID, SqlCodeIntel};
+pub use navigate::{DB_SCHEME, object_id, parse_object_id};
 pub use profile::{Inspection, InspectionLevel, InspectionProfile};
 pub use reference::{RefKind, Reference, Resolution, Suggestion, Target};

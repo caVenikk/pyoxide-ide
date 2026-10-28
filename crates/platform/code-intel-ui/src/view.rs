@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use code_intel::{
     AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, Feature, FileChange,
-    FileChangeKind, IntelError, IntelEvent, Route, RoutedCodeIntel, ServerId, ServerStatus,
+    FileChangeKind, IntelError, IntelEvent, ObjectTarget, Route, RoutedCodeIntel, ServerId,
+    ServerStatus,
 };
 use editor::{Analysis, Editor, EditorEvent};
 use gpui::{
@@ -67,6 +68,9 @@ pub enum CodeIntelEvent {
     /// Open a file in a tab with the caret at a position (a navigation
     /// target).
     OpenLocation { path: PathBuf, at: Point },
+    /// Open an object that is no place in a file (a database table): the
+    /// handler registered for its scheme does it.
+    OpenObject(ObjectTarget),
     /// Show the Documentation tool window ([`CodeIntelView::doc_window`])
     /// without moving the focus, registering it at its first use.
     ShowDocumentation,
