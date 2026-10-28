@@ -10,7 +10,7 @@
 //! cancel it.
 
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use std::sync::Arc;
@@ -144,6 +144,12 @@ pub trait DataSourceStore: Send + Sync {
     /// between runs (ADR 0021: the user cache folder, never the project);
     /// `None` keeps them in memory only.
     fn model_cache(&self, project: &Path) -> Option<ModelCache>;
+
+    /// The folder of the query consoles, one folder per data source in it
+    /// (the application's configuration folder when `None`).
+    fn console_folder(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 pub mod fake {
@@ -167,6 +173,7 @@ pub mod fake {
         saves: usize,
         tests: usize,
         cache: Option<PathBuf>,
+        consoles: Option<PathBuf>,
         connections: Option<Arc<dyn ConnectionSource>>,
     }
 
@@ -241,6 +248,11 @@ pub mod fake {
         /// until this is called).
         pub fn set_model_cache(&self, dir: &Path) {
             self.state.lock().unwrap().cache = Some(dir.to_owned());
+        }
+
+        /// Keeps the query consoles in `dir`.
+        pub fn set_console_folder(&self, dir: &Path) {
+            self.state.lock().unwrap().consoles = Some(dir.to_owned());
         }
 
         /// The data source handles connect through `source` (a [`NoServer`]
@@ -459,6 +471,10 @@ pub mod fake {
         fn model_cache(&self, _: &Path) -> Option<ModelCache> {
             let state = self.state.lock().unwrap();
             state.cache.as_ref().map(ModelCache::new)
+        }
+
+        fn console_folder(&self) -> Option<PathBuf> {
+            self.state.lock().unwrap().consoles.clone()
         }
     }
 }

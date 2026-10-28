@@ -20,6 +20,10 @@ pub use widget::{dialect_title, is_sql_file};
 /// The language id the SQL language services serve.
 pub const LANGUAGE_ID: &str = "sql";
 
+/// The word the editors of SQL files add to their key context: Execute is
+/// bound to it (`keymaps/*/console.toml`), in no other editor.
+pub const KEY_CONTEXT: &str = "SqlFile";
+
 /// The SQL file type: it takes over the platform's plain `.sql` type with
 /// the language id, comments and quotes of SQL, and the highlighter over
 /// `hub`.
@@ -29,6 +33,7 @@ pub fn file_type(hub: Arc<Hub>) -> FileType {
         language_id: Some(LANGUAGE_ID),
         highlighter: Some(Arc::new(SqlHighlighter::factory(hub.clone()))),
         decorator: Some(Arc::new(move |path| hub.decoration(path))),
+        key_context: Some(KEY_CONTEXT),
         ..FileType::plain("SQL", &["sql"], IconName("fileTypes/sql")).with_comment("-- ")
     }
 }

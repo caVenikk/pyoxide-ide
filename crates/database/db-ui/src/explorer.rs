@@ -36,6 +36,7 @@ use crate::store::DataSource;
 use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
+mod open_console;
 mod open_table;
 mod tree_view;
 
@@ -167,7 +168,7 @@ pub(crate) fn explorer_of(window: AnyWindowHandle, cx: &App) -> Option<Entity<Ex
 
 /// Runs `f` on the target explorer in its window, after the current
 /// dispatch (the window may be the one dispatching).
-fn with_target(
+pub(crate) fn with_target(
     cx: &mut App,
     f: impl FnOnce(&mut Explorer, &mut Window, &mut Context<Explorer>) + 'static,
 ) {
@@ -780,13 +781,20 @@ impl Explorer {
                 cx,
             ))
             .child(separator())
-            .child(self.toolbar_button(
-                "database-console",
-                icons::CONSOLE,
-                "Query Console",
-                false,
-                cx,
-            ))
+            .child(
+                self.toolbar_button(
+                    "database-console",
+                    icons::CONSOLE,
+                    "Query Console",
+                    has_source,
+                    cx,
+                )
+                .when(has_source, |d| {
+                    d.on_click(
+                        cx.listener(|this, _, window, cx| this.open_console(None, window, cx)),
+                    )
+                }),
+            )
             .child(self.toolbar_button("database-table", icons::TABLE, "Edit Data", false, cx))
             .child(
                 div()

@@ -184,6 +184,8 @@ pub enum Origin {
     Project,
     /// The data source the file is bound to gave the dialect.
     DataSource(String),
+    /// The file is a console of the data source.
+    Console,
     /// Nothing says: generic SQL, no scope.
     None,
 }

@@ -17,6 +17,8 @@ use crate::element::LineLayout;
 
 /// Size of a gutter icon (the reference's breakpoint icons).
 pub(crate) const ICON_SIZE: f32 = 14.0;
+/// An icon right of the line numbers is this far from the numbers.
+const LANE_ICON_GAP: f32 = 6.0;
 /// Opacity of the owner's hover icon (`Breakpoint.iconHoverAlpha`).
 const HOVER_ICON_ALPHA: f32 = 0.5;
 /// The line numbers' area starts this far right of the gutter's left edge
@@ -378,6 +380,22 @@ pub(crate) fn prepaint(
                 paint.icons.push((badge, badge_bounds(bounds), 1.0));
             }
             paint.icon_cells.push(cell(row));
+        }
+        if frame.gutter
+            && !frame.mirrored
+            && let Some(icon) = d.lane_icon
+            && visible.contains(&lines.start)
+            && let Some(row) = frame.rows_of(lines.start).find(|l| l.sub == 0)
+        {
+            let y = ((lh - icon_size) / 2.0).floor();
+            let bounds = Bounds::new(
+                point(
+                    frame.numbers_right + px(LANE_ICON_GAP),
+                    frame.top_of(row.row) + y,
+                ),
+                size(icon_size, icon_size),
+            );
+            paint.icons.push((icon, bounds, 1.0));
         }
         if shown && let Some(bg) = d.background {
             let full = theme.color(bg.color);

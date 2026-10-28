@@ -14,6 +14,10 @@
 //! made in the background when a page arrives, and the grid draws only the
 //! cells in view ([`body`]).
 //!
+//! The same view shows a console's result (`TableGrid::result`): its rows
+//! come from the session's statement, the WHERE and ORDER BY fields are
+//! not there, and the pages are the ones the session has fetched.
+//!
 //! Read-only: editing is a later issue; the value panel, display types and
 //! copy formats come with the value issue (the selection and the page's
 //! values are kept for them).
@@ -117,7 +121,7 @@ ui::ui_commands! {
         r#"{"field": "where"}"#;
     /// Sort by a column.
     SortByColumn { column: usize } => "db.grid.sort", "Sort",
-        "Sorts the active table grid by column `column` (zero-based) on the server: ascending, then descending, then unsorted; the ORDER BY field shows the order.",
+        "Sorts the active grid by column `column` (zero-based): ascending, then descending, then unsorted. A table grid orders on the server (the ORDER BY field shows the order); the grid of a console's result orders the rows it holds, the statement is not run again.",
         r#"{"column": 1}"#;
     /// Select cells.
     SelectCells { row: usize, column: usize, to_row: Option<usize>, to_column: Option<usize> } => "db.grid.select", "Select Cells",
@@ -193,7 +197,7 @@ fn default_page_size(cx: &App) -> PageSize {
 }
 
 /// Marks `grid` as the most recently used of its window.
-fn touch(window: AnyWindowHandle, grid: &Entity<TableGrid>, cx: &mut App) {
+pub(crate) fn touch(window: AnyWindowHandle, grid: &Entity<TableGrid>, cx: &mut App) {
     let weak = grid.downgrade();
     let grids = &mut cx.default_global::<Grids>().0;
     grids.retain(|(_, g)| g.upgrade().is_some() && *g != weak);
@@ -420,6 +424,24 @@ pub(crate) enum Field {
     Order,
 }
 
+/// Asks the console's session for the next page of the result.
+pub(crate) type FetchNext = std::rc::Rc<dyn Fn(&mut App)>;
+
+/// The pages of a console's result: the ones fetched so far, and which
+/// one is shown.
+struct ResultState {
+    columns: Vec<db_core::Column>,
+    pages: Vec<Arc<GridPage>>,
+    index: usize,
+    fetch: Option<FetchNext>,
+    /// A fetch of the next page is under way.
+    fetching: bool,
+    /// The column the shown rows are ordered by. The reference orders the
+    /// rows of a query result it has fetched itself (the ORDER BY of the
+    /// statement is the statement's own); `pages` hold them as they came.
+    sort: Option<(usize, data::SortDir)>,
+}
+
 /// What a running page read is for.
 #[derive(Debug, Clone)]
 struct Load {
@@ -493,6 +515,8 @@ pub struct TableGrid {
     menu: Option<OpenMenu>,
     body: body::BodyState,
     build_task: Task<()>,
+    /// Set for the grid of a console's result.
+    result: Option<ResultState>,
     _events: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -529,6 +553,36 @@ impl TabView for TableGrid {
 
 impl TableGrid {
     fn new(target: GridTarget, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(target, false, window, cx)
+    }
+
+    /// The grid of a console's result named `title`; rows are given by
+    /// [`Self::show_page`].
+    pub(crate) fn result(
+        target: GridTarget,
+        columns: Vec<db_core::Column>,
+        fetch: Option<FetchNext>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut grid = Self::build(target, true, window, cx);
+        grid.result = Some(ResultState {
+            columns,
+            pages: Vec::new(),
+            index: 0,
+            fetch,
+            fetching: false,
+            sort: None,
+        });
+        grid
+    }
+
+    fn build(
+        target: GridTarget,
+        is_result: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<PagerEvent>();
         let events = cx.spawn(async move |this, cx| {
             use futures::StreamExt as _;
@@ -594,11 +648,117 @@ impl TableGrid {
             menu: None,
             body: body::BodyState::default(),
             build_task: Task::ready(()),
+            result: None,
             _events: events,
             _subscriptions: subscriptions,
         };
-        grid.read_page(grid.query.clone(), 0, false, cx);
+        if !is_result {
+            grid.read_page(grid.query.clone(), 0, false, cx);
+        }
         grid
+    }
+
+    /// The grid shows a console's result.
+    pub(crate) fn is_result(&self) -> bool {
+        self.result.is_some()
+    }
+
+    /// A page of the console's result arrived: the first one replaces
+    /// what was shown, later ones are added (and shown).
+    pub(crate) fn show_page(
+        &mut self,
+        rows: Vec<db_core::Row>,
+        first_row: u64,
+        has_more: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(columns) = self.result.as_ref().map(|r| r.columns.clone()) else {
+            return;
+        };
+        let meta = self.meta.clone();
+        let build = cx.background_spawn(async move {
+            GridPage::build(&columns, rows, first_row, has_more, &meta)
+        });
+        self.build_task = cx.spawn(async move |this, cx| {
+            let page = Arc::new(build.await);
+            let _ = this.update(cx, |g, cx| {
+                let Some(state) = g.result.as_mut() else {
+                    return;
+                };
+                if page.first_row == 0 {
+                    state.pages.clear();
+                }
+                state.fetching = false;
+                state.pages.push(page.clone());
+                state.index = state.pages.len() - 1;
+                let sort = state.sort;
+                g.page = Some(match sort {
+                    Some((column, dir)) => Arc::new(page.sorted(column, dir)),
+                    None => page,
+                });
+                g.selection = None;
+                g.hover = None;
+                g.scroll.y = px(0.0);
+                status::changed(cx);
+                cx.notify();
+            });
+        });
+    }
+
+    /// The result has no more rows to fetch (its cursor was closed).
+    pub(crate) fn result_closed(&mut self, cx: &mut Context<Self>) {
+        if let Some(state) = self.result.as_mut() {
+            state.fetch = None;
+            state.fetching = false;
+        }
+        cx.notify();
+    }
+
+    fn show_result_page(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(state) = self.result.as_mut() else {
+            return;
+        };
+        let Some(page) = state.pages.get(index).cloned() else {
+            return;
+        };
+        state.index = index;
+        self.page = Some(match state.sort {
+            Some((column, dir)) => Arc::new(page.sorted(column, dir)),
+            None => page,
+        });
+        self.selection = None;
+        self.scroll.y = px(0.0);
+        cx.notify();
+    }
+
+    /// The sort marks of the headers: the result's own sort, or the ORDER
+    /// BY text of a table.
+    fn sort_marks(&self, page: &GridPage) -> Vec<(usize, data::SortDir)> {
+        match &self.result {
+            Some(state) => state.sort.into_iter().collect(),
+            None => data::sort_of(&self.query.order, &page.columns),
+        }
+    }
+
+    /// A click on a result's sort mark: ascending, descending, then the
+    /// order the rows came in; the page shown is ordered at once.
+    fn sort_result(&mut self, column: usize, cx: &mut Context<Self>) {
+        let Some(state) = self.result.as_mut() else {
+            return;
+        };
+        let Some(unsorted) = state.pages.get(state.index).cloned() else {
+            return;
+        };
+        if column >= unsorted.column_count() {
+            return;
+        }
+        state.sort = data::next_sort(state.sort, column);
+        self.page = Some(match state.sort {
+            Some((column, dir)) => Arc::new(unsorted.sorted(column, dir)),
+            None => unsorted,
+        });
+        self.selection = None;
+        cx.notify();
     }
 
     pub fn source(&self) -> &str {
@@ -749,6 +909,9 @@ impl TableGrid {
     }
 
     pub(crate) fn reload(&mut self, cx: &mut Context<Self>) {
+        if self.is_result() {
+            return;
+        }
         let query = self.fields_query(cx);
         let same = query == self.query;
         let first = if same {
@@ -763,6 +926,9 @@ impl TableGrid {
     }
 
     pub(crate) fn apply_fields(&mut self, cx: &mut Context<Self>) {
+        if self.is_result() {
+            return;
+        }
         let query = self.fields_query(cx);
         self.read_page(query, 0, false, cx);
     }
@@ -796,10 +962,20 @@ impl TableGrid {
     }
 
     pub(crate) fn first_page(&mut self, cx: &mut Context<Self>) {
+        if self.is_result() {
+            self.show_result_page(0, cx);
+            return;
+        }
         self.read_page(self.query.clone(), 0, false, cx);
     }
 
     pub(crate) fn previous_page(&mut self, cx: &mut Context<Self>) {
+        if let Some(state) = &self.result {
+            if state.index > 0 {
+                self.show_result_page(state.index - 1, cx);
+            }
+            return;
+        }
         let (Some(size), Some(page)) = (self.page_rows(), self.page.as_ref()) else {
             return;
         };
@@ -811,6 +987,20 @@ impl TableGrid {
     }
 
     pub(crate) fn next_page(&mut self, cx: &mut Context<Self>) {
+        if let Some(state) = self.result.as_mut() {
+            if state.index + 1 < state.pages.len() {
+                let next = state.index + 1;
+                self.show_result_page(next, cx);
+            } else if !state.fetching
+                && self.page.as_ref().is_some_and(|p| p.has_more)
+                && let Some(fetch) = state.fetch.clone()
+            {
+                state.fetching = true;
+                cx.defer(move |cx| fetch(cx));
+                cx.notify();
+            }
+            return;
+        }
         let (Some(size), Some(page)) = (self.page_rows(), self.page.as_ref()) else {
             return;
         };
@@ -822,6 +1012,9 @@ impl TableGrid {
     }
 
     pub(crate) fn last_page(&mut self, cx: &mut Context<Self>) {
+        if self.is_result() {
+            return;
+        }
         if self.page_rows().is_none() {
             return;
         }
@@ -844,6 +1037,9 @@ impl TableGrid {
     }
 
     pub(crate) fn count(&mut self, cx: &mut Context<Self>) {
+        if self.is_result() {
+            return;
+        }
         if let Some((job, _)) = self.counting.take() {
             self.pager.cancel(job);
         }
@@ -854,6 +1050,9 @@ impl TableGrid {
     }
 
     pub(crate) fn set_page_size(&mut self, size: usize, cx: &mut Context<Self>) {
+        if self.is_result() {
+            return;
+        }
         self.menu = None;
         self.page_size = if size == 0 {
             PageSize::All
@@ -890,6 +1089,10 @@ impl TableGrid {
     }
 
     fn sort_by(&mut self, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_result() {
+            self.sort_result(column, cx);
+            return;
+        }
         let Some(page) = self.page.clone() else {
             return;
         };
@@ -1177,7 +1380,7 @@ impl TableGrid {
                 "right": c.right,
                 "hidden": self.hidden.contains(&c.name),
             })).collect::<Vec<_>>()),
-            "sort": page.map(|p| data::sort_of(&self.query.order, &p.columns)
+            "sort": page.map(|p| self.sort_marks(p)
                 .into_iter()
                 .map(|(c, d)| json!({"column": c, "desc": d == data::SortDir::Desc}))
                 .collect::<Vec<_>>()),

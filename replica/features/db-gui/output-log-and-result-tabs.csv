@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Output log line per statement and a result tab per result set, tab reuse, pin, rename",db-gui,must,yes,no,Pro
+"Output log line per statement and a result tab per result set, tab reuse, pin, rename",db-gui,must,yes,partial,Pro

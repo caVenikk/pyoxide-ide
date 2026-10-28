@@ -5,6 +5,7 @@
 //! [`DataSourceStore`]: this crate never sees a driver, `db-service` or an
 //! async runtime, and passwords only pass through it as [`db_core::Secret`].
 
+pub mod console;
 pub mod dialog;
 pub mod explorer;
 pub mod fixture;
@@ -34,11 +35,13 @@ pub const TOOL_WINDOW: ToolWindow = ToolWindow("database");
 pub const KEYMAPS: KeymapFiles = KeymapFiles {
     macos: concat!(
         include_str!("../keymaps/macos/db.toml"),
-        include_str!("../keymaps/macos/grid.toml")
+        include_str!("../keymaps/macos/grid.toml"),
+        include_str!("../keymaps/macos/console.toml")
     ),
     default: concat!(
         include_str!("../keymaps/default/db.toml"),
-        include_str!("../keymaps/default/grid.toml")
+        include_str!("../keymaps/default/grid.toml"),
+        include_str!("../keymaps/default/console.toml")
     ),
 };
 
@@ -91,6 +94,10 @@ pub mod icons {
     pub const FIRST_PAGE: IconName = IconName("db/firstPage");
     pub const LAST_PAGE: IconName = IconName("db/lastPage");
     pub const STOP_DISABLED: IconName = IconName("db/stopDisabled");
+    // The marks of an executed statement in the console's gutter.
+    pub const STATEMENT_OK: IconName = IconName("db/statementOk");
+    // The Services tool window.
+    pub const SERVICES: IconName = IconName("db/services@20x20");
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -146,6 +153,7 @@ pub const ICONS: &[IconSvg] = &[
     icon!("index", "index"),
     icon!("uniqueIndex", "uniqueIndex"),
     icon!("check", "check"),
+    icon!("statementOk", "statementOk"),
     icon!("trigger", "trigger"),
     icon!("routine", "routine"),
     icon!("procedure", "procedure"),
@@ -160,6 +168,7 @@ pub const ICONS: &[IconSvg] = &[
     icon!("firstPage", "firstPage"),
     icon!("lastPage", "lastPage"),
     icon!("stopDisabled", "stopDisabled"),
+    icon!("services@20x20", "services@20x20"),
 ];
 
 /// The product's store, for the module's views.
@@ -195,22 +204,26 @@ pub fn module(config: DbUiConfig) -> Module {
             dialog::init(cx);
             prompt::init(cx);
             grid::init(cx);
+            console::init(cx);
         })),
         keymaps: Some(KEYMAPS),
-        tool_windows: vec![ToolWindowHook {
-            spec: ToolWindowSpec {
-                id: TOOL_WINDOW,
-                area: Area::Right,
-                // After Notifications (0), room for the AI tool windows.
-                order: 20,
-                icon: icons::TOOL_WINDOW,
-                title: "Database",
-                command: None,
-                registered: true,
+        tool_windows: vec![
+            ToolWindowHook {
+                spec: ToolWindowSpec {
+                    id: TOOL_WINDOW,
+                    area: Area::Right,
+                    // After Notifications (0), room for the AI tool windows.
+                    order: 20,
+                    icon: icons::TOOL_WINDOW,
+                    title: "Database",
+                    command: None,
+                    registered: true,
+                },
+                create: std::rc::Rc::new(explorer::create),
+                width: Some(explorer::WIDTH),
             },
-            create: std::rc::Rc::new(explorer::create),
-            width: Some(explorer::WIDTH),
-        }],
+            console::services::hook(),
+        ],
         ..Module::default()
     }
 }

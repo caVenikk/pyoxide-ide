@@ -1,0 +1,7 @@
+# Pyoxide keymap for macOS. Database consoles: Execute in the editor of a
+# SQL file (a console or a file attached to a data source). The key keeps its
+# meaning in every other editor.
+[[context]]
+name = "Editor && SqlFile"
+[context.bindings]
+"cmd-enter" = "db.console.execute"

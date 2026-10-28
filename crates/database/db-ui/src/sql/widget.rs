@@ -336,14 +336,14 @@ impl SqlWidget {
                     icon: Some(icons::SCHEMA),
                     text: format!("{database}.{schema}"),
                 });
-                schema
-                    .into_iter()
-                    .chain([Chip {
+                // A console is bound to its data source: no chip for it.
+                let source = (!matches!(resolved.scope_origin, settings::Origin::Console))
+                    .then_some(Chip {
                         id: ChipId::Source,
                         icon: Some(icon),
                         text: name,
-                    }])
-                    .collect()
+                    });
+                schema.into_iter().chain(source).collect()
             }
             None => vec![
                 Chip {
@@ -510,6 +510,7 @@ fn origin_json(origin: &settings::Origin) -> Json {
         }
         Origin::Project => json!({"kind": "project"}),
         Origin::DataSource(name) => json!({"kind": "data-source", "name": name}),
+        Origin::Console => json!({"kind": "console"}),
         Origin::None => json!({"kind": "none"}),
     }
 }
@@ -723,6 +724,74 @@ impl SqlWidget {
     }
 }
 
+impl SqlWidget {
+    /// Execute and Stop at the left of a console's toolbar, and its
+    /// transaction mode (the placeholder of the later transaction
+    /// controls).
+    fn console_buttons(
+        &self,
+        resolved: &Resolved,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui::AnyElement> {
+        let console = matches!(resolved.scope_origin, settings::Origin::Console);
+        // A file attached to a data source has the same controls; a file
+        // without one only Execute (it asks for a data source).
+        let attached = resolved.data_source.is_some();
+        let running = self
+            .visible_file()
+            .and_then(|f| {
+                crate::console::consoles(cx)
+                    .into_iter()
+                    .find(|c| c.read(cx).path == f)
+            })
+            .is_some_and(|c| c.read(cx).running.is_some());
+        let theme = cx.theme();
+        let muted = theme.color(UiRole::TextMuted);
+        let button = |id: &'static str, icon: IconName, tip: &'static str, enabled: bool| {
+            let b = ui::components::icon_button(id, icon, px(24.0), px(16.0), false, cx)
+                .debug_selector(move || id.to_owned())
+                .tooltip(Tooltip::text(tip, None));
+            if enabled {
+                b
+            } else {
+                b.opacity(ui::components::DISABLED_ALPHA)
+            }
+        };
+        let execute = button("sql-execute", IconName::RUN, "Execute", !running)
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::console::Execute), cx))
+            .into_any_element();
+        if !console && !attached {
+            return vec![execute];
+        }
+        vec![
+            execute,
+            div()
+                .flex_none()
+                .px(px(6.0))
+                .text_size(px(CHIP_TEXT))
+                .text_color(muted)
+                .child("Tx: Auto")
+                .into_any_element(),
+            button(
+                "sql-stop",
+                if running {
+                    IconName::STOP
+                } else {
+                    icons::STOP_DISABLED
+                },
+                "Cancel Running Statements",
+                running,
+            )
+            .when(running, |d| {
+                d.on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::console::Stop), cx)
+                })
+            })
+            .into_any_element(),
+        ]
+    }
+}
+
 impl Render for SqlWidget {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(resolved) = self.resolved() else {
@@ -739,6 +808,7 @@ impl Render for SqlWidget {
             let anchor = self.popup_anchor.get();
             ui::menu::overlay_at(menu, anchor.bottom_left(), Corner::TopLeft, window)
         });
+        let console = self.console_buttons(&resolved, cx);
         let theme = cx.theme();
         let toolbar = div()
             .id("sql-toolbar")
@@ -753,6 +823,8 @@ impl Render for SqlWidget {
             .px(px(8.0))
             .border_b_1()
             .border_color(theme.color(UiRole::Border))
+            .children(console)
+            .child(div().flex_1())
             .children(chips);
         div()
             .flex()

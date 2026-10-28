@@ -20,9 +20,9 @@ use workbench::test_support::keymap::{Harness, check_area};
 
 use super::*;
 
-const NAME: &str = "pyoxide-local";
+pub(crate) const NAME: &str = "pyoxide-local";
 
-fn rows(values: &[(&str, &str)]) -> Reaction {
+pub(crate) fn rows(values: &[(&str, &str)]) -> Reaction {
     Reaction::Rows {
         columns: vec!["id".into(), "email".into()],
         rows: values
@@ -54,7 +54,10 @@ fn server() -> FakeSource {
     source
 }
 
-fn store_with_model(root: &Path, server: &FakeSource) -> (Arc<FakeStore>, tempfile::TempDir) {
+pub(crate) fn store_with_model(
+    root: &Path,
+    server: &FakeSource,
+) -> (Arc<FakeStore>, tempfile::TempDir) {
     let cache_dir = tempfile::tempdir().unwrap();
     ModelCache::new(cache_dir.path())
         .store(&Model::from_snapshot(

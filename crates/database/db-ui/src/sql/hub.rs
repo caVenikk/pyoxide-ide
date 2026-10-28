@@ -69,10 +69,19 @@ pub fn syntax_dialect(dialect: db_core::Dialect) -> Dialect {
     }
 }
 
+/// A console file's data source and current schema: a console is bound
+/// to its data source by where it lives, not by a mapping of a project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleBinding {
+    pub source: Source,
+    pub schema: Option<String>,
+}
+
 /// The settings of the open projects.
 pub struct Hub {
     store: Arc<dyn DataSourceStore>,
     projects: RwLock<HashMap<PathBuf, Project>>,
+    consoles: RwLock<HashMap<PathBuf, ConsoleBinding>>,
     /// Bumped by every change of a dialect or scope, for the holders of an
     /// answer (the highlighters).
     epoch: AtomicU64,
@@ -83,6 +92,7 @@ impl Hub {
         Self {
             store,
             projects: RwLock::new(HashMap::new()),
+            consoles: RwLock::new(HashMap::new()),
             epoch: AtomicU64::new(1),
         }
     }
@@ -104,6 +114,30 @@ impl Hub {
         self.projects
             .write()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Binds a console file to its data source (and the schema its session
+    /// is in); every open editor of it is coloured again.
+    pub fn bind_console(&self, file: &Path, binding: ConsoleBinding) {
+        let changed = {
+            let mut consoles = self
+                .consoles
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            consoles.insert(file.to_owned(), binding.clone()) != Some(binding)
+        };
+        if changed {
+            self.bump();
+        }
+    }
+
+    /// The data source a console file is bound to.
+    pub fn console_binding(&self, file: &Path) -> Option<ConsoleBinding> {
+        self.consoles
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(file)
+            .cloned()
     }
 
     pub fn is_loaded(&self, root: &Path) -> bool {
@@ -181,6 +215,15 @@ impl Hub {
 
     /// The dialect and scope of a file, from memory.
     pub fn resolve(&self, file: &Path) -> Resolved {
+        if let Some(console) = self.console_binding(file) {
+            return Resolved {
+                dialect: console.source.dialect,
+                dialect_origin: Origin::DataSource(console.source.name.clone()),
+                data_source: Some(console.source.name),
+                schema: console.schema,
+                scope_origin: Origin::Console,
+            };
+        }
         let projects = self.read();
         let Some(root) = projects
             .keys()
@@ -195,6 +238,9 @@ impl Hub {
 
     /// A data source of the project the file belongs to, from memory.
     pub fn source_of(&self, file: &Path, name: &str) -> Option<Source> {
+        if let Some(console) = self.console_binding(file) {
+            return Some(console.source).filter(|s| s.name == name);
+        }
         let projects = self.read();
         let root = projects
             .keys()
@@ -217,8 +263,18 @@ impl Hub {
             Some(Dialect::Sqlite) => crate::icons::SQLITE,
             _ => crate::icons::DATA_SOURCE,
         };
+        let console = self.console_binding(file).is_some();
         FileDecoration {
             icon: Some(icon),
+            name: console.then(|| "console".to_owned()),
+            autosave: console,
+            breadcrumb: console.then(|| {
+                vec![
+                    "Database Consoles".to_owned(),
+                    name.clone(),
+                    format!("console [{name}]"),
+                ]
+            }),
             hint: Some(name),
         }
     }
@@ -295,6 +351,7 @@ pub fn origin_text(origin: &Origin) -> String {
             format!("mapped at {path} ({scope})")
         }
         Origin::Project => "the project default".to_owned(),
+        Origin::Console => "the console's data source".to_owned(),
         Origin::DataSource(name) => format!("the data source {name}"),
         Origin::None => "not configured".to_owned(),
     }

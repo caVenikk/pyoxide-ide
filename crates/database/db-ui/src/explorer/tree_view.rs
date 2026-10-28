@@ -186,7 +186,7 @@ impl Explorer {
 
     /// Opens the data source's handle: its cached model first, a refresh
     /// when there is none.
-    fn open_live(&mut self, name: &str, cx: &mut Context<Self>) {
+    pub(super) fn open_live(&mut self, name: &str, cx: &mut Context<Self>) {
         let (Some(root), Some(source)) = (
             self.root.clone(),
             self.sources().iter().find(|s| s.name == name).cloned(),
@@ -279,6 +279,13 @@ impl Explorer {
 
     fn on_event(&mut self, event: Event, cx: &mut Context<Self>) {
         let name = event.data_source.as_str().to_owned();
+        if matches!(
+            event.kind,
+            EventKind::Session { .. } | EventKind::Job { .. }
+        ) {
+            crate::console::route(event, cx);
+            return;
+        }
         let Some(live) = self.tree.lives.get_mut(&name) else {
             return;
         };
