@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,partial,"Community; default shell per OS, login and interactive options, environment (#89)"
+"Local shell sessions over a pseudo-terminal (PTY on macOS and Linux, ConPTY on Windows)",terminal,must,yes,yes,"Community; default shell per OS, login and interactive options, environment (#89); ConPTY on Windows is run by the Windows CI check job"

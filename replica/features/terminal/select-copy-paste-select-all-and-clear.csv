@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Select, copy, paste, select all and clear in the terminal",terminal,must,yes,partial,"Community (#89); mouse selection by character, word, line and rectangle, copy, paste, select all and clear in the grid view (#157); used once the Terminal tool window hosts it (#158)"
+"Select, copy, paste, select all and clear in the terminal",terminal,must,yes,yes,"Community (#89); mouse selection by character, word, line and rectangle, copy, paste, select all and clear in the grid view (#157); the Terminal tool window hosts it (#158)"

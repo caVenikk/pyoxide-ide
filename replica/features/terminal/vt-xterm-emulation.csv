@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,partial,Community; candidate alacritty_terminal (#89)
+"VT/xterm emulation (16 / 256 / 24-bit colours, alternate screen, resize, mouse reporting, bracketed paste, scrollback)",terminal,must,yes,yes,"Community; alacritty_terminal 0.26 emulation (#156, #89)"

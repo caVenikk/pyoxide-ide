@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Create Git Repository for a project without version control,vcs,must,yes,no,Community (#91)
+Create Git Repository for a project without version control,vcs,must,yes,yes,Community (#91); git.init from the VCS widget popup and the Branches popup without a repository (scenario vcs/no-git.md)

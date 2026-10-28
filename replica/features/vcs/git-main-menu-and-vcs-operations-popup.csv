@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Git main menu and VCS Operations popup,vcs,must,yes,no,Community (#91)
+Git main menu and VCS Operations popup,vcs,must,yes,partial,"Community (#91); Git main menu with Commit, Push, Update Project, Fetch, Branches, New Branch, Rollback, Add and VCS Operations; no Pull, Stash, Annotate or Log yet"

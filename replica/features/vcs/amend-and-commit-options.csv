@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Amend and commit options (author, sign-off, hooks)",vcs,must,yes,no,Community (#91)
+"Amend and commit options (author, sign-off, hooks)",vcs,must,yes,yes,"Community (#91); amend (vcs.commit.toggle-amend), commit options popup with Author, Sign-off commit and Run Git Hooks (--no-verify); git/src/commit.rs"
