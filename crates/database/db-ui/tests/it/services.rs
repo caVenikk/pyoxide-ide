@@ -192,7 +192,31 @@ fn the_hub_scope_follows_the_file_binding_and_the_published_model() {
     assert!(Arc::ptr_eq(&scope_of.model, &model));
     assert_eq!(scope_of.search_path, ["demo"]);
 
+    // A console lives outside the project and is bound to its data source
+    // by where it is: its scope is the data source's model, in its schema.
+    let console = code_intel::DocumentId::new("/config/consoles/local/console.sql");
+    hub.bind_console(
+        console.path(),
+        db_ui::sql::ConsoleBinding {
+            source: db_ui::sql::Source {
+                name: SOURCE.into(),
+                dialect: sql_syntax::Dialect::Postgres,
+                database: None,
+            },
+            schema: Some("public".into()),
+        },
+    );
+    let ctx = scope.context(&console);
+    assert_eq!(ctx.dialect, sql_syntax::Dialect::Postgres);
+    let scope_of = ctx.scope.expect("a console scope");
+    assert!(Arc::ptr_eq(&scope_of.model, &model));
+    assert_eq!(scope_of.search_path, ["public"]);
+    let seen_by_console = notified.load(std::sync::atomic::Ordering::SeqCst);
+
     // The same model again changes nothing.
     hub.publish_model(&root, SOURCE, model);
-    assert_eq!(notified.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        notified.load(std::sync::atomic::Ordering::SeqCst),
+        seen_by_console
+    );
 }
