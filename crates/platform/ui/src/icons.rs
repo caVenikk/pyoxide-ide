@@ -225,6 +225,7 @@ impl IconName {
     pub const MACROS: Self = Self("inline/variables");
     pub const BROWSE: Self = Self("inline/browse");
     pub const EXPAND: Self = Self("inline/expand");
+    pub const COLLAPSE: Self = Self("inline/collapse");
     pub const INLINE_SETTINGS: Self = Self("inline/inlineSettings");
     pub const HELP: Self = Self("general/help");
     /// The circled "?" after an option with a help tooltip
@@ -322,7 +323,7 @@ platform_icons! {
         "general/showAsTree", "general/up", "general/upload", "general/vcs",
         "general/keyboard", "general/learn",
         "ide/externalLink",
-        "inline/browse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
+        "inline/browse", "inline/collapse", "inline/exactWords", "inline/expand", "inline/inlineSettings",
         "inline/matchCase", "inline/newLine", "inline/preserveCase", "inline/regex",
         "inline/searchHistory", "inline/variables",
         "json/object",

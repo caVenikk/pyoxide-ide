@@ -169,7 +169,7 @@ impl DebuggerView {
     }
 
     /// The suspended session and frame values are evaluated in.
-    fn suspended_frame(&self, cx: &App) -> Option<(Session, i64)> {
+    pub(crate) fn suspended_frame(&self, cx: &App) -> Option<(Session, i64)> {
         let point = self.execution.as_ref()?;
         let tab = self.tool_window.read(cx).selected_tab()?;
         (tab.session.id() == point.session).then(|| (tab.session.clone(), point.frame))

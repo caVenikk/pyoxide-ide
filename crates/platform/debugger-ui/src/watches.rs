@@ -557,7 +557,7 @@ impl VariablesView {
 
     /// The expression of the selected row: a watch's own, else the
     /// value's.
-    fn selected_expression(&mut self, cx: &mut Context<Self>) -> Option<String> {
+    pub(crate) fn selected_expression(&mut self, cx: &mut Context<Self>) -> Option<String> {
         let row = self.selected_row(cx)?;
         match &row.kind {
             RowKind::Watch(w) => Some(w.expression.clone()),
@@ -846,17 +846,6 @@ impl VariablesView {
         }
         self.close_history(cx);
         self.add_watch(&expression, None, cx);
-    }
-
-    /// Evaluate Expression of a value: its expression into the field.
-    pub(crate) fn evaluate_value(
-        &mut self,
-        expression: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let expression = expression.or_else(|| self.selected_expression(cx));
-        self.set_field_text(&expression.unwrap_or_default(), window, cx);
     }
 
     pub(crate) fn field_json(&self, cx: &App) -> Json {
@@ -1931,11 +1920,6 @@ pub(crate) fn forward_watch_actions<E: InteractiveElement>(el: E, view: Entity<D
         .choose_history(a.index, window, cx));
     let el = on!(el, SetFieldExpression, |t, a, window, cx| t
         .set_field_text(&a.text, window, cx));
-    let el = on!(el, EvaluateValue, |t, a, window, cx| t.evaluate_value(
-        a.expression.clone(),
-        window,
-        cx
-    ));
     let el = on!(el, NewWatch, |t, a, window, cx| t.new_watch(
         a.expression.clone(),
         window,

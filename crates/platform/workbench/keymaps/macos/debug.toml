@@ -22,6 +22,9 @@
 "alt-f9" = "debug.run-to-cursor"
 "cmd-alt-f9" = "debug.force-run-to-cursor"
 "alt-f10" = "debug.show-execution-point"
+# Evaluate Expression (`EvaluateExpression`) opens the Evaluate dialog from the
+# editor and from the variables alike.
+"alt-f8" = "debug.evaluate-expression"
 
 # Threads & Variables (#166): Previous and Next Frame from anywhere while
 # debugging (`PreviousOccurence`, `NextOccurence` over the frames list,
@@ -62,15 +65,13 @@ name = "DebugVariables"
 "right" = "debug.variables.right"
 # The watches and the values (#166): New Watch (`XDebugger.NewWatch`),
 # Remove Watch (`$Delete`), Set Value and Edit of a watch
-# (`XDebugger.SetValue`), Copy Value (`$Copy`), Evaluate Expression
-# (`EvaluateExpression`), Jump To Source (`EditSource`) and Jump To Type
-# Source (`XDebugger.JumpToTypeSource`).
+# (`XDebugger.SetValue`), Copy Value (`$Copy`), Jump To Source
+# (`EditSource`) and Jump To Type Source (`XDebugger.JumpToTypeSource`).
 "insert" = "debug.new-watch"
 "backspace" = "debug.remove-watch"
 "delete" = "debug.remove-watch"
 "f2" = "debug.variables.set-value"
 "cmd-c" = "debug.variables.copy-value"
-"alt-f8" = "debug.evaluate-expression"
 "f4" = "debug.variables.jump-to-source"
 "shift-f4" = "debug.variables.jump-to-type-source"
 
@@ -109,3 +110,31 @@ name = "DebugValueEditor > Editor"
 name = "DebugValuePopup"
 [context.bindings]
 "escape" = "debug.value-popup.close"
+
+# The Evaluate dialog (#293, `XDebuggerEvaluationDialog`): Escape closes it
+# (an open history list first), Cmd+Enter evaluates (the dialog's OK key;
+# Enter in the one-line field too), Cmd+Shift+Enter adds the expression to
+# the watches, Alt+M switches between the expression and the code fragment
+# mode and Alt+R moves the focus to the result.
+[[context]]
+name = "EvaluateDialog"
+[context.bindings]
+"escape" = "evaluate-dialog.close"
+"cmd-enter" = "evaluate-dialog.evaluate"
+"cmd-shift-enter" = "evaluate-dialog.add-to-watches"
+"alt-m" = "evaluate-dialog.switch-mode"
+"alt-r" = "evaluate-dialog.focus-result"
+
+[[context]]
+name = "EvaluateDialog > Editor"
+[context.bindings]
+"escape" = "evaluate-dialog.close"
+"cmd-enter" = "evaluate-dialog.evaluate"
+"cmd-shift-enter" = "evaluate-dialog.add-to-watches"
+"alt-m" = "evaluate-dialog.switch-mode"
+"alt-r" = "evaluate-dialog.focus-result"
+
+[[context]]
+name = "EvaluateExpression > Editor"
+[context.bindings]
+"enter" = "evaluate-dialog.evaluate"
