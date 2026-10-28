@@ -252,6 +252,14 @@ impl Workbench {
         cx.notify();
     }
 
+    /// Shows a tool window in its area, in place of the one there, without
+    /// moving the focus (a console's statement shows its Services).
+    pub fn show_tool_window(&mut self, id: ToolWindow, cx: &mut Context<Self>) {
+        if self.tool_windows.show(id) {
+            cx.notify();
+        }
+    }
+
     /// Hides a tool window; the focus goes to the editor.
     pub fn hide(&mut self, id: ToolWindow, window: &mut Window, cx: &mut Context<Self>) {
         self.tool_windows.hide(id);

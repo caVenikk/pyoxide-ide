@@ -16,7 +16,7 @@ use ui::pointer::PointerExt;
 use ui::theme::ThemeExt;
 
 use super::body::{self, CELL_PAD, Hit};
-use super::data::{self, KeyMark, Selection, SortDir};
+use super::data::{KeyMark, Selection, SortDir};
 use super::{
     ApplyFields, ClearField, CountRows, Dismiss, FIELD_CONTEXT, Field, FirstPage, KEY_CONTEXT,
     LastPage, NextPage, OpenMenu, PAGE_SIZES, PreviousPage, Reload, Resize, SetDefaultPageSize,
@@ -352,7 +352,7 @@ impl TableGrid {
         let Some(page) = self.page.clone() else {
             return row.into_any_element();
         };
-        let sort = data::sort_of(&self.query.order, &page.columns);
+        let sort = self.sort_marks(&page);
         let view_width = layout.bounds.size.width.max(px(4000.0));
         let mut cells = div()
             .absolute()
@@ -874,7 +874,7 @@ impl Render for TableGrid {
         self.scroll = self.body.clamp(self.scroll);
 
         let toolbar = self.render_toolbar(cx);
-        let fields = self.render_fields(window, cx);
+        let fields = (!self.is_result()).then(|| self.render_fields(window, cx));
         let header = self.render_header(row_height + px(1.0), cx);
         let cells = self.render_body(window, cx);
         let bar = self.render_page_bar(cx);
@@ -937,7 +937,7 @@ impl Render for TableGrid {
             .on_action(cx.listener(|g, _: &LastPage, _, cx| g.last_page(cx)))
             .on_action(cx.listener(|g, _: &CountRows, _, cx| g.count(cx)))
             .child(toolbar)
-            .child(fields)
+            .children(fields)
             .child(grid)
             .children(popup)
     }

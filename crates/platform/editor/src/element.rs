@@ -398,6 +398,8 @@ pub(crate) struct Prepaint {
     diff_bars: Vec<(Bounds<Pixels>, Hsla)>,
     /// The background of a range ([`Editor::set_range_background`]).
     range_background: Vec<(Bounds<Pixels>, Hsla)>,
+    /// The boxes of a range ([`Editor::set_range_outline`]).
+    range_outline: Vec<(Bounds<Pixels>, Hsla)>,
     colors: Colors,
 }
 
@@ -1505,6 +1507,37 @@ impl Element for EditorElement {
             }
         }
 
+        // The outlined range, row by row.
+        let mut outline_rects = Vec::new();
+        if let Some((r, role)) = &editor.range_outline {
+            let len = editor.buffer.len_chars();
+            let r = r.start.min(len)..r.end.min(len);
+            let c = theme.color(*role);
+            let ra = editor.caret_row(r.start, false);
+            let rb = editor.caret_row(r.end, r.end > r.start);
+            for l in lines.iter().filter(|l| l.row >= ra && l.row <= rb) {
+                let x0 = if l.row == ra {
+                    line_x(l, r.start - l.line_start)
+                } else {
+                    line_x(l, l.seg_start)
+                };
+                let x1 = if l.row == rb {
+                    line_x(l, r.end - l.line_start)
+                } else {
+                    line_x(l, l.end_col)
+                };
+                if x1 > x0 {
+                    outline_rects.push((
+                        Bounds::from_corners(
+                            point(x0 - px(1.0), top_of(l.row)),
+                            point(x1 + px(1.0), top_of(l.row) + lh),
+                        ),
+                        c,
+                    ));
+                }
+            }
+        }
+
         // The placeholder of an empty one-line field.
         let placeholder = editor.shown_placeholder(focused).cloned().map(|text| {
             let run = TextRun {
@@ -1901,6 +1934,7 @@ impl Element for EditorElement {
             decoration_spans,
             diff_lines,
             range_background: background_rects,
+            range_outline: outline_rects,
             diff_bars,
             colors,
         }
@@ -2038,6 +2072,9 @@ impl Element for EditorElement {
                                 .corner_radii(px(3.0)),
                         );
                     }
+                }
+                for (r, c) in &p.range_outline {
+                    window.paint_quad(outline(*r, *c, BorderStyle::Solid).corner_radii(px(2.0)));
                 }
                 if let Some(caret) = p.caret {
                     window.paint_quad(fill(caret, p.colors.caret));

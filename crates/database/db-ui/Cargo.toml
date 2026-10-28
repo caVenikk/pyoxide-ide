@@ -7,6 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+chrono.workspace = true
+console.workspace = true
+console-ui.workspace = true
 async-trait.workspace = true
 db-core.workspace = true
 db-model.workspace = true
@@ -29,7 +32,6 @@ workbench.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
 db-model.workspace = true
 db-session = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }

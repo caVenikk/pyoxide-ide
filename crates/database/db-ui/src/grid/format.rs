@@ -169,6 +169,13 @@ impl Decimal {
         Some(m)
     }
 
+    /// The order of two numbers (`None` when one is too large to bring to
+    /// the same scale).
+    pub fn compare(self, other: Self) -> Option<std::cmp::Ordering> {
+        let scale = self.scale.max(other.scale);
+        Some(self.rescale(scale)?.cmp(&other.rescale(scale)?))
+    }
+
     pub fn checked_add(self, other: Self) -> Option<Self> {
         let scale = self.scale.max(other.scale);
         Some(Self {

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Console toolbar: data source, schema, transaction mode, Execute, Stop",db-gui,must,yes,no,Pro
+"Console toolbar: data source, schema, transaction mode, Execute, Stop",db-gui,must,yes,partial,Pro

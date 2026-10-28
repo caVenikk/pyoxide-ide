@@ -197,6 +197,9 @@ pub struct StripeMark {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Decoration {
     pub gutter_icon: Option<GutterIcon>,
+    /// An icon in the gutter right of the line numbers on the first line,
+    /// the number stays (the check mark of an executed SQL statement).
+    pub lane_icon: Option<IconName>,
     pub action: Option<GutterAction>,
     pub background: Option<LineBackground>,
     pub change: Option<ChangeKind>,
@@ -211,6 +214,13 @@ impl Decoration {
             badge: None,
             tooltip,
         });
+        self
+    }
+
+    /// An icon right of the line number of the first line, which keeps
+    /// its number.
+    pub fn lane_icon(mut self, icon: IconName) -> Self {
+        self.lane_icon = Some(icon);
         self
     }
 
@@ -863,6 +873,7 @@ impl Editor {
                         "lines": [l.start, l.end],
                         "gutter_icon": d.gutter_icon.as_ref().map(|g| g.icon.0),
                         "badge": d.gutter_icon.as_ref().and_then(|g| g.badge).map(|b| b.0),
+                        "lane_icon": d.lane_icon.map(|i| i.0),
                         "action": d.action.as_ref().map(|a| a.icon.0),
                         "background": d.background.map(|b| b.layer),
                         "change": d.change.map(ChangeKind::name),

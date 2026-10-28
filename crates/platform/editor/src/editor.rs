@@ -56,6 +56,10 @@ pub struct EditorConfig {
     /// Where a soft-wrapped line may wrap when no space is near (the
     /// file type's line wrap strategy).
     pub wrap_rules: Vec<WrapRule>,
+    /// A word the editor adds to its key context (`Editor SqlFile`), so
+    /// that a keymap can bind a key in the editors of one kind of file
+    /// only.
+    pub key_context: Option<&'static str>,
 }
 
 impl Default for EditorConfig {
@@ -71,6 +75,7 @@ impl Default for EditorConfig {
             triple_quotes: false,
             string_prefixes: Vec::new(),
             wrap_rules: WrapRule::defaults(),
+            key_context: None,
         }
     }
 }
@@ -341,6 +346,8 @@ pub struct Editor {
     /// A char range with the background of a text role
     /// ([`Editor::set_range_background`]).
     pub(crate) range_background: Option<(Range<usize>, themes::TextRole)>,
+    /// A char range outlined in a colour ([`Editor::set_range_outline`]).
+    pub(crate) range_outline: Option<(Range<usize>, themes::UiRole)>,
     /// Bring this char offset into the middle of the view on the next
     /// frame when it is not visible.
     pub(crate) reveal: Option<usize>,
@@ -495,6 +502,7 @@ impl Editor {
             transparent: false,
             search: None,
             range_background: None,
+            range_outline: None,
             reveal: None,
             console: false,
             forward_input: false,
@@ -993,6 +1001,25 @@ impl Editor {
         }
     }
 
+    /// Draws a box around a char range, one around each row of it (the
+    /// statement a SQL console ran), or removes it. The range does not
+    /// follow edits: the owner sets it again or removes it.
+    pub fn set_range_outline(
+        &mut self,
+        outline: Option<(Range<usize>, themes::UiRole)>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.range_outline != outline {
+            self.range_outline = outline;
+            cx.notify();
+        }
+    }
+
+    /// The range [`Self::set_range_outline`] draws.
+    pub fn range_outline(&self) -> Option<Range<usize>> {
+        self.range_outline.as_ref().map(|(r, _)| r.clone())
+    }
+
     /// The range [`Self::set_range_background`] draws.
     pub fn range_background(&self) -> Option<Range<usize>> {
         self.range_background.as_ref().map(|(r, _)| r.clone())
@@ -1297,6 +1324,7 @@ impl Editor {
             },
             "hovered": self.hovered().map(point),
             "decorations": self.decorations_json(),
+            "range_outline": self.range_outline.as_ref().map(|(r, _)| json!([r.start, r.end])),
             "gutter_hover": self.gutter_hover,
             "diff_highlights": self.diff_highlights.as_ref().map(|d| json!({
                 "lines": [d.lines.start, d.lines.end],
@@ -3074,10 +3102,16 @@ impl Render for Editor {
         let widget = crate::inspection::widget(self, cx);
         let tooltip = crate::inspection::stripe_tooltip(self, cx);
         let el = div()
-            .key_context(if self.single_line {
-                "Editor single_line"
-            } else {
-                "Editor"
+            .key_context({
+                let mut context = gpui::KeyContext::default();
+                context.add("Editor");
+                if self.single_line {
+                    context.add("single_line");
+                }
+                if let Some(extra) = self.config.key_context {
+                    context.add(extra);
+                }
+                context
             })
             .track_focus(&self.focus)
             // On the focused element itself: GPUI sends modifier changes

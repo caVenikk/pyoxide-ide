@@ -71,6 +71,8 @@ const TAB_PADDING: f32 = 8.0;
 const INACTIVE_TAB_ALPHA: f32 = 0.75;
 /// Diameter of the dot that marks a modified file in its tab.
 const MODIFIED_DOT: f32 = 6.0;
+/// How long after a change a file that saves itself is written.
+const AUTOSAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 /// The dot on a pinned tab's pin (`BadgeDotProvider(0.7, 0.2)` with a
 /// radius of 3 on the 16 px icon): its diameter and top left corner.
 const PIN_DOT: f32 = 6.0;
@@ -253,6 +255,8 @@ pub struct Workbench {
     save_settings: SaveSettings,
     /// The last keyboard or mouse input or edit (executor clock).
     last_input: Option<Instant>,
+    /// Files with an autosave timer running ([`FileDecoration::autosave`]).
+    autosave_pending: std::collections::HashSet<PathBuf>,
     /// A save after the idle time is scheduled.
     idle_save_pending: bool,
     /// The Find in Files popup (shown while it is open).
@@ -480,6 +484,7 @@ impl Workbench {
             resizing: None,
             save_settings: SaveSettings::default(),
             last_input: None,
+            autosave_pending: std::collections::HashSet::new(),
             idle_save_pending: false,
             find_in_files,
             search_everywhere,
@@ -735,18 +740,20 @@ impl Workbench {
         }
         let path = self.active_editor()?.read(cx).path()?.clone();
         let full = path.display().to_string();
-        let relative = self
-            .project(cx)
-            .and_then(|p| p.relative(&path))
-            .map(|r| r.display().to_string())
-            .unwrap_or_else(|| {
-                path.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            });
+        let decoration = self.file_types.decoration(&path);
+        let relative = decoration.name.unwrap_or_else(|| {
+            self.project(cx)
+                .and_then(|p| p.relative(&path))
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|| {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                })
+        });
         // A file the type decorates names what it belongs to instead of its
         // location (a query file, the data source it is attached to).
-        let place = self.file_types.decoration(&path).hint.unwrap_or(full);
+        let place = decoration.hint.unwrap_or(full);
         Some(format!("{relative} [{place}]"))
     }
 
@@ -817,10 +824,12 @@ impl Workbench {
             "tool_windows": self.tool_windows.state_json(),
             "tool_window_areas": self.tool_windows.areas_json(),
             "title_path": self.title_path(cx),
+            "status_path": self.project(cx).map(|p| self.status_path(&p, cx).0),
             "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
             "tabs": self.tabs.iter().map(|t| match &t.content {
                 TabContent::File { path, editor, .. } => {
                     let decoration = self.file_types.decoration(path);
+                    let decoration_autosave = decoration.autosave;
                     let mut tab = json!({
                         "path": rel(path),
                         "modified": editor.read(cx).is_modified(),
@@ -831,6 +840,10 @@ impl Workbench {
                     if let Some(hint) = decoration.hint {
                         tab["hint"] = json!(hint);
                         tab["icon"] = json!(self.file_types.icon(path).0);
+                    }
+                    // Only an autosaved tab has the key.
+                    if decoration_autosave {
+                        tab["autosave"] = json!(true);
                     }
                     // Only a pinned tab has the key.
                     if t.pinned {
@@ -1095,6 +1108,9 @@ impl Workbench {
                 // The editor's path follows renames.
                 if let Some(path) = editor.read(cx).path().cloned() {
                     remember_file(&mut this.recently_changed, &path);
+                    if this.file_types.decoration(&path).autosave {
+                        this.schedule_autosave(path, cx);
+                    }
                 }
             }
             if let EditorEvent::Jumped { from, view_y } = event
@@ -1213,6 +1229,24 @@ impl Workbench {
                     _ => break,
                 }
             }
+        })
+        .detach();
+    }
+
+    /// Saves `path` shortly after its last change; changes made while the
+    /// timer runs share the one save.
+    fn schedule_autosave(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !self.autosave_pending.insert(path.clone()) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(AUTOSAVE_DELAY).await;
+            let _ = this.update(cx, |this, cx| {
+                this.autosave_pending.remove(&path);
+                if let Some(i) = this.file_tab(&path) {
+                    this.save_tab(i, cx);
+                }
+            });
         })
         .detach();
     }
@@ -2175,10 +2209,15 @@ impl Workbench {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                if let Some(hint) = self.file_types.decoration(path).hint {
+                let decoration = self.file_types.decoration(path);
+                let decoration_autosave = decoration.autosave;
+                if let Some(shown) = decoration.name {
+                    name = shown;
+                }
+                if let Some(hint) = decoration.hint {
                     name = format!("{name} [{hint}]");
                 }
-                let modified = editor.read(cx).is_modified();
+                let modified = editor.read(cx).is_modified() && !decoration_autosave;
                 (
                     SharedString::from(name),
                     self.file_types.icon(path),
@@ -2507,6 +2546,31 @@ impl Workbench {
             .into_any_element()
     }
 
+    /// The path the status bar shows: the project and the active file's
+    /// place in it, or the file's own breadcrumb (a console), and the icon
+    /// of the last part.
+    fn status_path(&self, project: &Project, cx: &App) -> (Vec<String>, Option<IconName>) {
+        let mut parts: Vec<String> = vec![project.name().to_owned()];
+        let mut icon = None;
+        if let Some(editor) = self.active_editor()
+            && let Some(path) = editor.read(cx).path()
+        {
+            let decoration = self.file_types.decoration(path);
+            if let Some(crumbs) = decoration.breadcrumb.filter(|c| !c.is_empty()) {
+                parts = crumbs;
+                icon = Some(
+                    decoration
+                        .icon
+                        .unwrap_or_else(|| self.file_types.icon(path)),
+                );
+            } else if let Some(rel) = project.relative(path) {
+                parts.extend(rel.iter().map(|c| c.to_string_lossy().into_owned()));
+                icon = Some(self.file_types.icon(path));
+            }
+        }
+        (parts, icon)
+    }
+
     fn render_status_bar(&self, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let (height, text_size) = chrome::status_metrics(cx);
@@ -2540,15 +2604,7 @@ impl Workbench {
                     .child(notice.clone()),
             );
         } else if let Some(project) = self.project(cx) {
-            let mut parts: Vec<String> = vec![project.name().to_owned()];
-            let mut icon = None;
-            if let Some(editor) = self.active_editor()
-                && let Some(path) = editor.read(cx).path()
-                && let Some(rel) = project.relative(path)
-            {
-                parts.extend(rel.iter().map(|c| c.to_string_lossy().into_owned()));
-                icon = Some(self.file_types.icon(path));
-            }
+            let (parts, icon) = self.status_path(&project, cx);
             let last = parts.len() - 1;
             for (i, part) in parts.into_iter().enumerate() {
                 if i > 0 {

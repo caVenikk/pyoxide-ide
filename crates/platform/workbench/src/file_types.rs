@@ -34,9 +34,19 @@ pub type HighlighterFactory = Arc<dyn Fn() -> Box<dyn Highlighter> + Send + Sync
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileDecoration {
     pub icon: Option<IconName>,
+    /// Shown in tabs and the toolbar title in place of the file's name
+    /// (a console file without its extension).
+    pub name: Option<String>,
     /// Shown in brackets after the name in tabs, the project tree and the
     /// toolbar title.
     pub hint: Option<String>,
+    /// The path shown in the status bar in place of the project's path of
+    /// the file (a console: `Database Consoles > <data source> >
+    /// console [<data source>]`); the last part carries the icon.
+    pub breadcrumb: Option<Vec<String>>,
+    /// The file is saved a moment after every change, off the UI thread,
+    /// and its tab never shows the modified dot (a console file).
+    pub autosave: bool,
 }
 
 /// Asks a file type for the decoration of a file of the type; a memory
@@ -88,6 +98,9 @@ pub struct FileType {
     pub wrap_rules: &'static [WrapRule],
     /// The icon and hint of a file of this type that follow its state.
     pub decorator: Option<FileDecorator>,
+    /// A word added to the key context of the editors of this type's files
+    /// (`Editor SqlFile`).
+    pub key_context: Option<&'static str>,
 }
 
 impl std::fmt::Debug for FileType {
@@ -123,6 +136,7 @@ impl FileType {
             language_id: None,
             wrap_rules: &[],
             decorator: None,
+            key_context: None,
         }
     }
 
@@ -163,6 +177,7 @@ impl FileType {
             } else {
                 self.wrap_rules.to_vec()
             },
+            key_context: self.key_context,
             ..EditorConfig::default()
         }
     }

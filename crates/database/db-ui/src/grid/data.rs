@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use db_core::{Column, Row, ValueKind};
+use db_core::{Column, Row, Value, ValueKind};
 use gpui::SharedString;
 
 use super::format::{self, Decimal};
@@ -129,6 +129,70 @@ impl GridPage {
 
     pub fn cell(&self, row: usize, column: usize) -> Option<&CellText> {
         self.cells.get(row)?.get(column)
+    }
+
+    /// The same rows ordered by `column` (a stable sort of the rows this
+    /// page holds: the reference orders a result's fetched rows itself
+    /// when it does not sort via ORDER BY). NULL goes last ascending and
+    /// first descending.
+    pub fn sorted(&self, column: usize, dir: SortDir) -> Self {
+        let mut order: Vec<usize> = (0..self.cells.len()).collect();
+        order.sort_by(|a, b| {
+            let (x, y) = (self.rows[*a].get(column), self.rows[*b].get(column));
+            let ordering = compare_values(x, y);
+            match dir {
+                SortDir::Asc => ordering,
+                SortDir::Desc => ordering.reverse(),
+            }
+        });
+        Self {
+            columns: self.columns.clone(),
+            cells: order.iter().map(|i| self.cells[*i].clone()).collect(),
+            rows: Arc::new(order.iter().map(|i| self.rows[*i].clone()).collect()),
+            first_row: self.first_row,
+            has_more: self.has_more,
+        }
+    }
+}
+
+/// The order of two cells' values: numbers by value, dates and times by
+/// time, text without regard to case, anything else by its text; NULL
+/// after everything.
+pub fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let value = |v: Option<&Value>| match v {
+        Some(Value::Truncated { prefix, .. }) => Some(prefix.as_ref().clone()),
+        other => other.cloned(),
+    };
+    let (a, b) = (value(a), value(b));
+    match (&a, &b) {
+        (None | Some(Value::Null), None | Some(Value::Null)) => return Ordering::Equal,
+        (None | Some(Value::Null), _) => return Ordering::Greater,
+        (_, None | Some(Value::Null)) => return Ordering::Less,
+        _ => {}
+    }
+    let (a, b) = (a.unwrap_or(Value::Null), b.unwrap_or(Value::Null));
+    if let (Some(x), Some(y)) = (Decimal::of(&a), Decimal::of(&b))
+        && let Some(order) = x.compare(y)
+    {
+        return order;
+    }
+    match (&a, &b) {
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Date(x), Value::Date(y)) => x.cmp(y),
+        (Value::Time(x), Value::Time(y)) => x.cmp(y),
+        (Value::Timestamp(x), Value::Timestamp(y)) => x.cmp(y),
+        (Value::TimestampTz(x), Value::TimestampTz(y)) => x.cmp(y),
+        (Value::Bytes(x), Value::Bytes(y)) => x.cmp(y),
+        _ => {
+            let (x, y) = (
+                format::cell_text(&a).unwrap_or_default(),
+                format::cell_text(&b).unwrap_or_default(),
+            );
+            x.to_lowercase()
+                .cmp(&y.to_lowercase())
+                .then_with(|| x.cmp(&y))
+        }
     }
 }
 
@@ -280,6 +344,16 @@ pub fn sort_of(order: &str, columns: &[GridColumn]) -> Vec<(usize, SortDir)> {
     out
 }
 
+/// The sort of a result's rows after a click on a column's sort mark:
+/// ascending, then descending, then the order the rows came in.
+pub fn next_sort(current: Option<(usize, SortDir)>, column: usize) -> Option<(usize, SortDir)> {
+    match current {
+        Some((c, SortDir::Asc)) if c == column => Some((column, SortDir::Desc)),
+        Some((c, SortDir::Desc)) if c == column => None,
+        _ => Some((column, SortDir::Asc)),
+    }
+}
+
 /// The ORDER BY text after a click on a column's sort mark: ascending,
 /// then descending, then unsorted, replacing any other order.
 pub fn next_order(order: &str, columns: &[GridColumn], column: usize, quoted: String) -> String {
@@ -326,6 +400,35 @@ mod tests {
             key: KeyMark::Primary,
         }];
         GridPage::build(&columns(), rows, 0, true, &meta)
+    }
+
+    #[test]
+    fn a_page_sorts_numbers_by_value_text_by_letters_and_null_last() {
+        let p = page();
+        let ids = |p: &GridPage| -> Vec<String> {
+            (0..p.row_count())
+                .map(|r| p.cell(r, 0).unwrap().clone().unwrap().to_string())
+                .collect()
+        };
+        // 39 is after 2 by value, not before it as text.
+        assert_eq!(ids(&p.sorted(0, SortDir::Desc)), ["39", "2", "1"]);
+        assert_eq!(ids(&p.sorted(0, SortDir::Asc)), ["1", "2", "39"]);
+        // NULL last ascending, first descending; the values follow rows.
+        let kinds = p.sorted(1, SortDir::Asc);
+        assert_eq!(ids(&kinds), ["39", "1", "2"]);
+        assert_eq!(kinds.rows[2][0], Value::Int(2));
+        assert_eq!(ids(&p.sorted(1, SortDir::Desc)), ["2", "1", "39"]);
+        assert_eq!(p.sorted(1, SortDir::Asc).first_row, p.first_row);
+    }
+
+    #[test]
+    fn the_sort_cycles_ascending_descending_none() {
+        let a = next_sort(None, 1);
+        assert_eq!(a, Some((1, SortDir::Asc)));
+        let d = next_sort(a, 1);
+        assert_eq!(d, Some((1, SortDir::Desc)));
+        assert_eq!(next_sort(d, 1), None);
+        assert_eq!(next_sort(d, 0), Some((0, SortDir::Asc)));
     }
 
     #[test]
