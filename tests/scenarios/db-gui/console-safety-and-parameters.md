@@ -12,3 +12,7 @@
 
 ## Source
 observed; engine row bind-parameters
+
+## Engine differences
+- Bound values use the engine's positional form: PostgreSQL `$n`, Oracle `:n`, SQLite `?n`; the values are never part of the SQL text.
+- The unsafe-statement banner offers Execute, Execute and Suppress, and a close button that skips the run; the Warn on unsafe queries setting turns it off.

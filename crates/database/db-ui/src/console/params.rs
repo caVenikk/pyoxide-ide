@@ -180,7 +180,10 @@ mod tests {
 
     #[test]
     fn named_parameters_become_positional_with_the_values_bound() {
-        let st = statements("select * from t where id = :id and n = :id or s = :s", Dialect::Postgres);
+        let st = statements(
+            "select * from t where id = :id and n = :id or s = :s",
+            Dialect::Postgres,
+        );
         let slots = slots(&st, Dialect::Postgres);
         assert_eq!(
             slots.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(),
@@ -192,7 +195,10 @@ mod tests {
             ("s".to_owned(), "'o''k'".to_owned()),
         ]);
         let job = bind(&st[0], 0, Dialect::Postgres, &values);
-        assert_eq!(job.text, "select * from t where id = $1 and n = $1 or s = $2");
+        assert_eq!(
+            job.text,
+            "select * from t where id = $1 and n = $1 or s = $2"
+        );
         assert_eq!(job.params, [Value::Int(7), Value::Text("o'k".into())]);
         // The values are not in the text.
         assert!(!job.text.contains("o'k"));
@@ -230,7 +236,10 @@ mod tests {
 
     #[test]
     fn a_statement_without_parameters_and_ddl_are_left_alone() {
-        let st = statements("select 1; create table t (a int default :x)", Dialect::Postgres);
+        let st = statements(
+            "select 1; create table t (a int default :x)",
+            Dialect::Postgres,
+        );
         assert!(slots(&st, Dialect::Postgres).is_empty());
         let job = bind(&st[1], 1, Dialect::Postgres, &HashMap::new());
         assert_eq!(job.text, st[1].text);

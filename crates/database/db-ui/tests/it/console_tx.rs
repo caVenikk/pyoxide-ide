@@ -13,13 +13,16 @@ use gpui::TestAppContext;
 use serde_json::{Value, json};
 use workbench::test_support::keymap::Harness;
 
-use super::grid::NAME;
 use super::console::{console_state, harness, idle, open_console, output, wait_console};
+use super::grid::NAME;
 use super::*;
 
 fn server() -> FakeSource {
     let source = FakeSource::new(Backend::Postgres);
-    source.on("select 1/0", Reaction::query_error("22012", "division by zero"));
+    source.on(
+        "select 1/0",
+        Reaction::query_error("22012", "division by zero"),
+    );
     source.on("insert into", Reaction::Affected(1));
     source.on("delete from", Reaction::Affected(5));
     source.on("select 1", Reaction::column("a", &["1"]));
@@ -57,10 +60,7 @@ fn wait_decision(h: &mut Harness) -> Value {
         if !d.is_null() {
             return d;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the question"
-        );
+        assert!(started.elapsed() < Duration::from_secs(10), "the question");
         std::thread::sleep(Duration::from_millis(10));
         h.draw();
     }
@@ -217,8 +217,13 @@ fn the_isolation_level_is_set_for_the_session_and_refused_where_the_engine_has_n
     run_all(&mut h, "select 1;");
     wait_for(&mut h, "the statement", idle);
 
-    h.invoke("db.console.set-isolation", json!({ "level": "serializable" }));
-    wait_for(&mut h, "the level", |s| tx(s)["isolation"] == "serializable");
+    h.invoke(
+        "db.console.set-isolation",
+        json!({ "level": "serializable" }),
+    );
+    wait_for(&mut h, "the level", |s| {
+        tx(s)["isolation"] == "serializable"
+    });
     assert!(server.statements(Purpose::Console).contains(
         &"SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE".to_owned()
     ));
@@ -317,7 +322,10 @@ fn parameters_are_asked_remembered_and_bound_never_pasted(cx: &mut TestAppContex
     let (mut h, _cache, _consoles) = harness(cx, &root, &server);
     open_console(&mut h);
 
-    run_all(&mut h, "select * from orders where id = :id and note = :note;");
+    run_all(
+        &mut h,
+        "select * from orders where id = :id and note = :note;",
+    );
     let started = Instant::now();
     let dialog = loop {
         let d = console_state_parameters(&mut h);
@@ -334,7 +342,10 @@ fn parameters_are_asked_remembered_and_bound_never_pasted(cx: &mut TestAppContex
     assert_eq!(dialog["can_execute"], false, "{dialog}");
 
     h.invoke("db.params.set", json!({ "name": "id", "value": "7" }));
-    h.invoke("db.params.set", json!({ "name": "note", "value": "'it''s'" }));
+    h.invoke(
+        "db.params.set",
+        json!({ "name": "note", "value": "'it''s'" }),
+    );
     h.draw();
     assert_eq!(console_state_parameters(&mut h)["can_execute"], true);
     h.invoke("db.params.execute", Value::Null);

@@ -902,14 +902,12 @@ impl Render for SqlWidget {
             self._subscriptions
                 .push(cx.observe(&console, |_, _, cx| cx.notify()));
         }
-        let unsafe_banner = self
-            .console(cx)
-            .and_then(|c| {
-                c.read(cx)
-                    .unsafe_run
-                    .as_ref()
-                    .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
-            });
+        let unsafe_banner = self.console(cx).and_then(|c| {
+            c.read(cx)
+                .unsafe_run
+                .as_ref()
+                .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
+        });
         let tooltip = SharedString::from(Self::tooltip(&resolved));
         let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
         let chips: Vec<_> = self

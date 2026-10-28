@@ -193,11 +193,11 @@ impl Console {
             .schemas()
             .map(|s| (s.name(), s.info().is_system))
             .collect();
-        schemas.sort_by(|a, b| (a.1, a.0.to_lowercase()).cmp(&(b.1, b.0.to_lowercase())));
+        schemas.sort_by_key(|s| (s.1, s.0.to_lowercase()));
         let rows: Vec<MenuItem> = schemas
             .into_iter()
             .map(|(name, _)| {
-                let item = MenuItem::action(
+                MenuItem::action(
                     SharedString::from(name.to_owned()),
                     ChooseSchema {
                         schema: name.to_owned(),
@@ -208,14 +208,10 @@ impl Console {
                 } else {
                     crate::icons::SCHEMA
                 })
-                .description(format!("Makes `{name}` the current schema"));
-                item
+                .description(format!("Makes `{name}` the current schema"))
             })
             .collect();
-        let database = self
-            .database
-            .clone()
-            .unwrap_or_else(|| self.source.clone());
+        let database = self.database.clone().unwrap_or_else(|| self.source.clone());
         vec![MenuItem::submenu(database, rows).icon(crate::icons::DATABASE_NODE)]
     }
 

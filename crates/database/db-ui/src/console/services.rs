@@ -8,9 +8,10 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui::{
-    AnyWindowHandle, App, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity, EntityId, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Pixels, Styled, Subscription, WeakEntity, Window, div, prelude::*, px,
+    AnyWindowHandle, App, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity, EntityId,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
+    Render, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, prelude::*,
+    px,
 };
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip, header_tab, icon_button};
@@ -463,15 +464,10 @@ impl ServicesPanel {
         // Stop; the reference has no divider between the tabs and them.
         tabs = tabs
             .child(
-                crate::console::tx_ui::mode_button(
-                    "services-tx",
-                    "Tx",
-                    self.tx_bounds.clone(),
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.open_tx(&tx_console, window, cx)
-                })),
+                crate::console::tx_ui::mode_button("services-tx", "Tx", self.tx_bounds.clone(), cx)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.open_tx(&tx_console, window, cx)
+                    })),
             )
             .children(crate::console::tx_ui::commit_buttons(
                 "services",
