@@ -64,6 +64,7 @@ fn drop_statements_follow_the_options() {
     let both = DropOptions {
         if_exists: true,
         cascade: true,
+        qualify: Qualify::Auto,
     };
     assert_eq!(
         drop_statement(PG, customers, both).unwrap(),
@@ -96,6 +97,47 @@ fn drop_statements_follow_the_options() {
 }
 
 #[test]
+fn qualifying_follows_the_option() {
+    let model = model();
+    let customers = node(&model, "customers", NodeKind::Table);
+    let with = |qualify| DropOptions {
+        qualify,
+        ..DropOptions::default()
+    };
+    assert_eq!(
+        drop_statement(PG, customers, with(Qualify::Always)).unwrap(),
+        "drop table demo.customers;"
+    );
+    assert_eq!(
+        drop_statement(PG, customers, with(Qualify::Never)).unwrap(),
+        "drop table customers;"
+    );
+    assert_eq!(
+        drop_statement(Dialect::Sqlite, customers, with(Qualify::Auto)).unwrap(),
+        "drop table customers;",
+        "SQLite has no schema names in Auto"
+    );
+    assert_eq!(
+        drop_statement(Dialect::Sqlite, customers, with(Qualify::Always)).unwrap(),
+        "drop table demo.customers;"
+    );
+    let email = customers
+        .group(Group::Columns)
+        .nodes()
+        .find(|c| c.name() == "email")
+        .unwrap();
+    assert_eq!(
+        drop_statement(PG, email, with(Qualify::Never)).unwrap(),
+        "alter table customers drop column email;"
+    );
+    assert_eq!(
+        truncate_statement(PG, customers, Qualify::Never),
+        "truncate table customers;"
+    );
+    assert_eq!(Qualify::from_label("always"), Some(Qualify::Always));
+}
+
+#[test]
 fn rename_statements() {
     let model = model();
     let customers = node(&model, "customers", NodeKind::Table);
@@ -119,11 +161,11 @@ fn rename_statements() {
         "a key after its table"
     );
     assert_eq!(
-        truncate_statement(PG, customers),
+        truncate_statement(PG, customers, Qualify::Auto),
         "truncate table demo.customers;"
     );
     assert_eq!(
-        truncate_statement(Dialect::Sqlite, customers),
+        truncate_statement(Dialect::Sqlite, customers, Qualify::Auto),
         "delete from customers;"
     );
 }
