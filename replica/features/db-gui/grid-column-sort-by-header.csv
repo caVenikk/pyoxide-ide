@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Sort by column header click (server-side), local sort option",db-gui,must,yes,no,Pro
+"Sort by column header click (server-side), local sort option",db-gui,must,yes,partial,Pro

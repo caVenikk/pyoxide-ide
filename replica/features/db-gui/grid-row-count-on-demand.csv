@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Exact row count on demand (COUNT over the query),db-gui,should,yes,no,Pro
+Exact row count on demand (COUNT over the query),db-gui,should,yes,yes,Pro

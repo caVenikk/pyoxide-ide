@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Data grid with paging,db-gui,must,yes,no,"Pro; virtualized, renders visible cells only (feedback: grid freezes)"
+Data grid with paging,db-gui,must,yes,yes,"Pro; virtualized, renders visible cells only (feedback: grid freezes)"

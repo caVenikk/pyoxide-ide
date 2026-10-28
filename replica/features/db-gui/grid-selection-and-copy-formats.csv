@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Cell and range selection, copy as CSV, TSV, Markdown, JSON, SQL INSERT, SQL UPDATE, WHERE, HTML",db-gui,must,yes,no,Pro
+"Cell and range selection, copy as CSV, TSV, Markdown, JSON, SQL INSERT, SQL UPDATE, WHERE, HTML",db-gui,must,yes,partial,Pro

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Grid page bar: first, previous, next, last, page size, row range",db-gui,must,yes,no,Pro; engine row paginated-results
+"Grid page bar: first, previous, next, last, page size, row range",db-gui,must,yes,yes,Pro; engine row paginated-results
