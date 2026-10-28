@@ -30,8 +30,8 @@ use ui::theme::ThemeExt;
 
 use super::run::{self, Goal};
 use super::{
-    ExportBrowse, ExportCancel, ExportFormatMenu, ExportSetFormat, ExportSetOption, ExportSetPath,
-    ExportToClipboard, ExportToFile, TransferTarget,
+    ExportBrowse, ExportCancel, ExportFormatMenu, ExportSetFormat, ExportSetNullText,
+    ExportSetOption, ExportSetPath, ExportToClipboard, ExportToFile, TransferTarget,
 };
 
 const TITLE: &str = "Export Data";
@@ -51,6 +51,8 @@ pub(crate) struct ExportDialog {
     column_header: bool,
     row_header: bool,
     path: Entity<Editor>,
+    /// How NULL is written (tabular extractors).
+    null_text: Entity<Editor>,
     /// The path the dialog wrote itself; the field differing from it was
     /// edited by the user, and then the extension is left alone.
     auto_path: String,
@@ -136,7 +138,15 @@ impl ExportDialog {
             }
         });
         let focus = cx.focus_handle();
-        let subscriptions = vec![cx.observe(&path, |_, _, cx| cx.notify())];
+        let null_text = editor::field::new("", Some("empty".into()), false, window, cx);
+        let subscriptions = vec![
+            cx.observe(&path, |_, _, cx| cx.notify()),
+            cx.subscribe(&null_text, |this, _, e: &editor::EditorEvent, cx| {
+                if matches!(e, editor::EditorEvent::Edited(_)) {
+                    this.refresh_preview(cx);
+                }
+            }),
+        ];
         let mut dialog = Self {
             target,
             parent,
@@ -145,6 +155,7 @@ impl ExportDialog {
             column_header: false,
             row_header: false,
             path,
+            null_text,
             auto_path,
             preview,
             preview_job: None,
@@ -163,19 +174,20 @@ impl ExportDialog {
 
     // ---- choices -----------------------------------------------------------------
 
-    fn options(&self) -> ExportOptions {
+    fn options(&self, cx: &App) -> ExportOptions {
         let mut options = ExportOptions::new(self.format, self.target.dialect());
         options.column_header = self.column_header;
         options.row_header = self.row_header;
         options.transpose = self.transpose;
+        options.null_text = self.null_text.read(cx).text();
         options.key_columns = self.target.key_columns();
         options
     }
 
-    fn request(&self, target: ExportTarget, limit: Option<u64>) -> ExportRequest {
+    fn request(&self, target: ExportTarget, limit: Option<u64>, cx: &App) -> ExportRequest {
         ExportRequest {
             source: ExportSource::Table(self.target.query.clone()),
-            options: self.options(),
+            options: self.options(cx),
             target,
             limit,
         }
@@ -213,6 +225,13 @@ impl ExportDialog {
         cx.notify();
     }
 
+    fn set_null_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.null_text
+            .update(cx, |e, cx| e.set_text_selected(text, cx));
+        self.refresh_preview(cx);
+        cx.notify();
+    }
+
     fn set_path(&mut self, path: &str, cx: &mut Context<Self>) {
         self.path.update(cx, |e, cx| e.set_text_selected(path, cx));
         cx.notify();
@@ -225,9 +244,8 @@ impl ExportDialog {
         if let Some(job) = self.preview_job.take() {
             self.target.target.handle.cancel_job(job);
         }
-        let request = self.request(ExportTarget::Memory, Some(PREVIEW_ROWS));
+        let request = self.request(ExportTarget::Memory, Some(PREVIEW_ROWS), cx);
         self.preview_job = Some(self.target.target.handle.export(request, self.sink.clone()));
-        let _ = cx;
     }
 
     fn on_event(&mut self, event: ExportEvent, cx: &mut Context<Self>) {
@@ -284,7 +302,7 @@ impl ExportDialog {
             }
             Goal::Clipboard => ExportTarget::Memory,
         };
-        let request = self.request(target, None);
+        let request = self.request(target, None, cx);
         let transfer = self.target.clone();
         let parent = self.parent;
         self.close(window, cx);
@@ -363,6 +381,7 @@ impl ExportDialog {
             "column_header": self.column_header,
             "row_header": self.row_header,
             "path": self.path_text(cx),
+            "null_text": self.null_text.read(cx).text(),
             "preview": self.preview.read(cx).text(),
             "preview_loading": self.preview_job.is_some(),
             "preview_error": self.preview_error,
@@ -374,6 +393,27 @@ impl ExportDialog {
 
     fn label(text: &'static str, cx: &App) -> gpui::Div {
         div().text_color(cx.theme().color(UiRole::Text)).child(text)
+    }
+
+    /// The text NULL is written as (not in the reference's dialog: the
+    /// reference keeps it in the extractor's settings).
+    fn null_row(&self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let enabled = self.format.is_tabular();
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .when(!enabled, |d| d.opacity(ui::components::DISABLED_ALPHA))
+            .child(div().flex_none().child("NULL text:"))
+            .child(div().flex_1().child(editor::field::frame(
+                &self.null_text,
+                false,
+                false,
+                window,
+                cx,
+            )))
+            .into_any_element()
     }
 
     fn option(
@@ -477,6 +517,7 @@ impl Render for ExportDialog {
             .child(self.option("transpose", "Transpose", self.transpose, cx))
             .child(self.option("column-header", "Add column header", self.column_header, cx))
             .child(self.option("row-header", "Add row header", self.row_header, cx))
+            .child(self.null_row(window, cx))
             .child(Self::label("Output file:", cx))
             .child(path);
         let right = div()
@@ -519,6 +560,9 @@ impl Render for ExportDialog {
             .on_action(cx.listener(|this, a: &ExportSetOption, _, cx| {
                 this.set_option(&a.option, a.value, cx)
             }))
+            .on_action(
+                cx.listener(|this, a: &ExportSetNullText, _, cx| this.set_null_text(&a.text, cx)),
+            )
             .on_action(cx.listener(|this, a: &ExportSetPath, _, cx| this.set_path(&a.path, cx)))
             .on_action(cx.listener(|this, _: &ExportBrowse, window, cx| this.browse(window, cx)))
             .on_action(

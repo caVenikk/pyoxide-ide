@@ -36,6 +36,10 @@ ui::ui_commands! {
     ExportSetOption { option: String, value: bool } => "db.export.set-option", "Set Export Option",
         "Turns `transpose`, `column-header` or `row-header` of the Export Data dialog on or off.",
         r#"{"option": "column-header", "value": true}"#;
+    /// Set the text of NULL.
+    ExportSetNullText { text: String } => "db.export.set-null-text", "Set NULL Text",
+        "Sets the text the Export Data dialog writes for NULL in the tabular extractors (empty: nothing).",
+        r#"{"text": "\\N"}"#;
     /// Set the output file.
     ExportSetPath { path: String } => "db.export.set-path", "Set Output File",
         "Types `path` into the output file field of the Export Data dialog.",
@@ -72,6 +76,10 @@ ui::ui_commands! {
     ImportSetDelimiter { delimiter: String } => "db.import.set-delimiter", "Set Delimiter",
         "Sets the field delimiter of the Import dialog: `,`, `;`, `|` or `tab`.",
         r#"{"delimiter": ";"}"#;
+    /// Set the text of NULL.
+    ImportSetNullText { text: String } => "db.import.set-null-text", "Set NULL Text",
+        "Sets the text of a field (not quoted) that the Import dialog reads as NULL, besides an empty field (empty: none).",
+        r#"{"text": "\\N"}"#;
     /// Pair columns.
     ImportMap { column: String, source: Option<usize> } => "db.import.map", "Map Column",
         "Takes the values of table column `column` in the Import dialog from the file's column `source` (zero-based), or leaves it unfilled.",

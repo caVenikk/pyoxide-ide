@@ -204,6 +204,10 @@ fn the_export_dialog_previews_and_writes_a_file(cx: &mut TestAppContext) {
     });
     assert_eq!(s["list_open"], false, "{s}");
 
+    // The text of NULL is part of the preview too.
+    h.invoke("db.export.set-null-text", json!({"text": "\\N"}));
+    assert_eq!(transfer_state(&mut h)["state"]["null_text"], "\\N");
+
     // Back to CSV, written to a file that the dialog's end announces.
     h.invoke("db.export.set-format", json!({"format": "csv"}));
     h.invoke(
@@ -320,6 +324,17 @@ fn the_import_dialog_maps_columns_and_runs_one_transaction(cx: &mut TestAppConte
     h.invoke("db.import.set-delimiter", json!({"delimiter": "comma"}));
     wait_dialog(&mut h, "two columns", |s| {
         s["file_columns"] == json!(["id", "email"])
+    });
+
+    // A text that reads as NULL besides the empty field.
+    h.invoke("db.import.set-null-text", json!({"text": "x@e.test"}));
+    let s = wait_dialog(&mut h, "x as NULL", |s| {
+        s["preview_rows"][0] == json!(["1", null])
+    });
+    assert_eq!(s["null_text"], "x@e.test");
+    h.invoke("db.import.set-null-text", json!({"text": ""}));
+    wait_dialog(&mut h, "x as text", |s| {
+        s["preview_rows"][0] == json!(["1", "x@e.test"])
     });
 
     // A choice of the user: the second column takes the file's first.

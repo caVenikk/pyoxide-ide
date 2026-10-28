@@ -12,10 +12,11 @@ use std::path::PathBuf;
 
 use db_session::import::{self, ColumnMap, ImportFormat, Preview};
 use db_session::{Encoding, ImportRequest};
+use editor::Editor;
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, ClickEvent, Context, FocusHandle,
-    Focusable, IntoElement, PathPromptOptions, Pixels, Render, SharedString, Task, Window, canvas,
-    div, point, prelude::*, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, ClickEvent, Context, Entity,
+    FocusHandle, Focusable, IntoElement, PathPromptOptions, Pixels, Render, SharedString,
+    Subscription, Task, Window, canvas, div, point, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use themes::UiRole;
@@ -26,7 +27,7 @@ use ui::theme::ThemeExt;
 use super::run;
 use super::{
     ImportBrowse, ImportCancel, ImportMap, ImportMapMenu, ImportOk, ImportSetDelimiter,
-    ImportSetFile, ImportSetOption, TransferTarget,
+    ImportSetFile, ImportSetNullText, ImportSetOption, TransferTarget,
 };
 
 const TITLE: &str = "Import";
@@ -71,7 +72,10 @@ pub(crate) struct ImportDialog {
     list: Option<(ListKind, MenuPopup)>,
     anchors: std::rc::Rc<RefCell<HashMap<ListKind, Bounds<Pixels>>>>,
     reading: Task<()>,
+    /// The text of a field that is NULL.
+    null_text: Entity<Editor>,
     focus: FocusHandle,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Focusable for ImportDialog {
@@ -156,6 +160,17 @@ impl ImportDialog {
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus);
+        let null_text = editor::field::new("", Some("none".into()), false, window, cx);
+        let subscriptions =
+            vec![
+                cx.subscribe(&null_text, |this, field, e: &editor::EditorEvent, cx| {
+                    if matches!(e, editor::EditorEvent::Edited(_)) {
+                        let text = field.read(cx).text();
+                        this.format.null_text = (!text.is_empty()).then_some(text);
+                        this.reread(cx);
+                    }
+                }),
+            ];
         let mut dialog = Self {
             target,
             parent,
@@ -170,7 +185,9 @@ impl ImportDialog {
             list: None,
             anchors: Default::default(),
             reading: Task::ready(()),
+            null_text,
             focus,
+            _subscriptions: subscriptions,
         };
         if let Some(path) = path {
             dialog.set_file(path, cx);
@@ -264,6 +281,14 @@ impl ImportDialog {
             "inconvertible-as-null" => self.inconvertible_as_null = value,
             _ => return,
         }
+        cx.notify();
+    }
+
+    fn set_null_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.null_text
+            .update(cx, |e, cx| e.set_text_selected(text, cx));
+        self.format.null_text = (!text.is_empty()).then(|| text.to_owned());
+        self.reread(cx);
         cx.notify();
     }
 
@@ -452,6 +477,7 @@ impl ImportDialog {
             "delimiter": delimiter_id(self.format.csv.delimiter),
             "encoding": self.encoding.map(|e| e.title()),
             "header": self.format.header,
+            "null_text": self.format.null_text,
             "empty_as_null": self.format.empty_as_null,
             "inconvertible_as_null": self.inconvertible_as_null,
             "file_columns": preview.map(|p| p.header.clone()),
@@ -745,6 +771,19 @@ impl Render for ImportDialog {
                 "Delimiter:",
                 div().w(px(200.0)).child(delimiter).into_any_element(),
             ))
+            .child(row(
+                "NULL text:",
+                div()
+                    .w(px(200.0))
+                    .child(editor::field::frame(
+                        &self.null_text,
+                        false,
+                        false,
+                        window,
+                        cx,
+                    ))
+                    .into_any_element(),
+            ))
             .child(div().text_color(muted).child("Mapping"))
             .child(self.render_mapping(cx))
             .child(self.check("header", "First row is a header", self.format.header, cx))
@@ -781,6 +820,9 @@ impl Render for ImportDialog {
             .on_action(cx.listener(|this, a: &ImportSetDelimiter, _, cx| {
                 this.set_delimiter(&a.delimiter, cx)
             }))
+            .on_action(
+                cx.listener(|this, a: &ImportSetNullText, _, cx| this.set_null_text(&a.text, cx)),
+            )
             .on_action(cx.listener(|this, a: &ImportMap, _, cx| this.map(&a.column, a.source, cx)))
             .on_action(cx.listener(|this, a: &ImportMapMenu, window, cx| {
                 if let Some(i) = this.mapping.iter().position(|m| m.column == a.column) {
