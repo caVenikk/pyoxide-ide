@@ -40,9 +40,9 @@ ui::ui_commands! {
 
 /// Texts (our own).
 const WIDTH: f32 = 480.0;
-const IF_EXISTS: &str = "Add IF EXISTS";
-const CASCADE: &str = "Drop dependent objects too (CASCADE)";
-const PREVIEW: &str = "SQL";
+const IF_EXISTS: &str = "Use IF EXISTS syntax";
+const CASCADE: &str = "Use DROP CASCADE syntax";
+const PREVIEW: &str = "Preview";
 
 /// What the dialog asks.
 pub(crate) enum Ask {
@@ -54,9 +54,12 @@ pub(crate) enum Ask {
     /// for a data source, which is renamed without SQL).
     Rename {
         old: String,
-        statements: Option<Box<dyn Fn(&str) -> Vec<String>>>,
+        statements: Option<RenameStatements>,
     },
 }
+
+/// The statements for a new name.
+pub(crate) type RenameStatements = Box<dyn Fn(&str) -> Vec<String>>;
 
 /// The answer: the statements to run, and for Rename the new name.
 pub(crate) struct Answer {

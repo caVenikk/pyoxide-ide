@@ -327,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn names_match_anywhere_by_words() {
         let mut s = SpeedSearch::default();
         s.set("ord".into());

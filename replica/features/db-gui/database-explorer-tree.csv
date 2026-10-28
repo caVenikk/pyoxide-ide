@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Database explorer tree,db-gui,must,yes,partial,"Pro; tree of data source, database, schema, groups and objects from the model, header actions, keyboard and double click; filters, context menus and per-project state remain (#302)"
+Database explorer tree,db-gui,must,yes,partial,"Pro; tree of data source, database, schema, groups and objects from the model, header actions, keyboard and double click; context menus per node kind with their actions (#371); per-project state remains (#302)"
