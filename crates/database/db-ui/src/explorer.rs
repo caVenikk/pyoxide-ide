@@ -73,6 +73,9 @@ ui::ui_commands! {
     /// Refresh the selected data source's metadata.
     Refresh => "db.explorer.refresh", "Refresh",
         "Reads the metadata of the data source selected in the Database tool window again (its introspection scope) and shows it in the tree; the tree keeps the previous model until the new one is complete.";
+    /// Close the connections of the selected data source.
+    Disconnect => "db.explorer.disconnect", "Disconnect",
+        "Closes the connections of the data source selected in the Database tool window. With changes pending in a console's manual transaction it asks whether to commit them, roll them back or cancel.";
     /// Open nodes of the tree.
     Expand { path: String } => "db.explorer.expand", "Expand",
         "Opens every node along `path` in the Database tool window's tree and selects the last: the rows' texts from the data source down, joined by `/`. Opening a node reads the local model, never the database; opening a data source the first time shows its cached model, or reads it when there is none.",
@@ -201,6 +204,7 @@ pub(crate) fn init(cx: &mut App) {
         with_target(cx, move |e, _, cx| e.select_name(&name, cx))
     });
     cx.on_action(|_: &Refresh, cx| with_target(cx, |e, _, cx| e.refresh_selected(cx)));
+    cx.on_action(|_: &Disconnect, cx| with_target(cx, |e, _, cx| e.disconnect_selected(cx)));
     cx.on_action(|a: &Expand, cx| {
         let path = a.path.clone();
         with_target(cx, move |e, _, cx| e.expand_path(&path, cx))
@@ -723,6 +727,7 @@ impl Explorer {
         };
         let has_project = self.root.is_some();
         let has_source = self.selected_source().is_some();
+        let connected = self.selected_connected();
         let add_bounds = self.add_bounds.clone();
         div()
             .flex()
@@ -773,13 +778,18 @@ impl Explorer {
                     d.on_click(cx.listener(|this, _, _, cx| this.refresh_selected(cx)))
                 }),
             )
-            .child(self.toolbar_button(
-                "database-disconnect",
-                icons::DISCONNECT,
-                "Disconnect",
-                false,
-                cx,
-            ))
+            .child(
+                self.toolbar_button(
+                    "database-disconnect",
+                    icons::DISCONNECT,
+                    "Disconnect",
+                    connected,
+                    cx,
+                )
+                .when(connected, |d| {
+                    d.on_click(cx.listener(|this, _, _, cx| this.disconnect_selected(cx)))
+                }),
+            )
             .child(separator())
             .child(
                 self.toolbar_button(

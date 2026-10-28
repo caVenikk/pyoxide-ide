@@ -13,6 +13,7 @@ use gpui::TestAppContext;
 use serde_json::{Value, json};
 use workbench::test_support::keymap::Harness;
 
+use super::grid::NAME;
 use super::console::{console_state, harness, idle, open_console, output, wait_console};
 use super::*;
 
@@ -161,6 +162,47 @@ fn switching_to_auto_with_changes_pending_asks_and_the_answer_decides(cx: &mut T
             .statements(Purpose::Console)
             .contains(&"<rollback>".to_owned())
     );
+}
+
+#[gpui::test]
+fn disconnecting_with_changes_pending_asks_before_it_commits_or_rolls_back(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, root) = project();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke("db.console.set-tx-mode", json!({ "mode": "manual" }));
+    wait_for(&mut h, "manual mode", |s| tx(s)["mode"] == "manual");
+    run_all(&mut h, "insert into t values (1);");
+    wait_for(&mut h, "the insert", |s| tx(s)["pending"] == 1);
+
+    h.invoke("db.explorer.select", json!({ "name": NAME }));
+    h.invoke("db.explorer.disconnect", Value::Null);
+    let d = wait_decision(&mut h);
+    assert!(
+        d["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Disconnecting ends the transaction with 1 uncommitted change"),
+        "{d}"
+    );
+    // Nothing was done while it waited.
+    assert_eq!(tx(&console_state(&mut h))["pending"], 1);
+    h.invoke("db.tx-decision.commit", Value::Null);
+    let started = Instant::now();
+    while !server
+        .statements(Purpose::Console)
+        .contains(&"<commit>".to_owned())
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            server.statements(Purpose::Console)
+        );
+        std::thread::sleep(Duration::from_millis(10));
+        h.draw();
+    }
 }
 
 #[gpui::test]
