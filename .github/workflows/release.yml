@@ -1,0 +1,160 @@
+name: Release
+# A tag v<version> builds the release archives of every platform and creates a
+# DRAFT GitHub Release with them (docs/release.md). The version in the tag must
+# be the workspace version. Run by hand (workflow_dispatch), it builds and
+# uploads the archives as workflow artifacts only: no release, a way to try the
+# packaging without a tag.
+#
+# Only the workflow's GITHUB_TOKEN is used. Binaries are not notarized and not
+# signed with a paid certificate (docs/code-signing.md, docs/release.md).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The gate: the tag is the workspace version, the commit passed CI on all
+  # three platforms, and the repository checks (feature files, layers, brand
+  # sweep, notices, packaging names) pass.
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag is the workspace version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(python3 scripts/package.py names | sed -n 's/^VERSION=//p')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but the workspace version is $version"
+            exit 1
+          fi
+      - name: CI is green on this commit
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The matrix jobs of ci.yml report as `check (<os>)`; they must exist
+          # and have succeeded (a skipped draft run reports success too, but a
+          # commit on main always runs in full).
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" --paginate \
+            --jq '.check_runs[] | select(.name | startswith("check (")) | "\(.name)=\(.conclusion)"')
+          echo "$runs"
+          for os in ubuntu-latest macos-latest windows-latest; do
+            if ! echo "$runs" | grep -qx "check ($os)=success"; then
+              echo "::error::CI job 'check ($os)' has not succeeded on $GITHUB_SHA; tag a commit of main that passed CI"
+              exit 1
+            fi
+          done
+      - run: python3 scripts/progress.py --check-data
+      - run: python3 scripts/check-layers.py
+      # The product name only in the brand module (docs/rebrand.md).
+      - run: python3 scripts/check-brand.py
+      - run: python3 scripts/notice.py --check
+      - run: python3 scripts/package.py check
+      # What the maintainer judges "MVP done" by: the feature report.
+      - run: python3 scripts/progress.py >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: macos-aarch64, os: macos-latest, py: python3 }
+          - { target: macos-x86_64, os: macos-15-intel, py: python3 }
+          - { target: linux-x86_64, os: ubuntu-22.04, py: python3 }
+          - { target: linux-aarch64, os: ubuntu-22.04-arm, py: python3 }
+          - { target: windows-x86_64, os: windows-latest, py: python }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      # GPUI links X11, Wayland, xkbcommon and fontconfig on Linux, as in ci.yml.
+      - name: Linux packages for GPUI
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
+      - uses: dtolnay/rust-toolchain@stable
+      # Restores the cache of main; a release run never saves one.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: "false"
+      - name: Build
+        run: cargo build --release --locked -p pyoxide-ide -p pyoxide-cli -p db-cli
+      # The archive of this platform, in dist/; the debugger helper is fetched
+      # and checked by scripts/fetch-debugpy.py, the Windows ConPTY files by
+      # scripts/fetch-conpty.py. Binaries on macOS are signed ad hoc.
+      - name: Package
+        run: ${{ matrix.py }} scripts/package.py build --out dist
+      # Unpacks the archive elsewhere, checks its files and signature and
+      # starts the command-line program.
+      - name: Try the archive
+        run: |
+          archive=$(ls dist/*.tar.gz dist/*.zip 2>/dev/null | head -n 1)
+          ${{ matrix.py }} scripts/package.py verify "$archive"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    # Only for a tag; a manual run stops after the build.
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums, formula, notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          cat *.sha256 | sort -k 2 > SHA256SUMS
+          rm ./*.sha256
+          cp ../packaging/install.sh install.sh
+          cd ..
+          cat dist/SHA256SUMS
+          python3 scripts/package.py formula --version "$version" --sums dist/SHA256SUMS \
+            --out "dist/$(python3 scripts/package.py names | sed -n 's/^SLUG=//p').rb"
+          python3 scripts/package.py notes --version "$version" --out notes.md
+          # The list of changes since the last release, below the install section.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" --jq .body >> notes.md
+          ls -l dist
+      - name: Draft release
+        run: |
+          flags=(--draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md)
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # A re-run: replace the assets of the release that exists.
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* "${flags[@]}"
+          fi
