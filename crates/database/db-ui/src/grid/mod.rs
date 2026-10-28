@@ -22,6 +22,7 @@ mod body;
 pub mod data;
 pub mod format;
 mod render;
+mod sql_highlight;
 mod status;
 
 use std::sync::Arc;
@@ -516,6 +517,15 @@ impl TableGrid {
         });
         let filter = editor::field::new("", None, false, window, cx);
         let order = editor::field::new("", None, false, window, cx);
+        let dialect = db_session::syntax_dialect(target.backend.dialect());
+        for field in [&filter, &order] {
+            field.update(cx, |e, cx| {
+                e.set_highlighter(
+                    Some(Box::new(sql_highlight::SqlHighlighter::new(dialect))),
+                    cx,
+                )
+            });
+        }
         let focus = cx.focus_handle();
         let outer = cx.focus_handle();
         let main = window.window_handle();

@@ -12,6 +12,7 @@ use themes::{Metric, TextRole, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip, icon_button};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
+use ui::pointer::PointerExt;
 use ui::theme::ThemeExt;
 
 use super::body::{self, CELL_PAD, Hit};
@@ -65,7 +66,13 @@ impl TableGrid {
             .when(!on, |d| d.opacity(DISABLED_ALPHA))
     }
 
-    fn text_tool(id: &'static str, label: &'static str, tip: &'static str, cx: &App) -> AnyElement {
+    fn text_tool(
+        id: &'static str,
+        label: &'static str,
+        tip: &'static str,
+        chevron: bool,
+        cx: &App,
+    ) -> AnyElement {
         let theme = cx.theme();
         div()
             .id(id)
@@ -80,6 +87,9 @@ impl TableGrid {
             .opacity(DISABLED_ALPHA)
             .tooltip(Tooltip::text(tip, None))
             .child(label)
+            .when(chevron, |d| {
+                d.child(Icon::new(IconName::CHEVRON_DOWN).size(px(10.0)))
+            })
             .into_any_element()
     }
 
@@ -156,10 +166,11 @@ impl TableGrid {
                 "grid-tx",
                 "Tx: Auto",
                 "Transaction Mode",
+                true,
                 cx,
             ))
             .child(Self::separator(cx))
-            .child(Self::text_tool("grid-ddl", "DDL", "Go to DDL", cx))
+            .child(Self::text_tool("grid-ddl", "DDL", "Go to DDL", false, cx))
             .child(Self::tool(
                 "grid-search",
                 IconName::SEARCH_SMALL,
@@ -172,6 +183,7 @@ impl TableGrid {
                 "grid-extractor",
                 "CSV",
                 "Data Extractor",
+                true,
                 cx,
             ))
             .child(Self::separator(cx))
@@ -292,7 +304,7 @@ impl TableGrid {
             for c in &page.columns {
                 // The content, or the header: name, icon, gaps, sort mark.
                 let header = char_width * c.name.chars().count() as f32
-                    + px(2.0 * CELL_PAD + 2.0 + HEADER_ICON + SORT_MARK + 2.0 + 8.0);
+                    + px(2.0 * CELL_PAD + 2.0 + HEADER_ICON + 2.0 * SORT_MARK + 2.0 + 24.0);
                 let auto = (char_width * c.chars as f32 + px(2.0 * CELL_PAD + 2.0)).max(header);
                 let w = self
                     .widths
@@ -389,7 +401,6 @@ impl TableGrid {
                     .child(Icon::new(icon).size(px(HEADER_ICON)))
                     .child(
                         div()
-                            .flex_1()
                             .min_w(px(0.0))
                             .overflow_hidden()
                             .whitespace_nowrap()
@@ -397,6 +408,13 @@ impl TableGrid {
                             .font_weight(FontWeight::BOLD)
                             .child(c.name.clone()),
                     )
+                    .child(
+                        div()
+                            .flex_none()
+                            .opacity(0.8)
+                            .child(Icon::new(IconName::FILTER).size(px(SORT_MARK))),
+                    )
+                    .child(div().flex_1())
                     .child(
                         div()
                             .id(("grid-sort", i))
@@ -422,7 +440,7 @@ impl TableGrid {
                             .right(px(-RESIZE_GRIP / 2.0))
                             .w(px(RESIZE_GRIP))
                             .h_full()
-                            .cursor_col_resize()
+                            .pointer(gpui::CursorStyle::ResizeColumn)
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |g, e: &MouseDownEvent, _, cx| {

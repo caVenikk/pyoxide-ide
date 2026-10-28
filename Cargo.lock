@@ -1924,6 +1924,7 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "sql-syntax",
  "tempfile",
  "text",
  "themes",
