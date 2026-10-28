@@ -10,11 +10,14 @@ use workbench::file_types::FileType;
 
 pub mod highlight;
 pub mod hub;
+pub mod intel;
+mod models;
 pub mod settings;
 pub mod widget;
 
 pub use highlight::{SqlHighlighter, SqlLexer};
 pub use hub::{Hub, Kind, Source};
+pub use intel::{HubScope, SqlIntelProvider};
 pub use widget::{dialect_title, is_sql_file};
 
 /// The language id the SQL language services serve.
@@ -35,5 +38,21 @@ pub fn file_type(hub: Arc<Hub>) -> FileType {
         decorator: Some(Arc::new(move |path| hub.decoration(path))),
         key_context: Some(KEY_CONTEXT),
         ..FileType::plain("SQL", &["sql"], IconName("fileTypes/sql")).with_comment("-- ")
+    }
+}
+
+/// A data source's model was loaded or refreshed in the Database tool
+/// window: the SQL files attached to it resolve through it.
+pub(crate) fn publish_model(
+    cx: &gpui::App,
+    root: &std::path::Path,
+    source: &str,
+    model: &Arc<db_model::Model>,
+) {
+    if model.is_empty() {
+        return;
+    }
+    if let Some(global) = cx.try_global::<widget::SqlGlobal>() {
+        global.0.publish_model(root, source, model.clone());
     }
 }
