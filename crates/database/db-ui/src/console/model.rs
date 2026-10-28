@@ -28,7 +28,8 @@ use workbench::Workbench;
 
 use ui::menu::MenuItem;
 
-use super::plan::{self, Choice, Plan};
+use super::execution::{self, Choice, Plan};
+use super::plan::view::PlanView;
 use crate::grid::{GridTarget, TableGrid};
 use crate::query_settings::{self, Variant};
 use crate::sql::Hub;
@@ -38,6 +39,8 @@ pub(crate) mod safety;
 mod tx;
 
 pub(crate) use tx::parse_mode;
+mod explain;
+pub(crate) use explain::RunMode;
 
 /// What opens a console: the data source of the Database tool window.
 #[derive(Clone)]
@@ -48,6 +51,8 @@ pub(crate) struct ConsoleTarget {
     /// prompt of the output log and the chip show it).
     pub database: Option<String>,
     pub handle: DataSourceHandle,
+    /// The data source's connections refuse writes.
+    pub read_only: bool,
 }
 
 /// What the console is of: a console file of the data source (bound to it
@@ -73,7 +78,9 @@ pub(crate) struct ResultTab {
     pub pinned: bool,
     /// The user gave the tab its name: it is kept, never reused.
     pub renamed: bool,
-    pub grid: Entity<TableGrid>,
+    pub grid: Option<Entity<TableGrid>>,
+    /// The tab is a query plan, not a grid.
+    pub plan: Option<Entity<PlanView>>,
     /// The session's result the grid shows (to route its pages).
     pub result: Option<ResultId>,
 }
@@ -121,6 +128,7 @@ pub(crate) struct Console {
     pub backend: Backend,
     database: Option<String>,
     handle: DataSourceHandle,
+    read_only: bool,
     pub session: Session,
     pub window: AnyWindowHandle,
     pub workbench: WeakEntity<Workbench>,
@@ -149,6 +157,8 @@ pub(crate) struct Console {
     /// source and not opened again since.
     pub disconnected: bool,
     current: Option<Current>,
+    /// The explain the running job is.
+    explain: Option<explain::Run>,
     mark: Option<Mark>,
     /// The output log wraps long lines.
     pub soft_wrap: bool,
@@ -181,6 +191,7 @@ impl Console {
             backend: target.backend,
             database: target.database,
             handle: target.handle,
+            read_only: target.read_only,
             session,
             window: window.window_handle(),
             workbench,
@@ -200,6 +211,7 @@ impl Console {
             last_ms: None,
             disconnected: false,
             current: None,
+            explain: None,
             mark: None,
             soft_wrap: false,
             lines: Vec::new(),
@@ -299,6 +311,11 @@ impl Console {
             self.print(ContentKind::Error, "A statement is still running", cx);
             return;
         }
+        self.start(statements, cx);
+    }
+
+    /// Starts the job of `statements`.
+    fn start(&mut self, statements: Vec<JobStatement>, cx: &mut Context<Self>) {
         let job = Job::statements(statements).on_error(ErrorPolicy::Stop);
         self.running = Some(self.session.execute(job));
         self.pane = Pane::Output;
@@ -327,7 +344,7 @@ impl Console {
             (text.clone(), caret, range, editor.caret_bounds())
         };
         self.new_tab_run = options.new_tab;
-        match plan::plan(&text, caret, selection, self.dialect(), &options) {
+        match execution::plan(&text, caret, selection, self.dialect(), &options) {
             Plan::Nothing => {}
             Plan::Run(statements) => self.submit(statements, window, cx),
             Plan::Ask(choices) => {
@@ -447,14 +464,23 @@ impl Console {
                 rows,
                 has_more,
             } => {
-                if let Some(tab) = self.tabs.iter().find(|t| t.result == Some(result)) {
-                    tab.grid
-                        .update(cx, |g, cx| g.show_page(rows, first_row, has_more, cx));
+                if let Some(grid) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.result == Some(result))
+                    .and_then(|t| t.grid.as_ref())
+                {
+                    grid.update(cx, |g, cx| g.show_page(rows, first_row, has_more, cx));
                 }
             }
             SessionEvent::ResultClosed { result } => {
-                if let Some(tab) = self.tabs.iter().find(|t| t.result == Some(result)) {
-                    tab.grid.update(cx, |g, cx| g.result_closed(cx));
+                if let Some(grid) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.result == Some(result))
+                    .and_then(|t| t.grid.as_ref())
+                {
+                    grid.update(cx, |g, cx| g.result_closed(cx));
                 }
             }
             SessionEvent::CommandFailed { command, error } => {
@@ -493,6 +519,9 @@ impl Console {
                 has_more,
                 ..
             } => {
+                if self.show_plan(&rows, window, cx) {
+                    return;
+                }
                 if let Some(current) = self.current.as_mut() {
                     current.rows = Some(rows.len());
                 }
@@ -514,6 +543,7 @@ impl Console {
             JobEvent::Done { outcome } => {
                 self.running = None;
                 self.current = None;
+                self.explain = None;
                 if outcome == JobOutcome::Cancelled {
                     self.clear_mark(cx);
                     self.print(ContentKind::System, "Cancelled", cx);
@@ -703,13 +733,16 @@ impl Console {
             title: title.into(),
             pinned: false,
             renamed: false,
-            grid,
+            grid: Some(grid),
+            plan: None,
             result: Some(result),
         };
         let reuse = if self.new_tab_run {
             None
         } else {
-            self.tabs.iter().position(|t| !t.pinned && !t.renamed)
+            self.tabs
+                .iter()
+                .position(|t| t.grid.is_some() && !t.pinned && !t.renamed)
         };
         let index = match reuse {
             Some(ix) => {
@@ -766,7 +799,8 @@ impl Console {
             "tabs": self.tabs.iter().map(|t| json!({
                 "title": t.title.to_string(),
                 "pinned": t.pinned,
-                "grid": t.grid.read(cx).state_json(cx),
+                "grid": t.grid.as_ref().map(|g| g.read(cx).state_json(cx)),
+                "plan": t.plan.as_ref().map(|p| p.read(cx).state_json(cx)),
             })).collect::<Vec<_>>(),
         })
     }
