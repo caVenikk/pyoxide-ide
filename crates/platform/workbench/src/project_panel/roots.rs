@@ -168,10 +168,11 @@ impl ProjectPanel {
     /// kind of root it is, the project root also its location.
     pub(super) fn row_text(&self, node: &Node) -> RowText {
         if !Self::is_content_root(node) {
-            return RowText {
-                bold: false,
-                hint: None,
-            };
+            let hint = (!node.entry.is_dir())
+                .then(|| self.file_types.decoration(&node.entry.path).hint)
+                .flatten()
+                .map(|h| format!("[{h}]"));
+            return RowText { bold: false, hint };
         }
         let mut hint = self
             .root_kind(&node.entry.path)

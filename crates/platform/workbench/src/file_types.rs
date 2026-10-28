@@ -27,6 +27,22 @@ use ui::icons::IconName;
 /// Creates the highlighter of a file type for a new editor.
 pub type HighlighterFactory = Arc<dyn Fn() -> Box<dyn Highlighter> + Send + Sync>;
 
+/// What a type's decorator says about one file: an icon in place of the
+/// type's and a hint after the file's name (the data source a query file is
+/// attached to). It follows state that changes while the file stays the same,
+/// so it is asked again whenever the file is drawn.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileDecoration {
+    pub icon: Option<IconName>,
+    /// Shown in brackets after the name in tabs, the project tree and the
+    /// toolbar title.
+    pub hint: Option<String>,
+}
+
+/// Asks a file type for the decoration of a file of the type; a memory
+/// lookup, as it runs for every row drawn.
+pub type FileDecorator = Arc<dyn Fn(&Path) -> FileDecoration + Send + Sync>;
+
 /// The type of text files, also the type of a file no association names
 /// whose first bytes are text.
 pub const TEXT: &str = "Text";
@@ -70,6 +86,8 @@ pub struct FileType {
     /// Where a soft-wrapped line may wrap when no space is near (the
     /// language's line wrap strategy); empty for the rules of any text.
     pub wrap_rules: &'static [WrapRule],
+    /// The icon and hint of a file of this type that follow its state.
+    pub decorator: Option<FileDecorator>,
 }
 
 impl std::fmt::Debug for FileType {
@@ -104,6 +122,7 @@ impl FileType {
             highlighter: None,
             language_id: None,
             wrap_rules: &[],
+            decorator: None,
         }
     }
 
@@ -705,6 +724,13 @@ impl FileTypes {
     pub fn icon(&self, path: &Path) -> IconName {
         match self.for_path(path) {
             Some(t) => {
+                if let Some(icon) = t
+                    .decorator
+                    .as_ref()
+                    .and_then(|decorate| decorate(path).icon)
+                {
+                    return icon;
+                }
                 let name = file_name(path);
                 self.inner
                     .icon_rules
@@ -715,6 +741,15 @@ impl FileTypes {
             None if self.detected(path) == Some(Detected::Binary) => IconName::FILE_UNKNOWN,
             None => IconName::FILE_TEXT,
         }
+    }
+
+    /// The icon and hint the file's type gives it from the file's state
+    /// (empty for a type without a decorator).
+    pub fn decoration(&self, path: &Path) -> FileDecoration {
+        self.for_path(path)
+            .and_then(|t| t.decorator.as_ref())
+            .map(|decorate| decorate(path))
+            .unwrap_or_default()
     }
 
     /// What the first bytes of a file said, if they were read.

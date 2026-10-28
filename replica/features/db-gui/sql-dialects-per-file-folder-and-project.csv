@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"SQL dialect per file, folder and project, changed from the status bar",db-gui,should,yes,partial,"Pro; widget and mappings done (#321); the SQL Dialects settings page follows"
+"SQL dialect per file, folder and project, changed from the editor toolbar",db-gui,should,yes,partial,"Pro; toolbar chips and mappings done (#321); the SQL Dialects settings page follows"

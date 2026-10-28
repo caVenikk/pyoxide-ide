@@ -1,6 +1,6 @@
 //! The SQL editor glue: a `.sql` file is coloured by the SQL highlighter,
-//! the status bar widget shows its dialect and scope, and a choice in it
-//! is a mapping that is kept, reaches the open editor and survives a
+//! the toolbar above its editor shows its dialect and scope, and a choice
+//! in it is a mapping that is kept, reaches the open editor and survives a
 //! restart.
 
 use std::time::{Duration, Instant};
@@ -77,11 +77,13 @@ fn project_with_files() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[gpui::test]
-fn a_sql_file_is_coloured_and_the_widget_shows_generic_sql(cx: &mut TestAppContext) {
+fn a_sql_file_is_coloured_and_the_toolbar_shows_generic_sql(cx: &mut TestAppContext) {
     let (_dir, root) = project_with_files();
     let mut h = open_sql(cx, &root, "scratch.sql");
     let s = wait_for(&mut h, "the widget", |s| s["visible"] == true);
     assert_eq!(s["text"], "Generic SQL", "{s}");
+    assert_eq!(s["banner"], true, "no dialect yet: {s}");
+    assert_eq!(s["chips"], json!(["Generic SQL", "<data source>"]));
     assert_eq!(s["dialect-origin"]["kind"], "none");
     assert!(s["data-source"].is_null(), "{s}");
     assert_eq!(s["sources"], json!(["local"]));
@@ -118,7 +120,7 @@ fn a_sql_file_is_coloured_and_the_widget_shows_generic_sql(cx: &mut TestAppConte
 }
 
 #[gpui::test]
-fn the_widget_is_hidden_for_other_files(cx: &mut TestAppContext) {
+fn the_toolbar_is_hidden_for_other_files(cx: &mut TestAppContext) {
     let (_dir, root) = project_with_files();
     std::fs::write(root.join("notes.txt"), "x\n").unwrap();
     let mut h = open_sql(cx, &root, "notes.txt");
@@ -182,7 +184,10 @@ fn attaching_a_data_source_gives_the_dialect_and_a_shared_mapping_goes_to_the_pr
         s["dialect-origin"],
         json!({"kind": "data-source", "name": "local"})
     );
-    assert_eq!(s["data-source-text"], "local.public");
+    assert_eq!(s["schema-text"], "pyoxide.public");
+    assert_eq!(s["data-source-text"], "local");
+    assert_eq!(s["chips"], json!(["pyoxide.public", "local"]));
+    assert_eq!(s["banner"], false);
 
     h.invoke("sql.attach-data-source", json!({}));
     let s = wait_for(&mut h, "the detach", |s| s["data-source"].is_null());
@@ -244,4 +249,61 @@ fn a_new_dialect_colours_the_open_editor_again(cx: &mut TestAppContext) {
         std::thread::sleep(Duration::from_millis(10));
         h.draw();
     }
+}
+
+#[gpui::test]
+fn an_attached_file_takes_the_data_source_icon_and_name(cx: &mut TestAppContext) {
+    let (_dir, root) = project_with_files();
+    let mut h = open_sql(cx, &root, "scratch.sql");
+    wait_for(&mut h, "the widget", |s| s["visible"] == true);
+    let row = |s: &Value| {
+        s["tree"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["path"] == "scratch.sql")
+            .cloned()
+            .unwrap_or_else(|| panic!("scratch.sql in {s}"))
+    };
+    let plain = h.state();
+    assert_eq!(row(&plain)["icon"], "fileTypes/sql");
+    assert!(row(&plain)["roots"]["hint"].is_null());
+    assert!(plain["tabs"][0]["hint"].is_null());
+    assert_eq!(
+        plain["title_path"],
+        json!(format!(
+            "scratch.sql [{}]",
+            root.join("scratch.sql").display()
+        ))
+    );
+
+    h.invoke(
+        "sql.attach-data-source",
+        json!({ "name": "local", "schema": "public" }),
+    );
+    wait_for(&mut h, "the attachment", |s| s["data-source"] == "local");
+    h.draw();
+    let attached = h.state();
+    assert_eq!(row(&attached)["icon"], "db/postgres");
+    assert_eq!(row(&attached)["roots"]["hint"], "[local]");
+    assert_eq!(attached["tabs"][0]["icon"], "db/postgres");
+    assert_eq!(attached["tabs"][0]["hint"], "local");
+    assert_eq!(attached["title_path"], "scratch.sql [local]");
+
+    h.invoke("sql.attach-data-source", json!({}));
+    wait_for(&mut h, "the detach", |s| s["data-source"].is_null());
+    h.draw();
+    assert_eq!(row(&h.state())["icon"], "fileTypes/sql");
+}
+
+#[gpui::test]
+fn a_dialect_removes_the_banner(cx: &mut TestAppContext) {
+    let (_dir, root) = project_with_files();
+    let mut h = open_sql(cx, &root, "scratch.sql");
+    let s = wait_for(&mut h, "the widget", |s| s["visible"] == true);
+    assert_eq!(s["banner"], true);
+    h.invoke("sql.set-dialect", json!({ "dialect": "postgres" }));
+    let s = wait_for(&mut h, "the mapping", |s| s["dialect"] == "postgres");
+    assert_eq!(s["banner"], false);
+    assert_eq!(s["chips"], json!(["PostgreSQL", "<data source>"]));
 }

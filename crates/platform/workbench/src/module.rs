@@ -9,7 +9,7 @@ use code_intel_ui::CodeIntelHook;
 use gpui::App;
 use ui::icons::IconSvg;
 
-use crate::app::{Product, StatusWidget};
+use crate::app::{EditorHeader, Product, StatusWidget};
 use crate::file_types::{FileAssociation, FileType};
 use crate::keymap::KeymapFiles;
 use crate::tool_windows::ToolWindowHook;
@@ -62,6 +62,9 @@ pub struct Module {
     pub settings_pages: Vec<settings_ui::PageSpec>,
     /// The module's widgets in the status bar, after the product's.
     pub status_widgets: Vec<StatusWidget>,
+    /// The module's views above the editor of a file tab, after the
+    /// product's.
+    pub editor_headers: Vec<EditorHeader>,
     /// Registers the module's commands, tool windows and globals; runs
     /// after the product's.
     pub init: Option<Init>,
@@ -90,6 +93,7 @@ impl Product {
         }
         self.settings_pages.extend(module.settings_pages);
         self.status_widgets.extend(module.status_widgets);
+        self.editor_headers.extend(module.editor_headers);
         self.init.extend(module.init);
         self.keymaps.extend(module.keymaps);
         self.code_intel.extend(module.code_intel);

@@ -186,7 +186,8 @@ pub fn module(config: DbUiConfig) -> Module {
         name: "database",
         icons: ICONS,
         file_types: vec![sql::file_type(hub)],
-        status_widgets: vec![sql::widget::status_widget(), grid::status_widget()],
+        status_widgets: vec![grid::status_widget()],
+        editor_headers: vec![sql::widget::editor_header()],
         init: Some(Init::new(move |cx| {
             cx.set_global(Store(store.clone()));
             sql::widget::init(cx, init_hub.clone());

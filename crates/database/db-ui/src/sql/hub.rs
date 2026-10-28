@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use sql_syntax::Dialect;
+use workbench::FileDecoration;
 
 use super::settings::{self, Origin, Resolved, SqlSettings};
 use crate::store::DataSourceStore;
@@ -24,21 +25,32 @@ pub enum Kind {
     Personal,
 }
 
+/// A data source as the SQL glue knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    pub name: String,
+    pub dialect: Dialect,
+    /// The database (service, SID or file) the source points at, for the
+    /// chip of the query file toolbar.
+    pub database: Option<String>,
+}
+
 /// One project's SQL state.
 #[derive(Debug, Clone, Default)]
 pub struct Project {
     pub shared: SqlSettings,
     pub personal: SqlSettings,
     /// The project's data sources and their dialects, in their order.
-    pub sources: Vec<(String, Dialect)>,
+    pub sources: Vec<Source>,
 }
 
 impl Project {
+    pub fn source(&self, name: &str) -> Option<&Source> {
+        self.sources.iter().find(|s| s.name == name)
+    }
+
     pub fn source_dialect(&self, name: &str) -> Option<Dialect> {
-        self.sources
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, d)| *d)
+        self.source(name).map(|s| s.dialect)
     }
 
     fn resolve(&self, relative: Option<&str>) -> Resolved {
@@ -118,12 +130,16 @@ impl Hub {
         }
     }
 
-    fn read_sources(&self, root: &Path) -> Vec<(String, Dialect)> {
+    fn read_sources(&self, root: &Path) -> Vec<Source> {
         self.store
             .load(root)
             .unwrap_or_default()
             .into_iter()
-            .map(|s| (s.name, syntax_dialect(s.profile.dialect())))
+            .map(|s| Source {
+                dialect: syntax_dialect(s.profile.dialect()),
+                database: s.profile.database_name().map(str::to_owned),
+                name: s.name,
+            })
             .collect()
     }
 
@@ -134,7 +150,7 @@ impl Hub {
     }
 
     /// The project's data sources changed (the Data Sources dialog saved).
-    pub fn set_sources(&self, root: &Path, sources: Vec<(String, Dialect)>) {
+    pub fn set_sources(&self, root: &Path, sources: Vec<Source>) {
         if let Some(p) = self.write().get_mut(root) {
             p.sources = sources;
         }
@@ -142,7 +158,7 @@ impl Hub {
     }
 
     /// The data sources of the project, read from the store (blocking).
-    pub fn load_sources(&self, root: &Path) -> Vec<(String, Dialect)> {
+    pub fn load_sources(&self, root: &Path) -> Vec<Source> {
         self.read_sources(root)
     }
 
@@ -150,7 +166,7 @@ impl Hub {
     pub fn source_names(&self, root: &Path) -> Vec<String> {
         self.read()
             .get(root)
-            .map(|p| p.sources.iter().map(|(n, _)| n.clone()).collect())
+            .map(|p| p.sources.iter().map(|s| s.name.clone()).collect())
             .unwrap_or_default()
     }
 
@@ -175,6 +191,36 @@ impl Hub {
         };
         let relative = settings::relative(root, file);
         projects[root].resolve(relative.as_deref())
+    }
+
+    /// A data source of the project the file belongs to, from memory.
+    pub fn source_of(&self, file: &Path, name: &str) -> Option<Source> {
+        let projects = self.read();
+        let root = projects
+            .keys()
+            .filter(|r| file.starts_with(r))
+            .max_by_key(|r| r.components().count())?;
+        projects[root].source(name).cloned()
+    }
+
+    /// The icon and hint of a file in the editor, project tree and
+    /// toolbar title: the icon of the data source the file is attached to
+    /// and its name (nothing for a file that is not attached).
+    pub fn decoration(&self, file: &Path) -> FileDecoration {
+        let resolved = self.resolve(file);
+        let Some(name) = resolved.data_source else {
+            return FileDecoration::default();
+        };
+        let icon = match self.source_of(file, &name).map(|s| s.dialect) {
+            Some(Dialect::Postgres) => crate::icons::POSTGRES,
+            Some(Dialect::Oracle) => crate::icons::ORACLE,
+            Some(Dialect::Sqlite) => crate::icons::SQLITE,
+            _ => crate::icons::DATA_SOURCE,
+        };
+        FileDecoration {
+            icon: Some(icon),
+            hint: Some(name),
+        }
     }
 
     pub fn dialect(&self, file: &Path) -> Dialect {

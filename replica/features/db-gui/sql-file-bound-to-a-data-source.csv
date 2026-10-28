@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-A .sql file of the project attached to a data source and schema,db-gui,should,yes,partial,"Pro; attach and detach from the status bar widget (#321); the editor toolbar chips come with the console"
+A .sql file of the project attached to a data source and schema,db-gui,should,yes,partial,"Pro; attach and detach from the editor toolbar chips, data source icon and name in the tab and tree (#321); the run controls of the toolbar come with the console"

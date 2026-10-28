@@ -69,6 +69,25 @@ impl std::fmt::Debug for StatusWidget {
     }
 }
 
+/// A product's view above the editor of the active file tab, between the
+/// tab strip and the text (a banner, the toolbar of a kind of file).
+/// `create` runs once per main window, as [`StatusWidget`]'s does; the view
+/// draws nothing for a file it has no header for.
+#[derive(Clone)]
+pub struct EditorHeader {
+    /// The header's id.
+    pub id: &'static str,
+    pub create: CreateStatusWidget,
+}
+
+impl std::fmt::Debug for EditorHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditorHeader")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a product tells the workbench about itself, with the modules it
 /// includes ([`Product::with_module`]).
 #[derive(Debug, Clone, Default)]
@@ -92,6 +111,8 @@ pub struct Product {
     /// The product's widgets in the status bar, in order, right of the
     /// platform's widgets.
     pub status_widgets: Vec<StatusWidget>,
+    /// The product's views above the editor of a file tab, in order.
+    pub editor_headers: Vec<EditorHeader>,
     /// File masks Find in Files offers before any was used, the first one
     /// shown in its mask field.
     pub find_file_masks: Vec<&'static str>,
@@ -399,6 +420,7 @@ pub fn open_main_window_with(
         });
         // The product's status bar widgets get the finished workbench.
         Workbench::create_status_widgets(&workbench, &product, window, cx);
+        Workbench::create_editor_headers(&workbench, &product, window, cx);
         Workbench::create_module_tool_windows(&workbench, &product, window, cx);
         // Closing the window with changes not applied in its Settings
         // window asks first.

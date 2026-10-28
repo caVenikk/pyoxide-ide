@@ -278,6 +278,8 @@ pub struct Workbench {
     run_window: Entity<RunToolWindow>,
     /// The product's status bar widgets.
     status_widgets: Vec<AnyView>,
+    /// The product's views above the editor of a file tab.
+    editor_headers: Vec<AnyView>,
     /// The active file last reported with [`WorkbenchEvent::ActiveFileChanged`].
     reported_active_file: Option<PathBuf>,
     run_settings: run_actions::RunSettings,
@@ -490,6 +492,7 @@ impl Workbench {
             recently_changed: Vec::new(),
             run_window,
             status_widgets: Vec::new(),
+            editor_headers: Vec::new(),
             reported_active_file: None,
             run_settings: run_actions::RunSettings::default(),
             run_menu: None,
@@ -633,6 +636,26 @@ impl Workbench {
         });
     }
 
+    /// Creates the product's views above the editor (once, after the
+    /// workbench entity exists).
+    pub(crate) fn create_editor_headers(
+        this: &Entity<Self>,
+        product: &crate::app::Product,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let weak = this.downgrade();
+        let views: Vec<AnyView> = product
+            .editor_headers
+            .iter()
+            .map(|h| (h.create)(weak.clone(), window, cx))
+            .collect();
+        this.update(cx, |this, cx| {
+            this.editor_headers = views;
+            cx.notify();
+        });
+    }
+
     /// Makes the tool windows of the product's modules (once, after the
     /// workbench entity exists).
     pub(crate) fn create_module_tool_windows(
@@ -721,7 +744,10 @@ impl Workbench {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default()
             });
-        Some(format!("{relative} [{full}]"))
+        // A file the type decorates names what it belongs to instead of its
+        // location (a query file, the data source it is attached to).
+        let place = self.file_types.decoration(&path).hint.unwrap_or(full);
+        Some(format!("{relative} [{place}]"))
     }
 
     pub fn panel(&self) -> &Entity<ProjectPanel> {
@@ -794,11 +820,18 @@ impl Workbench {
             "go_to_line": self.go_to_line_field().map(|f| f.read(cx).text()),
             "tabs": self.tabs.iter().map(|t| match &t.content {
                 TabContent::File { path, editor, .. } => {
+                    let decoration = self.file_types.decoration(path);
                     let mut tab = json!({
                         "path": rel(path),
                         "modified": editor.read(cx).is_modified(),
                         "deleted": self.is_deleted_on_disk(path),
                     });
+                    // Only a decorated tab (a query file attached to a data
+                    // source) has these keys.
+                    if let Some(hint) = decoration.hint {
+                        tab["hint"] = json!(hint);
+                        tab["icon"] = json!(self.file_types.icon(path).0);
+                    }
                     // Only a pinned tab has the key.
                     if t.pinned {
                         tab["pinned"] = json!(true);
@@ -2138,10 +2171,13 @@ impl Workbench {
                         .unwrap_or(theme.color(UiRole::TabInactiveText))
                         .opacity(INACTIVE_TAB_ALPHA)
                 };
-                let name = path
+                let mut name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
+                if let Some(hint) = self.file_types.decoration(path).hint {
+                    name = format!("{name} [{hint}]");
+                }
                 let modified = editor.read(cx).is_modified();
                 (
                     SharedString::from(name),
@@ -2404,6 +2440,9 @@ impl Workbench {
                         .border_color(separator)
                         .children(tabs),
                 )
+                .when(self.tabs[active].path().is_some(), |d| {
+                    d.children(self.editor_headers.iter().cloned())
+                })
                 .children(
                     self.tabs[active]
                         .find()

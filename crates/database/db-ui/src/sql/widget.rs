@@ -1,38 +1,42 @@
-//! The dialect and scope widget of the status bar (ADR 0022): the SQL
-//! dialect of the active `.sql` file and the data source it is attached to,
-//! with a popup to change either. A choice is a mapping of the file, its
-//! folder or the project, kept in the personal project state (or the
-//! shared settings on request), and every open editor of the files it
-//! reaches is coloured again at once.
+//! The toolbar above the editor of a `.sql` file (ADR 0022): the SQL
+//! dialect of the file and the data source and schema it is attached to,
+//! with a popup to change them, and a banner while the file has no
+//! dialect. A choice is a mapping of the file, its folder or the project,
+//! kept in the personal project state (or the shared settings on request),
+//! and every open editor of the files it reaches is coloured again at
+//! once.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Corner, DismissEvent, Entity, Global,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, StatefulInteractiveElement,
-    Styled, Subscription, Task, WeakEntity, Window, canvas, div, prelude::*, px,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Corner, CursorStyle, DismissEvent,
+    Entity, Global, InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, canvas, div,
+    prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use sql_syntax::Dialect;
 use themes::UiRole;
 use ui::command::CommandError;
 use ui::components::Tooltip;
+use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use ui::theme::ThemeExt;
-use workbench::{StatusWidget, Workbench, WorkbenchEvent};
+use workbench::{EditorHeader, Workbench, WorkbenchEvent};
 
 use super::hub::{Hub, Kind, origin_text};
 use super::settings::{self, Resolved};
+use crate::icons;
 
 ui::ui_commands! {
     COMMANDS, scope = "Database";
     /// Open the dialect and scope popup.
     ChooseDialect => "sql.choose", "Change SQL Dialect and Data Source",
-        "Opens the SQL popup of the status bar: the dialects, and the data sources the file can be attached to.";
+        "Opens the SQL popup of the file's toolbar: the dialects, and the data sources the file can be attached to.";
     /// Set the dialect of a file, folder or the project.
     SetDialect { dialect: String, target: Option<String>, shared: Option<bool> } => "sql.set-dialect", "Set SQL Dialect",
         "Maps the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to a dialect (`generic`, `postgres`, `oracle`, `sqlite`; `default` removes the mapping). The mapping is personal unless `shared` is true, which writes it to the project's `.oxide/project.toml`. Open files are coloured again.",
@@ -41,9 +45,9 @@ ui::ui_commands! {
     AttachDataSource { name: Option<String>, schema: Option<String>, target: Option<String>, shared: Option<bool> } => "sql.attach-data-source", "Attach Data Source",
         "Attaches the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to the data source `name` and the optional `schema`; without `name` the attachment is removed. Names in the file then mean what that data source's metadata says. Personal unless `shared` is true.",
         r#"{"name": "local", "schema": "public"}"#;
-    /// Describe the widget.
+    /// Describe the toolbar.
     SqlState => "sql.state", "SQL State",
-        "Returns the SQL widget's state as JSON: whether it shows, its text, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
+        "Returns the SQL toolbar's state as JSON: whether it shows, its chips and banner, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
 }
 
 /// The product-wide settings of the SQL editor glue, in a global so that
@@ -52,7 +56,7 @@ pub(crate) struct SqlGlobal(pub Arc<Hub>);
 
 impl Global for SqlGlobal {}
 
-/// The name of a dialect as the widget shows it.
+/// The name of a dialect as the toolbar shows it.
 pub fn dialect_title(dialect: Dialect) -> &'static str {
     match dialect {
         Dialect::Generic => "Generic SQL",
@@ -102,7 +106,7 @@ pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
         };
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
-                widget.update(cx, |w, cx| w.open(window, cx));
+                widget.update(cx, |w, cx| w.open(ChipId::Source, window, cx));
             });
         });
     });
@@ -184,7 +188,14 @@ pub(crate) struct SqlWidget {
     /// The dialects the open SQL editors were last coloured with.
     applied: HashMap<PathBuf, (Dialect, u64)>,
     menu: Option<(Entity<ContextMenu>, Subscription)>,
-    bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// Where each chip was drawn; the popup opens below the one it was
+    /// opened from.
+    dialect_bounds: Rc<Cell<Bounds<Pixels>>>,
+    schema_bounds: Rc<Cell<Bounds<Pixels>>>,
+    source_bounds: Rc<Cell<Bounds<Pixels>>>,
+    popup_anchor: Rc<Cell<Bounds<Pixels>>>,
+    /// Files whose "dialect is not configured" banner was cancelled.
+    dismissed: HashSet<PathBuf>,
     load: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -216,7 +227,11 @@ impl SqlWidget {
             active_file,
             applied: HashMap::new(),
             menu: None,
-            bounds: Rc::default(),
+            dialect_bounds: Rc::default(),
+            schema_bounds: Rc::default(),
+            source_bounds: Rc::default(),
+            popup_anchor: Rc::default(),
+            dismissed: HashSet::new(),
             load: Task::ready(()),
             _subscriptions: subscriptions,
         };
@@ -252,6 +267,14 @@ impl SqlWidget {
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.refresh_editors(cx);
         cx.notify();
+        // The data source a file is attached to is in its tab, its row of
+        // the project tree and the toolbar title.
+        if let Some(workbench) = self.workbench.upgrade() {
+            workbench.update(cx, |workbench, cx| {
+                workbench.panel().update(cx, |_, cx| cx.notify());
+                cx.notify();
+            });
+        }
     }
 
     fn refresh_editors(&mut self, cx: &mut Context<Self>) {
@@ -287,18 +310,63 @@ impl SqlWidget {
         self.visible_file().map(|f| self.hub.resolve(f))
     }
 
-    /// The widget's text: the dialect, then the data source.
-    fn text(resolved: &Resolved) -> (String, Option<String>) {
-        (
-            dialect_title(resolved.dialect).to_owned(),
-            resolved
-                .data_source
-                .as_ref()
-                .map(|d| match &resolved.schema {
-                    Some(s) => format!("{d}.{s}"),
-                    None => d.clone(),
-                }),
-        )
+    /// The chips of the toolbar, left to right: a file attached to a data
+    /// source shows its schema (as `database.schema`) and the data source;
+    /// another file its dialect and the placeholder of the data source.
+    fn chips(&self, resolved: &Resolved) -> Vec<Chip> {
+        let attached = resolved.data_source.as_ref().map(|name| {
+            let source = self
+                .visible_file()
+                .and_then(|f| self.hub.source_of(f, name));
+            let icon = match source.as_ref().map(|s| s.dialect) {
+                Some(Dialect::Postgres) => icons::POSTGRES,
+                Some(Dialect::Oracle) => icons::ORACLE,
+                Some(Dialect::Sqlite) => icons::SQLITE,
+                _ => icons::DATA_SOURCE,
+            };
+            let database = source
+                .and_then(|s| s.database)
+                .unwrap_or_else(|| name.clone());
+            (name.clone(), icon, database)
+        });
+        match attached {
+            Some((name, icon, database)) => {
+                let schema = resolved.schema.as_ref().map(|schema| Chip {
+                    id: ChipId::Schema,
+                    icon: Some(icons::SCHEMA),
+                    text: format!("{database}.{schema}"),
+                });
+                schema
+                    .into_iter()
+                    .chain([Chip {
+                        id: ChipId::Source,
+                        icon: Some(icon),
+                        text: name,
+                    }])
+                    .collect()
+            }
+            None => vec![
+                Chip {
+                    id: ChipId::Dialect,
+                    icon: None,
+                    text: dialect_title(resolved.dialect).to_owned(),
+                },
+                Chip {
+                    id: ChipId::Source,
+                    icon: Some(icons::DATA_SOURCE),
+                    text: "<data source>".to_owned(),
+                },
+            ],
+        }
+    }
+
+    /// The banner shows while no mapping, default or data source gives the
+    /// file a dialect, until it is cancelled.
+    fn banner_shows(&self, resolved: &Resolved) -> bool {
+        matches!(resolved.dialect_origin, settings::Origin::None)
+            && self
+                .visible_file()
+                .is_some_and(|f| !self.dismissed.contains(f))
     }
 
     fn tooltip(resolved: &Resolved) -> String {
@@ -317,10 +385,16 @@ impl SqlWidget {
         text
     }
 
-    fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open(&mut self, chip: ChipId, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.is_some() {
             return;
         }
+        let anchor = match chip {
+            ChipId::Dialect => &self.dialect_bounds,
+            ChipId::Schema => &self.schema_bounds,
+            ChipId::Source => &self.source_bounds,
+        };
+        self.popup_anchor.set(anchor.get());
         let (Some(root), Some(file)) = (self.root.clone(), self.visible_file()) else {
             return;
         };
@@ -402,16 +476,16 @@ impl SqlWidget {
 
     fn state_json(&self, cx: &App) -> Json {
         let resolved = self.resolved();
-        let (text, data_source) = resolved
-            .as_ref()
-            .map(Self::text)
-            .map(|(t, d)| (Some(t), d))
-            .unwrap_or((None, None));
+        let chips = resolved.as_ref().map(|r| self.chips(r)).unwrap_or_default();
+        let text_of = |id: ChipId| chips.iter().find(|c| c.id == id).map(|c| c.text.clone());
         json!({
             "visible": resolved.is_some(),
             "file": self.visible_file().map(|f| f.display().to_string()),
-            "text": text,
-            "data-source-text": data_source,
+            "banner": resolved.as_ref().is_some_and(|r| self.banner_shows(r)),
+            "chips": chips.iter().map(|c| c.text.clone()).collect::<Vec<_>>(),
+            "text": text_of(ChipId::Dialect),
+            "schema-text": text_of(ChipId::Schema),
+            "data-source-text": text_of(ChipId::Source),
             "dialect": resolved.as_ref().map(|r| r.dialect.id()),
             "dialect-origin": resolved.as_ref().map(|r| origin_json(&r.dialect_origin)),
             "data-source": resolved.as_ref().and_then(|r| r.data_source.clone()),
@@ -517,9 +591,9 @@ fn popup_items(
     (items, selected)
 }
 
-pub(crate) fn status_widget() -> StatusWidget {
-    StatusWidget {
-        id: "status-sql",
+pub(crate) fn editor_header() -> EditorHeader {
+    EditorHeader {
+        id: "sql-toolbar",
         create: Rc::new(|workbench, window, cx| {
             let view = cx.new(|cx| SqlWidget::new(workbench, cx));
             let handle = window.window_handle();
@@ -531,41 +605,161 @@ pub(crate) fn status_widget() -> StatusWidget {
     }
 }
 
-impl Render for SqlWidget {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(resolved) = self.resolved() else {
-            return div().into_any_element();
+/// Which chip of the toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChipId {
+    Dialect,
+    Schema,
+    Source,
+}
+
+struct Chip {
+    id: ChipId,
+    icon: Option<IconName>,
+    text: String,
+}
+
+const TOOLBAR_HEIGHT: f32 = 36.0;
+const BANNER_HEIGHT: f32 = 36.0;
+const CHIP_TEXT: f32 = 12.0;
+
+impl SqlWidget {
+    fn render_chip(
+        &self,
+        chip: Chip,
+        tooltip: SharedString,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let hover = theme.color(UiRole::Hover);
+        let bounds = match chip.id {
+            ChipId::Dialect => self.dialect_bounds.clone(),
+            ChipId::Schema => self.schema_bounds.clone(),
+            ChipId::Source => self.source_bounds.clone(),
         };
-        let (dialect, data_source) = Self::text(&resolved);
-        let tooltip = Self::tooltip(&resolved);
-        let hover = cx.theme().color(UiRole::Hover);
-        let muted = cx.theme().color(UiRole::TextMuted);
-        let bounds = self.bounds.clone();
-        let overlay = self.menu.as_ref().map(|(menu, _)| {
-            ui::menu::overlay_at(menu, self.bounds.get().origin, Corner::BottomLeft, window)
-        });
+        let id = chip.id;
+        let selector = match id {
+            ChipId::Dialect => "sql-chip-dialect",
+            ChipId::Schema => "sql-chip-schema",
+            ChipId::Source => "sql-chip-source",
+        };
         div()
-            .id("status-sql")
-            .debug_selector(|| "status-sql".into())
+            .id(selector)
+            .debug_selector(|| selector.into())
             .relative()
             .flex()
             .flex_none()
+            .flex_row()
             .items_center()
-            .gap(px(6.0))
-            .h(px(22.0))
+            .gap(px(4.0))
+            .h(px(24.0))
             .px(px(6.0))
             .rounded(px(4.0))
+            .text_size(px(CHIP_TEXT))
             .whitespace_nowrap()
+            .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.bg(hover))
-            .child(dialect)
-            .children(data_source.map(|d| div().text_color(muted).child(d)))
+            .children(chip.icon.map(|i| Icon::new(i).size(px(16.0))))
+            .child(SharedString::from(chip.text))
+            .child(Icon::new(IconName::CHEVRON_DOWN).size(px(12.0)))
             .tooltip(Tooltip::text(tooltip, None))
-            .on_click(cx.listener(|this, _, window, cx| this.open(window, cx)))
+            .on_click(cx.listener(move |this, _, window, cx| this.open(id, window, cx)))
             .child(
                 canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
                     .absolute()
                     .size_full(),
             )
+            .into_any_element()
+    }
+
+    fn render_banner(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let link = theme.color(UiRole::TextLink);
+        let link = |id: &'static str, text: &'static str| {
+            div()
+                .id(id)
+                .debug_selector(|| id.into())
+                .flex_none()
+                .whitespace_nowrap()
+                .text_color(link)
+                .cursor(CursorStyle::PointingHand)
+                .child(text)
+        };
+        div()
+            .id("sql-banner")
+            .debug_selector(|| "sql-banner".into())
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .gap(px(12.0))
+            .h(px(BANNER_HEIGHT))
+            .mx(px(4.0))
+            .mt(px(4.0))
+            .px(px(12.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.color(UiRole::Warning).opacity(0.35))
+            .bg(theme.color(UiRole::WarningBg))
+            .child(Icon::new(IconName::WARNING).size(px(16.0)))
+            .child(
+                div()
+                    .flex_1()
+                    .whitespace_nowrap()
+                    .child("SQL dialect is not configured."),
+            )
+            .child(link("sql-banner-change", "Change dialect to...").on_click(
+                cx.listener(|this, _, window, cx| this.open(ChipId::Dialect, window, cx)),
+            ))
+            .child(
+                link("sql-banner-cancel", "Cancel").on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(file) = this.active_file.clone() {
+                        this.dismissed.insert(file);
+                    }
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
+    }
+}
+
+impl Render for SqlWidget {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(resolved) = self.resolved() else {
+            return div().into_any_element();
+        };
+        let tooltip = SharedString::from(Self::tooltip(&resolved));
+        let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
+        let chips: Vec<_> = self
+            .chips(&resolved)
+            .into_iter()
+            .map(|c| self.render_chip(c, tooltip.clone(), cx))
+            .collect();
+        let overlay = self.menu.as_ref().map(|(menu, _)| {
+            let anchor = self.popup_anchor.get();
+            ui::menu::overlay_at(menu, anchor.bottom_left(), Corner::TopLeft, window)
+        });
+        let theme = cx.theme();
+        let toolbar = div()
+            .id("sql-toolbar")
+            .debug_selector(|| "sql-toolbar".into())
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0))
+            .h(px(TOOLBAR_HEIGHT))
+            .px(px(8.0))
+            .border_b_1()
+            .border_color(theme.color(UiRole::Border))
+            .children(chips);
+        div()
+            .flex()
+            .flex_none()
+            .flex_col()
+            .children(banner)
+            .child(toolbar)
             .children(overlay)
             .into_any_element()
     }
