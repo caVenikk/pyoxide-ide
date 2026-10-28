@@ -11,6 +11,7 @@ pub mod command;
 pub mod components;
 pub mod deferred;
 pub mod dialog_window;
+pub mod expandable;
 pub mod fonts;
 pub mod form;
 pub mod icons;

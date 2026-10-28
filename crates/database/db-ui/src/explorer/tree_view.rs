@@ -12,11 +12,12 @@ use db_core::DataSourceId;
 use db_model::Model;
 use db_session::{DataSourceState, Event, EventKind, EventSink, RefreshEvent};
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Hsla, IntoElement, MouseButton, Window, div, prelude::*,
-    px, uniform_list,
+    AnyElement, App, ClickEvent, Context, Hsla, IntoElement, MouseButton, Pixels, Window, div,
+    prelude::*, px, uniform_list,
 };
 use serde_json::{Value as Json, json};
 use themes::{Metric, UiRole};
+use ui::expandable::{ExpandableItems, RowFrame, RowPlace};
 use ui::icons::{Icon, IconName};
 use ui::notification::{Notification, NotificationKind};
 use ui::theme::ThemeExt;
@@ -109,6 +110,11 @@ pub(crate) struct TreeState {
 pub(crate) struct Totals {
     pub schemas: Option<usize>,
     pub databases: Option<usize>,
+}
+
+/// Where the explorer keeps its [`ExpandableItems`].
+fn expansion_access(explorer: &mut Explorer) -> &mut ExpandableItems<RowKey> {
+    &mut explorer.expansion
 }
 
 impl Explorer {
@@ -506,7 +512,8 @@ impl Explorer {
 
     pub(super) fn select_row(&mut self, key: RowKey, cx: &mut Context<Self>) {
         self.selected = Some(key.source.to_string());
-        self.tree.selected = Some(key);
+        self.tree.selected = Some(key.clone());
+        ui::expandable::ExpandableItems::selection_moved(key, expansion_access, self, cx);
         cx.notify();
     }
 
@@ -712,7 +719,12 @@ impl Explorer {
                 )
             })
             .collect();
-        json!({ "rows": rows, "data_sources": lives })
+        let expanded_row = self
+            .expansion
+            .shown_now()
+            .and_then(|key| self.tree.rows.iter().position(|r| &r.key == key))
+            .and_then(|ix| self.row_paths().into_iter().nth(ix));
+        json!({ "rows": rows, "data_sources": lives, "expanded_row": expanded_row })
     }
 
     // ---- drawing ----------------------------------------------------------------
@@ -725,7 +737,121 @@ impl Explorer {
         }
     }
 
-    fn render_row(&self, ix: usize, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// Where the content (the name, its detail, a Retry link) of a row
+    /// ends, from the row's left edge.
+    fn content_end(&self, row: &Row, window: &Window, cx: &App) -> Pixels {
+        let text = self.row_text(row);
+        let theme = cx.theme();
+        let size = theme.ui_size();
+        let small = size - px(2.0);
+        let width = |s: &str, size| {
+            ui::expandable::text_width(s, size, gpui::FontWeight::NORMAL, window, cx)
+        };
+        let mut end = px(TREE_LEFT + ICON_X + TEXT_X)
+            + theme.metric(Metric::TreeIndent) * row.depth as f32
+            + width(&text.view.name, size);
+        let extra = text
+            .view
+            .count
+            .map(|c| c.to_string())
+            .or(text.view.detail.clone());
+        if let Some(extra) = extra {
+            end += px(DETAIL_GAP) + width(&extra, small);
+        }
+        if text.failed {
+            end += px(DETAIL_GAP) + width(RETRY, size);
+        }
+        end
+    }
+
+    /// Where the parts of a row are.
+    fn row_frame(&self, row: &Row, window: &Window, cx: &App) -> RowFrame {
+        let left = px(TREE_LEFT) + cx.theme().metric(Metric::TreeIndent) * row.depth as f32;
+        RowFrame {
+            scroll_x: ui::expandable::scrolled(&self.scroll).x,
+            view_width: self.expansion.view_width(),
+            control_x: if row.expandable {
+                left
+            } else {
+                left + px(ICON_X)
+            },
+            content_end: self.content_end(row, window, cx),
+        }
+    }
+
+    /// Width of the rows: the widest row's content and what follows it.
+    fn content_width(&self, window: &Window, cx: &App) -> Pixels {
+        let rows = &self.tree.rows;
+        let indent = f32::from(cx.theme().metric(Metric::TreeIndent));
+        ui::expandable::content_width(
+            rows.len(),
+            |ix| {
+                let row = &rows[ix];
+                let text = self.row_text(row);
+                let extra = text.view.count.map_or(0, |_| 4)
+                    + text
+                        .view
+                        .detail
+                        .as_ref()
+                        .map_or(0, |d| d.chars().count() + 1);
+                indent * row.depth as f32 + (text.view.name.chars().count() + extra) as f32 * 7.0
+            },
+            |ix| self.content_end(&rows[ix], window, cx),
+        )
+    }
+
+    /// The row at a position of the window.
+    fn row_at_position(&self, position: gpui::Point<Pixels>, cx: &App) -> Option<RowKey> {
+        let ix = ui::expandable::row_at(
+            position,
+            self.expansion.view(),
+            ui::expandable::scrolled(&self.scroll).y,
+            cx.theme().metric(Metric::RowHeight),
+            self.tree.rows.len(),
+        )?;
+        self.tree.rows.get(ix).map(|r| r.key.clone())
+    }
+
+    /// The rest of the row the pointer is at (or the selected row), over
+    /// the tree's edge.
+    fn expansion_overlay(
+        &self,
+        focused: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.expansion.reset_hint();
+        let key = self.expansion.shown(focused, self.tree.selected.as_ref())?;
+        let ix = self.tree.rows.iter().position(|r| &r.key == key)?;
+        let frame = self.row_frame(&self.tree.rows[ix], window, cx);
+        if !frame.is_cut() {
+            return None;
+        }
+        let theme = cx.theme();
+        let row_height = theme.metric(Metric::RowHeight);
+        let overlay = ui::expandable::Overlay {
+            row_top: row_height * ix as f32 - ui::expandable::scrolled(&self.scroll).y,
+            row_height,
+            frame,
+            background: theme.color(UiRole::ToolWindow),
+            border: theme.color(UiRole::Border),
+            radius: theme.metric(Metric::CornerRadius),
+            row: self.render_row(ix, focused, RowPlace::Rest, window, cx),
+        };
+        self.expansion
+            .overlay(overlay, window, expansion_access, cx)
+    }
+
+    /// A row, in the tree or as its rest shown over the tree's edge.
+    fn render_row(
+        &self,
+        ix: usize,
+        focused: bool,
+        place: RowPlace,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let expanded = place.is_rest();
         let row = self.tree.rows[ix].clone();
         let text = self.row_text(&row);
         let theme = cx.theme();
@@ -739,6 +865,10 @@ impl Explorer {
             UiRole::SelectionInactive
         });
         let hover = theme.color(UiRole::Hover);
+        let frame = self.row_frame(&row, window, cx);
+        // The pointer's row, also while it is on the rest of the row shown
+        // over the edge.
+        let hovered = !selected && self.expansion.hovered() == Some(&row.key);
         let name_color: Hsla = if text.failed {
             theme.color(UiRole::Danger)
         } else if row.key.node == NodeKey::Status {
@@ -814,17 +944,15 @@ impl Explorer {
             .w_full()
             .h(row_height)
             .overflow_hidden()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left(px(TREE_LEFT))
-                    .right(px(TREE_LEFT))
-                    .rounded(theme.metric(Metric::CornerRadius))
-                    .when(selected, |d| d.bg(selection))
-                    .when(!selected, |d| d.hover(move |s| s.bg(hover))),
-            )
+            .when(selected || hovered, |d| {
+                d.child(
+                    frame
+                        .highlight(expanded)
+                        .layer(theme.metric(Metric::CornerRadius))
+                        .bg(if selected { selection } else { hover }),
+                )
+            })
+            .children(place.width_spacer())
             .children(guides)
             .children(chevron)
             .children(icon)
@@ -840,23 +968,39 @@ impl Explorer {
             .into_any_element()
     }
 
-    pub(super) fn render_tree(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_tree(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let focused = self.focus.contains_focused(window, cx);
         let count = self.tree.rows.len();
+        let content = self.content_width(window, cx);
         let mut rows = uniform_list(
             "database-rows",
             count,
-            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+            cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                 range
-                    .map(|ix| this.render_row(ix, focused, cx))
+                    .map(|ix| this.render_row(ix, focused, RowPlace::Tree { content }, window, cx))
                     .collect::<Vec<_>>()
             }),
         )
         .debug_selector(|| "database-rows".into())
         .track_scroll(self.scroll.clone())
         .flex_1()
-        .overflow_x_hidden();
+        // The rows scroll sideways when the widest is wider than the tool
+        // window.
+        .with_horizontal_sizing_behavior(gpui::ListHorizontalSizingBehavior::Unconstrained);
         rows.style().restrict_scroll_to_axis = Some(true);
+        let expansion = self.expansion_overlay(focused, window, cx);
+        let area = div().id("database-rows-area");
+        // The pointer's row shows its rest when it is cut.
+        let area = ExpandableItems::attach(area, Self::row_at_position, expansion_access, cx);
+        let view = self.expansion.track_view(cx);
+        let area = area
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.0))
+            .child(rows)
+            .child(view);
         div()
             .id("database-sources")
             .debug_selector(|| "database-sources".into())
@@ -865,7 +1009,8 @@ impl Explorer {
             .flex_1()
             .min_h(px(0.0))
             .pt(px(TREE_TOP))
-            .child(rows)
+            .child(area)
+            .children(expansion)
             .children(self.error.clone().map(|e| {
                 div()
                     .px(px(TREE_LEFT))

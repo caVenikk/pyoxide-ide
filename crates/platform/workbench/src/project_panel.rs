@@ -33,19 +33,21 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
-    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
-    ScrollStrategy, Styled, Subscription, UniformListScrollHandle, Window, canvas, div, point,
-    prelude::*, px, uniform_list,
+    App, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
+    ScrollStrategy, Styled, Subscription, UniformListScrollHandle, Window, div, point, prelude::*,
+    px, uniform_list,
 };
 use project::{FileTree, Filter, Node, NodeId, Project, list_dir};
 use serde_json::json;
 use themes::{Metric, UiRole};
+use ui::expandable::{ExpandableItems, RowPlace};
 use ui::icons::{Icon, IconName};
 use ui::menu::{ContextMenu, MenuItem};
 use ui::theme::ThemeExt;
 
 use crate::file_types::FileTypes;
+use row_expansion::expansion_access;
 
 ui::ui_commands! {
     COMMANDS, scope = "ProjectTree";
@@ -127,13 +129,14 @@ pub struct ProjectPanel {
     resave: bool,
     /// Why the project settings could not be written, after a failed save.
     settings_error: Option<String>,
-    /// Where the rows were drawn (window coordinates), to place a context
-    /// menu opened from the keyboard.
-    rows_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// New, Rename and Delete: their popup or dialog while open.
     ops: file_ops::FileOps,
-    /// A row cut by the tree's edge shows its rest on hover.
-    expansion: row_expansion::RowExpansion,
+    /// Where the rows were drawn (window coordinates, for a context menu
+    /// opened from the keyboard), the row the pointer is at, and the row
+    /// cut by the tree's edge that shows its rest.
+    expansion: ExpandableItems<NodeId>,
+    /// Where the text of each drawn row ends, from the row's left edge.
+    label_ends: std::cell::RefCell<std::collections::HashMap<NodeId, Pixels>>,
     /// The vertical lines below open folders ("Show indent guides"). On by
     /// default; the reference IDE has them off until they are turned on.
     indent_guides: bool,
@@ -176,9 +179,9 @@ impl ProjectPanel {
             saving: false,
             resave: false,
             settings_error: None,
-            rows_bounds: Rc::default(),
             ops: file_ops::FileOps::default(),
-            expansion: row_expansion::RowExpansion::default(),
+            expansion: ExpandableItems::default(),
+            label_ends: Default::default(),
             indent_guides: true,
             focus_seen: Cell::new(false),
             rules: roots::ProductRules::default(),
@@ -342,7 +345,7 @@ impl ProjectPanel {
 
     fn select(&mut self, id: NodeId, cx: &mut Context<Self>) {
         self.selected = Some(id);
-        self.selection_moved(id, cx);
+        ExpandableItems::selection_moved(id, expansion_access, self, cx);
         if let Some(row) = self.tree.as_ref().and_then(|t| t.row_of(id)) {
             self.scroll_to_row(row, cx);
         }
@@ -485,6 +488,7 @@ impl ProjectPanel {
             "selected": self.selected.map(rel),
             "loading": self.loading > 0,
             "scroll_top": f32::from(scroll_top),
+            "scroll_left": f32::from(ui::expandable::scrolled(&self.scroll).x),
             "first_visible_row": first_visible,
             "context_menu": self.context_menu().map(|m| m.read(cx).state_json()),
             "exclusions": self.filter.as_ref().map(|f| &f.exclusions().paths),
@@ -778,7 +782,7 @@ impl ProjectPanel {
         let indent = theme.metric(Metric::TreeIndent) * tree.node(id).depth as f32;
         let x = px(TREE_LEFT + ICON_X + TEXT_X) + indent;
         let y = row_height * (row + 1) as f32 - self.scroll_top();
-        let origin = self.rows_bounds.get().origin;
+        let origin = self.expansion.view().origin;
         self.open_context_menu(id, origin + point(x, y), window, cx);
     }
 
@@ -843,14 +847,17 @@ impl ProjectPanel {
         self.file_colors = colors;
     }
 
+    /// A row, in the tree or as its rest shown over the tree's edge.
     fn row(
         &self,
         id: NodeId,
         ix: usize,
         focused: bool,
+        place: RowPlace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        let expanded = place.is_rest();
         let tree = self.tree.as_ref().expect("rows exist only with a tree");
         let theme = cx.theme();
         let node = tree.node(id);
@@ -870,10 +877,10 @@ impl ProjectPanel {
         let text_color = self.row_text_color(node, selected, focused, cx);
         // A row whose text runs past the selection's right end: its
         // selection and hover reach the tree's edge.
-        let wide = self.is_wide(self.measure_label(id, node, window, cx));
-        // While its rest shows over the edge the row stays hovered, also
-        // with the pointer on the rest.
-        let hovered = !selected && self.expanded_row(focused, cx) == Some(id);
+        let frame = self.row_frame(id, node, window, cx);
+        // The pointer's row, also while it is on the rest of the row shown
+        // over the edge.
+        let hovered = !selected && self.expansion.hovered() == Some(&id);
         let radius = theme.metric(Metric::CornerRadius);
         let guides = self.guides(cx).and_then(|g| {
             g.row(
@@ -904,33 +911,35 @@ impl ProjectPanel {
             // Tests find a row by its path (no cost in release builds).
             .debug_selector(|| {
                 let rel = self.filter.as_ref().and_then(|f| f.relative(&entry.path));
-                format!("tree-row:{}", rel.unwrap_or_default())
+                format!(
+                    "tree-row:{}{}",
+                    rel.unwrap_or_default(),
+                    if expanded { "#rest" } else { "" }
+                )
             })
             .relative()
             .w_full()
             .h(row_height)
             .overflow_hidden()
             .when_some(non_project, |d, bg| d.bg(bg))
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left(px(TREE_LEFT))
-                    .when(!wide, |d| d.right(px(TREE_LEFT)).rounded(radius))
-                    .when(wide, |d| {
-                        d.right(px(row_expansion::WIDE_MARGIN))
-                            .rounded_tl(radius)
-                            .rounded_bl(radius)
-                    })
-                    .when(selected, |d| {
-                        d.bg(selection).debug_selector(|| "tree-selection".into())
-                    })
-                    .when(hovered, |d| {
-                        d.bg(hover).debug_selector(|| "tree-hovered".into())
-                    })
-                    .when(!selected, |d| d.hover(move |s| s.bg(hover))),
-            )
+            .when(selected || hovered, |d| {
+                d.child(
+                    frame
+                        .highlight(expanded)
+                        .layer(radius)
+                        .bg(if selected { selection } else { hover })
+                        .debug_selector(move || {
+                            match (selected, expanded) {
+                                (true, false) => "tree-selection",
+                                (false, false) => "tree-hovered",
+                                (true, true) => "tree-selection-rest",
+                                (false, true) => "tree-hovered-rest",
+                            }
+                            .into()
+                        }),
+                )
+            })
+            .children(place.width_spacer())
             .children(guides)
             .children(chevron)
             .child(
@@ -1065,6 +1074,7 @@ impl Render for ProjectPanel {
             return el.pt_0().child(welcome).into_any_element();
         }
         let el = el.track_focus(&self.focus);
+        let content = self.content_width(window, cx);
         let mut rows = uniform_list(
             "project-rows",
             count,
@@ -1076,58 +1086,37 @@ impl Render for ProjectPanel {
                     .unwrap_or_default();
                 rows.into_iter()
                     .zip(range)
-                    .map(|(id, ix)| this.row(id, ix, focused, window, cx))
+                    .map(|(id, ix)| {
+                        this.row(id, ix, focused, RowPlace::Tree { content }, window, cx)
+                    })
                     .collect::<Vec<_>>()
             }),
         )
         .debug_selector(|| "project-rows".into())
         .track_scroll(self.scroll.clone())
         .flex_1()
-        // The list scrolls vertically (its own `overflow-y: scroll`, which
-        // the wheel and trackpad need); names wider than the tool window
-        // are cut off.
-        .overflow_x_hidden();
+        // The rows scroll sideways when the widest is wider than the tool
+        // window.
+        .with_horizontal_sizing_behavior(gpui::ListHorizontalSizingBehavior::Unconstrained);
         // A sideways swipe does not scroll the rows up or down.
         rows.style().restrict_scroll_to_axis = Some(true);
-        let bounds = self.rows_bounds.clone();
-        let panel = cx.entity_id();
         let menu = self
             .context_menu
             .as_ref()
             .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
         let expansion = self.expansion_overlay(focused, window, cx);
+        let area = div().id("project-rows-area");
+        // The pointer's row shows its rest when it is cut.
+        let area = ExpandableItems::attach(area, Self::row_at_position, expansion_access, cx);
+        let view = self.expansion.track_view(cx);
         el.child(
-            div()
-                .id("project-rows-area")
-                // The pointer's row shows its rest when it is cut.
-                .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
-                    this.pointer_over_rows(e.position, cx);
-                }))
-                .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
-                    if !hovered {
-                        this.pointer_left(window, cx);
-                    }
-                }))
-                .relative()
+            area.relative()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_h(px(0.0))
                 .child(rows)
-                .child(
-                    canvas(
-                        move |b, _, cx| {
-                            // The rows measure their text against the
-                            // width: draw them again when it changes.
-                            if bounds.replace(b).size.width != b.size.width {
-                                cx.notify(panel);
-                            }
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .size_full(),
-                ),
+                .child(view),
         )
         .children(menu)
         .children(expansion)

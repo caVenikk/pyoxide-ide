@@ -353,3 +353,86 @@ fn arrow_keys_walk_the_tree(cx: &mut TestAppContext) {
     h.press("up");
     assert_eq!(selected(&mut h).as_deref(), Some(NAME));
 }
+
+/// The row whose rest shows over the tree's edge.
+fn shown(h: &mut Harness) -> Value {
+    state(h)["explorer"]["tree"]["expanded_row"].clone()
+}
+
+/// Where the element `selector` was drawn last.
+fn drawn(h: &mut Harness, selector: &str) -> Option<gpui::Bounds<gpui::Pixels>> {
+    let main: gpui::AnyWindowHandle = h.window.into();
+    let name: &'static str = Box::leak(selector.to_owned().into_boxed_str());
+    gpui::VisualTestContext::from_window(main, h.cx).debug_bounds(name)
+}
+
+/// Moves the pointer to `at` and lets the rest of a row follow it (10 ms).
+fn point_at(h: &mut Harness, at: gpui::Point<gpui::Pixels>) {
+    let main: gpui::AnyWindowHandle = h.window.into();
+    gpui::VisualTestContext::from_window(main, h.cx).simulate_mouse_move(
+        at,
+        None,
+        gpui::Modifiers::none(),
+    );
+    h.cx.executor().advance_clock(Duration::from_millis(10));
+    h.draw();
+}
+
+/// A row wider than the tool window scrolls into view sideways, and shows
+/// its rest over the tool window's edge while the pointer is on it.
+#[gpui::test]
+fn a_cut_row_shows_its_rest_and_the_tree_scrolls_sideways(cx: &mut TestAppContext) {
+    let (_dirs, mut h) = with_cache(cx);
+    click_row(&mut h, NAME, 1);
+    h.press("right");
+    wait_for(&mut h, "the cached model", |s| {
+        s["explorer"]["tree"]["data_sources"][NAME]["has_model"] == true
+    });
+    h.invoke(
+        "db.explorer.expand",
+        json!({ "path": format!("{NAME}/pyoxide/demo/tables/customers/indexes") }),
+    );
+    h.draw();
+    let long = "database-row:customers_email_lower_idx";
+    let area = drawn(&mut h, "database-rows").expect("the rows are drawn");
+    let row = drawn(&mut h, long).expect("the long row is drawn");
+    assert_eq!(shown(&mut h), json!(null), "nothing before the pointer");
+
+    // The pointer on the long row: its rest shows from the tree's edge.
+    point_at(&mut h, row.intersect(&area).center());
+    assert_eq!(
+        shown(&mut h),
+        json!(format!(
+            "{NAME}/pyoxide/demo/tables/customers/indexes/customers_email_lower_idx"
+        ))
+    );
+    let rest = drawn(&mut h, "row-expansion").expect("the rest of the row shows");
+    assert_eq!(rest.left(), area.right() - gpui::px(1.0));
+    assert_eq!(rest.size.height, row.size.height + gpui::px(2.0));
+
+    // On the short row above it there is none.
+    let short = drawn(&mut h, "database-row:customers_pkey").expect("a short row");
+    point_at(&mut h, short.intersect(&area).center());
+    assert_eq!(shown(&mut h), json!(null));
+
+    // The rows scroll sideways until the widest row's end is in view; the
+    // rest of the row is gone then.
+    let main: gpui::AnyWindowHandle = h.window.into();
+    for _ in 0..3 {
+        gpui::VisualTestContext::from_window(main, h.cx).simulate_event(gpui::ScrollWheelEvent {
+            position: area.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(-2000.0), gpui::px(0.0))),
+            modifiers: gpui::Modifiers::none(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        h.draw();
+    }
+    let moved = drawn(&mut h, long).expect("the long row is drawn");
+    assert!(
+        moved.left() < row.left(),
+        "the rows did not scroll sideways"
+    );
+    let at = moved.intersect(&area).center();
+    point_at(&mut h, at);
+    assert_eq!(shown(&mut h), json!(null));
+}

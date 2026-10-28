@@ -11,6 +11,8 @@
    row; move the pointer out of the tree.
 4. Click a short row, press Up until the root row is selected, then click
    in the editor.
+5. Swipe the tree sideways (or Shift + wheel) with the cut root row
+   selected, to the end and back.
 
 ## Expected
 - Step 1: a thin vertical line (the theme's indent guide colour, faint)
@@ -37,15 +39,24 @@
 - Step 4: selecting the cut root row with the keyboard shows its rest
   while the tree has the focus; it goes when the focus moves to the
   editor or the selection moves on.
+- Step 5: the rows scroll sideways until the widest row's text ends
+  with a little room (the cell's 4 px and the tree's 12 px inset) and no
+  further; the highlight of the selected or hovered row starts 12 px in
+  (at the row's own chevron when that is further left) and, once the row's
+  text fits the view, ends 12 px before the view's edge with rounded
+  corners; no rest of a row shows over the edge when it fits.
 
 ## Commands
 `project.open-folder {"path"}`, `project.tree.reveal {"path"}`,
 `project.tree.up`, `project.tree.down`, `workbench.state`
-(`tree.rows[].guides`, `tree.rows[].overflows`, `tree.expanded_row`).
+(`tree.rows[].guides`, `tree.rows[].overflows`, `tree.expanded_row`,
+`tree.scroll_left`).
 
 ## Source
 IntelliJ Platform Community at `pycharm/2026.2.3` (Apache-2.0):
 `ClassicPainter` (indent lines, `Tree.hash`), `UISettings`
 (`showTreeIndentGuides`), `TreeExpandableItemsHandler`,
-`AbstractExpandableItemsHandler`; observed in PyCharm 2026.2.3 with "Show
+`AbstractExpandableItemsHandler`, `DefaultTreeUI` (highlight extent),
+`RenderingHelper`; the mechanism is `ui::expandable`, shared with the
+Database tree (`tests/scenarios/db-gui/tree-row-expansion.md`); observed in PyCharm 2026.2.3 with "Show
 indent guides" on.
