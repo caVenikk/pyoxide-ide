@@ -306,12 +306,15 @@ impl TableGrid {
                 let header = char_width * c.name.chars().count() as f32
                     + px(2.0 * CELL_PAD + 2.0 + HEADER_ICON + 2.0 * SORT_MARK + 2.0 + 24.0);
                 let auto = (char_width * c.chars as f32 + px(2.0 * CELL_PAD + 2.0)).max(header);
-                let w = self
-                    .widths
-                    .get(&c.name)
-                    .copied()
-                    .unwrap_or(auto)
-                    .max(px(MIN_COLUMN));
+                let w = if self.hidden.contains(&c.name) {
+                    px(0.0)
+                } else {
+                    self.widths
+                        .get(&c.name)
+                        .copied()
+                        .unwrap_or(auto)
+                        .max(px(MIN_COLUMN))
+                };
                 x += w;
                 edges.push(x);
             }
@@ -361,7 +364,7 @@ impl TableGrid {
         for (i, c) in page.columns.iter().enumerate() {
             let left = layout.edges[i] - self.scroll.x;
             let width = layout.width(i);
-            if left + width < px(0.0) || left > view_width {
+            if width <= px(0.0) || left + width < px(0.0) || left > view_width {
                 continue;
             }
             let icon = match c.key {
@@ -398,6 +401,12 @@ impl TableGrid {
                         window.focus(&g.focus);
                         g.select_column(column, cx);
                     }))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |g, e: &MouseDownEvent, window, cx| {
+                            g.show_header_menu(column, e.position, window, cx);
+                        }),
+                    )
                     .child(Icon::new(icon).size(px(HEADER_ICON)))
                     .child(
                         div()

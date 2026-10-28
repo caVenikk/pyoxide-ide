@@ -193,6 +193,36 @@ fn postgres_pages_the_demo_events_and_cancels_a_count() {
     );
 }
 
+/// The time to the first page of the demo table: the first one opens the
+/// connection, the next ones reuse it (the numbers go into `replica/perf.md`).
+#[test]
+#[ignore = "needs the postgres container with the demo schema"]
+fn postgres_first_page_of_the_demo_events_is_fast() {
+    let h = pg();
+    let p = pager(&h);
+    let q = TableQuery::new(TableRef::new(Some("demo"), "events"));
+    let started = Instant::now();
+    p.page(&q, 0, PageSize::Rows(500)).unwrap();
+    let cold = started.elapsed();
+    let mut warm = Vec::new();
+    for _ in 0..20 {
+        let started = Instant::now();
+        let page = p.page(&q, 0, PageSize::Rows(500)).unwrap();
+        warm.push(started.elapsed());
+        assert_eq!(page.rows.len(), 500);
+    }
+    warm.sort();
+    eprintln!(
+        "first page (with connecting) {cold:?}, warm median {:?}, max {:?}",
+        warm[warm.len() / 2],
+        warm[warm.len() - 1]
+    );
+    assert!(
+        warm[warm.len() / 2] < Duration::from_millis(100),
+        "{warm:?}"
+    );
+}
+
 #[test]
 #[ignore = "needs the oracle container"]
 fn oracle_pages_with_offset_and_fetch() {

@@ -233,6 +233,45 @@ fn the_grid_pages_counts_sorts_and_keeps_rows_on_errors(cx: &mut TestAppContext)
     );
 }
 
+#[gpui::test]
+fn hidden_columns_are_skipped_by_the_cursor_and_the_status(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let server = server();
+    let (store, _cache) = store_with_model(&root, &server);
+    let mut h = Harness::new(cx, product(store), cfg!(target_os = "macos"), Some(&root));
+    open_customers(&mut h);
+    let statements = server.statements(Purpose::Data).len();
+
+    h.invoke("db.grid.hide-column", json!({"column": 0}));
+    let s = grid_state(&mut h);
+    assert_eq!(s["columns"][0]["hidden"], true, "{s}");
+    assert_eq!(s["columns"][1]["hidden"], false, "{s}");
+    // A view change: the statement is not run again.
+    assert_eq!(server.statements(Purpose::Data).len(), statements);
+
+    // The cursor never rests on a hidden column.
+    h.invoke("db.grid.select", json!({"row": 0, "column": 1}));
+    h.invoke("db.grid.left", Value::Null);
+    let s = grid_state(&mut h);
+    assert_eq!(s["selection"]["lead"][1], 1, "{s}");
+    // Selecting everything counts only the shown cells, in shown columns.
+    h.invoke("db.grid.select-all", Value::Null);
+    let s = grid_state(&mut h);
+    assert_eq!(s["status"]["counts"], "3 cells, 3 rows", "{s}");
+
+    // The last shown column stays.
+    h.invoke("db.grid.hide-column", json!({"column": 1}));
+    assert_eq!(grid_state(&mut h)["columns"][1]["hidden"], false);
+    h.invoke("db.grid.show-all-columns", Value::Null);
+    h.invoke("db.grid.hide-other-columns", json!({"column": 1}));
+    let s = grid_state(&mut h);
+    assert_eq!(s["columns"][0]["hidden"], true, "{s}");
+    assert_eq!(s["columns"][1]["hidden"], false, "{s}");
+    h.invoke("db.grid.show-all-columns", Value::Null);
+    let s = grid_state(&mut h);
+    assert_eq!(s["columns"][0]["hidden"], false, "{s}");
+}
+
 // ---- key bindings --------------------------------------------------------------
 
 fn check(h: &mut Harness, b: &Binding) -> bool {

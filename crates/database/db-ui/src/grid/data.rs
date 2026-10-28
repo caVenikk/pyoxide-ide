@@ -197,14 +197,18 @@ pub struct SelectionSummary {
     pub position: String,
 }
 
-pub fn summary(page: &GridPage, selection: &Selection) -> SelectionSummary {
+pub fn summary(
+    page: &GridPage,
+    selection: &Selection,
+    shown: &dyn Fn(usize) -> bool,
+) -> SelectionSummary {
     let mut sum = Decimal::default();
     let mut overflow = false;
     for r in selection.rows() {
         let Some(row) = page.rows.get(r) else {
             continue;
         };
-        for c in selection.columns() {
+        for c in selection.columns().filter(|c| shown(*c)) {
             if let Some(n) = row.get(c).and_then(Decimal::of) {
                 match sum.checked_add(n) {
                     Some(s) => sum = s,
@@ -213,8 +217,9 @@ pub fn summary(page: &GridPage, selection: &Selection) -> SelectionSummary {
             }
         }
     }
-    let cells = selection.cell_count();
     let rows = selection.rows().count();
+    let cells = rows * selection.columns().filter(|c| shown(*c)).count();
+    let column = (0..=selection.lead.1).filter(|c| shown(*c)).count().max(1);
     SelectionSummary {
         sum: if overflow {
             "\u{221e}".to_owned()
@@ -228,7 +233,7 @@ pub fn summary(page: &GridPage, selection: &Selection) -> SelectionSummary {
                 if rows == 1 { "row" } else { "rows" }
             )
         }),
-        position: format!("{}:{}", selection.lead.0 + 1, selection.lead.1 + 1),
+        position: format!("{}:{column}", selection.lead.0 + 1),
     }
 }
 
@@ -347,11 +352,11 @@ mod tests {
             anchor: (0, 0),
             lead: (2, 1),
         };
-        let s = summary(&p, &all);
+        let s = summary(&p, &all, &|_| true);
         assert_eq!(s.sum, "42");
         assert_eq!(s.counts.as_deref(), Some("6 cells, 3 rows"));
         assert_eq!(s.position, "3:2");
-        let one = summary(&p, &Selection::cell((0, 1)));
+        let one = summary(&p, &Selection::cell((0, 1)), &|_| true);
         assert_eq!(one.sum, "0");
         assert_eq!(one.counts, None);
         assert_eq!(one.position, "1:2");

@@ -253,6 +253,7 @@ impl Paint {
         let view_left = self.scroll.x;
         let view_right = self.scroll.x + cells.size.width;
         let columns: Vec<usize> = (0..l.edges.len().saturating_sub(1))
+            .filter(|&i| l.edges[i + 1] > l.edges[i])
             .filter(|&i| l.edges[i + 1] > view_left && l.edges[i] < view_right)
             .collect();
         let x_of = |i: usize| cells_left + l.edges[i] - self.scroll.x;

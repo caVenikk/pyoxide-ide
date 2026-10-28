@@ -32,12 +32,13 @@ use db_session::{
     DataSourceHandle, JobId, PageError, PageSize, PagerEvent, ResultPager, TableQuery, TableRef,
 };
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, Focusable, Global, Pixels,
-    Point, SharedString, Subscription, Task, WeakEntity, Window, point, px,
+    AnyWindowHandle, App, AppContext as _, Context, DismissEvent, Entity, FocusHandle, Focusable,
+    Global, Pixels, Point, SharedString, Subscription, Task, WeakEntity, Window, point, px,
 };
 use serde_json::{Value as Json, json};
 use ui::command::CommandError;
 use ui::icons::IconName;
+use ui::menu::{ContextMenu, MenuItem, PopupOptions};
 use workbench::Workbench;
 use workbench::tab_view::TabView;
 
@@ -162,6 +163,17 @@ ui::ui_commands! {
     /// Close the balloon.
     Dismiss => "db.grid.dismiss", "Close Message",
         "Closes the error balloon of the active table grid, or cancels its running read.";
+    /// Hide a column.
+    HideColumn { column: usize } => "db.grid.hide-column", "Hide Column",
+        "Hides column `column` (zero-based) of the active table grid; the statement does not change.",
+        r#"{"column": 2}"#;
+    /// Hide all but one column.
+    HideOtherColumns { column: usize } => "db.grid.hide-other-columns", "Hide Other Columns",
+        "Hides every column of the active table grid but `column` (zero-based).",
+        r#"{"column": 2}"#;
+    /// Show every column.
+    ShowAllColumns => "db.grid.show-all-columns", "Show All Columns",
+        "Shows the columns of the active table grid that were hidden.";
 }
 
 /// Grids of the main windows, the most recently used last.
@@ -294,6 +306,18 @@ pub(crate) fn init(cx: &mut App) {
         )
     });
     on!(SelectColumn, |g, a, w, cx| g.select_column(a.column, cx));
+    on!(HideColumn, |g, a, w, cx| g.hide_columns(
+        Some(a.column),
+        false,
+        cx
+    ));
+    on!(HideOtherColumns, |g, a, w, cx| g.hide_columns(
+        Some(a.column),
+        true,
+        cx
+    ));
+    on!(ShowAllColumns, |g, a, w, cx| g
+        .hide_columns(None, false, cx));
     on!(MoveUp, |g, a, w, cx| g.move_by(-1, 0, false, cx));
     on!(MoveDown, |g, a, w, cx| g.move_by(1, 0, false, cx));
     on!(MoveLeft, |g, a, w, cx| g.move_by(0, -1, false, cx));
@@ -458,6 +482,8 @@ pub struct TableGrid {
     scroll: Point<Pixels>,
     /// Widths set by dragging a header's edge, by column name.
     widths: std::collections::HashMap<SharedString, Pixels>,
+    /// Columns hidden in the view (by name); the statement is not changed.
+    hidden: std::collections::HashSet<SharedString>,
     resize: Option<Resize>,
     /// The left button went down on a cell: moving extends the selection.
     drag_select: bool,
@@ -560,6 +586,7 @@ impl TableGrid {
             selection: None,
             scroll: point(px(0.0), px(0.0)),
             widths: Default::default(),
+            hidden: Default::default(),
             resize: None,
             drag_select: false,
             page_bar_bounds: Default::default(),
@@ -946,7 +973,7 @@ impl TableGrid {
         } else {
             (
                 step(current.lead.0, rows, n_rows),
-                step(current.lead.1, columns, n_columns),
+                self.shown_column_step(current.lead.1, columns, n_columns),
             )
         };
         let selection = if extend {
@@ -958,6 +985,108 @@ impl TableGrid {
             Selection::cell(lead)
         };
         self.select(selection, cx);
+    }
+
+    /// Whether column `column` is hidden.
+    fn is_hidden(&self, column: usize) -> bool {
+        self.page
+            .as_ref()
+            .and_then(|p| p.columns.get(column))
+            .is_some_and(|c| self.hidden.contains(&c.name))
+    }
+
+    /// The shown column `by` steps from `from` (a hidden one is skipped; at
+    /// an end the move stops).
+    fn shown_column_step(&self, from: usize, by: isize, count: usize) -> usize {
+        let dir = by.signum();
+        let mut at = from;
+        let mut left = by.unsigned_abs();
+        while left > 0 {
+            let next = at as isize + dir;
+            if next < 0 || next >= count as isize {
+                break;
+            }
+            at = next as usize;
+            if !self.is_hidden(at) {
+                left -= 1;
+            }
+        }
+        // Not on a hidden column: the nearest shown one back.
+        while self.is_hidden(at) && at > 0 {
+            at -= 1;
+        }
+        if self.is_hidden(at) {
+            while at + 1 < count && self.is_hidden(at) {
+                at += 1;
+            }
+        }
+        at
+    }
+
+    /// Hides `column` (or every other column with `others`); with `None`
+    /// shows all columns again.
+    fn hide_columns(&mut self, column: Option<usize>, others: bool, cx: &mut Context<Self>) {
+        let Some(page) = &self.page else {
+            return;
+        };
+        match column {
+            None => self.hidden.clear(),
+            Some(c) => {
+                let Some(name) = page.columns.get(c).map(|m| m.name.clone()) else {
+                    return;
+                };
+                if others {
+                    self.hidden = page
+                        .columns
+                        .iter()
+                        .map(|m| m.name.clone())
+                        .filter(|n| *n != name)
+                        .collect();
+                } else if self.hidden.len() + 1 < page.columns.len() {
+                    // The last shown column stays.
+                    self.hidden.insert(name);
+                }
+            }
+        }
+        if let Some(s) = self.selection
+            && self.is_hidden(s.lead.1)
+        {
+            self.selection = None;
+        }
+        status::changed(cx);
+        cx.notify();
+    }
+
+    /// The header's menu of column `column` at `at`.
+    pub(super) fn show_header_menu(
+        &mut self,
+        column: usize,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut items = vec![
+            MenuItem::action("Select Column", SelectColumn { column }),
+            MenuItem::separator(),
+            MenuItem::action("Hide Column", HideColumn { column }),
+            MenuItem::action("Hide Other Columns", HideOtherColumns { column }),
+        ];
+        items.push(if self.hidden.is_empty() {
+            MenuItem::unavailable("Show All Columns")
+        } else {
+            MenuItem::action("Show All Columns", ShowAllColumns)
+        });
+        let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
+        let subscription = cx.subscribe(&menu, |g, _, _: &DismissEvent, cx| {
+            g.menu = None;
+            cx.notify();
+        });
+        self.menu = Some(OpenMenu {
+            menu,
+            position: at,
+            _subscription: subscription,
+        });
+        cx.notify();
     }
 
     fn rows_in_view(&self) -> usize {
@@ -1046,6 +1175,7 @@ impl TableGrid {
                     data::KeyMark::Foreign => json!("foreign"),
                 },
                 "right": c.right,
+                "hidden": self.hidden.contains(&c.name),
             })).collect::<Vec<_>>()),
             "sort": page.map(|p| data::sort_of(&self.query.order, &p.columns)
                 .into_iter()
@@ -1069,7 +1199,11 @@ impl TableGrid {
     }
 
     pub(crate) fn summary(&self) -> Option<data::SelectionSummary> {
-        Some(data::summary(self.page.as_ref()?, self.selection.as_ref()?))
+        Some(data::summary(
+            self.page.as_ref()?,
+            self.selection.as_ref()?,
+            &|c| !self.is_hidden(c),
+        ))
     }
 }
 
