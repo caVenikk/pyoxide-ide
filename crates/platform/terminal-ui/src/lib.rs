@@ -27,7 +27,7 @@ mod view;
 
 pub use element::{
     ALTERNATE_LEFT_INSET, BOTTOM_INSET, CellMetrics, LEFT_INSET, TOP_INSET, TerminalElement,
-    cell_metrics, grid_layout,
+    TerminalFont, cell_metrics, grid_layout, set_font,
 };
 pub use terminal::StartRequest;
 pub use tool_window::{TerminalToolWindow, TerminalToolWindowEvent};

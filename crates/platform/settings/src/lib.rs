@@ -34,7 +34,7 @@ pub use files::{SaveSettings, SyncSettings};
 pub use import::{FileTypeAssociation, FileTypeSettings, ImportSettings};
 pub use keymap::{KeymapSettings, keymaps_dir};
 pub use store::{Problem, SavePlan, Section, SettingsError, Store, VERSION, write_atomic};
-pub use terminal::TerminalSettings;
+pub use terminal::{TerminalFontSettings, TerminalSettings};
 
 /// The application's configuration folder: the product's `CONFIG_DIR`
 /// environment variable, else its slug in the user's configuration folder

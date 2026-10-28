@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use gpui::App;
 use settings::{
     AppearanceSettings, EditorFontSettings, FileTypeAssociation, FileTypeSettings, ImportSettings,
-    SaveSettings, SoftWrapSettings, SyncSettings,
+    SaveSettings, SoftWrapSettings, SyncSettings, TerminalFontSettings,
 };
 use settings_import::pycharm::options::{self, ConfigFolder, ReferenceOptions, ThemePlugin};
 use settings_import::snapshot::{self, Snapshot};
@@ -92,6 +92,10 @@ pub(super) fn platform_importers() -> Vec<Importer> {
         Importer {
             id: "editor-font",
             work: editor_font,
+        },
+        Importer {
+            id: "terminal-font",
+            work: terminal_font,
         },
         Importer {
             id: "soft-wraps",
@@ -339,6 +343,39 @@ fn editor_font(source: &Source) -> Applied {
             parts.push("ligatures".to_owned());
         }
         Outcome::imported(format!("the editor font ({})", parts.join(", ")))
+    })
+}
+
+/// `options/terminal-font.xml`: a user who set a font for the terminal (a
+/// Nerd Font for the prompt) keeps it.
+fn terminal_font(source: &Source) -> Applied {
+    let options = source.options.terminal_font.clone();
+    if options.is_empty() {
+        return nothing();
+    }
+    Box::new(move |cx| {
+        let font = options.font;
+        let mut settings: TerminalFontSettings = store::get(cx);
+        if let Some(family) = font.family {
+            settings.family = Some(family);
+        }
+        if let Some(size) = font.size {
+            settings.size = Some(TerminalFontSettings::clamp_size(size));
+        }
+        if let Some(spacing) = font.line_spacing {
+            settings.line_spacing = Some(TerminalFontSettings::clamp_spacing(spacing));
+        }
+        if let Some(spacing) = options.column_spacing {
+            settings.column_spacing = Some(TerminalFontSettings::clamp_spacing(spacing));
+        }
+        if let Some(fallback) = font.fallback {
+            settings.fallback = Some(fallback);
+        }
+        store::set(cx, &settings);
+        let mut parts = Vec::new();
+        parts.extend(settings.family.clone());
+        parts.extend(settings.size.map(format_number));
+        Outcome::imported(format!("the terminal font ({})", parts.join(", ")))
     })
 }
 

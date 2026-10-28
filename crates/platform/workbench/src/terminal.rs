@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpui::{App, AppContext as _, Global, Task};
 use terminal::{ShellCustomizer, StartPlan, StartRequest, plan_session};
 
-pub use ::settings::TerminalSettings;
+pub use ::settings::{TerminalFontSettings, TerminalSettings};
 
 /// What a product adds to terminal sessions (the Python product activates
 /// the project's virtual environment).
@@ -45,8 +45,61 @@ impl Global for Hook {}
 /// Registers the Terminal settings and keeps the product's hook.
 pub(crate) fn init(cx: &mut App, hook: Option<TerminalHook>) {
     settings_ui::store::register::<TerminalSettings>(cx);
+    settings_ui::store::register::<TerminalFontSettings>(cx);
+    settings_ui::store::register::<::settings::EditorFontSettings>(cx);
+    follow_font(cx);
     cx.set_global(Hook(hook));
     route_keys(cx);
+}
+
+/// The terminal font of the settings: its own choice, else the editor
+/// font's family and size (the reference starts from the console font,
+/// which is the editor font until it is changed); the spacings are 1 until
+/// chosen.
+pub fn font_of(
+    terminal: &TerminalFontSettings,
+    editor: &::settings::EditorFontSettings,
+) -> terminal_ui::TerminalFont {
+    terminal_ui::TerminalFont {
+        family: terminal.family.clone().or_else(|| editor.family.clone()),
+        size: terminal
+            .size
+            .or(editor.size)
+            .map(TerminalFontSettings::clamp_size),
+        line_spacing: terminal
+            .line_spacing
+            .map_or(TerminalFontSettings::DEFAULT_SPACING, |s| {
+                TerminalFontSettings::clamp_spacing(s)
+            }),
+        column_spacing: terminal
+            .column_spacing
+            .map_or(TerminalFontSettings::DEFAULT_SPACING, |s| {
+                TerminalFontSettings::clamp_spacing(s)
+            }),
+        fallback: terminal.fallback_family().map(str::to_owned),
+    }
+}
+
+/// Keeps the terminal view's font in step with the settings.
+fn follow_font(cx: &mut App) {
+    fn apply(cx: &mut App) {
+        let font = font_of(
+            &settings_ui::store::get::<TerminalFontSettings>(cx),
+            &settings_ui::store::get::<::settings::EditorFontSettings>(cx),
+        );
+        terminal_ui::set_font(cx, font);
+    }
+    apply(cx);
+    settings_ui::store::observe(
+        cx,
+        <TerminalFontSettings as ::settings::Section>::KEY,
+        apply,
+    );
+    settings_ui::store::observe(
+        cx,
+        <::settings::EditorFontSettings as ::settings::Section>::KEY,
+        apply,
+    );
 }
 
 /// The product's customizers of a session in the project at
@@ -198,4 +251,48 @@ pub(crate) fn route_keys(cx: &mut App) {
         }
     })
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use ::settings::EditorFontSettings;
+
+    use super::*;
+
+    #[test]
+    fn the_terminal_inherits_the_editor_font_until_it_has_its_own() {
+        let editor = EditorFontSettings {
+            family: Some("Fira Code".into()),
+            size: Some(15.0),
+            ..EditorFontSettings::default()
+        };
+        let inherited = font_of(&TerminalFontSettings::default(), &editor);
+        assert_eq!(inherited.family.as_deref(), Some("Fira Code"));
+        assert_eq!(inherited.size, Some(15.0));
+        assert_eq!(inherited.line_spacing, 1.0);
+        assert_eq!(inherited.column_spacing, 1.0);
+        // No font of the machine is added as a fallback.
+        assert_eq!(inherited.fallback, None);
+
+        let own = TerminalFontSettings {
+            family: Some("JetBrainsMono Nerd Font".into()),
+            size: Some(100.0),
+            line_spacing: Some(1.2),
+            fallback: Some("Monospaced".into()),
+            ..TerminalFontSettings::default()
+        };
+        let font = font_of(&own, &editor);
+        assert_eq!(font.family.as_deref(), Some("JetBrainsMono Nerd Font"));
+        assert_eq!(font.size, Some(40.0));
+        assert_eq!(font.line_spacing, 1.2);
+        assert_eq!(font.fallback, None);
+        assert_eq!(
+            font_of(
+                &TerminalFontSettings::default(),
+                &EditorFontSettings::default()
+            )
+            .family,
+            None
+        );
+    }
 }

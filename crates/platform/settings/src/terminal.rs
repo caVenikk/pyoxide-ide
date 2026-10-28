@@ -56,6 +56,61 @@ impl TerminalSettings {
     }
 }
 
+/// The terminal's own font (Settings | Tools | Terminal | Font, the
+/// reference's `terminal-font.xml`, `TerminalFontSettingsService`). A key
+/// that is not set is inherited: the family and size from the editor font
+/// (the reference starts from the console font, which is the editor font
+/// until it is changed), the line and column spacing are 1. The characters
+/// the font lacks come from the platform's fallback, not from any font
+/// the machine happens to have, unless a fallback family is set.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct TerminalFontSettings {
+    /// The font family.
+    pub family: Option<String>,
+    /// The size in points.
+    pub size: Option<f32>,
+    /// The line height, a multiple of the font's own.
+    pub line_spacing: Option<f32>,
+    /// The width of a cell, a multiple of the font's own.
+    pub column_spacing: Option<f32>,
+    /// The family of the characters the font lacks.
+    pub fallback: Option<String>,
+}
+
+impl TerminalFontSettings {
+    /// The sizes allowed (`EditorFontsConstants`: 4 to 40).
+    pub const SIZES: std::ops::RangeInclusive<f32> = 4.0..=40.0;
+    /// The line and column spacings allowed (`EditorFontsConstants`: 0.6 to
+    /// 3).
+    pub const SPACINGS: std::ops::RangeInclusive<f32> = 0.6..=3.0;
+    /// The line and column spacing without a choice.
+    pub const DEFAULT_SPACING: f32 = 1.0;
+
+    /// A size in the allowed range.
+    pub fn clamp_size(size: f32) -> f32 {
+        size.clamp(*Self::SIZES.start(), *Self::SIZES.end())
+    }
+
+    /// A line or column spacing in the allowed range.
+    pub fn clamp_spacing(spacing: f32) -> f32 {
+        spacing.clamp(*Self::SPACINGS.start(), *Self::SPACINGS.end())
+    }
+
+    /// The fallback family in effect: the platform's (`None`) for an unset
+    /// one, `<None>` and the reference's logical default `Monospaced`.
+    pub fn fallback_family(&self) -> Option<&str> {
+        self.fallback
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty() && *f != "<None>" && *f != "Monospaced")
+    }
+}
+
+impl Section for TerminalFontSettings {
+    const KEY: &'static str = "terminal.font";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +144,34 @@ mod tests {
             store.get("terminal.shell-path"),
             Some(serde_json::json!(" /bin/zsh -l "))
         );
+    }
+
+    #[test]
+    fn the_font_is_inherited_until_chosen() {
+        let mut store = Store::new();
+        store.register::<TerminalFontSettings>();
+        assert_eq!(
+            store.section::<TerminalFontSettings>(),
+            TerminalFontSettings::default()
+        );
+        let chosen = TerminalFontSettings {
+            family: Some("JetBrainsMono Nerd Font".into()),
+            size: Some(14.0),
+            fallback: Some("Monospaced".into()),
+            ..TerminalFontSettings::default()
+        };
+        assert!(store.set_section(&chosen));
+        assert_eq!(
+            store.get("terminal.font.family"),
+            Some(serde_json::json!("JetBrainsMono Nerd Font"))
+        );
+        assert_eq!(chosen.fallback_family(), None);
+        let own = TerminalFontSettings {
+            fallback: Some(" Symbols Nerd Font ".into()),
+            ..TerminalFontSettings::default()
+        };
+        assert_eq!(own.fallback_family(), Some("Symbols Nerd Font"));
+        assert_eq!(TerminalFontSettings::clamp_size(100.0), 40.0);
+        assert_eq!(TerminalFontSettings::clamp_spacing(0.1), 0.6);
     }
 }

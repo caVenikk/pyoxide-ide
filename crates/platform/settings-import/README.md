@@ -40,7 +40,7 @@ database, file path, connect descriptor or TNS alias, TLS mode, parameters):
 
 `pycharm::options` finds the reference's configuration folders (newest
 first) and reads the options of the first-run import (ADR 0017): theme,
-colour scheme, keymap, editor font, soft wraps, the honoured UI options,
+colour scheme, keymap, editor font, terminal font (`terminal-font.xml`), soft wraps, the honoured UI options,
 autosave and file type associations, and the theme plugins' descriptors
 (`META-INF/plugin.xml` only). `snapshot` copies a configuration folder's
 data files (`options/*.xml`, `keymaps/`, `colors/`, `codestyles/`,
