@@ -234,6 +234,13 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// The expression Quick Evaluate Expression evaluates at an offset: as
+    /// [`Self::expression_at`], but side effects are allowed, so a call is
+    /// evaluated too.
+    fn expression_at_caret(&self, file: &Path, text: &str, offset: usize) -> Option<Range<usize>> {
+        self.expression_at(file, text, offset)
+    }
+
     /// Line breakpoints can be put in a file of this type (its stoppable
     /// lines are known), going by its path.
     fn line_breakpoint_file(&self, file: &Path) -> bool {

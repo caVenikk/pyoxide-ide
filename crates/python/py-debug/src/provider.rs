@@ -253,6 +253,17 @@ impl DebugAdapterProvider for PythonDebugProvider {
             .flatten()
     }
 
+    fn expression_at_caret(
+        &self,
+        file: &Path,
+        text: &str,
+        offset: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        breakpoints::is_python_file(file)
+            .then(|| crate::hover::expression_with_calls_at(text, offset))
+            .flatten()
+    }
+
     fn exception_breakpoint_type(&self) -> Option<ExceptionBreakpointType> {
         Some(breakpoints::exception_type())
     }

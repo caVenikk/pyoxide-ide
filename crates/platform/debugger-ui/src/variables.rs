@@ -515,8 +515,52 @@ impl VariablesView {
             .as_ref()
             .and_then(|p| p.values.get(crate::watches::RESULT).cloned());
         self.freeze(cx);
+        self.refresh_popup_root(cx);
         self.dirty = true;
         cx.notify();
+    }
+
+    /// A popup's root row shows its own text, which a set value may have
+    /// changed: its expression is evaluated again.
+    fn refresh_popup_root(&mut self, cx: &mut Context<Self>) {
+        let (Some(root), Some(frame)) = (&self.popup, self.frame_id()) else {
+            return;
+        };
+        let expression = match &root.variable.evaluate_name {
+            Some(name) => name.clone(),
+            None if root.parent == 0 => root.name.clone(),
+            None => return,
+        };
+        let epoch = self.epoch;
+        let task = crate::watches::evaluate(
+            self.session.clone(),
+            self.provider.clone(),
+            frame,
+            expression,
+            debugger::EvaluateContext::Watch,
+        );
+        cx.spawn(async move |this, cx| {
+            let eval = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let crate::watches::Eval::Value { variable, shape } = eval else {
+                    return;
+                };
+                if this.epoch != epoch {
+                    return;
+                }
+                if let Some(root) = &mut this.popup {
+                    // The children are the ones loaded for the reference
+                    // the root has; a new reference is not followed.
+                    let reference = root.variable.reference;
+                    root.variable = *variable;
+                    root.variable.reference = reference;
+                    root.shape = shape;
+                    this.dirty = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// The rows shown now stay until the new ones are loaded, at most

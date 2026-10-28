@@ -10,6 +10,10 @@
 5. Select the string and press Cmd+C (macOS) or Ctrl+C.
 6. Right-click a variable.
 7. Turn off Simplified Variables View (More ⋮ > Debugger Settings).
+8. Right-click a container, choose Inspect…; in the dialog expand a child,
+   choose Set As Root on it, then Back and Forward.
+9. Right-click a value, choose Compare Value with Clipboard….
+10. Right-click a value, choose Show Referring Objects….
 
 ## Expected
 - Step 1: rows `name = {type} value`, sorted by name; containers have an
@@ -23,11 +27,19 @@
   Evaluate Expression…, Add to Watches, Jump To Source, in the reference's
   order.
 - Step 7: functions, classes and modules appear among the variables.
+- Step 8: a window titled "Inspect 'name'" with a toolbar (Set As Root, Back,
+  Forward) and the value's tree; the history keeps 11 steps.
+- Step 9: a window titled "Clipboard vs Selected Value" with the clipboard
+  text ("From clipboard") against the value ("Selected Value").
+- Step 10: a window titled "Referring Objects For name" whose children are
+  the objects that refer to the value.
 
 ## Commands
 `debug.set-value {"path": ..., "value": ...}`,
 `debug.variables.set-value {"value": ...}` (the selected value),
-`debug.variables.copy-value`, `debug.variables.copy-name`,
+`debug.variables.copy-value`, `debug.variables.inspect`,
+`debug.variables.compare-with-clipboard`,
+`debug.variables.show-referring-objects`, `debug.variables.copy-name`,
 `debug.variables.jump-to-source`, `debug.variables.context-menu`,
 `debug.state` (variables with children), `debug.settings`.
 

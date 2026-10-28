@@ -240,7 +240,13 @@ impl DebuggerView {
         let editor = editor.clone();
         let find = cx.background_spawn(async move {
             let byte = byte_of(&text, offset)?;
-            let range = provider.expression_at(&path, &text, byte)?;
+            // The tree of Quick Evaluate Expression may run code (a call),
+            // the hover's value does not.
+            let range = if tree {
+                provider.expression_at_caret(&path, &text, byte)?
+            } else {
+                provider.expression_at(&path, &text, byte)?
+            };
             let expression = text.get(range.clone())?.to_owned();
             let chars = char_of(&text, range.start)..char_of(&text, range.end);
             Some((chars, expression))
