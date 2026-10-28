@@ -667,6 +667,7 @@ impl BackgroundTasks {
                 div()
                     .px(px(ROW_INSET))
                     .mt(px(-1.0))
+                    .h(small_line)
                     .text_size(small)
                     .line_height(small_line)
                     .text_color(text_color)
@@ -725,7 +726,9 @@ impl BackgroundTasks {
                                     .children(buttons),
                             ),
                     )
-                    .when(!comment.is_empty(), |d| d.child(line(comment)))
+                    // Always there, empty as a space: the hint must not
+                    // move the rows (`ProgressPanelBuilder.emptyComment`).
+                    .child(line(comment))
                     .when(!task.details.is_empty(), |d| {
                         d.child(line(task.details.clone()))
                     }),

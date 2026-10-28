@@ -238,6 +238,37 @@ fn auto_show_opens_the_popup_for_a_second_task(cx: &mut TestAppContext) {
     assert_eq!(tasks(cx, window)["auto_show"], json!(false));
 }
 
+#[gpui::test]
+fn hovering_the_cancel_button_does_not_move_the_row(cx: &mut TestAppContext) {
+    let window = open(cx);
+    // No text: the comment line only holds the button's hint.
+    invoke(
+        cx,
+        window,
+        "background-tasks.start",
+        json!({"title": "Updating Python interpreter", "seconds": 60}),
+    );
+    wait_shown(cx, window);
+    invoke(cx, window, "background-tasks.show", json!(null));
+    let id = tasks(cx, window)["tasks"][0]["id"].clone();
+    let button = format!("processes-cancel-{id}");
+    let row = bounds(cx, window, "processes-row-0");
+    let at = bounds(cx, window, &button);
+
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_move(at.center(), None, Modifiers::none());
+    draw(cx, window);
+    assert_eq!(bounds(cx, window, "processes-row-0"), row);
+    assert_eq!(bounds(cx, window, &button), at);
+
+    // And off the button again.
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    vcx.simulate_mouse_move(point(px(1.0), px(1.0)), None, Modifiers::none());
+    draw(cx, window);
+    assert_eq!(bounds(cx, window, "processes-row-0"), row);
+    assert_eq!(bounds(cx, window, &button), at);
+}
+
 fn try_bounds(
     cx: &mut TestAppContext,
     window: WindowHandle<Workbench>,
