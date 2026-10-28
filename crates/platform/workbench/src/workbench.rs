@@ -896,7 +896,7 @@ impl Workbench {
                 }
             }).collect::<Vec<_>>(),
             "active_tab": self.active,
-            "splits": self.splits_json(),
+            "splits": self.splits_json(cx),
             "tab_menu": self.tab_menu_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
@@ -2386,6 +2386,15 @@ impl Workbench {
                 (view.title(cx), view.icon(cx), text, false, view.tooltip(cx))
             }
         };
+        let dragged = splits::DraggedTab::new(
+            tab.key(),
+            title.clone(),
+            icon,
+            self.tab_bounds
+                .borrow()
+                .get(index)
+                .map_or(px(0.0), |b| b.size.width),
+        );
         let group: SharedString = format!("tab-{index}").into();
         // A modified file shows a dot where the close button is; hovering
         // the dot shows the close button (as the reference IDE's New UI tabs
@@ -2495,6 +2504,11 @@ impl Workbench {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.activate(index, window, cx);
             }))
+            // The tab can be dragged to another place or group
+            // (`splits/tab_drag.rs`).
+            .on_drag(dragged, |dragged, _, _, cx| {
+                cx.new(|_| splits::TabChip::new(dragged))
+            })
             // The tab's context menu where the pointer is; the active tab
             // stays.
             .on_mouse_down(

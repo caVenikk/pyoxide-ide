@@ -637,3 +637,257 @@ fn open_in_right_split_splits_once_and_then_reuses_the_right_group(cx: &mut Test
     assert_eq!(active_path(&mut h), "a.py");
     assert_eq!(focused(&mut h), 1);
 }
+
+// ---- dragging tabs ---------------------------------------------------------------
+
+/// Presses on the tab drawn at `selector` and moves to `to`: the drag is on
+/// while the button stays down.
+fn start_drag(h: &mut Harness, tab: &str, to: gpui::Point<Pixels>) {
+    let from = bounds(h, tab).center();
+    mouse::send(
+        h.cx,
+        h.window.into(),
+        vec![
+            mouse::press(from),
+            // Past the drag threshold, then to the target.
+            mouse::drag_to(point(from.x + px(8.0), from.y + px(1.0))),
+            mouse::drag_to(to),
+        ],
+    );
+}
+
+fn drop_at(h: &mut Harness, at: gpui::Point<Pixels>, modifiers: gpui::Modifiers) {
+    mouse::send(
+        h.cx,
+        h.window.into(),
+        vec![mouse::drag_to(at), mouse::release_with(at, modifiers)],
+    );
+}
+
+/// The editor area of the group whose strip is `strip`: from the strip's
+/// top to the bottom of the editor area.
+fn group_area(h: &mut Harness, strip: &str) -> Bounds<Pixels> {
+    let strip = bounds(h, strip);
+    let area = bounds(h, "editor-area");
+    Bounds::from_corners(strip.origin, point(strip.right(), area.bottom()))
+}
+
+/// Where the dragged tab would go (`splits.drag.drop.place`), `null` when
+/// nothing is dragged.
+fn drag_place(h: &mut Harness) -> Value {
+    let drag = h.state()["splits"]["drag"].clone();
+    if drag.is_null() {
+        return Value::Null;
+    }
+    drag["drop"]["place"].clone()
+}
+
+fn drawn(h: &mut Harness, part: &str) -> bool {
+    let name: &'static str = Box::leak(part.to_owned().into_boxed_str());
+    VisualTestContext::from_window(h.window.into(), h.cx)
+        .debug_bounds(name)
+        .is_some()
+}
+
+#[gpui::test]
+fn dragging_a_tab_along_its_strip_changes_its_place(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    let last = bounds(&mut h, "tab-2");
+    let strip = bounds(&mut h, "editor-tabs");
+    // While dragged, the tab leaves the strip and a slot opens where it
+    // would go: after the last tab.
+    let over = point(last.right() - px(4.0), strip.center().y);
+    start_drag(&mut h, "tab-0", over);
+    assert!(drawn(&mut h, "tab-drop-slot"));
+    assert!(drawn(&mut h, "tab-drag-image"));
+    assert_eq!(drag_place(&mut h), json!("strip 2"));
+    drop_at(&mut h, over, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [["b.py", "c.py", "a.py"]]);
+    assert_eq!(active_path(&mut h), "a.py");
+    assert_eq!(drag_place(&mut h), Value::Null);
+    // Back to the start: before the first tab.
+    let first = bounds(&mut h, "tab-0");
+    let to = point(first.left() + px(4.0), strip.center().y);
+    start_drag(&mut h, "tab-2", to);
+    drop_at(&mut h, to, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [["a.py", "b.py", "c.py"]]);
+}
+
+#[gpui::test]
+fn dropping_a_tab_in_the_middle_of_its_own_editor_changes_nothing(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    let area = group_area(&mut h, "editor-tabs");
+    start_drag(&mut h, "tab-0", area.center());
+    // The whole editor is the drop area.
+    let shown = bounds(&mut h, "tab-drop-area");
+    assert!((shown.size.width - area.size.width).abs() < px(2.0));
+    drop_at(&mut h, area.center(), gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [["a.py", "b.py", "c.py"]]);
+}
+
+#[gpui::test]
+fn a_tab_dropped_in_another_groups_strip_moves_there(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    h.invoke("tabs.split-move-right", json!({ "index": 1 }));
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py"]]);
+    // c.py (tab 2) over the left half of b.py's tab (tab 1) in the second
+    // group.
+    let target = bounds(&mut h, "tab-1");
+    let strip = bounds(&mut h, "editor-tabs");
+    let over = point(target.left() + px(4.0), strip.center().y);
+    start_drag(&mut h, "tab-2", over);
+    // The slot opens before b.py's tab.
+    let slot = bounds(&mut h, "tab-drop-slot");
+    assert!(
+        slot.left() < target.left() + px(40.0),
+        "{slot:?} {target:?}"
+    );
+    drop_at(&mut h, over, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["a.py"], vec!["c.py", "b.py"]]);
+    assert_eq!(focused(&mut h), 1);
+    assert_eq!(active_path(&mut h), "c.py");
+}
+
+#[gpui::test]
+fn a_tab_dropped_on_another_editor_goes_to_its_end(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    h.invoke("tabs.split-move-right", json!({ "index": 1 }));
+    // a.py (tab 0) onto the middle of the second group's editor.
+    let area = group_area(&mut h, "editor-tabs");
+    start_drag(&mut h, "tab-0", area.center());
+    let shown = bounds(&mut h, "tab-drop-area");
+    assert!((shown.size.width - area.size.width).abs() < px(2.0));
+    assert!((shown.size.height - (area.size.height - px(30.0))).abs() < px(20.0));
+    drop_at(&mut h, area.center(), gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["c.py"], vec!["b.py", "a.py"]]);
+    assert_eq!(active_path(&mut h), "a.py");
+}
+
+#[gpui::test]
+fn a_tab_dropped_on_an_edge_makes_a_split_on_that_side(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    let area = group_area(&mut h, "editor-tabs");
+    // The right edge: the right half is the drop area.
+    let right = point(area.right() - px(10.0), area.center().y);
+    start_drag(&mut h, "tab-0", right);
+    let shown = bounds(&mut h, "tab-drop-area");
+    assert!(
+        (shown.size.width - area.size.width / 2.0).abs() < px(2.0),
+        "{shown:?}"
+    );
+    assert!(
+        (shown.left() - area.center().x).abs() < px(2.0),
+        "{shown:?}"
+    );
+    drop_at(&mut h, right, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["b.py", "c.py"], vec!["a.py"]]);
+    assert_eq!(focused(&mut h), 1);
+    assert_eq!(
+        h.state()["splits"]["tree"]["split"]["vertical"],
+        json!(false)
+    );
+    // The left edge of the first group: the new group comes first.
+    let area = group_area(&mut h, "editor-tabs-0");
+    let left = point(area.left() + px(10.0), area.center().y);
+    start_drag(&mut h, "tab-1", left);
+    let shown = bounds(&mut h, "tab-drop-area");
+    assert!((shown.left() - area.left()).abs() < px(2.0), "{shown:?}");
+    drop_at(&mut h, left, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["b.py"], vec!["c.py"], vec!["a.py"]]);
+}
+
+#[gpui::test]
+fn a_tab_dropped_on_the_bottom_edge_splits_downwards(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    let area = group_area(&mut h, "editor-tabs");
+    let bottom = point(area.center().x, area.bottom() - px(10.0));
+    start_drag(&mut h, "tab-1", bottom);
+    let shown = bounds(&mut h, "tab-drop-area");
+    assert!(
+        (shown.bottom() - area.bottom()).abs() < px(2.0),
+        "{shown:?}"
+    );
+    assert!(shown.size.width > area.size.width - px(2.0));
+    drop_at(&mut h, bottom, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py"]]);
+    assert_eq!(
+        h.state()["splits"]["tree"]["split"]["vertical"],
+        json!(true)
+    );
+}
+
+#[gpui::test]
+fn the_last_tab_dragged_out_of_a_group_removes_the_group(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    h.invoke("tabs.split-move-right", json!({ "index": 1 }));
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py"]]);
+    // b.py, the only tab of the second group, onto the first group.
+    let area = group_area(&mut h, "editor-tabs-0");
+    start_drag(&mut h, "tab-1", area.center());
+    drop_at(&mut h, area.center(), gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [["a.py", "c.py", "b.py"]]);
+    assert!(h.state()["splits"]["tree"].get("leaf").is_some());
+    assert_eq!(active_path(&mut h), "b.py");
+}
+
+#[gpui::test]
+fn control_copies_the_file_to_the_other_group(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    h.invoke("tabs.split-move-right", json!({ "index": 1 }));
+    let area = group_area(&mut h, "editor-tabs");
+    // a.py onto the second group's editor with Control held.
+    start_drag(&mut h, "tab-0", area.center());
+    let control = gpui::Modifiers::control();
+    drop_at(&mut h, area.center(), control);
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py", "a.py"]]);
+    let state = h.state();
+    let mirrors = state["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["mirror"] == json!(true))
+        .count();
+    assert_eq!(mirrors, 1);
+    // The copy dragged back to the first group, which shows a.py: that
+    // tab is selected, nothing is opened twice.
+    let area = group_area(&mut h, "editor-tabs-0");
+    start_drag(&mut h, "tab-2", area.center());
+    drop_at(&mut h, area.center(), gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py"]]);
+    assert_eq!(active_path(&mut h), "a.py");
+}
+
+#[gpui::test]
+fn a_drag_released_outside_the_editor_changes_nothing(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    start_drag(&mut h, "tab-1", point(px(2.0), px(2.0)));
+    // Dragged, but over no place.
+    assert!(h.state()["splits"]["drag"].is_object());
+    assert_eq!(drag_place(&mut h), Value::Null);
+    drop_at(&mut h, point(px(2.0), px(2.0)), gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [["a.py", "b.py", "c.py"]]);
+    // The drag is over and the tab is back in its strip.
+    assert!(h.state()["splits"]["drag"].is_null());
+    bounds(&mut h, "tab-1");
+}
+
+#[gpui::test]
+fn a_group_with_one_tab_dropped_on_its_own_edge_changes_nothing(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = open(cx, dir.path());
+    h.invoke("tabs.split-move-right", json!({ "index": 1 }));
+    let area = group_area(&mut h, "editor-tabs");
+    let edge = point(area.right() - px(10.0), area.center().y);
+    start_drag(&mut h, "tab-1", edge);
+    drop_at(&mut h, edge, gpui::Modifiers::none());
+    assert_eq!(groups(&mut h), [vec!["a.py", "c.py"], vec!["b.py"]]);
+}

@@ -213,6 +213,7 @@ pub(crate) fn ui_sources(role: UiRole) -> &'static [Src] {
         RunWidgetRunningIcon => &[Ui("RunWidget.runningIconColor")],
         DragAndDropBorder => &[Ui("DragAndDrop.borderColor")],
         DragAndDropRow => &[Ui("DragAndDrop.rowBackground")],
+        DragAndDropArea => &[Ui("DragAndDrop.areaBackground")],
         TreeText => &[Ui("Tree.foreground")],
         TreeIndentGuide => &[Ui("Tree.hash")],
         ListButtonHover => &[Ui("List.Button.hoverBackground")],

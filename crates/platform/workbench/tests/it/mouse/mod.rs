@@ -35,6 +35,16 @@ pub fn release(at: Point<Pixels>) -> PlatformInput {
     })
 }
 
+/// The left button goes up at `at` with the modifiers held.
+pub fn release_with(at: Point<Pixels>, modifiers: Modifiers) -> PlatformInput {
+    PlatformInput::MouseUp(MouseUpEvent {
+        button: MouseButton::Left,
+        position: at,
+        modifiers,
+        click_count: 1,
+    })
+}
+
 /// The mouse moves to `at` with the left button held.
 pub fn drag_to(at: Point<Pixels>) -> PlatformInput {
     PlatformInput::MouseMove(MouseMoveEvent {

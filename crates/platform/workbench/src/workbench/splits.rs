@@ -34,6 +34,10 @@ use super::{Tab, TabContent, Workbench};
 use crate::commands::*;
 use crate::split_tree::{GroupId, Node, Path, clamp_proportion};
 
+mod tab_drag;
+use tab_drag::DropTarget;
+pub(super) use tab_drag::{DraggedTab, TabChip};
+
 /// Width of a splitter's line and of the strip around it that takes the
 /// mouse.
 const SPLITTER_LINE: f32 = 1.0;
@@ -80,6 +84,10 @@ pub(super) struct Splits {
     /// file: the version after it, so the event of that edit is not copied
     /// back.
     echo: HashMap<EntityId, u64>,
+    /// The tab being dragged and the width of its label.
+    dragging: Option<(EntityId, Pixels)>,
+    /// Where the dragged tab would go now.
+    drop: Option<DropTarget>,
 }
 
 impl Default for Splits {
@@ -93,6 +101,8 @@ impl Default for Splits {
             bounds: Rc::default(),
             drag: None,
             echo: HashMap::new(),
+            dragging: None,
+            drop: None,
         }
     }
 }
@@ -145,6 +155,10 @@ impl Workbench {
             .on_action(cx.listener(Self::next_splitter))
             .on_action(cx.listener(Self::previous_splitter))
             .on_mouse_move(cx.listener(Self::resize_split))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &gpui::MouseUpEvent, _, cx| this.tab_drag_ended(cx)),
+            )
     }
 
     // ---- groups and their tabs ---------------------------------------------------
@@ -251,6 +265,23 @@ impl Workbench {
                 Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
                 None => window.focus(&self.focus),
             }
+        }
+    }
+
+    /// Tab `index` is about to leave `group` for another: when it is the
+    /// group's selected tab, the neighbour before it (else the one after)
+    /// becomes the selected one.
+    fn hand_over_selection(&mut self, group: GroupId, index: usize) {
+        let order = self.group_tabs(group);
+        let key = self.tabs[index].key();
+        if order.len() > 1
+            && (self.splits.selected.get(&group) == Some(&key) || self.active == Some(index))
+        {
+            let at = order.iter().position(|&i| i == index).unwrap_or(0);
+            let neighbour = if at > 0 { order[at - 1] } else { order[1] };
+            self.splits
+                .selected
+                .insert(group, self.tabs[neighbour].key());
         }
     }
 
@@ -505,16 +536,7 @@ impl Workbench {
         }
         // The tab goes to the end of the other group, not pinned there; its
         // group selects a neighbour.
-        let order = self.group_tabs(group);
-        if order.len() > 1
-            && (self.splits.selected.get(&group) == Some(&key) || self.active == Some(index))
-        {
-            let at = order.iter().position(|&i| i == index).unwrap_or(0);
-            let neighbour = if at > 0 { order[at - 1] } else { order[1] };
-            self.splits
-                .selected
-                .insert(group, self.tabs[neighbour].key());
-        }
+        self.hand_over_selection(group, index);
         self.tabs[index].group = target;
         self.tabs[index].pinned = false;
         let rest = (0..self.tabs.len()).filter(|&i| i != index);
@@ -632,15 +654,7 @@ impl Workbench {
         self.splits.root = root;
         let target = if close_source {
             // The tab leaves its group: that one selects another.
-            let order = self.group_tabs(source);
-            let key = self.tabs[index].key();
-            if self.splits.selected.get(&source) == Some(&key) || self.active == Some(index) {
-                let at = order.iter().position(|&i| i == index).unwrap_or(0);
-                let neighbour = if at > 0 { order[at - 1] } else { order[1] };
-                self.splits
-                    .selected
-                    .insert(source, self.tabs[neighbour].key());
-            }
+            self.hand_over_selection(source, index);
             self.tabs[index].group = new;
             index
         } else {
@@ -1097,8 +1111,9 @@ impl Workbench {
     // ---- state ------------------------------------------------------------------------
 
     /// The groups for `workbench.state`: the tree and, per group in tree
-    /// order, its tabs and its selected tab.
-    pub(super) fn splits_json(&self) -> Json {
+    /// order, its tabs and its selected tab; while a tab is dragged, where
+    /// it would go (`drag`).
+    pub(super) fn splits_json(&self, cx: &gpui::App) -> Json {
         let groups: Vec<Json> = self
             .splits
             .root
@@ -1116,6 +1131,7 @@ impl Workbench {
             "focused": self.splits.focused,
             "tree": serde_json::to_value(&self.splits.root).unwrap_or(Json::Null),
             "groups": groups,
+            "drag": self.tab_drag_json(cx),
         })
     }
 
@@ -1127,7 +1143,18 @@ impl Workbench {
         let theme = cx.theme();
         let tab_h = theme.metric(themes::Metric::TabHeight);
         let separator = theme.color(UiRole::Border);
-        let tabs: Vec<AnyElement> = order.iter().map(|&i| self.render_tab(i, cx)).collect();
+        // The tab being dragged leaves its strip; the slot for it opens
+        // where it would go.
+        let dragged = self.dragged_tab(cx);
+        let mut tabs: Vec<AnyElement> = order
+            .iter()
+            .filter(|&&i| Some(self.tabs[i].key()) != dragged)
+            .map(|&i| self.render_tab(i, cx))
+            .collect();
+        if let Some((at, slot)) = self.drop_slot(group, cx) {
+            tabs.insert(at.min(tabs.len()), slot);
+        }
+        let drop_area = self.drop_area(group, cx);
         let strip = self.splits.strip(group);
         if let Some(selected) = selected {
             let at = order.iter().position(|&i| i == selected).unwrap_or(0);
@@ -1162,12 +1189,23 @@ impl Workbench {
             .flex_1()
             .min_w(px(0.0))
             .min_h(px(0.0))
+            .relative()
             .overflow_hidden()
             // A press anywhere in a group gives it the focus.
             .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                 if this.splits.focused != group {
                     this.focus_group(group, window, cx);
                 }
+            }))
+            // A tab dragged over the group shows where it would go; dropped,
+            // it goes there.
+            .on_drag_move(
+                cx.listener(move |this, e: &gpui::DragMoveEvent<DraggedTab>, _, cx| {
+                    this.tab_drag_over(group, e, cx)
+                }),
+            )
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                this.drop_tab(group, dragged, window, cx)
             }))
             // Files dropped on a group open in it.
             .on_drop(
@@ -1206,6 +1244,7 @@ impl Workbench {
             )
             .children(find)
             .children(body)
+            .children(drop_area)
             .into_any_element()
     }
 }
