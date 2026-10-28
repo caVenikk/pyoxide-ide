@@ -93,8 +93,8 @@ impl Col {
     /// Pixels the column starts with.
     pub fn width(self) -> f32 {
         match self {
-            Col::Operation => 210.0,
-            Col::Params => 170.0,
+            Col::Operation => 240.0,
+            Col::Params => 240.0,
             Col::Rows | Col::StartupCost => 96.0,
             Col::TotalCost => 100.0,
             Col::ActualRows => 110.0,
