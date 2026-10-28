@@ -40,6 +40,7 @@ mod connect;
 mod model_load;
 mod open_console;
 mod open_table;
+mod reveal;
 mod tree_view;
 
 pub(crate) use connect::ask_password;
@@ -191,6 +192,7 @@ pub(crate) fn with_target(
 
 pub(crate) fn init(cx: &mut App) {
     ui::command::register(cx, COMMANDS);
+    reveal::init(cx);
     cx.on_action(|_: &NewDataSource, cx| {
         with_target(cx, |e, window, cx| e.show_new_menu(None, window, cx))
     });

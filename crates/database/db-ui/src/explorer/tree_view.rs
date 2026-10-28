@@ -118,6 +118,9 @@ pub(crate) struct TreeState {
     /// (the counters after the names).
     pub totals: HashMap<String, Totals>,
     pub(super) total_tasks: HashMap<String, gpui::Task<()>>,
+    /// An object Go to Declaration asked for, to select once the data
+    /// source has its model.
+    pub pending_reveal: Option<(String, db_model::NodeId)>,
 }
 
 /// What a server offers, as far as it is read.
@@ -327,6 +330,7 @@ impl Explorer {
             None => live.refresh(),
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
@@ -435,6 +439,7 @@ impl Explorer {
             self.notify(Notification::new(NotificationKind::Warning, name, text), cx);
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
@@ -624,7 +629,7 @@ impl Explorer {
     }
 
     /// The model a row's node is in.
-    fn model_of(&self, source: &str) -> Option<&Model> {
+    pub(super) fn model_of(&self, source: &str) -> Option<&Model> {
         self.tree.lives.get(source).and_then(Live::shown_model)
     }
 

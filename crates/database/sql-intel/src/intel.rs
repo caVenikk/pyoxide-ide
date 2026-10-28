@@ -13,9 +13,10 @@ use std::thread;
 
 use code_intel::{
     AppliedEdit, CodeAction, CodeActionContext, CodeActionKind, CodeIntel, Command, CompletionItem,
-    CompletionTrigger, Completions, Diagnostic, DocumentId, EventHub, Feature, Features,
-    FileChange, FileEdits, FormatOptions, Hover, InsertText, Intel, IntelError, IntelEvent,
-    Location, Markup, Point, Rope, ServerId, ServerState, ServerStatus, SignatureContext,
+    CompletionTrigger, Completions, DefinitionTarget, Diagnostic, DocumentHighlight, DocumentId,
+    DocumentSymbol, EventHub, Feature, Features, FileChange, FileEdits, FormatOptions,
+    HighlightKind, Hover, InsertText, Intel, IntelError, IntelEvent, Location, Markup,
+    ObjectTarget, Point, Rope, ServerId, ServerState, ServerStatus, SignatureContext,
     SignatureHelp, TextEdit, Token, WorkspaceEdit, positions, ready, unsupported,
 };
 use futures::channel::oneshot;
@@ -27,8 +28,10 @@ use crate::context::ScopeProvider;
 use crate::docs;
 use crate::hover as quick_doc;
 use crate::inspect::{Fix, Problem};
+use crate::navigate::{DB_SCHEME, Destination, Nav, object_id};
 use crate::profile::{Inspection, InspectionProfile};
 use crate::signature;
+use crate::structure;
 
 /// The id of the services in the Language Services widget.
 pub const SERVER_ID: &str = "sql";
@@ -96,6 +99,9 @@ enum Job {
         at: Point,
         reply: oneshot::Sender<Result<Option<SignatureHelp>, IntelError>>,
     },
+    /// A request answered on the worker thread, from the analysis of the
+    /// latest text.
+    Query(Box<dyn FnOnce(&mut Worker) + Send>),
     Shutdown(oneshot::Sender<()>),
 }
 
@@ -200,6 +206,24 @@ impl SqlCodeIntel {
             input.latest.store(version, Ordering::Release);
         }
         let _ = self.jobs.send(Job::Changed(doc.clone()));
+    }
+}
+
+impl SqlCodeIntel {
+    /// Runs `run` on the worker thread, which answers requests before it
+    /// analyses changes.
+    fn query<T: Send + 'static>(
+        &self,
+        run: impl FnOnce(&mut Worker) -> Result<T, IntelError> + Send + 'static,
+    ) -> Intel<T> {
+        let (reply, rx) = oneshot::channel();
+        let job = Job::Query(Box::new(move |w| {
+            let _ = reply.send(run(w));
+        }));
+        if self.jobs.send(job).is_err() {
+            return ready(Err(IntelError::NotRunning));
+        }
+        Box::pin(async move { rx.await.unwrap_or(Err(IntelError::Cancelled)) })
     }
 }
 
@@ -311,16 +335,153 @@ impl CodeIntel for SqlCodeIntel {
         Box::pin(async move { rx.await.unwrap_or(Err(IntelError::Cancelled)) })
     }
 
-    fn definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
-        unsupported()
+    fn definition(&self, doc: &DocumentId, at: Point) -> Intel<Vec<Location>> {
+        let targets = self.definition_targets(doc, at);
+        Box::pin(async move {
+            Ok(targets
+                .await?
+                .into_iter()
+                .filter_map(|t| match t {
+                    DefinitionTarget::File(location) => Some(location),
+                    DefinitionTarget::Object(_) => None,
+                })
+                .collect())
+        })
+    }
+
+    fn definition_targets(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DefinitionTarget>> {
+        let doc = doc.clone();
+        self.query(move |w| {
+            w.navigate(&doc.clone(), at, move |nav, rope, offset| {
+                let Some((symbols, _)) = nav.symbols_at(offset) else {
+                    return Ok(Vec::new());
+                };
+                let mut out: Vec<DefinitionTarget> = Vec::new();
+                for symbol in &symbols {
+                    for d in nav.declarations(symbol, offset) {
+                        let target = match d {
+                            Destination::File(range) => DefinitionTarget::File(Location {
+                                path: doc.path().to_owned(),
+                                range: byte_to_point(rope, range.start)
+                                    ..byte_to_point(rope, range.end),
+                            }),
+                            Destination::Object {
+                                id,
+                                data_source,
+                                title,
+                            } => DefinitionTarget::Object(ObjectTarget::new(
+                                DB_SCHEME,
+                                object_id(id, &data_source),
+                                title,
+                            )),
+                        };
+                        if !out.contains(&target) {
+                            out.push(target);
+                        }
+                    }
+                }
+                Ok(out)
+            })
+        })
     }
 
     fn type_definition(&self, _: &DocumentId, _: Point) -> Intel<Vec<Location>> {
         unsupported()
     }
 
-    fn references(&self, _: &DocumentId, _: Point, _: bool) -> Intel<Vec<Location>> {
-        unsupported()
+    fn references(
+        &self,
+        doc: &DocumentId,
+        at: Point,
+        include_declaration: bool,
+    ) -> Intel<Vec<Location>> {
+        let doc = doc.clone();
+        self.query(move |w| {
+            w.navigate(&doc.clone(), at, move |nav, rope, offset| {
+                let Some((symbols, _)) = nav.symbols_at(offset) else {
+                    return Ok(Vec::new());
+                };
+                Ok(nav
+                    .occurrences(&symbols[0], offset)
+                    .into_iter()
+                    .filter(|o| include_declaration || !o.declaration)
+                    .map(|o| Location {
+                        path: doc.path().to_owned(),
+                        range: byte_to_point(rope, o.range.start)..byte_to_point(rope, o.range.end),
+                    })
+                    .collect())
+            })
+        })
+    }
+
+    fn document_highlights(&self, doc: &DocumentId, at: Point) -> Intel<Vec<DocumentHighlight>> {
+        let doc = doc.clone();
+        self.query(move |w| {
+            w.navigate(&doc, at, move |nav, rope, offset| {
+                let Some((symbols, _)) = nav.symbols_at(offset) else {
+                    return Ok(Vec::new());
+                };
+                Ok(nav
+                    .occurrences(&symbols[0], offset)
+                    .into_iter()
+                    .map(|o| DocumentHighlight {
+                        range: byte_to_point(rope, o.range.start)..byte_to_point(rope, o.range.end),
+                        kind: if o.declaration {
+                            HighlightKind::Write
+                        } else {
+                            HighlightKind::Read
+                        },
+                    })
+                    .collect())
+            })
+        })
+    }
+
+    fn rename(&self, doc: &DocumentId, at: Point, new_name: String) -> Intel<WorkspaceEdit> {
+        let doc = doc.clone();
+        self.query(move |w| {
+            w.navigate(&doc.clone(), at, move |nav, rope, offset| {
+                let Some((symbols, _)) = nav.symbols_at(offset) else {
+                    return Err(IntelError::Other("There is no name to rename here".into()));
+                };
+                let symbol = &symbols[0];
+                let text = nav
+                    .rename_text(symbol, &new_name, offset)
+                    .map_err(IntelError::Other)?;
+                let edits = nav
+                    .occurrences(symbol, offset)
+                    .into_iter()
+                    .map(|o| {
+                        TextEdit::new(
+                            byte_to_point(rope, o.range.start)..byte_to_point(rope, o.range.end),
+                            text.clone(),
+                        )
+                    })
+                    .collect();
+                Ok(WorkspaceEdit {
+                    files: vec![FileEdits {
+                        path: doc.path().to_owned(),
+                        edits,
+                    }],
+                })
+            })
+        })
+    }
+
+    fn document_symbols(&self, doc: &DocumentId) -> Intel<Vec<DocumentSymbol>> {
+        let doc = doc.clone();
+        self.query(move |w| {
+            if !w.sync(&doc) {
+                return Err(IntelError::Unsupported);
+            }
+            let Some(work) = w.docs.get(&doc) else {
+                return Err(IntelError::Unsupported);
+            };
+            Ok(structure::symbols(&work.script)
+                .iter()
+                .map(|s| document_symbol(&work.rope, s))
+                .collect())
+        })
     }
 
     fn code_actions(
@@ -395,6 +556,11 @@ impl CodeIntel for SqlCodeIntel {
             Feature::Completion,
             Feature::Hover,
             Feature::SignatureHelp,
+            Feature::Definition,
+            Feature::References,
+            Feature::Rename,
+            Feature::DocumentHighlights,
+            Feature::DocumentSymbols,
         ]);
         status.documents = self.shared.inputs().keys().cloned().collect();
         status.documents.sort();
@@ -480,7 +646,10 @@ impl Worker {
                     }
                     Job::Republish => republish = true,
                     a @ Job::Actions { .. } => actions.push(a),
-                    a @ (Job::Completion { .. } | Job::Hover { .. } | Job::Signature { .. }) => {
+                    a @ (Job::Completion { .. }
+                    | Job::Hover { .. }
+                    | Job::Signature { .. }
+                    | Job::Query(_)) => {
                         asks.push(a);
                     }
                     Job::Shutdown(tx) => shutdown.push(tx),
@@ -614,6 +783,7 @@ impl Worker {
             Job::Signature { doc, at, reply } => {
                 let _ = reply.send(self.signature(&doc, at));
             }
+            Job::Query(run) => run(self),
             _ => {}
         }
     }
@@ -653,6 +823,29 @@ impl Worker {
                 ),
             }),
         )
+    }
+
+    /// Runs a navigation request on the analysis of the latest text.
+    fn navigate<T>(
+        &mut self,
+        doc: &DocumentId,
+        at: Point,
+        run: impl FnOnce(&Nav<'_>, &Rope, usize) -> Result<T, IntelError>,
+    ) -> Result<T, IntelError> {
+        self.update(doc, false);
+        let ctx = self.shared.provider.context(doc);
+        let Some(w) = self.docs.get(doc) else {
+            return Err(IntelError::Unsupported);
+        };
+        let Some(analysis) = &w.analysis else {
+            return Err(IntelError::Cancelled);
+        };
+        let nav = Nav {
+            script: &w.script,
+            ctx: &ctx,
+            analysis,
+        };
+        run(&nav, &w.rope, point_to_byte(&w.rope, at))
     }
 
     fn signature(
@@ -802,6 +995,22 @@ fn completions(rope: &Rope, caret: usize, answer: complete::Answer) -> Completio
     Completions {
         items,
         incomplete: answer.incomplete,
+    }
+}
+
+fn document_symbol(rope: &Rope, s: &structure::Symbol) -> DocumentSymbol {
+    let range = |r: &Range<usize>| byte_to_point(rope, r.start)..byte_to_point(rope, r.end);
+    DocumentSymbol {
+        name: s.name.clone(),
+        detail: s.detail.clone(),
+        kind: s.kind,
+        range: range(&s.range),
+        selection_range: range(&s.selection),
+        children: s
+            .children
+            .iter()
+            .map(|c| document_symbol(rope, c))
+            .collect(),
     }
 }
 

@@ -17,10 +17,10 @@ use workbench::test_support::keymap::Harness;
 
 use super::*;
 
-const SOURCE: &str = "local";
+pub const SOURCE: &str = "local";
 
 /// A store whose cache holds the demo model of `SOURCE`.
-fn cached_store() -> (Arc<FakeStore>, tempfile::TempDir) {
+pub fn cached_store() -> (Arc<FakeStore>, tempfile::TempDir) {
     let cache_dir = tempfile::tempdir().unwrap();
     ModelCache::new(cache_dir.path())
         .store(&Model::from_snapshot(
@@ -33,7 +33,7 @@ fn cached_store() -> (Arc<FakeStore>, tempfile::TempDir) {
     (store, cache_dir)
 }
 
-fn open<'a>(
+pub fn open<'a>(
     cx: &'a mut TestAppContext,
     store: Arc<FakeStore>,
     root: &Path,
@@ -75,7 +75,7 @@ fn wait_for(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
     }
 }
 
-fn attach(h: &mut Harness) {
+pub fn attach(h: &mut Harness) {
     h.invoke("sql.attach-data-source", json!({ "name": SOURCE }));
     let started = Instant::now();
     while h.invoke("sql.state", Value::Null)["data-source"] != SOURCE {
