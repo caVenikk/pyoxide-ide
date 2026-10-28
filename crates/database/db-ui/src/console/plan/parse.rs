@@ -149,10 +149,7 @@ fn pg_operation(node_type: &str, modify: Option<&str>) -> (NodeKind, String) {
         "Sort" | "Incremental Sort" | "Materialize" | "Memoize" => {
             (NodeKind::Transform, node_type.into())
         }
-        "ModifyTable" => (
-            NodeKind::Other,
-            modify.unwrap_or("Modify Table").to_owned(),
-        ),
+        "ModifyTable" => (NodeKind::Other, modify.unwrap_or("Modify Table").to_owned()),
         t if t.starts_with("Index") => (NodeKind::IndexScan, format!("Index Scan ({t})")),
         t if t.starts_with("Bitmap") => (NodeKind::IndexScan, format!("Bitmap Scan ({t})")),
         t if t.ends_with("Join") || t == "Nested Loop" => (NodeKind::Join, t.into()),
@@ -269,7 +266,10 @@ pub(super) fn sqlite_text(root: &PlanNode) -> String {
                 .iter()
                 .find(|(k, _)| k == "Detail")
                 .map_or("", |(_, v)| v.as_str());
-            out.push(format!("{prefix}{}--{detail}", if last { '`' } else { '|' }));
+            out.push(format!(
+                "{prefix}{}--{detail}",
+                if last { '`' } else { '|' }
+            ));
             let next = format!("{prefix}{}  ", if last { ' ' } else { '|' });
             lines(&n.children, &next, out);
         }
@@ -357,7 +357,11 @@ pub(super) fn oracle(text: &str) -> Option<PlanNode> {
     }
     // Predicates: `   1 - filter("A"=1)`, continued on the lines after.
     let mut current: Option<usize> = None;
-    for line in lines.iter().skip(end).skip_while(|l| !l.starts_with("Predicate")) {
+    for line in lines
+        .iter()
+        .skip(end)
+        .skip_while(|l| !l.starts_with("Predicate"))
+    {
         let trimmed = line.trim();
         if let Some((id, rest)) = trimmed.split_once(" - ")
             && id.chars().all(|c| c.is_ascii_digit())
@@ -365,7 +369,10 @@ pub(super) fn oracle(text: &str) -> Option<PlanNode> {
         {
             current = flat.iter().position(|(_, i, _)| i == id);
             if let Some(ix) = current {
-                flat[ix].2.props.push(("Predicate".to_owned(), rest.to_owned()));
+                flat[ix]
+                    .2
+                    .props
+                    .push(("Predicate".to_owned(), rest.to_owned()));
             }
         } else if let Some(ix) = current
             && !trimmed.is_empty()

@@ -60,6 +60,8 @@ impl PlanView {
                 .unwrap_or_else(|e| e.into_inner())
                 .push_str(ContentKind::Normal, &format!("{}\n", plan.raw));
             view.flush(cx);
+            // The answer is read from its first line.
+            view.editor().update(cx, |e, cx| e.go_to(0, None, cx));
         });
         Self {
             plan,
@@ -85,11 +87,7 @@ impl PlanView {
 
     /// Opens a collapsed node, collapses an open one that has children.
     pub fn toggle(&mut self, path: Vec<usize>, cx: &mut Context<Self>) {
-        if self
-            .plan
-            .node(&path)
-            .is_none_or(|n| n.children.is_empty())
-        {
+        if self.plan.node(&path).is_none_or(|n| n.children.is_empty()) {
             return;
         }
         if !self.collapsed.remove(&path) {
@@ -193,11 +191,15 @@ impl PlanView {
             .into_any_element()
     }
 
-    fn render_table(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_table(&self, focused: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = cx.theme();
         let border = theme.color(UiRole::Border);
         let muted = theme.color(UiRole::TextMuted);
-        let selected_bg = theme.color(UiRole::Selection);
+        let selected_bg = theme.color(if focused {
+            UiRole::Selection
+        } else {
+            UiRole::SelectionInactive
+        });
         let hover = theme.color(UiRole::Hover);
         let cols = self.plan.columns();
         let total: f32 = cols.iter().map(|c| c.width()).sum();
@@ -241,7 +243,8 @@ impl PlanView {
                 .min_w(px(total))
                 .when(is_selected, |d| d.bg(selected_bg))
                 .when(!is_selected, |d| d.hover(move |s| s.bg(hover)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    window.focus(&this.focus);
                     this.select(path.clone(), cx)
                 }));
             for col in &cols {
@@ -361,20 +364,18 @@ impl PlanView {
 }
 
 impl Render for PlanView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focused = self.focus.contains_focused(window, cx);
         let toolbar = self.render_toolbar(cx);
         let body = match self.mode {
             Mode::Tree => div()
                 .flex()
                 .flex_row()
                 .size_full()
-                .child(self.render_table(cx))
+                .child(self.render_table(focused, cx))
                 .child(self.render_details(cx))
                 .into_any_element(),
-            Mode::Text => div()
-                .size_full()
-                .child(self.raw.clone())
-                .into_any_element(),
+            Mode::Text => div().size_full().child(self.raw.clone()).into_any_element(),
         };
         div()
             .id("plan-view")

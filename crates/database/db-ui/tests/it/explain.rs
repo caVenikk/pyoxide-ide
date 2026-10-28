@@ -26,8 +26,14 @@ const ANALYZED: &str = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "
 
 fn server() -> FakeSource {
     let source = FakeSource::new(Backend::Postgres);
-    source.on("explain (analyze", Reaction::column("QUERY PLAN", &[ANALYZED]));
-    source.on("explain (format json)", Reaction::column("QUERY PLAN", &[PLAN]));
+    source.on(
+        "explain (analyze",
+        Reaction::column("QUERY PLAN", &[ANALYZED]),
+    );
+    source.on(
+        "explain (format json)",
+        Reaction::column("QUERY PLAN", &[PLAN]),
+    );
     source.on("from demo.customers", Reaction::column("id", &["1"]));
     source.on("delete from", Reaction::Affected(1));
     source
@@ -84,7 +90,14 @@ fn explain_plan_shows_the_tree_of_the_statement_without_running_it(cx: &mut Test
     );
     assert_eq!(
         plan["columns"],
-        json!(["Operation", "Params", "Rows", "Total Cost", "Startup Cost", "Raw Desc"])
+        json!([
+            "Operation",
+            "Params",
+            "Rows",
+            "Total Cost",
+            "Startup Cost",
+            "Raw Desc"
+        ])
     );
     assert_eq!(plan["rows"][1]["total_cost"], "43.26");
     assert_eq!(plan["rows"][1]["rows"], "300");
@@ -94,8 +107,8 @@ fn explain_plan_shows_the_tree_of_the_statement_without_running_it(cx: &mut Test
     // Only the explain went to the server, in the console's session.
     let sent = server.statements(Purpose::Console);
     assert!(
-        sent.iter().any(|q| q
-            == "EXPLAIN (FORMAT JSON) select * from demo.customers where id = 1"),
+        sent.iter()
+            .any(|q| q == "EXPLAIN (FORMAT JSON) select * from demo.customers where id = 1"),
         "{sent:?}"
     );
     assert!(
@@ -148,7 +161,10 @@ fn the_properties_of_the_selected_node_and_the_raw_text_are_in_the_tab(cx: &mut 
     let plan = console_state(&mut h)["tabs"][0]["plan"].clone();
     assert_eq!(plan["mode"], "text");
     assert!(
-        plan["raw"].as_str().unwrap().contains("\"Node Type\": \"Hash Join\""),
+        plan["raw"]
+            .as_str()
+            .unwrap()
+            .contains("\"Node Type\": \"Hash Join\""),
         "{plan}"
     );
 }

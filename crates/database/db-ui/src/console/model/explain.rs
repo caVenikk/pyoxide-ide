@@ -17,7 +17,9 @@ pub(crate) enum RunMode {
     Execute,
     /// The plan of the statement; with `analyze` the statement runs and the
     /// plan has the measured rows and times.
-    Explain { analyze: bool },
+    Explain {
+        analyze: bool,
+    },
 }
 
 /// The explain the console is running.
@@ -71,11 +73,8 @@ impl Console {
                 return;
             }
         }
-        let texts = sql_syntax::explain_statements(
-            &statement.text,
-            dialect,
-            ExplainOptions { analyze },
-        );
+        let texts =
+            sql_syntax::explain_statements(&statement.text, dialect, ExplainOptions { analyze });
         if texts.is_empty() {
             return;
         }

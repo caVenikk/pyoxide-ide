@@ -59,7 +59,10 @@ const PG_ANALYZE: &str = r#"[
 ]"#;
 
 fn text_rows(lines: &[&str]) -> Vec<Vec<Value>> {
-    lines.iter().map(|l| vec![Value::Text((*l).into())]).collect()
+    lines
+        .iter()
+        .map(|l| vec![Value::Text((*l).into())])
+        .collect()
 }
 
 fn paths(plan: &Plan) -> Vec<(usize, String)> {
@@ -95,7 +98,11 @@ fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
         (Some(300.0), Some(43.26), Some(6.7))
     );
     assert_eq!(
-        (join.actual_rows, join.actual_total_time, join.actual_startup_time),
+        (
+            join.actual_rows,
+            join.actual_total_time,
+            join.actual_startup_time
+        ),
         (Some(300.0), Some(1.221), Some(0.678))
     );
     // What the columns do not show is the raw description.
@@ -105,7 +112,10 @@ fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
     );
     let scan = plan.node(&[0, 0]).unwrap();
     assert_eq!(scan.params, "table: orders;");
-    assert_eq!(plan.node(&[0, 1, 0]).unwrap().params, "table: customers; index: customers_pkey;");
+    assert_eq!(
+        plan.node(&[0, 1, 0]).unwrap().params,
+        "table: customers; index: customers_pkey;"
+    );
     assert_eq!(plan.node(&[0, 1, 0]).unwrap().kind, NodeKind::IndexScan);
     // The statement carries the document's own properties.
     let root = &plan.root;
@@ -115,9 +125,17 @@ fn a_postgres_plan_is_the_statement_over_the_plan_tree() {
             .iter()
             .any(|(k, v)| k == "Execution Time" && v == "1.025")
     );
-    assert!(root.raw_desc.starts_with("Planning = {"), "{}", root.raw_desc);
+    assert!(
+        root.raw_desc.starts_with("Planning = {"),
+        "{}",
+        root.raw_desc
+    );
     // The raw text is the answer, indented.
-    assert!(plan.raw.starts_with("[\n  {\n    \"Plan\": {"), "{}", plan.raw);
+    assert!(
+        plan.raw.starts_with("[\n  {\n    \"Plan\": {"),
+        "{}",
+        plan.raw
+    );
 }
 
 #[test]
@@ -174,7 +192,9 @@ fn a_collapsed_node_hides_its_descendants() {
 
 #[test]
 fn the_statement_names_the_root() {
-    let rows = vec![vec![Value::Text(r#"[{"Plan": {"Node Type": "Result"}}]"#.into())]];
+    let rows = vec![vec![Value::Text(
+        r#"[{"Plan": {"Node Type": "Result"}}]"#.into(),
+    )]];
     let label = |sql: &str| {
         Plan::from_rows(Dialect::Postgres, sql, &rows, false)
             .root
@@ -281,8 +301,12 @@ fn an_oracle_plan_nests_by_the_indentation_of_its_operations() {
     );
     // A predicate that goes on over several lines is one property.
     assert!(
-        plan.node(&[0, 1]).unwrap().props.iter().any(|(k, v)| k == "Predicate"
-            && v == "filter(\"A\".\"DUMMY\"='X' AND \"A\".\"DUMMY\" IS NOT NULL)")
+        plan.node(&[0, 1])
+            .unwrap()
+            .props
+            .iter()
+            .any(|(k, v)| k == "Predicate"
+                && v == "filter(\"A\".\"DUMMY\"='X' AND \"A\".\"DUMMY\" IS NOT NULL)")
     );
     assert_eq!(plan.root.kind, NodeKind::Statement);
     assert!(plan.raw.starts_with("Plan hash value: 735651981"));

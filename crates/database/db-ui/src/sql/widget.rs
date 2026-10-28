@@ -793,12 +793,11 @@ impl SqlWidget {
             .flex_row()
             .items_center()
             .child(
-                button("sql-explain", icons::PLAN, "Explain Plan", !running)
-                    .when(!running, |d| {
-                        d.on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(crate::console::ExplainPlan), cx)
-                        })
-                    }),
+                button("sql-explain", icons::PLAN, "Explain Plan", !running).when(!running, |d| {
+                    d.on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::console::ExplainPlan), cx)
+                    })
+                }),
             )
             .child(
                 ui::components::icon_button(
@@ -813,9 +812,9 @@ impl SqlWidget {
                 .tooltip(Tooltip::text("Explain Plan and Explain Analyze", None))
                 .when(running, |d| d.opacity(ui::components::DISABLED_ALPHA))
                 .when(!running, |d| {
-                    d.on_click(cx.listener(|this, _, window, cx| {
-                        this.open_explain_menu(window, cx)
-                    }))
+                    d.on_click(
+                        cx.listener(|this, _, window, cx| this.open_explain_menu(window, cx)),
+                    )
                 }),
             )
             .child(

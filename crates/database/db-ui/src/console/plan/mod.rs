@@ -10,8 +10,8 @@ mod commands;
 mod parse;
 pub(crate) mod view;
 
-pub(crate) use commands::{ExplainAnalyze, ExplainPlan};
 pub(super) use commands::init;
+pub(crate) use commands::{ExplainAnalyze, ExplainPlan};
 
 use std::collections::HashSet;
 
@@ -93,8 +93,8 @@ impl Col {
     /// Pixels the column starts with.
     pub fn width(self) -> f32 {
         match self {
-            Col::Operation => 210.0,
-            Col::Params => 170.0,
+            Col::Operation => 240.0,
+            Col::Params => 240.0,
             Col::Rows | Col::StartupCost => 96.0,
             Col::TotalCost => 100.0,
             Col::ActualRows => 110.0,
@@ -142,11 +142,7 @@ impl Plan {
             props: vec![("Operation".into(), label.to_lowercase())],
             ..PlanNode::default()
         });
-        Self {
-            root,
-            raw,
-            analyze,
-        }
+        Self { root, raw, analyze }
     }
 
     /// The columns that have a value somewhere in the plan.
@@ -159,10 +155,7 @@ impl Plan {
             (Col::Rows, any(|n| n.rows.is_some())),
             (Col::ActualRows, any(|n| n.actual_rows.is_some())),
             (Col::TotalCost, any(|n| n.total_cost.is_some())),
-            (
-                Col::ActualTotalTime,
-                any(|n| n.actual_total_time.is_some()),
-            ),
+            (Col::ActualTotalTime, any(|n| n.actual_total_time.is_some())),
             (Col::StartupCost, any(|n| n.startup_cost.is_some())),
             (
                 Col::ActualStartupTime,
