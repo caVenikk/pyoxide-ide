@@ -95,7 +95,7 @@ ui::ui_commands! {
 
 /// Texts of the dialogs and balloons (our own).
 const REMOVE_TITLE: &str = "Remove Data Source";
-const DROP_TITLE: &str = "Drop";
+const DROP_TITLE: &str = "Confirm Drop";
 const TRUNCATE_TITLE: &str = "Truncate";
 const RENAME_TITLE: &str = "Rename";
 
@@ -1096,7 +1096,7 @@ impl Explorer {
     ) -> Option<gpui::AnyElement> {
         use gpui::{
             FontWeight, InteractiveElement as _, IntoElement as _, MouseButton, ParentElement as _,
-            StatefulInteractiveElement as _, Styled as _, anchored, deferred, div, px,
+            StatefulInteractiveElement as _, Styled as _, anchored, div, px,
         };
         let doc = self.tree.doc.as_ref()?;
         let theme = cx.theme();
@@ -1145,7 +1145,7 @@ impl Explorer {
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         Some(
-            deferred(
+            ui::deferred(
                 anchored()
                     .position(point(gpui::px(0.0), gpui::px(0.0)))
                     .child(
