@@ -63,3 +63,15 @@ name = "BreakpointsTree"
 "enter" = "breakpoints-dialog.go-to-source"
 "f4" = "breakpoints-dialog.go-to-source"
 "cmd-down" = "breakpoints-dialog.go-to-source"
+
+# The class chooser of a new exception breakpoint ("Select Exception
+# Class"): Up and Down move in the list from the name field, Enter takes
+# the class, Escape cancels (`ChooseByNamePanel`, `DialogWrapper`). The
+# name field keeps the focus.
+[[context]]
+name = "ExceptionClassChooser > Editor"
+[context.bindings]
+"escape" = "exception-class-chooser.cancel"
+"enter" = "exception-class-chooser.ok"
+"up" = "exception-class-chooser.previous"
+"down" = "exception-class-chooser.next"

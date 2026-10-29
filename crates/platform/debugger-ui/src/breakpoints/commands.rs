@@ -102,7 +102,7 @@ ui::ui_commands! {
     DialogAdd => "breakpoints-dialog.add", "Add",
         "Opens the list of breakpoint types that can be added here (Python Exception Breakpoint).";
     DialogChooseClass => "breakpoints-dialog.choose-class", "Select Exception Class",
-        "Opens the class chooser of a new exception breakpoint.";
+        "Opens the class chooser of a new exception breakpoint (a dialog with a name field and the matching classes).";
     /// Adds an exception breakpoint and selects it.
     DialogAddException { class: String } => "breakpoints-dialog.add-exception", "Add Exception Breakpoint",
         "Adds an exception breakpoint for a class (a row of the class chooser) and selects it.",
@@ -121,9 +121,24 @@ ui::ui_commands! {
     DialogDone => "breakpoints-dialog.done", "Done", "Closes the Breakpoints dialog.";
 }
 
+ui::ui_commands! {
+    CHOOSER_COMMANDS, scope = "ExceptionClassChooser";
+    ChooserOk => "exception-class-chooser.ok", "OK",
+        "Adds an exception breakpoint for the class selected in the class chooser (or the dotted class name typed) and closes the chooser.";
+    ChooserCancel => "exception-class-chooser.cancel", "Cancel",
+        "Closes the class chooser without adding a breakpoint.";
+    ChooserPrevious => "exception-class-chooser.previous", "Up", "Selects the class above.";
+    ChooserNext => "exception-class-chooser.next", "Down", "Selects the class below.";
+    /// Replaces the text of the name field.
+    ChooserSetQuery { text: String } => "exception-class-chooser.set-query", "Set Class Name",
+        "Replaces the text of the class chooser's name field and filters the classes by it.",
+        r#"{"text": "ValueError"}"#;
+}
+
 /// Registers the commands.
 pub fn register(cx: &mut gpui::App) {
     ui::command::register(cx, COMMANDS);
     ui::command::register(cx, POPUP_COMMANDS);
     ui::command::register(cx, DIALOG_COMMANDS);
+    ui::command::register(cx, CHOOSER_COMMANDS);
 }

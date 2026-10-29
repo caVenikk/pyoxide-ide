@@ -652,6 +652,64 @@ fn the_breakpoints_dialog(cx: &mut TestAppContext) {
     assert!(h.dialog().is_none());
 }
 
+/// Scenario `debugger-breakpoints-dialog.md`, step 4: + and Python
+/// Exception Breakpoint open the class chooser, which stays open while
+/// the + list closes and the windows change activation as in a real run;
+/// a class typed and Enter add the breakpoint, selected.
+#[gpui::test]
+fn adding_an_exception_breakpoint_with_the_class_chooser(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx, support::debug_hook());
+    let view =
+        h.cx.read(|cx| h.window.read(cx).unwrap().debugger_view().clone());
+    h.cx.update(|cx| view.update(cx, |v, _| v.set_activate(true)));
+    h.invoke("debug.view-breakpoints", json!(null));
+    let dialog = h.dialog().expect("the dialog is open");
+    h.invoke("breakpoints-dialog.add", json!(null));
+    let menu =
+        h.cx.update(|cx| ui::dialog_window::child_of(dialog, cx))
+            .expect("the + list is open");
+    h.press_in(menu, "enter");
+    let chooser =
+        h.cx.update(|cx| ui::dialog_window::child_of(dialog, cx))
+            .expect("the class chooser is open");
+    assert!(chooser != menu, "the chooser is a window of its own");
+    let state = h.debug()["dialog"]["chooser"].clone();
+    assert_eq!(state["title"], "Select Exception Class");
+    assert_eq!(state["rows"], json!(["KeyError", "ValueError"]));
+    // Typing filters the classes; Enter takes the selected one.
+    h.press_in(chooser, "v a l");
+    let state = h.debug()["dialog"]["chooser"].clone();
+    assert_eq!(state["query"], "val");
+    assert_eq!(state["rows"], json!(["ValueError"]));
+    assert_eq!(state["selected"], 0);
+    h.press_in(chooser, "enter");
+    assert!(
+        h.cx.update(|cx| ui::dialog_window::child_of(dialog, cx))
+            .is_none()
+    );
+    let state = h.debug();
+    assert_eq!(state["dialog"]["chooser"], Value::Null);
+    assert_eq!(state["dialog"]["detail"]["title"], "ValueError");
+    assert_eq!(state["exception_breakpoints"][1]["class"], "ValueError");
+    // Escape cancels the chooser and adds nothing.
+    h.invoke("breakpoints-dialog.choose-class", json!(null));
+    let chooser =
+        h.cx.update(|cx| ui::dialog_window::child_of(dialog, cx))
+            .expect("the class chooser is open");
+    // A script sets the name field.
+    h.invoke("exception-class-chooser.set-query", json!({"text": "key"}));
+    let state = h.debug()["dialog"]["chooser"].clone();
+    assert_eq!(state["query"], "key");
+    assert_eq!(state["rows"], json!(["KeyError"]));
+    h.press_in(chooser, "escape");
+    assert_eq!(h.debug()["dialog"]["chooser"], Value::Null);
+    assert_eq!(
+        h.debug()["exception_breakpoints"].as_array().unwrap().len(),
+        2
+    );
+    assert!(h.dialog().is_some(), "the Breakpoints dialog stays open");
+}
+
 impl H<'_> {
     fn click_in_dialog(&mut self, dialog: AnyWindowHandle, selector: &'static str) {
         let mut vcx = VisualTestContext::from_window(dialog, self.cx);
