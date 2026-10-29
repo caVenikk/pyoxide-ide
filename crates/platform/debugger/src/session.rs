@@ -212,6 +212,8 @@ struct Data {
     launched: bool,
     configuration_done: bool,
     stopping: bool,
+    /// Disconnect: the program goes on without the debugger.
+    detached: bool,
     /// Grows whenever the program moves on: answers of an older one are
     /// dropped.
     generation: u64,
@@ -374,6 +376,7 @@ impl Session {
                     launched: false,
                     configuration_done: false,
                     stopping: false,
+                    detached: false,
                     generation: 0,
                     stops: 0,
                     threads: Vec::new(),
@@ -1395,9 +1398,10 @@ impl Session {
             }
             data.phase = Phase::Ended;
             data.stop = None;
-            data.debuggee.clone()
+            data.debuggee.clone().filter(|_| !data.detached)
         };
-        // The program never outlives its adapter.
+        // The program never outlives its adapter, unless it was left to
+        // run (Disconnect).
         if let Some(debuggee) = debuggee
             && debuggee.is_running()
         {
@@ -1895,6 +1899,50 @@ impl Session {
                     wait_exit(&debuggee, Duration::from_millis(500));
                     let _ = debuggee.kill();
                     wait_exit(&debuggee, STOP_TIMEOUT);
+                }
+                let _ = done.send(());
+            });
+        if spawned.is_err()
+            && let Some(client) = self.program_client()
+        {
+            client.kill();
+        }
+        finished
+    }
+
+    /// Disconnect (its window closes): the adapters detach
+    /// (`disconnect` without `terminateDebuggee`) and end, the program goes
+    /// on running without the debugger. An adapter still running after
+    /// [`STOP_TIMEOUT`] is killed. The receiver gets a message when the
+    /// adapters are gone.
+    pub fn disconnect(&self) -> flume::Receiver<()> {
+        let (done, finished) = flume::bounded(1);
+        let (first, subprocesses) = {
+            let mut data = lock(&self.inner.data);
+            let first = !data.stopping;
+            data.stopping = true;
+            data.detached = true;
+            if data.phase != Phase::Ended {
+                data.phase = Phase::Stopping;
+            }
+            let subprocesses: Vec<Client> =
+                data.subprocesses.iter().map(|s| s.client.clone()).collect();
+            (first, subprocesses)
+        };
+        let client = self.program_client();
+        if first {
+            self.changed();
+        }
+        let spawned = thread::Builder::new()
+            .name("debug disconnect".to_owned())
+            .spawn(move || {
+                let ending: Vec<_> = subprocesses
+                    .iter()
+                    .chain(client.as_ref())
+                    .map(|client| client.shutdown(false, STOP_TIMEOUT))
+                    .collect();
+                for ended in ending {
+                    let _ = ended.recv();
                 }
                 let _ = done.send(());
             });

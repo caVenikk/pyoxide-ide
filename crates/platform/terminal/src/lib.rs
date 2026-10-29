@@ -41,7 +41,7 @@ pub use customizer::{
     Customization, ShellContext, ShellCustomizer, SourceScript, StartPlan, StartRequest, home_dir,
     plan_session,
 };
-pub use ending::{QUIT_GRACE, end_all_sessions};
+pub use ending::{QUIT_GRACE, end_all_sessions, end_sessions};
 pub use input::{Key, Modifiers, MouseAction, MouseButton};
 pub use prescan::{MarkKind, OWN_OSC};
 pub use process::ExitStatus;

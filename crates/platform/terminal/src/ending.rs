@@ -41,11 +41,27 @@ pub(crate) fn register(pid: u32, exited: Arc<AtomicBool>) {
 /// application's quit; blocks the caller for up to `grace` plus a few
 /// milliseconds, so it is not for the UI thread's normal operation.
 pub fn end_all_sessions(grace: Duration) {
-    let shells: Vec<(u32, Arc<AtomicBool>)> = {
-        let mut live = LIVE.lock();
-        live.retain(|l| !l.exited.load(Ordering::Acquire));
-        live.iter().map(|l| (l.pid, l.exited.clone())).collect()
-    };
+    end_shells(live_shells(|_| true), grace);
+}
+
+/// Ends the running shells with the process ids `pids` (the sessions of a
+/// window that closes) and everything they started, as
+/// [`end_all_sessions`] does; blocks for up to `grace`, so it runs off the
+/// UI thread.
+pub fn end_sessions(pids: &[u32], grace: Duration) {
+    end_shells(live_shells(|pid| pids.contains(&pid)), grace);
+}
+
+fn live_shells(wanted: impl Fn(u32) -> bool) -> Vec<(u32, Arc<AtomicBool>)> {
+    let mut live = LIVE.lock();
+    live.retain(|l| !l.exited.load(Ordering::Acquire));
+    live.iter()
+        .filter(|l| wanted(l.pid))
+        .map(|l| (l.pid, l.exited.clone()))
+        .collect()
+}
+
+fn end_shells(shells: Vec<(u32, Arc<AtomicBool>)>, grace: Duration) {
     if shells.is_empty() {
         return;
     }

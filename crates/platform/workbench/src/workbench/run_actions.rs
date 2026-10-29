@@ -34,6 +34,9 @@ pub(super) enum PendingDialog {
     StopAndLaunch(super::debug::Launch),
     /// Closing a tab whose process runs: Terminate or Disconnect.
     CloseRunning(usize),
+    /// Closing the window (or its project, or quitting) while a process
+    /// runs: Terminate, Disconnect or Cancel (`closing.rs`).
+    CloseWindow(ui::window_close::Running),
     /// A dialog about a file changed on disk (`file_sync`).
     FileSync(super::file_sync::SyncDialog),
     /// "Are you sure you want to delete …?": Yes deletes it.
@@ -1212,6 +1215,9 @@ impl Workbench {
                 }
                 self.run_window
                     .update(cx, |w, cx| w.close(tab, terminate, cx));
+            }
+            (PendingDialog::CloseWindow(running), button) => {
+                self.close_window_answered(running, button, checked, window, cx)
             }
             (PendingDialog::CloseTerminal(id), button) => {
                 self.terminal_close_answered(id, button, checked, window, cx)

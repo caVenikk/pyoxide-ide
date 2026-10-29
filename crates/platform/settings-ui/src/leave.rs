@@ -102,10 +102,14 @@ pub fn resolve(leaving: Leaving, cx: &mut App, then: impl FnOnce(&mut App) + 'st
     .detach();
 }
 
-/// A main window is about to close: true when it may close now. When the
-/// Settings window opened from it has unsaved changes, asks first and
-/// closes `parent` afterwards if the answer lets it.
-pub fn can_close_parent(parent: AnyWindowHandle, cx: &mut App) -> bool {
+/// A main window is about to close: true when nothing is to be settled.
+/// When the Settings window opened from it has unsaved changes, asks first
+/// and runs `then` afterwards if the answer lets the window close.
+pub fn settle_parent(
+    parent: AnyWindowHandle,
+    cx: &mut App,
+    then: impl FnOnce(&mut App) + 'static,
+) -> bool {
     let Some(handle) = find(cx) else {
         return true;
     };
@@ -115,9 +119,7 @@ pub fn can_close_parent(parent: AnyWindowHandle, cx: &mut App) -> bool {
     if !handle.read(cx).is_ok_and(|v| v.any_modified(cx)) {
         return true;
     }
-    resolve(Leaving::Project, cx, move |cx| {
-        let _ = parent.update(cx, |_, window, _| window.remove_window());
-    });
+    resolve(Leaving::Project, cx, then);
     false
 }
 

@@ -33,12 +33,17 @@ impl Workbench {
         }
     }
 
-    /// `project.close`: modified files are saved and the window closes;
-    /// the last main window is replaced by one without a project that
-    /// shows the Welcome tab, in the same place (the reference shows its
-    /// Welcome screen).
+    /// `project.close`: running processes are asked about, what the window
+    /// started ends, modified files are saved and the window closes
+    /// (`closing.rs`).
     fn close_project(&mut self, _: &CloseProject, window: &mut Window, cx: &mut Context<Self>) {
-        self.save_all(cx);
+        self.close_window(super::closing::Closing::Project, window, cx);
+    }
+
+    /// Closes the window of a closed project; the last main window is
+    /// replaced by one without a project that shows the Welcome tab, in
+    /// the same place (the reference shows its Welcome screen).
+    pub(super) fn close_project_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let this = window.window_handle();
         let last = !cx
             .windows()
