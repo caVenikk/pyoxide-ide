@@ -6,5 +6,6 @@ mod completion;
 mod fixture;
 mod inspections;
 mod intel;
+mod navigation;
 mod resolution;
 mod valid;

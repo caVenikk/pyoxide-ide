@@ -82,6 +82,8 @@ const PIN_DOT_Y: f32 = 0.2;
 /// How long a notice stays in the status bar (about as long as the
 /// reference's balloons stay).
 const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
+/// The notice when Go to Declaration finds an object nothing can open.
+const NO_OBJECT_HANDLER: &str = "Cannot open this declaration";
 /// Between the run widget and the toolbar's buttons right of it: the run
 /// widget's toolbar ends 16 after its buttons, the main toolbar's groups
 /// are 10 apart, its buttons have 5 on both sides (`RedesignedRunWidget`
@@ -555,6 +557,11 @@ impl Workbench {
             }
             CodeIntelEvent::OpenLocation { path, at } => {
                 self.open_file_at(path.clone(), *at, None, window, cx)
+            }
+            CodeIntelEvent::OpenObject(target) => {
+                if !crate::object_targets::open(target, window, cx) {
+                    self.show_notice(NO_OBJECT_HANDLER.into(), cx);
+                }
             }
             CodeIntelEvent::ShowDocumentation => self.show_documentation_window(window, cx),
         }

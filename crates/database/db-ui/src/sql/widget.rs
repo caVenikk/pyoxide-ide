@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use futures::StreamExt as _;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, Corner, CursorStyle, DismissEvent,
     Entity, Global, InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -45,6 +46,9 @@ ui::ui_commands! {
     AttachDataSource { name: Option<String>, schema: Option<String>, target: Option<String>, shared: Option<bool> } => "sql.attach-data-source", "Attach Data Source",
         "Attaches the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to the data source `name` and the optional `schema`; without `name` the attachment is removed. Names in the file then mean what that data source's metadata says. Personal unless `shared` is true.",
         r#"{"name": "local", "schema": "public"}"#;
+    /// Connect the data source the active file is attached to.
+    ConnectDataSource => "sql.connect", "Connect Data Source",
+        "Connects the data source the active SQL file is attached to, for its table and column names: the \"Connect\" link of the hint above the editor, which shows while the data source has no metadata and needs a password. Asks for the password first when none is kept; nothing when the toolbar shows no hint.";
     /// Describe the toolbar.
     SqlState => "sql.state", "SQL State",
         "Returns the SQL toolbar's state as JSON: whether it shows, its chips and banner, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
@@ -98,8 +102,30 @@ fn target(cx: &App) -> Option<(AnyWindowHandle, Entity<SqlWidget>)> {
 }
 
 pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
+    // A data source without a cached model that code intelligence asks
+    // for is loaded by the Database tool window of its project.
+    let (wanted, mut requests) = futures::channel::mpsc::unbounded::<(PathBuf, String)>();
+    hub.on_model_absent(move |root, source| {
+        let _ = wanted.unbounded_send((root.to_owned(), source.to_owned()));
+    });
+    cx.spawn(async move |cx| {
+        while let Some((root, source)) = requests.next().await {
+            let _ = cx.update(|cx| crate::explorer::request_model(&root, &source, cx));
+        }
+    })
+    .detach();
     cx.set_global(SqlGlobal(hub));
     ui::command::register(cx, COMMANDS);
+    cx.on_action(|_: &ConnectDataSource, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.connect(window, cx));
+            });
+        });
+    });
     cx.on_action(|_: &ChooseDialect, cx| {
         let Some((window, widget)) = target(cx) else {
             return;
@@ -369,6 +395,27 @@ impl SqlWidget {
                 .is_some_and(|f| !self.dismissed.contains(f))
     }
 
+    /// The data source whose metadata the file's names would resolve
+    /// through, when only a connection with a typed password can bring it:
+    /// the hint offers to connect.
+    fn connect_hint(&self, resolved: &Resolved) -> Option<String> {
+        let file = self.visible_file()?;
+        let source = resolved.data_source.as_ref()?;
+        let root = self.hub.root_of(file).or_else(|| self.root.clone())?;
+        self.hub.connect_hint(&root, source).then(|| source.clone())
+    }
+
+    /// The hint's "Connect" link: connects the data source as the Database
+    /// tool window does, asking for the password first.
+    fn connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = self.resolved().and_then(|r| self.connect_hint(&r)) else {
+            return;
+        };
+        if let Some(explorer) = crate::explorer::explorer_of(window.window_handle(), cx) {
+            explorer.update(cx, |e, cx| e.connect_for_sql(&name, cx));
+        }
+    }
+
     fn tooltip(resolved: &Resolved) -> String {
         let mut text = format!(
             "SQL dialect: {} ({})",
@@ -482,6 +529,7 @@ impl SqlWidget {
             "visible": resolved.is_some(),
             "file": self.visible_file().map(|f| f.display().to_string()),
             "banner": resolved.as_ref().is_some_and(|r| self.banner_shows(r)),
+            "connect-hint": resolved.as_ref().and_then(|r| self.connect_hint(r)),
             "chips": chips.iter().map(|c| c.text.clone()).collect::<Vec<_>>(),
             "text": text_of(ChipId::Dialect),
             "schema-text": text_of(ChipId::Schema),
@@ -725,6 +773,45 @@ impl SqlWidget {
 }
 
 impl SqlWidget {
+    /// The hint to connect a data source that has no metadata yet and
+    /// needs a password: the names of its tables and columns are not
+    /// known until it is connected.
+    fn render_connect_hint(&self, source: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = cx.theme();
+        div()
+            .id("sql-connect-hint")
+            .debug_selector(|| "sql-connect-hint".into())
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .gap(px(12.0))
+            .h(px(BANNER_HEIGHT))
+            .mx(px(4.0))
+            .mt(px(4.0))
+            .px(px(12.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.color(UiRole::Info).opacity(0.35))
+            .bg(theme.color(UiRole::InfoBg))
+            .child(Icon::new(IconName::INFO).size(px(16.0)))
+            .child(div().flex_1().whitespace_nowrap().child(format!(
+                "Connect to \u{201c}{source}\u{201d} to complete its table and column names."
+            )))
+            .child(
+                div()
+                    .id("sql-connect-link")
+                    .debug_selector(|| "sql-connect-link".into())
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .text_color(theme.color(UiRole::TextLink))
+                    .cursor(CursorStyle::PointingHand)
+                    .child("Connect")
+                    .on_click(cx.listener(|this, _, window, cx| this.connect(window, cx))),
+            )
+            .into_any_element()
+    }
+
     /// Execute and Stop at the left of a console's toolbar, and its
     /// transaction mode (the placeholder of the later transaction
     /// controls).
@@ -799,6 +886,9 @@ impl Render for SqlWidget {
         };
         let tooltip = SharedString::from(Self::tooltip(&resolved));
         let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
+        let hint = self
+            .connect_hint(&resolved)
+            .map(|source| self.render_connect_hint(&source, cx));
         let chips: Vec<_> = self
             .chips(&resolved)
             .into_iter()
@@ -831,6 +921,7 @@ impl Render for SqlWidget {
             .flex_none()
             .flex_col()
             .children(banner)
+            .children(hint)
             .child(toolbar)
             .children(overlay)
             .into_any_element()
