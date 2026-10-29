@@ -634,6 +634,51 @@ impl RunToolWindow {
         cx.notify();
     }
 
+    /// The runs whose processes run, asked about before the window closes
+    /// (`ui::window_close`): Terminate stops one (interrupt, then the kill
+    /// of its tree), Disconnect leaves it running; its tab closes.
+    pub fn running_processes(this: &Entity<Self>, cx: &App) -> Vec<ui::window_close::Running> {
+        this.read(cx)
+            .tabs
+            .iter()
+            .filter(|t| t.is_alive())
+            .map(|t| {
+                let (id, run) = (t.id, this.downgrade());
+                ui::window_close::Running::new(t.title.clone(), move |how, cx| {
+                    let terminate = how == ui::window_close::Stop::Terminate;
+                    run.update(cx, |w, cx| w.end_tab(id, terminate, cx))
+                        .unwrap_or_else(|_| Task::ready(()))
+                })
+            })
+            .collect()
+    }
+
+    /// Closes the tab `id`; with `terminate` its process ends first: the
+    /// task is done when it did.
+    fn end_tab(&mut self, id: u64, terminate: bool, cx: &mut Context<Self>) -> Task<()> {
+        let Some(index) = self.tabs.iter().position(|t| t.id == id) else {
+            return Task::ready(());
+        };
+        let process = self.tabs[index]
+            .process
+            .clone()
+            .filter(|_| terminate && self.tabs[index].is_alive());
+        self.close(index, false, cx);
+        let Some(process) = process else {
+            return Task::ready(());
+        };
+        cx.background_spawn(async move {
+            let _ = process.stop();
+            for _ in 0..100 {
+                if !process.is_running() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let _ = process.kill();
+        })
+    }
+
     /// Stops every process (the application quits).
     pub fn kill_all(&mut self) {
         for tab in &self.tabs {
