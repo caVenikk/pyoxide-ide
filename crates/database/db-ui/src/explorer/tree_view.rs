@@ -293,6 +293,8 @@ impl Explorer {
             return;
         };
         let mut balloon = None;
+        let mut failed = None;
+        let mut finished = false;
         match event.kind {
             EventKind::State { state } => live.state = state,
             EventKind::Refresh { job, event } if live.refresh == Some(job) => match event {
@@ -302,6 +304,7 @@ impl Explorer {
                     live.model = live.handle.model().get();
                     live.has_model = true;
                     live.error = None;
+                    finished = true;
                     if let Some(root) = &self.root {
                         crate::sql::publish_model(cx, root, &name, &live.model);
                     }
@@ -322,14 +325,26 @@ impl Explorer {
                     if live.shown_model().is_some() {
                         // The tree keeps the cached model; the reason goes
                         // to a balloon.
-                        balloon = Some(error.message);
+                        balloon = Some(error.message.clone());
                     } else {
-                        live.error = Some(error.message);
+                        live.error = Some(error.message.clone());
                     }
+                    failed = Some(error);
                 }
                 RefreshEvent::Cancelled => live.refresh = None,
             },
             _ => return,
+        }
+        if finished {
+            self.model_load_finished(&name);
+        }
+        if let Some(error) = failed
+            && self.model_load_failed(&name, &error, cx)
+            && balloon.is_none()
+        {
+            // A load for the SQL files' completion: the tree may not be
+            // shown, so the reason goes to a balloon.
+            self.notify(Self::model_load_notification(&name, error.message), cx);
         }
         if let Some(text) = balloon {
             self.notify(Notification::new(NotificationKind::Warning, name, text), cx);

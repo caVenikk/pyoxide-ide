@@ -4,9 +4,11 @@
 //! the data grid of a table (`grid`) and what it shows for values, with its
 //! panel and views (`grid_values`), the SQL editor glue (`sql`) with its
 //! language services (`services`), the SQL consoles with their output log and
-//! result tabs (`console`) and the copy and transfer dialogs of the grid
+//! result tabs (`console`), the metadata the editor loads for a data source on
+//! its own (`autoload`) and the copy and transfer dialogs of the grid
 //! (`transfer`).
 
+mod autoload;
 mod console;
 mod data_sources;
 mod grid;

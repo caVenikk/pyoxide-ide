@@ -36,10 +36,12 @@ use crate::store::DataSource;
 use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
+mod model_load;
 mod open_console;
 mod open_table;
 mod tree_view;
 
+pub(crate) use model_load::request as request_model;
 pub(crate) use open_table::{open_selected_command, open_table_command, with_table};
 
 /// The key context of the tool window (its bindings in `db.toml`).
@@ -298,6 +300,8 @@ pub struct Explorer {
     sink: Option<db_session::EventSink>,
     events_task: Task<()>,
     scroll: UniformListScrollHandle,
+    /// Loading models for the SQL files' code intelligence (`model_load`).
+    model_load: model_load::State,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -326,6 +330,7 @@ impl Explorer {
             sink: None,
             events_task: Task::ready(()),
             scroll: UniformListScrollHandle::new(),
+            model_load: model_load::State::default(),
             _subscriptions: Vec::new(),
         }
     }
@@ -383,6 +388,7 @@ impl Explorer {
                     }
                 }
                 this.sources_changed();
+                this.run_pending_model_loads(cx);
                 cx.notify();
             });
         });
