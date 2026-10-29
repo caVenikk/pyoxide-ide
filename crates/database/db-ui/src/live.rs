@@ -3,15 +3,18 @@
 //! refreshes) and the refresh that runs. The tree reads the current model
 //! of a handle; it never asks the database when a node opens.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use db_core::schema::{Level, Scope};
-use db_core::{DataSourceId, Profile};
+use db_core::{Connection, ConnectionSource, DataSourceId, Profile, Purpose};
 use db_model::Model;
 use db_session::{DataSourceHandle, DataSourceOptions, DataSourceState, DbRuntime, JobId};
 use gpui::{App, Global};
 
+use crate::prompt::Asker;
+use crate::store::{DataSource, DataSourceStore};
 use crate::tree::Status;
 
 /// The runtime of the module's data source handles, started with the
@@ -122,3 +125,67 @@ impl Live {
         Status::Empty
     }
 }
+
+/// The connections of a data source handle, asking the person for the
+/// password first when none is to be had without asking (the data source
+/// saves it "Never", it was not typed yet, or the server refused the
+/// typed one): every way of connecting the module has goes through it, so
+/// that no connect ends in "no password" when a prompt can fix it.
+pub(crate) struct Prompting {
+    inner: Arc<dyn ConnectionSource>,
+    store: Arc<dyn DataSourceStore>,
+    root: PathBuf,
+    source: DataSource,
+    asker: Option<Asker>,
+}
+
+impl Prompting {
+    pub fn new(
+        inner: Arc<dyn ConnectionSource>,
+        store: Arc<dyn DataSourceStore>,
+        root: PathBuf,
+        source: DataSource,
+        asker: Option<Asker>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            store,
+            root,
+            source,
+            asker,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl ConnectionSource for Prompting {
+    async fn open(
+        &self,
+        data_source: &DataSourceId,
+        purpose: Purpose,
+    ) -> db_core::Result<Arc<dyn Connection>> {
+        if let Some(asker) = &self.asker
+            && self.source.profile.needs_password()
+            && self.store.needs_prompt(&self.root, &self.source)
+        {
+            let typed = asker.ask(self.root.clone(), self.source.name.clone()).await;
+            if !typed {
+                return Err(db_core::Error::new(
+                    db_core::ErrorKind::Cancelled,
+                    PASSWORD_NOT_ENTERED,
+                ));
+            }
+        }
+        let opened = self.inner.open(data_source, purpose).await;
+        if let Err(e) = &opened
+            && e.kind == db_core::ErrorKind::Auth
+        {
+            // The server refused it: the next connect asks again.
+            self.store.release_password(&self.root, &self.source.name);
+        }
+        opened
+    }
+}
+
+/// The reason of a connect that was not tried.
+pub(crate) const PASSWORD_NOT_ENTERED: &str = "The password was not entered";
