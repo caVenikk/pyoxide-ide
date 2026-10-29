@@ -116,6 +116,9 @@ pub(crate) struct Console {
     pub running: Option<JobId>,
     /// How long the last statement took, for the Services tree.
     pub last_ms: Option<u64>,
+    /// The session's connection was ended by a disconnect of the data
+    /// source and not opened again since.
+    pub disconnected: bool,
     current: Option<Current>,
     mark: Option<Mark>,
     /// The output log wraps long lines.
@@ -160,6 +163,7 @@ impl Console {
             tx: TxStatus::default(),
             running: None,
             last_ms: None,
+            disconnected: false,
             current: None,
             mark: None,
             soft_wrap: false,
@@ -300,6 +304,17 @@ impl Console {
         self.run(statements, cx);
     }
 
+    /// The data source was disconnected: the session's connection is gone.
+    pub fn disconnected(&mut self, cx: &mut Context<Self>) {
+        if self.disconnected {
+            return;
+        }
+        self.disconnected = true;
+        self.tx = TxStatus::default();
+        self.print(ContentKind::System, "Disconnected", cx);
+        cx.notify();
+    }
+
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         if self.running.is_some() {
             self.session.cancel();
@@ -319,7 +334,10 @@ impl Console {
 
     fn on_session(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         match event {
-            SessionEvent::Connected => self.print(ContentKind::System, "Connected", cx),
+            SessionEvent::Connected => {
+                self.disconnected = false;
+                self.print(ContentKind::System, "Connected", cx)
+            }
             SessionEvent::Schema { schema } => {
                 self.schema = Some(schema);
                 self.bind();
@@ -639,6 +657,7 @@ impl Console {
             "source": self.source,
             "schema": self.schema,
             "running": self.running.is_some(),
+            "disconnected": self.disconnected,
             "soft_wrap": self.soft_wrap,
             "tx": {"open": self.tx.open, "pending": self.tx.pending},
             "output": self.lines,

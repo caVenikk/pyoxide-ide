@@ -202,7 +202,10 @@ pub fn module(config: DbUiConfig) -> Module {
     Module {
         name: "database",
         icons: ICONS,
-        file_types: vec![sql::file_type(hub)],
+        file_types: vec![sql::file_type(hub.clone())],
+        code_intel: vec![workbench::CodeIntelHook::new(sql::SqlIntelProvider::new(
+            hub,
+        ))],
         status_widgets: vec![grid::status_widget()],
         editor_headers: vec![sql::widget::editor_header()],
         init: Some(Init::new(move |cx| {

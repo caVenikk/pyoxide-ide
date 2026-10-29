@@ -29,6 +29,8 @@ use crate::tree::{self, NodeKey, NodeView, Row, RowIcon, RowKey, SourceTree, Sta
 
 /// Metrics of the rows (logical px), the project tree's: the space left of
 /// the first chevron, chevron to icon, icon to text.
+/// The green dot on the icon of a connected data source.
+const CONNECTED_MARK: f32 = 7.0;
 const TREE_LEFT: f32 = 12.0;
 const ICON_X: f32 = 21.0;
 const TEXT_X: f32 = 20.0;
@@ -88,6 +90,20 @@ struct RowText {
     view: NodeView,
     /// A failed status row: the text in the error colour, a Retry link.
     failed: bool,
+    /// A data source row of a connected data source: its icon gets the
+    /// "connected" mark.
+    connected: bool,
+}
+
+/// Whether two profiles connect to the same place as the same user (they
+/// may differ in how long the password is kept).
+fn same_connection(a: &db_core::Profile, b: &db_core::Profile) -> bool {
+    let mut a = a.clone();
+    let mut b = b.clone();
+    for p in [&mut a, &mut b] {
+        p.gui.get_or_insert_with(Default::default).password_save = db_core::PasswordSave::default();
+    }
+    a == b
 }
 
 /// The tree's part of the explorer.
@@ -101,7 +117,10 @@ pub(crate) struct TreeState {
     /// How many schemas and databases the servers offer, by data source
     /// (the counters after the names).
     pub totals: HashMap<String, Totals>,
-    total_tasks: HashMap<String, gpui::Task<()>>,
+    pub(super) total_tasks: HashMap<String, gpui::Task<()>>,
+    /// An object Go to Declaration asked for, to select once the data
+    /// source has its model.
+    pub pending_reveal: Option<(String, db_model::NodeId)>,
 }
 
 /// What a server offers, as far as it is read.
@@ -166,9 +185,16 @@ impl Explorer {
             .totals
             .retain(|name, _| sources.iter().any(|s| &s.name == name));
         self.tree.lives.retain(|name, live| {
-            sources
-                .iter()
-                .any(|s| &s.name == name && s.profile == live.profile)
+            let Some(source) = sources.iter().find(|s| &s.name == name) else {
+                return false;
+            };
+            // How long the password is kept does not change what the
+            // handle connects to.
+            if !same_connection(&source.profile, &live.profile) {
+                return false;
+            }
+            live.profile = source.profile.clone();
+            true
         });
         self.tree
             .expanded
@@ -205,10 +231,17 @@ impl Explorer {
         };
         let store = crate::store(cx);
         let sink = self.sink(cx);
+        let connections = live::Prompting::new(
+            store.connections(&root),
+            store.clone(),
+            root.clone(),
+            source.clone(),
+            crate::prompt::asker(cx),
+        );
         let handle = runtime.data_source(
             DataSourceId::from(name),
             live::options(&source.profile),
-            store.connections(&root),
+            connections,
             sink,
         );
         let mut live = Live::new(source.profile.clone(), handle);
@@ -251,11 +284,31 @@ impl Explorer {
             let totals = run.await;
             let _ = this.update(cx, |this, cx| {
                 this.tree.total_tasks.remove(&key);
-                this.tree.totals.insert(key, totals);
+                this.tree.totals.insert(key.clone(), totals);
                 cx.notify();
             });
         });
         self.tree.total_tasks.insert(name, task);
+    }
+
+    /// The counters of a data source that connected after they could not be
+    /// read (the password was typed just now).
+    pub(super) fn reload_totals(&mut self, name: &str, cx: &mut Context<Self>) {
+        let unread = self
+            .tree
+            .totals
+            .get(name)
+            .is_none_or(|t| t.schemas.is_none())
+            && !self.tree.total_tasks.contains_key(name);
+        let (Some(root), Some(source)) = (
+            self.root.clone(),
+            self.sources().iter().find(|s| s.name == name).cloned(),
+        ) else {
+            return;
+        };
+        if unread && self.tree.lives.contains_key(name) {
+            self.load_totals(&source, &root, cx);
+        }
     }
 
     fn cache_loaded(&mut self, name: &str, model: Option<Model>, cx: &mut Context<Self>) {
@@ -269,11 +322,15 @@ impl Explorer {
             Some(model) if live.handle.model().generation() == 0 => {
                 live.model = live.handle.model().set(model);
                 live.has_model = true;
+                if let Some(root) = &self.root {
+                    crate::sql::publish_model(cx, root, name, &live.model);
+                }
             }
             Some(_) => {}
             None => live.refresh(),
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
@@ -290,8 +347,36 @@ impl Explorer {
             return;
         };
         let mut balloon = None;
+        let mut failed = None;
+        let mut finished = false;
+        let mut reached = None;
         match event.kind {
-            EventKind::State { state } => live.state = state,
+            EventKind::State { state } => {
+                reached = Some(state.clone());
+                live.state = state;
+            }
+            EventKind::DecisionNeeded {
+                reason: db_session::DecisionReason::Disconnect,
+                sessions,
+            } => {
+                self.notify(
+                    Notification::new(
+                        NotificationKind::Warning,
+                        name,
+                        format!(
+                            "{} {} uncommitted changes: commit or roll them back, then disconnect",
+                            sessions.len(),
+                            if sessions.len() == 1 {
+                                "console has"
+                            } else {
+                                "consoles have"
+                            }
+                        ),
+                    ),
+                    cx,
+                );
+                return;
+            }
             EventKind::Refresh { job, event } if live.refresh == Some(job) => match event {
                 RefreshEvent::Started => {}
                 RefreshEvent::Finished { .. } => {
@@ -299,6 +384,10 @@ impl Explorer {
                     live.model = live.handle.model().get();
                     live.has_model = true;
                     live.error = None;
+                    finished = true;
+                    if let Some(root) = &self.root {
+                        crate::sql::publish_model(cx, root, &name, &live.model);
+                    }
                     if let Some(root) = self.root.clone()
                         && let Some(cache) = crate::store(cx).model_cache(&root)
                     {
@@ -313,22 +402,44 @@ impl Explorer {
                 }
                 RefreshEvent::Failed { error } => {
                     live.refresh = None;
-                    if live.shown_model().is_some() {
+                    if error.kind == db_core::ErrorKind::Cancelled {
+                        // The password was not typed: nothing to report
+                        // beyond the row.
+                        if live.shown_model().is_none() {
+                            live.error = Some(error.message.clone());
+                        }
+                    } else if live.shown_model().is_some() {
                         // The tree keeps the cached model; the reason goes
                         // to a balloon.
-                        balloon = Some(error.message);
+                        balloon = Some(error.message.clone());
                     } else {
-                        live.error = Some(error.message);
+                        live.error = Some(error.message.clone());
                     }
+                    failed = Some(error);
                 }
                 RefreshEvent::Cancelled => live.refresh = None,
             },
             _ => return,
         }
+        if let Some(state) = reached {
+            self.state_reached(&name, &state, cx);
+        }
+        if finished {
+            self.model_load_finished(&name);
+        }
+        if let Some(error) = failed
+            && self.model_load_failed(&name, &error)
+            && balloon.is_none()
+        {
+            // A load for the SQL files' completion: the tree may not be
+            // shown, so the reason goes to a balloon.
+            self.notify(Self::model_load_notification(&name, error.message), cx);
+        }
         if let Some(text) = balloon {
             self.notify(Notification::new(NotificationKind::Warning, name, text), cx);
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
@@ -403,7 +514,14 @@ impl Explorer {
         };
         match self.tree.lives.get_mut(&name) {
             Some(live) => live.refresh(),
-            None => self.open_live(&name, cx),
+            None => {
+                self.open_live(&name, cx);
+                // With a cached model opening shows it and connects nothing:
+                // Refresh is a request to connect.
+                if let Some(live) = self.tree.lives.get_mut(&name) {
+                    live.refresh();
+                }
+            }
         }
         self.rebuild_rows();
         cx.notify();
@@ -511,7 +629,7 @@ impl Explorer {
     }
 
     /// The model a row's node is in.
-    fn model_of(&self, source: &str) -> Option<&Model> {
+    pub(super) fn model_of(&self, source: &str) -> Option<&Model> {
         self.tree.lives.get(source).and_then(Live::shown_model)
     }
 
@@ -533,6 +651,7 @@ impl Explorer {
                 count: None,
             },
             failed: false,
+            connected: false,
         };
         match row.key.node {
             NodeKey::Source => {
@@ -540,6 +659,7 @@ impl Explorer {
                     Some(profile.map_or(icons::DATA_SOURCE, |p| icons::backend(p.backend))),
                     source.to_owned(),
                 );
+                text.connected = self.is_connected(source);
                 // The databases shown of the server's (the current one),
                 // or the schemas where the engine has one database.
                 text.view.detail = match (profile.and_then(database_name), totals) {
@@ -601,6 +721,7 @@ impl Explorer {
                         icon: Some(icon_name(view.icon)),
                         view,
                         failed: false,
+                        connected: false,
                     }
                 }
                 None => plain(None, String::new()),
@@ -611,6 +732,7 @@ impl Explorer {
                         icon: Some(icons::FOLDER),
                         view: tree::group_view(node, group),
                         failed: false,
+                        connected: false,
                     },
                     None => plain(None, String::new()),
                 }
@@ -778,6 +900,19 @@ impl Explorer {
                 .top((row_height - px(16.0)) / 2.0)
                 .child(Icon::new(icon).size(px(16.0)))
         });
+        let mark = text.connected.then(|| {
+            div()
+                .id(("db-connected", ix))
+                .debug_selector(|| "database-connected".to_owned())
+                .absolute()
+                .left(left + px(ICON_X + 10.0))
+                .top((row_height - px(16.0)) / 2.0 + px(9.0))
+                .size(px(CONNECTED_MARK))
+                .rounded_full()
+                .border_1()
+                .border_color(theme.color(UiRole::Surface))
+                .bg(theme.color(UiRole::Success))
+        });
         let extra = text
             .view
             .count
@@ -828,6 +963,7 @@ impl Explorer {
             .children(guides)
             .children(chevron)
             .children(icon)
+            .children(mark)
             .child(label)
             .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
                 window.focus(&this.focus);

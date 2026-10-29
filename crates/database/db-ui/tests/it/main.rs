@@ -1,16 +1,22 @@
-//! The database module's interface in a headless main window: the key
-//! bindings of `keymaps/*/db.toml` (`keymap`) and the Database tool window
-//! with the Data Sources dialog over a fake store (`data_sources`), its
-//! object tree (`tree`), the data grid of a table (`grid`) and what it shows
-//! for values, with its panel and views (`grid_values`), the SQL editor glue
-//! (`sql`) and the SQL consoles with their output log and result tabs
-//! (`console`), and the copy and transfer dialogs of the grid (`transfer`).
+//! The database module's interface in a headless main window: the key bindings
+//! of `keymaps/*/db.toml` (`keymap`), the Database tool window with the Data
+//! Sources dialog over a fake store (`data_sources`), its object tree (`tree`),
+//! the data grid of a table (`grid`) and what it shows for values, with its
+//! panel and views (`grid_values`), the SQL editor glue (`sql`) with its
+//! language services (`services`), the SQL consoles with their output log and
+//! result tabs (`console`), the metadata the editor loads for a data source on
+//! its own (`autoload`), the password prompt of every connect with Disconnect
+//! (`connect`) and the copy and transfer dialogs of the grid (`transfer`).
 
+mod autoload;
+mod connect;
 mod console;
 mod data_sources;
 mod grid;
 mod grid_values;
 mod keymap;
+mod navigation;
+mod services;
 mod sql;
 mod transfer;
 mod tree;

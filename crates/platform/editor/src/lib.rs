@@ -31,7 +31,7 @@ pub use diagnostics::{Analysis, DiagnosticMark, MarkMessage, MarkSeverity, Probl
 pub use diff_highlights::DiffHighlights;
 pub use editor::{
     BLINK_INTERVAL, Editor, EditorConfig, EditorEvent, ForwardedInput, MatchBackground,
-    SearchHighlights, TypeHook, forward_actions, new_editor,
+    SearchHighlights, TypeHook, UsageHighlight, forward_actions, new_editor,
 };
 pub use element::LONG_LINE;
 pub use find::FindBar;

@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use code_intel::{
     AppliedEdit, CodeIntel, CompletionTrigger, Completions, DocumentId, Feature, FileChange,
-    FileChangeKind, IntelError, IntelEvent, Route, RoutedCodeIntel, ServerId, ServerStatus,
+    FileChangeKind, IntelError, IntelEvent, ObjectTarget, Route, RoutedCodeIntel, ServerId,
+    ServerStatus,
 };
 use editor::{Analysis, Editor, EditorEvent};
 use gpui::{
@@ -31,7 +32,9 @@ use crate::hover::DocState;
 use crate::intentions::IntentionState;
 use crate::marks;
 use crate::navigation::NavState;
+use crate::occurrences::OccurrenceState;
 use crate::popup::{CaretPopup, Placement, PopupHost, TextHint};
+use crate::rename::RenameState;
 use crate::services::{self, InlineAction, ServerItem, ServicesPopup, WidgetBounds};
 use crate::signature::{self, SignaturePopup, SignatureState};
 
@@ -67,9 +70,21 @@ pub enum CodeIntelEvent {
     /// Open a file in a tab with the caret at a position (a navigation
     /// target).
     OpenLocation { path: PathBuf, at: Point },
+    /// Open an object that is no place in a file (a database table): the
+    /// handler registered for its scheme does it.
+    OpenObject(ObjectTarget),
     /// Show the Documentation tool window ([`CodeIntelView::doc_window`])
     /// without moving the focus, registering it at its first use.
     ShowDocumentation,
+    /// Open the Rename dialog for the symbol at the caret of the active
+    /// editor, with its name; the dialog reports the new name through
+    /// [`CodeIntelView::rename_confirmed`] or
+    /// [`CodeIntelView::rename_cancelled`].
+    RenameDialog { name: String },
+    /// The services refused the new name (a message for the dialog).
+    RenameRejected(String),
+    /// The rename was applied (the dialog closes).
+    RenameDone,
 }
 
 /// The code intelligence of a main window: the project's language
@@ -109,6 +124,10 @@ pub struct CodeIntelView {
     pub(crate) reported: Reported,
     /// Go to Declaration, Show Usages and the list popups.
     pub(crate) nav: NavState,
+    /// Highlight Usages in File.
+    pub(crate) occurrences: OccurrenceState,
+    /// Rename.
+    pub(crate) rename: RenameState,
     /// Show Context Actions and the bulb.
     pub(crate) intentions: IntentionState,
     /// Reformat Code or Optimize Imports in flight.
@@ -166,6 +185,8 @@ impl CodeIntelView {
             signatures: SignatureState::new(signature_popup),
             reported: Reported::default(),
             nav: NavState::default(),
+            occurrences: OccurrenceState::default(),
+            rename: RenameState::default(),
             intentions: IntentionState::new(cx.weak_entity()),
             format_request: None,
             server_tasks: Default::default(),
@@ -434,6 +455,7 @@ impl CodeIntelView {
             self.signature_editor_event(&editor, event, cx);
             self.nav_editor_event(&editor, event, cx);
             self.intention_editor_event(&editor, event, cx);
+            self.occurrence_editor_event(&editor, event, cx);
         }
         match event {
             EditorEvent::Edited(applied) => {
@@ -1300,6 +1322,18 @@ impl CodeIntelView {
         }
     }
 
+    fn rename_symbol(&mut self, _: &RenameSymbol, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.rename_at_caret(&editor, cx);
+        }
+    }
+
+    fn file_structure(&mut self, _: &FileStructure, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.active_editor() {
+            self.show_structure(&editor, cx);
+        }
+    }
+
     fn show_intentions(&mut self, _: &ShowIntentions, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(editor) = self.active_editor() {
             self.show_intentions_at_caret(&editor, cx);
@@ -1398,6 +1432,8 @@ pub fn forward_actions<E: InteractiveElement>(el: E, view: Entity<CodeIntelView>
         GoToDeclaration => go_to_declaration,
         ShowUsages => show_usages,
         ShowIntentions => show_intentions,
+        RenameSymbol => rename_symbol,
+        FileStructure => file_structure,
         Reformat => reformat,
         OptimizeImports => optimize_imports,
         ErrorDescription => error_description,

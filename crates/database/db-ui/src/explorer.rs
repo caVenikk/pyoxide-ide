@@ -36,10 +36,15 @@ use crate::store::DataSource;
 use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
+mod connect;
+mod model_load;
 mod open_console;
 mod open_table;
+mod reveal;
 mod tree_view;
 
+pub(crate) use connect::ask_password;
+pub(crate) use model_load::request as request_model;
 pub(crate) use open_table::{open_selected_command, open_table_command, with_table};
 
 /// The key context of the tool window (its bindings in `db.toml`).
@@ -73,6 +78,9 @@ ui::ui_commands! {
     /// Refresh the selected data source's metadata.
     Refresh => "db.explorer.refresh", "Refresh",
         "Reads the metadata of the data source selected in the Database tool window again (its introspection scope) and shows it in the tree; the tree keeps the previous model until the new one is complete.";
+    /// Disconnect the selected data source.
+    Disconnect => "db.explorer.disconnect", "Disconnect",
+        "Closes the connections of the data source selected in the Database tool window and ends the sessions of its consoles; the data source stays in the tree with its metadata, and connects again with the next use (asking for a password that is not kept). Does nothing for a data source that is not connected; a console with uncommitted changes holds it back and a balloon says so.";
     /// Open nodes of the tree.
     Expand { path: String } => "db.explorer.expand", "Expand",
         "Opens every node along `path` in the Database tool window's tree and selects the last: the rows' texts from the data source down, joined by `/`. Opening a node reads the local model, never the database; opening a data source the first time shows its cached model, or reads it when there is none.",
@@ -184,6 +192,7 @@ pub(crate) fn with_target(
 
 pub(crate) fn init(cx: &mut App) {
     ui::command::register(cx, COMMANDS);
+    reveal::init(cx);
     cx.on_action(|_: &NewDataSource, cx| {
         with_target(cx, |e, window, cx| e.show_new_menu(None, window, cx))
     });
@@ -201,6 +210,7 @@ pub(crate) fn init(cx: &mut App) {
         with_target(cx, move |e, _, cx| e.select_name(&name, cx))
     });
     cx.on_action(|_: &Refresh, cx| with_target(cx, |e, _, cx| e.refresh_selected(cx)));
+    cx.on_action(|_: &Disconnect, cx| with_target(cx, |e, _, cx| e.disconnect_selected(cx)));
     cx.on_action(|a: &Expand, cx| {
         let path = a.path.clone();
         with_target(cx, move |e, _, cx| e.expand_path(&path, cx))
@@ -298,6 +308,10 @@ pub struct Explorer {
     sink: Option<db_session::EventSink>,
     events_task: Task<()>,
     scroll: UniformListScrollHandle,
+    /// Loading models for the SQL files' code intelligence (`model_load`).
+    model_load: model_load::State,
+    /// The passwords asked for (`connect`).
+    connect: connect::State,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -326,6 +340,8 @@ impl Explorer {
             sink: None,
             events_task: Task::ready(()),
             scroll: UniformListScrollHandle::new(),
+            model_load: model_load::State::default(),
+            connect: connect::State::default(),
             _subscriptions: Vec::new(),
         }
     }
@@ -383,6 +399,7 @@ impl Explorer {
                     }
                 }
                 this.sources_changed();
+                this.run_pending_model_loads(cx);
                 cx.notify();
             });
         });
@@ -603,10 +620,12 @@ impl Explorer {
             "loaded": self.sources.is_some(),
             "error": self.error,
             "selected": self.selected_source().map(|s| s.name.clone()),
+            "can_disconnect": self.can_disconnect(),
             "sources": self.sources().iter().map(|s| json!({
                 "name": s.name,
                 "backend": s.profile.backend.id(),
                 "target": s.profile.target(),
+                "connected": self.is_connected(&s.name),
             })).collect::<Vec<_>>(),
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
             "tree": self.tree_json(),
@@ -723,6 +742,7 @@ impl Explorer {
         };
         let has_project = self.root.is_some();
         let has_source = self.selected_source().is_some();
+        let can_disconnect = self.can_disconnect();
         let add_bounds = self.add_bounds.clone();
         div()
             .flex()
@@ -773,13 +793,18 @@ impl Explorer {
                     d.on_click(cx.listener(|this, _, _, cx| this.refresh_selected(cx)))
                 }),
             )
-            .child(self.toolbar_button(
-                "database-disconnect",
-                icons::DISCONNECT,
-                "Disconnect",
-                false,
-                cx,
-            ))
+            .child(
+                self.toolbar_button(
+                    "database-disconnect",
+                    icons::DISCONNECT,
+                    "Disconnect",
+                    can_disconnect,
+                    cx,
+                )
+                .when(can_disconnect, |d| {
+                    d.on_click(cx.listener(|this, _, _, cx| this.disconnect_selected(cx)))
+                }),
+            )
             .child(separator())
             .child(
                 self.toolbar_button(

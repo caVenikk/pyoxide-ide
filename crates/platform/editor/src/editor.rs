@@ -120,6 +120,17 @@ pub struct SearchHighlights {
     pub background: MatchBackground,
 }
 
+/// An occurrence of the symbol at the caret, drawn with the background of
+/// the theme's read or write identifier (`IDENTIFIER_UNDER_CARET_ATTRIBUTES`
+/// and `WRITE_IDENTIFIER_UNDER_CARET_ATTRIBUTES`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageHighlight {
+    /// Chars, in the current text.
+    pub range: Range<usize>,
+    /// The symbol is written here (declared or assigned).
+    pub write: bool,
+}
+
 /// The background of [`SearchHighlights`]' matches.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum MatchBackground {
@@ -348,6 +359,9 @@ pub struct Editor {
     pub(crate) range_background: Option<(Range<usize>, themes::TextRole)>,
     /// A char range outlined in a colour ([`Editor::set_range_outline`]).
     pub(crate) range_outline: Option<(Range<usize>, themes::UiRole)>,
+    /// The other occurrences of the symbol at the caret, as the services
+    /// found them ([`Editor::set_usage_highlights`]).
+    pub(crate) usage_highlights: Vec<UsageHighlight>,
     /// Bring this char offset into the middle of the view on the next
     /// frame when it is not visible.
     pub(crate) reveal: Option<usize>,
@@ -506,6 +520,7 @@ impl Editor {
             search: None,
             range_background: None,
             range_outline: None,
+            usage_highlights: Vec::new(),
             reveal: None,
             console: false,
             bare: false,
@@ -642,6 +657,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.usage_highlights.clear();
         self.text_edited(&applied);
         self.wrap_edited(&applied, cx);
         self.schedule_highlighting(cx);
@@ -1019,6 +1035,25 @@ impl Editor {
         }
     }
 
+    /// Draws the occurrences of the symbol at the caret (sorted by range;
+    /// they do not follow edits: the owner sets them again or removes
+    /// them).
+    pub fn set_usage_highlights(
+        &mut self,
+        highlights: Vec<UsageHighlight>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.usage_highlights != highlights {
+            self.usage_highlights = highlights;
+            cx.notify();
+        }
+    }
+
+    /// The occurrences [`Self::set_usage_highlights`] draws.
+    pub fn usage_highlights(&self) -> &[UsageHighlight] {
+        &self.usage_highlights
+    }
+
     /// The range [`Self::set_range_outline`] draws.
     pub fn range_outline(&self) -> Option<Range<usize>> {
         self.range_outline.as_ref().map(|(r, _)| r.clone())
@@ -1329,6 +1364,10 @@ impl Editor {
             "hovered": self.hovered().map(point),
             "decorations": self.decorations_json(),
             "range_outline": self.range_outline.as_ref().map(|(r, _)| json!([r.start, r.end])),
+            "usage_highlights": self.usage_highlights.iter().map(|u| json!({
+                "range": [u.range.start, u.range.end],
+                "write": u.write,
+            })).collect::<Vec<_>>(),
             "gutter_hover": self.gutter_hover,
             "diff_highlights": self.diff_highlights.as_ref().map(|d| json!({
                 "lines": [d.lines.start, d.lines.end],
@@ -1371,6 +1410,7 @@ impl Editor {
         if let Some(search) = &mut self.search {
             search.edited(&applied);
         }
+        self.usage_highlights.clear();
         self.text_edited(&applied);
         self.wrap_edited(&applied, cx);
         self.schedule_highlighting(cx);

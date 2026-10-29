@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use code_intel::{DocumentId, Location, Point, Rope};
+use code_intel::{DefinitionTarget, DocumentId, Location, ObjectTarget, Point, Rope};
 use editor::{Editor, EditorEvent};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, DismissEvent, Entity, EntityId, Modifiers,
@@ -47,7 +47,7 @@ pub(crate) struct NavState {
     /// The window of the editors (list popups take its focus).
     window: Option<AnyWindowHandle>,
     /// The request of Go to Declaration or Show Usages.
-    request: Option<Task<()>>,
+    pub(crate) request: Option<Task<()>>,
     /// The symbol drawn as a link (editor, range) and the request that
     /// checks the symbol under the mouse has a declaration.
     link: Option<(EntityId, Range<usize>)>,
@@ -65,6 +65,8 @@ pub(crate) struct NavState {
 pub(crate) enum ListTargets {
     Locations(Vec<Location>),
     Intentions,
+    /// The symbols of the file structure: where the caret goes.
+    Symbols(Vec<Point>),
 }
 
 struct OpenList {
@@ -152,15 +154,40 @@ impl CodeIntelView {
         };
         let doc = document.id.clone();
         let at = document.versions.point(offset);
-        let request = services.definition(&doc, at);
+        let request = services.definition_targets(&doc, at);
         let editor = editor.clone();
         self.nav.request = Some(cx.spawn(async move |this, cx| {
-            let locations = request.await.unwrap_or_default();
+            let targets = request.await.unwrap_or_default();
             let _ = this.update(cx, |v, cx| {
                 v.nav.request = None;
-                v.declarations_answered(&editor, &doc, offset, at, locations, cx)
+                v.targets_answered(&editor, &doc, offset, at, targets, cx)
             });
         }));
+    }
+
+    /// The targets of Go to Declaration: places in files, else the first
+    /// object (a database table) for the handler of its scheme.
+    fn targets_answered(
+        &mut self,
+        editor: &Entity<Editor>,
+        doc: &DocumentId,
+        offset: usize,
+        at: Point,
+        targets: Vec<DefinitionTarget>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut locations = Vec::new();
+        let mut objects: Vec<ObjectTarget> = Vec::new();
+        for target in targets {
+            match target {
+                DefinitionTarget::File(location) => locations.push(location),
+                DefinitionTarget::Object(object) => objects.push(object),
+            }
+        }
+        match objects.into_iter().next() {
+            Some(object) if locations.is_empty() => cx.emit(CodeIntelEvent::OpenObject(object)),
+            _ => self.declarations_answered(editor, doc, offset, at, locations, cx),
+        }
     }
 
     fn declarations_answered(
@@ -383,6 +410,19 @@ impl CodeIntelView {
                 }
             }
             ListTargets::Intentions => self.intention_chosen(&list.editor, &path, cx),
+            ListTargets::Symbols(targets) => {
+                let (Some(&at), Some(document)) = (
+                    path.first().and_then(|&i| targets.get(i)),
+                    self.document_of(&list.editor),
+                ) else {
+                    return;
+                };
+                let location = Location {
+                    path: document.id.path().to_owned(),
+                    range: at..at,
+                };
+                self.navigate(&list.editor, location, cx);
+            }
         }
     }
 
@@ -518,7 +558,8 @@ impl CodeIntelView {
         else {
             return;
         };
-        let request = services.definition(&document.id, document.versions.point(word.start));
+        let request =
+            services.definition_targets(&document.id, document.versions.point(word.start));
         let editor = editor.clone();
         self.nav.link_request = Some(cx.spawn(async move |this, cx| {
             let found = request.await.is_ok_and(|l| !l.is_empty());

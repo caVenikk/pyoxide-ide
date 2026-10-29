@@ -40,6 +40,8 @@ const RADIUS: f32 = 8.0;
 const SELECTION_RADIUS: f32 = 4.0;
 const ICON: f32 = 16.0;
 const ICON_GAP: f32 = 6.0;
+/// Width of a level of nesting.
+const INDENT: f32 = 14.0;
 const TITLE_TOP: f32 = 12.0;
 const TITLE_BOTTOM: f32 = 10.0;
 /// Space between the text and the details of a row.
@@ -60,6 +62,9 @@ pub struct ListRow {
     pub detail: Option<SharedString>,
     /// The text is code: the editor font.
     pub code: bool,
+    /// Levels of nesting under the rows before it (a tree shown flat, as
+    /// the file structure is).
+    pub indent: u8,
     /// Sub-actions, opened next to the row.
     pub children: Vec<ListItem>,
 }
@@ -106,6 +111,9 @@ pub struct ListOptions {
     pub more_button: bool,
     /// A name for tests (`debug_selector` prefix and `code.state`).
     pub name: &'static str,
+    /// The row selected first (the first row that can be chosen without
+    /// it).
+    pub selected: Option<usize>,
 }
 
 /// An open list popup.
@@ -164,7 +172,11 @@ impl ListPopup {
             dismissed: false,
             _subscriptions: subscriptions,
         };
-        popup.selected = popup.first_shown();
+        popup.selected = popup
+            .options
+            .selected
+            .filter(|&i| popup.items.get(i).is_some_and(|item| item.row().is_some()))
+            .or_else(|| popup.first_shown());
         popup
     }
 
@@ -383,6 +395,7 @@ impl ListPopup {
                 "text": row.text.as_ref(),
                 "icon": row.icon.map(|i| i.0),
                 "detail": row.detail.as_ref().map(|d| d.as_ref()),
+                "indent": row.indent,
                 "children": row.children.iter().map(|c| match c {
                     ListItem::Row(r) => json!(r.text.as_ref()),
                     ListItem::Separator => json!("-"),
@@ -482,7 +495,8 @@ impl ListPopup {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .px(px(CONTENT_X))
+                            .pl(px(CONTENT_X + INDENT * f32::from(row.indent)))
+                            .pr(px(CONTENT_X))
                             .rounded(px(SELECTION_RADIUS))
                             .when(is_selected, |d| d.bg(selection))
                             .when(with_icons, |d| {

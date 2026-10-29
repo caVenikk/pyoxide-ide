@@ -8,11 +8,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
+
+use db_model::Model;
 
 use sql_syntax::Dialect;
 use workbench::FileDecoration;
 
+use super::models::Models;
 use super::settings::{self, Origin, Resolved, SqlSettings};
 use crate::store::DataSourceStore;
 
@@ -82,28 +85,104 @@ pub struct Hub {
     store: Arc<dyn DataSourceStore>,
     projects: RwLock<HashMap<PathBuf, Project>>,
     consoles: RwLock<HashMap<PathBuf, ConsoleBinding>>,
+    /// The metadata models the files' scopes resolve through.
+    models: Models,
     /// Bumped by every change of a dialect or scope, for the holders of an
-    /// answer (the highlighters).
+    /// answer (the highlighters), and told to the listeners.
+    changes: Arc<Changes>,
+}
+
+/// The epoch of the hub's answers and who wants to hear when it moves.
+#[derive(Default)]
+pub(crate) struct Changes {
     epoch: AtomicU64,
+    listeners: Mutex<Vec<Listener>>,
+}
+
+/// Called on every change, from any thread; `false` unsubscribes.
+type Listener = Box<dyn Fn() -> bool + Send + Sync>;
+
+impl Changes {
+    fn epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn bump(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|listener| listener());
+    }
 }
 
 impl Hub {
     pub fn new(store: Arc<dyn DataSourceStore>) -> Self {
+        let changes = Arc::new(Changes {
+            epoch: AtomicU64::new(1),
+            ..Changes::default()
+        });
         Self {
+            models: Models::new(store.clone(), changes.clone()),
             store,
             projects: RwLock::new(HashMap::new()),
             consoles: RwLock::new(HashMap::new()),
-            epoch: AtomicU64::new(1),
+            changes,
         }
     }
 
     /// Changes whenever a file's dialect or scope may have changed.
     pub fn epoch(&self) -> u64 {
-        self.epoch.load(Ordering::Acquire)
+        self.changes.epoch()
     }
 
     fn bump(&self) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
+        self.changes.bump();
+    }
+
+    /// Calls `listener` on every change of a dialect, a scope or a model,
+    /// from whichever thread made it, until it returns `false`. It must be
+    /// quick and must not call back into the hub's writers.
+    pub fn subscribe(&self, listener: impl Fn() -> bool + Send + Sync + 'static) {
+        self.changes
+            .listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Box::new(listener));
+    }
+
+    /// The metadata model of a data source of the project at `root`: the
+    /// live one the Database tool window holds, else the one cached on
+    /// disk (read in the background; `None` until it is there).
+    pub fn model(&self, root: &Path, source: &str) -> Option<Arc<Model>> {
+        self.models.get(root, source)
+    }
+
+    /// Calls `handler` with the project's folder and the data source's
+    /// name when a file's scope asks for the model of a data source that
+    /// has none cached, once for each data source in a run. It runs on
+    /// the thread that read the cache and must not block.
+    pub fn on_model_absent(&self, handler: impl Fn(&Path, &str) + Send + Sync + 'static) {
+        self.models.on_absent(Arc::new(handler));
+    }
+
+    /// Says that the model of `source` can only be had by connecting with
+    /// a password the person types (or that it no longer is): the toolbar
+    /// of the files attached to it offers to connect.
+    pub fn set_needs_connect(&self, root: &Path, source: &str, needs: bool) {
+        self.models.set_needs_connect(root, source, needs);
+    }
+
+    /// Whether the toolbar of a file attached to `source` offers to
+    /// connect: the data source has no model and needs a typed password.
+    pub fn connect_hint(&self, root: &Path, source: &str) -> bool {
+        self.models.connect_hint(root, source)
+    }
+
+    /// A data source's model was loaded or refreshed (by the Database tool
+    /// window): files attached to it resolve through the new one.
+    pub fn publish_model(&self, root: &Path, source: &str, model: Arc<Model>) {
+        self.models.publish(root, source, model);
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<PathBuf, Project>> {

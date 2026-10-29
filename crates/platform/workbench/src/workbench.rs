@@ -40,6 +40,7 @@ use crate::settings::SaveSettings;
 use crate::tab_view::AnyTabView;
 
 mod branches;
+mod code_rename;
 mod commit;
 mod debug;
 mod diff;
@@ -82,6 +83,8 @@ const PIN_DOT_Y: f32 = 0.2;
 /// How long a notice stays in the status bar (about as long as the
 /// reference's balloons stay).
 const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(10);
+/// The notice when Go to Declaration finds an object nothing can open.
+const NO_OBJECT_HANDLER: &str = "Cannot open this declaration";
 /// Between the run widget and the toolbar's buttons right of it: the run
 /// widget's toolbar ends 16 after its buttons, the main toolbar's groups
 /// are 10 apart, its buttons have 5 on both sides (`RedesignedRunWidget`
@@ -245,6 +248,9 @@ pub struct Workbench {
     tab_bounds: Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>>,
     /// The context menu of a tab while open (`tab_menu.rs`).
     tab_menu: Option<tab_menu::TabMenu>,
+    /// The Rename dialog of the code intelligence while open
+    /// (`code_rename.rs`).
+    code_rename: Option<code_rename::CodeRename>,
     /// Background reads and writes in flight.
     pending: usize,
     /// Last error or notice, shown in the status bar.
@@ -528,6 +534,7 @@ impl Workbench {
             diff_tabs: Default::default(),
             tab_bounds: Default::default(),
             tab_menu: None,
+            code_rename: None,
             _subscriptions: subscriptions,
         }
     }
@@ -556,7 +563,19 @@ impl Workbench {
             CodeIntelEvent::OpenLocation { path, at } => {
                 self.open_file_at(path.clone(), *at, None, window, cx)
             }
+            CodeIntelEvent::OpenObject(target) => {
+                if !crate::object_targets::open(target, window, cx) {
+                    self.show_notice(NO_OBJECT_HANDLER.into(), cx);
+                }
+            }
             CodeIntelEvent::ShowDocumentation => self.show_documentation_window(window, cx),
+            CodeIntelEvent::RenameDialog { name } => {
+                self.open_rename_dialog(name.clone(), window, cx)
+            }
+            CodeIntelEvent::RenameRejected(message) => {
+                self.rename_dialog_rejected(message.clone(), cx)
+            }
+            CodeIntelEvent::RenameDone => self.close_rename_dialog(window, cx),
         }
     }
 
@@ -898,6 +917,7 @@ impl Workbench {
             "active_tab": self.active,
             "splits": self.splits_json(cx),
             "tab_menu": self.tab_menu_json(cx),
+            "code_rename": self.code_rename_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
@@ -3049,6 +3069,7 @@ impl Render for Workbench {
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_tab_menu(window))
+            .children(self.render_code_rename())
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())

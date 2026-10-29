@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use db_core::DataSourceId;
 use db_model::{Model, ModelCache};
 use db_ui::fixture::demo_snapshot;
+use db_ui::store::DataSourceStore as _;
 use db_ui::store::fake::{FakeStore, NoServer};
 use gpui::TestAppContext;
 use serde_json::{Value, json};
@@ -144,6 +145,8 @@ fn without_a_model_a_failed_connection_shows_the_error_and_retry(cx: &mut TestAp
     store.set_model_cache(cache_dir.path());
     let server = Arc::new(NoServer::default());
     store.set_connections(server.clone());
+    // A password at hand: the connection is tried without asking.
+    store.hold_password(&root, NAME, db_core::Secret::new("secret"));
     let mut h = open(cx, store, &root);
     h.invoke("db.explorer.expand", json!({ "path": NAME }));
     let s = wait_for(&mut h, "the failed refresh", |s| {
