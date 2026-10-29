@@ -101,7 +101,7 @@ pub(crate) struct TreeState {
     /// How many schemas and databases the servers offer, by data source
     /// (the counters after the names).
     pub totals: HashMap<String, Totals>,
-    total_tasks: HashMap<String, gpui::Task<()>>,
+    pub(super) total_tasks: HashMap<String, gpui::Task<()>>,
 }
 
 /// What a server offers, as far as it is read.
@@ -251,7 +251,8 @@ impl Explorer {
             let totals = run.await;
             let _ = this.update(cx, |this, cx| {
                 this.tree.total_tasks.remove(&key);
-                this.tree.totals.insert(key, totals);
+                this.tree.totals.insert(key.clone(), totals);
+                this.forget_once_password(&key, cx);
                 cx.notify();
             });
         });
@@ -336,7 +337,7 @@ impl Explorer {
             _ => return,
         }
         if finished {
-            self.model_load_finished(&name);
+            self.model_load_finished(&name, cx);
         }
         if let Some(error) = failed
             && self.model_load_failed(&name, &error, cx)

@@ -175,6 +175,41 @@ fn a_data_source_that_needs_a_prompt_shows_the_hint_and_waits(cx: &mut TestAppCo
     assert!(state(&mut h)["prompt"].is_null());
 }
 
+/// "Save password: Never": the typed password serves that connect only;
+/// the hint stays while the model is missing, and the next connect asks
+/// again.
+#[gpui::test]
+fn a_never_data_source_asks_again_for_every_connect(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut profile = pg();
+    profile.gui = Some(db_core::GuiOptions {
+        password_save: db_core::PasswordSave::Never,
+        ..Default::default()
+    });
+    let (mut h, server, store) = open(cx, &root, profile, None);
+    attach(&mut h);
+    wait(&mut h, "the hint", |h| sql(h)["connect-hint"] == SOURCE);
+
+    for round in 1..=2 {
+        let opened = server.opened();
+        h.invoke("sql.connect", Value::Null);
+        wait(&mut h, "the prompt", |h| !state(h)["prompt"].is_null());
+        h.invoke("db.password-prompt.set", json!({"value": "secret"}));
+        h.invoke("db.password-prompt.ok", Value::Null);
+        wait(&mut h, "the connection", |_| server.opened() > opened);
+        // The fake server is not there: the load fails and the typed
+        // password is forgotten; the hint stays.
+        wait(&mut h, "the password forgotten", |_| {
+            store.password(SOURCE).is_none()
+        });
+        // The refresh that failed may still be settling: let it end first.
+        std::thread::sleep(Duration::from_millis(200));
+        h.draw();
+        assert_eq!(store.password(SOURCE), None, "round {round}");
+        assert_eq!(sql(&mut h)["connect-hint"], SOURCE, "round {round}");
+    }
+}
+
 /// Cancelling the prompt connects nothing and keeps the hint.
 #[gpui::test]
 fn cancelling_the_prompt_keeps_the_hint(cx: &mut TestAppContext) {

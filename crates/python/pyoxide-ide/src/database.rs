@@ -999,11 +999,18 @@ mod tests {
         // Nothing is kept for the Forever data source yet.
         assert!(store.needs_prompt(root, &forever));
 
-        // One held for this run is enough, for any data source.
+        // One held serves the connect it was typed for, for any data source.
         store.hold_password(root, "never", Secret::new("typed"));
         store.hold_password(root, "until", Secret::new("typed"));
         assert!(!store.needs_prompt(root, &never));
         assert!(!store.needs_prompt(root, &until));
+
+        // "Never" lets it go once that connect is done, so the next asks
+        // again; "Until restart" keeps it for the run.
+        store.release_password(root, "never");
+        assert!(store.needs_prompt(root, &never));
+        assert!(!store.needs_prompt(root, &until));
+        assert_eq!(os.calls(), 0);
 
         // A kept one is, for the Forever data source.
         os.inner
