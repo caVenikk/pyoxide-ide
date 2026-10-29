@@ -612,3 +612,59 @@ fn space_presses_the_focused_button_and_enter_the_default(cx: &mut TestAppContex
     assert_eq!(store.saves(), 2);
     assert_eq!(store.sources(&root)[0].profile.host, "db.example.com");
 }
+
+/// Types text into the focused field of the dialog.
+fn type_text(h: &mut Harness, text: &str) {
+    let dialog = h.target();
+    h.cx.simulate_input(dialog, text);
+    h.draw();
+}
+
+/// Tab and Shift+Tab in the fields of the dialog move the focus to the
+/// next and the previous field instead of typing a tab.
+#[gpui::test]
+fn tab_walks_through_the_fields(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, point, px};
+    let (_dir, root) = project();
+    let mut h = open(cx, FakeStore::new(SECRET), &root);
+    h.invoke(
+        "db.explorer.add-data-source",
+        json!({"backend": "postgres"}),
+    );
+    let url = |h: &mut Harness| {
+        state(h)["dialog"]["selected"]["url"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    // A click puts the caret into the Host field, inside its text.
+    let at = dialog_bounds(&mut h, "data-source-host").origin + point(px(40.0), px(10.0));
+    let dialog = h.target();
+    {
+        let mut vcx = gpui::VisualTestContext::from_window(dialog, h.cx);
+        vcx.simulate_mouse_move(at, None, Modifiers::none());
+        vcx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+        vcx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    }
+    h.draw();
+    type_text(&mut h, "x");
+    assert_eq!(url(&mut h), "postgresql://localxhost:5432/postgres");
+    // Tab leaves it for the Port field and types no tab.
+    h.press("tab");
+    type_text(&mut h, "7");
+    let with_port = url(&mut h);
+    assert!(
+        with_port.contains('7'),
+        "the Port field took the text: {with_port}"
+    );
+    assert!(with_port.contains("localxhost"), "{with_port}");
+    // Shift+Tab goes back to the Host field.
+    h.press("shift-tab");
+    type_text(&mut h, "y");
+    let back = url(&mut h);
+    assert!(
+        back.contains("localxyhost"),
+        "the Host field took the text: {back}"
+    );
+    assert!(!back.contains('\t'), "{back}");
+}
