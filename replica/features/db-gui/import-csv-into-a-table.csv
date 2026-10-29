@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Import a CSV or TSV file into a table with column mapping and preview,db-gui,should,yes,no,Pro
+Import a CSV or TSV file into a table with column mapping and preview,db-gui,should,yes,partial,Pro

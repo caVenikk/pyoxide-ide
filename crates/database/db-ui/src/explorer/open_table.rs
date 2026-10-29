@@ -108,16 +108,14 @@ impl Explorer {
         }
     }
 
-    /// Opens a table by name (`db.grid.open`); the data source's model is
-    /// read, never the database.
-    pub(super) fn open_named_table(
-        &mut self,
+    /// The grid target of a table by name, from the loaded metadata.
+    pub(crate) fn named_target(
+        &self,
         source: &str,
         schema: Option<&str>,
         table: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let found = self.tree.lives.get(source).and_then(|live| {
+    ) -> Option<GridTarget> {
+        self.tree.lives.get(source).and_then(|live| {
             let model = live.shown_model()?;
             let node = model
                 .schemas()
@@ -136,7 +134,24 @@ impl Explorer {
                 table: TableRef::new(Some(node.schema().name()), node.name()),
                 columns: column_meta(node),
             })
-        });
+        })
+    }
+
+    /// The table of the selected row.
+    pub(crate) fn selected_target(&self) -> Option<GridTarget> {
+        self.grid_target(self.tree.selected.as_ref()?)
+    }
+
+    /// Opens a table by name (`db.grid.open`); the data source's model is
+    /// read, never the database.
+    pub(super) fn open_named_table(
+        &mut self,
+        source: &str,
+        schema: Option<&str>,
+        table: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let found = self.named_target(source, schema, table);
         match found {
             Some(target) => self.open_grid(target, cx),
             None => self.notify(
@@ -179,4 +194,46 @@ pub(crate) fn open_selected_command(cx: &mut App) {
         return;
     };
     cx.defer(move |cx| explorer.update(cx, |e, cx| e.open_selected_table(cx)));
+}
+
+/// Runs `f` with the grid target of the table `table` of `source` (or of
+/// the table selected in the tool window when `table` is `None`) and the
+/// window of the tool window; a table the metadata does not know gets a
+/// warning.
+pub(crate) fn with_table(
+    source: Option<String>,
+    schema: Option<String>,
+    table: Option<String>,
+    f: impl FnOnce(GridTarget, AnyWindowHandle, &mut App) + 'static,
+    cx: &mut App,
+) {
+    let Some(explorer) = target_explorer(cx) else {
+        return;
+    };
+    cx.defer(move |cx| {
+        let found = explorer.update(cx, |e, cx| {
+            let window = e.window_handle(cx)?;
+            let target = match (&source, &table) {
+                (Some(source), Some(table)) => {
+                    let target = e.named_target(source, schema.as_deref(), table);
+                    if target.is_none() {
+                        e.notify(
+                            Notification::new(
+                                NotificationKind::Warning,
+                                source.clone(),
+                                format!("No table {table} in the loaded metadata of {source}"),
+                            ),
+                            cx,
+                        );
+                    }
+                    target
+                }
+                _ => e.selected_target(),
+            }?;
+            Some((target, window))
+        });
+        if let Some((target, window)) = found {
+            f(target, window, cx);
+        }
+    });
 }

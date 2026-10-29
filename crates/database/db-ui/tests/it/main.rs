@@ -4,7 +4,7 @@
 //! object tree (`tree`), the data grid of a table (`grid`) and what it shows
 //! for values, with its panel and views (`grid_values`), the SQL editor glue
 //! (`sql`) and the SQL consoles with their output log and result tabs
-//! (`console`).
+//! (`console`), and the copy and transfer dialogs of the grid (`transfer`).
 
 mod console;
 mod data_sources;
@@ -12,6 +12,7 @@ mod grid;
 mod grid_values;
 mod keymap;
 mod sql;
+mod transfer;
 mod tree;
 
 use std::path::{Path, PathBuf};

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Import runs in one transaction and ends with a report,db-gui,should,yes,no,Pro
+Import runs in one transaction and ends with a report,db-gui,should,yes,yes,Pro

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Export results (CSV / JSON),database,should,yes,no,
+Export results (CSV / JSON),database,should,yes,yes,

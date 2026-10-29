@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Export the grid to a file (CSV, TSV, JSON, SQL INSERT, Markdown, HTML), re-running the query without paging",db-gui,must,yes,no,Pro; engine row export-results
+"Export the grid to a file (CSV, TSV, JSON, SQL INSERT, Markdown, HTML), re-running the query without paging",db-gui,must,yes,yes,Pro; engine row export-results

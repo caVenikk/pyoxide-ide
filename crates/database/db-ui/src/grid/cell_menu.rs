@@ -1,8 +1,9 @@
 //! The menu of a right click on a cell (shot DB44): the value features of
 //! this issue (the value panel, record and aggregate views, display types
 //! of binary columns, loading and saving a whole value, the aggregate
-//! copy). Other items of the reference's menu (copy formats, editing,
-//! filters) come with their own issues; their rows are added in
+//! copy) and the copy formats ([`TableGrid::copy_menu_items`]). Other
+//! items of the reference's menu (editing, filters) come with their own
+//! issues; their rows are added in
 //! [`TableGrid::cell_menu_items`].
 
 use gpui::{Context, DismissEvent, Pixels, Point, Window};
@@ -27,6 +28,8 @@ impl TableGrid {
             MenuItem::action("Show Aggregate View", ShowAggregates),
             MenuItem::separator(),
         ];
+        items.extend(self.copy_menu_items());
+        items.push(MenuItem::separator());
         let value = self.cell_value(pos);
         let binary = value
             .as_deref()

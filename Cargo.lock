@@ -1871,6 +1871,7 @@ version = "0.0.1"
 dependencies = [
  "app-info",
  "async-trait",
+ "chrono",
  "commands",
  "db-core",
  "db-model",
@@ -1924,6 +1925,7 @@ dependencies = [
  "futures",
  "gpui",
  "native-path",
+ "progress",
  "project",
  "serde",
  "serde_json",

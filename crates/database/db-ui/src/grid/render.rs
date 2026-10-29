@@ -53,7 +53,7 @@ impl TableGrid {
             .into_any_element()
     }
 
-    fn tool(
+    pub(super) fn tool(
         id: &'static str,
         icon: IconName,
         tip: &'static str,
@@ -66,7 +66,7 @@ impl TableGrid {
             .when(!on, |d| d.opacity(DISABLED_ALPHA))
     }
 
-    fn text_tool(
+    pub(super) fn text_tool(
         id: &'static str,
         label: &'static str,
         tip: &'static str,
@@ -201,13 +201,7 @@ impl TableGrid {
                 }),
             )
             .child(div().flex_1())
-            .child(Self::text_tool(
-                "grid-extractor",
-                "CSV",
-                "Data Extractor",
-                true,
-                cx,
-            ))
+            .child(self.extractor_button(cx))
             .child(Self::separator(cx))
             .child(
                 icon_button(
@@ -227,6 +221,7 @@ impl TableGrid {
                     }))
                 }),
             )
+            .child(self.transfer_buttons(cx))
             .child(Self::tool(
                 "grid-view-options",
                 IconName::SHOW,

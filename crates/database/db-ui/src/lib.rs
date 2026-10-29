@@ -16,6 +16,7 @@ mod password;
 pub mod prompt;
 pub mod sql;
 pub mod store;
+pub mod transfer;
 pub mod tree;
 pub mod url;
 
@@ -101,6 +102,8 @@ pub mod icons {
     pub const STATEMENT_OK: IconName = IconName("db/statementOk");
     // The Services tool window.
     pub const SERVICES: IconName = IconName("db/services@20x20");
+    pub const EXPORT_DATA: IconName = IconName("db/exportData");
+    pub const IMPORT_DATA: IconName = IconName("db/importData");
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -172,6 +175,8 @@ pub const ICONS: &[IconSvg] = &[
     icon!("lastPage", "lastPage"),
     icon!("stopDisabled", "stopDisabled"),
     icon!("services@20x20", "services@20x20"),
+    icon!("exportData", "exportData"),
+    icon!("importData", "importData"),
 ];
 
 /// The product's store, for the module's views.
@@ -208,6 +213,7 @@ pub fn module(config: DbUiConfig) -> Module {
             prompt::init(cx);
             grid::init(cx);
             console::init(cx);
+            transfer::init(cx);
         })),
         keymaps: Some(KEYMAPS),
         settings_pages: data_views::pages(),
