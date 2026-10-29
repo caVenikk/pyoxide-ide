@@ -9,7 +9,10 @@
 //!   opened like the tree opens it, and a failure is told in a balloon;
 //! - else nothing is asked of the person: the hub is told, the file's
 //!   toolbar shows a hint with a "Connect" link, and the link connects as
-//!   the tree does, asking for the password first.
+//!   the tree does, asking for the password first. A data source that saves
+//!   its password "Never" uses the typed one for that connect only and asks
+//!   again for the next (while it is connected, the open connection is
+//!   reused and nothing is asked).
 //!
 //! Nothing here waits for the database or the credential store on the UI
 //! thread.
@@ -34,6 +37,10 @@ pub(super) struct State {
     /// Data sources whose password the person typed for a load and the
     /// store holds for this run.
     held: HashSet<String>,
+    /// Data sources that save their password "Never" and hold one the
+    /// person typed for the connect in progress: it is forgotten as soon
+    /// as the connect is done.
+    once: HashSet<String>,
 }
 
 /// Code intelligence of a file in the project `root` needs the model of
@@ -139,6 +146,8 @@ impl Explorer {
                 let weak = cx.entity().downgrade();
                 let user = source.profile.user.clone();
                 let name = source.name.clone();
+                let never =
+                    source.profile.gui_options().password_save == db_core::PasswordSave::Never;
                 crate::prompt::ask(&source.name, &user, window, cx, move |secret, cx| {
                     let (Some(secret), Some(this)) = (secret, weak.upgrade()) else {
                         return;
@@ -146,6 +155,9 @@ impl Explorer {
                     store.hold_password(&root, &name, secret);
                     this.update(cx, |this, cx| {
                         this.model_load.held.insert(name.clone());
+                        if never {
+                            this.model_load.once.insert(name.clone());
+                        }
                         this.start_model_load(&name, cx);
                     });
                 });
@@ -155,9 +167,33 @@ impl Explorer {
     }
 
     /// A load of the data source finished with a model.
-    pub(super) fn model_load_finished(&mut self, name: &str) {
+    pub(super) fn model_load_finished(&mut self, name: &str, cx: &mut Context<Self>) {
         self.model_load.loading.remove(name);
         self.model_load.held.remove(name);
+        self.forget_once_password(name, cx);
+    }
+
+    /// The password typed for one connect of a data source that saves
+    /// "Never" is forgotten once the connect has served its refresh and
+    /// its counters (an open connection goes on without it); the next
+    /// connect asks again.
+    pub(super) fn forget_once_password(&mut self, name: &str, cx: &mut Context<Self>) {
+        if !self.model_load.once.contains(name) {
+            return;
+        }
+        let busy = self
+            .tree
+            .lives
+            .get(name)
+            .is_some_and(|l| l.refresh.is_some() || l.cache_loading)
+            || self.tree.total_tasks.contains_key(name);
+        if busy {
+            return;
+        }
+        self.model_load.once.remove(name);
+        if let Some(root) = self.root.clone() {
+            crate::store(cx).release_password(&root, name);
+        }
     }
 
     /// A refresh of the data source failed: tells whether the failure
@@ -177,6 +213,7 @@ impl Explorer {
         {
             crate::store(cx).release_password(&root, name);
         }
+        self.forget_once_password(name, cx);
         ours
     }
 

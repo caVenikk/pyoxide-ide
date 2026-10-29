@@ -111,13 +111,16 @@ pub trait DataSourceStore: Send + Sync {
         source.profile.needs_password() && !self.has_password(project, &source.name)
     }
 
-    /// Holds a password the person typed for the data source `name` for
-    /// the rest of the run (memory only, never written anywhere), so that
-    /// the data source's connections open with it. Does not block.
+    /// Holds a password the person typed for the data source `name` (memory
+    /// only, never written anywhere), so that the data source's connections
+    /// open with it. For "Until restart" it stays for the run; for "Never"
+    /// the caller releases it once the connect it served is done. Does not
+    /// block.
     fn hold_password(&self, _project: &Path, _name: &str, _password: Secret) {}
 
     /// Forgets the password [`Self::hold_password`] holds for `name` (the
-    /// server refused it).
+    /// server refused it, or it was typed for one connect of a data source
+    /// that saves "Never").
     fn release_password(&self, _project: &Path, _name: &str) {}
 
     /// Connects to `source` as edited, with the password typed (`Some`)
