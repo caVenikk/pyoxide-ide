@@ -67,9 +67,6 @@ pub struct TerminalOptions {
     /// The wheel sends arrow keys on the alternate screen when the program
     /// does not report the mouse.
     pub alternate_scroll: bool,
-    /// Line height as a multiple of the font's (the terminal font's line
-    /// spacing).
-    pub line_spacing: f32,
 }
 
 impl Default for TerminalOptions {
@@ -81,7 +78,6 @@ impl Default for TerminalOptions {
             paste_on_middle_click: true,
             blink: true,
             alternate_scroll: true,
-            line_spacing: 1.0,
         }
     }
 }

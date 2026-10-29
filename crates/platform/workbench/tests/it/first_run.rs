@@ -134,6 +134,14 @@ fn reference(root: &Path) {
 </component></application>"#,
     );
     write(
+        &o.join("terminal-font.xml"),
+        r#"<application><component name="TerminalFontOptions">
+  <option name="FONT_SIZE_2D" value="12.5" />
+  <option name="FONT_FAMILY" value="JetBrainsMono Nerd Font" />
+  <option name="SECONDARY_FONT_FAMILY" value="Monospaced" />
+</component></application>"#,
+    );
+    write(
         &o.join("editor.xml"),
         r#"<application><component name="EditorSettings"><option name="USE_SOFT_WRAPS" value="MAIN_EDITOR" /></component></application>"#,
     );
@@ -265,6 +273,11 @@ fn the_import_brings_the_reference_settings_and_closes_the_window(cx: &mut TestA
     assert_eq!(h.get("editor.font.family"), json!("Menlo"));
     assert_eq!(h.get("editor.font.size"), json!(14.5));
     assert_eq!(h.get("editor.font.ligatures"), json!(true));
+    assert_eq!(
+        h.get("terminal.font.family"),
+        json!("JetBrainsMono Nerd Font")
+    );
+    assert_eq!(h.get("terminal.font.size"), json!(12.5));
     assert_eq!(h.get("editor.soft-wraps.enabled"), json!(true));
     assert_eq!(h.get("system.files.save-on-idle"), json!(true));
     assert_eq!(h.get("system.files.idle-seconds"), json!(30));
@@ -279,6 +292,7 @@ fn the_import_brings_the_reference_settings_and_closes_the_window(cx: &mut TestA
     for id in [
         "appearance",
         "editor-font",
+        "terminal-font",
         "soft-wraps",
         "autosave",
         "file-types",
@@ -291,6 +305,7 @@ fn the_import_brings_the_reference_settings_and_closes_the_window(cx: &mut TestA
     let snapshot = h.config().join("imported/PyCharm-2026.2");
     assert!(snapshot.join("options/laf.xml").is_file());
     assert!(snapshot.join("options/editor-font.xml").is_file());
+    assert!(snapshot.join("options/terminal-font.xml").is_file());
     assert!(snapshot.join("keymaps/Mine.xml").is_file());
     assert!(!snapshot.join("options/security.xml").exists());
     assert!(!snapshot.join("c.kdbx").exists());
@@ -330,6 +345,8 @@ fn skip_import_keeps_the_defaults_and_records_the_choice(cx: &mut TestAppContext
         "islands-dark"
     );
     assert_eq!(h.get("editor.font.size"), Value::Null);
+    // No import: the terminal takes the editor's font.
+    assert_eq!(h.get("terminal.font.family"), Value::Null);
     assert_eq!(h.cx.update(first_run::take_report).map(|n| n.title), None);
 }
 

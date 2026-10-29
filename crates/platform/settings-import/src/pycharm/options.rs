@@ -10,6 +10,8 @@
 //!   storage): the keymap (`KeymapManager`, `<active_keymap name>`), a
 //!   custom one in `keymaps/*.xml`;
 //! - `options/editor-font.xml`: the editor font (`DefaultFont`);
+//! - `options/terminal-font.xml`: the terminal font (`TerminalFontOptions`,
+//!   the keys of the editor font and `COLUMN_SPACING`);
 //! - `options/editor.xml`: soft wraps (`EditorSettings`);
 //! - `options/ui.lnf.xml`: the UI options Pyoxide honours (`UISettings`);
 //! - `options/ide.general.xml`: autosave and synchronisation
@@ -267,6 +269,24 @@ impl FontOptions {
     }
 }
 
+/// The terminal font (`TerminalFontSettingsService`): the keys of the editor
+/// font and the column spacing. A file that never held a choice has none
+/// of the keys, which is [`TerminalFontOptions::is_empty`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TerminalFontOptions {
+    /// `FONT_FAMILY`, `FONT_SIZE_2D` (else `FONT_SIZE`), `LINE_SPACING`
+    /// and `SECONDARY_FONT_FAMILY`; the ligatures key is not used.
+    pub font: FontOptions,
+    /// `COLUMN_SPACING`.
+    pub column_spacing: Option<f32>,
+}
+
+impl TerminalFontOptions {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Soft wraps (`EditorSettingsExternalizable`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SoftWrapOptions {
@@ -329,6 +349,8 @@ pub struct ReferenceOptions {
     /// The keymap's name; `None`: the platform's default.
     pub keymap: Option<String>,
     pub font: FontOptions,
+    /// `terminal-font.xml`; empty without the file.
+    pub terminal_font: TerminalFontOptions,
     /// `None` when `editor.xml` has no soft-wrap options.
     pub soft_wraps: Option<SoftWrapOptions>,
     pub general: GeneralOptions,
@@ -339,6 +361,24 @@ pub struct ReferenceOptions {
     pub removed_file_types: Vec<FileTypeMapping>,
     /// Files that exist but could not be read, with the reason.
     pub problems: Vec<String>,
+}
+
+/// The font keys of an `AppFontOptions` component.
+fn font_options(c: &Element) -> FontOptions {
+    FontOptions {
+        family: option(c, "FONT_FAMILY").map(str::to_owned),
+        size: positive(option(c, "FONT_SIZE_2D").or_else(|| option(c, "FONT_SIZE"))),
+        line_spacing: positive(option(c, "LINE_SPACING")),
+        ligatures: option(c, "USE_LIGATURES").and_then(boolean),
+        fallback: option(c, "SECONDARY_FONT_FAMILY").map(str::to_owned),
+    }
+}
+
+/// A finite number above zero.
+fn positive(value: Option<&str>) -> Option<f32> {
+    value
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
 }
 
 /// The options of the configuration folder `dir`.
@@ -360,6 +400,7 @@ pub fn read_options(dir: &Path) -> ReferenceOptions {
     let scheme = read("colors.scheme.xml");
     let keymap = read(&format!("{}/keymap.xml", os_folder())).or_else(|| read("keymap.xml"));
     let font = read("editor-font.xml");
+    let terminal_font = read("terminal-font.xml");
     let editor = read("editor.xml");
     let ui = read("ui.lnf.xml");
     let general = read("ide.general.xml");
@@ -384,18 +425,17 @@ pub fn read_options(dir: &Path) -> ReferenceOptions {
     if let Some(root) = font
         && let Some(c) = component(&root, "DefaultFont")
     {
-        let size = option(c, "FONT_SIZE_2D")
-            .or_else(|| option(c, "FONT_SIZE"))
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|s| s.is_finite() && *s > 0.0);
-        out.font = FontOptions {
-            family: option(c, "FONT_FAMILY").map(str::to_owned),
-            size,
-            line_spacing: option(c, "LINE_SPACING")
-                .and_then(|v| v.parse::<f32>().ok())
-                .filter(|s| s.is_finite() && *s > 0.0),
-            ligatures: option(c, "USE_LIGATURES").and_then(boolean),
-            fallback: option(c, "SECONDARY_FONT_FAMILY").map(str::to_owned),
+        out.font = font_options(c);
+    }
+    if let Some(root) = terminal_font
+        && let Some(c) = component(&root, "TerminalFontOptions")
+    {
+        out.terminal_font = TerminalFontOptions {
+            font: FontOptions {
+                ligatures: None,
+                ..font_options(c)
+            },
+            column_spacing: positive(option(c, "COLUMN_SPACING")),
         };
     }
     if let Some(root) = editor
@@ -733,6 +773,17 @@ mod tests {
             </component></application>"#,
         );
         write(
+            &o.join("terminal-font.xml"),
+            r#"<application><component name="TerminalFontOptions">
+                <option name="FONT_SIZE" value="12" />
+                <option name="FONT_SIZE_2D" value="12.5" />
+                <option name="FONT_FAMILY" value="JetBrainsMono Nerd Font" />
+                <option name="LINE_SPACING" value="1.1" />
+                <option name="SECONDARY_FONT_FAMILY" value="Monospaced" />
+                <option name="COLUMN_SPACING" value="0.9" />
+            </component></application>"#,
+        );
+        write(
             &o.join("editor.xml"),
             r#"<application><component name="EditorSettings">
                 <option name="USE_SOFT_WRAPS" value="MAIN_EDITOR:CONSOLE" />
@@ -774,6 +825,19 @@ mod tests {
                 line_spacing: Some(1.3),
                 ligatures: Some(true),
                 fallback: None,
+            }
+        );
+        assert_eq!(
+            options.terminal_font,
+            TerminalFontOptions {
+                font: FontOptions {
+                    family: Some("JetBrainsMono Nerd Font".into()),
+                    size: Some(12.5),
+                    line_spacing: Some(1.1),
+                    ligatures: None,
+                    fallback: Some("Monospaced".into()),
+                },
+                column_spacing: Some(0.9),
             }
         );
         assert_eq!(

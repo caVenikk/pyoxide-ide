@@ -53,23 +53,63 @@ pub struct CellMetrics {
     pub cell: Size<Pixels>,
 }
 
-/// The font families on the machine and the symbol fonts among them
-/// (asked once: the list is long).
-struct MachineFonts {
-    names: Vec<String>,
-    fallbacks: Option<FontFallbacks>,
+/// The font families on the machine (asked once: the list is long).
+fn machine_fonts(window: &Window) -> &'static [String] {
+    static FONTS: OnceLock<Vec<String>> = OnceLock::new();
+    FONTS.get_or_init(|| window.text_system().all_font_names())
 }
 
-fn machine_fonts(window: &Window) -> &'static MachineFonts {
-    static FONTS: OnceLock<MachineFonts> = OnceLock::new();
-    FONTS.get_or_init(|| {
-        let names = window.text_system().all_font_names();
-        let fallbacks = symbol_fallbacks(&names);
-        MachineFonts {
-            fallbacks: (!fallbacks.is_empty()).then(|| FontFallbacks::from_fonts(fallbacks)),
-            names,
+/// The terminal font the settings chose (Settings | Tools | Terminal |
+/// Font); what is not chosen is the theme's terminal font. The application
+/// keeps it up to date with [`set_font`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerminalFont {
+    /// Tried before the theme's families.
+    pub family: Option<String>,
+    /// In points.
+    pub size: Option<f32>,
+    /// The line height, a multiple of the font's own.
+    pub line_spacing: f32,
+    /// The cell width, a multiple of the advance of the font.
+    pub column_spacing: f32,
+    /// The family of the characters the font lacks. `None`: the platform's
+    /// own fallback only; no font is added behind the user's back (a Nerd
+    /// Font prompt shows boxes until a Nerd Font is chosen).
+    pub fallback: Option<String>,
+}
+
+impl Default for TerminalFont {
+    fn default() -> Self {
+        Self {
+            family: None,
+            size: None,
+            line_spacing: 1.0,
+            column_spacing: 1.0,
+            fallback: None,
         }
-    })
+    }
+}
+
+impl TerminalFont {
+    /// The families to try: the chosen one, then the theme's.
+    fn families(&self, theme: &[String]) -> Vec<String> {
+        match &self.family {
+            Some(family) => std::iter::once(family.clone())
+                .chain(theme.iter().filter(|f| *f != family).cloned())
+                .collect(),
+            None => theme.to_vec(),
+        }
+    }
+}
+
+impl gpui::Global for TerminalFont {}
+
+/// Makes `font` the terminal font and redraws the windows.
+pub fn set_font(cx: &mut App, font: TerminalFont) {
+    if cx.try_global::<TerminalFont>() != Some(&font) {
+        cx.set_global(font);
+        cx.refresh_windows();
+    }
 }
 
 thread_local! {
@@ -93,34 +133,24 @@ fn terminal_family(families: &[String], names: &[String]) -> SharedString {
     })
 }
 
-/// Fonts with the symbols of Powerline and Nerd Font prompts, when the
-/// machine has them: glyphs the terminal font lacks are taken from them
-/// before the system's own fallback.
-fn symbol_fallbacks(names: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = names
-        .iter()
-        .filter(|n| n.contains("Nerd Font") || n.contains("Powerline"))
-        .cloned()
-        .collect();
-    // Monospaced variants first: their symbols fit a cell.
-    out.sort_by_key(|n| (!n.ends_with(" Mono"), n.len()));
-    out.dedup();
-    out.truncate(4);
-    out
-}
-
-/// The terminal font of the theme and the size of its cell.
-pub fn cell_metrics(window: &mut Window, cx: &App, line_spacing: f32) -> CellMetrics {
+/// The terminal font and the size of its cell: the chosen font
+/// ([`set_font`]) over the theme's.
+pub fn cell_metrics(window: &mut Window, cx: &App) -> CellMetrics {
     let fonts = &cx.theme().raw().fonts;
-    let machine = machine_fonts(window);
+    let chosen = cx.try_global::<TerminalFont>().cloned().unwrap_or_default();
+    let families = chosen.families(&fonts.terminal_family);
     let font = Font {
-        family: terminal_family(&fonts.terminal_family, &machine.names),
+        family: terminal_family(&families, machine_fonts(window)),
         features: FontFeatures::disable_ligatures(),
-        fallbacks: machine.fallbacks.clone(),
+        fallbacks: chosen
+            .fallback
+            .as_ref()
+            .map(|f| FontFallbacks::from_fonts(vec![f.clone()])),
         weight: FontWeight::NORMAL,
         style: FontStyle::Normal,
     };
-    let font_size = px(fonts.terminal_size);
+    let font_size = px(chosen.size.unwrap_or(fonts.terminal_size));
+    let line_spacing = chosen.line_spacing;
     let ts = window.text_system();
     let id = ts.resolve_font(&font);
     let ascent = f32::from(ts.ascent(id, font_size)).ceil();
@@ -132,6 +162,7 @@ pub fn cell_metrics(window: &mut Window, cx: &App, line_spacing: f32) -> CellMet
         .advance(id, font_size, '%')
         .map(|s| s.width)
         .unwrap_or(font_size * 0.6);
+    let width = px((f32::from(width) * chosen.column_spacing).round().max(1.0));
     CellMetrics {
         font,
         font_size,
@@ -320,8 +351,7 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        let line_spacing = self.view.read(cx).options().line_spacing;
-        let metrics = cell_metrics(window, cx, line_spacing);
+        let metrics = cell_metrics(window, cx);
         let theme = cx.theme();
         let base_colors = TerminalColors::from_theme(theme.raw());
         let scrollbar_width = theme.metric(Metric::ScrollbarWidth);
@@ -592,20 +622,15 @@ mod tests {
     }
 
     #[test]
-    fn symbol_fonts_are_preferred_monospaced() {
-        let names: Vec<String> = [
-            "Menlo",
-            "JetBrainsMono Nerd Font",
-            "Symbols Nerd Font",
-            "JetBrainsMono Nerd Font Mono",
-            "Inter",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        let f = symbol_fallbacks(&names);
-        assert_eq!(f[0], "JetBrainsMono Nerd Font Mono");
-        assert!(f.contains(&"Symbols Nerd Font".to_owned()));
-        assert!(!f.contains(&"Menlo".to_owned()));
+    fn the_chosen_family_goes_first_and_no_symbol_font_is_added() {
+        let theme = vec!["JetBrains Mono".to_owned(), "Menlo".to_owned()];
+        assert_eq!(TerminalFont::default().families(&theme), theme);
+        let chosen = TerminalFont {
+            family: Some("Menlo".into()),
+            ..TerminalFont::default()
+        };
+        assert_eq!(chosen.families(&theme), ["Menlo", "JetBrains Mono"]);
+        // Nothing the machine has is a fallback unless one is chosen.
+        assert_eq!(TerminalFont::default().fallback, None);
     }
 }

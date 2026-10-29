@@ -115,13 +115,15 @@ fn hooks(cx: &mut App) -> &mut Hooks {
     cx.default_global::<Hooks>()
 }
 
-/// Registers the commands and the `[import]` and `[file-types]` sections.
+/// Registers the commands and the `[import]`, `[file-types]` and
+/// `[terminal.font]` sections.
 pub fn init(cx: &mut App) {
     ui::command::register(cx, COMMANDS);
     ui::command::register(cx, QUERY_COMMANDS);
     ui::command::register(cx, WORKBENCH_COMMANDS);
     crate::store::register::<ImportSettings>(cx);
     crate::store::register::<settings::FileTypeSettings>(cx);
+    crate::store::register::<settings::TerminalFontSettings>(cx);
     for importer in import::platform_importers() {
         register_importer(cx, importer);
     }
