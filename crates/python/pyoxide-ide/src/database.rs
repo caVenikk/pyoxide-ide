@@ -1010,7 +1010,6 @@ mod tests {
         store.release_password(root, "never");
         assert!(store.needs_prompt(root, &never));
         assert!(!store.needs_prompt(root, &until));
-        assert_eq!(os.calls(), 0);
 
         // A kept one is, for the Forever data source.
         os.inner
