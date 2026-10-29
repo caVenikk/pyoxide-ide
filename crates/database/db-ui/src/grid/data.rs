@@ -9,6 +9,7 @@ use db_core::{Column, Row, Value, ValueKind};
 use gpui::SharedString;
 
 use super::format::{self, Decimal};
+use super::value::{self, CellFormat};
 
 /// How a column takes part in the table's keys (header icon).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -69,8 +70,9 @@ impl GridPage {
         first_row: u64,
         has_more: bool,
         meta: &[ColumnMeta],
+        fmt: &CellFormat,
     ) -> Self {
-        let mut grid_columns: Vec<GridColumn> = columns
+        let grid_columns: Vec<GridColumn> = columns
             .iter()
             .map(|c| {
                 let meta = meta.iter().find(|m| m.name == c.name);
@@ -89,13 +91,46 @@ impl GridPage {
                 }
             })
             .collect();
+        Self::with_cells(grid_columns, Arc::new(rows), first_row, has_more, fmt)
+    }
+
+    /// The same rows with their texts made again, for other formats or
+    /// display types.
+    pub fn reformatted(&self, fmt: &CellFormat) -> Self {
+        Self::with_cells(
+            self.columns.clone(),
+            self.rows.clone(),
+            self.first_row,
+            self.has_more,
+            fmt,
+        )
+    }
+
+    fn with_cells(
+        mut grid_columns: Vec<GridColumn>,
+        rows: Arc<Vec<Row>>,
+        first_row: u64,
+        has_more: bool,
+        fmt: &CellFormat,
+    ) -> Self {
+        let binary: Vec<value::DisplayType> = grid_columns
+            .iter()
+            .map(|c| fmt.display_of(&c.name))
+            .collect();
+        for c in &mut grid_columns {
+            c.chars = 0;
+        }
         let cells: Vec<Vec<CellText>> = rows
             .iter()
             .map(|row| {
                 row.iter()
                     .enumerate()
                     .map(|(i, v)| {
-                        let text = format::cell_text(v);
+                        let text = value::cell_text(
+                            v,
+                            &fmt.formats,
+                            binary.get(i).copied().unwrap_or_default(),
+                        );
                         if let Some(c) = grid_columns.get_mut(i) {
                             let len = text
                                 .as_deref()
@@ -113,7 +148,7 @@ impl GridPage {
         Self {
             columns: grid_columns,
             cells,
-            rows: Arc::new(rows),
+            rows,
             first_row,
             has_more,
         }
@@ -185,9 +220,10 @@ pub fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Orderin
         (Value::TimestampTz(x), Value::TimestampTz(y)) => x.cmp(y),
         (Value::Bytes(x), Value::Bytes(y)) => x.cmp(y),
         _ => {
+            let formats = CellFormat::default().formats;
             let (x, y) = (
-                format::cell_text(&a).unwrap_or_default(),
-                format::cell_text(&b).unwrap_or_default(),
+                value::cell_text(&a, &formats, Default::default()).unwrap_or_default(),
+                value::cell_text(&b, &formats, Default::default()).unwrap_or_default(),
             );
             x.to_lowercase()
                 .cmp(&y.to_lowercase())
@@ -399,7 +435,7 @@ mod tests {
             data_type: "bigint".into(),
             key: KeyMark::Primary,
         }];
-        GridPage::build(&columns(), rows, 0, true, &meta)
+        GridPage::build(&columns(), rows, 0, true, &meta, &CellFormat::default())
     }
 
     #[test]

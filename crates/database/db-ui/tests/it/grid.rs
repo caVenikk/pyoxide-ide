@@ -74,7 +74,7 @@ pub(crate) fn store_with_model(
 
 /// Draws until `f` holds for `db.grid.state` (the pager answers from
 /// threads of its own).
-fn wait_grid(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+pub(super) fn wait_grid(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
     let started = Instant::now();
     loop {
         let s = grid_state(h);
@@ -90,7 +90,7 @@ fn wait_grid(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
     }
 }
 
-fn grid_state(h: &mut Harness) -> Value {
+pub(super) fn grid_state(h: &mut Harness) -> Value {
     use gpui::AppContext as _;
     let window: gpui::AnyWindowHandle = h.window.into();
     h.cx.update_window(window, |_, window, cx| {
@@ -101,7 +101,7 @@ fn grid_state(h: &mut Harness) -> Value {
 }
 
 /// Shows the tree with the cached model and opens `customers`.
-fn open_customers(h: &mut Harness) -> Value {
+pub(super) fn open_customers(h: &mut Harness) -> Value {
     show_tool_window(h);
     h.invoke("db.explorer.expand", json!({ "path": NAME }));
     let started = Instant::now();

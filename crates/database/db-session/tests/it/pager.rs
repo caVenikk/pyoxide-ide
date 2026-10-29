@@ -6,12 +6,12 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use db_core::{ConnectParams, Dialect, ErrorKind, opt};
+use db_core::{ConnectParams, Dialect, ErrorKind, Value, opt};
 use db_oracle_thin::ThinDriver;
 use db_postgres::PostgresDriver;
 use db_session::{
-    DataSourceOptions, JobId, Page, PageError, PageSize, PagerEvent, ResultPager, SessionOptions,
-    TableQuery, TableRef,
+    CellQuery, DataSourceOptions, JobId, Page, PageError, PageSize, PagerEvent, ResultPager,
+    SessionOptions, TableQuery, TableRef,
 };
 use db_sqlite::SqliteDriver;
 
@@ -38,7 +38,9 @@ impl Pager {
             let left = deadline.saturating_duration_since(Instant::now());
             let e = self.rx.recv_timeout(left).expect("the pager's event");
             let j = match &e {
-                PagerEvent::Page { job, .. } | PagerEvent::Count { job, .. } => *job,
+                PagerEvent::Page { job, .. }
+                | PagerEvent::Count { job, .. }
+                | PagerEvent::Cell { job, .. } => *job,
             };
             if j == job {
                 return e;
@@ -49,6 +51,13 @@ impl Pager {
     fn page(&self, q: &TableQuery, first: u64, size: PageSize) -> Result<Page, PageError> {
         match self.wait(self.pager.page(q, first, size)) {
             PagerEvent::Page { result, .. } => result,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn cell(&self, q: &CellQuery) -> Result<Value, PageError> {
+        match self.wait(self.pager.cell(q)) {
+            PagerEvent::Cell { result, .. } => result,
             other => panic!("{other:?}"),
         }
     }
@@ -126,6 +135,49 @@ fn sqlite_pages_count_and_keep_errors_apart() {
             .unwrap(),
         25
     );
+}
+
+#[test]
+fn sqlite_loads_the_whole_value_of_a_truncated_cell_by_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = sqlite(&dir);
+    let session = h.handle.open_session(SessionOptions::default());
+    h.run_ok(
+        &session,
+        "create table notes (id integer primary key, body text);
+         insert into notes values (1, 'short'), (2, replace(hex(zeroblob(1572864)), '00', 'ab'));",
+    );
+    let p = pager(&h);
+    let table = TableRef::new(None, "notes");
+    let page = p
+        .page(&TableQuery::new(table.clone()), 0, PageSize::Rows(10))
+        .unwrap();
+    // The page cuts the long value at the 1 MiB limit.
+    let Value::Truncated { prefix, .. } = &page.rows[1][1] else {
+        panic!("not truncated: {:?}", page.rows[1][1]);
+    };
+    assert_eq!(prefix.as_str().map(str::len), Some(1 << 20));
+    let whole = p
+        .cell(&CellQuery {
+            table: table.clone(),
+            column: "body".into(),
+            key: vec![("id".into(), Value::Int(2))],
+        })
+        .unwrap();
+    assert_eq!(whole.as_str().map(str::len), Some(3 << 20));
+    // A key that finds nothing, and no key at all, are errors.
+    let missing = p.cell(&CellQuery {
+        table: table.clone(),
+        column: "body".into(),
+        key: vec![("id".into(), Value::Int(9))],
+    });
+    assert!(missing.is_err());
+    let keyless = p.cell(&CellQuery {
+        table,
+        column: "body".into(),
+        key: vec![],
+    });
+    assert!(keyless.unwrap_err().error.message.contains("no key"));
 }
 
 fn pg() -> Harness {
@@ -221,6 +273,71 @@ fn postgres_first_page_of_the_demo_events_is_fast() {
         warm[warm.len() / 2] < Duration::from_millis(100),
         "{warm:?}"
     );
+}
+
+#[test]
+#[ignore = "needs the postgres container with the demo schema"]
+fn postgres_reads_one_cell_by_the_rows_key() {
+    let h = pg();
+    let p = pager(&h);
+    let table = TableRef::new(Some("demo"), "events");
+    let cell = |column: &str, key: Vec<(String, Value)>| {
+        p.cell(&CellQuery {
+            table: table.clone(),
+            column: column.into(),
+            key,
+        })
+    };
+    // A bigint key; the demo's long message of event 500 is whole.
+    let message = cell("message", vec![("id".into(), Value::Int(500))]).unwrap();
+    assert_eq!(message.as_str().map(str::len), Some(5800), "{message:?}");
+    // A uuid in the key is a literal the server converts.
+    let page = p
+        .page(&TableQuery::new(table.clone()), 0, PageSize::Rows(2))
+        .unwrap();
+    let kind = cell("kind", vec![("uid".into(), page.rows[0][3].clone())]).unwrap();
+    assert_eq!(page.rows[0][2], kind);
+    // NULL is searched for with IS NULL: many rows match, which is an error.
+    assert!(cell("kind", vec![("blob".into(), Value::Null)]).is_err());
+}
+
+#[test]
+#[ignore = "needs the oracle container"]
+fn oracle_reads_one_cell_by_the_rows_key() {
+    let params = ConnectParams {
+        host: env("PYOXIDE_TEST_ORACLE_HOST", "localhost"),
+        port: env("PYOXIDE_TEST_ORACLE_PORT", "1521")
+            .parse()
+            .unwrap_or(1521),
+        database: env("PYOXIDE_TEST_ORACLE_SERVICE", "FREEPDB1"),
+        user: "pyoxide".into(),
+        password: password(),
+        ..ConnectParams::default()
+    };
+    let h = harness(Arc::new(ThinDriver), params, DataSourceOptions::default());
+    let p = pager(&h);
+    let table = TableRef::new(Some("SYS"), "ALL_OBJECTS");
+    let q = TableQuery {
+        filter: "OBJECT_TYPE = 'TABLE'".into(),
+        order: "OBJECT_ID".into(),
+        ..TableQuery::new(table.clone())
+    };
+    let page = p.page(&q, 0, PageSize::Rows(1)).unwrap();
+    let column = |name: &str| {
+        page.columns
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap_or_else(|| panic!("no column {name}"))
+    };
+    let id = page.rows[0][column("OBJECT_ID")].clone();
+    let whole = p
+        .cell(&CellQuery {
+            table,
+            column: "OBJECT_TYPE".into(),
+            key: vec![("OBJECT_ID".into(), id)],
+        })
+        .unwrap();
+    assert_eq!(whole.as_str(), Some("TABLE"), "{whole:?}");
 }
 
 #[test]

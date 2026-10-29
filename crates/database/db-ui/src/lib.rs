@@ -6,6 +6,7 @@
 //! async runtime, and passwords only pass through it as [`db_core::Secret`].
 
 pub mod console;
+pub mod data_views;
 pub mod dialog;
 pub mod explorer;
 pub mod fixture;
@@ -36,12 +37,14 @@ pub const KEYMAPS: KeymapFiles = KeymapFiles {
     macos: concat!(
         include_str!("../keymaps/macos/db.toml"),
         include_str!("../keymaps/macos/grid.toml"),
-        include_str!("../keymaps/macos/console.toml")
+        include_str!("../keymaps/macos/console.toml"),
+        include_str!("../keymaps/macos/values.toml")
     ),
     default: concat!(
         include_str!("../keymaps/default/db.toml"),
         include_str!("../keymaps/default/grid.toml"),
-        include_str!("../keymaps/default/console.toml")
+        include_str!("../keymaps/default/console.toml"),
+        include_str!("../keymaps/default/values.toml")
     ),
 };
 
@@ -207,6 +210,7 @@ pub fn module(config: DbUiConfig) -> Module {
             console::init(cx);
         })),
         keymaps: Some(KEYMAPS),
+        settings_pages: data_views::pages(),
         tool_windows: vec![
             ToolWindowHook {
                 spec: ToolWindowSpec {

@@ -1,25 +1,11 @@
-//! The text a grid cell shows for a value, as the reference shows it by
-//! default: `<null>` for SQL NULL, timestamps with six fraction digits,
-//! PostgreSQL intervals in words (`4 mins 58 secs`), numbers in their
-//! shortest exact form. Display types and formats are the value panel's
-//! (#306); this is the default text only.
+//! Pieces of a grid's value texts: the `<null>` marker, alignment,
+//! PostgreSQL intervals in words (`4 mins 58 secs`) and the exact decimals
+//! the aggregates use. What a cell shows for each type is [`super::value`].
 
 use db_core::{Value, ValueKind};
 
 /// What NULL looks like (grey, unlike an empty string).
 pub const NULL_TEXT: &str = "<null>";
-
-/// The cell text of a value; `None` for SQL NULL.
-pub fn cell_text(value: &Value) -> Option<String> {
-    Some(match value {
-        Value::Null => return None,
-        Value::Timestamp(t) => t.format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
-        Value::TimestampTz(t) => t.format("%Y-%m-%d %H:%M:%S%.6f %:z").to_string(),
-        Value::Interval(text) => interval_words(text).unwrap_or_else(|| text.clone()),
-        Value::Truncated { prefix, .. } => cell_text(prefix).unwrap_or_default(),
-        other => other.to_string(),
-    })
-}
 
 /// Numbers are right-aligned.
 pub fn right_aligned(kind: ValueKind) -> bool {
@@ -176,6 +162,95 @@ impl Decimal {
         Some(self.rescale(scale)?.cmp(&other.rescale(scale)?))
     }
 
+    /// The number as a float, for statistics.
+    pub fn to_f64(self) -> f64 {
+        self.to_string().parse().unwrap_or(f64::NAN)
+    }
+
+    /// This divided by `n` (not zero), to 34 significant digits rounded
+    /// half to even (`DECIMAL128`, as the reference divides), without the
+    /// trailing zeros of the fraction.
+    pub fn divided_by(self, n: u64) -> String {
+        const DIGITS: usize = 34;
+        let negative = self.mantissa < 0;
+        let q = self.mantissa.unsigned_abs();
+        let d = u128::from(n.max(1));
+        let whole = (q / d).to_string();
+        let mut rem = q % d;
+        // The digits of the quotient, the point after `point` of them.
+        let mut digits: Vec<u8> = if whole == "0" {
+            Vec::new()
+        } else {
+            whole.bytes().map(|b| b - b'0').collect()
+        };
+        let mut point = if whole == "0" {
+            0
+        } else {
+            whole.len() as isize
+        };
+        let mut significant = digits.len();
+        while rem != 0 && significant < DIGITS {
+            rem *= 10;
+            let digit = (rem / d) as u8;
+            rem %= d;
+            if digits.is_empty() && digit == 0 {
+                // A leading zero of the fraction: no significant digit yet.
+                point -= 1;
+                continue;
+            }
+            digits.push(digit);
+            significant += 1;
+        }
+        if rem != 0 {
+            let twice = rem * 2;
+            let up = twice > d || (twice == d && digits.last().is_some_and(|x| x % 2 == 1));
+            if up {
+                let mut i = digits.len();
+                loop {
+                    if i == 0 {
+                        digits.insert(0, 1);
+                        point += 1;
+                        break;
+                    }
+                    i -= 1;
+                    if digits[i] == 9 {
+                        digits[i] = 0;
+                    } else {
+                        digits[i] += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if digits.is_empty() {
+            return "0".to_owned();
+        }
+        // Now shift the point left by this number's scale.
+        let point = point - self.scale as isize;
+        let mut out = String::new();
+        if negative {
+            out.push('-');
+        }
+        let text: String = digits.iter().map(|d| char::from(b'0' + d)).collect();
+        if point <= 0 {
+            out.push_str("0.");
+            out.extend(std::iter::repeat_n('0', (-point) as usize));
+            out.push_str(&text);
+        } else if point as usize >= text.len() {
+            out.push_str(&text);
+            out.extend(std::iter::repeat_n('0', point as usize - text.len()));
+        } else {
+            out.push_str(&text[..point as usize]);
+            out.push('.');
+            out.push_str(&text[point as usize..]);
+        }
+        if out.contains('.') {
+            let trimmed = out.trim_end_matches('0').trim_end_matches('.');
+            out = trimmed.to_owned();
+        }
+        out
+    }
+
     pub fn checked_add(self, other: Self) -> Option<Self> {
         let scale = self.scale.max(other.scale);
         Some(Self {
@@ -211,27 +286,9 @@ impl std::fmt::Display for Decimal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{FixedOffset, NaiveDate, TimeZone as _};
 
     #[test]
-    fn values_show_as_in_the_reference() {
-        assert_eq!(cell_text(&Value::Null), None);
-        let t = NaiveDate::from_ymd_opt(2026, 9, 25)
-            .unwrap()
-            .and_hms_opt(23, 54, 0)
-            .unwrap();
-        let tz = FixedOffset::east_opt(0).unwrap().from_utc_datetime(&t);
-        assert_eq!(
-            cell_text(&Value::TimestampTz(tz)).unwrap(),
-            "2026-09-25 23:54:00.000000 +00:00"
-        );
-        assert_eq!(
-            cell_text(&Value::Timestamp(t)).unwrap(),
-            "2026-09-25 23:54:00.000000"
-        );
-        assert_eq!(cell_text(&Value::Float(0.998)).unwrap(), "0.998");
-        assert_eq!(cell_text(&Value::Float(0.5)).unwrap(), "0.5");
-        assert_eq!(cell_text(&Value::Bool(true)).unwrap(), "true");
+    fn numbers_are_right_aligned() {
         assert!(right_aligned(ValueKind::Float));
         assert!(!right_aligned(ValueKind::Text));
     }
@@ -249,6 +306,29 @@ mod tests {
         assert_eq!(interval_words("-00:00:01").unwrap(), "-1 secs");
         assert_eq!(interval_words("00:00:00").unwrap(), "0 secs");
         assert_eq!(interval_words("P1D"), None);
+    }
+
+    #[test]
+    fn averages_have_thirty_four_digits() {
+        let d = |s: &str| Decimal::parse(s).unwrap();
+        assert_eq!(
+            d("109.626").divided_by(438),
+            "0.2502876712328767123287671232876712"
+        );
+        assert_eq!(d("0.501").divided_by(2), "0.2505");
+        assert_eq!(d("10").divided_by(4), "2.5");
+        assert_eq!(
+            d("-10").divided_by(3),
+            "-3.333333333333333333333333333333333"
+        );
+        assert_eq!(d("2").divided_by(3), "0.6666666666666666666666666666666667");
+        assert_eq!(d("1200").divided_by(2), "600");
+        assert_eq!(d("0.0001").divided_by(1), "0.0001");
+        assert_eq!(Decimal::default().divided_by(5), "0");
+        assert_eq!(
+            d("1").compare(d("0.999")),
+            Some(std::cmp::Ordering::Greater)
+        );
     }
 
     #[test]

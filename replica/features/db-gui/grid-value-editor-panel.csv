@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Value editor side panel for the current cell (text, JSON, hex)",db-gui,should,yes,no,Pro
+"Value editor side panel for the current cell (text, JSON, hex)",db-gui,should,yes,partial,"Pro; side panel with Record, Value (read-only editor, JSON indent, hex) and Aggregates tabs (#306); editing a value waits for the grid edit issue"

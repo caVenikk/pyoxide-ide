@@ -178,6 +178,28 @@ impl TableGrid {
                 false,
                 cx,
             ))
+            .child(
+                icon_button(
+                    "grid-value-panel",
+                    IconName::PREVIEW,
+                    px(BUTTON),
+                    px(ICON),
+                    self.values.panel.is_some(),
+                    cx,
+                )
+                .debug_selector(|| "grid-value-panel".to_owned())
+                .tooltip(Tooltip::text("Open in Value Editor", None))
+                .when(!has_page, |d| d.opacity(DISABLED_ALPHA))
+                .when(has_page, |d| {
+                    d.on_click(cx.listener(|g, _, window, cx| {
+                        if g.values.panel.is_some() {
+                            g.close_panel(window, cx)
+                        } else {
+                            g.open_panel(super::panel::PanelTab::Value, window, cx)
+                        }
+                    }))
+                }),
+            )
             .child(div().flex_1())
             .child(Self::text_tool(
                 "grid-extractor",
@@ -187,6 +209,24 @@ impl TableGrid {
                 cx,
             ))
             .child(Self::separator(cx))
+            .child(
+                icon_button(
+                    "grid-view-as",
+                    IconName::DIFF_SIDE_BY_SIDE,
+                    px(BUTTON),
+                    px(ICON),
+                    self.values.view != super::views::ViewMode::Table,
+                    cx,
+                )
+                .debug_selector(|| "grid-view-as".to_owned())
+                .tooltip(Tooltip::text("View As", None))
+                .when(!has_page, |d| d.opacity(DISABLED_ALPHA))
+                .when(has_page, |d| {
+                    d.on_click(cx.listener(|g, e: &ClickEvent, window, cx| {
+                        g.show_view_menu(e.position(), window, cx)
+                    }))
+                }),
+            )
             .child(Self::tool(
                 "grid-view-options",
                 IconName::SHOW,
@@ -300,7 +340,7 @@ impl TableGrid {
     fn column_edges(&self, char_width: Pixels) -> Vec<Pixels> {
         let mut edges = vec![px(0.0)];
         let mut x = px(0.0);
-        if let Some(page) = &self.page {
+        if let Some(page) = self.shown_page() {
             for c in &page.columns {
                 // The content, or the header: name, icon, gaps, sort mark.
                 let header = char_width * c.name.chars().count() as f32
@@ -349,10 +389,14 @@ impl TableGrid {
                     .border_r_1()
                     .border_color(lines),
             );
-        let Some(page) = self.page.clone() else {
+        let Some(page) = self.shown_page().cloned() else {
             return row.into_any_element();
         };
-        let sort = self.sort_marks(&page);
+        let sort = if self.is_transposed() {
+            Vec::new()
+        } else {
+            self.sort_marks(&page)
+        };
         let view_width = layout.bounds.size.width.max(px(4000.0));
         let mut cells = div()
             .absolute()
@@ -404,7 +448,9 @@ impl TableGrid {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |g, e: &MouseDownEvent, window, cx| {
-                            g.show_header_menu(column, e.position, window, cx);
+                            if !g.is_transposed() {
+                                g.show_header_menu(column, e.position, window, cx);
+                            }
                         }),
                     )
                     .child(Icon::new(icon).size(px(HEADER_ICON)))
@@ -415,7 +461,7 @@ impl TableGrid {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .font_weight(FontWeight::BOLD)
-                            .child(c.name.clone()),
+                            .child(self.header_label(i)),
                     )
                     .child(
                         div()
@@ -488,7 +534,7 @@ impl TableGrid {
             thumb: theme.color(UiRole::Scrollbar),
         };
         let font = theme.editor_font();
-        let paint = self.page.clone().map(|page| body::Paint {
+        let paint = self.shown_page().cloned().map(|page| body::Paint {
             page,
             layout: self.body.shared(),
             scroll: self.scroll,
@@ -543,6 +589,15 @@ impl TableGrid {
                             );
                         }
                         Hit::None => {}
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|g, e: &MouseDownEvent, window, cx| {
+                    window.focus(&g.focus);
+                    if let Hit::Cell(pos) = g.body.hit(e.position, g.scroll) {
+                        g.show_cell_menu(pos, e.position, window, cx);
                     }
                 }),
             )
@@ -839,6 +894,7 @@ impl TableGrid {
         self.menu = Some(OpenMenu {
             menu,
             position,
+            corner: gpui::Corner::BottomLeft,
             _subscription: subscription,
         });
         cx.notify();
@@ -865,8 +921,11 @@ impl Render for TableGrid {
             .width;
         let line_height = (font.size * font.line_spacing).round();
         let row_height = line_height + px(ROW_EXTRA);
-        let rows = self.page.as_ref().map_or(0, |p| p.row_count());
-        let last_number = self.page.as_ref().map_or(1, |p| p.first_row + rows as u64);
+        self.sync_panel(cx);
+        self.sync_text_view(cx);
+        let text_view = self.values.view == super::views::ViewMode::Text;
+        let rows = self.shown_page().map_or(0, |p| p.row_count());
+        let last_number = self.shown_page().map_or(1, |p| p.first_row + rows as u64);
         let digits = last_number.to_string().len().max(2);
         let numbers = char_width * digits as f32 + px(CELL_PAD * 4.0 + 8.0);
         let edges = self.column_edges(char_width);
@@ -877,12 +936,23 @@ impl Render for TableGrid {
         let fields = (!self.is_result()).then(|| self.render_fields(window, cx));
         let header = self.render_header(row_height + px(1.0), cx);
         let cells = self.render_body(window, cx);
+        let text = self.values.text.as_ref().filter(|_| text_view).map(|t| {
+            div()
+                .id("grid-text-view")
+                .flex_1()
+                .min_h(px(0.0))
+                .w_full()
+                .overflow_hidden()
+                .child(t.editor.clone())
+                .into_any_element()
+        });
+        let panel = self.render_panel(cx);
         let bar = self.render_page_bar(cx);
         let error = self.render_error(cx);
         let popup = self
             .menu
             .as_ref()
-            .map(|m| ui::menu::overlay_at(&m.menu, m.position, gpui::Corner::BottomLeft, window));
+            .map(|m| ui::menu::overlay_at(&m.menu, m.position, m.corner, window));
         let grid = div()
             .id("grid-area")
             .relative()
@@ -890,6 +960,7 @@ impl Render for TableGrid {
             .flex_col()
             .flex_1()
             .min_h(px(0.0))
+            .min_w(px(0.0))
             .on_mouse_move(cx.listener(|g, e: &MouseMoveEvent, _, cx| {
                 if let Some(r) = g.resize {
                     if e.pressed_button != Some(MouseButton::Left) {
@@ -916,10 +987,17 @@ impl Render for TableGrid {
                     g.drag_select = false;
                 }),
             )
-            .child(header)
-            .child(cells)
+            .children((!text_view).then_some(header))
+            .children(if text_view { text } else { Some(cells) })
             .children(bar)
             .children(error);
+        let content = div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            .min_h(px(0.0))
+            .child(grid)
+            .children(panel);
         div()
             .id("table-grid")
             .key_context(VIEW_CONTEXT)
@@ -938,7 +1016,7 @@ impl Render for TableGrid {
             .on_action(cx.listener(|g, _: &CountRows, _, cx| g.count(cx)))
             .child(toolbar)
             .children(fields)
-            .child(grid)
+            .child(content)
             .children(popup)
     }
 }

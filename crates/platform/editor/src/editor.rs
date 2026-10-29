@@ -354,6 +354,9 @@ pub struct Editor {
     /// A console: no line numbers, no caret row, no room below the last
     /// line, the console's colours.
     pub(crate) console: bool,
+    /// No line numbers and no marks column, in the editor's own colours
+    /// ([`Editor::set_bare`]).
+    pub(crate) bare: bool,
     /// Typing, Enter, Tab, Backspace, Delete and Paste are reported as
     /// [`EditorEvent::Input`] instead of editing the text.
     pub(crate) forward_input: bool,
@@ -505,6 +508,7 @@ impl Editor {
             range_outline: None,
             reveal: None,
             console: false,
+            bare: false,
             forward_input: false,
             type_hook: None,
             scroll_to_end: false,
