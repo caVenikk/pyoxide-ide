@@ -196,6 +196,13 @@ impl Console {
             .schemas()
             .map(|s| (s.name(), s.info().is_system))
             .collect();
+        // The schema the session reports is always there, also before the
+        // data source was introspected.
+        if let Some(current) = self.schema.as_deref()
+            && !schemas.iter().any(|s| s.0 == current)
+        {
+            schemas.push((current, false));
+        }
         schemas.sort_by_key(|s| (s.1, s.0.to_lowercase()));
         let rows: Vec<MenuItem> = schemas
             .into_iter()

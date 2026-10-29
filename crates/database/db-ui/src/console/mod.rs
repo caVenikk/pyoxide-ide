@@ -207,6 +207,9 @@ fn finish_open(
             });
             subscribe(&console, &workbench, window, cx);
             cx.default_global::<Consoles>().0.push(console.clone());
+            // Connect now, off the UI thread, so the toolbar knows the
+            // current schema before the first statement.
+            console.read(cx).session.connect();
             console
         }
     };
