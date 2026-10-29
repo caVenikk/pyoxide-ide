@@ -21,7 +21,7 @@ use terminal::start::{Os, environment};
 use terminal::{SessionOptions, ShellCommand, TerminalSize};
 use terminal_ui::{FLOOD_AFTER, FLOOD_FRAME, SessionView, SessionViewEvent};
 
-fn options(program: &str, args: &[&str]) -> SessionOptions {
+pub(crate) fn options(program: &str, args: &[&str]) -> SessionOptions {
     SessionOptions {
         command: ShellCommand {
             program: program.into(),
@@ -34,17 +34,23 @@ fn options(program: &str, args: &[&str]) -> SessionOptions {
     }
 }
 
-fn open<'a>(
+pub(crate) fn open<'a>(
     cx: &'a mut TestAppContext,
     program: &str,
     args: &[&str],
 ) -> (Entity<SessionView>, &'a mut VisualTestContext) {
+    open_with(cx, options(program, args))
+}
+
+pub(crate) fn open_with(
+    cx: &mut TestAppContext,
+    options: SessionOptions,
+) -> (Entity<SessionView>, &mut VisualTestContext) {
     cx.executor().allow_parking();
     cx.update(|cx| {
         ui::init(cx, themes::ThemeKind::Dark);
         terminal_ui::init(cx);
     });
-    let options = options(program, args);
     let (view, cx) = cx.add_window_view(|window, cx| {
         let view = SessionView::new(options, window, cx);
         window.focus(&gpui::Focusable::focus_handle(&view, cx));
@@ -56,14 +62,14 @@ fn open<'a>(
 
 /// Runs the background work (the view's copies of the screen) and draws a
 /// frame.
-fn frame(cx: &mut VisualTestContext) {
+pub(crate) fn frame(cx: &mut VisualTestContext) {
     cx.executor().advance_clock(Duration::from_millis(20));
     cx.run_until_parked();
     cx.update(|window, cx| window.draw(cx).clear());
 }
 
 /// Draws frames until `f` accepts the view's state (at most about 20 s).
-fn wait(
+pub(crate) fn wait(
     cx: &mut VisualTestContext,
     view: &Entity<SessionView>,
     what: &str,
@@ -231,14 +237,14 @@ fn count_redraws(
     (count, subscription)
 }
 
-fn has_line(s: &Value, f: impl Fn(&str) -> bool) -> bool {
+pub(crate) fn has_line(s: &Value, f: impl Fn(&str) -> bool) -> bool {
     s["lines"]
         .as_array()
         .is_some_and(|l| l.iter().any(|l| f(l.as_str().unwrap())))
 }
 
 /// A point in the left half of a cell (a selection starts before it).
-fn cell(
+pub(crate) fn cell(
     cx: &mut VisualTestContext,
     view: &Entity<SessionView>,
     line: usize,
@@ -248,7 +254,7 @@ fn cell(
 }
 
 /// A point in the right half of a cell (a selection ends after it).
-fn cell_end(
+pub(crate) fn cell_end(
     cx: &mut VisualTestContext,
     view: &Entity<SessionView>,
     line: usize,
@@ -257,7 +263,7 @@ fn cell_end(
     at(cx, view, line, column as f32 + 0.75)
 }
 
-fn at(
+pub(crate) fn at(
     cx: &mut VisualTestContext,
     view: &Entity<SessionView>,
     line: usize,
@@ -270,7 +276,12 @@ fn at(
     )
 }
 
-fn click(cx: &mut VisualTestContext, at: Point<Pixels>, count: usize, modifiers: Modifiers) {
+pub(crate) fn click(
+    cx: &mut VisualTestContext,
+    at: Point<Pixels>,
+    count: usize,
+    modifiers: Modifiers,
+) {
     cx.simulate_event(MouseDownEvent {
         position: at,
         modifiers,

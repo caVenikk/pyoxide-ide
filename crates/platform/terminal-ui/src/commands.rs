@@ -79,3 +79,30 @@ ui::ui_commands! {
     ShowTabList => "terminal.show-tab-list", "Show List of Tabs",
         "Opens the list of the tabs of the Terminal tool window under the selected tab (with a search by typing); choosing a row selects that tab. Needs more than one tab.";
 }
+
+ui::ui_commands! {
+    FIND_COMMANDS, scope = "Terminal";
+    /// Open the find bar.
+    Find { text: Option<String> } => "terminal.find", "Find",
+        "Opens the find bar at the top right of the selected session (`Find` in the reference): the selected text is the query, else the last one, selected in the field; with `text` that is the query and the matches are searched at once.",
+        r#"{"text": "error"}"#;
+    /// Go to the next match.
+    FindNext => "terminal.find-next", "Find Next",
+        "Moves to the next match of the find bar's query (after the last, the first) and scrolls it into view; opens the bar when it is closed.";
+    /// Go to the previous match.
+    FindPrevious => "terminal.find-previous", "Find Previous",
+        "Moves to the previous match of the find bar's query (before the first, the last) and scrolls it into view; opens the bar when it is closed.";
+    /// Close the find bar.
+    FindClose => "terminal.find-close", "Close Find",
+        "Closes the find bar and gives the focus back to the session (Escape in the bar); the matches are no longer marked.";
+    /// Match case in the find bar.
+    FindToggleCase => "terminal.find-toggle-case", "Match Case",
+        "Switches Match Case of the find bar on or off.";
+    /// Regular expression in the find bar.
+    FindToggleRegex => "terminal.find-toggle-regex", "Regex",
+        "Switches Regex of the find bar on or off.";
+    /// Open the link at a cell.
+    OpenLink { line: usize, column: usize } => "terminal.open-link", "Open Link",
+        "Opens the link at a cell of the selected session (a click on it, or Cmd/Ctrl+click for a path in the text): a URL in the browser, a file in the editor at its line and column, a folder of the project in the Project view and another folder in the system's file manager. `line` and `column` count from 0 on the visible screen.",
+        r#"{"line": 3, "column": 5}"#;
+}

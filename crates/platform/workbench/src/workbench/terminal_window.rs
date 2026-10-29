@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 
 use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
-use terminal_ui::{SessionView, TerminalToolWindow, TerminalToolWindowEvent};
+use terminal_ui::commands::{Find, FindNext, FindPrevious, OpenLink};
+use terminal_ui::{LinkTarget, SessionView, TerminalToolWindow, TerminalToolWindowEvent};
 use ui::icons::IconName;
 
 use super::Workbench;
@@ -33,7 +34,7 @@ ui::ui_commands! {
         r#"{"text": "echo hi\r"}"#;
     /// The Terminal tool window's state.
     State => "terminal.state", "Terminal State",
-        "Returns the state of the Terminal tool window as JSON: the tabs (name, title, working directory, exit) and the selected one, the open list of tabs (a menu's state, `null` while closed), and the selected session's size, visible lines, cursor, modes, selection, scrolling, title and exit.";
+        "Returns the state of the Terminal tool window as JSON: the tabs (name, title, working directory, exit) and the selected one, the open list of tabs (a menu's state, `null` while closed), and the selected session's size, visible lines, cursor, modes, selection, scrolling, title and exit, the links on the screen (`links`, with the hint over a clicked path in `link_hint`), the find bar (`find`: query, options, number of matches, the current one) and the command blocks on the screen (`blocks`).";
 }
 
 /// The Terminal tool window's id.
@@ -126,6 +127,10 @@ impl Workbench {
         root.on_action(cx.listener(Self::toggle_terminal))
             .on_action(cx.listener(Self::open_terminal))
             .on_action(cx.listener(Self::type_into_terminal))
+            .on_action(cx.listener(Self::terminal_find))
+            .on_action(cx.listener(Self::terminal_find_next))
+            .on_action(cx.listener(Self::terminal_find_previous))
+            .on_action(cx.listener(Self::terminal_open_link))
     }
 
     fn terminal_event(
@@ -139,6 +144,9 @@ impl Workbench {
             // editor is (`app.rs`, `observe_keystrokes`).
             TerminalToolWindowEvent::Redraw => crate::shot::draw_now(window),
             TerminalToolWindowEvent::NewTab => self.new_terminal_tab(None, window, cx),
+            TerminalToolWindowEvent::OpenLink(target) => {
+                self.open_terminal_link(target, window, cx)
+            }
             TerminalToolWindowEvent::CloseRequested(id) => {
                 self.terminal_close_requested(*id, window, cx)
             }
@@ -201,8 +209,10 @@ impl Workbench {
             let plan = plan.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.terminal_ui.starting = false;
+                let filters = crate::terminal::link_filters(cx);
                 let session = cx.new(|cx| {
                     let mut session = SessionView::new(plan.options, window, cx);
+                    session.set_link_filters(filters, cx);
                     let options = terminal_ui::TerminalOptions {
                         option_as_meta: settings.option_as_meta,
                         ..session.options().clone()
@@ -377,6 +387,94 @@ impl Workbench {
             self.terminal_ui.shell = action.shell.clone();
         }
         self.show_terminal(action.input.clone(), window, cx);
+    }
+
+    /// Find in the selected session when the terminal does not have the
+    /// focus (the command channel, a menu): the Terminal tool window shows
+    /// and the bar opens.
+    fn terminal_find(&mut self, action: &Find, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_terminal(None, window, cx);
+        if let Some(session) = self.terminal_session(cx) {
+            session.update(cx, |s, cx| s.open_find(action.text.as_deref(), window, cx));
+        }
+    }
+
+    fn terminal_find_next(&mut self, _: &FindNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_terminal(None, window, cx);
+        if let Some(session) = self.terminal_session(cx) {
+            session.update(cx, |s, cx| {
+                s.find_step(terminal::SearchDirection::Next, window, cx)
+            });
+        }
+    }
+
+    fn terminal_find_previous(
+        &mut self,
+        _: &FindPrevious,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_terminal(None, window, cx);
+        if let Some(session) = self.terminal_session(cx) {
+            session.update(cx, |s, cx| {
+                s.find_step(terminal::SearchDirection::Previous, window, cx)
+            });
+        }
+    }
+
+    /// `terminal.open-link`: the link at a cell of the selected session.
+    fn terminal_open_link(&mut self, action: &OpenLink, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.terminal_session(cx) {
+            let cell = terminal::Point::new(action.line, action.column);
+            session.update(cx, |s, cx| s.open_link_at(cell, cx));
+        }
+    }
+
+    /// Follows a link of the terminal's output: a URL in the browser; a
+    /// file in the editor at its line and column; a folder of the project
+    /// in the Project view, any other folder in the system's file
+    /// manager.
+    fn open_terminal_link(
+        &mut self,
+        target: &LinkTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let LinkTarget::File { path, .. } = target else {
+            if let LinkTarget::Url(url) = target {
+                // A `www.` address has no scheme.
+                if url.contains(':') {
+                    cx.open_url(url);
+                } else {
+                    cx.open_url(&format!("https://{url}"));
+                }
+            }
+            return;
+        };
+        let (path, target) = (path.clone(), target.clone());
+        let is_dir = cx.background_spawn({
+            let path = path.clone();
+            async move { path.is_dir() }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let is_dir = is_dir.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if !is_dir {
+                    this.open_link(&target, window, cx);
+                    return;
+                }
+                match this.project(cx) {
+                    Some(project) if project.relative(&path).is_some() => {
+                        this.tool_windows.show(ToolWindow::Project);
+                        this.panel.update(cx, |panel, cx| panel.reveal(&path, cx));
+                        window.focus(&this.panel.focus_handle(cx));
+                        cx.notify();
+                    }
+                    _ => cx.reveal_path(&path),
+                }
+            });
+        })
+        .detach();
     }
 
     fn type_into_terminal(&mut self, action: &TypeText, _: &mut Window, cx: &mut Context<Self>) {

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Links in terminal output (URLs, file paths with line:column, Python tracebacks)",terminal,must,yes,no,Community (#89)
+"Links in terminal output (URLs, file paths with line:column, Python tracebacks)",terminal,must,yes,yes,Community (#160)

@@ -112,6 +112,8 @@ pub enum TerminalToolWindowEvent {
     RemoveFromSidebar,
     /// Settings in the options menu.
     Settings,
+    /// The user opened a link in a session's output.
+    OpenLink(crate::links::LinkTarget),
 }
 
 /// One tab: a session and its names.
@@ -327,6 +329,9 @@ impl TerminalToolWindow {
                 window,
                 move |this, _, event, window, cx| match event {
                     SessionViewEvent::Redraw => cx.emit(TerminalToolWindowEvent::Redraw),
+                    SessionViewEvent::OpenLink(target) => {
+                        cx.emit(TerminalToolWindowEvent::OpenLink(target.clone()))
+                    }
                     SessionViewEvent::TitleChanged(_)
                     | SessionViewEvent::CommandRunningChanged(_) => cx.notify(),
                     SessionViewEvent::Exited(_) if this.close_on_exit => {

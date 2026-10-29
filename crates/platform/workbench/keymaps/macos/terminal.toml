@@ -11,7 +11,9 @@
 # A focused terminal (the reference's `Terminal.*` actions): Copy only
 # with a selection (without one the key goes on), Paste (bracketed when
 # the program asked for it), Select All, Clear Terminal (the prompt line
-# stays), Line Up and Down, Page Up and Down.
+# stays), Line Up and Down, Page Up and Down, and Find with its next and
+# previous match (the reference's find in the terminal, which reuses the
+# editor's keys).
 [[context]]
 name = "Terminal"
 [context.bindings]
@@ -23,6 +25,9 @@ name = "Terminal"
 "cmd-down" = "terminal.line-down"
 "shift-pageup" = "terminal.page-up"
 "shift-pagedown" = "terminal.page-down"
+"cmd-f" = "terminal.find"
+"cmd-g" = "terminal.find-next"
+"cmd-shift-g" = "terminal.find-previous"
 # The tabs of the Terminal tool window (`Terminal.NewTab`,
 # `Terminal.CloseTab`, `NextTab`, `PreviousTab`, `ShowContent`) and Hide;
 # Escape goes to the shell. (Bound in the terminal's own context: a
@@ -34,6 +39,24 @@ name = "Terminal"
 "cmd-{" = "terminal.previous-tab"
 "ctrl-shift-down" = "terminal.show-tab-list"
 "shift-escape" = "workbench.hide-tool-window"
+
+# The find bar over the output: its field is an editor. Enter goes to the
+# next match, Shift+Enter to the previous one, Escape closes the bar and
+# gives the focus back to the session. The options take the keys of the
+# editor's find bar.
+[[context]]
+name = "TerminalFind > Editor"
+[context.bindings]
+"enter" = "terminal.find-next"
+"shift-enter" = "terminal.find-previous"
+"cmd-g" = "terminal.find-next"
+"cmd-shift-g" = "terminal.find-previous"
+"cmd-f" = "terminal.find"
+"escape" = "terminal.find-close"
+"ctrl-alt-c" = "terminal.find-toggle-case"
+"alt-c" = "terminal.find-toggle-case"
+"ctrl-alt-x" = "terminal.find-toggle-regex"
+"alt-x" = "terminal.find-toggle-regex"
 
 # The rename balloon of a tab (`ToolWindowTabRenameActionBase`): Enter
 # renames (an empty name is refused), Escape cancels.

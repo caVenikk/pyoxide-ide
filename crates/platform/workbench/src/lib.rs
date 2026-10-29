@@ -60,4 +60,5 @@ pub use project::AutoExclusions;
 pub use project_panel::{NewItem, NewItemKind, NewTemplate, RootKind, TreeHooks};
 pub use run::{FieldText, RunHook, RunProvider, RunRequest, RunSpec};
 pub use terminal::{TerminalHook, TerminalProvider};
+pub use terminal_ui::{LinkFilter, LinkFilters};
 pub use workbench::{Workbench, WorkbenchEvent};

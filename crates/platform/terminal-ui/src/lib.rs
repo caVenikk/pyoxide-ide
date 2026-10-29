@@ -13,14 +13,22 @@
 //! - [`colors`]: the theme's terminal colours with the reference's rules
 //!   for inverse and dim text and its minimum contrast.
 //!
+//! - [`links`], [`blocks`] and the find bar: URLs, OSC 8 hyperlinks, the
+//!   product's link filters and paths that are links while Cmd (Ctrl) is
+//!   held; the command blocks of a shell with integration with their
+//!   separators and failure markers; the find bar with its count.
 //! - [`tool_window`]: the Terminal tool window, its tabs and their
 //!   commands.
 
+pub mod blocks;
 pub mod colors;
 pub mod commands;
 mod element;
+mod find;
 mod ime;
 pub mod keys;
+mod link_ui;
+pub mod links;
 pub mod plan;
 pub mod tool_window;
 mod view;
@@ -29,6 +37,9 @@ pub use element::{
     ALTERNATE_LEFT_INSET, BOTTOM_INSET, CellMetrics, LEFT_INSET, TOP_INSET, TerminalElement,
     TerminalFont, cell_metrics, grid_layout, set_font,
 };
+pub use find::FIND_CONTEXT;
+pub use link_ui::{HINT_DELAY, command_held};
+pub use links::{GridLink, LinkFilter, LinkFilters, LinkTarget};
 pub use terminal::StartRequest;
 pub use tool_window::{TerminalToolWindow, TerminalToolWindowEvent};
 pub use view::{
@@ -47,4 +58,5 @@ pub fn init(cx: &mut gpui::App) {
         async {}
     })
     .detach();
+    ui::command::register(cx, commands::FIND_COMMANDS);
 }

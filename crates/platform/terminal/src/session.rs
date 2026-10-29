@@ -440,6 +440,33 @@ impl Screen {
     pub fn snapshot_into(&self, out: &mut Snapshot) {
         fill_snapshot(&self.shared, out);
     }
+
+    /// [`Session::count_matches`], for a background thread.
+    pub fn count_matches(&self, limit: usize) -> MatchCount {
+        count_matches(&self.shared, limit)
+    }
+}
+
+/// Counts the matches of the search in the whole output, up to `limit`.
+fn count_matches(shared: &Shared, limit: usize) -> MatchCount {
+    let mut guard = shared.state.lock();
+    let State { term, search } = &mut *guard;
+    let Some(search) = search.as_mut() else {
+        return MatchCount::default();
+    };
+    let start = GridPoint::new(term.topmost_line(), Column(0));
+    let end = GridPoint::new(term.bottommost_line(), term.last_column());
+    let mut count = MatchCount::default();
+    for m in RegexIter::new(start, end, Direction::Right, term, &mut search.regex) {
+        if search.current.as_ref() == Some(&m) {
+            count.current = Some(count.total);
+        }
+        count.total += 1;
+        if count.total >= limit {
+            break;
+        }
+    }
+    count
 }
 
 /// Copies the visible state under the terminal's lock.
@@ -868,24 +895,7 @@ impl Session {
     /// scrollback under the terminal's lock: call it when the query or
     /// the output changed, not per frame.
     pub fn count_matches(&self, limit: usize) -> MatchCount {
-        let mut guard = self.shared.state.lock();
-        let State { term, search } = &mut *guard;
-        let Some(search) = search.as_mut() else {
-            return MatchCount::default();
-        };
-        let start = GridPoint::new(term.topmost_line(), Column(0));
-        let end = GridPoint::new(term.bottommost_line(), term.last_column());
-        let mut count = MatchCount::default();
-        for m in RegexIter::new(start, end, Direction::Right, term, &mut search.regex) {
-            if search.current.as_ref() == Some(&m) {
-                count.current = Some(count.total);
-            }
-            count.total += 1;
-            if count.total >= limit {
-                break;
-            }
-        }
-        count
+        count_matches(&self.shared, limit)
     }
 
     /// Clear Terminal: drops the scrollback and the screen above the

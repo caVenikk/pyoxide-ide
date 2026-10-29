@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Command separators in the terminal,terminal,should,yes,no,Community; needs shell integration
+Command separators in the terminal,terminal,should,yes,yes,"Community; needs shell integration (#160); the option has no settings page yet"
