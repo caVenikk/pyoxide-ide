@@ -205,6 +205,10 @@ pub enum EditorEvent {
     /// A hyperlink (a char range of a line, see
     /// [`Highlighter::line_links`]) was clicked.
     LinkClicked { line: usize, range: Range<usize> },
+    /// A right click on the text, or the command: the owner opens the
+    /// editor's context menu at this window position. The caret is where
+    /// the click was, unless it was inside the selection.
+    ContextMenu { position: gpui::Point<Pixels> },
     /// The mouse moved over the text without a button pressed, to another
     /// char or with other modifiers: the char offset under it (`None` when
     /// it left the text) and its window position.
@@ -3083,6 +3087,7 @@ editor_actions! {
     Copy => copy,
     Cut => cut,
     Paste => paste,
+    ShowContextMenu => show_context_menu,
     ShrinkSelection => shrink_selection,
     Escape => escape,
     DeleteToLineStart => delete_to_line_start,

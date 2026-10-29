@@ -193,6 +193,8 @@ pub(crate) struct SqlWidget {
     dialect_bounds: Rc<Cell<Bounds<Pixels>>>,
     schema_bounds: Rc<Cell<Bounds<Pixels>>>,
     source_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The Explain button and its arrow: the menu opens below them.
+    explain_bounds: Rc<Cell<Bounds<Pixels>>>,
     popup_anchor: Rc<Cell<Bounds<Pixels>>>,
     /// Files whose "dialect is not configured" banner was cancelled.
     dismissed: HashSet<PathBuf>,
@@ -230,6 +232,7 @@ impl SqlWidget {
             dialect_bounds: Rc::default(),
             schema_bounds: Rc::default(),
             source_bounds: Rc::default(),
+            explain_bounds: Rc::default(),
             popup_anchor: Rc::default(),
             dismissed: HashSet::new(),
             load: Task::ready(()),
@@ -408,6 +411,25 @@ impl SqlWidget {
             ..PopupOptions::default()
         };
         let menu = ContextMenu::popup(items, options, window, cx);
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.menu = None;
+            cx.notify();
+        });
+        self.menu = Some((menu, subscription));
+        cx.notify();
+    }
+
+    /// The menu of the Explain arrow: Explain Plan and Explain Analyze.
+    fn open_explain_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu.is_some() {
+            return;
+        }
+        self.popup_anchor.set(self.explain_bounds.get());
+        let items = vec![
+            MenuItem::action("Explain Plan", crate::console::ExplainPlan),
+            MenuItem::action("Explain Analyze", crate::console::ExplainAnalyze),
+        ];
+        let menu = ContextMenu::build(items, window, cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
@@ -763,8 +785,47 @@ impl SqlWidget {
         if !console && !attached {
             return vec![execute];
         }
+        let explain_bounds = self.explain_bounds.clone();
+        let explain = div()
+            .relative()
+            .flex()
+            .flex_none()
+            .flex_row()
+            .items_center()
+            .child(
+                button("sql-explain", icons::PLAN, "Explain Plan", !running).when(!running, |d| {
+                    d.on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::console::ExplainPlan), cx)
+                    })
+                }),
+            )
+            .child(
+                ui::components::icon_button(
+                    "sql-explain-menu",
+                    IconName::CHEVRON_DOWN,
+                    px(14.0),
+                    px(12.0),
+                    false,
+                    cx,
+                )
+                .debug_selector(|| "sql-explain-menu".to_owned())
+                .tooltip(Tooltip::text("Explain Plan and Explain Analyze", None))
+                .when(running, |d| d.opacity(ui::components::DISABLED_ALPHA))
+                .when(!running, |d| {
+                    d.on_click(
+                        cx.listener(|this, _, window, cx| this.open_explain_menu(window, cx)),
+                    )
+                }),
+            )
+            .child(
+                canvas(move |b, _, _| explain_bounds.set(b), |_, _, _, _| {})
+                    .absolute()
+                    .size_full(),
+            )
+            .into_any_element();
         vec![
             execute,
+            explain,
             div()
                 .flex_none()
                 .px(px(6.0))

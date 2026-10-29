@@ -104,6 +104,13 @@ pub mod icons {
     pub const SERVICES: IconName = IconName("db/services@20x20");
     pub const EXPORT_DATA: IconName = IconName("db/exportData");
     pub const IMPORT_DATA: IconName = IconName("db/importData");
+    // The query plan.
+    pub const PLAN: IconName = IconName("db/queryPlan");
+    pub const PLAN_TEXT: IconName = IconName("db/planText");
+    pub const PLAN_SELECT: IconName = IconName("db/planSelect");
+    pub const PLAN_JOIN: IconName = IconName("db/planJoin");
+    pub const PLAN_TRANSFORM: IconName = IconName("db/planTransform");
+    pub const PLAN_OPERATION: IconName = IconName("db/planOperation");
 
     /// The icon of a backend's data sources.
     pub fn backend(backend: db_core::Backend) -> IconName {
@@ -177,6 +184,12 @@ pub const ICONS: &[IconSvg] = &[
     icon!("services@20x20", "services@20x20"),
     icon!("exportData", "exportData"),
     icon!("importData", "importData"),
+    icon!("queryPlan", "queryPlan"),
+    icon!("planText", "planText"),
+    icon!("planSelect", "planSelect"),
+    icon!("planJoin", "planJoin"),
+    icon!("planTransform", "planTransform"),
+    icon!("planOperation", "planOperation"),
 ];
 
 /// The product's store, for the module's views.

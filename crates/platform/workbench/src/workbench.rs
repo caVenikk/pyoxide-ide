@@ -44,6 +44,7 @@ mod commit;
 mod debug;
 mod diff;
 mod documentation_window;
+mod editor_menu;
 mod file_events;
 mod file_sync;
 mod history;
@@ -245,6 +246,8 @@ pub struct Workbench {
     tab_bounds: Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>>,
     /// The context menu of a tab while open (`tab_menu.rs`).
     tab_menu: Option<tab_menu::TabMenu>,
+    /// The context menu of the text editor while open (`editor_menu.rs`).
+    editor_menu: Option<editor_menu::EditorMenu>,
     /// Background reads and writes in flight.
     pending: usize,
     /// Last error or notice, shown in the status bar.
@@ -528,6 +531,7 @@ impl Workbench {
             diff_tabs: Default::default(),
             tab_bounds: Default::default(),
             tab_menu: None,
+            editor_menu: None,
             _subscriptions: subscriptions,
         }
     }
@@ -898,6 +902,7 @@ impl Workbench {
             "active_tab": self.active,
             "splits": self.splits_json(cx),
             "tab_menu": self.tab_menu_json(cx),
+            "editor_menu": self.editor_menu_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
@@ -1161,27 +1166,32 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<FindBar>, Vec<Subscription>) {
-        let subscription = cx.subscribe(editor, move |this, editor, event: &EditorEvent, cx| {
-            this.sync_views(&editor, event, cx);
-            if matches!(event, EditorEvent::Edited(_)) {
-                // Edits count as input for the idle save (they may also come
-                // from commands rather than keys).
-                this.note_input(cx);
-                // The editor's path follows renames.
-                if let Some(path) = editor.read(cx).path().cloned() {
-                    remember_file(&mut this.recently_changed, &path);
-                    if this.file_types.decoration(&path).autosave {
-                        this.schedule_autosave(path, cx);
+        let subscription = cx.subscribe_in(
+            editor,
+            window,
+            move |this, editor, event: &EditorEvent, window, cx| {
+                this.sync_views(editor, event, cx);
+                this.editor_menu_event(editor, event, window, cx);
+                if matches!(event, EditorEvent::Edited(_)) {
+                    // Edits count as input for the idle save (they may also come
+                    // from commands rather than keys).
+                    this.note_input(cx);
+                    // The editor's path follows renames.
+                    if let Some(path) = editor.read(cx).path().cloned() {
+                        remember_file(&mut this.recently_changed, &path);
+                        if this.file_types.decoration(&path).autosave {
+                            this.schedule_autosave(path, cx);
+                        }
                     }
                 }
-            }
-            if let EditorEvent::Jumped { from, view_y } = event
-                && let Some(path) = editor.read(cx).path().cloned()
-            {
-                this.editor_jumped(path, *from, *view_y, cx);
-            }
-            cx.notify()
-        });
+                if let EditorEvent::Jumped { from, view_y } = event
+                    && let Some(path) = editor.read(cx).path().cloned()
+                {
+                    this.editor_jumped(path, *from, *view_y, cx);
+                }
+                cx.notify()
+            },
+        );
         let find = cx.new(|cx| FindBar::new(editor.clone(), window, cx));
         // The bar opens and closes inside the editor area; matches found in
         // the background are drawn at once, not at the next refresh.
@@ -3049,6 +3059,7 @@ impl Render for Workbench {
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_tab_menu(window))
+            .children(self.render_editor_menu(window))
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())

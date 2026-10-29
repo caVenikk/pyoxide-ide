@@ -25,9 +25,13 @@ use sql_syntax::{Dialect, Statement, TokenKind};
 use themes::{TextRole, UiRole};
 use workbench::Workbench;
 
+use super::plan::view::PlanView;
 use crate::grid::{GridTarget, TableGrid};
 use crate::sql::Hub;
 use crate::sql::hub::{ConsoleBinding, Source};
+
+mod explain;
+pub(crate) use explain::RunMode;
 
 /// What opens a console: the data source of the Database tool window.
 #[derive(Clone)]
@@ -38,6 +42,8 @@ pub(crate) struct ConsoleTarget {
     /// prompt of the output log and the chip show it).
     pub database: Option<String>,
     pub handle: DataSourceHandle,
+    /// The data source's connections refuse writes.
+    pub read_only: bool,
 }
 
 /// What the console is of: a console file of the data source (bound to it
@@ -63,7 +69,9 @@ pub(crate) struct ResultTab {
     pub pinned: bool,
     /// The user gave the tab its name: it is kept, never reused.
     pub renamed: bool,
-    pub grid: Entity<TableGrid>,
+    pub grid: Option<Entity<TableGrid>>,
+    /// The tab is a query plan, not a grid.
+    pub plan: Option<Entity<PlanView>>,
     /// The session's result the grid shows (to route its pages).
     pub result: Option<ResultId>,
 }
@@ -104,6 +112,7 @@ pub(crate) struct Console {
     pub backend: Backend,
     database: Option<String>,
     handle: DataSourceHandle,
+    read_only: bool,
     pub session: Session,
     pub window: AnyWindowHandle,
     pub workbench: WeakEntity<Workbench>,
@@ -117,6 +126,8 @@ pub(crate) struct Console {
     /// How long the last statement took, for the Services tree.
     pub last_ms: Option<u64>,
     current: Option<Current>,
+    /// The explain the running job is.
+    explain: Option<explain::Run>,
     mark: Option<Mark>,
     /// The output log wraps long lines.
     pub soft_wrap: bool,
@@ -149,6 +160,7 @@ impl Console {
             backend: target.backend,
             database: target.database,
             handle: target.handle,
+            read_only: target.read_only,
             session,
             window: window.window_handle(),
             workbench,
@@ -161,6 +173,7 @@ impl Console {
             running: None,
             last_ms: None,
             current: None,
+            explain: None,
             mark: None,
             soft_wrap: false,
             lines: Vec::new(),
@@ -260,8 +273,12 @@ impl Console {
             self.print(ContentKind::Error, "A statement is still running", cx);
             return;
         }
-        let job = Job::statements(statements.into_iter().map(JobStatement::from))
-            .on_error(ErrorPolicy::Stop);
+        self.start(statements.into_iter().map(JobStatement::from).collect(), cx);
+    }
+
+    /// Starts the job of `statements`.
+    fn start(&mut self, statements: Vec<JobStatement>, cx: &mut Context<Self>) {
+        let job = Job::statements(statements).on_error(ErrorPolicy::Stop);
         self.running = Some(self.session.execute(job));
         self.pane = Pane::Output;
         cx.emit(ConsoleEvent::Started);
@@ -270,12 +287,19 @@ impl Console {
 
     /// Runs the statement at the caret, or the selection's statements.
     pub fn execute_at_caret(&mut self, cx: &mut Context<Self>) {
+        let statements = self.caret_statements(cx);
+        self.run(statements, cx);
+    }
+
+    /// The statement at the caret of the console's editor, or the
+    /// statements of its selection.
+    fn caret_statements(&self, cx: &App) -> Vec<Statement> {
         let Some(editor) = self
             .workbench
             .upgrade()
             .and_then(|wb| wb.read(cx).editor_for(&self.path))
         else {
-            return;
+            return Vec::new();
         };
         let (text, selection) = {
             let editor = editor.read(cx);
@@ -290,14 +314,13 @@ impl Console {
         };
         let dialect = self.dialect();
         let (range, caret) = selection;
-        let statements = if range.is_empty() {
+        if range.is_empty() {
             sql_syntax::statement_at(&text, caret, dialect)
                 .into_iter()
                 .collect()
         } else {
             sql_syntax::statements_in(&text, range, dialect)
-        };
-        self.run(statements, cx);
+        }
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
@@ -342,14 +365,23 @@ impl Console {
                 rows,
                 has_more,
             } => {
-                if let Some(tab) = self.tabs.iter().find(|t| t.result == Some(result)) {
-                    tab.grid
-                        .update(cx, |g, cx| g.show_page(rows, first_row, has_more, cx));
+                if let Some(grid) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.result == Some(result))
+                    .and_then(|t| t.grid.as_ref())
+                {
+                    grid.update(cx, |g, cx| g.show_page(rows, first_row, has_more, cx));
                 }
             }
             SessionEvent::ResultClosed { result } => {
-                if let Some(tab) = self.tabs.iter().find(|t| t.result == Some(result)) {
-                    tab.grid.update(cx, |g, cx| g.result_closed(cx));
+                if let Some(grid) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.result == Some(result))
+                    .and_then(|t| t.grid.as_ref())
+                {
+                    grid.update(cx, |g, cx| g.result_closed(cx));
                 }
             }
             SessionEvent::CommandFailed { error, .. } => {
@@ -386,6 +418,9 @@ impl Console {
                 has_more,
                 ..
             } => {
+                if self.show_plan(&rows, window, cx) {
+                    return;
+                }
                 if let Some(current) = self.current.as_mut() {
                     current.rows = Some(rows.len());
                 }
@@ -407,6 +442,7 @@ impl Console {
             JobEvent::Done { outcome } => {
                 self.running = None;
                 self.current = None;
+                self.explain = None;
                 if outcome == JobOutcome::Cancelled {
                     self.clear_mark(cx);
                     self.print(ContentKind::System, "Cancelled", cx);
@@ -592,7 +628,8 @@ impl Console {
             title: title.into(),
             pinned: false,
             renamed: false,
-            grid,
+            grid: Some(grid),
+            plan: None,
             result: Some(result),
         };
         let reuse = self.tabs.iter().position(|t| !t.pinned && !t.renamed);
@@ -649,7 +686,8 @@ impl Console {
             "tabs": self.tabs.iter().map(|t| json!({
                 "title": t.title.to_string(),
                 "pinned": t.pinned,
-                "grid": t.grid.read(cx).state_json(cx),
+                "grid": t.grid.as_ref().map(|g| g.read(cx).state_json(cx)),
+                "plan": t.plan.as_ref().map(|p| p.read(cx).state_json(cx)),
             })).collect::<Vec<_>>(),
         })
     }

@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use editor::{EditorConfig, Highlighter, WrapRule};
 use ui::icons::IconName;
+use ui::menu::MenuItem;
 
 /// Creates the highlighter of a file type for a new editor.
 pub type HighlighterFactory = Arc<dyn Fn() -> Box<dyn Highlighter> + Send + Sync>;
@@ -52,6 +53,11 @@ pub struct FileDecoration {
 /// Asks a file type for the decoration of a file of the type; a memory
 /// lookup, as it runs for every row drawn.
 pub type FileDecorator = Arc<dyn Fn(&Path) -> FileDecoration + Send + Sync>;
+
+/// Asks a file type for the rows its files add to the editor's context menu
+/// (between the common ones and Open In); they are commands like any item.
+/// Called when the menu opens.
+pub type FileContextMenu = Arc<dyn Fn(&Path, &gpui::App) -> Vec<MenuItem> + Send + Sync>;
 
 /// The type of text files, also the type of a file no association names
 /// whose first bytes are text.
@@ -98,6 +104,8 @@ pub struct FileType {
     pub wrap_rules: &'static [WrapRule],
     /// The icon and hint of a file of this type that follow its state.
     pub decorator: Option<FileDecorator>,
+    /// The rows this type's files add to the editor's context menu.
+    pub context_menu: Option<FileContextMenu>,
     /// A word added to the key context of the editors of this type's files
     /// (`Editor SqlFile`).
     pub key_context: Option<&'static str>,
@@ -136,6 +144,7 @@ impl FileType {
             language_id: None,
             wrap_rules: &[],
             decorator: None,
+            context_menu: None,
             key_context: None,
         }
     }
@@ -764,6 +773,14 @@ impl FileTypes {
         self.for_path(path)
             .and_then(|t| t.decorator.as_ref())
             .map(|decorate| decorate(path))
+            .unwrap_or_default()
+    }
+
+    /// The rows the file's type adds to the editor's context menu.
+    pub fn context_menu(&self, path: &Path, cx: &gpui::App) -> Vec<MenuItem> {
+        self.for_path(path)
+            .and_then(|t| t.context_menu.as_ref())
+            .map(|rows| rows(path, cx))
             .unwrap_or_default()
     }
 

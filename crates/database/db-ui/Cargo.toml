@@ -20,7 +20,7 @@ gpui.workspace = true
 project.workspace = true
 progress.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
 settings.workspace = true
 settings-ui.workspace = true
 sql-syntax.workspace = true

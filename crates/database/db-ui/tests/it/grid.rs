@@ -58,6 +58,15 @@ pub(crate) fn store_with_model(
     root: &Path,
     server: &FakeSource,
 ) -> (Arc<FakeStore>, tempfile::TempDir) {
+    store_with_profile(root, server, pg())
+}
+
+/// Like [`store_with_model`], over the data source `profile`.
+pub(crate) fn store_with_profile(
+    root: &Path,
+    server: &FakeSource,
+    profile: db_core::Profile,
+) -> (Arc<FakeStore>, tempfile::TempDir) {
     let cache_dir = tempfile::tempdir().unwrap();
     ModelCache::new(cache_dir.path())
         .store(&Model::from_snapshot(
@@ -68,7 +77,7 @@ pub(crate) fn store_with_model(
     let store = FakeStore::new("secret");
     store.set_model_cache(cache_dir.path());
     store.set_connections(Arc::new(server.clone()));
-    store.add(root, NAME, pg());
+    store.add(root, NAME, profile);
     (store, cache_dir)
 }
 

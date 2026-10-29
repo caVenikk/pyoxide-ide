@@ -6,6 +6,7 @@
 //! an editor and shows the matches in it.
 
 pub mod commands;
+mod context_menu;
 pub mod decorations;
 mod diagnostics;
 mod diff_highlights;

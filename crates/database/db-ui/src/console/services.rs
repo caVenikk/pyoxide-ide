@@ -20,7 +20,7 @@ use workbench::tool_windows::{
 };
 use workbench::workbench::ToolWindow;
 
-use super::{Console, Pane, consoles};
+use super::{Console, Pane, consoles, model::ResultTab};
 use crate::icons;
 
 /// The tool window's id: its stripe button is `stripe-services`.
@@ -413,7 +413,14 @@ impl ServicesPanel {
                 .gap(px(4.0))
                 .pl(px(8.0))
                 .pr(px(2.0))
-                .child(Icon::new(icons::TABLE).size(px(ICON)))
+                .child(
+                    Icon::new(if tab.plan.is_some() {
+                        icons::PLAN
+                    } else {
+                        icons::TABLE
+                    })
+                    .size(px(ICON)),
+                )
                 .child(tab.title.clone())
                 .child(
                     icon_button(
@@ -560,7 +567,13 @@ impl Render for ServicesPanel {
                         .child(self.render_output_toolbar(console, cx))
                         .into_any_element(),
                     Pane::Result(i) => match c.tabs.get(i) {
-                        Some(tab) => tab.grid.clone().into_any_element(),
+                        Some(ResultTab {
+                            plan: Some(plan), ..
+                        }) => plan.clone().into_any_element(),
+                        Some(ResultTab {
+                            grid: Some(grid), ..
+                        }) => grid.clone().into_any_element(),
+                        Some(_) => c.output.clone().into_any_element(),
                         None => c.output.clone().into_any_element(),
                     },
                 };
