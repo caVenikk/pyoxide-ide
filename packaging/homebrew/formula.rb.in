@@ -1,0 +1,65 @@
+# Formula template of the Homebrew tap (docs/release.md). The release workflow
+# fills the @...@ values (scripts/package.py formula) and attaches the result,
+# named @SLUG@.rb, to the release; copy it into Formula/ of the tap repository.
+#
+# A formula, not a cask: Homebrew does not quarantine files a formula installs,
+# so the application opens without Gatekeeper's "cannot be verified" dialog
+# although it is not notarized by Apple.
+class @CLASS@ < Formula
+  desc "Fast, native IDE for Python"
+  homepage "https://github.com/@REPOSITORY@"
+  version "@VERSION@"
+  license any_of: ["MIT", "Apache-2.0"]
+
+  on_macos do
+    on_arm do
+      url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/@SLUG@-@VERSION@-macos-aarch64.tar.gz"
+      sha256 "@SHA_MACOS_AARCH64@"
+    end
+    on_intel do
+      url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/@SLUG@-@VERSION@-macos-x86_64.tar.gz"
+      sha256 "@SHA_MACOS_X86_64@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/@SLUG@-@VERSION@-linux-aarch64.tar.gz"
+      sha256 "@SHA_LINUX_AARCH64@"
+    end
+    on_intel do
+      url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/@SLUG@-@VERSION@-linux-x86_64.tar.gz"
+      sha256 "@SHA_LINUX_X86_64@"
+    end
+  end
+
+  def install
+    if OS.mac?
+      prefix.install "@APP@"
+      programs = prefix/"@APP@/Contents/MacOS"
+    else
+      libexec.install Dir["*"]
+      programs = libexec
+    end
+    # Launcher scripts, not symlinks: the programs find their files (the
+    # debugger helper) from the path they were started by.
+    %w[@IDE@ @DB_CLI@ @CLI@].each do |name|
+      (bin/name).write_env_script programs/name, {}
+    end
+  end
+
+  def caveats
+    return unless OS.mac?
+
+    <<~EOS
+      The application is in:
+        #{opt_prefix}/@APP@
+      Link it into your applications folder to find it in Launchpad and Spotlight:
+        ln -sfn #{opt_prefix}/@APP@ ~/Applications/@APP@
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/@CLI@ --version")
+  end
+end

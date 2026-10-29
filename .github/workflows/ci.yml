@@ -163,6 +163,8 @@ jobs:
       - run: python3 scripts/check-brand.py
       # notices/ holds the third-party notices, one file per entry (ADR 0019).
       - run: python3 scripts/notice.py --check
+      # The names in packaging/ (install script) agree with the brand module.
+      - run: python3 scripts/package.py check
       - run: bash scripts/test-ci-scope.sh
 
   # Ignored tests against real databases (docs/testing-databases.md). The
