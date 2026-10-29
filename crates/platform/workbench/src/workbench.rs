@@ -40,6 +40,7 @@ use crate::settings::SaveSettings;
 use crate::tab_view::AnyTabView;
 
 mod branches;
+mod code_rename;
 mod commit;
 mod debug;
 mod diff;
@@ -247,6 +248,9 @@ pub struct Workbench {
     tab_bounds: Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>>,
     /// The context menu of a tab while open (`tab_menu.rs`).
     tab_menu: Option<tab_menu::TabMenu>,
+    /// The Rename dialog of the code intelligence while open
+    /// (`code_rename.rs`).
+    code_rename: Option<code_rename::CodeRename>,
     /// Background reads and writes in flight.
     pending: usize,
     /// Last error or notice, shown in the status bar.
@@ -530,6 +534,7 @@ impl Workbench {
             diff_tabs: Default::default(),
             tab_bounds: Default::default(),
             tab_menu: None,
+            code_rename: None,
             _subscriptions: subscriptions,
         }
     }
@@ -564,6 +569,13 @@ impl Workbench {
                 }
             }
             CodeIntelEvent::ShowDocumentation => self.show_documentation_window(window, cx),
+            CodeIntelEvent::RenameDialog { name } => {
+                self.open_rename_dialog(name.clone(), window, cx)
+            }
+            CodeIntelEvent::RenameRejected(message) => {
+                self.rename_dialog_rejected(message.clone(), cx)
+            }
+            CodeIntelEvent::RenameDone => self.close_rename_dialog(window, cx),
         }
     }
 
@@ -905,6 +917,7 @@ impl Workbench {
             "active_tab": self.active,
             "splits": self.splits_json(cx),
             "tab_menu": self.tab_menu_json(cx),
+            "code_rename": self.code_rename_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
             "find": self.active_find_bar().map(|f| f.read(cx).state_json(cx)),
@@ -3056,6 +3069,7 @@ impl Render for Workbench {
             .children(self.render_go_to_line(cx))
             .children(self.render_run_menu(window))
             .children(self.render_tab_menu(window))
+            .children(self.render_code_rename())
             .children(self.render_branch_overlays(window, cx))
             .children(self.render_project_widget_popup(window))
             .children(self.render_commit_overlays())

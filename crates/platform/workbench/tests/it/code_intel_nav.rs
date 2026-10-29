@@ -805,3 +805,237 @@ fn reformat_code_and_optimize_imports(cx: &mut TestAppContext) {
     h.invoke("editor.undo", json!(null));
     assert_eq!(h.text(), "import sys\nimport os\nx=1\ny = 2\n");
 }
+
+// ---- Highlight Usages in File, Rename, File Structure (#320) --------------
+
+fn highlight(
+    line: usize,
+    start: usize,
+    end: usize,
+    kind: code_intel::HighlightKind,
+) -> code_intel::DocumentHighlight {
+    code_intel::DocumentHighlight {
+        range: Point::new(line, start)..Point::new(line, end),
+        kind,
+    }
+}
+
+#[gpui::test]
+fn usages_in_the_file_are_highlighted_at_the_caret(cx: &mut TestAppContext) {
+    use code_intel::HighlightKind::{Read, Write};
+    use code_intel::fake::RequestKind;
+    let mut h = H::new(cx, &[("app.py", APP)]);
+    // `g`: declared in line 3, used in line 7; nothing elsewhere.
+    h.fake.on_document_highlights(|_, at| {
+        Ok(if at.line == 3 || at.line == 7 {
+            vec![highlight(3, 4, 5, Write), highlight(7, 4, 5, Read)]
+        } else {
+            Vec::new()
+        })
+    });
+    h.open("app.py", "x = g");
+    h.wait(300);
+    let ranges = |h: &mut H| -> Vec<(u64, u64, bool)> {
+        h.editor_state()["usage_highlights"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|u| {
+                (
+                    u["range"][0].as_u64().unwrap(),
+                    u["range"][1].as_u64().unwrap(),
+                    u["write"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let (decl, usage) = (h.offset_after("def ") as u64, h.offset_after("x = ") as u64);
+    assert_eq!(
+        ranges(&mut h),
+        [(decl, decl + 1, true), (usage, usage + 1, false)]
+    );
+    let asked = h.fake.requests(RequestKind::DocumentHighlights);
+
+    // The caret moves inside the highlights: they stay, nothing is asked.
+    h.caret_after("def g");
+    h.wait(300);
+    assert_eq!(ranges(&mut h).len(), 2);
+    assert_eq!(h.fake.requests(RequestKind::DocumentHighlights), asked);
+
+    // A caret on nothing shows none.
+    h.caret_after("from lib");
+    h.wait(300);
+    assert!(ranges(&mut h).is_empty());
+
+    // Typing drops them.
+    h.caret_after("x = g");
+    h.wait(300);
+    assert_eq!(ranges(&mut h).len(), 2);
+    h.type_text("g");
+    assert!(ranges(&mut h).is_empty());
+
+    // A selection shows none.
+    h.caret_after("def g");
+    h.wait(300);
+    let editor = h.editor();
+    let start = h.offset_after("def ");
+    h.cx.update(|cx| {
+        editor.update(cx, |e, cx| {
+            e.set_selections(SelectionSet::single(Selection::new(start, start + 4)), cx)
+        })
+    });
+    h.wait(300);
+    assert!(ranges(&mut h).is_empty());
+}
+
+fn rename_edits(
+    path: PathBuf,
+) -> impl Fn(&DocumentId, Point, &str) -> Result<WorkspaceEdit, IntelError> {
+    move |_, _, new_name| {
+        if new_name == "orders" {
+            return Err(IntelError::Other(
+                "A database object is renamed in the database, not in the script".into(),
+            ));
+        }
+        Ok(WorkspaceEdit {
+            files: vec![FileEdits {
+                path: path.clone(),
+                edits: vec![
+                    TextEdit::new(Point::new(3, 4)..Point::new(3, 5), new_name),
+                    TextEdit::new(Point::new(7, 4)..Point::new(7, 5), new_name),
+                ],
+            }],
+        })
+    }
+}
+
+#[gpui::test]
+fn rename_opens_a_dialog_and_applies_the_edits(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", APP)]);
+    let path = h.path("app.py");
+    h.fake.on_rename(rename_edits(path));
+    h.open("app.py", "x = g");
+    h.invoke("code.rename", json!(null));
+    let dialog = h.invoke("workbench.state", json!(null))["code_rename"].clone();
+    assert_eq!(dialog["kind"], "rename");
+    assert_eq!(dialog["label"], "Rename 'g' and its usages to:");
+    assert_eq!(dialog["text"], "g");
+    // The old name is the name to keep: no Refactor yet.
+    assert_eq!(dialog["can_confirm"], false);
+
+    // The old name is selected: typing replaces it.
+    h.type_text("make");
+    let dialog = h.invoke("workbench.state", json!(null))["code_rename"].clone();
+    assert_eq!(dialog["text"], "make");
+    assert_eq!(dialog["can_confirm"], true);
+    h.press("enter");
+    assert_eq!(
+        h.text(),
+        "from lib import norm\n\n\ndef make():\n    return norm(1)\n\n\nx = make()\n"
+    );
+    assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+    // One undo step for all the usages.
+    h.invoke("editor.undo", json!(null));
+    assert_eq!(h.text(), APP);
+
+    // Escape: nothing changes.
+    h.invoke("code.rename", json!(null));
+    h.type_text("other");
+    h.press("escape");
+    assert_eq!(h.text(), APP);
+    assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+}
+
+#[gpui::test]
+fn rename_refuses_what_the_services_refuse(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", APP)]);
+    // A symbol the services cannot rename: a hint with their message, no
+    // dialog.
+    h.fake.on_rename(|_, _, _| {
+        Err(IntelError::Other(
+            "A database object is renamed in the database, not in the script".into(),
+        ))
+    });
+    h.open("app.py", "x = g");
+    h.invoke("code.rename", json!(null));
+    assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+    assert_eq!(
+        h.state()["hint"],
+        "Cannot rename: A database object is renamed in the database, not in the script"
+    );
+
+    // A name the services refuse after the dialog: the message shows in
+    // the dialog, which stays.
+    let path = h.path("app.py");
+    h.fake.on_rename(rename_edits(path));
+    h.invoke("code.rename", json!(null));
+    h.type_text("orders");
+    h.press("enter");
+    let dialog = h.invoke("workbench.state", json!(null))["code_rename"].clone();
+    assert_eq!(
+        dialog["message"],
+        "A database object is renamed in the database, not in the script"
+    );
+    assert_eq!(h.text(), APP);
+    h.press("escape");
+    assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+}
+
+#[gpui::test]
+fn the_file_structure_lists_the_symbols_and_moves_the_caret(cx: &mut TestAppContext) {
+    use code_intel::{DocumentSymbol, SymbolKind};
+    let mut h = H::new(cx, &[("app.py", APP)]);
+    h.fake.on_document_symbols(|_| {
+        let mut g = DocumentSymbol::new(
+            "g",
+            SymbolKind::Function,
+            Point::new(3, 0)..Point::new(4, 18),
+        );
+        g.selection_range = Point::new(3, 4)..Point::new(3, 5);
+        g.detail = Some("()".into());
+        let mut inner = DocumentSymbol::new(
+            "y",
+            SymbolKind::Variable,
+            Point::new(4, 4)..Point::new(4, 10),
+        );
+        inner.selection_range = Point::new(4, 4)..Point::new(4, 5);
+        g.children.push(inner);
+        let x = DocumentSymbol::new(
+            "x",
+            SymbolKind::Variable,
+            Point::new(7, 0)..Point::new(7, 7),
+        );
+        Ok(vec![g, x])
+    });
+    // The caret is in `y`, inside `g`: the innermost symbol is selected.
+    h.open("app.py", "    retu");
+    h.invoke("code.file-structure", json!(null));
+    let list = h.list();
+    assert_eq!(list["name"], "structure");
+    assert_eq!(list["title"], "app.py");
+    let rows: Vec<_> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| {
+            (
+                i["text"].as_str().unwrap().to_owned(),
+                i["indent"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(rows, [("g".into(), 0), ("y".into(), 1), ("x".into(), 0)]);
+    assert_eq!(list["selected"], "y");
+
+    // Typing narrows the rows; Enter moves the caret to the name.
+    h.type_text("x");
+    assert_eq!(h.list()["items"].as_array().unwrap().len(), 1);
+    h.press("enter");
+    assert_eq!(h.at(), ("app.py".into(), 7, 0));
+    assert!(h.list().is_null());
+
+    // A file without symbols says so.
+    h.fake.on_document_symbols(|_| Ok(Vec::new()));
+    h.invoke("code.file-structure", json!(null));
+    assert_eq!(h.state()["hint"], "No structure to show");
+}

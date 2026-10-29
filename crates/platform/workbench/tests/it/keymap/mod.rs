@@ -716,6 +716,29 @@ fn script_docs(fake: &FakeCodeIntel) {
             " = ",
         )])
     });
+    // Rename: the first word of the first line. The structure: `alpha`
+    // (line 1) with `x` (line 2) inside it.
+    fake.on_rename(|doc, _, new_name| {
+        Ok(WorkspaceEdit {
+            files: vec![FileEdits {
+                path: doc.path().to_owned(),
+                edits: vec![TextEdit::new(Point::new(0, 0)..Point::new(0, 5), new_name)],
+            }],
+        })
+    });
+    fake.on_document_symbols(|_| {
+        let mut alpha = code_intel::DocumentSymbol::new(
+            "alpha",
+            code_intel::SymbolKind::Class,
+            Point::new(0, 0)..Point::new(0, 5),
+        );
+        alpha.children.push(code_intel::DocumentSymbol::new(
+            "x",
+            code_intel::SymbolKind::Method,
+            Point::new(1, 0)..Point::new(1, 1),
+        ));
+        Ok(vec![alpha])
+    });
 }
 
 /// The remote part of `vcs.state`: the Push and Update Project dialogs,

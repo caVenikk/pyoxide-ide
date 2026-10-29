@@ -21,6 +21,8 @@
 //! - [`signature`]: parameter info.
 //! - [`navigation`]: Go to Declaration or Usages, Show Usages, and the
 //!   list popups ([`list_popup`]).
+//! - [`occurrences`]: Highlight Usages in File, the occurrences of the
+//!   symbol at the caret drawn in the editor.
 //! - [`intentions`]: Show Context Actions and the bulb.
 //! - [`services`]: the Language Services widget of the status bar and its
 //!   popup.
@@ -47,10 +49,13 @@ pub mod intentions;
 pub mod list_popup;
 mod marks;
 pub mod navigation;
+mod occurrences;
 pub mod popup;
+pub mod rename;
 pub mod server_tasks;
 pub mod services;
 pub mod signature;
+pub mod structure;
 mod view;
 
 pub use code_intel;
