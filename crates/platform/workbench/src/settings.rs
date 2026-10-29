@@ -45,7 +45,7 @@ pub use ::settings::{DataViewSettings, SaveSettings, SyncSettings};
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
 /// Id of the Editor group.
 pub const EDITOR: &str = "editor";
-/// Id of the Tools group.
+/// Id of the Tools group (modules put their tool pages under it).
 pub const TOOLS: &str = "tools";
 /// Id of the Terminal page.
 pub const TERMINAL_PAGE: &str = terminal::ID;

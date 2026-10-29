@@ -432,6 +432,7 @@ fn a_search_keeps_the_pages_found_and_selects_the_first(cx: &mut TestAppContext)
     let s = h.state();
     assert_eq!(s["open"], json!(true));
     assert_eq!(s["search"]["text"], json!(""));
+    // Every page of the tree again (the Tools group among them).
     assert_eq!(h.rows().len(), 9);
     h.invoke("settings.escape", json!(null));
     assert_eq!(h.state()["open"], json!(false));

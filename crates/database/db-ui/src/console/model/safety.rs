@@ -93,6 +93,7 @@ impl Console {
         if self.running.is_some() || statements.is_empty() {
             return;
         }
+        self.new_tab_run = query_settings::get(cx).execute.new_tab;
         self.ask_parameters(statements, true, window, cx);
     }
 

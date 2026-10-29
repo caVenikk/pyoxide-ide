@@ -103,3 +103,15 @@ fn no_statements_no_candidates() {
     assert!(candidates_at("", 0, PG).is_empty());
     assert!(candidates_at("-- nothing\n", 4, PG).is_empty());
 }
+
+#[test]
+fn statement_of_takes_a_range_as_one_statement() {
+    use sql_syntax::statement_of;
+    let s = "select 1;\n  update t set a = 1;  \nselect 3";
+    let from = s.find("select 1").unwrap();
+    let to = s.find("select 3").unwrap();
+    let one = statement_of(s, from..to, PG).unwrap();
+    assert_eq!(one.text, "select 1;\n  update t set a = 1");
+    assert_eq!(&s[one.range.clone()], one.text);
+    assert!(statement_of(s, 9..12, PG).is_none());
+}
