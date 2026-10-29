@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use db_ui::store::DataSourceStore as _;
 use gpui::TestAppContext;
 use serde_json::{Value, json};
 use workbench::keymap::Binding;
@@ -77,6 +78,9 @@ fn run(cx: &mut TestAppContext, macos: bool) {
     let (_dir, root) = project();
     let store = FakeStore::new("pw");
     store.add(&root, "local", pg());
+    // A password at hand: connecting asks nothing (a prompt would hold the
+    // keys back).
+    store.hold_password(&root, "local", db_core::Secret::new("pw"));
     let area = if macos {
         include_str!("../../keymaps/macos/db.toml")
     } else {
