@@ -8,6 +8,7 @@ mod console;
 mod decorations;
 mod decorations_perf;
 mod editing;
+mod field;
 mod marks;
 mod problems;
 mod soft_wraps;

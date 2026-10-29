@@ -681,8 +681,11 @@ impl Editor {
     }
 
     /// Makes this editor a one-line text field (dialogs, search fields).
+    /// A one-line field is a tab stop: Tab and Shift+Tab move the focus to
+    /// the next and the previous one instead of typing a tab.
     pub fn set_single_line(&mut self, single_line: bool) {
         self.single_line = single_line;
+        self.focus = self.focus.clone().tab_stop(single_line);
     }
 
     /// Shows the text of a one-line field in the UI font instead of the
@@ -2096,8 +2099,12 @@ impl Editor {
         first..last + 1
     }
 
-    fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+    fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
         if self.forwarded(|| ForwardedInput::Tab, cx) {
+            return;
+        }
+        if self.single_line {
+            window.focus_next();
             return;
         }
         let multiline = self
@@ -2122,7 +2129,11 @@ impl Editor {
         self.edit(edits, EditKind::Typing, CaretPlacement::AfterEachEdit, cx);
     }
 
-    fn unindent(&mut self, _: &Unindent, _: &mut Window, cx: &mut Context<Self>) {
+    fn unindent(&mut self, _: &Unindent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.single_line {
+            window.focus_prev();
+            return;
+        }
         self.indent_lines(false, cx);
     }
 
