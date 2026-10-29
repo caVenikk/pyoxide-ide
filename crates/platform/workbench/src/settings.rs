@@ -7,6 +7,7 @@
 mod first_run;
 mod keymap;
 mod system;
+mod terminal;
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -44,6 +45,10 @@ pub use ::settings::{DataViewSettings, SaveSettings, SyncSettings};
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
 /// Id of the Editor group.
 pub const EDITOR: &str = "editor";
+/// Id of the Tools group.
+pub const TOOLS: &str = "tools";
+/// Id of the Terminal page.
+pub const TERMINAL_PAGE: &str = terminal::ID;
 /// Id of the Keymap page.
 pub const KEYMAP_PAGE: &str = keymap::ID;
 
@@ -104,6 +109,23 @@ fn pages() -> Vec<PageSpec> {
             search_terms: font::SEARCH_TERMS,
             description: None,
             create: Some(settings_ui::page::create(font::FontPage::new)),
+        },
+        PageSpec {
+            weight: 10,
+            description: Some(
+                "Configure integration with third-party applications, specify the SSH Terminal connection settings, manage server certificates and tasks, configure diagrams layout, etc.",
+            ),
+            ..PageSpec::group(TOOLS, None, "Tools")
+        },
+        PageSpec {
+            id: terminal::ID,
+            parent: Some(TOOLS),
+            title: terminal::TITLE,
+            weight: 0,
+            scope: Scope::Application,
+            search_terms: terminal::SEARCH_TERMS,
+            description: None,
+            create: Some(settings_ui::page::create(terminal::TerminalPage::new)),
         },
         PageSpec {
             id: keymap::ID,

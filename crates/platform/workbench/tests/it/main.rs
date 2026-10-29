@@ -47,6 +47,7 @@ mod source_roots;
 mod splits;
 mod tab_menu;
 mod terminal;
+mod terminal_font;
 mod tool_windows;
 mod toolbar_layout;
 mod tree_rows;
