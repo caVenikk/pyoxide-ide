@@ -83,6 +83,30 @@ fn first_run_for(asked: Option<&str>, scripted: bool, settings_exist: bool) -> b
     }
 }
 
+/// Whether a start with settings that were stored before takes the
+/// reference's settings once, without asking (`settings_ui::first_run::
+/// adopt_existing`): not with `PYOXIDE_FIRST_RUN=0`, and not in a scripted
+/// run (`PYOXIDE_RUN`, `PYOXIDE_SHOT`, `PYOXIDE_BENCH`) unless it names the
+/// folders to import from (`PYOXIDE_REFERENCE_CONFIG`), so that a scripted
+/// run never reads the machine's own.
+pub fn adopt_existing(settings_exist: bool, scripted: bool) -> bool {
+    adopt_existing_for(
+        app_info::var("FIRST_RUN").as_deref(),
+        scripted,
+        settings_exist,
+        reference_config_root().is_some(),
+    )
+}
+
+fn adopt_existing_for(
+    asked: Option<&str>,
+    scripted: bool,
+    settings_exist: bool,
+    reference_named: bool,
+) -> bool {
+    settings_exist && asked != Some("0") && (!scripted || reference_named)
+}
+
 /// `PYOXIDE_REFERENCE_CONFIG`: the folder of the reference IDE's
 /// configuration folders to look in instead of the platform's.
 pub fn reference_config_root() -> Option<std::path::PathBuf> {
@@ -222,7 +246,7 @@ pub fn marker(text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{first_run_for, parse_window_size};
+    use super::{adopt_existing_for, first_run_for, parse_window_size};
 
     #[test]
     fn window_sizes() {
@@ -240,5 +264,14 @@ mod tests {
         assert!(!first_run_for(None, true, false));
         assert!(first_run_for(Some("1"), true, true));
         assert!(!first_run_for(Some("0"), false, false));
+    }
+
+    #[test]
+    fn an_older_configuration_adopts_the_reference_once_and_never_in_scripted_runs() {
+        assert!(adopt_existing_for(None, false, true, false));
+        assert!(!adopt_existing_for(None, false, false, false));
+        assert!(!adopt_existing_for(Some("0"), false, true, false));
+        assert!(!adopt_existing_for(None, true, true, false));
+        assert!(adopt_existing_for(None, true, true, true));
     }
 }

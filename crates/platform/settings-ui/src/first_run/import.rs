@@ -34,6 +34,11 @@ pub struct Source {
     /// Pyoxide's configuration folder (where `settings.toml` is), for the
     /// files an importer writes (`themes/`, `keymaps/`, `interpreters.toml`).
     pub config_dir: Option<PathBuf>,
+    /// The import is made for settings that already exist (a configuration
+    /// older than the first-run window, [`super::adopt_existing`]): an
+    /// importer that honours this sets only what the settings do not hold
+    /// yet.
+    pub fill_only: bool,
 }
 
 /// What an import brings, said in the balloon: parts of a sentence ("the
@@ -312,25 +317,28 @@ fn appearance(source: &Source) -> Applied {
 
 fn editor_font(source: &Source) -> Applied {
     let font = source.options.font.clone();
+    let fill = source.fill_only;
     if font.is_empty() {
         return nothing();
     }
     Box::new(move |cx| {
-        let mut settings: EditorFontSettings = store::get(cx);
-        if let Some(family) = font.family {
-            settings.family = Some(family);
-        }
-        if let Some(size) = font.size {
-            settings.size = Some(EditorFontSettings::clamp_size(size));
-        }
-        if let Some(height) = font.line_spacing {
-            settings.line_height = Some(EditorFontSettings::clamp_line_height(height));
-        }
-        if let Some(ligatures) = font.ligatures {
-            settings.ligatures = Some(ligatures);
-        }
-        if let Some(fallback) = font.fallback {
-            settings.fallback = Some(fallback);
+        let before: EditorFontSettings = store::get(cx);
+        let mut settings = before.clone();
+        put(&mut settings.family, font.family, fill);
+        put(
+            &mut settings.size,
+            font.size.map(EditorFontSettings::clamp_size),
+            fill,
+        );
+        put(
+            &mut settings.line_height,
+            font.line_spacing.map(EditorFontSettings::clamp_line_height),
+            fill,
+        );
+        put(&mut settings.ligatures, font.ligatures, fill);
+        put(&mut settings.fallback, font.fallback, fill);
+        if fill && settings == before {
+            return Outcome::default();
         }
         store::set(cx, &settings);
         let family = settings
@@ -346,30 +354,47 @@ fn editor_font(source: &Source) -> Applied {
     })
 }
 
+/// Sets `slot` to the imported `value`; with `fill_only` only a slot that
+/// holds nothing.
+fn put<T>(slot: &mut Option<T>, value: Option<T>, fill_only: bool) {
+    if value.is_some() && (!fill_only || slot.is_none()) {
+        *slot = value;
+    }
+}
+
 /// `options/terminal-font.xml`: a user who set a font for the terminal (a
 /// Nerd Font for the prompt) keeps it.
 fn terminal_font(source: &Source) -> Applied {
     let options = source.options.terminal_font.clone();
+    let fill = source.fill_only;
     if options.is_empty() {
         return nothing();
     }
     Box::new(move |cx| {
         let font = options.font;
-        let mut settings: TerminalFontSettings = store::get(cx);
-        if let Some(family) = font.family {
-            settings.family = Some(family);
-        }
-        if let Some(size) = font.size {
-            settings.size = Some(TerminalFontSettings::clamp_size(size));
-        }
-        if let Some(spacing) = font.line_spacing {
-            settings.line_spacing = Some(TerminalFontSettings::clamp_spacing(spacing));
-        }
-        if let Some(spacing) = options.column_spacing {
-            settings.column_spacing = Some(TerminalFontSettings::clamp_spacing(spacing));
-        }
-        if let Some(fallback) = font.fallback {
-            settings.fallback = Some(fallback);
+        let before: TerminalFontSettings = store::get(cx);
+        let mut settings = before.clone();
+        put(&mut settings.family, font.family, fill);
+        put(
+            &mut settings.size,
+            font.size.map(TerminalFontSettings::clamp_size),
+            fill,
+        );
+        put(
+            &mut settings.line_spacing,
+            font.line_spacing.map(TerminalFontSettings::clamp_spacing),
+            fill,
+        );
+        put(
+            &mut settings.column_spacing,
+            options
+                .column_spacing
+                .map(TerminalFontSettings::clamp_spacing),
+            fill,
+        );
+        put(&mut settings.fallback, font.fallback, fill);
+        if fill && settings == before {
+            return Outcome::default();
         }
         store::set(cx, &settings);
         let mut parts = Vec::new();
@@ -553,6 +578,7 @@ pub(super) fn prepare(folder: ConfigFolder, config_dir: Option<PathBuf>) -> Prep
             snapshot,
             options,
             config_dir,
+            fill_only: false,
         },
         snapshot: kept,
         problem,
@@ -611,6 +637,7 @@ pub(super) fn recorded_source(
         snapshot,
         options,
         config_dir: Some(config_dir),
+        fill_only: false,
     }
 }
 

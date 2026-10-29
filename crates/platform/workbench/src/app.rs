@@ -515,7 +515,15 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
         let shot =
             env::shot_path().filter(|_| !matches!(env::bench(), Some(env::Bench::Completion(_))));
         if !env::first_run(settings_exist) {
+            // A configuration older than the first-run window takes the
+            // reference's settings once, without asking.
+            let scripted = !commands.is_empty() || shot.is_some() || env::bench().is_some();
+            let adopt = env::adopt_existing(settings_exist, scripted);
             open_main(product.clone(), paths, commands, shot, cx);
+            if adopt {
+                let start = crate::settings::first_run_start(product.name);
+                settings_ui::first_run::adopt_existing(&start, cx);
+            }
             return;
         }
         let scripted = !commands.is_empty() || shot.is_some();
