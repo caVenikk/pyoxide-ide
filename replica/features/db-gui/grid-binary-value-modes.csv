@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Binary values as text, hex, hex and ascii, uuid",db-gui,could,yes,no,Pro
+"Binary values as text, hex, hex and ascii, uuid",db-gui,could,yes,yes,"Pro; Change Display Type: Detect, UUID, UUID swapped, Text, Hex, Hex and ASCII (#306)"

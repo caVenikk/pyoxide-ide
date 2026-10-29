@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"NULL marker, truncated long values, load the full value, save to file",db-gui,must,yes,partial,Pro; engine row large-values-capped-fetch-of-lob-json-long-text
+"NULL marker, truncated long values, load the full value, save to file",db-gui,must,yes,yes,"Pro; <null> marker, cell text capped, Load Full Value by the row key, Save LOB to a file (#306)"
