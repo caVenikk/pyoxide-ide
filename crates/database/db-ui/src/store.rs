@@ -102,6 +102,24 @@ pub trait DataSourceStore: Send + Sync {
     /// `<hidden>`).
     fn has_password(&self, project: &Path, name: &str) -> bool;
 
+    /// Connecting to `source` would need the person to type a password: it
+    /// needs one and none is to be had without asking (the environment, a
+    /// kept one, one held for this run). The lookup never prompts, but it
+    /// may read the credential store, so the module calls it off the UI
+    /// thread. What code intelligence asks before it connects on its own.
+    fn needs_prompt(&self, project: &Path, source: &DataSource) -> bool {
+        source.profile.needs_password() && !self.has_password(project, &source.name)
+    }
+
+    /// Holds a password the person typed for the data source `name` for
+    /// the rest of the run (memory only, never written anywhere), so that
+    /// the data source's connections open with it. Does not block.
+    fn hold_password(&self, _project: &Path, _name: &str, _password: Secret) {}
+
+    /// Forgets the password [`Self::hold_password`] holds for `name` (the
+    /// server refused it).
+    fn release_password(&self, _project: &Path, _name: &str) {}
+
     /// Connects to `source` as edited, with the password typed (`Some`)
     /// or the kept one (`None`), and disconnects; writes nothing.
     fn test(
@@ -390,6 +408,18 @@ pub mod fake {
 
         fn has_password(&self, _: &Path, name: &str) -> bool {
             self.state.lock().unwrap().passwords.contains_key(name)
+        }
+
+        fn hold_password(&self, _: &Path, name: &str, password: Secret) {
+            self.state
+                .lock()
+                .unwrap()
+                .passwords
+                .insert(name.to_owned(), password);
+        }
+
+        fn release_password(&self, _: &Path, name: &str) {
+            self.state.lock().unwrap().passwords.remove(name);
         }
 
         fn test(

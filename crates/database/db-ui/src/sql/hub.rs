@@ -158,6 +158,27 @@ impl Hub {
         self.models.get(root, source)
     }
 
+    /// Calls `handler` with the project's folder and the data source's
+    /// name when a file's scope asks for the model of a data source that
+    /// has none cached, once for each data source in a run. It runs on
+    /// the thread that read the cache and must not block.
+    pub fn on_model_absent(&self, handler: impl Fn(&Path, &str) + Send + Sync + 'static) {
+        self.models.on_absent(Arc::new(handler));
+    }
+
+    /// Says that the model of `source` can only be had by connecting with
+    /// a password the person types (or that it no longer is): the toolbar
+    /// of the files attached to it offers to connect.
+    pub fn set_needs_connect(&self, root: &Path, source: &str, needs: bool) {
+        self.models.set_needs_connect(root, source, needs);
+    }
+
+    /// Whether the toolbar of a file attached to `source` offers to
+    /// connect: the data source has no model and needs a typed password.
+    pub fn connect_hint(&self, root: &Path, source: &str) -> bool {
+        self.models.connect_hint(root, source)
+    }
+
     /// A data source's model was loaded or refreshed (by the Database tool
     /// window): files attached to it resolve through the new one.
     pub fn publish_model(&self, root: &Path, source: &str, model: Arc<Model>) {

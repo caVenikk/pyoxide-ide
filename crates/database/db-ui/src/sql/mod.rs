@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use gpui::BorrowAppContext as _;
 use ui::icons::IconName;
 use workbench::file_types::FileType;
 
@@ -44,7 +45,7 @@ pub fn file_type(hub: Arc<Hub>) -> FileType {
 /// A data source's model was loaded or refreshed in the Database tool
 /// window: the SQL files attached to it resolve through it.
 pub(crate) fn publish_model(
-    cx: &gpui::App,
+    cx: &mut gpui::App,
     root: &std::path::Path,
     source: &str,
     model: &Arc<db_model::Model>,
@@ -52,7 +53,13 @@ pub(crate) fn publish_model(
     if model.is_empty() {
         return;
     }
-    if let Some(global) = cx.try_global::<widget::SqlGlobal>() {
-        global.0.publish_model(root, source, model.clone());
+    let Some(hub) = cx.try_global::<widget::SqlGlobal>().map(|g| g.0.clone()) else {
+        return;
+    };
+    let hinted = hub.connect_hint(root, source);
+    hub.publish_model(root, source, model.clone());
+    if hinted {
+        // The toolbars drop their hint to connect.
+        cx.update_global::<widget::SqlGlobal, _>(|_, _| {});
     }
 }
