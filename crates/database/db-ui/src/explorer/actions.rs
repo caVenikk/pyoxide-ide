@@ -145,7 +145,7 @@ pub(super) fn init(cx: &mut App) {
 pub(crate) struct DdlRun {
     source: String,
     session: Session,
-    job: JobId,
+    pub(super) job: JobId,
     after: After,
     error: Option<String>,
 }
