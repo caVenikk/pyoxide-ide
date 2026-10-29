@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+"Terminal font (family, size, line and column spacing, fallback family) with no hidden fallback fonts",terminal,should,yes,partial,"#287; settings section and file keys; Settings page not yet"
