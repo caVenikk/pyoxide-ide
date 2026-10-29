@@ -824,6 +824,53 @@ fn schema_is_read_after_connecting_and_after_set_schema() {
 }
 
 #[test]
+fn connect_reads_the_schema_before_any_statement() {
+    let h = harness(Backend::Postgres, DataSourceOptions::default());
+    h.source.on(
+        "current_schema",
+        Reaction::column("current_schema", &["public"]),
+    );
+    let session = h.handle.open_session(SessionOptions::default());
+    assert_eq!(session.status().schema, None);
+    session.connect();
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event: SessionEvent::Schema { schema },
+            ..
+        } => Some(schema.clone()),
+        _ => None,
+    });
+    assert_eq!(session.status().schema.as_deref(), Some("public"));
+    assert_eq!(h.source.opened(Purpose::Console), 1);
+}
+
+#[test]
+fn set_schema_before_the_first_statement_connects_and_switches() {
+    let h = harness(Backend::Postgres, DataSourceOptions::default());
+    h.source.on(
+        "current_schema",
+        Reaction::column("current_schema", &["public"]),
+    );
+    let session = h.handle.open_session(SessionOptions::default());
+    session.set_schema("Sales");
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event:
+                SessionEvent::CommandDone {
+                    command: Command::SetSchema,
+                },
+            ..
+        } => Some(()),
+        _ => None,
+    });
+    assert!(
+        h.console_sql()
+            .contains(&"SET search_path TO \"Sales\"".to_owned())
+    );
+    assert_eq!(h.source.opened(Purpose::Console), 1);
+}
+
+#[test]
 fn isolation_is_set_now_and_after_a_reconnect_and_refused_where_unsupported() {
     let h = harness(Backend::Postgres, DataSourceOptions::default());
     let session = h.handle.open_session(SessionOptions::default());

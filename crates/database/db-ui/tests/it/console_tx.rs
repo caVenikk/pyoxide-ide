@@ -235,11 +235,13 @@ fn the_schema_is_switched_by_the_session_and_shown_by_the_toolbar(cx: &mut TestA
     let server = server();
     let (mut h, _cache, _consoles) = harness(cx, &root, &server);
     open_console(&mut h);
-    // Before the session reports a schema the chip shows the placeholder.
+    // The console connects when it opens: the toolbar shows the current
+    // schema before any statement ran.
+    wait_for(&mut h, "the schema", |s| s["schema"] == "public");
     h.draw();
     let chip = h.invoke("sql.state", Value::Null)["schema-text"].clone();
     assert!(
-        chip.as_str().is_some_and(|t| t.ends_with(".<schema>")),
+        chip.as_str().is_some_and(|t| t.ends_with(".public")),
         "{chip}"
     );
     run_all(&mut h, "select 1;");

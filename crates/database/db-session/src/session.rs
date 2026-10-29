@@ -86,6 +86,7 @@ pub(crate) enum Cmd {
     },
     Commit,
     Rollback,
+    Connect,
     SetSchema(String),
     SetTxMode(TxMode, TxPolicy),
     SetIsolation(Isolation),
@@ -274,6 +275,13 @@ impl Session {
         }
     }
 
+    /// Open the connection now instead of with the first statement, so the
+    /// current schema is known. [`SessionEvent::CommandFailed`] with
+    /// [`Command::Connect`] when it cannot be opened.
+    pub fn connect(&self) {
+        self.inner.send(Cmd::Connect);
+    }
+
     pub fn commit(&self) {
         self.inner.send(Cmd::Commit);
     }
@@ -451,6 +459,15 @@ impl Actor {
                     self.shared.touch();
                     let r = self.end_transaction(false).await;
                     self.report(Command::Rollback, r);
+                }
+                Cmd::Connect => {
+                    self.shared.touch();
+                    let r = self
+                        .ensure_conn(None)
+                        .await
+                        .map(|_| ())
+                        .map_err(|f| f.error);
+                    self.report(Command::Connect, r);
                 }
                 Cmd::SetSchema(schema) => {
                     self.shared.touch();
@@ -1076,6 +1093,15 @@ impl Actor {
 
     async fn set_schema(&mut self, schema: String) -> Result<(), Error> {
         self.schema_wanted = Some(schema.clone());
+        let fresh = self
+            .conn
+            .as_ref()
+            .is_none_or(|live| live.epoch != self.shared.epoch());
+        // No connection yet: open it now; opening applies the wanted schema.
+        self.ensure_conn(None).await.map_err(|f| f.error)?;
+        if fresh {
+            return Ok(());
+        }
         let Some(live) = &self.conn else {
             return Ok(());
         };

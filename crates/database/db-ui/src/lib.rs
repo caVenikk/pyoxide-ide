@@ -212,7 +212,10 @@ pub fn module(config: DbUiConfig) -> Module {
         file_types: vec![sql::file_type(hub)],
         status_widgets: vec![grid::status_widget()],
         editor_headers: vec![sql::widget::editor_header()],
-        settings_pages: settings_page::pages(),
+        settings_pages: settings_page::pages()
+            .into_iter()
+            .chain(data_views::pages())
+            .collect(),
         init: Some(Init::new(move |cx| {
             cx.set_global(Store(store.clone()));
             settings_ui::store::register::<query_settings::QueryExecutionSettings>(cx);
@@ -225,7 +228,6 @@ pub fn module(config: DbUiConfig) -> Module {
             transfer::init(cx);
         })),
         keymaps: Some(KEYMAPS),
-        settings_pages: data_views::pages(),
         tool_windows: vec![
             ToolWindowHook {
                 spec: ToolWindowSpec {

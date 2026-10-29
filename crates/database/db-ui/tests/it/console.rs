@@ -427,7 +427,8 @@ fn execute_in_an_attached_file_runs_that_files_statement_in_its_own_session(
     });
     // The console did not run its text again: the file's statement ran in
     // a session of its own, with its own node and output.
-    assert_eq!(all[0]["output"], json!([]), "{all:?}");
+    let console_log = output(&all[0]);
+    assert!(!console_log.contains("nope"), "{console_log}");
     assert_eq!(all[0]["file"], false);
     assert!(all[1]["path"].as_str().unwrap().ends_with("scratch.sql"));
     assert_eq!(all[1]["file"], true);
@@ -451,7 +452,7 @@ fn execute_in_an_attached_file_runs_that_files_statement_in_its_own_session(
     let all = wait_consoles(&mut h, "the second run", |all| {
         all.len() == 2 && idle(&all[1]) && output(&all[1]).matches("retrieved").count() == 2
     });
-    assert_eq!(all[0]["output"], json!([]), "{all:?}");
+    assert!(!output(&all[0]).contains("nope"), "{all:?}");
     assert!(services_visible(&mut h));
 
     // Back in the console, the key runs the console's statement.
