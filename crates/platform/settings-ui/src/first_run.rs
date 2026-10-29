@@ -350,6 +350,88 @@ pub fn pick_up(cx: &mut App) {
     .detach();
 }
 
+/// The importers that adopt the reference's settings for a configuration
+/// older than the first-run window ([`adopt_existing`]): the ones whose
+/// values are never already there by accident, filling only what the
+/// settings do not hold.
+const ADOPTED: [&str; 2] = ["editor-font", "terminal-font"];
+
+/// For a configuration without an `[import]` record (made before the
+/// first-run window existed, or by a start that never showed it): imports
+/// the reference's newest configuration folder once, as the first-run
+/// window does, but without asking and without overwriting a value the
+/// settings hold: the snapshot is kept and recorded, the [`ADOPTED`]
+/// importers fill what is missing (the terminal and editor fonts), and the
+/// others count as applied, so that a later [`pick_up`] changes nothing
+/// the person has set up since. `settings.import-reference` imports the
+/// rest on request. Without a folder to import the start counts as
+/// skipped. Call it from a main window's start-up, after every area
+/// registered its importer, and only for a configuration that existed.
+pub fn adopt_existing(start: &Start, cx: &mut App) {
+    if !undecided(cx) || hooks(cx).picking_up {
+        return;
+    }
+    let Some(config_dir) = import::config_dir(cx) else {
+        return;
+    };
+    hooks(cx).picking_up = true;
+    let found = find(start, cx);
+    let all = importers(cx);
+    cx.spawn(async move |cx| {
+        let found = found.await;
+        let folder = found.main.first().or(found.other.first()).cloned();
+        let prepared = match folder {
+            Some(folder) => {
+                let dir = Some(config_dir);
+                Some(
+                    cx.background_executor()
+                        .spawn(async move {
+                            let mut prepared = import::prepare(folder, dir);
+                            prepared.source.fill_only = true;
+                            prepared
+                        })
+                        .await,
+                )
+            }
+            None => None,
+        };
+        let mut applied = Vec::new();
+        if let Some(prepared) = &prepared {
+            let source = Arc::new(prepared.source.clone());
+            for importer in all.iter().filter(|i| ADOPTED.contains(&i.id)) {
+                let (source, work) = (source.clone(), importer.work);
+                let done = cx.background_executor().spawn(async move { work(&source) });
+                applied.push(done.await);
+            }
+        }
+        let _ = cx.update(|cx| {
+            hooks(cx).picking_up = false;
+            // An import made meanwhile (the command) decided already.
+            if !undecided(cx) {
+                return;
+            }
+            let Some(prepared) = prepared else {
+                decide_skipped(cx);
+                return;
+            };
+            let mut outcome = import::apply_all(applied, cx);
+            outcome.problems.extend(prepared.problem);
+            let ran: Vec<&str> = all.iter().map(|i| i.id).collect();
+            let record =
+                import::record(&prepared.source.folder, prepared.snapshot.as_deref(), &ran);
+            crate::store::set(cx, &record);
+            if !outcome.imported.is_empty() || !outcome.problems.is_empty() {
+                report(
+                    import::notification(&prepared.source.folder, &outcome),
+                    true,
+                    cx,
+                );
+            }
+        });
+    })
+    .detach();
+}
+
 /// Records how the first start ended when nothing was recorded yet.
 fn decide_skipped(cx: &mut App) {
     if undecided(cx) {

@@ -491,3 +491,108 @@ fn nothing_is_picked_up_after_skip_import(cx: &mut TestAppContext) {
     assert_eq!(h.get("import.applied.later"), Value::Null);
     assert!(!h.config().join("imported").exists());
 }
+
+/// A start-up with `settings.toml` of an older configuration (no `[import]`
+/// record) and `adopt_existing` run, the reference's folders in `JetBrains`
+/// next to the configuration folder (when `with_reference`).
+fn adopt(cx: &mut TestAppContext, with_reference: bool) -> H<'_> {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    let file = config.join("settings.toml");
+    write(
+        &file,
+        "version = 1\n\n[appearance]\ntheme = \"islands-dracula-colorful\"\n\n[editor.font]\nsize = 14.0\nligatures = false\n",
+    );
+    let root = dir.path().join("JetBrains");
+    std::fs::create_dir_all(&root).unwrap();
+    if with_reference {
+        reference(&root);
+    }
+    let product = Product {
+        name: "Test IDE",
+        ..Product::default()
+    };
+    let store_file = file.clone();
+    cx.update(|cx| {
+        workbench::init(cx, &product);
+        settings_ui::store::load(cx, store_file);
+        theme_switch::load(cx, Some(config.join("themes")), None);
+        first_run::adopt_existing(
+            &Start {
+                title: "Test IDE".into(),
+                reference_root: Some(root),
+                activate: false,
+            },
+            cx,
+        );
+    });
+    let mut h = H {
+        cx,
+        file,
+        done: Rc::new(Cell::new(false)),
+        _dir: dir,
+    };
+    h.settle();
+    h
+}
+
+#[gpui::test]
+fn an_older_configuration_takes_the_fonts_of_the_reference_once(cx: &mut TestAppContext) {
+    let mut h = adopt(cx, true);
+    // The terminal font was not there; the editor font keeps what was set
+    // and takes what was not.
+    assert_eq!(
+        h.get("terminal.font.family"),
+        json!("JetBrainsMono Nerd Font")
+    );
+    assert_eq!(h.get("terminal.font.size"), json!(12.5));
+    assert_eq!(h.get("editor.font.family"), json!("Menlo"));
+    assert_eq!(h.get("editor.font.size"), json!(14.0));
+    assert_eq!(h.get("editor.font.ligatures"), json!(false));
+    // Nothing else is imported: the theme is the person's.
+    assert_eq!(h.get("appearance.theme"), json!("islands-dracula-colorful"));
+    assert_eq!(h.get("editor.soft-wraps.enabled"), json!(false));
+    // The import is recorded with its snapshot; every importer counts as
+    // applied, so that nothing comes at the next start.
+    assert_eq!(h.get("import.source"), json!("PyCharm"));
+    assert_eq!(h.get("import.version"), json!("2026.2"));
+    for id in [
+        "editor-font",
+        "terminal-font",
+        "appearance",
+        "soft-wraps",
+        "keymap",
+    ] {
+        assert_eq!(h.get(&format!("import.applied.{id}")), json!(true), "{id}");
+    }
+    let snapshot = h.config().join("imported/PyCharm-2026.2");
+    assert!(snapshot.join("options/terminal-font.xml").is_file());
+    assert!(!snapshot.join("options/security.xml").exists());
+
+    // Once: a font changed afterwards stays, and the next start adds nothing.
+    h.cx.update(|cx| {
+        settings_ui::store::set_key(cx, "terminal.font.family", json!("Menlo")).unwrap()
+    });
+    h.cx.update(first_run::pick_up);
+    h.settle();
+    assert_eq!(h.get("terminal.font.family"), json!("Menlo"));
+    assert!(!h.cx.update(|cx| first_run::undecided(cx)));
+    h.cx.update(|cx| {
+        let start = Start {
+            title: "Test IDE".into(),
+            reference_root: None,
+            activate: false,
+        };
+        first_run::adopt_existing(&start, cx)
+    });
+    h.settle();
+    assert_eq!(h.get("terminal.font.family"), json!("Menlo"));
+}
+
+#[gpui::test]
+fn an_older_configuration_without_reference_folders_counts_as_skipped(cx: &mut TestAppContext) {
+    let mut h = adopt(cx, false);
+    assert_eq!(h.get("import.source"), json!("skipped"));
+    assert_eq!(h.get("terminal.font.family"), Value::Null);
+    assert!(!h.config().join("imported").exists());
+}
