@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::classify::{Classification, Danger, DdlTarget, StatementKind, classify};
+use crate::classify::{Classification, Danger, DdlTarget, StatementKind, classify, classify_text};
 use crate::dialect::Dialect;
 use crate::lexer::{Token, TokenKind, lex};
 
@@ -398,6 +398,41 @@ pub fn candidates_at(script: &str, caret: usize, dialect: Dialect) -> Vec<Candid
         });
     }
     out
+}
+
+/// The text in `range` of `script` as one statement, whatever it holds:
+/// trimmed, a closing `;` dropped (a PL/SQL block keeps its own), the range
+/// narrowed to match. `None` when nothing but blanks and `;` is left.
+pub fn statement_of(script: &str, range: Range<usize>, dialect: Dialect) -> Option<Statement> {
+    let start = floor_boundary(script, range.start);
+    let end = floor_boundary(script, range.end).max(start);
+    let piece = &script[start..end];
+    let lead = piece.len() - piece.trim_start().len();
+    let mut text = piece.trim();
+    let block = split(text, dialect)
+        .last()
+        .is_some_and(|s| s.text.trim_end().ends_with(';'));
+    if !block {
+        text = text.trim_end_matches(|c: char| c == ';' || c.is_whitespace());
+    }
+    if text.is_empty() {
+        return None;
+    }
+    let range = start + lead..start + lead + text.len();
+    let Classification {
+        kind,
+        writes,
+        danger,
+        ddl,
+    } = classify_text(text, dialect);
+    Some(Statement {
+        text: text.to_string(),
+        range,
+        kind,
+        writes,
+        danger,
+        ddl,
+    })
 }
 
 /// The statements of the text in `range` (a selection), split as a script of

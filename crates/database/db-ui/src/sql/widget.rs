@@ -116,6 +116,16 @@ pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
             });
         });
     });
+    cx.on_action(|_: &crate::console::ChooseExecution, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open_choices(window, cx));
+            });
+        });
+    });
     cx.on_action(|_: &OpenTxMenu, cx| {
         let Some((window, widget)) = target(cx) else {
             return;
@@ -449,6 +459,24 @@ impl SqlWidget {
         });
         self.menu = Some((menu, subscription));
         cx.notify();
+    }
+
+    /// The question "what to execute" under the caret.
+    fn open_choices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(console) = self.console(cx) else {
+            return;
+        };
+        let (items, anchor) = {
+            let console = console.read(cx);
+            (console.choice_items(), console.choice_anchor())
+        };
+        let anchor = anchor.unwrap_or_else(|| self.source_bounds.get());
+        let options = PopupOptions {
+            title: Some("Execute".into()),
+            selected: Some(0),
+            ..PopupOptions::default()
+        };
+        self.show_items(items, anchor, options, window, cx);
     }
 
     /// The console's transaction mode and isolation popup.

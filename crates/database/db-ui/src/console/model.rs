@@ -18,15 +18,19 @@ use db_session::{
 };
 use editor::{Decoration, Editor, EditorEvent, TextPiece};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, Entity, EventEmitter, SharedString,
-    Subscription, WeakEntity, Window,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EventEmitter, Pixels,
+    SharedString, Subscription, WeakEntity, Window,
 };
 use serde_json::{Value as Json, json};
 use sql_syntax::{Dialect, Statement, TokenKind};
 use themes::{TextRole, UiRole};
 use workbench::Workbench;
 
+use ui::menu::MenuItem;
+
+use super::plan::{self, Choice, Plan};
 use crate::grid::{GridTarget, TableGrid};
+use crate::query_settings::{self, Variant};
 use crate::sql::Hub;
 use crate::sql::hub::{ConsoleBinding, Source};
 
@@ -72,6 +76,13 @@ pub(crate) struct ResultTab {
     pub grid: Entity<TableGrid>,
     /// The session's result the grid shows (to route its pages).
     pub result: Option<ResultId>,
+}
+
+/// What the options of Execute ask about: the ways to run, and where the
+/// popup goes.
+struct Asked {
+    choices: Vec<Choice>,
+    anchor: Option<Bounds<Pixels>>,
 }
 
 /// The statement being run, for the lines it leaves in the output.
@@ -126,6 +137,11 @@ pub(crate) struct Console {
     pub param_values: HashMap<String, String>,
     /// The statements the unsafe-query banner waits for.
     pub unsafe_run: Option<safety::UnsafeRun>,
+    /// The "what to execute" question waiting for its answer.
+    asked: Option<Asked>,
+    /// The result of the run in progress opens in a tab of its own (the
+    /// option of the Execute action that started it).
+    new_tab_run: bool,
     pub running: Option<JobId>,
     /// How long the last statement took, for the Services tree.
     pub last_ms: Option<u64>,
@@ -175,6 +191,8 @@ impl Console {
             pending_isolation: None,
             param_values: HashMap::new(),
             unsafe_run: None,
+            asked: None,
+            new_tab_run: false,
             running: None,
             last_ms: None,
             current: None,
@@ -284,19 +302,66 @@ impl Console {
         cx.notify();
     }
 
-    /// Runs the statement at the caret, or the selection's statements.
-    pub fn execute_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let statements = self.statements_at_caret(cx);
-        self.submit(statements, window, cx);
+    /// Runs what the Execute action `variant` runs at the caret or in the
+    /// selection (its options: Settings > Tools > Database > Query
+    /// Execution), in a tab of its own or the reused one as they say. The
+    /// options may ask what to run first.
+    pub fn execute_with(&mut self, variant: Variant, window: &mut Window, cx: &mut Context<Self>) {
+        let options = *query_settings::get(cx).options(variant);
+        let Some(editor) = self.editor(cx) else {
+            return;
+        };
+        let (text, caret, selection, anchor) = {
+            let editor = editor.read(cx);
+            let text = editor.text();
+            let sel = editor.selections().primary();
+            let chars = |c: usize| char_to_byte(&text, c);
+            let (range, caret) = (
+                chars(sel.range().start)..chars(sel.range().end),
+                chars(sel.head),
+            );
+            (text.clone(), caret, range, editor.caret_bounds())
+        };
+        self.new_tab_run = options.new_tab;
+        match plan::plan(&text, caret, selection, self.dialect(), &options) {
+            Plan::Nothing => {}
+            Plan::Run(statements) => self.submit(statements, window, cx),
+            Plan::Ask(choices) => {
+                self.asked = Some(Asked { choices, anchor });
+                window.dispatch_action(Box::new(super::ChooseExecution), cx);
+                cx.notify();
+            }
+        }
     }
 
-    /// The statement at the caret, or the selection's statements.
+    /// The popup's rows of the open "what to execute" question.
+    pub fn choice_items(&self) -> Vec<MenuItem> {
+        self.asked
+            .iter()
+            .flat_map(|a| a.choices.iter().enumerate())
+            .map(|(index, c)| MenuItem::action(c.label.clone(), super::ExecuteChoice { index }))
+            .collect()
+    }
+
+    /// Where the question was asked: the caret's character in the window.
+    pub fn choice_anchor(&self) -> Option<Bounds<Pixels>> {
+        self.asked.as_ref().and_then(|a| a.anchor)
+    }
+
+    /// The answer to the question: runs the choice `index`.
+    pub fn run_choice(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(asked) = self.asked.take() else {
+            return;
+        };
+        if let Some(choice) = asked.choices.into_iter().nth(index) {
+            self.submit(choice.statements, window, cx);
+        }
+    }
+
+    /// The statement at the caret, or the selection's statements (what the
+    /// Parameters button asks the values of).
     pub(super) fn statements_at_caret(&self, cx: &Context<Self>) -> Vec<Statement> {
-        let Some(editor) = self
-            .workbench
-            .upgrade()
-            .and_then(|wb| wb.read(cx).editor_for(&self.path))
-        else {
+        let Some(editor) = self.editor(cx) else {
             return Vec::new();
         };
         let (text, selection) = {
@@ -623,7 +688,11 @@ impl Console {
             grid,
             result: Some(result),
         };
-        let reuse = self.tabs.iter().position(|t| !t.pinned && !t.renamed);
+        let reuse = if self.new_tab_run {
+            None
+        } else {
+            self.tabs.iter().position(|t| !t.pinned && !t.renamed)
+        };
         let index = match reuse {
             Some(ix) => {
                 self.tabs[ix] = tab;
