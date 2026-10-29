@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Export streams rows to the file and can be cancelled,db-gui,must,yes,no,performance budget
+Export streams rows to the file and can be cancelled,db-gui,must,yes,yes,performance budget
