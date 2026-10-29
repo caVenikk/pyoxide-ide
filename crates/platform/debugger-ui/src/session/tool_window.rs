@@ -859,27 +859,21 @@ impl DebugToolWindow {
             .into_any_element(),
         );
         let theme = cx.theme();
+        // The tool window has the focus: the selected content tab is
+        // outlined in the focus colour, in grey otherwise.
+        let active = self.frames_or_variables_focused(window, cx)
+            || self.content_focus(cx).contains_focused(window, cx);
         let content_tab = |content: Content| {
             let selected = tab.content == content;
-            let hover = theme.color(UiRole::TabHover);
-            div()
-                .id(content.id())
+            ui::components::header_tab(content.id(), selected, active, cx)
                 .debug_selector(move || format!("debug-content-{}", content.id()))
-                .flex_none()
-                .h(px(26.0))
                 .px(px(8.0))
-                .flex()
-                .items_center()
-                .rounded(theme.metric(Metric::ButtonRadius))
                 .whitespace_nowrap()
-                .when(selected, |d| {
-                    d.bg(theme.color(UiRole::TabActive))
-                        .text_color(theme.color(UiRole::TabActiveText))
-                })
-                .when(!selected, |d| {
-                    d.text_color(theme.color(UiRole::TabInactiveText))
-                        .hover(move |s| s.bg(hover))
-                })
+                .text_color(theme.color(if selected {
+                    UiRole::TabActiveText
+                } else {
+                    UiRole::TabInactiveText
+                }))
                 .child(content.title())
                 .on_click(move |_, window, cx| {
                     window.dispatch_action(

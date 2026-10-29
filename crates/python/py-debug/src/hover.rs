@@ -13,6 +13,17 @@ use tree_sitter::{Node, Parser};
 
 /// The byte range of the expression at byte `offset` of `text`.
 pub fn expression_at(text: &str, offset: usize) -> Option<Range<usize>> {
+    expression_range(text, offset, false)
+}
+
+/// The same for Quick Evaluate Expression, which may run code: a function
+/// or a method called stands for the whole call, `summary.copy()` over
+/// `copy`.
+pub fn expression_with_calls_at(text: &str, offset: usize) -> Option<Range<usize>> {
+    expression_range(text, offset, true)
+}
+
+fn expression_range(text: &str, offset: usize, calls: bool) -> Option<Range<usize>> {
     if offset >= text.len() {
         return None;
     }
@@ -41,7 +52,7 @@ pub fn expression_at(text: &str, offset: usize) -> Option<Range<usize>> {
         && outer.kind() == "call"
         && field_of(outer, element) == Some("function")
     {
-        return None;
+        return calls.then(|| outer.byte_range());
     }
     Some(element.byte_range())
 }
@@ -143,6 +154,22 @@ print(describe(items=[1, 2]), os.path.sep, f\"{value}\")\n";
         assert_eq!(at("os.path", 0, 0), Some("os"));
         assert_eq!(at("os.path", 0, 4), Some("os.path"));
         assert_eq!(at("os.path.sep", 0, 9), Some("os.path.sep"));
+    }
+
+    #[test]
+    fn quick_evaluate_runs_the_call_the_caret_is_in() {
+        let at = |word: &str, n: usize, at: usize| {
+            let start = TEXT.match_indices(word).nth(n).unwrap().0;
+            expression_with_calls_at(TEXT, start + at).map(|r| &TEXT[r])
+        };
+        assert_eq!(at("len", 0, 1), Some("len(items)"));
+        assert_eq!(at("copy", 0, 1), Some("summary.copy()"));
+        assert_eq!(at("describe(items=", 0, 2), Some("describe(items=[1, 2])"));
+        // What the call is on, its arguments and plain names stay as they are.
+        assert_eq!(at("summary.copy", 0, 1), Some("summary"));
+        assert_eq!(at("items)", 0, 0), Some("items"));
+        assert_eq!(at("keys", 0, 1), Some("summary.copy().keys"));
+        assert_eq!(at("\"count\"", 0, 2), None);
     }
 
     #[test]

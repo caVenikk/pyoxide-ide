@@ -253,6 +253,17 @@ impl DebugAdapterProvider for PythonDebugProvider {
             .flatten()
     }
 
+    fn expression_at_caret(
+        &self,
+        file: &Path,
+        text: &str,
+        offset: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        breakpoints::is_python_file(file)
+            .then(|| crate::hover::expression_with_calls_at(text, offset))
+            .flatten()
+    }
+
     fn exception_breakpoint_type(&self) -> Option<ExceptionBreakpointType> {
         Some(breakpoints::exception_type())
     }
@@ -266,6 +277,14 @@ impl DebugAdapterProvider for PythonDebugProvider {
 
     fn present_value(&self, variable: &Variable) -> ValueNode {
         values::present(variable)
+    }
+
+    fn present_child(&self, variable: &Variable, scope: bool) -> ValueNode {
+        values::present_child(variable, scope)
+    }
+
+    fn referrers_expression(&self, expression: &str) -> Option<String> {
+        Some(values::referrers_expression(expression))
     }
 
     fn sizes_expression(&self, expressions: &[&str]) -> Option<String> {

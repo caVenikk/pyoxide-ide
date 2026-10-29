@@ -234,6 +234,13 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
         None
     }
 
+    /// The expression Quick Evaluate Expression evaluates at an offset: as
+    /// [`Self::expression_at`], but side effects are allowed, so a call is
+    /// evaluated too.
+    fn expression_at_caret(&self, file: &Path, text: &str, offset: usize) -> Option<Range<usize>> {
+        self.expression_at(file, text, offset)
+    }
+
     /// Line breakpoints can be put in a file of this type (its stoppable
     /// lines are known), going by its path.
     fn line_breakpoint_file(&self, file: &Path) -> bool {
@@ -256,6 +263,13 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// drawing: no I/O.
     fn present_value(&self, variable: &Variable) -> ValueNode {
         ValueNode::plain(variable)
+    }
+
+    /// How a child is shown: of a value (`scope` false), or of a frame's
+    /// scope or a group (`scope` true); [`Self::present_value`] by default.
+    fn present_child(&self, variable: &Variable, scope: bool) -> ValueNode {
+        let _ = scope;
+        self.present_value(variable)
     }
 
     /// An expression that evaluates, in a frame, to the sizes of the
@@ -338,6 +352,14 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
     /// value of `expression` is declared (Jump To Type Source); `None`
     /// when the product cannot tell.
     fn type_source_expression(&self, expression: &str) -> Option<String> {
+        let _ = expression;
+        None
+    }
+
+    /// An expression that evaluates, in a frame, to a list of the objects
+    /// that refer to the value of `expression` (Show Referring Objects);
+    /// `None` when the product's runtime cannot tell.
+    fn referrers_expression(&self, expression: &str) -> Option<String> {
         let _ = expression;
         None
     }

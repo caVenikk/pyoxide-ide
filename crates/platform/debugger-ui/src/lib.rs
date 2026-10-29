@@ -21,6 +21,7 @@ pub mod frames;
 mod hook;
 pub mod icons;
 mod inline;
+mod inspect;
 pub mod session;
 pub mod value_hint;
 pub mod variables;
@@ -45,4 +46,5 @@ pub fn init(cx: &mut gpui::App) {
     evaluate::register(cx);
     ui::command::register(cx, session::commands::COMMANDS);
     ui::command::register(cx, value_hint::COMMANDS);
+    inspect::register(cx);
 }

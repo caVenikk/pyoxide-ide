@@ -690,9 +690,9 @@ fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
         "Edit…",
         "Pause Watch",
         "-",
-        "(Inspect…)",
+        "Inspect…",
         "Copy Value",
-        "(Compare Value with Clipboard)",
+        "Compare Value with Clipboard",
         "Copy Name",
         "-",
         "Evaluate Expression…",
@@ -722,10 +722,10 @@ fn watches_pause_view_as_history_and_menus(cx: &mut TestAppContext) {
             "New Watch…",
             "Remove All Watches",
             "-",
-            "(Inspect…)",
+            "Inspect…",
             "Set Value…",
             "Copy Value",
-            "(Compare Value with Clipboard)",
+            "Compare Value with Clipboard",
             "Copy Name",
             "-",
             "Evaluate Expression…",
@@ -983,6 +983,54 @@ fn every_window_follows_show_variable_values_in_editor(cx: &mut TestAppContext) 
     assert_eq!(shown(&mut h, third), json!(false));
 }
 
+/// Inspect: a dialog on the selected value with its own tree and a
+/// history of roots.
+#[gpui::test]
+fn inspect_opens_a_dialog_on_the_selected_value(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    let main = h.file("main.py");
+    let mut script = support::debug_start_ignoring(
+        &h.root,
+        None,
+        &["setBreakpoints", "setExceptionBreakpoints", "source"],
+    );
+    script.extend(debug_stop(&main, 3, "breakpoint"));
+    script.extend([
+        json!({"expect": "scopes", "arguments": {"frameId": 103}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0,
+                "evaluateName": "a"},
+            {"name": "b", "value": "[2]", "type": "list", "variablesReference": 7,
+                "evaluateName": "b"}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 7}}),
+        json!({"respond": {"variables": [
+            {"name": "0", "value": "2", "type": "int", "variablesReference": 0}]}}),
+    ]);
+    push_debug_script(script);
+    h.invoke("debug.debug", json!(null));
+    h.wait("the values of the stop", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("b")))
+    });
+    assert_eq!(h.debug()["inspect_dialogs"], json!([]));
+    h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
+    h.invoke("debug.variables.inspect", json!(null));
+    let s = h.wait("the Inspect dialog", |s| {
+        s["inspect_dialogs"]
+            .as_array()
+            .is_some_and(|d| d.len() == 1)
+    });
+    let dialog = &s["inspect_dialogs"][0];
+    assert_eq!(dialog["title"], json!("Inspect 'b'"), "{dialog:#}");
+    assert_eq!(dialog["history"], json!(["b"]), "{dialog:#}");
+    assert_eq!(dialog["can_back"], json!(false), "{dialog:#}");
+    assert_eq!(dialog["can_forward"], json!(false), "{dialog:#}");
+}
+
 /// debugger-values-in-editor.md: the mouse resting on `b` of `return b`
 /// (the execution line) shows its value under it, with the expression's
 /// background; a click shows its tree; Escape closes it. A click on the
@@ -1088,6 +1136,18 @@ fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppC
         h.debug()["value_hint"]["tree"]["selected"],
         json!(["b", "0"])
     );
+    // Its context menu is the value group of the variables view's.
+    h.invoke("debug.variables.context-menu", json!(null));
+    let menu = h.debug()["value_hint"]["tree"]["menu"].clone();
+    let labels: Vec<&str> = menu["levels"][0]["items"]
+        .as_array()
+        .expect("the popup tree's menu is open")
+        .iter()
+        .filter_map(|i| i["label"].as_str())
+        .collect();
+    assert_eq!(labels.first(), Some(&"Inspect…"), "{labels:?}");
+    assert!(!labels.contains(&"New Watch…"), "{labels:?}");
+    h.invoke("menu.cancel", json!(null));
     h.invoke("debug.value-popup.close", json!(null));
     assert!(h.debug()["value_hint"].is_null());
     assert_eq!(h.cx.update(|cx| editor.read(cx).range_background()), None);

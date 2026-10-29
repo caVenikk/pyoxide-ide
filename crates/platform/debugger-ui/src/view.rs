@@ -126,6 +126,8 @@ pub struct DebuggerView {
     pub(crate) inline: crate::inline::InlineValues,
     /// Values under the mouse and their popups.
     pub(crate) hints: crate::value_hint::ValueHints,
+    /// The open Inspect and Referring Objects dialogs.
+    pub(crate) inspects: Vec<gpui::WindowHandle<crate::inspect::InspectDialog>>,
     _tool_window_events: gpui::Subscription,
 }
 
@@ -174,6 +176,7 @@ impl DebuggerView {
             pending_restart: None,
             inline: Default::default(),
             hints: Default::default(),
+            inspects: Vec::new(),
             _tool_window_events: tool_window_events,
         }
     }
@@ -808,6 +811,7 @@ impl DebuggerView {
         state["show_values_inline"] = json!(self.inline_values_shown());
         state["inline_values"] = self.inline_values_json();
         state["value_hint"] = self.value_hint_json(cx);
+        state["inspect_dialogs"] = self.inspects_json(cx);
         state["starting"] = json!(self.starting.len());
         state
     }
@@ -1033,5 +1037,5 @@ fn forward_frame_actions<E: InteractiveElement>(el: E, view: Entity<DebuggerView
             })
         })
     });
-    crate::watches::forward_watch_actions(el, view)
+    crate::watches::forward_watch_actions(crate::inspect::forward_actions(el, view.clone()), view)
 }

@@ -302,7 +302,7 @@ pub(crate) async fn evaluate(
 
 impl VariablesView {
     /// The suspended frame shown.
-    fn frame_id(&self) -> Option<i64> {
+    pub(crate) fn frame_id(&self) -> Option<i64> {
         self.frame
             .as_ref()
             .filter(|_| self.phase == Phase::Suspended)
@@ -1614,30 +1614,12 @@ impl VariablesView {
     /// watch's or the result's own expression is not evaluated again (it
     /// may change what it shows).
     pub(crate) fn copy_value(&mut self, cx: &mut Context<Self>) {
-        let Some(row) = self.selected_row(cx) else {
-            return;
-        };
-        let Some(v) = row.value().cloned() else {
-            return;
-        };
-        let shown = v.variable.value.clone();
-        let again = matches!(row.kind, RowKind::Value(_));
-        let whole = match (&v.variable.evaluate_name, self.frame_id()) {
-            (Some(name), Some(frame)) if again && self.session.evaluates_for_clipboard() => Some(
-                self.session
-                    .evaluate_in(name, Some(frame), EvaluateContext::Clipboard),
-            ),
-            _ => None,
-        };
-        match whole {
-            Some(pending) => {
-                cx.spawn(async move |_, cx| {
-                    let text = pending.await.map(|e| e.value).unwrap_or(shown);
-                    let _ = cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string(text)));
-                })
-                .detach();
-            }
-            None => cx.write_to_clipboard(ClipboardItem::new_string(shown)),
+        if let Some(fetch) = self.fetch_value(cx) {
+            cx.spawn(async move |_, cx| {
+                let text = fetch.await;
+                let _ = cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string(text)));
+            })
+            .detach();
         }
     }
 
@@ -1767,10 +1749,16 @@ impl VariablesView {
             .as_ref()
             .map(|p| p.extra_value_actions())
             .unwrap_or_default();
-        let mut items = vec![
-            MenuItem::action("New Watch\u{2026}", NewWatch { expression: None })
-                .icon(IconName::ADD),
-        ];
+        // A popup's tree has the value's group only (`XDebugger.Inspect.Tree.Popup`).
+        let popup = self.popup.is_some();
+        let mut items = if popup {
+            Vec::new()
+        } else {
+            vec![
+                MenuItem::action("New Watch\u{2026}", NewWatch { expression: None })
+                    .icon(IconName::ADD),
+            ]
+        };
         if watch.is_some() {
             items.push(
                 MenuItem::action(
@@ -1783,7 +1771,9 @@ impl VariablesView {
                 .icon(IconName::REMOVE),
             );
         }
-        items.push(MenuItem::action("Remove All Watches", RemoveAllWatches).enabled(rows));
+        if !popup {
+            items.push(MenuItem::action("Remove All Watches", RemoveAllWatches).enabled(rows));
+        }
         if let Some(w) = watch {
             // Edit has the key of Set Value (`use-shortcut-of`).
             items.push(MenuItem::action("Edit\u{2026}", SetValue { value: None }));
@@ -1801,12 +1791,17 @@ impl VariablesView {
                 );
             }
         }
-        items.push(MenuItem::separator());
+        if !popup {
+            items.push(MenuItem::separator());
+        }
         if value.is_some() && extras.contains(&debugger::ExtraValueAction::CustomizeDataView) {
             items.push(MenuItem::unavailable("Customize Data View"));
         }
         if row.is_some_and(|r| r.value().is_some()) {
-            items.push(MenuItem::unavailable("Inspect\u{2026}"));
+            items.push(
+                MenuItem::action("Inspect\u{2026}", crate::inspect::InspectValue)
+                    .enabled(suspended),
+            );
         }
         if watch.is_none() {
             let settable = matches!(row.map(|r| &r.kind), Some(RowKind::Value(_)))
@@ -1817,7 +1812,13 @@ impl VariablesView {
             );
         }
         items.push(MenuItem::action("Copy Value", CopyValue).enabled(value.is_some()));
-        items.push(MenuItem::unavailable("Compare Value with Clipboard"));
+        items.push(
+            MenuItem::action(
+                "Compare Value with Clipboard",
+                crate::inspect::CompareWithClipboard,
+            )
+            .enabled(value.is_some()),
+        );
         items.push(
             MenuItem::action("Copy Name", CopyName).enabled(value.is_some() || watch.is_some()),
         );
@@ -1828,7 +1829,7 @@ impl VariablesView {
                 EvaluateValue { expression: None },
             )
             .icon(icons::EVALUATE_EXPRESSION)
-            .enabled(suspended),
+            .enabled(suspended && !self.in_dialog),
         );
         items.push(
             MenuItem::action("Add to Watches", AddToWatches)
@@ -1836,7 +1837,13 @@ impl VariablesView {
                 .enabled(value.is_some() || watch.is_some()),
         );
         if value.is_some() && extras.contains(&debugger::ExtraValueAction::ShowReferringObjects) {
-            items.push(MenuItem::unavailable("Show Referring Objects\u{2026}"));
+            items.push(
+                MenuItem::action(
+                    "Show Referring Objects\u{2026}",
+                    crate::inspect::ShowReferringObjects,
+                )
+                .enabled(suspended),
+            );
         }
         items.push(MenuItem::separator());
         // Enabled for every value as in the reference
@@ -1958,21 +1965,27 @@ pub(crate) fn forward_watch_actions<E: InteractiveElement>(el: E, view: Entity<D
         .menu_at_selection(window, cx));
     let v = view.clone();
     let el = el.on_action(move |_: &JumpToValueSource, _, cx| {
-        v.update(cx, |v, cx| v.jump_to_value_source(cx))
+        v.update(cx, |v, cx| v.jump_to_value_source(None, cx))
     });
     let v = view;
-    el.on_action(move |_: &JumpToTypeSource, _, cx| v.update(cx, |v, cx| v.jump_to_type_source(cx)))
+    el.on_action(move |_: &JumpToTypeSource, _, cx| {
+        v.update(cx, |v, cx| v.jump_to_type_source(None, cx))
+    })
 }
 
 impl DebuggerView {
     /// Jump To Source of the selected value: its declaration in the frame's
     /// file, found by the product off the UI thread.
-    pub(crate) fn jump_to_value_source(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn jump_to_value_source(
+        &mut self,
+        tree: Option<&Entity<VariablesView>>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(provider) = self.debugger.as_ref().map(|d| d.provider().clone()) else {
             return;
         };
         let mut target = None;
-        self.with_variables(cx, |t, cx| target = t.jump_target(cx));
+        self.with_tree(tree, cx, |t, cx| target = t.jump_target(cx));
         let Some((path, line, name)) = target else {
             return;
         };
@@ -1996,13 +2009,17 @@ impl DebuggerView {
     /// Jump To Type Source of the selected value: the running program says
     /// where its type is declared (the product's expression, evaluated in
     /// the frame); nothing opens for a type without a source (a builtin).
-    pub(crate) fn jump_to_type_source(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn jump_to_type_source(
+        &mut self,
+        tree: Option<&Entity<VariablesView>>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(provider) = self.debugger.as_ref().map(|d| d.provider().clone()) else {
             return;
         };
         let mut target = None;
         let mut session = None;
-        self.with_variables(cx, |t, cx| {
+        self.with_tree(tree, cx, |t, cx| {
             target = t.type_source_target(cx);
             session = Some(t.session().clone());
         });

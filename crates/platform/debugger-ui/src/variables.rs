@@ -302,6 +302,9 @@ pub struct VariablesView {
     /// A popup's tree: its one value instead of the frame's, without the
     /// evaluate field, the watches and the context menu.
     pub(crate) popup: Option<PopupRoot>,
+    /// A popup's tree in a window of its own (Inspect): its menu has no
+    /// Evaluate Expression.
+    pub(crate) in_dialog: bool,
 }
 
 impl VariablesView {
@@ -359,6 +362,7 @@ impl VariablesView {
             highlighted: None,
             line_height: px(16.0),
             popup: None,
+            in_dialog: false,
         }
     }
 
@@ -511,8 +515,52 @@ impl VariablesView {
             .as_ref()
             .and_then(|p| p.values.get(crate::watches::RESULT).cloned());
         self.freeze(cx);
+        self.refresh_popup_root(cx);
         self.dirty = true;
         cx.notify();
+    }
+
+    /// A popup's root row shows its own text, which a set value may have
+    /// changed: its expression is evaluated again.
+    fn refresh_popup_root(&mut self, cx: &mut Context<Self>) {
+        let (Some(root), Some(frame)) = (&self.popup, self.frame_id()) else {
+            return;
+        };
+        let expression = match &root.variable.evaluate_name {
+            Some(name) => name.clone(),
+            None if root.parent == 0 => root.name.clone(),
+            None => return,
+        };
+        let epoch = self.epoch;
+        let task = crate::watches::evaluate(
+            self.session.clone(),
+            self.provider.clone(),
+            frame,
+            expression,
+            debugger::EvaluateContext::Watch,
+        );
+        cx.spawn(async move |this, cx| {
+            let eval = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let crate::watches::Eval::Value { variable, shape } = eval else {
+                    return;
+                };
+                if this.epoch != epoch {
+                    return;
+                }
+                if let Some(root) = &mut this.popup {
+                    // The children are the ones loaded for the reference
+                    // the root has; a new reference is not followed.
+                    let reference = root.variable.reference;
+                    root.variable = *variable;
+                    root.variable.reference = reference;
+                    root.shape = shape;
+                    this.dirty = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// The rows shown now stay until the new ones are loaded, at most
@@ -1080,13 +1128,35 @@ impl VariablesView {
                     }
                     window.focus(&this.focus);
                     this.select(&menu_path, cx);
-                    if this.popup.is_none() {
-                        this.open_menu(e.position, window, cx);
-                    }
+                    this.open_menu(e.position, window, cx);
                 }),
             )
             .into_any_element()
     }
+}
+
+/// A group among the children of a value, as the rows are built: its
+/// title and icon, the adapter's own children of it (by reference) and the
+/// values the parent shows in it (index, name, kind).
+struct GroupRows {
+    title: String,
+    icon: GroupIcon,
+    references: Vec<i64>,
+    values: Vec<(usize, String, ValueKind)>,
+}
+
+/// The group of a title, made when it is the first.
+fn group_rows(groups: &mut Vec<GroupRows>, title: String, icon: GroupIcon) -> &mut GroupRows {
+    if let Some(at) = groups.iter().position(|g| g.title == title) {
+        return &mut groups[at];
+    }
+    groups.push(GroupRows {
+        title,
+        icon,
+        references: Vec::new(),
+        values: Vec::new(),
+    });
+    groups.last_mut().expect("just pushed")
 }
 
 /// Builds the rows of a view.
@@ -1230,7 +1300,7 @@ impl Builder<'_> {
             })),
         });
         if let Some(reference) = children {
-            self.children(reference, &path, 1, false);
+            self.children(reference, &path, 1, false, false);
         }
         // Set Value or an edited watch failed: the message under its row.
         if let Some(error) = view
@@ -1347,7 +1417,7 @@ impl Builder<'_> {
         let first_only = view.provider.as_ref().is_some_and(|p| p.first_scope_only());
         if first_only {
             if let Some(scope) = scopes.first() {
-                self.children(scope.reference, "", 0, true);
+                self.children(scope.reference, "", 0, true, true);
             }
             return;
         }
@@ -1364,13 +1434,15 @@ impl Builder<'_> {
                 },
             });
             if expanded {
-                self.children(scope.reference, &path, 1, i == 0);
+                self.children(scope.reference, &path, 1, i == 0, true);
             }
         }
     }
 
     /// The rows of a scope's or a value's children.
-    fn children(&mut self, reference: i64, path: &str, depth: usize, root: bool) {
+    /// `scope`: the children of a frame's scope or of a group (the
+    /// provider does not group these again).
+    fn children(&mut self, reference: i64, path: &str, depth: usize, root: bool, scope: bool) {
         let view = self.view;
         let Some(children) = view.session.loaded_children(reference) else {
             if let Some(error) = view.errors.get(&reference) {
@@ -1399,12 +1471,12 @@ impl Builder<'_> {
             }
             return;
         };
-        let mut groups: Vec<(Variable, String, GroupIcon)> = Vec::new();
+        let mut groups: Vec<GroupRows> = Vec::new();
         let mut returns: Vec<(usize, String)> = Vec::new();
         let mut return_group = None;
         for (i, variable) in children.items.iter().enumerate() {
             let node = match &view.provider {
-                Some(p) => p.present_value(variable),
+                Some(p) => p.present_child(variable, scope),
                 None => debugger::values::ValueNode::plain(variable),
             };
             match node.role {
@@ -1419,7 +1491,16 @@ impl Builder<'_> {
                         depth,
                     );
                 }
-                ValueRole::Group { title, icon } => groups.push((variable.clone(), title, icon)),
+                ValueRole::Group { title, icon } => {
+                    group_rows(&mut groups, title, icon)
+                        .references
+                        .push(variable.reference);
+                }
+                ValueRole::Grouped { kind, title, icon } => {
+                    group_rows(&mut groups, title, icon)
+                        .values
+                        .push((i, node.name, kind));
+                }
                 ValueRole::ReturnValue { group } => {
                     return_group = Some(group);
                     returns.push((i, node.name));
@@ -1428,7 +1509,7 @@ impl Builder<'_> {
                     let more_path = join(path, &format!("\u{2026}{}", variable.value));
                     if view.state.expanded.contains(&more_path) {
                         // The rest of the collection, in place.
-                        self.children(variable.reference, path, depth, false);
+                        self.children(variable.reference, path, depth, false, scope);
                     } else {
                         self.rows.push(Row {
                             path: more_path,
@@ -1488,7 +1569,13 @@ impl Builder<'_> {
                 }
             }
         }
-        for (variable, title, icon) in groups {
+        for group in groups {
+            let GroupRows {
+                title,
+                icon,
+                references,
+                values,
+            } = group;
             let group_path = join(path, &title);
             let expanded = view.state.expanded.contains(&group_path);
             self.rows.push(Row {
@@ -1499,13 +1586,28 @@ impl Builder<'_> {
                     icon: match icon {
                         GroupIcon::Special => icons::SPECIAL_VARIABLES,
                         GroupIcon::ReturnValues => icons::RETURN_VALUES,
+                        GroupIcon::Protected => icons::PROTECTED,
                         GroupIcon::Plain => IconName::FOLDER,
                     },
                     expanded,
                 },
             });
             if expanded {
-                self.children(variable.reference, &group_path, depth + 1, false);
+                for (i, name, kind) in values {
+                    self.value(
+                        &children.items[i],
+                        children.shape(i),
+                        &name,
+                        kind,
+                        reference,
+                        &group_path,
+                        depth + 1,
+                    );
+                }
+                for group_reference in references {
+                    // The children of a group are not grouped again.
+                    self.children(group_reference, &group_path, depth + 1, false, true);
+                }
             }
         }
     }
@@ -1566,7 +1668,7 @@ impl Builder<'_> {
             );
         }
         if expanded {
-            self.children(variable.reference, &path, depth + 1, false);
+            self.children(variable.reference, &path, depth + 1, false, false);
         }
     }
 }

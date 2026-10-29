@@ -21,6 +21,7 @@ serde_json.workspace = true
 text.workspace = true
 themes.workspace = true
 ui.workspace = true
+vcs-ui.workspace = true
 
 [dev-dependencies]
 dap-client = { workspace = true, features = ["fake"] }

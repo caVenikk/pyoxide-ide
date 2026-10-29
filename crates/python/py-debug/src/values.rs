@@ -21,6 +21,13 @@ const MORE_ITEMS: &str = "MoreItemsRange";
 const SPECIAL: &str = "Special Variables";
 const RETURN_VALUES: &str = "Return Values";
 const PROTECTED: &str = "Protected Attributes";
+/// debugpy's name of the child that holds the length of a container, and
+/// pydevd's (`PyDebugValueGroupsKt.DUNDER_LEN`).
+const LEN: &str = "len()";
+const DUNDER_LEN: &str = "__len__";
+/// The names that stay among a value's children when its protected
+/// attributes are grouped (`PROTECTED_ATTRS_EXCLUDED`).
+const NOT_PROTECTED: [&str; 2] = [DUNDER_LEN, "__exception__"];
 
 /// Types shown with the array icon (`NodeTypes.LIST_NODE_TYPE`,
 /// `TUPLE_NODE_TYPE`).
@@ -74,6 +81,47 @@ pub(crate) fn present(variable: &Variable) -> ValueNode {
     }
 }
 
+/// A child of a value, or of a frame's scope or a group (`scope`). The children of a value are
+/// shown as the reference's pydevd shows them (`PyDebugValue
+/// .computeChildren` in the simplified view): the length as `__len__`, the
+/// names that start with `_` (debugpy's "special variables" and the
+/// protected names it leaves among the values) in a "Protected
+/// Attributes" group after the others.
+pub(crate) fn present_child(variable: &Variable, scope: bool) -> ValueNode {
+    let mut node = present(variable);
+    if scope {
+        return node;
+    }
+    match &node.role {
+        ValueRole::Group { title, .. } if title == SPECIAL => {
+            node.name = PROTECTED.to_owned();
+            node.role = ValueRole::Group {
+                title: PROTECTED.to_owned(),
+                icon: GroupIcon::Protected,
+            };
+        }
+        ValueRole::Group { title, .. } if title == PROTECTED => {
+            node.role = ValueRole::Group {
+                title: PROTECTED.to_owned(),
+                icon: GroupIcon::Protected,
+            };
+        }
+        ValueRole::Value(kind) => {
+            if variable.name == LEN {
+                node.name = DUNDER_LEN.to_owned();
+            } else if node.name.starts_with('_') && !NOT_PROTECTED.contains(&node.name.as_str()) {
+                node.role = ValueRole::Grouped {
+                    kind: *kind,
+                    title: PROTECTED.to_owned(),
+                    icon: GroupIcon::Protected,
+                };
+            }
+        }
+        _ => {}
+    }
+    node
+}
+
 fn title_case(word: &str) -> String {
     let mut chars = word.chars();
     match chars.next() {
@@ -92,6 +140,15 @@ fn remaining(range: &str) -> Option<usize> {
     let start: usize = start.trim().parse().ok()?;
     let end: usize = end.trim().parse().ok()?;
     end.checked_sub(start)
+}
+
+/// The expression for the objects that refer to the value of `expression`
+/// (pydevd's `get_referrer_info` for debugpy, which has none): the garbage
+/// collector's referrers without the frames of the evaluation itself.
+pub(crate) fn referrers_expression(expression: &str) -> String {
+    format!(
+        "[__r for __r in __import__('gc').get_referrers({expression}) if type(__r).__name__ != 'frame']"
+    )
 }
 
 /// One Python expression for the sizes of several values: a tuple with the
@@ -193,6 +250,48 @@ mod tests {
                 remaining: Some(900)
             }
         );
+    }
+
+    #[test]
+    fn the_children_of_a_value_group_their_protected_attributes() {
+        // A frame's scope (and a group) keeps debugpy's groups and names.
+        let node = present_child(&variable("special variables", "", "", 10), true);
+        assert_eq!(node.name, "Special Variables");
+        let node = present_child(&variable("_cache", "dict", "{}", 0), true);
+        assert!(matches!(node.role, ValueRole::Value(_)));
+        // A value's children: the group is the protected attributes.
+        let node = present_child(&variable("special variables", "", "", 10), false);
+        assert_eq!(node.name, "Protected Attributes");
+        assert_eq!(
+            node.role,
+            ValueRole::Group {
+                title: "Protected Attributes".into(),
+                icon: GroupIcon::Protected
+            }
+        );
+        let node = present_child(&variable("len()", "int", "2", 0), false);
+        assert_eq!(node.name, "__len__");
+        assert_eq!(node.role, ValueRole::Value(ValueKind::Primitive));
+        let node = present_child(&variable("_cache", "list", "[]", 4), false);
+        assert_eq!(
+            node.role,
+            ValueRole::Grouped {
+                kind: ValueKind::Array,
+                title: "Protected Attributes".into(),
+                icon: GroupIcon::Protected
+            }
+        );
+        let node = present_child(&variable("count", "int", "1", 0), false);
+        assert_eq!(node.role, ValueRole::Value(ValueKind::Primitive));
+        let node = present_child(&variable("__exception__", "tuple", "()", 5), false);
+        assert!(matches!(node.role, ValueRole::Value(_)));
+    }
+
+    #[test]
+    fn referrers_leave_out_the_evaluation_frames() {
+        let e = referrers_expression("summary['sum']");
+        assert!(e.contains("gc').get_referrers(summary['sum'])"), "{e}");
+        assert!(e.contains("!= 'frame'"), "{e}");
     }
 
     #[test]
