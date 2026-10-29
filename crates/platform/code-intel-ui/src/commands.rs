@@ -19,6 +19,10 @@ ui::ui_commands! {
         "Shows the usages of the symbol at the caret in a popup.";
     ShowIntentions => "code.show-intentions", "Show Context Actions",
         "Shows the quick fixes and intention actions at the caret.";
+    RenameSymbol => "code.rename", "Rename\u{2026}",
+        "Renames the symbol at the caret and its usages.";
+    FileStructure => "code.file-structure", "File Structure",
+        "Shows the symbols of the file in a popup; choosing one moves the caret to it.";
     Reformat => "code.reformat", "Reformat Code",
         "Reformats the file, or the selected lines.";
     OptimizeImports => "code.optimize-imports", "Optimize Imports",

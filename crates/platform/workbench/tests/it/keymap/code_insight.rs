@@ -122,6 +122,31 @@ fn check_docs(h: &mut H, command: &str, keys: &str, what: &str) {
             assert_eq!(state(h)["list"]["name"], "usages", "{what}");
             assert_eq!(state(h)["list"]["items"][0]["text"], "x", "{what}");
         }
+        "code.rename" => {
+            // The Rename dialog opens over the name at the caret, the old
+            // name selected and Refactor not yet possible; Escape closes it.
+            h.set_editor("al|pha\nx\n");
+            h.press(keys);
+            let dialog = h.invoke("workbench.state", json!(null))["code_rename"].clone();
+            assert_eq!(dialog["kind"], "rename", "{what}");
+            assert_eq!(dialog["text"], "alpha", "{what}");
+            assert_eq!(dialog["can_confirm"], false, "{what}");
+            h.invoke("name-input.cancel", json!(null));
+            assert!(
+                h.invoke("workbench.state", json!(null))["code_rename"].is_null(),
+                "{what}"
+            );
+            assert!(h.editor_focused(), "{what}: the focus is back in the editor");
+        }
+        "code.file-structure" => {
+            h.set_editor("al|pha\nx\n");
+            h.press(keys);
+            assert_eq!(state(h)["list"]["name"], "structure", "{what}");
+            assert_eq!(state(h)["list"]["selected"], "alpha", "{what}");
+            h.invoke("menu.down", json!(null));
+            h.invoke("menu.confirm", json!(null));
+            assert_eq!(h.editor_marked(), "alpha\n|x\n", "{what}");
+        }
         "code.reformat" => {
             h.set_editor("x=1|\n");
             h.press(keys);
@@ -188,6 +213,8 @@ fn check(h: &mut H, b: &Binding) -> bool {
         | "code.show-intentions"
         | "code.go-to-declaration"
         | "code.show-usages"
+        | "code.rename"
+        | "code.file-structure"
         | "code.reformat"
         | "code.optimize-imports" => check_docs(h, &b.command, keys, &what),
         _ => return false,

@@ -47,7 +47,7 @@ pub(crate) struct NavState {
     /// The window of the editors (list popups take its focus).
     window: Option<AnyWindowHandle>,
     /// The request of Go to Declaration or Show Usages.
-    request: Option<Task<()>>,
+    pub(crate) request: Option<Task<()>>,
     /// The symbol drawn as a link (editor, range) and the request that
     /// checks the symbol under the mouse has a declaration.
     link: Option<(EntityId, Range<usize>)>,
@@ -65,6 +65,8 @@ pub(crate) struct NavState {
 pub(crate) enum ListTargets {
     Locations(Vec<Location>),
     Intentions,
+    /// The symbols of the file structure: where the caret goes.
+    Symbols(Vec<Point>),
 }
 
 struct OpenList {
@@ -408,6 +410,19 @@ impl CodeIntelView {
                 }
             }
             ListTargets::Intentions => self.intention_chosen(&list.editor, &path, cx),
+            ListTargets::Symbols(targets) => {
+                let (Some(&at), Some(document)) = (
+                    path.first().and_then(|&i| targets.get(i)),
+                    self.document_of(&list.editor),
+                ) else {
+                    return;
+                };
+                let location = Location {
+                    path: document.id.path().to_owned(),
+                    range: at..at,
+                };
+                self.navigate(&list.editor, location, cx);
+            }
         }
     }
 
