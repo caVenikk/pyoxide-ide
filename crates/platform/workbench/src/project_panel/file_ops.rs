@@ -416,7 +416,7 @@ impl ProjectPanel {
         let indent = theme.metric(Metric::TreeIndent) * tree.node(id).depth as f32;
         let x = px(TREE_LEFT + ICON_X + TEXT_X) + indent;
         let y = row_height * (row + 1) as f32 - self.scroll_top();
-        Some(self.rows_bounds.get().origin + point(x, y))
+        Some(self.expansion.view().origin + point(x, y))
     }
 
     // ---- commands ---------------------------------------------------------

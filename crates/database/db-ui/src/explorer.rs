@@ -298,6 +298,9 @@ pub struct Explorer {
     sink: Option<db_session::EventSink>,
     events_task: Task<()>,
     scroll: UniformListScrollHandle,
+    /// The pointer's row of the tree and the row cut by its edge that shows
+    /// its rest.
+    expansion: ui::expandable::ExpandableItems<crate::tree::RowKey>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -326,6 +329,7 @@ impl Explorer {
             sink: None,
             events_task: Task::ready(()),
             scroll: UniformListScrollHandle::new(),
+            expansion: Default::default(),
             _subscriptions: Vec::new(),
         }
     }

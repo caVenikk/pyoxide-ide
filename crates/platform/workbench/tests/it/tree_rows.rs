@@ -122,6 +122,23 @@ fn drawn(
         .unwrap_or_else(|| panic!("{selector} is not drawn"))
 }
 
+/// The middle of the visible part of the row `selector` (a row is as wide
+/// as the widest one; the tree shows its left part).
+fn visible_center(
+    cx: &mut TestAppContext,
+    window: WindowHandle<Workbench>,
+    selector: &str,
+) -> Point<Pixels> {
+    let row = drawn(cx, window, selector);
+    let area = drawn(cx, window, "project-rows");
+    row.intersect(&area).center()
+}
+
+fn mouse_to_row(cx: &mut TestAppContext, window: WindowHandle<Workbench>, selector: &str) {
+    let at = visible_center(cx, window, selector);
+    mouse_to(cx, window, at);
+}
+
 fn mouse_to(cx: &mut TestAppContext, window: WindowHandle<Workbench>, at: Point<Pixels>) {
     VisualTestContext::from_window(window.into(), cx).simulate_mouse_move(
         at,
@@ -132,7 +149,7 @@ fn mouse_to(cx: &mut TestAppContext, window: WindowHandle<Workbench>, at: Point<
 }
 
 fn click(cx: &mut TestAppContext, window: WindowHandle<Workbench>, selector: &str) {
-    let at = drawn(cx, window, selector).center();
+    let at = visible_center(cx, window, selector);
     let vcx = &mut VisualTestContext::from_window(window.into(), cx);
     vcx.simulate_mouse_move(at, None, Modifiers::none());
     vcx.simulate_click(at, Modifiers::none());
@@ -260,11 +277,11 @@ fn a_cut_row_reaches_the_edge_and_shows_its_rest_on_hover(cx: &mut TestAppContex
     // ends, level with the row and as high; its 1 px border runs outside
     // the row above, below and at the right end.
     let root_row = drawn(cx, window, "tree-row:");
-    mouse_to(cx, window, root_row.center());
+    mouse_to_row(cx, window, "tree-row:");
     let t = tree(cx, window);
     assert_eq!(t["expanded_row"], json!(""));
-    let rest = drawn(cx, window, "tree-row-expansion");
-    let part = drawn(cx, window, "tree-row-expansion-row");
+    let rest = drawn(cx, window, "row-expansion");
+    let part = drawn(cx, window, "row-expansion-row");
     let hovered = drawn(cx, window, "tree-hovered");
     assert_eq!(hovered.right(), area.right() - px(1.0));
     assert_eq!(part.left(), hovered.right());
@@ -281,10 +298,10 @@ fn a_cut_row_reaches_the_edge_and_shows_its_rest_on_hover(cx: &mut TestAppContex
     assert!(rest.right() <= window_width, "cut at the window's edge");
 
     // Not for a row that fits; gone when the pointer leaves the rows.
-    let src = drawn(cx, window, "tree-row:src").center();
+    let src = visible_center(cx, window, "tree-row:src");
     mouse_to(cx, window, src);
     assert_eq!(tree(cx, window)["expanded_row"], json!(null));
-    mouse_to(cx, window, root_row.center());
+    mouse_to_row(cx, window, "tree-row:");
     assert_eq!(tree(cx, window)["expanded_row"], json!(""));
     mouse_to(
         cx,
@@ -322,7 +339,7 @@ fn the_rest_of_a_row_shows_10_ms_after_the_pointer_comes(cx: &mut TestAppContext
         .join(LONG_ROOT);
     layout(&root);
     let window = open(cx, &root);
-    let at = drawn(cx, window, "tree-row:").center();
+    let at = visible_center(cx, window, "tree-row:");
     VisualTestContext::from_window(window.into(), cx).simulate_mouse_move(
         at,
         None,
@@ -344,9 +361,8 @@ fn the_rest_of_a_row_stays_under_the_pointer_and_takes_the_rows_clicks(cx: &mut 
     layout(&root);
     let window = open(cx, &root);
     click(cx, window, "tree-row:src");
-    let root_row = drawn(cx, window, "tree-row:");
-    mouse_to(cx, window, root_row.center());
-    let rest = drawn(cx, window, "tree-row-expansion");
+    mouse_to_row(cx, window, "tree-row:");
+    let rest = drawn(cx, window, "row-expansion");
 
     // The pointer moves from the row onto its rest: it stays.
     mouse_to(cx, window, rest.center());
@@ -376,10 +392,57 @@ fn the_rest_of_a_row_stays_under_the_pointer_and_takes_the_rows_clicks(cx: &mut 
     // Back to the row and onto its rest: a right click opens the row's
     // context menu.
     click(cx, window, "tree-row:src");
-    mouse_to(cx, window, root_row.center());
+    mouse_to_row(cx, window, "tree-row:");
     mouse_to(cx, window, rest.center());
     right_click_at(cx, window, rest.center());
     let t = tree(cx, window);
     assert_eq!(t["selected"], json!(""));
     assert!(t["context_menu"].is_object(), "no context menu: {t}");
+}
+
+/// A swipe sideways at `at`, `dx` px (negative: the content moves left).
+fn swipe(cx: &mut TestAppContext, window: WindowHandle<Workbench>, at: Point<Pixels>, dx: f32) {
+    VisualTestContext::from_window(window.into(), cx).simulate_event(gpui::ScrollWheelEvent {
+        position: at,
+        delta: gpui::ScrollDelta::Pixels(point(px(dx), px(0.0))),
+        modifiers: Modifiers::none(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    draw(cx, window);
+}
+
+#[gpui::test]
+fn a_row_wider_than_the_tool_window_scrolls_into_view(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = native_path::canonicalize(dir.path())
+        .unwrap()
+        .join(LONG_ROOT);
+    layout(&root);
+    let window = open(cx, &root);
+    let area = drawn(cx, window, "project-rows");
+    assert_eq!(tree(cx, window)["scroll_left"], json!(0.0));
+
+    // A swipe to the left scrolls the rows sideways, as far as the widest
+    // row's end and no further.
+    swipe(cx, window, area.center(), -60.0);
+    let first = tree(cx, window)["scroll_left"].as_f64().unwrap();
+    assert!(first > 0.0, "the rows did not scroll sideways");
+    swipe(cx, window, area.center(), -5000.0);
+    let last = tree(cx, window)["scroll_left"].as_f64().unwrap();
+    assert!(last > first);
+    swipe(cx, window, area.center(), -5000.0);
+    assert_eq!(tree(cx, window)["scroll_left"].as_f64().unwrap(), last);
+
+    // Scrolled to the end the root's text fits the view: its selection
+    // ends inside it with a rounded end, and there is no rest to show.
+    let selection = drawn(cx, window, "tree-selection");
+    assert!(selection.right() < area.right() - px(1.0));
+    mouse_to_row(cx, window, "tree-row:");
+    assert_eq!(tree(cx, window)["expanded_row"], json!(null));
+
+    // Back: the rows are as before the first swipe.
+    swipe(cx, window, area.center(), 10000.0);
+    assert_eq!(tree(cx, window)["scroll_left"], json!(0.0));
+    let selection = drawn(cx, window, "tree-selection");
+    assert_eq!(selection.right(), area.right() - px(1.0));
 }
