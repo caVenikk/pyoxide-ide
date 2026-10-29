@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,no,Community
+"Evaluate Expression dialog, Quick Evaluate and value tooltip",run-debug,should,yes,partial,"Community (#293); the dialog with expression and code fragment modes; Quick Evaluate and the value tooltip not yet"

@@ -338,7 +338,23 @@ fn check_debug_watches(h: &mut H, command: &str, keys: &str, what: &str) {
             h.focus(tree);
             h.invoke("debug.variables.select", json!({"path": ["Locals", "b"]}));
             h.press(keys);
-            assert_eq!(variables(h)["evaluate"]["text"], json!("b"), "{what}");
+            // The Evaluate dialog opens with the value's expression.
+            let dialog = h.debug()["evaluate_dialog"].clone();
+            assert_eq!(dialog["expression"], json!("b"), "{what}: {dialog}");
+            assert_eq!(dialog["mode"], json!("expression"), "{what}: {dialog}");
+            // From the editor: the word at the caret.
+            h.invoke("tabs.select", json!({"index": 0}));
+            h.focus_editor();
+            h.set_editor("|a = 1\n");
+            h.press(keys);
+            let dialog = h.debug()["evaluate_dialog"].clone();
+            assert_eq!(dialog["expression"], json!("a"), "{what}: {dialog}");
+            if let Some(open) =
+                h.cx.update(|cx| ui::dialog_window::find(debugger_ui::evaluate::CONTEXT, cx))
+            {
+                h.cx.update(|cx| ui::dialog_window::close(open, cx));
+                h.draw();
+            }
         }
         "debug.variables.jump-to-source" | "debug.variables.jump-to-type-source" => {
             // From another file: a.py opens at the declaration (of the
@@ -531,10 +547,125 @@ fn check(h: &mut H, b: &Binding) -> bool {
             check_debug_views(h, c, keys, &what, b.context.as_deref())
         }
         c if WATCH_COMMANDS.contains(&c) => check_debug_watches(h, c, keys, &what),
+        c if EVALUATE_COMMANDS.contains(&c) => {
+            check_evaluate_dialog(h, c, keys, &what, b.context.as_deref())
+        }
         "debug.quick-evaluate" | "debug.value-popup.close" => {
             check_value_popups(h, b.command.as_str(), keys, &what)
         }
         _ => return false,
     }
     true
+}
+
+/// The keys of the Evaluate dialog (#293).
+const EVALUATE_COMMANDS: [&str; 5] = [
+    "evaluate-dialog.evaluate",
+    "evaluate-dialog.add-to-watches",
+    "evaluate-dialog.switch-mode",
+    "evaluate-dialog.focus-result",
+    "evaluate-dialog.close",
+];
+
+/// The keys of the Evaluate dialog with a scripted adapter
+/// ([`views_script`]) that answers `a + 1` twice. In the context of the
+/// dialog itself (not its editors) the result tree has the focus.
+fn check_evaluate_dialog(h: &mut H, command: &str, keys: &str, what: &str, context: Option<&str>) {
+    let answer = || {
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": "a + 1"}}),
+            json!({"respond": {"result": "2", "type": "int", "variablesReference": 0}}),
+        ]
+    };
+    let mut after = answer();
+    after.extend(answer());
+    start_views(h, after);
+    // The watches of an earlier check are removed.
+    while h.debug()["tool_window"]["tabs"][0]["variables"]["watches"]
+        .as_array()
+        .is_some_and(|w| !w.is_empty())
+    {
+        h.invoke("debug.remove-watch", json!({"index": 0}));
+    }
+    h.invoke("debug.evaluate-expression", json!({"expression": "a + 1"}));
+    let find = |h: &mut H| {
+        h.cx.update(|cx| ui::dialog_window::find(debugger_ui::evaluate::CONTEXT, cx))
+    };
+    let dialog = find(h).expect("the Evaluate dialog is open");
+    let state = |h: &mut H| h.debug()["evaluate_dialog"].clone();
+    let in_dialog = |h: &mut H, keys: &str| {
+        h.dispatched.borrow_mut().clear();
+        h.cx.simulate_keystrokes(dialog, keys);
+        h.draw();
+    };
+    let result = |h: &mut H| {
+        h.wait_debug("the result", |s| {
+            s["evaluate_dialog"]["result"]["state"] == json!("value")
+        })["evaluate_dialog"]
+            .clone()
+    };
+    let plain = context == Some("EvaluateDialog") && command != "evaluate-dialog.focus-result";
+    if plain {
+        // The tree has the focus: the keys of the dialog itself.
+        in_dialog(h, "enter");
+        result(h);
+        let focus = h
+            .cx
+            .update(|cx| {
+                let handle = dialog.downcast::<debugger_ui::evaluate::EvaluateDialog>()?;
+                handle.read(cx).ok()?.result_focus(cx)
+            })
+            .expect("the result tree");
+        h.cx.update_window(dialog, |_, window, _| window.focus(&focus))
+            .unwrap();
+        h.draw();
+        assert_eq!(state(h)["result_focused"], json!(true), "{what}");
+    }
+    let evaluations = state(h)["evaluations"].as_u64().unwrap();
+    match command {
+        "evaluate-dialog.evaluate" => {
+            in_dialog(h, keys);
+            let d = result(h);
+            assert_eq!(
+                d["evaluations"].as_u64().unwrap(),
+                evaluations + 1,
+                "{what}"
+            );
+            assert_eq!(
+                d["result"]["tree"]["rows"][0]["text"],
+                json!("result = {int} 2"),
+                "{what}"
+            );
+        }
+        "evaluate-dialog.add-to-watches" => {
+            in_dialog(h, keys);
+            assert_eq!(
+                h.debug()["tool_window"]["tabs"][0]["variables"]["watches"],
+                json!(["a + 1"]),
+                "{what}"
+            );
+        }
+        "evaluate-dialog.switch-mode" => {
+            in_dialog(h, keys);
+            assert_eq!(state(h)["mode"], json!("fragment"), "{what}");
+            in_dialog(h, keys);
+            assert_eq!(state(h)["mode"], json!("expression"), "{what}");
+        }
+        "evaluate-dialog.focus-result" => {
+            in_dialog(h, "enter");
+            result(h);
+            assert_eq!(state(h)["result_focused"], json!(false), "{what}");
+            in_dialog(h, keys);
+            assert_eq!(state(h)["result_focused"], json!(true), "{what}");
+        }
+        "evaluate-dialog.close" => {
+            in_dialog(h, keys);
+            assert!(find(h).is_none(), "{what}");
+            return;
+        }
+        _ => panic!("{what}: no check"),
+    }
+    // Closed without a key, which would be the last one dispatched.
+    h.cx.update(|cx| ui::dialog_window::close(dialog, cx));
+    h.draw();
 }

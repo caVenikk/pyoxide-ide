@@ -100,6 +100,8 @@ pub struct DebuggerView {
     pub(crate) popup: Option<OpenPopup>,
     pub(crate) tooltip: Option<Tooltip>,
     pub(crate) dialog: Option<WindowHandle<BreakpointsDialog>>,
+    /// The Evaluate dialog.
+    pub(crate) evaluate_dialog: Option<WindowHandle<crate::evaluate::EvaluateDialog>>,
     /// Conditions entered before, the latest first (`breakpointCondition`
     /// history).
     pub(crate) history: Vec<String>,
@@ -160,6 +162,7 @@ impl DebuggerView {
             popup: None,
             tooltip: None,
             dialog: None,
+            evaluate_dialog: None,
             history: Vec::new(),
             highlighters: None,
             tooltip_delay: TOOLTIP_DELAY,
@@ -205,6 +208,7 @@ impl DebuggerView {
         self.generation += 1;
         self.close_popup(false, window, cx);
         self.close_dialog(cx);
+        self.close_evaluate_dialog(cx);
         self.tooltip = None;
         self.gutters.clear();
         // The previous project's sessions end with it.
@@ -786,6 +790,12 @@ impl DebuggerView {
             Some(t) if t.shown => json!({"line": t.line, "lines": t.lines}),
             _ => Json::Null,
         };
+        state["evaluate_dialog"] = self
+            .evaluate_dialog
+            .as_ref()
+            .and_then(|d| d.read(cx).ok())
+            .map(|d| d.state_json(cx))
+            .unwrap_or(Json::Null);
         state["dialog"] = self
             .dialog
             .as_ref()
@@ -872,6 +882,15 @@ pub fn forward_actions<E: InteractiveElement>(
     let el = el.on_action(move |a: &AddExceptionBreakpoint, window, cx| {
         v.update(cx, |v, cx| v.add_exception_action(a, window, cx))
     });
+    let v = view.clone();
+    let editor = active.clone();
+    let el = el.on_action(
+        move |a: &crate::session::commands::EvaluateValue, window, cx| {
+            v.update(cx, |v, cx| {
+                v.evaluate_expression_action(a.expression.clone(), editor.as_ref(), window, cx)
+            })
+        },
+    );
     let el = crate::value_hint::forward_actions(el, view.clone(), active.clone());
     forward_session_actions(el, view, active)
 }

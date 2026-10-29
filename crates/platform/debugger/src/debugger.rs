@@ -35,6 +35,8 @@ pub enum HistoryKind {
     Watch,
     /// The editor of Set Value (`setValue`).
     SetValue,
+    /// The code fragment mode of the Evaluate dialog (`evaluateCodeFragment`).
+    CodeFragment,
 }
 
 /// What changed.
@@ -586,6 +588,7 @@ impl Debugger {
             HistoryKind::Evaluate => view.history.clone(),
             HistoryKind::Watch => view.watch_history.clone(),
             HistoryKind::SetValue => view.set_value_history.clone(),
+            HistoryKind::CodeFragment => view.fragment_history.clone(),
         }
     }
 
@@ -603,6 +606,7 @@ impl Debugger {
                 HistoryKind::Evaluate => &mut view.history,
                 HistoryKind::Watch => &mut view.watch_history,
                 HistoryKind::SetValue => &mut view.set_value_history,
+                HistoryKind::CodeFragment => &mut view.fragment_history,
             };
             if history.first().is_some_and(|e| e == expression) {
                 return;
@@ -612,6 +616,22 @@ impl Debugger {
             history.truncate(HISTORY);
         }
         self.save();
+    }
+
+    /// The Evaluate dialog opens in code fragment mode (the last mode the
+    /// user chose, `XDebuggerGeneralSettings.evaluationDialogMode`).
+    pub fn evaluate_fragment_mode(&self) -> bool {
+        self.inner.state().stored.view.evaluate_fragment_mode
+    }
+
+    pub fn set_evaluate_fragment_mode(&self, fragment: bool) {
+        let changed = {
+            let mut state = self.inner.state();
+            std::mem::replace(&mut state.stored.view.evaluate_fragment_mode, fragment) != fragment
+        };
+        if changed {
+            self.save();
+        }
     }
 
     /// The frames' share of the width of Threads & Variables, once it was

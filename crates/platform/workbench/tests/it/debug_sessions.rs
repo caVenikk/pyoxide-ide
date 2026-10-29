@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui::{AppContext as _, TestAppContext, WindowHandle};
+use gpui::{AppContext as _, Focusable as _, TestAppContext, WindowHandle};
 use serde_json::{Value, json};
 use ui::icons::IconName;
 use workbench::{FileType, Product, Workbench};
@@ -1115,4 +1115,220 @@ fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppC
         tick(h.cx);
     }
     assert_eq!(*infos.borrow(), vec![1]);
+}
+
+impl H<'_> {
+    fn evaluate_dialog(&mut self) -> Option<gpui::AnyWindowHandle> {
+        self.cx
+            .update(|cx| ui::dialog_window::find(debugger_ui::evaluate::CONTEXT, cx))
+    }
+
+    fn dialog_state(&mut self) -> Value {
+        self.debug()["evaluate_dialog"].clone()
+    }
+
+    /// Presses keys in the Evaluate dialog.
+    fn press_in_dialog(&mut self, keys: &str) {
+        let dialog = self.evaluate_dialog().expect("the Evaluate dialog is open");
+        self.cx.simulate_keystrokes(dialog, keys);
+        self.draw();
+    }
+
+    /// Runs a command in the Evaluate dialog's window.
+    fn invoke_in_dialog(&mut self, id: &str, args: Value) {
+        let dialog = self.evaluate_dialog().expect("the Evaluate dialog is open");
+        self.cx
+            .update_window(dialog, |_, window, cx| {
+                ui::command::invoke(id, args, window, cx)
+            })
+            .unwrap()
+            .unwrap_or_else(|e| panic!("{id}: {e:?}"));
+        self.draw();
+    }
+
+    /// Waits for the dialog's result to be `state` (`value`, `error`).
+    fn wait_result(&mut self, state: &str) -> Value {
+        let state = state.to_owned();
+        self.wait("the dialog's result", move |s| {
+            s["evaluate_dialog"]["result"]["state"] == json!(state)
+        })["evaluate_dialog"]
+            .clone()
+    }
+}
+
+/// debugger-evaluate-dialog.md: Evaluate Expression (Alt+F8) opens the
+/// dialog with the selected value's expression; Enter evaluates it into a
+/// tree, an error shows the adapter's message, Alt+M switches to the code
+/// fragment mode (⌘Enter evaluates), the history lists the evaluated
+/// expressions, Add to Watches (⇧⌘Enter) keeps the dialog open, Escape
+/// closes it, and so does the end of the session.
+#[gpui::test]
+fn the_evaluate_dialog_evaluates_expressions_and_code_fragments(cx: &mut TestAppContext) {
+    let (mut h, _dir) = setup(cx);
+    let evaluate = |expression: &str, value: &str, type_name: &str, reference: i64| {
+        vec![
+            json!({"expect": "evaluate", "arguments": {"expression": expression}}),
+            json!({"respond": {"result": value, "type": type_name,
+                "variablesReference": reference}}),
+        ]
+    };
+    let mut after = vec![
+        json!({"expect": "scopes", "arguments": {"frameId": 102}}),
+        json!({"respond": {"scopes": [{"name": "Locals", "variablesReference": 5,
+            "expensive": false}]}}),
+        json!({"expect": "variables", "arguments": {"variablesReference": 5}}),
+        json!({"respond": {"variables": [
+            {"name": "a", "value": "1", "type": "int", "variablesReference": 0,
+                "evaluateName": "a"}]}}),
+    ];
+    after.extend(evaluate("a + 1", "2", "int", 0));
+    after.extend(evaluate("{'x': 1}", "{'x': 1}", "dict", 9));
+    after.extend([
+        json!({"expect": "variables", "arguments": {"variablesReference": 9}}),
+        json!({"respond": {"variables": [
+            {"name": "'x'", "value": "1", "type": "int", "variablesReference": 0}]}}),
+        json!({"expect": "evaluate", "arguments": {"expression": "undefined_name"}}),
+        json!({"fail": "NameError: name 'undefined_name' is not defined"}),
+    ]);
+    after.extend(evaluate("c = 1\nc + 2", "3", "int", 0));
+    h.debug_main(None, after);
+    h.wait("the values of the stop", |s| {
+        s["tool_window"]["tabs"][0]["variables"]["rows"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|r| r["name"] == json!("a")))
+    });
+    let enter = if cfg!(target_os = "macos") {
+        "cmd-enter"
+    } else {
+        "ctrl-enter"
+    };
+    let add_to_watches = if cfg!(target_os = "macos") {
+        "cmd-shift-enter"
+    } else {
+        "ctrl-shift-enter"
+    };
+
+    // The selected value's expression opens the dialog (the variables have
+    // the focus).
+    let view = h
+        .window
+        .read_with(h.cx, |w, _| w.debugger_view().clone())
+        .unwrap();
+    let tree = h.cx.update(|cx| {
+        view.read(cx)
+            .tool_window()
+            .read(cx)
+            .selected_variables()
+            .unwrap()
+            .focus_handle(cx)
+    });
+    h.cx.update_window(h.window.into(), |_, window, _| window.focus(&tree))
+        .unwrap();
+    h.invoke("debug.variables.select", json!({"path": ["Locals", "a"]}));
+    h.invoke("debug.evaluate-expression", json!(null));
+    let d = h.dialog_state();
+    assert_eq!(d["mode"], json!("expression"), "{d:#}");
+    assert_eq!(d["expression"], json!("a"), "{d:#}");
+    assert_eq!(d["result"]["state"], json!("none"), "{d:#}");
+
+    // Enter evaluates the expression: `result`, with its value.
+    h.invoke("debug.evaluate-expression", json!({"expression": "a + 1"}));
+    assert_eq!(h.dialog_state()["expression"], json!("a + 1"));
+    h.press_in_dialog("enter");
+    let d = h.wait_result("value");
+    assert_eq!(d["evaluated"], json!("a + 1"), "{d:#}");
+    assert_eq!(
+        d["result"]["tree"]["rows"][0]["text"],
+        json!("result = {int} 2"),
+        "{d:#}"
+    );
+
+    // A container: its tree is open (`result`, then its children).
+    h.invoke_in_dialog(
+        "evaluate-dialog.evaluate",
+        json!({"expression": "{'x': 1}"}),
+    );
+    h.wait("the container's children", |s| {
+        s["evaluate_dialog"]["result"]["tree"]["rows"][1]["text"] == json!("'x' = {int} 1")
+    });
+    let d = h.dialog_state();
+    assert_eq!(
+        d["result"]["tree"]["rows"][0]["expanded"],
+        json!(true),
+        "{d:#}"
+    );
+
+    // An error shows the adapter's message.
+    h.invoke_in_dialog(
+        "evaluate-dialog.evaluate",
+        json!({"expression": "undefined_name"}),
+    );
+    let d = h.wait_result("error");
+    assert_eq!(
+        d["result"]["message"],
+        json!("NameError: name 'undefined_name' is not defined"),
+        "{d:#}"
+    );
+
+    // Alt+M: the code fragment mode, with the text; the mode is kept.
+    h.press_in_dialog("alt-m");
+    let d = h.dialog_state();
+    assert_eq!(d["mode"], json!("fragment"), "{d:#}");
+    assert_eq!(d["fragment"], json!("undefined_name"), "{d:#}");
+    h.invoke(
+        "debug.evaluate-expression",
+        json!({"expression": "c = 1\nc + 2"}),
+    );
+    assert_eq!(h.dialog_state()["fragment"], json!("c = 1\nc + 2"));
+    h.press_in_dialog(enter);
+    let d = h.wait_result("value");
+    assert_eq!(
+        d["result"]["tree"]["rows"][0]["text"],
+        json!("result = {int} 3"),
+        "{d:#}"
+    );
+    // Enter in the fragment is a new line, not an evaluation.
+    h.press_in_dialog("enter");
+    assert_eq!(h.dialog_state()["fragment"], json!("c = 1\nc + 2\n"));
+
+    // The history of each mode.
+    h.invoke_in_dialog("evaluate-dialog.history", json!(null));
+    let d = h.dialog_state();
+    assert_eq!(d["history"]["items"], json!(["c = 1\nc + 2"]), "{d:#}");
+    h.press_in_dialog("escape");
+    assert_eq!(
+        h.dialog_state()["history"],
+        json!(null),
+        "escape closes the list first"
+    );
+    h.press_in_dialog("alt-m");
+    h.invoke_in_dialog("evaluate-dialog.history", json!(null));
+    let d = h.dialog_state();
+    assert_eq!(d["mode"], json!("expression"), "{d:#}");
+    assert_eq!(
+        d["history"]["items"],
+        json!(["undefined_name", "{'x': 1}", "a + 1"]),
+        "{d:#}"
+    );
+    h.press_in_dialog("down down enter");
+    let d = h.dialog_state();
+    assert_eq!(d["history"], json!(null), "{d:#}");
+    assert_eq!(d["expression"], json!("{'x': 1}"), "{d:#}");
+
+    // Add to Watches: the expression goes to the watches, the dialog stays.
+    h.press_in_dialog(add_to_watches);
+    assert_eq!(h.tab()["variables"]["watches"], json!(["{'x': 1}"]));
+    assert!(h.evaluate_dialog().is_some());
+
+    // Escape closes the dialog; Evaluate Expression opens it again; the end
+    // of the session closes it.
+    h.press_in_dialog("escape");
+    assert!(h.evaluate_dialog().is_none());
+    h.invoke("debug.evaluate-expression", json!({"expression": "a"}));
+    assert!(h.evaluate_dialog().is_some());
+    h.invoke("debug.stop", json!(null));
+    for _ in 0..100 {
+        tick(h.cx);
+    }
+    assert!(h.evaluate_dialog().is_none(), "closed with the session");
 }

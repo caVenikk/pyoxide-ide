@@ -150,7 +150,7 @@ ui::ui_commands! {
         r#"{"text": "len(items)"}"#;
     /// Evaluate Expression of a value.
     EvaluateValue { expression: Option<String> } => "debug.evaluate-expression", "Evaluate Expression\u{2026}",
-        "Puts an expression (the selected value's without one) into the evaluate field and gives the field the focus.",
+        "Opens the Evaluate dialog over the selected frame of a suspended session with an expression: the given one, else the selected value's (variables focused), else the editor's selection or the word at its caret.",
         r#"{"expression": "items"}"#;
     /// New Watch.
     NewWatch { expression: Option<String> } => "debug.new-watch", "New Watch\u{2026}",

@@ -81,6 +81,10 @@ pub struct ViewState {
     /// The expressions typed last into a watch's editor and Set Value's.
     pub watch_history: Vec<String>,
     pub set_value_history: Vec<String>,
+    /// The code fragments evaluated last in the Evaluate dialog.
+    pub fragment_history: Vec<String>,
+    /// The Evaluate dialog opens in code fragment mode.
+    pub evaluate_fragment_mode: bool,
     /// The frames' share of the width, once it was dragged.
     pub frames_split: Option<f32>,
     pub frames_hint_closed: bool,
@@ -120,6 +124,10 @@ struct View {
     watch_history: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     set_value_history: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fragment_history: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    evaluate_fragment_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     frames_split: Option<f32>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -290,6 +298,8 @@ pub fn load(root: &Path) -> Result<Option<Stored>, StoreError> {
             history: view.expression_history,
             watch_history: view.watch_history,
             set_value_history: view.set_value_history,
+            fragment_history: view.fragment_history,
+            evaluate_fragment_mode: view.evaluate_fragment_mode,
             frames_split: view
                 .frames_split
                 .filter(|s| s.is_finite() && *s > 0.0 && *s < 1.0),
@@ -360,6 +370,8 @@ pub fn save(root: &Path, stored: &Stored) -> Result<bool, StoreError> {
             expression_history: stored.view.history.clone(),
             watch_history: stored.view.watch_history.clone(),
             set_value_history: stored.view.set_value_history.clone(),
+            fragment_history: stored.view.fragment_history.clone(),
+            evaluate_fragment_mode: stored.view.evaluate_fragment_mode,
             frames_split: stored.view.frames_split,
             frames_hint_closed: stored.view.frames_hint_closed,
         }),
@@ -425,6 +437,8 @@ mod tests {
             history: vec!["len(items)".into(), "x + 1".into()],
             watch_history: vec!["x".into()],
             set_value_history: vec!["5".into()],
+            fragment_history: vec!["x = 1\ny = 2".into()],
+            evaluate_fragment_mode: true,
             frames_split: Some(0.25),
             frames_hint_closed: true,
         };

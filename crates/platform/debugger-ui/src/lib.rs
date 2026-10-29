@@ -16,6 +16,7 @@
 //! - [`DebugHook`]: what a product supplies (its debug adapter provider).
 
 pub mod breakpoints;
+pub mod evaluate;
 pub mod frames;
 mod hook;
 pub mod icons;
@@ -41,6 +42,7 @@ pub use debugger::{DebugRequest, Phase, Session};
 pub fn init(cx: &mut gpui::App) {
     icons::register(cx);
     breakpoints::commands::register(cx);
+    evaluate::register(cx);
     ui::command::register(cx, session::commands::COMMANDS);
     ui::command::register(cx, value_hint::COMMANDS);
 }
