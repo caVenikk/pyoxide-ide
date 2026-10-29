@@ -111,6 +111,51 @@ fn check_breakpoints(h: &mut H, command: &str, keys: &str, what: &str, context: 
     h.clear_breakpoints();
 }
 
+/// The class chooser's keys in its name field (classes `KeyError`,
+/// `ValueError`).
+fn check_chooser(h: &mut H, command: &str, keys: &str, what: &str) {
+    h.clear_breakpoints();
+    h.invoke("debug.add-exception-breakpoint", json!(null));
+    let dialog = h.breakpoints_dialog().expect("the dialog is open");
+    let chooser = h
+        .cx
+        .update(|cx| ui::dialog_window::child_of(dialog, cx))
+        .expect("the class chooser is open");
+    let chooser_state = |h: &mut H| h.debug()["dialog"]["chooser"].clone();
+    match command {
+        "exception-class-chooser.next" => {
+            h.press_in(chooser, keys);
+            assert_eq!(chooser_state(h)["selected"], 1, "{what}");
+        }
+        "exception-class-chooser.previous" => {
+            h.invoke("exception-class-chooser.next", json!(null));
+            h.press_in(chooser, keys);
+            assert_eq!(chooser_state(h)["selected"], 0, "{what}");
+        }
+        "exception-class-chooser.ok" => {
+            h.press_in(chooser, keys);
+            assert!(chooser_state(h).is_null(), "{what}: the chooser closes");
+            let state = h.debug();
+            assert_eq!(state["exception_breakpoints"][1]["class"], "KeyError", "{what}");
+            h.invoke("breakpoints-dialog.remove", json!(null));
+        }
+        "exception-class-chooser.cancel" => {
+            h.press_in(chooser, keys);
+            assert!(chooser_state(h).is_null(), "{what}: the chooser closes");
+            assert_eq!(
+                h.debug()["exception_breakpoints"].as_array().map(Vec::len),
+                Some(1),
+                "{what}"
+            );
+        }
+        _ => panic!("{what}: no check"),
+    }
+    if let Some(open) = h.cx.update(|cx| ui::dialog_window::child_of(dialog, cx)) {
+        h.cx.update(|cx| ui::dialog_window::close(open, cx));
+    }
+    h.clear_breakpoints();
+}
+
 impl H<'_> {
     fn breakpoints_dialog(&mut self) -> Option<gpui::AnyWindowHandle> {
         self.cx
@@ -179,6 +224,9 @@ fn check(h: &mut H, b: &Binding) -> bool {
             || c.starts_with("breakpoints-dialog.") =>
         {
             check_breakpoints(h, c, keys, &what, b.context.as_deref())
+        }
+        c if c.starts_with("exception-class-chooser.") => {
+            check_chooser(h, c, keys, &what)
         }
         _ => return false,
     }

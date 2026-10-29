@@ -20,8 +20,11 @@
   edits apply to the gutter icon at once.
 - Step 3: Activation policy On termination (selected) / On raise, Ignore
   library files.
-- Step 4: a class chooser "Select Exception Class"; the new breakpoint is
-  listed and enabled.
+- Step 4: the + list shows "Python Exception Breakpoint"; choosing it
+  opens the dialog "Select Exception Class" (a name field, the matching
+  classes below, Cancel and OK), which stays open. Typing filters the
+  classes, Up and Down move, Enter or OK adds the breakpoint: it is listed,
+  enabled and selected. Escape or Cancel adds nothing.
 - Step 5: double-click and F4 open the source at the line; Delete removes
   the breakpoint and its gutter icon.
 - Step 6: everything is kept.

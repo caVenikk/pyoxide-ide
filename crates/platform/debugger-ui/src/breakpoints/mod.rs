@@ -1,8 +1,10 @@
 //! Breakpoints in the UI (#164): the gutter of an editor ([`gutter`]),
-//! the properties popup ([`popup`]), the Breakpoints dialog ([`dialog`]),
+//! the properties popup ([`popup`]), the Breakpoints dialog ([`dialog`])
+//! with its class chooser ([`class_chooser`]),
 //! how breakpoints are shown ([`presentation`]) and the commands
 //! ([`commands`]).
 
+pub mod class_chooser;
 pub mod commands;
 pub mod dialog;
 pub mod gutter;
