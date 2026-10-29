@@ -34,6 +34,10 @@ const ICON_X: f32 = 21.0;
 const TEXT_X: f32 = 20.0;
 const TREE_TOP: f32 = 4.0;
 const CHEVRON: f32 = 16.0;
+/// How much of the selection and the hover colour is kept over a coloured
+/// row, so that the colour shows through.
+const TINTED_SELECTION_ALPHA: f32 = 0.5;
+const TINTED_HOVER_ALPHA: f32 = 0.5;
 /// Name to its grey detail or count.
 const DETAIL_GAP: f32 = 6.0;
 
@@ -835,18 +839,22 @@ impl Explorer {
         let indent = theme.metric(Metric::TreeIndent);
         let left = px(TREE_LEFT) + indent * row.depth as f32;
         let selected = self.tree.selected.as_ref() == Some(&row.key);
-        let selection = theme.color(if focused {
+        let mut selection = theme.color(if focused {
             UiRole::Selection
         } else {
             UiRole::SelectionInactive
         });
-        let hover = theme.color(UiRole::Hover);
+        let mut hover = theme.color(UiRole::Hover);
         // A coloured row is painted across the tree's width, square; the
-        // selection and the hover take its place.
+        // selection and the hover are drawn over it, semi-transparent, so the
+        // colour shows through.
         let tint = self
             .row_color(&row.key)
-            .filter(|_| !selected)
             .map(|c| super::colors::tint(c, theme.is_dark()));
+        if tint.is_some() {
+            selection.a *= TINTED_SELECTION_ALPHA;
+            hover.a *= TINTED_HOVER_ALPHA;
+        }
         let name_color: Hsla = if text.failed {
             theme.color(UiRole::Danger)
         } else if row.key.node == NodeKey::Status {
@@ -923,19 +931,12 @@ impl Explorer {
         div()
             .id(("db-row", ix))
             .debug_selector(move || selector.clone())
-            .group("database-row")
             .relative()
             .w_full()
             .h(row_height)
             .overflow_hidden()
             .when_some(tint, |d, color| {
-                d.child(
-                    div()
-                        .absolute()
-                        .size_full()
-                        .bg(color)
-                        .group_hover("database-row", |s| s.bg(gpui::transparent_black())),
-                )
+                d.child(div().absolute().size_full().bg(color))
             })
             .child(
                 div()

@@ -18,8 +18,9 @@
   a separator, Settings. The chosen row is painted with its colour from
   the tree's left edge to its right edge, with square corners, and the
   text keeps its colour; other rows do not change.
-- Step 3: a selected row shows the selection, not its colour; the pointer's
-  row shows the hover highlight instead of the colour.
+- Step 3: a selected row keeps its colour, the selection is drawn over it
+  semi-transparent; the pointer's row keeps it likewise under the hover
+  highlight.
 - Step 4: after Apply to Children every row below the schema (tables,
   groups, columns) has the schema's colour; No Color leaves that table
   without one; Auto gives it the schema's again. Apply to Children is
