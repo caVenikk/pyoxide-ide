@@ -1925,6 +1925,7 @@ dependencies = [
  "editor",
  "futures",
  "gpui",
+ "name-match",
  "native-path",
  "progress",
  "project",
