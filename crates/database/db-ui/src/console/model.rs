@@ -740,9 +740,7 @@ impl Console {
         let reuse = if self.new_tab_run {
             None
         } else {
-            self.tabs
-                .iter()
-                .position(|t| t.grid.is_some() && !t.pinned && !t.renamed)
+            self.tabs.iter().position(|t| !t.pinned && !t.renamed)
         };
         let index = match reuse {
             Some(ix) => {

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use gpui::BorrowAppContext as _;
 use ui::icons::IconName;
+use ui::menu::MenuItem;
 use workbench::file_types::FileType;
 
 pub mod highlight;
@@ -36,7 +37,11 @@ pub fn file_type(hub: Arc<Hub>) -> FileType {
         quotes: &['\'', '"'],
         language_id: Some(LANGUAGE_ID),
         highlighter: Some(Arc::new(SqlHighlighter::factory(hub.clone()))),
-        decorator: Some(Arc::new(move |path| hub.decoration(path))),
+        decorator: Some(Arc::new({
+            let hub = hub.clone();
+            move |path| hub.decoration(path)
+        })),
+        context_menu: Some(Arc::new(move |path, _| context_menu(&hub, path))),
         key_context: Some(KEY_CONTEXT),
         ..FileType::plain("SQL", &["sql"], IconName("fileTypes/sql")).with_comment("-- ")
     }
@@ -62,4 +67,25 @@ pub(crate) fn publish_model(
         // The toolbars drop their hint to connect.
         cx.update_global::<widget::SqlGlobal, _>(|_, _| {});
     }
+}
+
+/// The rows the editor's context menu gets for a SQL file attached to a data
+/// source, a console or a file (the reference's `Explain Plan` group and
+/// `Execute`, after Evaluate Expression): Explain Plan > Explain Plan,
+/// Explain Analyze; Execute. A file with no data source has none.
+fn context_menu(hub: &Hub, path: &std::path::Path) -> Vec<MenuItem> {
+    if hub.resolve(path).data_source.is_none() {
+        return Vec::new();
+    }
+    vec![
+        MenuItem::submenu(
+            "Explain Plan",
+            vec![
+                MenuItem::action("Explain Plan", crate::console::ExplainPlan),
+                MenuItem::action("Explain Analyze", crate::console::ExplainAnalyze),
+            ],
+        )
+        .icon(crate::icons::PLAN),
+        MenuItem::action("Execute", crate::console::Execute).icon(IconName::RUN),
+    ]
 }

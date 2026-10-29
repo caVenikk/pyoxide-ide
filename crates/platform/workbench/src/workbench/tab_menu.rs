@@ -498,7 +498,7 @@ impl Workbench {
 
     /// Run and Debug the file with its context configuration
     /// (`RunContextPopupGroup`: `Run 'main'`, `Debug 'main'`).
-    fn tab_run_items(
+    pub(super) fn tab_run_items(
         &self,
         file: &Path,
         keys: &dyn Fn(&dyn gpui::Action) -> String,
@@ -547,7 +547,7 @@ impl Workbench {
     /// unversioned file, Show Diff and, for the active tab, Rollback… for a
     /// changed one), then
     /// the repository's (Push…, Fetch, Branches…, New Branch…).
-    fn tab_git_items(
+    pub(super) fn tab_git_items(
         &self,
         file: &Path,
         active: bool,
