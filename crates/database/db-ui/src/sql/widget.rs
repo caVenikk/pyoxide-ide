@@ -412,7 +412,7 @@ impl SqlWidget {
             return;
         };
         if let Some(explorer) = crate::explorer::explorer_of(window.window_handle(), cx) {
-            explorer.update(cx, |e, cx| e.connect_for_sql(&name, window, cx));
+            explorer.update(cx, |e, cx| e.connect_for_sql(&name, cx));
         }
     }
 

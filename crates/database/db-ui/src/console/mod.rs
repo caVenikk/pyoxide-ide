@@ -123,6 +123,16 @@ pub(crate) fn route(event: db_session::Event, cx: &mut App) {
     });
 }
 
+/// The data source `source` was disconnected: the sessions of its consoles
+/// ended (they connect again with their next statement).
+pub(crate) fn disconnected(source: &str, cx: &mut App) {
+    for console in consoles(cx) {
+        if console.read(cx).source == source {
+            console.update(cx, |c, cx| c.disconnected(cx));
+        }
+    }
+}
+
 /// Opens the console of a data source in an editor tab of `workbench`.
 pub(crate) fn open(
     workbench: Entity<Workbench>,

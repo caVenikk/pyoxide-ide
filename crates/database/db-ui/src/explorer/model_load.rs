@@ -9,10 +9,7 @@
 //!   opened like the tree opens it, and a failure is told in a balloon;
 //! - else nothing is asked of the person: the hub is told, the file's
 //!   toolbar shows a hint with a "Connect" link, and the link connects as
-//!   the tree does, asking for the password first. A data source that saves
-//!   its password "Never" uses the typed one for that connect only and asks
-//!   again for the next (while it is connected, the open connection is
-//!   reused and nothing is asked).
+//!   the tree does, which asks for the password (`connect`).
 //!
 //! Nothing here waits for the database or the credential store on the UI
 //! thread.
@@ -20,7 +17,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use gpui::{App, AppContext as _, BorrowAppContext as _, Context, Window};
+use gpui::{App, AppContext as _, BorrowAppContext as _, Context};
 use ui::notification::{Notification, NotificationKind};
 
 use super::{Explorer, Explorers};
@@ -34,13 +31,6 @@ pub(super) struct State {
     /// Data sources loading for code intelligence: a failure is told in a
     /// balloon, whether or not the tree shows them.
     loading: HashSet<String>,
-    /// Data sources whose password the person typed for a load and the
-    /// store holds for this run.
-    held: HashSet<String>,
-    /// Data sources that save their password "Never" and hold one the
-    /// person typed for the connect in progress: it is forgotten as soon
-    /// as the connect is done.
-    once: HashSet<String>,
 }
 
 /// Code intelligence of a file in the project `root` needs the model of
@@ -117,104 +107,25 @@ impl Explorer {
     }
 
     /// The "Connect" link of a SQL file's toolbar: connects to `name` as
-    /// the tree does, after asking for the password when none is to be had
-    /// without asking.
-    pub(crate) fn connect_for_sql(
-        &mut self,
-        name: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (Some(root), Some(source)) = (
-            self.root.clone(),
-            self.sources().iter().find(|s| s.name == name).cloned(),
-        ) else {
-            return;
-        };
-        let store = crate::store(cx);
-        let check = cx.background_spawn({
-            let (store, root, source) = (store.clone(), root.clone(), source.clone());
-            async move { store.needs_prompt(&root, &source) }
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let needs_prompt = check.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                if !needs_prompt {
-                    this.start_model_load(&source.name, cx);
-                    return;
-                }
-                let weak = cx.entity().downgrade();
-                let user = source.profile.user.clone();
-                let name = source.name.clone();
-                let never =
-                    source.profile.gui_options().password_save == db_core::PasswordSave::Never;
-                crate::prompt::ask(&source.name, &user, window, cx, move |secret, cx| {
-                    let (Some(secret), Some(this)) = (secret, weak.upgrade()) else {
-                        return;
-                    };
-                    store.hold_password(&root, &name, secret);
-                    this.update(cx, |this, cx| {
-                        this.model_load.held.insert(name.clone());
-                        if never {
-                            this.model_load.once.insert(name.clone());
-                        }
-                        this.start_model_load(&name, cx);
-                    });
-                });
-            });
-        })
-        .detach();
+    /// the tree does; the connection asks for the password when none is to
+    /// be had without asking.
+    pub(crate) fn connect_for_sql(&mut self, name: &str, cx: &mut Context<Self>) {
+        if self.sources().iter().any(|s| s.name == name) {
+            self.start_model_load(name, cx);
+        }
     }
 
     /// A load of the data source finished with a model.
-    pub(super) fn model_load_finished(&mut self, name: &str, cx: &mut Context<Self>) {
+    pub(super) fn model_load_finished(&mut self, name: &str) {
         self.model_load.loading.remove(name);
-        self.model_load.held.remove(name);
-        self.forget_once_password(name, cx);
-    }
-
-    /// The password typed for one connect of a data source that saves
-    /// "Never" is forgotten once the connect has served its refresh and
-    /// its counters (an open connection goes on without it); the next
-    /// connect asks again.
-    pub(super) fn forget_once_password(&mut self, name: &str, cx: &mut Context<Self>) {
-        if !self.model_load.once.contains(name) {
-            return;
-        }
-        let busy = self
-            .tree
-            .lives
-            .get(name)
-            .is_some_and(|l| l.refresh.is_some() || l.cache_loading)
-            || self.tree.total_tasks.contains_key(name);
-        if busy {
-            return;
-        }
-        self.model_load.once.remove(name);
-        if let Some(root) = self.root.clone() {
-            crate::store(cx).release_password(&root, name);
-        }
     }
 
     /// A refresh of the data source failed: tells whether the failure
-    /// belongs in a balloon (the load was ours, and nothing else tells it).
-    /// A password typed for the load that the server refused is forgotten,
-    /// so that the next "Connect" asks again.
-    pub(super) fn model_load_failed(
-        &mut self,
-        name: &str,
-        error: &db_core::Error,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// belongs in a balloon (the load was ours, and nothing else tells it;
+    /// a password that was not typed is no failure to tell).
+    pub(super) fn model_load_failed(&mut self, name: &str, error: &db_core::Error) -> bool {
         let ours = self.model_load.loading.remove(name);
-        if self.model_load.held.remove(name)
-            && error.kind == db_core::ErrorKind::Auth
-            && let Some(root) = self.root.clone()
-        {
-            crate::store(cx).release_password(&root, name);
-        }
-        self.forget_once_password(name, cx);
-        ours
+        ours && error.kind != db_core::ErrorKind::Cancelled
     }
 
     /// The notification of a failed load for code intelligence.
