@@ -45,6 +45,12 @@ ui::ui_commands! {
     AttachDataSource { name: Option<String>, schema: Option<String>, target: Option<String>, shared: Option<bool> } => "sql.attach-data-source", "Attach Data Source",
         "Attaches the active SQL file, its folder (`target`: `folder`) or the whole project (`project`) to the data source `name` and the optional `schema`; without `name` the attachment is removed. Names in the file then mean what that data source's metadata says. Personal unless `shared` is true.",
         r#"{"name": "local", "schema": "public"}"#;
+    /// Open the transaction popup of a console.
+    OpenTxMenu => "db.console.tx-menu", "Transaction Mode and Isolation",
+        "Opens the popup of the console toolbar's transaction button: the mode (Auto, Manual) and the isolation level, the current ones checked.";
+    /// Open the schema popup of a console.
+    OpenSchemaMenu => "db.console.schema-menu", "Current Schema",
+        "Opens the list of the schemas the console can switch to, the current one checked. Nothing where the engine has no schemas to switch (SQLite).";
     /// Describe the toolbar.
     SqlState => "sql.state", "SQL State",
         "Returns the SQL toolbar's state as JSON: whether it shows, its chips and banner, the active file's dialect and scope with where each came from, the data sources it can attach, and the open popup.";
@@ -107,6 +113,36 @@ pub(crate) fn init(cx: &mut App, hub: Arc<Hub>) {
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, cx| {
                 widget.update(cx, |w, cx| w.open(ChipId::Source, window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &crate::console::ChooseExecution, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open_choices(window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenTxMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open_tx(window, cx));
+            });
+        });
+    });
+    cx.on_action(|_: &OpenSchemaMenu, cx| {
+        let Some((window, widget)) = target(cx) else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                widget.update(cx, |w, cx| w.open(ChipId::Schema, window, cx));
             });
         });
     });
@@ -193,6 +229,9 @@ pub(crate) struct SqlWidget {
     dialect_bounds: Rc<Cell<Bounds<Pixels>>>,
     schema_bounds: Rc<Cell<Bounds<Pixels>>>,
     source_bounds: Rc<Cell<Bounds<Pixels>>>,
+    tx_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The consoles whose changes redraw the toolbar.
+    observed: HashSet<gpui::EntityId>,
     popup_anchor: Rc<Cell<Bounds<Pixels>>>,
     /// Files whose "dialect is not configured" banner was cancelled.
     dismissed: HashSet<PathBuf>,
@@ -230,6 +269,8 @@ impl SqlWidget {
             dialect_bounds: Rc::default(),
             schema_bounds: Rc::default(),
             source_bounds: Rc::default(),
+            tx_bounds: Rc::default(),
+            observed: HashSet::new(),
             popup_anchor: Rc::default(),
             dismissed: HashSet::new(),
             load: Task::ready(()),
@@ -331,11 +372,18 @@ impl SqlWidget {
         });
         match attached {
             Some((name, icon, database)) => {
-                let schema = resolved.schema.as_ref().map(|schema| Chip {
-                    id: ChipId::Schema,
-                    icon: Some(icons::SCHEMA),
-                    text: format!("{database}.{schema}"),
-                });
+                // A console whose session has not reported a schema yet
+                // shows the placeholder, as the reference does.
+                let console = matches!(resolved.scope_origin, settings::Origin::Console);
+                let schema = resolved
+                    .schema
+                    .clone()
+                    .or_else(|| console.then(|| "<schema>".to_owned()))
+                    .map(|schema| Chip {
+                        id: ChipId::Schema,
+                        icon: Some(icons::SCHEMA),
+                        text: format!("{database}.{schema}"),
+                    });
                 // A console is bound to its data source: no chip for it.
                 let source = (!matches!(resolved.scope_origin, settings::Origin::Console))
                     .then_some(Chip {
@@ -385,8 +433,83 @@ impl SqlWidget {
         text
     }
 
+    /// The console of the visible file, when it has one.
+    fn console(&self, cx: &App) -> Option<Entity<crate::console::Console>> {
+        let file = self.visible_file()?;
+        crate::console::console_of(file, cx)
+    }
+
+    /// Opens a popup of `items` under `anchor`.
+    fn show_items(
+        &mut self,
+        items: Vec<MenuItem>,
+        anchor: Bounds<Pixels>,
+        options: PopupOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.menu.is_some() || items.is_empty() {
+            return;
+        }
+        self.popup_anchor.set(anchor);
+        let menu = ContextMenu::popup(items, options, window, cx);
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.menu = None;
+            cx.notify();
+        });
+        self.menu = Some((menu, subscription));
+        cx.notify();
+    }
+
+    /// The question "what to execute" under the caret.
+    fn open_choices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(console) = self.console(cx) else {
+            return;
+        };
+        let (items, anchor) = {
+            let console = console.read(cx);
+            (console.choice_items(), console.choice_anchor())
+        };
+        let anchor = anchor.unwrap_or_else(|| self.source_bounds.get());
+        let options = PopupOptions {
+            title: Some("Execute".into()),
+            selected: Some(0),
+            ..PopupOptions::default()
+        };
+        self.show_items(items, anchor, options, window, cx);
+    }
+
+    /// The console's transaction mode and isolation popup.
+    fn open_tx(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(console) = self.console(cx) else {
+            return;
+        };
+        let items = console.read(cx).tx_menu_items();
+        self.show_items(
+            items,
+            self.tx_bounds.get(),
+            crate::console::tx_ui::popup_options(),
+            window,
+            cx,
+        );
+    }
+
     fn open(&mut self, chip: ChipId, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.is_some() {
+            return;
+        }
+        // The schema of a console is the session's: its list switches it.
+        if chip == ChipId::Schema
+            && let Some(console) = self.console(cx)
+        {
+            let items = console.read(cx).schema_menu_items();
+            self.show_items(
+                items,
+                self.schema_bounds.get(),
+                PopupOptions::default(),
+                window,
+                cx,
+            );
             return;
         }
         let anchor = match chip {
@@ -498,6 +621,15 @@ impl SqlWidget {
                 .map(|r| self.hub.source_names(r))
                 .unwrap_or_default(),
             "popup": self.menu.as_ref().map(|(m, _)| m.read(cx).state_json()),
+            "console": self.console(cx).map(|c| {
+                let c = c.read(cx);
+                json!({
+                    "tx": c.tx_label(),
+                    "commit-buttons": c.is_manual(),
+                    "pending": c.pending(),
+                    "unsafe-banner": c.unsafe_run.as_ref().map(|u| u.message.clone()),
+                })
+            }),
         })
     }
 }
@@ -737,13 +869,9 @@ impl SqlWidget {
         // A file attached to a data source has the same controls; a file
         // without one only Execute (it asks for a data source).
         let attached = resolved.data_source.is_some();
-        let running = self
-            .visible_file()
-            .and_then(|f| {
-                crate::console::consoles(cx)
-                    .into_iter()
-                    .find(|c| c.read(cx).path == f)
-            })
+        let console_entity = self.console(cx);
+        let running = console_entity
+            .as_ref()
             .is_some_and(|c| c.read(cx).running.is_some());
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
@@ -763,32 +891,81 @@ impl SqlWidget {
         if !console && !attached {
             return vec![execute];
         }
-        vec![
-            execute,
-            div()
-                .flex_none()
-                .px(px(6.0))
-                .text_size(px(CHIP_TEXT))
-                .text_color(muted)
-                .child("Tx: Auto")
-                .into_any_element(),
-            button(
-                "sql-stop",
-                if running {
-                    IconName::STOP
-                } else {
-                    icons::STOP_DISABLED
-                },
-                "Cancel Running Statements",
-                running,
-            )
-            .when(running, |d| {
-                d.on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(crate::console::Stop), cx)
+        let stop = button(
+            "sql-stop",
+            if running {
+                IconName::STOP
+            } else {
+                icons::STOP_DISABLED
+            },
+            "Cancel Running Statements",
+            running,
+        )
+        .when(running, |d| {
+            d.on_click(|_, window, cx| window.dispatch_action(Box::new(crate::console::Stop), cx))
+        })
+        .into_any_element();
+        let mut buttons = vec![execute];
+        if console_entity.is_some() {
+            buttons.push(
+                button("sql-parameters", icons::PARAMETERS, "Parameters", !running)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(
+                            Box::new(crate::console::transactions::EditParameters),
+                            cx,
+                        )
+                    })
+                    .into_any_element(),
+            );
+            buttons.push(
+                button(
+                    "sql-settings",
+                    IconName::SETTINGS_SMALL,
+                    "Query Execution Settings",
+                    true,
+                )
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(
+                        Box::new(settings_ui::commands::OpenSettings {
+                            page: Some(crate::settings_page::QUERY_EXECUTION.to_owned()),
+                            filter: None,
+                        }),
+                        cx,
+                    )
                 })
-            })
-            .into_any_element(),
-        ]
+                .into_any_element(),
+            );
+        }
+        match &console_entity {
+            Some(console) => {
+                let label = console.read(cx).tx_label();
+                buttons.push(
+                    crate::console::tx_ui::mode_button("sql-tx", label, self.tx_bounds.clone(), cx)
+                        .on_click(cx.listener(|this, _, window, cx| this.open_tx(window, cx)))
+                        .into_any_element(),
+                );
+                buttons.extend(crate::console::tx_ui::commit_buttons(
+                    "sql",
+                    console,
+                    px(24.0),
+                    px(16.0),
+                    cx,
+                ));
+            }
+            // A file attached to a data source has no session before its
+            // first run.
+            None => buttons.push(
+                div()
+                    .flex_none()
+                    .px(px(6.0))
+                    .text_size(px(CHIP_TEXT))
+                    .text_color(muted)
+                    .child("Tx: Auto")
+                    .into_any_element(),
+            ),
+        }
+        buttons.push(stop);
+        buttons
     }
 }
 
@@ -797,6 +974,18 @@ impl Render for SqlWidget {
         let Some(resolved) = self.resolved() else {
             return div().into_any_element();
         };
+        if let Some(console) = self.console(cx)
+            && self.observed.insert(console.entity_id())
+        {
+            self._subscriptions
+                .push(cx.observe(&console, |_, _, cx| cx.notify()));
+        }
+        let unsafe_banner = self.console(cx).and_then(|c| {
+            c.read(cx)
+                .unsafe_run
+                .as_ref()
+                .map(|u| crate::console::tx_ui::unsafe_banner(&u.message, cx))
+        });
         let tooltip = SharedString::from(Self::tooltip(&resolved));
         let banner = self.banner_shows(&resolved).then(|| self.render_banner(cx));
         let chips: Vec<_> = self
@@ -832,6 +1021,7 @@ impl Render for SqlWidget {
             .flex_col()
             .children(banner)
             .child(toolbar)
+            .children(unsafe_banner)
             .children(overlay)
             .into_any_element()
     }

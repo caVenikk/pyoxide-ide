@@ -281,7 +281,7 @@ impl Explorer {
         let name = event.data_source.as_str().to_owned();
         if matches!(
             event.kind,
-            EventKind::Session { .. } | EventKind::Job { .. }
+            EventKind::Session { .. } | EventKind::Job { .. } | EventKind::DecisionNeeded { .. }
         ) {
             crate::console::route(event, cx);
             return;
@@ -406,6 +406,26 @@ impl Explorer {
             None => self.open_live(&name, cx),
         }
         self.rebuild_rows();
+        cx.notify();
+    }
+
+    /// The selected data source has connections open.
+    pub(super) fn selected_connected(&self) -> bool {
+        self.selected_source()
+            .and_then(|s| self.tree.lives.get(&s.name))
+            .is_some_and(|live| live.state == DataSourceState::Connected)
+    }
+
+    /// Closes the connections of the selected data source; with changes
+    /// pending in a console the session layer asks first.
+    pub(super) fn disconnect_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self
+            .selected_source()
+            .and_then(|s| self.tree.lives.get(&s.name))
+        else {
+            return;
+        };
+        live.handle.disconnect(db_session::TxPolicy::Ask);
         cx.notify();
     }
 

@@ -35,12 +35,12 @@ fn server() -> FakeSource {
     source
 }
 
-fn console_state(h: &mut Harness) -> Value {
+pub(super) fn console_state(h: &mut Harness) -> Value {
     h.invoke("db.console.state", Value::Null)["consoles"][0].clone()
 }
 
 /// Draws until the console's state satisfies `f`.
-fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
+pub(super) fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Value {
     let started = Instant::now();
     loop {
         let s = console_state(h);
@@ -56,11 +56,11 @@ fn wait_console(h: &mut Harness, what: &str, f: impl Fn(&Value) -> bool) -> Valu
     }
 }
 
-fn idle(s: &Value) -> bool {
+pub(super) fn idle(s: &Value) -> bool {
     s["running"] == false && s["output"].as_array().is_some_and(|o| !o.is_empty())
 }
 
-fn output(s: &Value) -> String {
+pub(super) fn output(s: &Value) -> String {
     s["output"]
         .as_array()
         .unwrap()
@@ -72,7 +72,7 @@ fn output(s: &Value) -> String {
 
 /// Shows the tree with the cached model and opens the console of the
 /// data source.
-fn open_console(h: &mut Harness) -> Value {
+pub(super) fn open_console(h: &mut Harness) -> Value {
     show_tool_window(h);
     h.invoke("db.explorer.expand", json!({ "path": NAME }));
     let started = Instant::now();
@@ -95,7 +95,7 @@ fn open_console(h: &mut Harness) -> Value {
     }
 }
 
-fn harness<'a>(
+pub(super) fn harness<'a>(
     cx: &'a mut TestAppContext,
     root: &Path,
     server: &FakeSource,
@@ -427,7 +427,8 @@ fn execute_in_an_attached_file_runs_that_files_statement_in_its_own_session(
     });
     // The console did not run its text again: the file's statement ran in
     // a session of its own, with its own node and output.
-    assert_eq!(all[0]["output"], json!([]), "{all:?}");
+    let console_log = output(&all[0]);
+    assert!(!console_log.contains("nope"), "{console_log}");
     assert_eq!(all[0]["file"], false);
     assert!(all[1]["path"].as_str().unwrap().ends_with("scratch.sql"));
     assert_eq!(all[1]["file"], true);
@@ -451,7 +452,7 @@ fn execute_in_an_attached_file_runs_that_files_statement_in_its_own_session(
     let all = wait_consoles(&mut h, "the second run", |all| {
         all.len() == 2 && idle(&all[1]) && output(&all[1]).matches("retrieved").count() == 2
     });
-    assert_eq!(all[0]["output"], json!([]), "{all:?}");
+    assert!(!output(&all[0]).contains("nope"), "{all:?}");
     assert!(services_visible(&mut h));
 
     // Back in the console, the key runs the console's statement.

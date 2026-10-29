@@ -14,6 +14,8 @@ pub mod grid;
 mod live;
 mod password;
 pub mod prompt;
+pub mod query_settings;
+mod settings_page;
 pub mod sql;
 pub mod store;
 pub mod transfer;
@@ -98,6 +100,9 @@ pub mod icons {
     pub const FIRST_PAGE: IconName = IconName("db/firstPage");
     pub const LAST_PAGE: IconName = IconName("db/lastPage");
     pub const STOP_DISABLED: IconName = IconName("db/stopDisabled");
+    // The console's transactions and parameters.
+    pub const TX: IconName = IconName("db/tx");
+    pub const PARAMETERS: IconName = IconName("db/parameters");
     // The marks of an executed statement in the console's gutter.
     pub const STATEMENT_OK: IconName = IconName("db/statementOk");
     // The Services tool window.
@@ -174,6 +179,8 @@ pub const ICONS: &[IconSvg] = &[
     icon!("firstPage", "firstPage"),
     icon!("lastPage", "lastPage"),
     icon!("stopDisabled", "stopDisabled"),
+    icon!("tx", "tx"),
+    icon!("parameters", "parameters"),
     icon!("services@20x20", "services@20x20"),
     icon!("exportData", "exportData"),
     icon!("importData", "importData"),
@@ -205,8 +212,13 @@ pub fn module(config: DbUiConfig) -> Module {
         file_types: vec![sql::file_type(hub)],
         status_widgets: vec![grid::status_widget()],
         editor_headers: vec![sql::widget::editor_header()],
+        settings_pages: settings_page::pages()
+            .into_iter()
+            .chain(data_views::pages())
+            .collect(),
         init: Some(Init::new(move |cx| {
             cx.set_global(Store(store.clone()));
+            settings_ui::store::register::<query_settings::QueryExecutionSettings>(cx);
             sql::widget::init(cx, init_hub.clone());
             explorer::init(cx);
             dialog::init(cx);
@@ -216,7 +228,6 @@ pub fn module(config: DbUiConfig) -> Module {
             transfer::init(cx);
         })),
         keymaps: Some(KEYMAPS),
-        settings_pages: data_views::pages(),
         tool_windows: vec![
             ToolWindowHook {
                 spec: ToolWindowSpec {

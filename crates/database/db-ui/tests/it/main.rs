@@ -4,13 +4,17 @@
 //! object tree (`tree`), the data grid of a table (`grid`) and what it shows
 //! for values, with its panel and views (`grid_values`), the SQL editor glue
 //! (`sql`) and the SQL consoles with their output log and result tabs
-//! (`console`), and the copy and transfer dialogs of the grid (`transfer`).
+//! (`console`) and their transactions, schema and safety checks
+//! (`console_tx`), and the copy and transfer dialogs of the grid
+//! (`transfer`).
 
 mod console;
+mod console_tx;
 mod data_sources;
 mod grid;
 mod grid_values;
 mod keymap;
+mod query_execution;
 mod sql;
 mod transfer;
 mod tree;

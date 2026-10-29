@@ -44,6 +44,8 @@ pub use ::settings::{DataViewSettings, SaveSettings, SyncSettings};
 pub const APPEARANCE_BEHAVIOR: &str = "appearance-behavior";
 /// Id of the Editor group.
 pub const EDITOR: &str = "editor";
+/// Id of the Tools group (modules put their tool pages under it).
+pub const TOOLS: &str = "tools";
 /// Id of the Keymap page.
 pub const KEYMAP_PAGE: &str = keymap::ID;
 
@@ -104,6 +106,15 @@ fn pages() -> Vec<PageSpec> {
             search_terms: font::SEARCH_TERMS,
             description: None,
             create: Some(settings_ui::page::create(font::FontPage::new)),
+        },
+        // After Editor, Plugins, Version Control and Languages & Frameworks
+        // (`PlatformExtensions.xml`: the group weights go down from Keymap).
+        PageSpec {
+            weight: 20,
+            description: Some(
+                "Configure the tools built into the IDE: the database tools, the terminal and others.",
+            ),
+            ..PageSpec::group(TOOLS, None, "Tools")
         },
         PageSpec {
             id: keymap::ID,

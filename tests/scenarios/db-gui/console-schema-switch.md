@@ -12,3 +12,8 @@
 
 ## Source
 observed
+
+## Engine differences
+- PostgreSQL: the session `search_path` is set to the chosen schema.
+- Oracle: `ALTER SESSION SET CURRENT_SCHEMA`; the chip is re-read after a manual `ALTER SESSION`.
+- SQLite: there are no schemas to switch; the schema list is empty.

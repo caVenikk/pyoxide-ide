@@ -27,7 +27,8 @@ pub use line::LineLexer;
 pub use params::{ParamKind, Parameter, parameters};
 pub use script::{Script, SyntaxError, SyntaxErrorKind, TextEdit, parse, reparse};
 pub use split::{
-    Candidate, CandidateKind, Statement, candidates_at, split, statement_at, statements_in,
+    Candidate, CandidateKind, Statement, candidates_at, split, statement_at, statement_of,
+    statements_in,
 };
 pub use tree::{
     EmbeddedFragment, Expected, FragmentLanguage, NameKind, StatementTree, SyntaxElement,

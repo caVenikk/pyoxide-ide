@@ -89,6 +89,7 @@ struct FakeInner {
     open: Mutex<OpenBehavior>,
     cancel_supported: AtomicBool,
     log: Mutex<Vec<LogEntry>>,
+    bound: Mutex<Vec<(String, Vec<Value>)>>,
     opened: Mutex<Vec<Purpose>>,
     open_now: AtomicUsize,
 }
@@ -102,6 +103,7 @@ impl FakeSource {
                 open: Mutex::new(OpenBehavior::Connect),
                 cancel_supported: AtomicBool::new(true),
                 log: Mutex::new(Vec::new()),
+                bound: Mutex::new(Vec::new()),
                 opened: Mutex::new(Vec::new()),
                 open_now: AtomicUsize::new(0),
             }),
@@ -130,6 +132,11 @@ impl FakeSource {
 
     pub fn log(&self) -> Vec<LogEntry> {
         lock(&self.inner.log).clone()
+    }
+
+    /// The statements that were sent with bound values, with the values.
+    pub fn bound(&self) -> Vec<(String, Vec<Value>)> {
+        lock(&self.inner.bound).clone()
     }
 
     /// The logged statements and calls of connections opened for `purpose`.
@@ -314,8 +321,11 @@ impl Connection for FakeConnection {
         self.source.backend
     }
 
-    async fn execute(&self, sql: &str, _params: &[Value], _opts: &ExecOptions) -> Result<Outcome> {
+    async fn execute(&self, sql: &str, params: &[Value], _opts: &ExecOptions) -> Result<Outcome> {
         self.log(sql);
+        if !params.is_empty() {
+            lock(&self.source.bound).push((sql.to_owned(), params.to_vec()));
+        }
         self.check()?;
         self.before(sql)?;
         let r = self.react(self.reaction(sql)).await;

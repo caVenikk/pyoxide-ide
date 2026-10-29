@@ -73,6 +73,77 @@ pub struct SessionOptions {
     /// Schema to switch to after connecting (PostgreSQL: the search path,
     /// Oracle: the current schema).
     pub schema: Option<String>,
+    /// Isolation level to set after connecting; `None` leaves the server's.
+    pub isolation: Option<Isolation>,
+}
+
+/// The isolation level of a console's transactions (the console's
+/// transaction menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    /// What the server is configured with.
+    DatabaseDefault,
+    #[default]
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+impl Isolation {
+    pub const ALL: [Isolation; 4] = [
+        Isolation::DatabaseDefault,
+        Isolation::ReadCommitted,
+        Isolation::RepeatableRead,
+        Isolation::Serializable,
+    ];
+
+    /// The words of SQL (`READ COMMITTED`); `None` for the server's default.
+    pub fn sql(self) -> Option<&'static str> {
+        match self {
+            Isolation::DatabaseDefault => None,
+            Isolation::ReadCommitted => Some("READ COMMITTED"),
+            Isolation::RepeatableRead => Some("REPEATABLE READ"),
+            Isolation::Serializable => Some("SERIALIZABLE"),
+        }
+    }
+
+    /// The level as commands name it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Isolation::DatabaseDefault => "database-default",
+            Isolation::ReadCommitted => "read-committed",
+            Isolation::RepeatableRead => "repeatable-read",
+            Isolation::Serializable => "serializable",
+        }
+    }
+
+    /// The level named `id` ([`Isolation::id`]), also with underscores.
+    pub fn from_id(id: &str) -> Option<Self> {
+        let id = id.replace('_', "-");
+        Self::ALL.into_iter().find(|l| l.id() == id)
+    }
+
+    /// The level as the menu names it.
+    pub fn title(self) -> &'static str {
+        match self {
+            Isolation::DatabaseDefault => "Database Default",
+            Isolation::ReadCommitted => "Read Committed",
+            Isolation::RepeatableRead => "Repeatable Read",
+            Isolation::Serializable => "Serializable",
+        }
+    }
+
+    /// Whether the engine can run its transactions at this level:
+    /// PostgreSQL all of them, Oracle read committed and serializable,
+    /// SQLite none (its transactions are serializable).
+    pub fn supported(self, dialect: db_core::Dialect) -> bool {
+        match dialect {
+            db_core::Dialect::Postgres => true,
+            db_core::Dialect::Oracle => self != Isolation::RepeatableRead,
+            db_core::Dialect::Sqlite => false,
+        }
+    }
 }
 
 /// What to do with pending changes when an action would end a transaction

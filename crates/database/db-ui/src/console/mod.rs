@@ -5,9 +5,15 @@
 //! log and the result tabs show in the Services tool window under the
 //! editor.
 
+mod decision;
 mod files;
 mod model;
+mod params;
+mod params_dialog;
+pub(crate) mod plan;
 pub(crate) mod services;
+pub(crate) mod transactions;
+pub(crate) mod tx_ui;
 
 use std::path::PathBuf;
 
@@ -18,6 +24,7 @@ use workbench::Workbench;
 pub(crate) use model::{Console, ConsoleEvent, ConsoleKind, ConsoleTarget, Pane};
 
 use crate::explorer;
+use crate::query_settings::Variant;
 
 /// The key context of the output log (its bindings in `console.toml`).
 pub const OUTPUT_CONTEXT: &str = "DatabaseOutput";
@@ -31,6 +38,19 @@ ui::ui_commands! {
     /// Run the statement at the caret.
     Execute => "db.console.execute", "Execute",
         "Runs the statement at the caret of the active SQL editor, or the statements of its selection, in the session of that file: a console's own, or the session of a `.sql` file attached to a data source (its own node in the Services tool window); a file without a data source opens the data source popup. Nothing in any other editor. The output log and the result tab show in the Services tool window.";
+    /// Run with the second set of Execute options.
+    Execute2 => "db.console.execute-2", "Execute (2)",
+        "Like db.console.execute, with the options of the Execute (2) tab of Settings > Tools > Database > Query Execution (what to run at the caret or for a selection, results in a new tab). No default shortcut.";
+    /// Run with the third set of Execute options.
+    Execute3 => "db.console.execute-3", "Execute (3)",
+        "Like db.console.execute, with the options of the Execute (3) tab of Settings > Tools > Database > Query Execution. No default shortcut.";
+    /// Show the popup of what an Execute could run.
+    ChooseExecution => "db.console.choose-execution", "Choose What to Execute",
+        "Opens the popup that asks what to execute (a subquery around the caret, the statement, all statements) when the Execute options say \"Ask what to execute\" and more than one thing could run. Set by Execute itself.";
+    /// Answer the popup with a row.
+    ExecuteChoice { index: usize } => "db.console.execute-choice", "Execute Choice",
+        "Runs row `index` (zero-based) of the open \"what to execute\" popup of the active console.",
+        r#"{"index": 0}"#;
     /// Cancel the running statement.
     Stop => "db.console.stop", "Cancel Running Statements",
         "Cancels the statement the active console is running.";
@@ -103,6 +123,10 @@ fn target_window(cx: &App) -> Option<AnyWindowHandle> {
 /// Hands a session event to the console it belongs to (the module's
 /// data source handles send every event to the Database tool window).
 pub(crate) fn route(event: db_session::Event, cx: &mut App) {
+    if matches!(event.kind, db_session::EventKind::DecisionNeeded { .. }) {
+        transactions::route_decision(event, cx);
+        return;
+    }
     let (db_session::EventKind::Session { session, .. }
     | db_session::EventKind::Job { session, .. }) = &event.kind
     else {
@@ -173,6 +197,9 @@ fn finish_open(
             });
             subscribe(&console, &workbench, window, cx);
             cx.default_global::<Consoles>().0.push(console.clone());
+            // Connect now, off the UI thread, so the toolbar knows the
+            // current schema before the first statement.
+            console.read(cx).session.connect();
             console
         }
     };
@@ -240,7 +267,25 @@ pub(crate) fn init(cx: &mut App) {
         explorer::with_target(cx, move |e, window, cx| e.open_console(source, window, cx));
     });
     cx.on_action(|_: &Execute, cx| {
-        explorer::with_target(cx, |e, window, cx| e.execute(window, cx));
+        explorer::with_target(cx, |e, window, cx| e.execute(Variant::Execute, window, cx));
+    });
+    cx.on_action(|_: &Execute2, cx| {
+        explorer::with_target(cx, |e, window, cx| e.execute(Variant::Execute2, window, cx));
+    });
+    cx.on_action(|_: &Execute3, cx| {
+        explorer::with_target(cx, |e, window, cx| e.execute(Variant::Execute3, window, cx));
+    });
+    cx.on_action(|a: &ExecuteChoice, cx| {
+        let Some(console) = target(cx) else {
+            return;
+        };
+        let index = a.index;
+        let window = console.read(cx).window;
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                console.update(cx, |c, cx| c.run_choice(index, window, cx));
+            });
+        });
     });
     cx.on_action(|_: &Stop, cx| {
         let Some(console) = target(cx) else {
@@ -292,6 +337,7 @@ pub(crate) fn init(cx: &mut App) {
         "db.console.state",
         std::rc::Rc::new(|_, window, cx| Ok(state_json(window.window_handle(), cx))),
     );
+    transactions::init(cx);
     services::init(cx);
 }
 
@@ -304,5 +350,7 @@ fn state_json(window: AnyWindowHandle, cx: &App) -> Json {
             .map(|c| c.read(cx).state_json(cx))
             .collect::<Vec<_>>(),
         "services": {"collapsed": services::collapsed(main, cx)},
+        "tx_decision": decision::state_json(cx),
+        "parameters": params_dialog::state_json(cx),
     })
 }

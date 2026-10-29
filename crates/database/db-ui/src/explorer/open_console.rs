@@ -8,6 +8,7 @@ use ui::notification::{Notification, NotificationKind};
 
 use super::Explorer;
 use crate::console::{self, ConsoleKind, ConsoleTarget};
+use crate::query_settings::Variant;
 use crate::sql::widget::{ChooseDialect, SqlGlobal, is_sql_file};
 
 impl Explorer {
@@ -64,7 +65,12 @@ impl Explorer {
     /// data source the file is attached to, made on the first run); a SQL
     /// file without a data source asks for one; any other editor does
     /// nothing.
-    pub(crate) fn execute(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn execute(
+        &mut self,
+        variant: Variant,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(workbench) = self.workbench.upgrade() else {
             return;
         };
@@ -80,7 +86,7 @@ impl Explorer {
             .clone()
             .filter(|c| c.read(cx).kind == ConsoleKind::Console)
         {
-            console.update(cx, |c, cx| c.execute_at_caret(cx));
+            console.update(cx, |c, cx| c.execute_with(variant, window, cx));
             return;
         }
         let hub = cx.global::<SqlGlobal>().0.clone();
@@ -89,14 +95,14 @@ impl Explorer {
             return;
         };
         if let Some(console) = existing.filter(|c| c.read(cx).source == source) {
-            console.update(cx, |c, cx| c.execute_at_caret(cx));
+            console.update(cx, |c, cx| c.execute_with(variant, window, cx));
             return;
         }
         let Some(target) = self.console_target(&source, cx) else {
             return;
         };
         let console = console::attach_file(workbench, target, file, window, cx);
-        console.update(cx, |c, cx| c.execute_at_caret(cx));
+        console.update(cx, |c, cx| c.execute_with(variant, window, cx));
         cx.notify();
     }
 }

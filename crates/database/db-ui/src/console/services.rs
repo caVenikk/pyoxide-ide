@@ -3,16 +3,20 @@
 //! with the grid (the reference's Services tool window of a database
 //! console, DB50, DB51).
 
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use gpui::{
-    AnyWindowHandle, App, ClickEvent, Context, Entity, EntityId, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Subscription, WeakEntity, Window, div, prelude::*, px,
+    AnyWindowHandle, App, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity, EntityId,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
+    Render, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, prelude::*,
+    px,
 };
 use themes::{Metric, UiRole};
 use ui::components::{DISABLED_ALPHA, Tooltip, header_tab, icon_button};
 use ui::icons::{Icon, IconName};
+use ui::menu::ContextMenu;
 use ui::theme::ThemeExt;
 use workbench::Workbench;
 use workbench::tool_windows::{
@@ -133,6 +137,9 @@ struct ServicesPanel {
     subscriptions: Vec<Subscription>,
     /// The tree rows that are collapsed: the group (`""`) and data sources.
     collapsed: HashSet<String>,
+    /// The open transaction popup, and where its button is drawn.
+    tx_menu: Option<(Entity<ContextMenu>, Subscription)>,
+    tx_bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
 impl Focusable for ServicesPanel {
@@ -163,7 +170,24 @@ impl ServicesPanel {
             observed: HashSet::new(),
             subscriptions: Vec::new(),
             collapsed: HashSet::new(),
+            tx_menu: None,
+            tx_bounds: Rc::default(),
         }
+    }
+
+    /// Opens the transaction mode and isolation popup of `console`.
+    fn open_tx(&mut self, console: &Entity<Console>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tx_menu.is_some() {
+            return;
+        }
+        let items = console.read(cx).tx_menu_items();
+        let menu = ContextMenu::popup(items, crate::console::tx_ui::popup_options(), window, cx);
+        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.tx_menu = None;
+            cx.notify();
+        });
+        self.tx_menu = Some((menu, subscription));
+        cx.notify();
     }
 
     fn toggle(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -435,7 +459,28 @@ impl ServicesPanel {
             );
         }
         let stop = console.clone();
-        // The reference has no divider between the tabs and Stop.
+        let tx_console = console.clone();
+        // Transaction mode and Commit / Rollback (manual mode) come before
+        // Stop; the reference has no divider between the tabs and them.
+        tabs = tabs
+            .child(
+                crate::console::tx_ui::mode_icon_button(
+                    "services-tx",
+                    px(BUTTON),
+                    self.tx_bounds.clone(),
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.open_tx(&tx_console, window, cx)
+                })),
+            )
+            .children(crate::console::tx_ui::commit_buttons(
+                "services",
+                console,
+                px(BUTTON),
+                px(ICON),
+                cx,
+            ));
         tabs.child(
             icon_button(
                 "services-stop",
@@ -574,6 +619,10 @@ impl Render for ServicesPanel {
             }
             None => div().flex_1(),
         };
+        let tx_overlay = self.tx_menu.as_ref().map(|(menu, _)| {
+            let anchor = self.tx_bounds.get();
+            ui::menu::overlay_at(menu, anchor.bottom_left(), Corner::TopLeft, window)
+        });
         div()
             .id("services-tool-window-content")
             .debug_selector(|| "services-tool-window-content".to_owned())
@@ -591,5 +640,6 @@ impl Render for ServicesPanel {
                     .child(tree)
                     .child(content),
             )
+            .children(tx_overlay)
     }
 }
