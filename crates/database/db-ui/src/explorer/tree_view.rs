@@ -36,7 +36,7 @@ const TREE_TOP: f32 = 4.0;
 const CHEVRON: f32 = 16.0;
 /// How much of the selection and the hover colour is kept over a coloured
 /// row, so that the colour shows through.
-const TINTED_SELECTION_ALPHA: f32 = 0.5;
+const TINTED_SELECTION_ALPHA: f32 = 0.3;
 const TINTED_HOVER_ALPHA: f32 = 0.5;
 /// Name to its grey detail or count.
 const DETAIL_GAP: f32 = 6.0;
