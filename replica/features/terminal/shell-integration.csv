@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell",terminal,must,yes,partial,"Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); used once the Terminal tool window starts sessions through workbench::terminal::plan"
+"Shell integration (prompt and command marks, working directory) for zsh / bash / fish / PowerShell",terminal,must,yes,yes,"Community; OSC 7 / OSC 133 scripts for zsh, bash, sh, fish, PowerShell (#159); the Terminal tool window starts its sessions through workbench::terminal::plan (#158)"

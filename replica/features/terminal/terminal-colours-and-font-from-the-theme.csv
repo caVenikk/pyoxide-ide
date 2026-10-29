@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,partial,Community (#89); the grid view paints with the theme's terminal colours and minimum contrast (#157); used once the Terminal tool window hosts it (#158)
+"Terminal colours and font from the theme (BLOCK_TERMINAL keys, minimum contrast)",terminal,must,yes,partial,"Community (#89); the grid view paints with the theme's terminal colours, the theme's terminal font and minimum contrast (#157); the Terminal tool window hosts it (#158); own terminal font setting and terminal-font.xml import still open (#287)"
