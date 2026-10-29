@@ -82,6 +82,34 @@ pub(crate) fn kill(process: &OsProcess) -> io::Result<()> {
     result
 }
 
+pub(crate) fn descendants_of(pid: u32) -> Vec<u32> {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return Vec::new();
+    };
+    descendants_deepest_first(pid)
+        .into_iter()
+        .filter_map(|p| u32::try_from(p).ok())
+        .collect()
+}
+
+pub(crate) fn hang_up_pid(pid: u32) {
+    signal_pid(pid, libc::SIGHUP);
+}
+
+pub(crate) fn kill_pid(pid: u32) {
+    signal_pid(pid, libc::SIGKILL);
+}
+
+fn signal_pid(pid: u32, signal: libc::c_int) {
+    // Zero and negative ids would address process groups.
+    if let Ok(pid) = libc::pid_t::try_from(pid)
+        && pid > 0
+    {
+        // SAFETY: plain syscall.
+        unsafe { libc::kill(pid, signal) };
+    }
+}
+
 fn signal_tree(root: libc::pid_t, signal: libc::c_int) -> io::Result<()> {
     for pid in descendants_deepest_first(root) {
         // SAFETY: plain syscall.

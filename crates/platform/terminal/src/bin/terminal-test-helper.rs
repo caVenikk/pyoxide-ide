@@ -18,6 +18,14 @@
 //! - `child`: starts a program that waits for its input to close as its
 //!   child, prints `ready` and sleeps (a shell with a command running);
 //! - `wait`: reads its input until it closes (the child of `child`);
+//! - `hold`: ignores the hang-up, sleeps (a program a closed terminal does
+//!   not end);
+//! - `orphan`: starts `hold` in a process group of its own, prints
+//!   `child <pid>` and sleeps (a shell with a job that ignores the hang-up);
+//! - `quit-host <mode>`: the application at its quit: runs this program in
+//!   `<mode>` in a terminal session, waits for its `child <pid>` line, prints
+//!   `host child <pid>`, ends all sessions as the application does and exits
+//!   at once without dropping anything;
 //! - `flood <bytes>`: prints numbered lines worth that many bytes, then
 //!   `flood done`; waits for a line.
 
@@ -129,6 +137,29 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(60));
             }
         }
+        "hold" => {
+            os::ignore_hangup();
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        }
+        "orphan" => {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .arg("hold")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            os::own_process_group(&mut command);
+            #[allow(clippy::zombie_processes)]
+            let child = command.spawn().unwrap();
+            writeln!(out, "child {}", child.id()).unwrap();
+            out.flush().unwrap();
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        }
+        "quit-host" => quit_host(args.get(1).map_or("orphan", String::as_str)),
         "wait" => {
             let mut sink = Vec::new();
             let _ = io::stdin().lock().read_to_end(&mut sink);
@@ -163,6 +194,44 @@ fn main() {
     }
 }
 
+fn quit_host(mode: &str) {
+    use terminal::start::{Os, environment};
+    use terminal::{Session, ShellCommand, TerminalSize};
+
+    let options = terminal::SessionOptions {
+        command: ShellCommand {
+            program: std::env::current_exe().unwrap().display().to_string(),
+            args: vec![mode.to_owned()],
+        },
+        working_directory: std::env::temp_dir(),
+        env: environment(Os::current(), &[], &[]),
+        size: TerminalSize::new(120, 24),
+        scrollback_lines: 0,
+    };
+    let (session, _events) = Session::spawn(options).expect("start the session");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let child = loop {
+        let text = session.snapshot().text();
+        let found = text
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("child "))
+            .and_then(|pid| pid.trim().parse::<u32>().ok());
+        if let Some(pid) = found {
+            break pid;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no child line:\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    println!("host child {child}");
+    io::stdout().flush().unwrap();
+    terminal::end_all_sessions(terminal::QUIT_GRACE);
+    // Like the application's quit: nothing is dropped.
+    std::process::exit(0);
+}
+
 fn wait_line() {
     let mut line = String::new();
     let _ = io::stdin().lock().read_line(&mut line);
@@ -170,6 +239,18 @@ fn wait_line() {
 
 #[cfg(unix)]
 mod os {
+    /// A hang-up does not end this process.
+    pub fn ignore_hangup() {
+        // SAFETY: sets a signal disposition.
+        unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
+    }
+
+    /// The command starts in a process group of its own.
+    pub fn own_process_group(command: &mut std::process::Command) {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     /// Columns and rows of the terminal on standard output.
     pub fn size() -> (u16, u16) {
         // SAFETY: a zeroed winsize filled by the call.
@@ -195,6 +276,12 @@ mod os {
 
 #[cfg(windows)]
 mod os {
+    /// Windows sends no hang-up.
+    pub fn ignore_hangup() {}
+
+    /// The command starts in a process group of its own.
+    pub fn own_process_group(_command: &mut std::process::Command) {}
+
     use windows_sys::Win32::System::Console::{
         CONSOLE_SCREEN_BUFFER_INFO, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
         ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle,

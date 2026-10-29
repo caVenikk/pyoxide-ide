@@ -40,4 +40,11 @@ pub use view::{
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, commands::COMMANDS);
     ui::command::register(cx, commands::TAB_COMMANDS);
+    // Nothing started in a terminal outlives the application (#280): the
+    // shells and their programs are ended before the process exits.
+    cx.on_app_quit(|_| {
+        terminal::end_all_sessions(terminal::QUIT_GRACE);
+        async {}
+    })
+    .detach();
 }

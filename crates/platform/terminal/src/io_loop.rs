@@ -79,6 +79,12 @@ pub(crate) fn child_pid(pty: &tty::Pty) -> u32 {
     }
 }
 
+/// The shell's process handle.
+#[cfg(windows)]
+pub(crate) fn child_handle(pty: &tty::Pty) -> windows_sys::Win32::Foundation::HANDLE {
+    pty.child_watcher().raw_handle()
+}
+
 /// Starts the loop thread; it owns the PTY and drops it at the end.
 pub(crate) fn start(
     pty: tty::Pty,
