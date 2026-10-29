@@ -168,24 +168,22 @@ impl Workbench {
             .contains_focused(window, cx);
         let tab = self.tabs.remove(index);
         if let Some(path) = tab.path() {
-            self.sync_tab_closed(path, cx);
-            if let Some(view) = &self.code_intel {
-                view.update(cx, |v, cx| v.editor_closed(path, cx));
+            if !tab.mirror {
+                self.sync_tab_closed(path, cx);
+                if let Some(view) = &self.code_intel {
+                    view.update(cx, |v, cx| v.editor_closed(path, cx));
+                }
+                self.diff_file_tab_closed(path, cx);
             }
-            self.diff_file_tab_closed(path, cx);
-        }
-        self.active = match self.active {
-            _ if self.tabs.is_empty() => None,
-            Some(a) if a > index => Some(a - 1),
-            Some(a) if a == index => Some(index.saturating_sub(1).min(self.tabs.len() - 1)),
-            other => other,
-        };
-        if focused {
-            match self.active {
-                Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
-                None => window.focus(&self.focus),
+            if tab.mirror
+                && let Some(editor) = tab.editor()
+            {
+                self.vcs_tab_closed(editor, cx);
+                self.debug_tab_closed(editor, cx);
             }
         }
+        self.promote_mirror(&tab, window, cx);
+        self.tab_removed(index, tab.group, tab.key(), focused, window, cx);
     }
 }
 

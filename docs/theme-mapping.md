@@ -306,6 +306,7 @@ attributes empty, `syntax.diagnostic-hint` is a grey dotted line
 | `ui.run-widget-running-icon` | `RunWidget.runningIconColor` | Icons on the run widget's coloured buttons (Rerun while a process runs, Stop) |
 | `ui.drag-and-drop-border` | `DragAndDrop.borderColor` | Border of the row that takes dragged files or folders (the reference's drop target rectangle) |
 | `ui.drag-and-drop-row` | `DragAndDrop.rowBackground` | Background of the row that takes dragged files or folders |
+| `ui.drag-and-drop-area` | `DragAndDrop.areaBackground` | Fill of the area that takes a dragged editor tab: the half of an editor for a new split, a whole editor, the slot in a tab strip |
 | `ui.tree-text` | `Tree.foreground` | Text of tree rows, such as the pages of the Settings window and the Keymap and Run/Debug Configurations trees |
 | `ui.tree-indent-guide` | `Tree.hash` | Indent guides of trees: the vertical lines below an open folder (the reference's "Show indent guides") |
 | `ui.list-button-hover` | `List.Button.hoverBackground` | Background of a hovered button at the end of a popup row, such as Run in the run widget's dropdown |
@@ -576,6 +577,7 @@ Roles without a source are derived, then taken from the base theme.
 | `ui.run-widget-stop` | `ui.danger` |
 | `ui.drag-and-drop-border` | `ui.accent` |
 | `ui.drag-and-drop-row` | `ui.selection` |
+| `ui.drag-and-drop-area` | `ui.selection` |
 | `ui.tree-text` | `ui.text` |
 | `ui.tree-indent-guide` | `ui.divider` |
 | `ui.list-button-hover` | `ui.hover` |

@@ -36,6 +36,7 @@ pub mod search_everywhere;
 pub mod settings;
 mod shot;
 pub mod simulate;
+mod split_tree;
 pub mod tab_view;
 pub mod terminal;
 #[cfg(feature = "test-support")]

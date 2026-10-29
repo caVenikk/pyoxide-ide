@@ -20,6 +20,8 @@ name = "ProjectTree"
 # Jump to Source (`EditSource`) first: its shortcut is the one shown.
 "f4" = "project.tree.open"
 "enter" = "project.tree.open"
+# Open in Right Split (`OpenInRightSplit`).
+"shift-enter" = "project.open-in-right-split"
 "ctrl--" = "project.tree.collapse-all"
 "ctrl-=" = "project.tree.expand-all"
 "escape" = "workbench.focus-editor"

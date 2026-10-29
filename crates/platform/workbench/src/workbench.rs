@@ -11,8 +11,8 @@ use editor::{Editor, EditorEvent, FindBar};
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Bounds, ClickEvent, Context, DispatchPhase, Div,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollHandle,
-    ScrollWheelEvent, SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
+    MouseDownEvent, MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollWheelEvent,
+    SharedString, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
 use project::Project;
 use serde_json::json;
@@ -50,7 +50,8 @@ mod history;
 pub(crate) mod project_widget;
 mod remote;
 mod run_actions;
-mod tab_menu;
+mod splits;
+pub(crate) mod tab_menu;
 pub(crate) mod terminal_window;
 mod tool_window_areas;
 mod version_control;
@@ -171,6 +172,11 @@ struct Tab {
     content: TabContent,
     /// Pinned (`tab_menu.rs`).
     pinned: bool,
+    /// The tab group (split window) the tab is in (`splits.rs`).
+    group: crate::split_tree::GroupId,
+    /// A second view of a file whose first view is in another group: its
+    /// text follows the first view's (`splits.rs`).
+    mirror: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -228,13 +234,12 @@ pub struct Workbench {
     tool_windows: crate::tool_windows::ToolWindows,
     first_frame_reported: bool,
     panel: Entity<ProjectPanel>,
+    /// The tabs of all groups; a group's tabs are in the order of this list.
     tabs: Vec<Tab>,
+    /// The selected tab of the focused group.
     active: Option<usize>,
-    /// Scroll position of the tab strip, and the active tab and tab count
-    /// it was last brought to show (a change of either scrolls the strip
-    /// just enough to show the whole active tab).
-    tab_scroll: ScrollHandle,
-    tab_scroll_shown: std::cell::Cell<Option<(usize, usize)>>,
+    /// The editor area's split windows (`splits.rs`).
+    splits: splits::Splits,
     /// The bounds of each tab as last drawn (a tab's menu opened from a
     /// command opens below it).
     tab_bounds: Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>>,
@@ -274,6 +279,9 @@ pub struct Workbench {
     /// A file being opened gives the focus back to this element once it
     /// is loaded (the debugger shows a line without taking the focus).
     pub(crate) focus_after_open: Option<(PathBuf, FocusHandle)>,
+    /// A file being read that opens in a given group, not the focused one
+    /// (Open in Right Split).
+    pub(crate) open_target: Option<(PathBuf, splits::OpenTarget)>,
     /// Files shown in editors and files edited, most recent first (the
     /// Recently Viewed and Recently Changed scopes of Find in Files).
     recently_viewed: Vec<PathBuf>,
@@ -474,8 +482,7 @@ impl Workbench {
             panel,
             tabs: Vec::new(),
             active: None,
-            tab_scroll: ScrollHandle::new(),
-            tab_scroll_shown: std::cell::Cell::new(None),
+            splits: Default::default(),
             pending: 0,
             message: None,
             notice: None,
@@ -493,6 +500,7 @@ impl Workbench {
             return_focus: None,
             pending_go_to: None,
             focus_after_open: None,
+            open_target: None,
             recently_viewed: Vec::new(),
             recently_changed: Vec::new(),
             run_window,
@@ -773,15 +781,27 @@ impl Workbench {
 
     /// The editor of the tab of `path`, when the file is open.
     pub fn editor_for(&self, path: &Path) -> Option<Entity<Editor>> {
-        self.tabs
-            .iter()
-            .find(|t| t.is_file(path))
-            .and_then(|t| t.editor().cloned())
+        self.views_of(path).into_iter().next()
     }
 
-    /// The index of the tab of `path`'s editor.
+    /// The index of the tab of `path`'s editor: the one in the focused
+    /// group, else the first view's.
     fn file_tab(&self, path: &Path) -> Option<usize> {
-        self.tabs.iter().position(|t| t.is_file(path))
+        let focused = self.splits.focused;
+        // The advanced setting "When navigating to a file, prefer
+        // selecting existing tab in inactive split pane"
+        // (`editor.open.inactive.splitter`, on by default): a file that is
+        // open in another group is not opened again, its tab is selected
+        // (`FileEditorManagerImpl.findWindowInAllSplitters`: the focused
+        // group first, then the groups in the order they were made).
+        self.tabs
+            .iter()
+            .position(|t| t.is_file(path) && t.group == focused)
+            .or_else(|| {
+                (0..self.tabs.len())
+                    .filter(|&i| self.tabs[i].is_file(path))
+                    .min_by_key(|&i| self.tabs[i].group)
+            })
     }
 
     /// The Find in Files popup (drawn while it is open).
@@ -791,7 +811,11 @@ impl Workbench {
 
     /// Paths of the open files' tabs, in order.
     pub fn tab_paths(&self) -> Vec<PathBuf> {
-        self.tabs.iter().filter_map(|t| t.path().cloned()).collect()
+        self.tabs
+            .iter()
+            .filter(|t| !t.mirror)
+            .filter_map(|t| t.path().cloned())
+            .collect()
     }
 
     /// Background work is still running (reads, writes, tree listings).
@@ -849,6 +873,10 @@ impl Workbench {
                     if t.pinned {
                         tab["pinned"] = json!(true);
                     }
+                    // Only a second view of a file has the key.
+                    if t.mirror {
+                        tab["mirror"] = json!(true);
+                    }
                     // Only a coloured tab has the key.
                     if let Some(color) = self.vcs_file_colors().name_color(path, false, false) {
                         tab["color"] = json!(color.name());
@@ -868,6 +896,7 @@ impl Workbench {
                 }
             }).collect::<Vec<_>>(),
             "active_tab": self.active,
+            "splits": self.splits_json(cx),
             "tab_menu": self.tab_menu_json(cx),
             "navigation": self.navigation.history.state_json(rel),
             "editor": self.active_editor().map(|e| e.read(cx).state_json()),
@@ -903,6 +932,7 @@ impl Workbench {
         }
         self.save_all(cx);
         self.tabs.clear();
+        self.reset_splits();
         self.diff_tabs_cleared(cx);
         self.active = None;
         self.clear_navigation();
@@ -935,9 +965,32 @@ impl Workbench {
     /// Opens a file in a tab (or selects its tab); reading happens off the
     /// UI thread.
     pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(i) = self.file_tab(&path) {
-            self.activate(i, window, cx);
-            return;
+        self.open_file_in(path, None, window, cx);
+    }
+
+    /// Opens a file in a tab of the focused group, or in `target`'s; a file
+    /// that is open already has its tab selected, unless `target` says
+    /// where it should show.
+    pub(crate) fn open_file_in(
+        &mut self,
+        path: PathBuf,
+        target: Option<splits::OpenTarget>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            Some(target) => {
+                if self.show_in_target(&path, target, window, cx) {
+                    return;
+                }
+                self.open_target = Some((path.clone(), target));
+            }
+            None => {
+                if let Some(i) = self.file_tab(&path) {
+                    self.activate(i, window, cx);
+                    return;
+                }
+            }
         }
         // A diff that edits the file's document: the tab continues with it.
         if let Some(buffer) = self.diff_document(&path, cx) {
@@ -1075,32 +1128,41 @@ impl Workbench {
         .detach();
     }
 
-    fn add_tab(
-        &mut self,
-        path: PathBuf,
+    /// The editor of a file: its path, file type and the soft wraps setting.
+    fn new_file_editor(
+        &self,
+        path: &Path,
         buffer: text::Buffer,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        if let Some(i) = self.file_tab(&path) {
-            self.activate(i, window, cx);
-            return;
-        }
-        let file_type = self.file_types.for_path(&path).cloned();
+    ) -> Entity<Editor> {
+        let file_type = self.file_types.for_path(path).cloned();
         let soft_wraps = crate::editor_settings::soft_wraps(cx);
-        let editor = cx.new(|cx| {
+        cx.new(|cx| {
             let mut editor = Editor::new(buffer, window, cx);
-            editor.set_path(Some(path.clone()));
+            editor.set_path(Some(path.to_owned()));
             if let Some(t) = &file_type {
                 editor.set_config(t.editor_config());
                 if let Some(factory) = &t.highlighter {
                     editor.set_highlighter(Some(factory()), cx);
                 }
             }
-            crate::editor_settings::apply(&soft_wraps, &mut editor, &path, cx);
+            crate::editor_settings::apply(&soft_wraps, &mut editor, path, cx);
             editor
-        });
-        let subscription = cx.subscribe(&editor, move |this, editor, event: &EditorEvent, cx| {
+        })
+    }
+
+    /// The find bar of a file's tab and the subscriptions the tab keeps:
+    /// to its editor (input for the idle save, recently changed files,
+    /// jumps, the other views of the file) and to its find bar.
+    fn file_tab_parts(
+        &mut self,
+        editor: &Entity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<FindBar>, Vec<Subscription>) {
+        let subscription = cx.subscribe(editor, move |this, editor, event: &EditorEvent, cx| {
+            this.sync_views(&editor, event, cx);
             if matches!(event, EditorEvent::Edited(_)) {
                 // Edits count as input for the idle save (they may also come
                 // from commands rather than keys).
@@ -1127,6 +1189,41 @@ impl Workbench {
             crate::shot::draw_now(window)
         });
         let observe_find = cx.observe(&find, |_, _, cx| cx.notify());
+        (find, vec![subscription, find_subscription, observe_find])
+    }
+
+    fn add_tab(
+        &mut self,
+        path: PathBuf,
+        buffer: text::Buffer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self
+            .open_target
+            .take_if(|(p, _)| *p == path)
+            .map(|(_, t)| t);
+        match target {
+            // The file may have been opened while it was read.
+            Some(target) => {
+                if self.show_in_target(&path, target, window, cx) {
+                    return;
+                }
+            }
+            None => {
+                if let Some(i) = self.file_tab(&path) {
+                    self.activate(i, window, cx);
+                    return;
+                }
+            }
+        }
+        let group = match target {
+            Some(target) => self.target_group(target),
+            None => self.splits.focused,
+        };
+        let file_type = self.file_types.for_path(&path).cloned();
+        let editor = self.new_file_editor(&path, buffer, window, cx);
+        let (find, subscriptions) = self.file_tab_parts(&editor, window, cx);
         if let Some((_, point)) = self.pending_go_to.take_if(|(p, _)| *p == path) {
             editor.update(cx, |e, cx| {
                 e.go_to(point.line + 1, Some(point.column + 1), cx)
@@ -1152,7 +1249,9 @@ impl Workbench {
         self.tabs.push(Tab {
             content: TabContent::File { path, editor, find },
             pinned: false,
-            _subscriptions: vec![subscription, find_subscription, observe_find],
+            group,
+            mirror: false,
+            _subscriptions: subscriptions,
         });
         self.message = None;
         self.activate(index, window, cx);
@@ -1176,6 +1275,7 @@ impl Workbench {
             self.vcs_close_popup(cx);
         }
         self.active = Some(index);
+        self.note_selected(index);
         if let Some(path) = self.tabs[index].path().cloned() {
             remember_file(&mut self.recently_viewed, &path);
         }
@@ -1254,6 +1354,12 @@ impl Workbench {
     /// Writes one tab's file if it is modified; the returned task ends
     /// when the file is written.
     fn save_tab_task(&mut self, index: usize, cx: &mut Context<Self>) -> Option<Task<()>> {
+        // A second view of a file is saved by the first.
+        let index = if index < self.tabs.len() {
+            self.saving_tab(index)
+        } else {
+            index
+        };
         let tab = self.tabs.get(index)?;
         let editor = tab.editor()?.clone();
         let path = tab.path()?.clone();
@@ -1267,6 +1373,16 @@ impl Workbench {
             let point = e.buffer_mut().begin_save();
             (e.buffer().encoded(), point)
         });
+        // The other views hold the same text.
+        let others: Vec<_> = self
+            .views_of(&path)
+            .into_iter()
+            .filter(|e| *e != editor)
+            .map(|e| {
+                let point = e.update(cx, |e, _| e.buffer_mut().begin_save());
+                (e, point)
+            })
+            .collect();
         self.pending += 1;
         let write = cx.background_spawn({
             let path = path.clone();
@@ -1285,6 +1401,12 @@ impl Workbench {
                             e.buffer_mut().mark_saved_at(point);
                             cx.notify();
                         });
+                        for (other, point) in others {
+                            other.update(cx, |e, cx| {
+                                e.buffer_mut().mark_saved_at(point);
+                                cx.notify();
+                            });
+                        }
                         if let Some(view) = &this.code_intel {
                             view.update(cx, |v, cx| v.file_saved(&path, cx));
                         }
@@ -1336,26 +1458,23 @@ impl Workbench {
         let tab = self.tabs.remove(index);
         match &tab.content {
             TabContent::File { path, editor, .. } => {
-                self.sync_tab_closed(path, cx);
+                // A second view of a file is not known to the services.
+                if !tab.mirror {
+                    self.sync_tab_closed(path, cx);
+                }
                 self.vcs_tab_closed(editor, cx);
                 self.debug_tab_closed(editor, cx);
-                if let Some(view) = &self.code_intel {
-                    view.update(cx, |v, cx| v.editor_closed(path, cx));
+                if !tab.mirror {
+                    if let Some(view) = &self.code_intel {
+                        view.update(cx, |v, cx| v.editor_closed(path, cx));
+                    }
+                    self.diff_file_tab_closed(path, cx);
                 }
-                self.diff_file_tab_closed(path, cx);
             }
             TabContent::View(view) => self.view_tab_closed(view.entity_id(), cx),
         }
-        self.active = match self.active {
-            _ if self.tabs.is_empty() => None,
-            Some(a) if a > index => Some(a - 1),
-            Some(a) if a == index => Some(index.saturating_sub(1).min(self.tabs.len() - 1)),
-            other => other,
-        };
-        match self.active {
-            Some(a) => window.focus(&self.tabs[a].focus_handle(cx)),
-            None => window.focus(&self.focus),
-        }
+        self.promote_mirror(&tab, window, cx);
+        self.tab_removed(index, tab.group, tab.key(), true, window, cx);
         self.report_active_file(cx);
         cx.notify();
     }
@@ -1483,6 +1602,7 @@ impl Workbench {
             editors: self
                 .tabs
                 .iter()
+                .filter(|t| !t.mirror)
                 .filter_map(|t| Some((t.path()?.clone(), t.editor()?.clone())))
                 .collect(),
             current_file: self.active.and_then(|i| self.tabs[i].path().cloned()),
@@ -1618,6 +1738,7 @@ impl Workbench {
         let overrides = self
             .tabs
             .iter()
+            .filter(|t| !t.mirror)
             .filter_map(|t| Some((t.path()?, t.editor()?)))
             .filter(|(_, e)| e.read(cx).is_modified())
             .map(|(p, e)| (p.clone(), e.read(cx).buffer().rope().clone()))
@@ -1882,15 +2003,28 @@ impl Workbench {
     }
 
     fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(a) = self.active {
-            self.activate((a + 1) % self.tabs.len(), window, cx);
-        }
+        self.step_tab(true, window, cx);
     }
 
     fn previous_tab(&mut self, _: &PreviousTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(a) = self.active {
-            self.activate((a + self.tabs.len() - 1) % self.tabs.len(), window, cx);
-        }
+        self.step_tab(false, window, cx);
+    }
+
+    /// The next (previous) tab of the focused group, round.
+    fn step_tab(&mut self, next: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.active else {
+            return;
+        };
+        let order = self.group_tabs(self.tabs[a].group);
+        let Some(at) = order.iter().position(|&i| i == a) else {
+            return;
+        };
+        let to = if next {
+            (at + 1) % order.len()
+        } else {
+            (at + order.len() - 1) % order.len()
+        };
+        self.activate(order[to], window, cx);
     }
 
     // ---- drawing --------------------------------------------------------------
@@ -2185,12 +2319,24 @@ impl Workbench {
         // (`JBTabsImpl.isHoveredOrWithPopup`).
         let with_menu = self.tab_menu_index() == Some(index);
         let theme = cx.theme();
-        let selected = self.active == Some(index);
+        let selected = self.is_selected_in_group(index);
         let pill_h = theme.metric(Metric::TabSelectionHeight);
         let radius = theme.metric(Metric::ButtonRadius);
         let hover = theme.color(UiRole::TabHover);
-        let active_bg = theme.color(UiRole::TabActive);
-        let outline = theme.color(UiRole::TabUnderline);
+        // The selected tab of a group without the focus has no outline,
+        // as the selected tab of a strip without the focus
+        // (`EditorTabs.inactiveUnderlinedTabBackground`).
+        let in_focused_group = tab.group == self.splits.focused;
+        let active_bg = if in_focused_group {
+            theme.color(UiRole::TabActive)
+        } else {
+            theme.color(UiRole::TabSelectedInactive)
+        };
+        let outline = if in_focused_group {
+            theme.color(UiRole::TabUnderline)
+        } else {
+            theme.color(UiRole::TabUnderlineInactive)
+        };
         let (title, icon, text, modified, tooltip) = match &tab.content {
             TabContent::File { path, editor, .. } => {
                 // A file gone from disk whose editor keeps its changes;
@@ -2240,6 +2386,15 @@ impl Workbench {
                 (view.title(cx), view.icon(cx), text, false, view.tooltip(cx))
             }
         };
+        let dragged = splits::DraggedTab::new(
+            tab.key(),
+            title.clone(),
+            icon,
+            self.tab_bounds
+                .borrow()
+                .get(index)
+                .map_or(px(0.0), |b| b.size.width),
+        );
         let group: SharedString = format!("tab-{index}").into();
         // A modified file shows a dot where the close button is; hovering
         // the dot shows the close button (as the reference IDE's New UI tabs
@@ -2349,6 +2504,11 @@ impl Workbench {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.activate(index, window, cx);
             }))
+            // The tab can be dragged to another place or group
+            // (`splits/tab_drag.rs`).
+            .on_drag(dragged, |dragged, _, _, cx| {
+                cx.new(|_| splits::TabChip::new(dragged))
+            })
             // The tab's context menu where the pointer is; the active tab
             // stays.
             .on_mouse_down(
@@ -2446,52 +2606,10 @@ impl Workbench {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(active) = self.active {
-            let theme = cx.theme();
-            let tab_h = theme.metric(Metric::TabHeight);
-            let separator = theme.color(UiRole::Border);
-            let tabs: Vec<AnyElement> = (0..self.tabs.len())
-                .map(|i| self.render_tab(i, cx))
-                .collect();
-            let shown = Some((active, self.tabs.len()));
-            if self.tab_scroll_shown.replace(shown) != shown {
-                self.tab_scroll.scroll_to_item(active);
-            }
-            let separator = match &self.tabs[active].content {
-                TabContent::View(view) if !view.separator(cx) => gpui::transparent_black(),
-                _ => separator,
-            };
+        if self.active.is_some() || !self.splits.is_single() {
             return self
                 .editor_island(min, cx)
-                .child(
-                    div()
-                        .id("editor-tabs")
-                        .debug_selector(|| "editor-tabs".into())
-                        .flex()
-                        .flex_row()
-                        .flex_none()
-                        .items_center()
-                        .h(tab_h)
-                        .pl(px(FIRST_TAB_OFFSET))
-                        .overflow_x_scroll()
-                        .track_scroll(&self.tab_scroll)
-                        .border_b_1()
-                        .border_color(separator)
-                        .children(tabs),
-                )
-                .when(self.tabs[active].path().is_some(), |d| {
-                    d.children(self.editor_headers.iter().cloned())
-                })
-                .children(
-                    self.tabs[active]
-                        .find()
-                        .filter(|find| find.read(cx).is_open())
-                        .cloned(),
-                )
-                .child(match &self.tabs[active].content {
-                    TabContent::File { editor, .. } => self.editor_container(editor, cx),
-                    TabContent::View(view) => div().flex_1().min_h(px(0.0)).child(view.view()),
-                })
+                .child(self.render_groups(cx))
                 .into_any_element();
         }
         // As the reference IDE's text painter draws them: a 16 px label
@@ -2882,6 +3000,7 @@ impl Render for Workbench {
         root = self.diff_actions(root, cx);
         root = self.window_actions(root, cx);
         root = self.tab_menu_actions(root, cx);
+        root = self.split_actions(root, cx);
         let marker_popup = self.vcs_render_popup(window, cx);
         let debug_overlay = self.debug_overlay(window, cx);
         root.flex()

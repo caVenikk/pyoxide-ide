@@ -287,6 +287,8 @@ impl Workbench {
         self.tabs.push(Tab {
             content: TabContent::View(Box::new(view)),
             pinned: false,
+            group: self.splits.focused,
+            mirror: false,
             _subscriptions: Vec::new(),
         });
         id

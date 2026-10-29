@@ -160,6 +160,16 @@ Window
     Close All but Pinned
     Close Tabs to the Left
     Close Tabs to the Right
+    ---
+    Split Right
+    Split and Move Right
+    Split Down
+    Split and Move Down
+    Change Splitter Orientation
+    Unsplit
+    Unsplit All
+    Go to Next Splitter  ⌥⇥
+    Go to Previous Splitter  ⌥⇧⇥
   Processes >
     Show
     Auto Show

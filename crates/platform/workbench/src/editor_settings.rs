@@ -62,7 +62,7 @@ pub(crate) fn follow(cx: &mut App) {
         };
         let _ = handle.update(cx, |w, _, cx| {
             for path in w.tab_paths() {
-                if let Some(editor) = w.editor_for(&path) {
+                for editor in w.views_of(&path) {
                     editor.update(cx, |e, cx| apply(&settings, e, &path, cx));
                 }
             }

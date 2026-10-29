@@ -344,17 +344,22 @@ impl ProjectPanel {
         let reload = |paths: Option<Vec<String>>| {
             MenuItem::action("Reload from Disk", ReloadFromDisk { paths }).icon(IconName::REFRESH)
         };
+        let open = open_menu_items(&entry.path, entry.is_dir());
         let Some(rel) = filter.relative(&entry.path) else {
-            return vec![
+            let mut items = vec![
                 MenuItem::separator(),
                 MenuItem::unavailable("Rename…"),
                 MenuItem::submenu("Refactor", Vec::new()).enabled(false),
                 MenuItem::separator(),
                 MenuItem::unavailable("Delete…"),
+            ];
+            items.extend(open);
+            items.extend([
                 MenuItem::separator(),
                 // The project root: everything.
                 reload(Some(vec![String::new()])),
-            ];
+            ]);
+            return items;
         };
         let rename = || {
             MenuItem::action(
@@ -384,7 +389,7 @@ impl ProjectPanel {
                 },
             ),
         ];
-        vec![
+        let mut items = vec![
             MenuItem::separator(),
             rename(),
             MenuItem::submenu("Refactor", refactor),
@@ -395,9 +400,10 @@ impl ProjectPanel {
                     paths: Some(vec![rel.clone()]),
                 },
             ),
-            MenuItem::separator(),
-            reload(Some(vec![rel])),
-        ]
+        ];
+        items.extend(open);
+        items.extend([MenuItem::separator(), reload(Some(vec![rel]))]);
+        items
     }
 
     /// Below the selected row, where its name starts (window coordinates).
@@ -1126,4 +1132,33 @@ fn insert(tree: &mut FileTree, filter: &project::Filter, path: &Path, is_dir: bo
             folder: project::FolderKind::Plain,
         },
     );
+}
+
+/// *Open in Right Split* (a file) and *Open In* (*Finder*, *Terminal*),
+/// the group after the run rows of the reference's Project view menu
+/// (`OpenInRightSplit`, `RevealGroup`), with the separator before it.
+fn open_menu_items(path: &std::path::Path, is_dir: bool) -> Vec<MenuItem> {
+    use crate::commands::{OpenInRightSplit, OpenInTerminal, RevealFile};
+    let path = Some(path.display().to_string());
+    let mut items = vec![MenuItem::separator()];
+    if !is_dir {
+        items.push(
+            MenuItem::action(
+                "Open in Right Split",
+                OpenInRightSplit { path: path.clone() },
+            )
+            .icon(IconName::SPLIT_VERTICALLY),
+        );
+    }
+    items.push(MenuItem::submenu(
+        "Open In",
+        vec![
+            MenuItem::action(
+                crate::workbench::tab_menu::FILE_MANAGER,
+                RevealFile { path: path.clone() },
+            ),
+            MenuItem::action("Terminal", OpenInTerminal { path }),
+        ],
+    ));
+    items
 }

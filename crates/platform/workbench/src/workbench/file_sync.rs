@@ -504,6 +504,9 @@ impl Workbench {
     /// when it quits.
     fn save_on_quit(&mut self, cx: &mut Context<Self>) {
         for i in 0..self.tabs.len() {
+            if self.tabs[i].mirror {
+                continue;
+            }
             let (Some(path), Some(editor)) =
                 (self.tabs[i].path().cloned(), self.tabs[i].editor().cloned())
             else {
@@ -710,6 +713,7 @@ impl Workbench {
         let checks: Vec<Check> = self
             .tabs
             .iter()
+            .filter(|t| !t.mirror)
             .filter_map(|t| Some((t.path()?, t.editor()?)))
             .filter(|(path, _)| paths.as_ref().is_none_or(|p| p.contains(path)))
             .filter_map(|(path, editor)| {

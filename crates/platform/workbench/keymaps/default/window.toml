@@ -9,6 +9,9 @@
 "ctrl-f4" = "tabs.close"
 "alt-right" = "tabs.next"
 "alt-left" = "tabs.previous"
+# Between the splits of the editor area.
+"alt-tab" = "tabs.next-splitter"
+"alt-shift-tab" = "tabs.previous-splitter"
 
 # An open context menu (Swing popup menu keys of the reference IDE).
 [[context]]

@@ -30,6 +30,8 @@ impl Workbench {
         self.tabs.push(Tab {
             content: TabContent::View(Box::new(view.clone())),
             pinned: false,
+            group: self.splits.focused,
+            mirror: false,
             _subscriptions: vec![observed],
         });
         self.activate(self.tabs.len() - 1, window, cx);

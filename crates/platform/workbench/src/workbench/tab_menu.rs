@@ -39,11 +39,11 @@ pub(super) struct TabMenu {
 /// The reference's file manager name in Open In (`RevealFileAction.
 /// getFileManagerName`, the short text of the `RevealInPopup` place).
 #[cfg(target_os = "macos")]
-const FILE_MANAGER: &str = "Finder";
+pub(crate) const FILE_MANAGER: &str = "Finder";
 #[cfg(windows)]
-const FILE_MANAGER: &str = "Explorer";
+pub(crate) const FILE_MANAGER: &str = "Explorer";
 #[cfg(not(any(target_os = "macos", windows)))]
-const FILE_MANAGER: &str = "File Manager";
+pub(crate) const FILE_MANAGER: &str = "File Manager";
 
 /// Moves the pinned tabs before the others as `JBTabsImpl.
 /// groupPinnedFirst` does: a pinned tab after an unpinned one trades places
@@ -90,7 +90,7 @@ impl Workbench {
     }
 
     /// The tab a command acts on: `index`, else the active one.
-    fn tab_of(&self, index: Option<usize>) -> Option<usize> {
+    pub(super) fn tab_of(&self, index: Option<usize>) -> Option<usize> {
         index.or(self.active).filter(|&i| i < self.tabs.len())
     }
 
@@ -99,7 +99,7 @@ impl Workbench {
     /// Close Other Tabs: all but `index` and the pinned ones.
     fn others_of(&self, index: usize) -> Vec<usize> {
         (0..self.tabs.len())
-            .filter(|&i| i != index && !self.tabs[i].pinned)
+            .filter(|&i| i != index && self.same_group(i, index) && !self.tabs[i].pinned)
             .collect()
     }
 
@@ -107,14 +107,25 @@ impl Workbench {
     /// ones there.
     fn beside(&self, index: usize, left: bool) -> Vec<usize> {
         (0..self.tabs.len())
+            .filter(|&i| self.same_group(i, index))
             .filter(|&i| if left { i < index } else { i > index })
             .filter(|&i| !self.tabs[i].pinned)
             .collect()
     }
 
-    /// Close All but Pinned.
-    fn unpinned(&self) -> Vec<usize> {
-        (0..self.tabs.len())
+    /// The group a Close action acts on: the one of tab `index`, else of
+    /// the active tab, else the focused one (`EditorWindow.DATA_KEY`: the
+    /// window the action was started in).
+    fn group_of(&self, index: Option<usize>) -> crate::split_tree::GroupId {
+        self.tab_of(index)
+            .map(|i| self.tabs[i].group)
+            .unwrap_or(self.splits.focused)
+    }
+
+    /// Close All but Pinned, in a group.
+    fn unpinned(&self, group: crate::split_tree::GroupId) -> Vec<usize> {
+        self.group_tabs(group)
+            .into_iter()
             .filter(|&i| !self.tabs[i].pinned)
             .collect()
     }
@@ -123,11 +134,12 @@ impl Workbench {
     /// control status (`FileEditorManagerImpl.isChanged`: a status other
     /// than unknown or not changed is a change). Nothing without version
     /// control (the action is enabled only with an active VCS).
-    fn unmodified(&self, cx: &App) -> Vec<usize> {
+    fn unmodified(&self, group: crate::split_tree::GroupId, cx: &App) -> Vec<usize> {
         if self.version_control.service.is_none() {
             return Vec::new();
         }
-        (0..self.tabs.len())
+        self.group_tabs(group)
+            .into_iter()
             .filter(|&i| !self.tabs[i].pinned)
             .filter(|&i| match self.tabs[i].path() {
                 Some(path) => matches!(
@@ -167,27 +179,30 @@ impl Workbench {
         }
     }
 
-    fn close_all_tabs(&mut self, _: &CloseAllTabs, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_tabs((0..self.tabs.len()).collect(), window, cx);
+    /// Close All Tabs (In Group): every tab of the group, pinned ones too
+    /// (`CloseAllEditorsAction`).
+    fn close_all_tabs(&mut self, a: &CloseAllTabs, window: &mut Window, cx: &mut Context<Self>) {
+        let group = self.group_of(a.index);
+        self.close_tabs(self.group_tabs(group), window, cx);
     }
 
     fn close_unmodified_tabs(
         &mut self,
-        _: &CloseUnmodifiedTabs,
+        a: &CloseUnmodifiedTabs,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tabs = self.unmodified(cx);
+        let tabs = self.unmodified(self.group_of(a.index), cx);
         self.close_tabs(tabs, window, cx);
     }
 
     fn close_unpinned_tabs(
         &mut self,
-        _: &CloseUnpinnedTabs,
+        a: &CloseUnpinnedTabs,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_tabs(self.unpinned(), window, cx);
+        self.close_tabs(self.unpinned(self.group_of(a.index)), window, cx);
     }
 
     fn close_tabs_to_left(
@@ -227,12 +242,24 @@ impl Workbench {
             return;
         }
         self.tabs[index].pinned = !self.tabs[index].pinned;
-        let pinned: Vec<bool> = self.tabs.iter().map(|t| t.pinned).collect();
+        // The pinned tabs go first within the tab's group; the tabs of the
+        // other groups stay where they are.
+        let slots = self.group_tabs(self.tabs[index].group);
+        let pinned: Vec<bool> = slots.iter().map(|&i| self.tabs[i].pinned).collect();
         let order = group_pinned_first(&pinned);
         if order.iter().enumerate().any(|(i, &o)| i != o) {
+            let mut permutation: Vec<usize> = (0..self.tabs.len()).collect();
+            for (slot, &o) in slots.iter().zip(&order) {
+                permutation[*slot] = slots[o];
+            }
             let mut old: Vec<Option<super::Tab>> = self.tabs.drain(..).map(Some).collect();
-            self.tabs = order.iter().map(|&o| old[o].take().unwrap()).collect();
-            self.active = self.active.and_then(|a| order.iter().position(|&o| o == a));
+            self.tabs = permutation
+                .iter()
+                .map(|&o| old[o].take().unwrap())
+                .collect();
+            self.active = self
+                .active
+                .and_then(|a| permutation.iter().position(|&o| o == a));
         }
         cx.notify();
     }
@@ -345,7 +372,7 @@ impl Workbench {
         let keys = |action: &dyn gpui::Action| {
             ui::keys::shortcut_in(action, &focus, window).unwrap_or_default()
         };
-        let count = self.tabs.len();
+        let count = self.group_tabs(self.tabs[index].group).len();
         let some = Some(index);
         let mut items = vec![
             MenuItem::action("Close", CloseTab { index: some })
@@ -355,14 +382,37 @@ impl Workbench {
                 .shortcut(keys(&CloseOtherTabs { index: None }))
                 .enabled(count > 1)
                 .mnemonic(6),
-            MenuItem::action("Close All Tabs", CloseAllTabs).mnemonic(6),
         ];
-        if !self.unmodified(cx).is_empty() {
-            items.push(MenuItem::action("Close Unmodified Tabs", CloseUnmodifiedTabs).mnemonic(6));
+        // In a split the Close actions name the group they act on
+        // (`CloseEditorsActionBase.update`: `inSplitter`).
+        let group = self.tabs[index].group;
+        let in_split = !self.splits.is_single();
+        let (all, unmodified, unpinned) = if in_split {
+            (
+                "Close All Tabs In Group",
+                "Close Unmodified Tabs In Group",
+                "Close All but Pinned In Group",
+            )
+        } else {
+            (
+                "Close All Tabs",
+                "Close Unmodified Tabs",
+                "Close All but Pinned",
+            )
+        };
+        items.push(MenuItem::action(all, CloseAllTabs { index: some }).mnemonic(6));
+        if !self.unmodified(group, cx).is_empty() {
+            items.push(
+                MenuItem::action(unmodified, CloseUnmodifiedTabs { index: some }).mnemonic(6),
+            );
         }
-        let pinned = self.tabs.iter().filter(|t| t.pinned).count();
-        if pinned > 0 && pinned < count {
-            items.push(MenuItem::action("Close All but Pinned", CloseUnpinnedTabs));
+        let in_group = self.group_tabs(group);
+        let pinned = in_group.iter().filter(|&&i| self.tabs[i].pinned).count();
+        if pinned > 0 && pinned < in_group.len() {
+            items.push(MenuItem::action(
+                unpinned,
+                CloseUnpinnedTabs { index: some },
+            ));
         }
         if !self.beside(index, true).is_empty() {
             items.push(MenuItem::action(
@@ -402,6 +452,11 @@ impl Workbench {
                     copy("Path from Content Root", "content-root"),
                 ],
             ));
+        }
+        let split = self.tab_split_items(index, &keys);
+        if !split.is_empty() {
+            items.push(MenuItem::separator());
+            items.extend(split);
         }
         items.push(MenuItem::separator());
         let (pin, mnemonic) = if self.tabs[index].pinned {
@@ -632,10 +687,10 @@ mod tests {
     fn separators_are_dropped_at_the_ends_and_when_doubled() {
         let items = without_extra_separators(vec![
             MenuItem::separator(),
-            MenuItem::action("a", CloseAllTabs),
+            MenuItem::action("a", CloseAllTabs { index: None }),
             MenuItem::separator(),
             MenuItem::separator(),
-            MenuItem::action("b", CloseAllTabs),
+            MenuItem::action("b", CloseAllTabs { index: None }),
             MenuItem::separator(),
         ]);
         let labels: Vec<_> = items

@@ -682,6 +682,9 @@ fn the_context_menu_has_the_file_operations(cx: &mut TestAppContext) {
             "-",
             "Delete…",
             "-",
+            "Open in Right Split",
+            "Open In",
+            "-",
             "Reload from Disk",
             "-",
             "Mark File As"
@@ -1127,7 +1130,8 @@ fn reload_from_disk_looks_at_the_selection_again(cx: &mut TestAppContext) {
         .map(|i| i["label"].as_str().unwrap_or("-").to_owned())
         .collect();
     let at = labels.iter().position(|l| l == "Reload from Disk").unwrap();
-    assert_eq!(labels[at - 2], "Delete…");
+    assert_eq!(labels[at - 4], "Delete…");
+    assert_eq!(labels[at - 2], "Open In");
     assert_eq!(labels[at + 2], "Mark Directory As");
     h.invoke("menu.cancel", json!(null));
     h.invoke("project.tree.reload-from-disk", json!(null));

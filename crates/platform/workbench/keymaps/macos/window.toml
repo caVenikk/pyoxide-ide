@@ -17,6 +17,9 @@
 "ctrl-right" = "tabs.next"
 "cmd-{" = "tabs.previous"
 "ctrl-left" = "tabs.previous"
+# Between the splits of the editor area.
+"alt-tab" = "tabs.next-splitter"
+"alt-shift-tab" = "tabs.previous-splitter"
 
 # An open context menu (Swing popup menu keys of the reference IDE).
 [[context]]

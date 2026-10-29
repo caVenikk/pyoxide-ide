@@ -44,6 +44,7 @@ mod settings;
 mod shell;
 mod soft_wraps;
 mod source_roots;
+mod splits;
 mod tab_menu;
 mod terminal;
 mod tool_windows;
