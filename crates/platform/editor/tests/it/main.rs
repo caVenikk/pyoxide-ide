@@ -5,6 +5,7 @@
 
 mod basics;
 mod console;
+mod context_menu;
 mod decorations;
 mod decorations_perf;
 mod editing;

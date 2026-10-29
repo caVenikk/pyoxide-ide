@@ -355,6 +355,7 @@ impl FindBar {
                 | EditorEvent::GutterActionClicked { .. }
                 | EditorEvent::ChangeMarkerClicked { .. }
                 | EditorEvent::AfterLineTextClicked { .. }
+                | EditorEvent::ContextMenu { .. }
                 | EditorEvent::Scrolled => {}
             }),
             cx.on_blur(&history_focus, window, |this, _, cx| {

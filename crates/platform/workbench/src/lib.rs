@@ -52,7 +52,7 @@ pub use app::{
 pub use code_intel_ui::{CodeIntelHook, CodeIntelProvider};
 pub use debugger_ui::DebugHook;
 pub use file_types::{
-    FileAssociation, FileDecoration, FileDecorator, FileType, HighlighterFactory,
+    FileAssociation, FileContextMenu, FileDecoration, FileDecorator, FileType, HighlighterFactory,
 };
 pub use keymap::KeymapFiles;
 pub use module::{Init, Module};

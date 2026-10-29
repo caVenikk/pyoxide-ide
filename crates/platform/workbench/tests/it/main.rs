@@ -18,6 +18,7 @@ mod debug_sessions;
 mod diff;
 mod drop;
 mod editor_font;
+mod editor_menu;
 mod exclusions;
 mod external_changes;
 mod file_ops;

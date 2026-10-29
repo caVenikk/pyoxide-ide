@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use super::console::{
     console_state, harness, harness_with, idle, open_console, output, wait_console,
 };
+use super::grid::NAME;
 use super::*;
 
 const PLAN: &str = r#"[{"Plan": {"Node Type": "Hash Join", "Startup Cost": 6.70, "Total Cost": 43.26, "Plan Rows": 300, "Join Type": "Inner",
@@ -262,4 +263,100 @@ fn explain_analyze_on_a_read_only_data_source_runs_selects_only(cx: &mut TestApp
     wait_console(&mut h, "the analyze", |s| {
         idle(s) && s["tabs"][0]["plan"]["analyze"] == true
     });
+}
+
+fn open_file(h: &mut Harness, path: &std::path::Path) {
+    h.invoke(
+        "project.open-file",
+        json!({ "path": path.display().to_string() }),
+    );
+}
+
+/// The first-level rows of the editor's context menu: (label, has submenu).
+fn menu(h: &mut Harness) -> Vec<(String, bool)> {
+    h.state()["editor_menu"]["menu"]["levels"][0]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|r| {
+            (
+                r["label"].as_str().unwrap_or("---").to_owned(),
+                r["submenu"] == true,
+            )
+        })
+        .collect()
+}
+
+#[gpui::test]
+fn the_editor_menu_of_a_console_and_an_attached_file_has_explain_plan_and_execute(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, root) = project();
+    std::fs::write(root.join("scratch.sql"), "select * from demo.customers").unwrap();
+    std::fs::write(root.join("loose.sql"), "select 1").unwrap();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke("editor.context-menu", Value::Null);
+    h.draw();
+    let rows = menu(&mut h);
+    let at = |label: &str| rows.iter().position(|r| r.0 == label);
+    let explain = at("Explain Plan").unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(rows[explain].1, "a submenu");
+    assert_eq!(at("Execute"), Some(explain + 1), "{rows:?}");
+    assert!(at("Paste").unwrap() < explain);
+    assert_eq!(rows.last().unwrap().0, "Open In");
+    h.invoke("menu.cancel", Value::Null);
+
+    // The same in a file attached to the data source.
+    open_file(&mut h, &root.join("scratch.sql"));
+    h.invoke("sql.attach-data-source", json!({ "name": NAME }));
+    h.invoke("editor.context-menu", Value::Null);
+    h.draw();
+    let rows = menu(&mut h);
+    assert!(
+        rows.iter().any(|r| r.0 == "Explain Plan" && r.1),
+        "{rows:?}"
+    );
+    assert!(rows.iter().any(|r| r.0 == "Execute"), "{rows:?}");
+    h.invoke("menu.cancel", Value::Null);
+
+    // A file with no data source has neither.
+    open_file(&mut h, &root.join("loose.sql"));
+    h.invoke("editor.context-menu", Value::Null);
+    h.draw();
+    let rows = menu(&mut h);
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.0 == "Explain Plan" || r.0 == "Execute"),
+        "{rows:?}"
+    );
+}
+
+#[gpui::test]
+fn the_explain_row_of_the_editor_menu_explains_the_statement_at_the_caret(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke(
+        "editor.type",
+        json!({ "text": "select * from demo.customers where id = 1;" }),
+    );
+    h.invoke("editor.context-menu", Value::Null);
+    h.draw();
+    // Down to Explain Plan, open its submenu, choose the first row.
+    let items = menu(&mut h);
+    let index = items.iter().position(|r| r.0 == "Explain Plan").unwrap();
+    let downs = items[..=index].iter().filter(|r| r.0 != "---").count();
+    for _ in 0..downs {
+        h.invoke("menu.down", Value::Null);
+    }
+    h.invoke("menu.open-submenu", Value::Null);
+    h.invoke("menu.confirm", Value::Null);
+    let plan = plan(&mut h);
+    assert!(!rows(&plan).is_empty(), "{plan}");
+    assert!(h.state()["editor_menu"].is_null());
 }

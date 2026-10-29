@@ -97,6 +97,8 @@ ui::ui_commands! {
     Copy => "editor.copy", "Copy", "Copies the selection, or the caret line when nothing is selected.";
     Cut => "editor.cut", "Cut", "Cuts the selection, or the caret line when nothing is selected.";
     Paste => "editor.paste", "Paste", "Pastes the clipboard at the carets.";
+    ShowContextMenu => "editor.context-menu", "Show Context Menu",
+        "Opens the context menu of the editor below the caret, as a right click on the text does.";
     ShrinkSelection => "editor.shrink-selection", "Shrink Selection",
         "Goes back to the selection before the last Extend Selection.";
     Escape => "editor.escape", "Escape", "Drops the selection and extra carets.";
