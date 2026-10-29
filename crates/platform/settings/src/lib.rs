@@ -21,6 +21,7 @@ mod editor;
 mod files;
 mod import;
 mod keymap;
+mod short_float;
 mod store;
 mod terminal;
 

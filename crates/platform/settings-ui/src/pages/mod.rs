@@ -2,5 +2,6 @@
 //! workbench puts them in the tree.
 
 pub mod appearance;
+pub mod family_combo;
 pub mod font;
 pub mod general;

@@ -15,28 +15,23 @@
 //! Not drawn: the main and bold weights, the character variants, the
 //! whitespace dots of the preview and its blinking of changed glyphs.
 
-use std::cell::RefCell;
 use std::ops::Range;
-use std::rc::Rc;
-use std::sync::Arc;
 
 use editor::{Editor, EditorEvent, Highlighter, InlineStyle, Span};
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, ElementId, Entity, FocusHandle,
-    FontWeight, Global, IntoElement, KeyDownEvent, Pixels, Render, ScrollStrategy, SharedString,
-    Subscription, Task, TextSystem, UniformListScrollHandle, Window, anchored, canvas, div,
-    prelude::*, px, uniform_list,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, IntoElement,
+    KeyDownEvent, Render, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
 use settings::{EditorFontSettings, Section as _};
 use text::{AppliedEdit, Buffer};
 use themes::UiRole;
 use ui::components::Tooltip;
-use ui::deferred;
 use ui::icons::{Icon, IconName};
 use ui::pointer::PointerExt as _;
 use ui::theme::{FontChoice, Theme, ThemeExt};
 
+use super::family_combo::{ComboEvent, ComboSpec, FamilyCombo, families};
 use crate::page::{PageContext, SettingsPage};
 use crate::store;
 
@@ -61,8 +56,6 @@ const TYPOGRAPHY: &str = "Typography Settings";
 const FALLBACK: &str = "Fallback font:";
 const FALLBACK_COMMENT: &str = "Used for symbols not supported\nby the main font";
 const NONE: &str = "<None>";
-const MONOSPACED: &str = "Monospaced";
-const PROPORTIONAL: &str = "Proportional";
 const PREVIEW_HINT: &str = "Enter any text to preview";
 pub const SEARCH_TERMS: &[&str] = &[
     FONT,
@@ -103,20 +96,6 @@ ABCDEFGHIJKLMNOPQRSTUVWXYZ\n\
 \n\
 \n";
 
-/// Families the reference counts as monospaced before probing
-/// (`FontFamilyCombo.MyModel.KNOWN_MONOSPACED_FAMILIES`).
-const KNOWN_MONOSPACED: &[&str] = &[
-    "Consolas",
-    "DejaVu Sans Mono",
-    "Droid Sans Mono",
-    "JetBrains Mono",
-    "Fira Code",
-    "Inconsolata",
-    "Menlo",
-    "Monospaced",
-    "Source Code Pro",
-];
-
 /// The page's metrics, from the reference (Kotlin UI DSL, `AppFontPanel`):
 /// the options 12 from the page's edge and the top line, rows 24 high and
 /// 12 apart, the label column 37 wide, the font combo 285 wide and the
@@ -147,11 +126,29 @@ const GROUP_INDENT: f32 = 20.0;
 const COMMENT_TOP: f32 = 4.0;
 const PREVIEW_LEFT: f32 = 6.0;
 const HINT_PAD: (f32, f32) = (10.0, 15.0);
-/// The list of a combo box: rows of `List.rowHeight`, at most this many
-/// shown, the body's insets.
-const LIST_ROW: f32 = 24.0;
-const LIST_ROWS: usize = 15;
-const LIST_PAD: f32 = 8.0;
+
+/// The page's combo boxes: the main font's list holds every family that can
+/// draw its name, in the Monospaced and Proportional groups; the fallback's
+/// also the `<None>` row.
+const FAMILY_COMBO: ComboSpec = ComboSpec {
+    prefix: "font",
+    name: "family",
+    width: FAMILY_WIDTH,
+    list_width: FALLBACK_WIDTH,
+    monospaced_only: false,
+    groups: true,
+    names_only: true,
+    none: None,
+    warn_missing: true,
+};
+const FALLBACK_COMBO: ComboSpec = ComboSpec {
+    name: "fallback",
+    width: FALLBACK_WIDTH,
+    names_only: false,
+    none: Some(NONE),
+    warn_missing: false,
+    ..FAMILY_COMBO
+};
 
 /// The keys of `settings.edit`.
 mod field {
@@ -192,98 +189,6 @@ pub fn choice_of(settings: &EditorFontSettings) -> FontChoice {
 fn apply_stored(cx: &mut App) {
     let settings: EditorFontSettings = store::get(cx);
     ui::theme::set_font_choice(cx, choice_of(&settings));
-}
-
-// ---- font families -------------------------------------------------------------------
-
-/// A font family of the list.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Family {
-    pub name: SharedString,
-    pub monospaced: bool,
-    /// The font has glyphs for its own name (the list draws it in it; the
-    /// main font's list leaves it out otherwise).
-    pub shows_name: bool,
-}
-
-/// The families known so far and the listing in progress.
-#[derive(Default)]
-struct Families {
-    list: Arc<Vec<Family>>,
-    loaded: bool,
-    task: Option<Task<()>>,
-}
-
-impl Global for Families {}
-
-/// Lists and probes the families of the text system (blocking: every
-/// family is loaded; run it off the UI thread).
-fn probe_families(ts: &TextSystem) -> Vec<Family> {
-    let mut names: Vec<String> = ts
-        .all_font_names()
-        .into_iter()
-        .filter(|n| !n.is_empty() && !n.starts_with('.'))
-        .collect();
-    names.sort();
-    names.dedup();
-    let size = px(12.0);
-    let mut families: Vec<Family> = names
-        .into_iter()
-        .map(|name| {
-            let id = ts.resolve_font(&gpui::font(name.clone()));
-            let width = |c: char| ts.advance(id, size, c).ok().map(|s| s.width);
-            let widths = [width('i'), width('m'), width('W'), width('.')];
-            let monospaced = KNOWN_MONOSPACED.contains(&name.as_str())
-                || (widths[0].is_some() && widths.iter().all(|w| *w == widths[0]));
-            let shows_name = name.chars().all(|c| c == ' ' || width(c).is_some());
-            Family {
-                name: name.into(),
-                monospaced,
-                shows_name,
-            }
-        })
-        .collect();
-    sort_families(&mut families);
-    families
-}
-
-/// Monospaced families first, then by name (`MyFontItemComparator`).
-fn sort_families(families: &mut [Family]) {
-    families.sort_by(|a, b| {
-        b.monospaced
-            .cmp(&a.monospaced)
-            .then_with(|| a.name.cmp(&b.name))
-    });
-}
-
-/// Lists the families on the background executor, once per application;
-/// the windows redraw when they are there.
-fn refresh_families(cx: &mut App) {
-    if cx
-        .try_global::<Families>()
-        .is_some_and(|f| f.loaded || f.task.is_some())
-    {
-        return;
-    }
-    let ts = cx.text_system().clone();
-    let work = cx.background_spawn(async move { probe_families(&ts) });
-    let task = cx.spawn(async move |cx| {
-        let list = work.await;
-        let _ = cx.update(|cx| {
-            let families = cx.default_global::<Families>();
-            families.list = Arc::new(list);
-            families.loaded = true;
-            families.task = None;
-            cx.refresh_windows();
-        });
-    });
-    cx.default_global::<Families>().task = Some(task);
-}
-
-fn families(cx: &App) -> (Arc<Vec<Family>>, bool) {
-    cx.try_global::<Families>()
-        .map(|f| (f.list.clone(), f.loaded))
-        .unwrap_or_default()
 }
 
 // ---- the preview ---------------------------------------------------------------------
@@ -387,53 +292,6 @@ impl Highlighter for PreviewHighlighter {
 
 // ---- the page ------------------------------------------------------------------------
 
-/// Which combo box's list is open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum List {
-    Family,
-    Fallback,
-}
-
-impl List {
-    fn name(self) -> &'static str {
-        match self {
-            List::Family => "family",
-            List::Fallback => "fallback",
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
-}
-
-/// A row of a combo box's list.
-#[derive(Debug, Clone, PartialEq)]
-enum Row {
-    Header(&'static str),
-    None,
-    Family(Family),
-}
-
-impl Row {
-    fn value(&self) -> Option<Option<SharedString>> {
-        match self {
-            Row::Header(_) => None,
-            Row::None => Some(None),
-            Row::Family(f) => Some(Some(f.name.clone())),
-        }
-    }
-}
-
-/// An open list: its rows, the highlighted one and its scroll.
-struct OpenList {
-    which: List,
-    rows: Rc<Vec<Row>>,
-    highlighted: Option<usize>,
-    scroll: UniformListScrollHandle,
-    focus: FocusHandle,
-}
-
 /// The font the page holds, in the form the store keeps it.
 #[derive(Debug, Clone, PartialEq)]
 struct Shown {
@@ -527,15 +385,12 @@ fn parse_number(text: &str, range: &std::ops::RangeInclusive<f32>) -> Result<f32
 /// The page: the font it holds (Size and Line height as typed), the
 /// preview, an open list.
 pub struct FontPage {
-    family: String,
-    fallback: Option<String>,
+    family: Entity<FamilyCombo>,
+    fallback: Entity<FamilyCombo>,
     ligatures: bool,
     size: Entity<Editor>,
     line_height: Entity<Editor>,
     typography: bool,
-    list: Option<OpenList>,
-    /// Where the combo boxes are drawn (the lists open below them).
-    anchors: Rc<RefCell<[Bounds<Pixels>; 2]>>,
     preview: Entity<Editor>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -543,8 +398,10 @@ pub struct FontPage {
 
 impl FontPage {
     pub fn new(_: &PageContext, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        refresh_families(cx);
         let shown = Shown::stored(cx);
+        let focus = cx.focus_handle();
+        let family = Self::combo(FAMILY_COMBO, Some(shown.family.clone()), &focus, cx);
+        let fallback = Self::combo(FALLBACK_COMBO, shown.fallback.clone(), &focus, cx);
         let size = editor::field::new(&number_text(shown.size), None, true, window, cx);
         let line_height =
             editor::field::new(&number_text(shown.line_height), None, true, window, cx);
@@ -569,43 +426,73 @@ impl FontPage {
                     cx.notify();
                 }
             };
+        let chosen =
+            |this: &mut Self, _: Entity<FamilyCombo>, _: &ComboEvent, cx: &mut Context<Self>| {
+                this.sync_preview(cx);
+                cx.notify();
+            };
         let subscriptions = vec![
             cx.subscribe(&size, edited),
             cx.subscribe(&line_height, edited),
+            cx.subscribe(&family, chosen),
+            cx.subscribe(&fallback, chosen),
         ];
         let mut this = Self {
-            family: shown.family,
-            fallback: shown.fallback,
+            family,
+            fallback,
             ligatures: shown.ligatures,
             size,
             line_height,
             typography: false,
-            list: None,
-            anchors: Rc::default(),
             preview,
-            focus: cx.focus_handle(),
+            focus,
             _subscriptions: subscriptions,
         };
         this.sync_preview(cx);
         this
     }
 
+    /// A combo box of the page.
+    fn combo(
+        spec: ComboSpec,
+        value: Option<String>,
+        focus: &FocusHandle,
+        cx: &mut Context<Self>,
+    ) -> Entity<FamilyCombo> {
+        let focus = focus.clone();
+        cx.new(|cx| FamilyCombo::new(spec, value, focus, cx))
+    }
+
     fn text(field: &Entity<Editor>, cx: &App) -> String {
         field.read(cx).text().trim().to_owned()
+    }
+
+    /// The main font's family the page holds.
+    fn family(&self, cx: &App) -> String {
+        self.family
+            .read(cx)
+            .value()
+            .unwrap_or(EditorFontSettings::DEFAULT_FAMILY)
+            .to_owned()
+    }
+
+    /// The fallback font the page holds.
+    fn fallback(&self, cx: &App) -> Option<String> {
+        self.fallback.read(cx).value().map(str::to_owned)
     }
 
     /// The font the page holds; an error while Size or Line height is no
     /// number.
     fn shown(&self, cx: &App) -> Result<Shown, String> {
         Ok(Shown {
-            family: self.family.clone(),
+            family: self.family(cx),
             size: parse_number(&Self::text(&self.size, cx), &EditorFontSettings::SIZES)?,
             line_height: parse_number(
                 &Self::text(&self.line_height, cx),
                 &EditorFontSettings::LINE_HEIGHTS,
             )?,
             ligatures: self.ligatures,
-            fallback: self.fallback.clone(),
+            fallback: self.fallback(cx),
         })
     }
 
@@ -617,7 +504,7 @@ impl FontPage {
             parse_number(&Self::text(field, cx), range).unwrap_or(fallback)
         };
         Shown {
-            family: self.family.clone(),
+            family: self.family(cx),
             size: number(&self.size, &EditorFontSettings::SIZES, stored.size),
             line_height: number(
                 &self.line_height,
@@ -625,7 +512,7 @@ impl FontPage {
                 stored.line_height,
             ),
             ligatures: self.ligatures,
-            fallback: self.fallback.clone(),
+            fallback: self.fallback(cx),
         }
     }
 
@@ -654,12 +541,21 @@ impl FontPage {
     /// 13 with line height 1.2, no ligatures, no fallback font.
     fn restore_defaults(&mut self, cx: &mut Context<Self>) {
         let defaults = Shown::defaults();
-        self.family = defaults.family;
+        self.family
+            .update(cx, |c, cx| c.set_value(Some(defaults.family), cx));
+        self.fallback
+            .update(cx, |c, cx| c.set_value(defaults.fallback, cx));
         self.ligatures = defaults.ligatures;
-        self.fallback = defaults.fallback;
         self.set_numbers(defaults.size, defaults.line_height, cx);
         self.sync_preview(cx);
         cx.notify();
+    }
+
+    /// Closes the open list, if any.
+    fn close_lists(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
+        for combo in [&self.family, &self.fallback] {
+            combo.update(cx, |c, cx| c.close(window.as_deref_mut(), cx));
+        }
     }
 
     fn toggle_ligatures(&mut self, cx: &mut Context<Self>) {
@@ -689,187 +585,7 @@ impl FontPage {
             .update(cx, |e, cx| e.set_text_selected(&text, cx));
     }
 
-    // ---- lists ----
-
-    fn rows(which: List, cx: &App) -> Vec<Row> {
-        let (list, _) = families(cx);
-        let mut rows = Vec::new();
-        if which == List::Fallback {
-            rows.push(Row::None);
-        }
-        let mut monospaced = None;
-        for family in list.iter() {
-            if which == List::Family && !family.shows_name {
-                continue;
-            }
-            if monospaced != Some(family.monospaced) {
-                monospaced = Some(family.monospaced);
-                rows.push(Row::Header(if family.monospaced {
-                    MONOSPACED
-                } else {
-                    PROPORTIONAL
-                }));
-            }
-            rows.push(Row::Family(family.clone()));
-        }
-        rows
-    }
-
-    fn open_list(&mut self, which: List, window: &mut Window, cx: &mut Context<Self>) {
-        let rows = Rc::new(Self::rows(which, cx));
-        let current: Option<SharedString> = match which {
-            List::Family => Some(self.family.clone().into()),
-            List::Fallback => self.fallback.clone().map(Into::into),
-        };
-        let highlighted = rows.iter().position(|r| r.value() == Some(current.clone()));
-        let scroll = UniformListScrollHandle::new();
-        if let Some(ix) = highlighted {
-            scroll.scroll_to_item(ix, ScrollStrategy::Center);
-        }
-        let focus = cx.focus_handle();
-        window.focus(&focus);
-        self.list = Some(OpenList {
-            which,
-            rows,
-            highlighted,
-            scroll,
-            focus,
-        });
-        cx.notify();
-    }
-
-    fn close_list(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        if self.list.take().is_some() {
-            if let Some(window) = window {
-                window.focus(&self.focus);
-            }
-            cx.notify();
-        }
-    }
-
-    fn toggle_list(&mut self, which: List, window: &mut Window, cx: &mut Context<Self>) {
-        if self.list.as_ref().is_some_and(|l| l.which == which) {
-            self.close_list(Some(window), cx);
-        } else {
-            self.open_list(which, window, cx);
-        }
-    }
-
-    /// Takes the value of row `ix` of the open list and closes it.
-    fn choose(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(list) = &self.list else {
-            return;
-        };
-        let which = list.which;
-        let Some(value) = list.rows.get(ix).and_then(Row::value) else {
-            return;
-        };
-        match which {
-            List::Family => {
-                if let Some(family) = value {
-                    self.family = family.to_string();
-                }
-            }
-            List::Fallback => self.fallback = value.map(|v| v.to_string()),
-        }
-        self.close_list(Some(window), cx);
-        self.sync_preview(cx);
-    }
-
-    fn move_highlight(&mut self, down: bool, cx: &mut Context<Self>) {
-        let Some(list) = &mut self.list else {
-            return;
-        };
-        let count = list.rows.len();
-        let selectable = |ix: usize| !matches!(list.rows[ix], Row::Header(_));
-        let mut ix = list.highlighted;
-        for _ in 0..count {
-            let next = match (ix, down) {
-                (None, true) => 0,
-                (None, false) => count.saturating_sub(1),
-                (Some(i), true) => (i + 1) % count,
-                (Some(i), false) => (i + count - 1) % count,
-            };
-            ix = Some(next);
-            if selectable(next) {
-                break;
-            }
-        }
-        if let Some(ix) = ix.filter(|ix| *ix < count) {
-            list.highlighted = Some(ix);
-            list.scroll.scroll_to_item(ix, ScrollStrategy::Top);
-        }
-        cx.notify();
-    }
-
-    fn list_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match event.keystroke.key.as_str() {
-            "down" => self.move_highlight(true, cx),
-            "up" => self.move_highlight(false, cx),
-            "enter" => {
-                if let Some(ix) = self.list.as_ref().and_then(|l| l.highlighted) {
-                    self.choose(ix, window, cx);
-                }
-            }
-            "escape" => self.close_list(Some(window), cx),
-            _ => return,
-        }
-        cx.stop_propagation();
-    }
-
     // ---- drawing ----
-
-    fn combo(
-        &self,
-        which: List,
-        text: AnyElement,
-        width: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let open = self.list.as_ref().is_some_and(|l| l.which == which);
-        let anchors = self.anchors.clone();
-        let focus = cx.theme().color(UiRole::Focus);
-        ui::form::combo(
-            SharedString::from(format!("font-{}", which.name())),
-            vec![text],
-            cx,
-        )
-        .debug_selector(move || format!("font:{}", which.name()))
-        .h(px(ROW))
-        .w(px(width))
-        .when(open, |d| d.border_color(focus))
-        .child(
-            canvas(
-                move |bounds, _, _| anchors.borrow_mut()[which.index()] = bounds,
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full(),
-        )
-        .on_click(
-            cx.listener(move |this, _: &ClickEvent, window, cx| {
-                this.toggle_list(which, window, cx)
-            }),
-        )
-        .into_any_element()
-    }
-
-    /// The family's text in its combo box: a family the text system does
-    /// not have in the error colour (`MyWarningItem`).
-    fn family_text(&self, cx: &App) -> AnyElement {
-        let (list, loaded) = families(cx);
-        let missing = loaded && !list.iter().any(|f| f.name.as_ref() == self.family);
-        if missing {
-            div()
-                .text_color(cx.theme().color(UiRole::Danger))
-                .child(format!("<Font missing: {}>", self.family))
-                .into_any_element()
-        } else {
-            div().child(self.family.clone()).into_any_element()
-        }
-    }
 
     fn number_field(
         &self,
@@ -916,102 +632,6 @@ impl FontPage {
             .into_any_element()
     }
 
-    fn render_list(&self, list: &OpenList, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let bounds = self.anchors.borrow()[list.which.index()];
-        let shown_rows = list.rows.len().clamp(1, LIST_ROWS);
-        let height = LIST_ROW * shown_rows as f32 + 2.0 * LIST_PAD;
-        let rows = list.rows.clone();
-        let highlighted = list.highlighted;
-        let (_, loaded) = families(cx);
-        let body = uniform_list(
-            "font-list",
-            rows.len(),
-            cx.processor(move |_, range: Range<usize>, _, cx| {
-                let theme = cx.theme();
-                let selection = theme.color(UiRole::Selection);
-                let muted = theme.color(UiRole::TextMuted);
-                let small = theme.ui_size() - px(1.0);
-                range
-                    .map(|ix| {
-                        let row = div()
-                            .id(ElementId::NamedInteger("font-row".into(), ix as u64))
-                            .h(px(LIST_ROW))
-                            .px(px(LIST_PAD))
-                            .flex()
-                            .items_center();
-                        match &rows[ix] {
-                            Row::Header(title) => row
-                                .debug_selector(move || format!("font-header:{title}"))
-                                .text_size(small)
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(muted)
-                                .child(div().px(px(LIST_PAD)).child(*title)),
-                            other => {
-                                let (label, family) = match other {
-                                    Row::Family(f) => (
-                                        f.name.clone(),
-                                        (loaded && f.shows_name).then(|| f.name.clone()),
-                                    ),
-                                    _ => (SharedString::from(NONE), None),
-                                };
-                                let selector = format!("font-row:{label}");
-                                row.debug_selector(move || selector.clone())
-                                    .pointing_hand()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .h_full()
-                                            .px(px(LIST_PAD))
-                                            .flex()
-                                            .items_center()
-                                            .rounded(px(4.0))
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .when(highlighted == Some(ix), |d| d.bg(selection))
-                                            .when_some(family, |d, f| d.font_family(f))
-                                            .child(label),
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this: &mut Self, _: &ClickEvent, window, cx| {
-                                            this.choose(ix, window, cx)
-                                        },
-                                    ))
-                            }
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .track_scroll(list.scroll.clone())
-        .h(px(height - 2.0 * LIST_PAD));
-        let popup = div()
-            .id("font-list-popup")
-            .debug_selector(|| "font-list".into())
-            .key_context(ui::menu::KEY_CONTEXT)
-            .track_focus(&list.focus)
-            .occlude()
-            .w(bounds.size.width.max(px(FALLBACK_WIDTH)))
-            .h(px(height))
-            .py(px(LIST_PAD))
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(theme.color(UiRole::PopupBorder))
-            .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow(ui::components::popup_shadow())
-            .on_key_down(cx.listener(Self::list_key))
-            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_list(Some(window), cx)))
-            .child(body);
-        deferred(
-            anchored()
-                .position(bounds.bottom_left() + gpui::point(px(0.0), px(2.0)))
-                .snap_to_window()
-                .child(popup),
-        )
-        .with_priority(1)
-        .into_any_element()
-    }
-
     fn render_form(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let muted = theme.color(UiRole::TextMuted);
@@ -1024,13 +644,12 @@ impl FontPage {
                 .w(px(LABEL_COLUMN))
                 .child(crate::search::label(text, cx))
         };
-        let family_text = self.family_text(cx);
         let family_row = div()
             .flex()
             .items_center()
             .h(px(ROW))
             .child(label(FONT, cx))
-            .child(self.combo(List::Family, family_text, FAMILY_WIDTH, cx));
+            .child(self.family.clone());
         let size_row = div()
             .flex()
             .items_center()
@@ -1110,9 +729,6 @@ impl FontPage {
                 this.typography = !this.typography;
                 cx.notify();
             }));
-        let fallback_text = div()
-            .child(self.fallback.clone().unwrap_or_else(|| NONE.to_owned()))
-            .into_any_element();
         let typography = expanded.then(|| {
             let comment = FALLBACK_COMMENT.lines().map(|line| div().child(line));
             div()
@@ -1130,17 +746,13 @@ impl FontPage {
                 )
                 .child(div().w(px(LABEL_GAP)))
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .child(self.combo(List::Fallback, fallback_text, FALLBACK_WIDTH, cx))
-                        .child(
-                            div()
-                                .pt(px(COMMENT_TOP))
-                                .text_size(small)
-                                .text_color(muted)
-                                .children(comment),
-                        ),
+                    div().flex().flex_col().child(self.fallback.clone()).child(
+                        div()
+                            .pt(px(COMMENT_TOP))
+                            .text_size(small)
+                            .text_color(muted)
+                            .children(comment),
+                    ),
                 )
         });
         div()
@@ -1220,11 +832,13 @@ impl SettingsPage for FontPage {
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let stored = Shown::stored(cx);
-        self.family = stored.family;
+        self.family
+            .update(cx, |c, cx| c.set_value(Some(stored.family), cx));
+        self.fallback
+            .update(cx, |c, cx| c.set_value(stored.fallback, cx));
         self.ligatures = stored.ligatures;
-        self.fallback = stored.fallback;
         self.set_numbers(stored.size, stored.line_height, cx);
-        self.close_list(Some(window), cx);
+        self.close_lists(Some(window), cx);
         self.sync_preview(cx);
         cx.notify();
     }
@@ -1237,28 +851,26 @@ impl SettingsPage for FontPage {
         let (list, loaded) = families(cx);
         let preview = self.preview.read(cx);
         let font = self.preview_shown(cx);
+        let open = [
+            (FAMILY_COMBO.name, &self.family),
+            (FALLBACK_COMBO.name, &self.fallback),
+        ]
+        .into_iter()
+        .find(|(_, c)| c.read(cx).is_open())
+        .map(|(name, c)| (name, c.read(cx).state()));
         json!({
-            "family": self.family,
+            "family": self.family(cx),
             "size": Self::text(&self.size, cx),
             "line-height": Self::text(&self.line_height, cx),
             "ligatures": self.ligatures,
-            "fallback": self.fallback,
+            "fallback": self.fallback(cx),
             "restore-defaults": self.restorable(cx),
             "typography": self.typography,
             "families": list.len(),
             "families-loaded": loaded,
-            "list": self.list.as_ref().map(|l| l.which.name()),
-            "rows": self.list.as_ref().map(|l| {
-                l.rows
-                    .iter()
-                    .map(|r| match r {
-                        Row::Header(t) => json!({"header": t}),
-                        Row::None => json!({"label": NONE}),
-                        Row::Family(f) => json!({"label": f.name, "monospaced": f.monospaced}),
-                    })
-                    .collect::<Vec<_>>()
-            }),
-            "highlighted": self.list.as_ref().and_then(|l| l.highlighted),
+            "list": open.as_ref().map(|(name, _)| name),
+            "rows": open.as_ref().map(|(_, state)| state["rows"].clone()),
+            "highlighted": open.as_ref().map(|(_, state)| state["highlighted"].clone()),
             "preview": {
                 "family": font.family,
                 "size": font.size,
@@ -1284,19 +896,22 @@ impl SettingsPage for FontPage {
         };
         match name {
             field::FAMILY => {
-                self.family = value
+                let family = value
                     .as_str()
                     .filter(|s| !s.trim().is_empty())
                     .ok_or("`family` takes a family name")?
                     .to_owned();
+                self.family
+                    .update(cx, |c, cx| c.set_value(Some(family), cx));
             }
             field::FALLBACK => {
-                self.fallback = match value {
+                let fallback = match value {
                     Json::Null => None,
                     Json::String(s) if s == NONE || s.is_empty() => None,
                     Json::String(s) => Some(s.clone()),
                     _ => return Err("`fallback` takes a family name or null".into()),
                 };
+                self.fallback.update(cx, |c, cx| c.set_value(fallback, cx));
             }
             field::SIZE => {
                 let t = text()?;
@@ -1316,29 +931,27 @@ impl SettingsPage for FontPage {
             }
             // Opens (`"family"`, `"fallback"`) or closes (`null`) a list.
             field::LIST => match value.as_str() {
-                Some("family") => self.open_list(List::Family, window, cx),
+                Some("family") => {
+                    self.close_lists(None, cx);
+                    self.family.update(cx, |c, cx| c.open(window, cx));
+                }
                 Some("fallback") => {
                     self.typography = true;
-                    self.open_list(List::Fallback, window, cx)
+                    self.close_lists(None, cx);
+                    self.fallback.update(cx, |c, cx| c.open(window, cx));
                 }
-                None => self.close_list(Some(window), cx),
+                None => self.close_lists(Some(window), cx),
                 Some(other) => return Err(format!("no list `{other}`")),
             },
             // Chooses a row of the open list by its label.
             field::CHOOSE => {
                 let label = value.as_str().ok_or("`choose` takes a row's label")?;
-                let ix = self
-                    .list
-                    .as_ref()
-                    .and_then(|l| {
-                        l.rows.iter().position(|r| match r {
-                            Row::None => label == NONE,
-                            Row::Family(f) => f.name.as_ref() == label,
-                            Row::Header(_) => false,
-                        })
-                    })
-                    .ok_or_else(|| format!("no row `{label}` in an open list"))?;
-                self.choose(ix, window, cx);
+                let combo = [&self.family, &self.fallback]
+                    .into_iter()
+                    .find(|c| c.read(cx).is_open())
+                    .ok_or_else(|| format!("no row `{label}` in an open list"))?
+                    .clone();
+                combo.update(cx, |c, cx| c.choose_label(label, window, cx))?;
             }
             _ => return Err(format!("no field `{name}` on this page")),
         }
@@ -1353,7 +966,6 @@ impl Render for FontPage {
         let divider = cx.theme().color(UiRole::Divider);
         let form = self.render_form(window, cx);
         let preview = self.render_preview(cx);
-        let list = self.list.as_ref().map(|l| self.render_list(l, cx));
         div()
             .id("font-page")
             .debug_selector(|| "font-page".into())
@@ -1371,7 +983,6 @@ impl Render for FontPage {
             .border_color(divider)
             .child(form)
             .child(preview)
-            .children(list)
     }
 }
 
@@ -1414,22 +1025,5 @@ mod tests {
             Ok(0.6)
         );
         assert!(parse_number("big", &EditorFontSettings::SIZES).is_err());
-    }
-
-    #[test]
-    fn monospaced_families_come_first() {
-        let family = |name: &str, monospaced| Family {
-            name: name.to_owned().into(),
-            monospaced,
-            shows_name: true,
-        };
-        let mut list = vec![
-            family("Arial", false),
-            family("Menlo", true),
-            family("Courier", true),
-        ];
-        sort_families(&mut list);
-        let names: Vec<_> = list.iter().map(|f| f.name.to_string()).collect();
-        assert_eq!(names, ["Courier", "Menlo", "Arial"]);
     }
 }
