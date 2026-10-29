@@ -427,7 +427,8 @@ impl Workbench {
     ) -> impl IntoElement {
         let top = self.stripe_buttons(Area::Left, window, cx);
         let bottom = self.stripe_buttons(Area::Bottom, window, cx);
-        chrome::stripe("left-stripe", top, bottom, cx)
+        let background = self.frame_part_background(UiRole::ToolWindowStripe, cx);
+        chrome::stripe("left-stripe", top, bottom, background, cx)
     }
 
     pub(super) fn render_right_stripe(
@@ -436,7 +437,8 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let top = self.stripe_buttons(Area::Right, window, cx);
-        chrome::stripe("right-stripe", top, Vec::new(), cx)
+        let background = self.frame_part_background(UiRole::ToolWindowStripe, cx);
+        chrome::stripe("right-stripe", top, Vec::new(), background, cx)
     }
 
     /// The area shows a tool window that can be drawn.

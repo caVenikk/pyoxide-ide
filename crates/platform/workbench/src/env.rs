@@ -2,7 +2,7 @@
 //!
 //! | variable | effect |
 //! |---|---|
-//! | `PYOXIDE_BACKGROUND=1` | open windows without activating the app or taking focus |
+//! | `PYOXIDE_BACKGROUND=1` | open windows without activating the app or taking focus; the main window is drawn as the active one (`inactive`: as it is, the project colour dimmed) |
 //! | `PYOXIDE_THEME=light` | use the light theme in this run (`dark`, or a theme id), whatever the settings store, until a theme is chosen in the IDE |
 //! | `PYOXIDE_SHOT=<file.png>` | save an image of the main window after it settled, then quit (macOS) |
 //! | `PYOXIDE_WINDOW_SIZE=<w>x<h>` | open the main window with this content size in points, below the usual minimum too (pictures at several widths) |
@@ -32,11 +32,22 @@ use std::time::Instant;
 
 use themes::ThemeKind;
 
-/// Open windows in the background (`PYOXIDE_BACKGROUND=1`): shown, but the
-/// app is not activated and the window does not become key, so the person's
-/// frontmost application keeps the keyboard.
+/// Open windows in the background (`PYOXIDE_BACKGROUND=1` or `inactive`):
+/// shown, but the app is not activated and the window does not become key,
+/// so the person's frontmost application keeps the keyboard.
 pub fn background() -> bool {
-    app_info::var_os("BACKGROUND").is_some_and(|v| v == "1")
+    matches!(
+        app_info::var("BACKGROUND").as_deref(),
+        Some("1" | "inactive")
+    )
+}
+
+/// Whether the window's frame is drawn as the active window's (the project
+/// colour is dimmed in an inactive one). A window opened with
+/// `PYOXIDE_BACKGROUND=1` stands for the window in front and is drawn
+/// active; `PYOXIDE_BACKGROUND=inactive` draws it as it is.
+pub fn drawn_active(window: &gpui::Window) -> bool {
+    window.is_window_active() || app_info::var("BACKGROUND").as_deref() == Some("1")
 }
 
 /// Theme kind requested with `PYOXIDE_THEME` (the theme drawn before
