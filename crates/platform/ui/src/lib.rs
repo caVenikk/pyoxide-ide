@@ -24,6 +24,7 @@ pub mod pointer;
 pub mod progress_bar;
 pub mod theme;
 pub mod tree_guides;
+pub mod window_close;
 
 pub use deferred::{Deferred, deferred};
 pub use icons::{Icon, IconName};
