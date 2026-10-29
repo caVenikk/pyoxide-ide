@@ -158,6 +158,26 @@ agents' builds at the same time.
 | 2026-10-26 | mac-1 | diagnostics of a 5000-line script on open (142 KB, 600 statements) | 10.3 ms (max 11.4) | 150 ms | parsed beforehand; parse and analysis together 19.7 ms (max 21.7) |
 | 2026-10-26 | mac-1 | diagnostics after a keystroke | 0.29 ms (max 0.47) | 10 ms | re-parse included; one statement analysed per keystroke |
 
+### SQL completion
+Issue #320: `cargo bench -p sql-intel --bench completion`
+(`crates/database/sql-intel/benches/completion.rs`), the same generated
+5000-line script and PostgreSQL model of 10 006 tables as above, through
+`SqlCodeIntel`. Each of ten requests (columns of an alias, tables with and
+without a prefix, columns before `FROM`, a join condition, CTE columns,
+functions, keywords) types a statement into the middle of the script, asks
+for completion at the caret and removes the statement again; the time runs
+from the text change to the items (re-parse, the request, the items as
+`code-intel` data), 200 runs each. Without a prefix, or with one that
+matches nearly everything, the answer holds 2000 items and is marked
+incomplete (the popup asks again with the next letters). Release build,
+Rust 1.99.0.
+
+| date | machine | metric | value | budget | notes |
+|---|---|---|---|---|---|
+| 2026-10-29 | mac-1 | completion, keystroke to items, all ten requests (2000 runs) | median 0.18 ms, p99 0.72 ms (max 1.2) | p99 30 ms | slowest request: tables with a prefix that matches every table, median 0.66 ms |
+| 2026-10-29 | mac-1 | the same while other agents' builds ran | median 0.65 ms, p99 3.1 ms (max 3.4) | p99 30 ms | |
+| 2026-10-29 | mac-1 | first request after open (142 KB script) | 4.2 ms | | parse of the whole script and the index of what it creates |
+
 ### Schema load (5000 tables)
 Issue #298: `Introspector::load` on a schema of 5000 tables with 5 columns each
 (25,000 columns), a primary key, a unique constraint, a foreign key, a check

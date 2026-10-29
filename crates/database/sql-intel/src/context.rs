@@ -85,6 +85,26 @@ impl Scope {
     }
 }
 
+/// The case completion writes keywords in (the code style's keyword case).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum KeywordCase {
+    /// As the keywords around are written: lower case after a lower case
+    /// word, else upper case.
+    #[default]
+    Keep,
+    Upper,
+    Lower,
+}
+
+/// What completion does besides offering names.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompletionOptions {
+    pub keyword_case: KeywordCase,
+    /// A table inserted into `FROM` gets an alias made from the initials of
+    /// its name.
+    pub insert_alias: bool,
+}
+
 /// The dialect and scope of one document.
 #[derive(Debug, Clone)]
 pub struct SqlContext {
@@ -93,11 +113,21 @@ pub struct SqlContext {
     /// errors and the inspections that need no metadata, never an
     /// unresolved reference.
     pub scope: Option<Scope>,
+    pub completion: CompletionOptions,
 }
 
 impl SqlContext {
     pub fn new(dialect: Dialect, scope: Option<Scope>) -> Self {
-        Self { dialect, scope }
+        Self {
+            dialect,
+            scope,
+            completion: CompletionOptions::default(),
+        }
+    }
+
+    pub fn with_completion(mut self, completion: CompletionOptions) -> Self {
+        self.completion = completion;
+        self
     }
 
     /// A document without a scope.

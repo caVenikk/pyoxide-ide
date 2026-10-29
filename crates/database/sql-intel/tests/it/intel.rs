@@ -241,3 +241,18 @@ fn unused_cte_is_greyed_and_profile_levels_apply() {
     let items = diagnostics(&events, &doc, 1);
     assert_eq!(items[0].severity, Severity::WeakWarning);
 }
+
+#[test]
+fn diagnostics_still_arrive_after_requests_that_came_first() {
+    use code_intel::CompletionTrigger;
+    let intel = SqlCodeIntel::new(Arc::new(sql_intel::FixedScope(scoped(Dialect::Postgres))));
+    let events = intel.events();
+    let doc = DocumentId::new("/p/q.sql");
+    let text = "select * from custmers;\n".repeat(50);
+    intel.did_open(&doc, "sql", 1, &Rope::from_str(&text));
+    for _ in 0..20 {
+        let answer = intel.completion(&doc, Point::new(0, 14), CompletionTrigger::Invoked);
+        assert!(!block(answer).items.is_empty());
+    }
+    assert_eq!(diagnostics(&events, &doc, 1).len(), 50);
+}

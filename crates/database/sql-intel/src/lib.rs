@@ -21,7 +21,12 @@
 //! No UI toolkit, no network, no async runtime.
 
 mod analysis;
+mod builtins;
+mod complete;
 mod context;
+mod cursor;
+mod docs;
+mod hover;
 mod inspect;
 mod intel;
 mod locals;
@@ -29,9 +34,10 @@ mod names;
 mod profile;
 mod reference;
 mod resolve;
+mod signature;
 
 pub use analysis::{Analyzer, DocumentAnalysis, analyze};
-pub use context::{FixedScope, Scope, ScopeProvider, SqlContext};
+pub use context::{CompletionOptions, FixedScope, KeywordCase, Scope, ScopeProvider, SqlContext};
 pub use inspect::{Fix, FixEdit, Problem};
 pub use intel::{SERVER_ID, SqlCodeIntel};
 pub use profile::{Inspection, InspectionLevel, InspectionProfile};

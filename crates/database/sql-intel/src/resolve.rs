@@ -82,26 +82,26 @@ pub(crate) struct StatementOut {
 }
 
 #[derive(Debug, Clone)]
-struct Source {
+pub(crate) struct Source {
     /// The alias, folded.
-    alias: Option<String>,
+    pub alias: Option<String>,
     /// The table or CTE name as written in `FROM`, folded: schema and name.
-    table: Option<(Option<String>, String)>,
+    pub table: Option<(Option<String>, String)>,
     /// The schema of the model object, exactly.
-    object_schema: Option<String>,
+    pub object_schema: Option<String>,
     /// How the source is qualified in a fix: the alias, else the table name,
     /// as written.
-    qualifier: String,
+    pub qualifier: String,
     /// The range of the name that defines it (alias, else table name).
-    def: Range<usize>,
-    columns: Columns,
+    pub def: Range<usize>,
+    pub columns: Columns,
     /// A table of the database: it has system columns.
-    is_table: bool,
+    pub is_table: bool,
 }
 
 impl Source {
     /// The source a qualifier (`t`, `s.t`, `a`) names.
-    fn named_by(&self, dialect: Dialect, q: &[Part]) -> bool {
+    pub fn named_by(&self, dialect: Dialect, q: &[Part]) -> bool {
         let Some(last) = q.last() else {
             return false;
         };
@@ -137,22 +137,36 @@ impl Source {
 }
 
 #[derive(Debug, Default, Clone)]
-struct Frame {
-    sources: Vec<Source>,
+pub(crate) struct Frame {
+    pub sources: Vec<Source>,
     /// Select-list aliases: folded name and range.
-    aliases: Vec<(String, Range<usize>)>,
+    pub aliases: Vec<(String, Range<usize>)>,
     /// Columns merged by `USING` or a natural join.
-    using: Vec<String>,
-    natural: bool,
+    pub using: Vec<String>,
+    pub natural: bool,
     /// Something in `FROM` hides names (a hole, a syntax error, a pivot).
-    uncertain: bool,
+    pub uncertain: bool,
 }
 
 #[derive(Debug, Clone)]
-struct CteBinding {
-    name: String,
-    def: Range<usize>,
-    columns: Columns,
+pub(crate) struct CteBinding {
+    pub name: String,
+    pub def: Range<usize>,
+    pub columns: Columns,
+}
+
+/// What a name at a position could refer to: the sources of the statement
+/// around the position and of the statements around that, the CTEs in
+/// scope, and the target of a data modification.
+#[derive(Debug, Clone)]
+pub(crate) struct Snapshot {
+    /// The part of the statement the snapshot is valid for.
+    pub range: Range<usize>,
+    /// Outermost first.
+    pub frames: Vec<Frame>,
+    pub ctes: Vec<CteBinding>,
+    /// The table an `INSERT`, `UPDATE`, `DELETE` or `MERGE` changes.
+    pub target: Option<Source>,
 }
 
 /// Where select-list aliases are visible to an unqualified name.
@@ -175,6 +189,10 @@ pub(crate) struct Resolver<'c, 'l> {
     /// Inside PL/SQL, PL/pgSQL, a trigger or a routine body: a name that is
     /// no column may be a variable or a parameter.
     procedural: u32,
+    /// A position completion asks about: the sources visible there are
+    /// recorded in `snapshots`.
+    probe: Option<usize>,
+    pub snapshots: Vec<Snapshot>,
     pub out: StatementOut,
 }
 
@@ -187,12 +205,61 @@ impl<'c, 'l> Resolver<'c, 'l> {
             ctes: Vec::new(),
             aliases: Aliases::No,
             procedural: 0,
+            probe: None,
+            snapshots: Vec::new(),
             out: StatementOut::default(),
         }
     }
 
+    /// A resolver that records what is visible at `offset`.
+    pub fn probing(env: &'c Env<'c>, locals: &'l LocalIndex, offset: usize) -> Self {
+        let mut r = Self::new(env, locals);
+        r.probe = Some(offset);
+        r
+    }
+
+    /// Records the frames and CTEs in scope when the probe is in `range`.
+    fn snapshot(&mut self, range: Range<usize>, target: Option<&Source>) {
+        let Some(p) = self.probe else {
+            return;
+        };
+        if range.start <= p && p <= range.end {
+            self.snapshots.push(Snapshot {
+                range,
+                frames: self.frames.clone(),
+                ctes: self.ctes.clone(),
+                target: target.cloned(),
+            });
+        }
+    }
+
+    /// The smallest snapshot of the statement that is valid for the probe
+    /// (the innermost one when equal).
+    pub fn best_snapshot(&mut self) -> Option<Snapshot> {
+        let mut best: Option<usize> = None;
+        for (i, s) in self.snapshots.iter().enumerate() {
+            let better = match best {
+                None => true,
+                Some(b) => s.range.len() <= self.snapshots[b].range.len(),
+            };
+            if better {
+                best = Some(i);
+            }
+        }
+        best.map(|i| self.snapshots.swap_remove(i))
+    }
+
     fn dialect(&self) -> Dialect {
         self.env.dialect
+    }
+
+    /// Walks the statement of a parse unit and returns what is visible at
+    /// the probe (see [`Resolver::probing`]).
+    pub fn visible_at_probe(mut self, root: SyntaxNode<'_>) -> Option<Snapshot> {
+        for node in root.child_nodes() {
+            self.statement(node);
+        }
+        self.best_snapshot()
     }
 
     /// Resolves the statement of a parse unit (its root).
@@ -467,6 +534,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
                                 frame.uncertain = matches!(out, Columns::Unknown);
                             }
                             self.frames.push(frame);
+                            self.snapshot(c.range(), None);
                             let saved = std::mem::replace(&mut self.aliases, Aliases::First);
                             self.expr(c);
                             self.aliases = saved;
@@ -578,6 +646,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             }
         }
         self.frames.push(frame);
+        self.snapshot(node.range(), None);
         if let Some(from) = from {
             self.join_conditions(from);
         }
@@ -911,6 +980,9 @@ impl<'c, 'l> Resolver<'c, 'l> {
         }
         let mut frame = Frame::default();
         let target = self.target(node, &mut frame);
+        self.frames.push(frame.clone());
+        self.snapshot(node.range(), target.as_ref());
+        self.frames.pop();
         let mut listed: Option<usize> = None;
         let mut values_or_query: Option<SyntaxNode<'_>> = None;
         for c in node.child_nodes() {
@@ -1126,6 +1198,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             }
         }
         self.frames.push(frame);
+        self.snapshot(node.range(), target.as_ref());
         if let Some(from) = node.child(K::FromClause) {
             self.join_conditions(from);
         }
@@ -1146,7 +1219,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             uncertain: node.child(K::Hole).is_some(),
             ..Frame::default()
         };
-        self.target(node, &mut frame);
+        let target = self.target(node, &mut frame);
         if let Some(using) = node.child(K::UsingSource) {
             if names::has_error(using) || names::has_hole(using) {
                 frame.uncertain = true;
@@ -1156,6 +1229,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             }
         }
         self.frames.push(frame);
+        self.snapshot(node.range(), target.as_ref());
         for c in node.child_nodes() {
             match c.kind() {
                 K::UsingSource => self.join_conditions(c),
@@ -1183,6 +1257,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             }
         }
         self.frames.push(frame);
+        self.snapshot(node.range(), target.as_ref());
         for c in node.child_nodes() {
             match c.kind() {
                 K::OnClause => self.expr(c),
@@ -1614,7 +1689,7 @@ impl<'c, 'l> Resolver<'c, 'l> {
             // Oracle: `package.member`; elsewhere a schema outside the model.
             None => Resolution::Unknown,
         };
-        let suggestions = if resolution == Resolution::Unresolved {
+        let suggestions = if resolution == Resolution::Unresolved && self.probe.is_none() {
             let s = model.schema(&schema.name, self.env.mode);
             let cands: Vec<&str> = s
                 .map(|s| {
@@ -1824,6 +1899,10 @@ impl<'c, 'l> Resolver<'c, 'l> {
     /// search path with the CTEs and the script's objects; and the schemas
     /// outside the path that have the name.
     fn table_suggestions(&self, name: &Part, schema: Option<&str>) -> Vec<Suggestion> {
+        if self.probe.is_some() {
+            // Completion reads the scope, not the problems.
+            return Vec::new();
+        }
         let dialect = self.dialect();
         let Some(model) = self.env.model() else {
             return Vec::new();
