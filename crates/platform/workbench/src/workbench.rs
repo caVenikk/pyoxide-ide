@@ -445,6 +445,11 @@ impl Workbench {
                 if window.is_window_active() {
                     this.window_activated(cx);
                 }
+                // The frame's project colour is dimmed in an inactive
+                // window.
+                if this.frame_gradient(cx) {
+                    cx.notify();
+                }
             }),
         ];
         // Code intelligence popups and key contexts are drawn by the root.
@@ -2127,13 +2132,14 @@ impl Workbench {
         ];
         let width = window.viewport_size().width - left;
         let project_color = self.toolbar_project_color(height, cx);
+        let background = self.frame_part_background(UiRole::Toolbar, cx);
         div()
             .id("toolbar")
             .debug_selector(|| "toolbar".into())
             .relative()
             .flex_none()
             .h(height)
-            .bg(theme.color(UiRole::Toolbar))
+            .when_some(background, |d, background| d.bg(background))
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
                     window.titlebar_double_click();
@@ -2812,7 +2818,10 @@ impl Workbench {
             .h(height)
             .px(px(10.0))
             .gap(px(16.0))
-            .bg(theme.color(UiRole::StatusBar))
+            .when_some(
+                self.frame_part_background(UiRole::StatusBar, cx),
+                |d, background| d.bg(background),
+            )
             .text_size(text_size)
             .text_color(theme.color(UiRole::StatusBarText))
             .child(left)
@@ -3006,6 +3015,8 @@ impl Render for Workbench {
         root.flex()
             .flex_col()
             .bg(frame)
+            // The project's colour under everything (the Islands themes).
+            .children(self.frame_project_color(window, cx))
             .child(self.render_toolbar(window, &run_widget, cx))
             .child(
                 div()

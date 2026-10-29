@@ -311,18 +311,22 @@ pub fn stripe_button_badged(
 /// the top and at the bottom; in a low window the top group is drawn over
 /// the bottom one and covers as much of it as the window lacks
 /// (`ToolWindowToolbar`: the top stripe in the north of a border layout,
-/// the bottom stripe in the south, the north one painted over it).
+/// the bottom stripe in the south, the north one painted over it). The
+/// bottom group is cut where the top one ends rather than covered, so the
+/// stripe needs no background of its own: `background` is none where the
+/// frame's background (the project colour of the Islands themes) shows
+/// through.
 pub fn stripe(
     id: &'static str,
     top: Vec<AnyElement>,
     bottom: Vec<AnyElement>,
+    background: Option<Hsla>,
     cx: &App,
 ) -> impl IntoElement {
     let theme = cx.theme();
     let width = theme.metric(Metric::StripeWidth);
     let button = theme.metric(Metric::StripeButtonSize);
     let inset = (width - button) / 2.0;
-    let background = theme.color(UiRole::ToolWindowStripe);
     let group = || div().flex().flex_col().items_center().gap(px(4.0));
     div()
         .id(id)
@@ -334,24 +338,31 @@ pub fn stripe(
         .w(width)
         .h_full()
         .overflow_hidden()
-        .bg(background)
-        // Drawn first, so that the top group covers it.
-        .child(
-            group()
-                .debug_selector(move || format!("{id}-bottom"))
-                .absolute()
-                .left_0()
-                .right_0()
-                .bottom(inset)
-                .children(bottom),
-        )
+        .when_some(background, |d, background| d.bg(background))
         .child(
             group()
                 .debug_selector(move || format!("{id}-top"))
-                .occlude()
+                .flex_none()
                 .pt(px(2.0))
-                .bg(background)
                 .children(top),
+        )
+        // The rest of the stripe: the bottom group at its bottom, cut at
+        // the top group.
+        .child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_hidden()
+                .child(
+                    group()
+                        .debug_selector(move || format!("{id}-bottom"))
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(inset)
+                        .children(bottom),
+                ),
         )
 }
 
