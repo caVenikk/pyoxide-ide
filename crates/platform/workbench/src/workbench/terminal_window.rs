@@ -162,11 +162,10 @@ impl Workbench {
                 self.tool_windows.set_registered(TERMINAL, false);
                 cx.notify();
             }
-            // The reference opens Tools > Terminal, a page Pyoxide does not
-            // have yet: the Settings window opens.
+            // The reference opens Tools > Terminal.
             TerminalToolWindowEvent::Settings => self.open_settings(
                 &settings_ui::commands::OpenSettings {
-                    page: None,
+                    page: Some(crate::settings::TERMINAL_PAGE.to_owned()),
                     filter: None,
                 },
                 window,

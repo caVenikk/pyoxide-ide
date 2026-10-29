@@ -69,10 +69,13 @@ pub struct TerminalFontSettings {
     /// The font family.
     pub family: Option<String>,
     /// The size in points.
+    #[serde(serialize_with = "crate::short_float::serialize")]
     pub size: Option<f32>,
     /// The line height, a multiple of the font's own.
+    #[serde(serialize_with = "crate::short_float::serialize")]
     pub line_spacing: Option<f32>,
     /// The width of a cell, a multiple of the font's own.
+    #[serde(serialize_with = "crate::short_float::serialize")]
     pub column_spacing: Option<f32>,
     /// The family of the characters the font lacks.
     pub fallback: Option<String>,
@@ -87,14 +90,49 @@ impl TerminalFontSettings {
     /// The line and column spacing without a choice.
     pub const DEFAULT_SPACING: f32 = 1.0;
 
-    /// A size in the allowed range.
+    /// The size without a choice (`EditorFontsConstants` default).
+    pub const DEFAULT_SIZE: f32 = 13.0;
+    /// The digits after the point of a size, and of a spacing
+    /// (`TerminalFontSettings`).
+    pub const SIZE_DIGITS: u32 = 1;
+    pub const SPACING_DIGITS: u32 = 2;
+
+    /// A size in the allowed range, to one digit.
     pub fn clamp_size(size: f32) -> f32 {
-        size.clamp(*Self::SIZES.start(), *Self::SIZES.end())
+        round_to(
+            size.clamp(*Self::SIZES.start(), *Self::SIZES.end()),
+            Self::SIZE_DIGITS,
+        )
     }
 
-    /// A line or column spacing in the allowed range.
+    /// A line or column spacing in the allowed range, to two digits.
     pub fn clamp_spacing(spacing: f32) -> f32 {
-        spacing.clamp(*Self::SPACINGS.start(), *Self::SPACINGS.end())
+        round_to(
+            spacing.clamp(*Self::SPACINGS.start(), *Self::SPACINGS.end()),
+            Self::SPACING_DIGITS,
+        )
+    }
+
+    /// The size a text field holds; a text that is no number is the
+    /// default size (`TerminalFontSize.parse`).
+    pub fn parse_size(text: &str) -> f32 {
+        Self::clamp_size(text.trim().parse().unwrap_or(Self::DEFAULT_SIZE))
+    }
+
+    /// The spacing a text field holds; a text that is no number is 1
+    /// (`TerminalLineSpacing.parse`).
+    pub fn parse_spacing(text: &str) -> f32 {
+        Self::clamp_spacing(text.trim().parse().unwrap_or(Self::DEFAULT_SPACING))
+    }
+
+    /// A size as a field shows it: `13.0`, `12.5`.
+    pub fn format_size(size: f32) -> String {
+        format_float(size, Self::SIZE_DIGITS)
+    }
+
+    /// A spacing as a field shows it: `1.0`, `1.05`, `1.1`.
+    pub fn format_spacing(spacing: f32) -> String {
+        format_float(spacing, Self::SPACING_DIGITS)
     }
 
     /// The fallback family in effect: the platform's (`None`) for an unset
@@ -105,6 +143,22 @@ impl TerminalFontSettings {
             .map(str::trim)
             .filter(|f| !f.is_empty() && *f != "<None>" && *f != "Monospaced")
     }
+}
+
+/// `value` to `digits` digits after the point.
+fn round_to(value: f32, digits: u32) -> f32 {
+    let multiplier = 10f32.powi(digits as i32);
+    (value * multiplier).round() / multiplier
+}
+
+/// `value` with `digits` digits after the point, the trailing zeros left
+/// out down to one digit (`TerminalSettingsFloatValueImpl.toFormattedString`).
+fn format_float(value: f32, digits: u32) -> String {
+    let mut text = format!("{:.*}", digits as usize, value);
+    while text.ends_with('0') && text.split('.').nth(1).is_some_and(|f| f.len() > 1) {
+        text.pop();
+    }
+    text
 }
 
 impl Section for TerminalFontSettings {
@@ -173,5 +227,30 @@ mod tests {
         assert_eq!(own.fallback_family(), Some("Symbols Nerd Font"));
         assert_eq!(TerminalFontSettings::clamp_size(100.0), 40.0);
         assert_eq!(TerminalFontSettings::clamp_spacing(0.1), 0.6);
+    }
+
+    #[test]
+    fn numbers_are_parsed_and_shown_as_the_reference_does() {
+        use TerminalFontSettings as F;
+        assert_eq!(F::parse_size(" 12.55 "), 12.6);
+        assert_eq!(F::parse_size("big"), 13.0);
+        assert_eq!(F::parse_size("2"), 4.0);
+        assert_eq!(F::parse_spacing("1.234"), 1.23);
+        assert_eq!(F::parse_spacing(""), 1.0);
+        assert_eq!(F::parse_spacing("9"), 3.0);
+        assert_eq!(F::format_size(13.0), "13.0");
+        assert_eq!(F::format_size(12.5), "12.5");
+        assert_eq!(F::format_spacing(1.0), "1.0");
+        assert_eq!(F::format_spacing(1.1), "1.1");
+        assert_eq!(F::format_spacing(1.05), "1.05");
+        // The file holds the numbers as they were typed.
+        let settings = F {
+            size: Some(12.6),
+            column_spacing: Some(1.05),
+            ..F::default()
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(json["size"], serde_json::json!(12.6));
+        assert_eq!(json["column-spacing"], serde_json::json!(1.05));
     }
 }

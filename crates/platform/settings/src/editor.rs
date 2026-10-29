@@ -17,8 +17,10 @@ pub struct EditorFontSettings {
     /// The font family.
     pub family: Option<String>,
     /// The size in points.
+    #[serde(serialize_with = "crate::short_float::serialize")]
     pub size: Option<f32>,
     /// The line height, a multiple of the font's own.
+    #[serde(serialize_with = "crate::short_float::serialize")]
     pub line_height: Option<f32>,
     /// Ligatures of the font are used.
     pub ligatures: Option<bool>,
