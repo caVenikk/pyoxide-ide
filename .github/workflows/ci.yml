@@ -95,6 +95,18 @@ jobs:
         if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
         timeout-minutes: 10
         run: |
+          # Provisioning can still rewrite APT sources after the runner starts.
+          if command -v cloud-init >/dev/null 2>&1; then
+            cloud_init_status=0
+            sudo timeout 120s cloud-init status --wait || cloud_init_status=$?
+            case "$cloud_init_status" in
+              0) ;;
+              2) echo 'cloud-init completed with recoverable errors; continuing with explicit APT checks' ;;
+              *) exit "$cloud_init_status" ;;
+            esac
+          fi
+          apt_sources_stamp=$(mktemp)
+          trap 'rm -f "$apt_sources_stamp"' EXIT
           # Use an Ubuntu-listed mirror outside the affected ubuntu.com domains.
           # Preserve suites, signing keys and third-party repositories.
           for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
@@ -103,9 +115,37 @@ jobs:
                 -e 's#(^|[[:space:]])mirror\+file:/etc/apt/apt-mirrors\.txt([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\2#g' \
                 -e 's#(^|[[:space:]])https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\3#g' \
                 "$source"
+              sha256sum "$source" >> "$apt_sources_stamp"
             fi
           done
           sudo apt-get -o APT::Update::Error-Mode=any update
+          sha256sum --check "$apt_sources_stamp"
+          echo "::group::APT index diagnostics"
+          dpkg-query -W apt
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              printf '%s\n' "$source"
+              awk 'NR <= 60' "$source"
+            fi
+          done
+          apt-config dump | awk '/^(APT::Update::|DPkg::(Pre|Post)-Invoke|Dir::State::lists|APT::Architecture)/ { if (++n <= 60) print }'
+          apt-get indextargets --format '$(URI) -> $(FILENAME)' 'Identifier: Packages' | awk 'NR <= 40'
+          find /var/lib/apt/lists -maxdepth 1 -type f -printf '%f %s bytes\n' | sort | awk 'NR <= 80'
+          while IFS= read -r index; do
+            printf 'Index: %s\n' "$index"
+            if [ -f "$index" ]; then
+              /usr/lib/apt/apt-helper cat-file "$index" | awk '
+                /^Package:/ { count++ }
+                /^Package: (libxkbcommon-dev|libwayland-dev|libfontconfig-dev)$/ { print }
+                END { print "Package records:", count + 0 }
+              '
+            else
+              echo 'Expected index file is missing'
+            fi
+          done < <(apt-get indextargets --format '$(FILENAME)' 'Identifier: Packages' | awk 'NR <= 40')
+          apt-cache policy libxkbcommon-dev libwayland-dev libfontconfig-dev
+          apt-cache stats
+          echo "::endgroup::"
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
