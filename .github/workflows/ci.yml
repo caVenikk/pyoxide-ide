@@ -95,6 +95,18 @@ jobs:
         if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
         timeout-minutes: 10
         run: |
+          # Provisioning can still rewrite APT sources after the runner starts.
+          if command -v cloud-init >/dev/null 2>&1; then
+            cloud_init_status=0
+            sudo timeout 120s cloud-init status --wait || cloud_init_status=$?
+            case "$cloud_init_status" in
+              0) ;;
+              2) echo 'cloud-init completed with recoverable errors; continuing with explicit APT checks' ;;
+              *) exit "$cloud_init_status" ;;
+            esac
+          fi
+          apt_sources_stamp=$(mktemp)
+          trap 'rm -f "$apt_sources_stamp"' EXIT
           # Use an Ubuntu-listed mirror outside the affected ubuntu.com domains.
           # Preserve suites, signing keys and third-party repositories.
           for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
@@ -103,9 +115,11 @@ jobs:
                 -e 's#(^|[[:space:]])mirror\+file:/etc/apt/apt-mirrors\.txt([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\2#g' \
                 -e 's#(^|[[:space:]])https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\3#g' \
                 "$source"
+              sha256sum "$source" >> "$apt_sources_stamp"
             fi
           done
           sudo apt-get -o APT::Update::Error-Mode=any update
+          sha256sum --check "$apt_sources_stamp"
           echo "::group::APT index diagnostics"
           dpkg-query -W apt
           for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
