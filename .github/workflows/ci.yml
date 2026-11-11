@@ -93,8 +93,19 @@ jobs:
       # fontconfig on Linux; tests use its headless test platform.
       - name: Linux packages for GPUI
         if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
+          # Use an Ubuntu-listed mirror outside the affected ubuntu.com domains.
+          # Preserve suites, signing keys and third-party repositories.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i -E \
+                -e 's#(^|[[:space:]])mirror\+file:/etc/apt/apt-mirrors\.txt([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\2#g' \
+                -e 's#(^|[[:space:]])https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|$)#\1https://mirrors.kernel.org/ubuntu/\3#g' \
+                "$source"
+            fi
+          done
+          sudo apt-get -o APT::Update::Error-Mode=any update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
