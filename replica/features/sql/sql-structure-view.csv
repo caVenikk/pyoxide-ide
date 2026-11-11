@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"File structure of statements, procedures and packages",sql,could,yes,no,Pro; ADR 0022; needs document_symbols in code-intel
+"File structure of statements, procedures and packages",sql,could,yes,partial,"Pro; SQL document-symbol engine provides statements, CTEs and supported procedural declarations; editor structure UI and parity validation remain separate (#320)"

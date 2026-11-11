@@ -17,7 +17,7 @@ pub(crate) struct Documentation {
     pub range: Range<usize>,
 }
 
-fn word_at(script: &Script, offset: usize) -> Option<SyntaxToken<'_>> {
+pub(crate) fn word_at(script: &Script, offset: usize) -> Option<SyntaxToken<'_>> {
     let root = script.root_at(offset);
     let root = root.fragment_at(offset).map_or(root, |f| f.root);
     let mut found = None;

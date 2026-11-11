@@ -80,6 +80,22 @@ impl DocumentAnalysis {
         out
     }
 
+    /// Every reference of the statement `offset` is in, in order.
+    pub(crate) fn unit_references(&self, offset: usize) -> Vec<Reference> {
+        let Some(u) = self.unit_at(offset) else {
+            return Vec::new();
+        };
+        u.results
+            .refs
+            .iter()
+            .map(|r| {
+                let mut r = r.clone();
+                shift_reference(&mut r, u.unit.start as isize);
+                r
+            })
+            .collect()
+    }
+
     /// The innermost reference whose name contains `offset` (or ends at it).
     pub fn reference_at(&self, offset: usize) -> Option<Reference> {
         let u = self.unit_at(offset)?;

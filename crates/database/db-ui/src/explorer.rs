@@ -43,6 +43,7 @@ mod context_menu;
 mod model_load;
 mod open_console;
 mod open_table;
+mod reveal;
 mod speed_search;
 mod sql_dialog;
 mod tree_view;
@@ -199,6 +200,7 @@ pub(crate) fn init(cx: &mut App) {
     actions::init(cx);
     sql_dialog::init(cx);
     speed_search::init(cx);
+    reveal::init(cx);
     cx.on_action(|_: &NewDataSource, cx| {
         with_target(cx, |e, window, cx| e.show_new_menu(None, window, cx))
     });

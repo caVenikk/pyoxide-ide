@@ -14,8 +14,9 @@ use std::time::Duration;
 
 use code_intel::fake::{Call, FakeCodeIntel};
 use code_intel::{
-    CodeAction, CodeActionKind, CodeIntel, Diagnostic, DocumentId, FileChangeKind, FileEdits,
-    IntelError, Location, Point, Severity, TextEdit, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeIntel, DefinitionTarget, Diagnostic, DocumentId,
+    FileChangeKind, FileEdits, IntelError, Location, ObjectTarget, Point, Severity, TextEdit,
+    WorkspaceEdit,
 };
 use editor::{Editor, EditorEvent};
 use gpui::{
@@ -230,6 +231,41 @@ fn location(path: PathBuf, line: usize, start: usize, end: usize) -> Location {
 
 const APP: &str = "from lib import norm\n\n\ndef g():\n    return norm(1)\n\n\nx = g()\n";
 const LIB: &str = "def norm(x):\n    return x\n";
+
+#[gpui::test]
+fn an_object_target_goes_to_the_handler_of_its_scheme(cx: &mut TestAppContext) {
+    let mut h = H::new(cx, &[("app.py", APP)]);
+    let opened: Rc<std::cell::RefCell<Vec<String>>> = Rc::default();
+    let sink = opened.clone();
+    h.cx.update(|cx| {
+        workbench::object_targets::register(
+            cx,
+            "db",
+            Rc::new(move |target, _, _| sink.borrow_mut().push(target.id.clone())),
+        )
+    });
+    h.fake.on_definition_targets(|_, _| {
+        Ok(vec![DefinitionTarget::Object(ObjectTarget::new(
+            "db",
+            "main/orders",
+            "orders",
+        ))])
+    });
+    h.open("app.py", "x = g");
+    h.invoke("code.go-to-declaration", json!(null));
+    assert_eq!(*opened.borrow(), ["main/orders"]);
+    // The caret stays where it was.
+    assert_eq!(h.at().0, "app.py");
+
+    // A scheme nobody handles says so in the status bar.
+    h.fake.on_definition_targets(|_, _| {
+        Ok(vec![DefinitionTarget::Object(ObjectTarget::new(
+            "web", "x", "x",
+        ))])
+    });
+    h.invoke("code.go-to-declaration", json!(null));
+    assert_eq!(opened.borrow().len(), 1);
+}
 
 #[gpui::test]
 fn go_to_declaration_in_the_file_and_in_another(cx: &mut TestAppContext) {

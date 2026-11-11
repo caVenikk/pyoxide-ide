@@ -147,6 +147,9 @@ pub(crate) struct TreeState {
     /// from the keyboard.
     pub rows_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     pub search: super::speed_search::SpeedSearch,
+    /// An object Go to Declaration asked for, to select once the data
+    /// source has its model.
+    pub pending_reveal: Option<(String, db_model::NodeId)>,
 }
 
 /// What a server offers, as far as it is read.
@@ -389,6 +392,7 @@ impl Explorer {
             None => live.refresh(),
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
@@ -489,6 +493,7 @@ impl Explorer {
             self.notify(Notification::new(NotificationKind::Warning, name, text), cx);
         }
         self.rebuild_rows();
+        self.reveal_pending(cx);
         cx.notify();
     }
 
