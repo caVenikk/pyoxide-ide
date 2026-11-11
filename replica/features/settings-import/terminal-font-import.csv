@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-One-time import of the terminal font (terminal-font.xml),settings-import,should,yes,yes,#287
+One-time import of the terminal font (terminal-font.xml),settings-import,should,yes,yes,Initial import and one-time adoption of missing font values for older profiles without an import record; stored values preserved (#404)
