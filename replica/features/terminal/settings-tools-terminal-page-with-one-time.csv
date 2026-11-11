@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Settings > Tools > Terminal page with one-time import from .idea,terminal,should,yes,no,Community; after the settings window (#92)
+Settings > Tools > Terminal page with one-time import from .idea,terminal,should,yes,partial,Font Settings group and legacy-profile font adoption implemented (#404); Project/Application options and project settings import remain (#411)
