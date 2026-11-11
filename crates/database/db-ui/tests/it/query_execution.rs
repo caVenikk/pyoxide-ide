@@ -108,11 +108,14 @@ fn the_page_is_under_tools_and_database_with_the_references_defaults(cx: &mut Te
     assert_eq!(f["show-execution-time"], true);
     assert_eq!(f["warn-unsafe-queries"], true);
     // The keymap's shortcut of Execute; the others have none.
-    assert!(
-        f["execute"]["shortcut"].is_string() == cfg!(target_os = "macos"),
-        "{f}"
-    );
+    let execute_shortcut = if cfg!(target_os = "macos") {
+        "⌘⏎"
+    } else {
+        "⌃⏎"
+    };
+    assert_eq!(f["execute"]["shortcut"], execute_shortcut, "{f}");
     assert!(f["execute-2"]["shortcut"].is_null(), "{f}");
+    assert!(f["execute-3"]["shortcut"].is_null(), "{f}");
 
     // Database and Terminal share a single Tools group after their pages
     // are registered together.

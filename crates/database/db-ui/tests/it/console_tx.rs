@@ -245,7 +245,8 @@ fn the_schema_is_switched_by_the_session_and_shown_by_the_toolbar(cx: &mut TestA
         "{chip}"
     );
     run_all(&mut h, "select 1;");
-    let s = wait_for(&mut h, "the schema", |s| s["schema"] == "public");
+    let s = wait_for(&mut h, "the statement", idle);
+    assert_eq!(s["schema"], "public", "{s}");
     assert!(output(&s).contains("public> select 1"), "{s}");
 
     h.invoke("db.console.set-schema", json!({ "schema": "sales" }));
