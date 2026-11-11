@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Confirmation before DELETE or UPDATE without WHERE,db-gui,should,yes,no,Pro
+Confirmation before DELETE or UPDATE without WHERE,db-gui,should,yes,yes,"Pro; unsafe UPDATE/DELETE banner offers Execute, Execute and Suppress, or dismiss; Query Execution setting controls warnings (#305)"

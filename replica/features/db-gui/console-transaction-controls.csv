@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Transaction mode, Commit, Rollback and pending indicator in the console and grid",db-gui,must,yes,partial,"Pro; engine row transaction-mode. Engine part done (db-session, #299): transaction mode, commit, rollback, pending state, a decision asked before closing with changes; the toolbar comes with #305"
+"Transaction mode, Commit, Rollback and pending indicator in the console and grid",db-gui,must,yes,yes,"Pro; console and Services transaction mode/isolation menus, Commit/Rollback and pending counter; statement savepoints preserve prior changes after errors; engine-specific isolation limits documented (#305)"

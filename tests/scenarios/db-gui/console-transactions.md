@@ -10,7 +10,7 @@
 ## Expected
 - The failed statement does not abort the transaction: the first insert is kept, the transaction continues.
 - A visible indicator shows the number of pending changes; Commit and Rollback are available.
-- Closing a console or disconnecting with a pending transaction asks: commit, roll back or cancel.
+- Disconnecting with a pending transaction asks: commit, roll back or cancel. Closing a console tab keeps its session without a prompt.
 - Switching to auto mode with a pending transaction asks the same.
 
 ## Source
