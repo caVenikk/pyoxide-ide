@@ -113,6 +113,18 @@ fn the_page_is_under_tools_and_database_with_the_references_defaults(cx: &mut Te
         "{f}"
     );
     assert!(f["execute-2"]["shortcut"].is_null(), "{f}");
+
+    // Database and Terminal share a single Tools group after their pages
+    // are registered together.
+    let rows = s["rows"].as_array().unwrap();
+    assert_eq!(rows.iter().filter(|row| row["id"] == "tools").count(), 1);
+    h.invoke(
+        "settings.open",
+        json!({ "page": workbench::settings::TERMINAL_PAGE }),
+    );
+    let terminal = h.invoke("settings.state", Value::Null);
+    assert_eq!(terminal["page"], workbench::settings::TERMINAL_PAGE);
+    assert_eq!(terminal["breadcrumbs"], json!(["Tools", "Terminal"]));
 }
 
 #[gpui::test]
