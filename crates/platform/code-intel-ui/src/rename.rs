@@ -163,6 +163,16 @@ impl CodeIntelView {
         }));
     }
 
+    /// The source document changed or is no longer active: neither a delayed
+    /// answer nor an open dialog may apply edits for the old context.
+    pub(crate) fn invalidate_rename(&mut self, cx: &mut Context<Self>) {
+        let requested = self.rename.request.take().is_some();
+        let pending = self.rename.pending.take().is_some();
+        if requested || pending {
+            cx.emit(CodeIntelEvent::RenameDone);
+        }
+    }
+
     /// The Rename dialog was closed without a rename.
     pub fn rename_cancelled(&mut self, cx: &mut Context<Self>) {
         self.rename.pending = None;

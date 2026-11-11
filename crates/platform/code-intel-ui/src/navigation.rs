@@ -528,7 +528,11 @@ impl CodeIntelView {
             EditorEvent::Hovered {
                 offset, modifiers, ..
             } => self.link_hovered(editor, *offset, *modifiers, cx),
-            EditorEvent::Edited(_) | EditorEvent::Reloaded => self.clear_link(cx),
+            EditorEvent::Edited(_) | EditorEvent::Reloaded => {
+                // File Structure holds positions in the old document; discard
+                // both an in-flight answer and an already displayed list.
+                self.reset_navigation(cx);
+            }
             _ => {}
         }
     }

@@ -1039,3 +1039,94 @@ fn the_file_structure_lists_the_symbols_and_moves_the_caret(cx: &mut TestAppCont
     h.invoke("code.file-structure", json!(null));
     assert_eq!(h.state()["hint"], "No structure to show");
 }
+
+/// Changes that invalidate positions held by rename and structure requests.
+fn invalidate_symbol_context(h: &mut H, change: &str) {
+    match change {
+        "switch" => h.open("other.py", "other"),
+        "edit" => {
+            let editor = h.editor();
+            h.cx.update(|cx| editor.update(cx, |e, cx| e.insert("#", cx)));
+            h.draw();
+        }
+        "reload" => {
+            let editor = h.editor();
+            h.cx.update(|cx| editor.update(cx, |e, cx| e.buffer_reloaded(cx)));
+            h.draw();
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[gpui::test]
+fn delayed_rename_probes_are_discarded_when_the_context_changes(cx: &mut TestAppContext) {
+    use code_intel::fake::RequestKind;
+    let mut h = H::new(cx, &[("app.py", APP), ("other.py", "other")]);
+    h.fake.on_rename(rename_edits(h.path("app.py")));
+    h.fake.hold(RequestKind::Rename);
+    for change in ["switch", "edit", "reload"] {
+        h.open("app.py", "x = g");
+        h.invoke("code.rename", json!(null));
+        assert_eq!(h.fake.pending(RequestKind::Rename), 1, "{change}");
+        invalidate_symbol_context(&mut h, change);
+        assert_eq!(h.fake.release(RequestKind::Rename), 0, "{change}");
+        h.draw();
+        assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+    }
+}
+
+#[gpui::test]
+fn delayed_rename_edits_never_apply_after_the_context_changes(cx: &mut TestAppContext) {
+    use code_intel::fake::RequestKind;
+    let mut h = H::new(cx, &[("app.py", APP), ("other.py", "other")]);
+    h.fake.on_rename(rename_edits(h.path("app.py")));
+    for change in ["switch", "edit", "reload"] {
+        h.fake.answer_at_once(RequestKind::Rename);
+        h.open("app.py", "x = g");
+        h.invoke("code.rename", json!(null));
+        assert!(!h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+        h.fake.hold(RequestKind::Rename);
+        h.type_text("make");
+        h.press("enter");
+        assert_eq!(h.fake.pending(RequestKind::Rename), 1, "{change}");
+        invalidate_symbol_context(&mut h, change);
+        let text = h.text();
+        assert_eq!(h.fake.release(RequestKind::Rename), 0, "{change}");
+        h.draw();
+        assert_eq!(h.text(), text, "{change}");
+        assert!(h.invoke("workbench.state", json!(null))["code_rename"].is_null());
+    }
+}
+
+#[gpui::test]
+fn structure_answers_and_open_lists_are_discarded_when_the_context_changes(
+    cx: &mut TestAppContext,
+) {
+    use code_intel::fake::RequestKind;
+    use code_intel::{DocumentSymbol, SymbolKind};
+    let mut h = H::new(cx, &[("app.py", APP), ("other.py", "other")]);
+    h.fake.on_document_symbols(|_| {
+        Ok(vec![DocumentSymbol::new(
+            "g",
+            SymbolKind::Function,
+            Point::new(3, 4)..Point::new(3, 5),
+        )])
+    });
+    for change in ["switch", "edit", "reload"] {
+        h.fake.hold(RequestKind::DocumentSymbols);
+        h.open("app.py", "x = g");
+        h.invoke("code.file-structure", json!(null));
+        assert_eq!(h.fake.pending(RequestKind::DocumentSymbols), 1, "{change}");
+        invalidate_symbol_context(&mut h, change);
+        assert_eq!(h.fake.release(RequestKind::DocumentSymbols), 0, "{change}");
+        h.draw();
+        assert!(h.list().is_null(), "{change}");
+
+        h.fake.answer_at_once(RequestKind::DocumentSymbols);
+        h.open("app.py", "x = g");
+        h.invoke("code.file-structure", json!(null));
+        assert_eq!(h.list()["name"], "structure");
+        invalidate_symbol_context(&mut h, change);
+        assert!(h.list().is_null(), "{change}");
+    }
+}

@@ -439,6 +439,7 @@ impl CodeIntelView {
             return;
         }
         self.active = path.map(Path::to_owned);
+        self.invalidate_rename(cx);
         self.close_completion(cx);
         self.close_doc(cx);
         self.reset_signature(cx);
@@ -450,6 +451,9 @@ impl CodeIntelView {
     }
 
     fn editor_event(&mut self, path: &Path, event: &EditorEvent, cx: &mut Context<Self>) {
+        if matches!(event, EditorEvent::Edited(_) | EditorEvent::Reloaded) {
+            self.invalidate_rename(cx);
+        }
         if let Some(editor) = self.documents.get(path).map(|d| d.editor.clone()) {
             self.doc_editor_event(&editor, event, cx);
             self.signature_editor_event(&editor, event, cx);
