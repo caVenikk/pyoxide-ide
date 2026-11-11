@@ -40,6 +40,7 @@ use crate::settings::SaveSettings;
 use crate::tab_view::AnyTabView;
 
 mod branches;
+pub(crate) mod closing;
 mod commit;
 mod debug;
 mod diff;
@@ -331,6 +332,11 @@ pub struct Workbench {
     terminal_ui: terminal_window::TerminalUi,
     /// The diff tabs (`diff.rs`).
     diff_tabs: diff::DiffTabs,
+    /// A close of the window waiting for answers about running processes
+    /// (`closing.rs`).
+    closing: Option<closing::InProgress>,
+    /// What ends with the window (`ui::window_close`).
+    window_parts: Vec<ui::window_close::Registration>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -526,6 +532,8 @@ impl Workbench {
             commit_ui,
             terminal_ui,
             diff_tabs: Default::default(),
+            closing: None,
+            window_parts: Vec::new(),
             tab_bounds: Default::default(),
             tab_menu: None,
             _subscriptions: subscriptions,

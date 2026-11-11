@@ -52,4 +52,5 @@ mod toolbar_layout;
 mod tree_rows;
 mod version_control;
 mod welcome;
+mod window_close;
 mod window_layout;

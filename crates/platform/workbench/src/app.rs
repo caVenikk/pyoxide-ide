@@ -343,7 +343,9 @@ pub fn init(cx: &mut App, product: &Product) {
     );
     // Changes not applied in the Settings window are asked about first.
     cx.on_action(|_: &Quit, cx| {
-        settings_ui::leave::resolve(settings_ui::leave::Leaving::Application, cx, |cx| cx.quit())
+        settings_ui::leave::resolve(settings_ui::leave::Leaving::Application, cx, |cx| {
+            crate::workbench::closing::quit(cx)
+        })
     });
     // A save in progress gets a moment to end; the temporary file of one
     // that does not is removed, so quitting leaves nothing next to the
@@ -422,11 +424,11 @@ pub fn open_main_window_with(
         Workbench::create_status_widgets(&workbench, &product, window, cx);
         Workbench::create_editor_headers(&workbench, &product, window, cx);
         Workbench::create_module_tool_windows(&workbench, &product, window, cx);
+        // What the window started ends with it.
+        Workbench::register_window_parts(&workbench, window, cx);
         // Closing the window with changes not applied in its Settings
-        // window asks first.
-        window.on_window_should_close(cx, |window, cx| {
-            settings_ui::leave::can_close_parent(window.window_handle(), cx)
-        });
+        // window or with running processes asks first.
+        window.on_window_should_close(cx, crate::workbench::closing::should_close);
         // Recent Projects of the main menu leaves out the active window's
         // project.
         workbench.update(cx, |_, cx| {

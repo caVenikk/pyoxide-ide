@@ -527,6 +527,33 @@ impl DebuggerView {
         cx.notify();
     }
 
+    /// The sessions that run, asked about before their window closes
+    /// (`ui::window_close`): Terminate stops one (its program, its adapter
+    /// and their children), Disconnect detaches the debugger and leaves the
+    /// program running.
+    pub fn running(&self) -> Vec<ui::window_close::Running> {
+        let Some(debugger) = &self.debugger else {
+            return Vec::new();
+        };
+        debugger
+            .sessions()
+            .into_iter()
+            .filter(|s| !s.is_ended())
+            .map(|session| {
+                let name = session.name().to_owned();
+                ui::window_close::Running::new(name, move |how, cx| {
+                    let done = match how {
+                        ui::window_close::Stop::Terminate => session.stop(),
+                        ui::window_close::Stop::Disconnect => session.disconnect(),
+                    };
+                    cx.background_spawn(async move {
+                        let _ = done.recv_async().await;
+                    })
+                })
+            })
+            .collect()
+    }
+
     /// Kills every session's processes at once (the application quits).
     pub fn kill_all(&self) {
         if let Some(debugger) = &self.debugger {
