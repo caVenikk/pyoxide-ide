@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Explorer: Copy Reference and quoted names,db-gui,could,yes,no,Pro
+Explorer: Copy Reference and quoted names,db-gui,could,yes,partial,Pro; Copy Reference and Duplicate of a data source (#371); quoted names remain

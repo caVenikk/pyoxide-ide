@@ -230,3 +230,80 @@ fn ten_thousand_tables_flatten_within_a_frame() {
     let budget = if cfg!(debug_assertions) { 200 } else { 16 };
     assert!(took < std::time::Duration::from_millis(budget), "{took:?}");
 }
+
+/// The reference's index order (unique first, the primary key's among
+/// them, then the others, by name inside each part); the model keeps them
+/// by name.
+#[test]
+fn indexes_unique_first_then_by_name() {
+    use db_core::schema::{IndexInfo, ObjectInfo, ObjectKind, RelationInfo};
+    let mut snapshot = demo_snapshot();
+    let schema = &mut snapshot.schemas[0];
+    let names = [
+        ("zeta_idx", false),
+        ("mid_uq", true),
+        ("alpha_idx", false),
+        ("beta_uq", true),
+        ("idx_probe_pkey", true),
+    ];
+    schema.objects.push(ObjectInfo {
+        schema: "demo".into(),
+        name: "idx_probe".into(),
+        kind: ObjectKind::Table,
+        ..ObjectInfo::default()
+    });
+    for (name, _) in names {
+        schema.objects.push(ObjectInfo {
+            schema: "demo".into(),
+            name: name.into(),
+            kind: ObjectKind::Index,
+            parent: Some("idx_probe".into()),
+            ..ObjectInfo::default()
+        });
+    }
+    schema.relations.push(RelationInfo {
+        name: "idx_probe".into(),
+        indexes: names
+            .iter()
+            .map(|(name, unique)| IndexInfo {
+                name: (*name).into(),
+                unique: *unique,
+                columns: vec!["id".into()],
+                ..IndexInfo::default()
+            })
+            .collect(),
+        ..RelationInfo::default()
+    });
+    let model = Model::from_snapshot(DataSourceId::from("local"), snapshot);
+    let table = node(&model, "idx_probe", NodeKind::Table);
+    let in_model: Vec<_> = table
+        .group(db_model::Group::Indexes)
+        .nodes()
+        .map(|n| n.name())
+        .collect();
+    assert_eq!(
+        in_model,
+        [
+            "alpha_idx",
+            "beta_uq",
+            "idx_probe_pkey",
+            "mid_uq",
+            "zeta_idx"
+        ]
+    );
+    let in_tree: Vec<_> = TreeGroup::Indexes
+        .nodes(table)
+        .iter()
+        .map(|n| n.name())
+        .collect();
+    assert_eq!(
+        in_tree,
+        [
+            "beta_uq",
+            "idx_probe_pkey",
+            "mid_uq",
+            "alpha_idx",
+            "zeta_idx"
+        ]
+    );
+}

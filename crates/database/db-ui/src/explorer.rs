@@ -36,10 +36,15 @@ use crate::store::DataSource;
 use crate::tree;
 use crate::{BACKENDS, backend_title, icons};
 
+mod actions;
+mod colors;
 mod connect;
+mod context_menu;
 mod model_load;
 mod open_console;
 mod open_table;
+mod speed_search;
+mod sql_dialog;
 mod tree_view;
 
 pub(crate) use connect::ask_password;
@@ -191,6 +196,9 @@ pub(crate) fn with_target(
 
 pub(crate) fn init(cx: &mut App) {
     ui::command::register(cx, COMMANDS);
+    actions::init(cx);
+    sql_dialog::init(cx);
+    speed_search::init(cx);
     cx.on_action(|_: &NewDataSource, cx| {
         with_target(cx, |e, window, cx| e.show_new_menu(None, window, cx))
     });
@@ -236,6 +244,7 @@ pub(crate) fn init(cx: &mut App) {
                 "explorer": explorer.unwrap_or(Json::Null),
                 "dialog": dialog::state_json(cx),
                 "prompt": crate::prompt::state_json(cx),
+                "sql_dialog": sql_dialog::state_json(cx),
             }))
         }),
     );
@@ -402,6 +411,7 @@ impl Explorer {
                 }
                 this.sources_changed();
                 this.run_pending_model_loads(cx);
+                this.reopen_expanded(cx);
                 cx.notify();
             });
         });
@@ -631,6 +641,8 @@ impl Explorer {
             })).collect::<Vec<_>>(),
             "menu": self.menu.as_ref().map(|m| m.menu.read(cx).state_json()),
             "tree": self.tree_json(),
+            "search": self.search_json(),
+            "actions": self.actions_json(cx),
         })
     }
 
@@ -962,7 +974,13 @@ impl Explorer {
 impl Render for Explorer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let header = self.render_header(cx).into_any_element();
-        let toolbar = self.render_toolbar(cx).into_any_element();
+        let toolbar = div()
+            .relative()
+            .child(self.render_toolbar(cx))
+            .children(self.render_search_field(cx))
+            .into_any_element();
+        let doc = self.render_doc(window, cx);
+        let confirm = self.tree.confirm.as_ref().map(|c| c.dialog.clone());
         let body = if self.sources().is_empty() {
             if self.root.is_some() && self.sources.is_none() {
                 div().flex_1().into_any_element()
@@ -980,6 +998,15 @@ impl Render for Explorer {
             .id("database-tool-window-content")
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, _, cx| {
+                if this.tree.doc.is_some() && e.keystroke.key == "escape" {
+                    this.tree.doc = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                } else if this.menu.is_none() && this.search_key(e, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .flex()
             .flex_col()
             .size_full()
@@ -987,5 +1014,7 @@ impl Render for Explorer {
             .child(toolbar)
             .child(body)
             .children(popup)
+            .children(doc)
+            .children(confirm)
     }
 }

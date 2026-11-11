@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Explorer: Drop and Truncate with confirmation,db-gui,could,yes,no,Pro; needs a writable data source
+Explorer: Drop and Truncate with confirmation,db-gui,could,yes,yes,Pro; needs a writable data source; Drop and Truncate show the statement of the data source dialect in a preview with IF EXISTS and CASCADE options before running (#371)
