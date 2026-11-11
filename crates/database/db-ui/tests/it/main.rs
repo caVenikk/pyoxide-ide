@@ -8,12 +8,14 @@
 //! its own (`autoload`), the password prompt of every connect with Disconnect
 //! (`connect`) and the copy and transfer dialogs of the grid (`transfer`).
 //! Console transactions, schemas and safety checks are covered by `console_tx`.
+//! Query plans are covered by `explain`.
 
 mod autoload;
 mod connect;
 mod console;
 mod console_tx;
 mod data_sources;
+mod explain;
 mod grid;
 mod grid_values;
 mod keymap;

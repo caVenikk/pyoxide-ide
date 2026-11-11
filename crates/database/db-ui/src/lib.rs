@@ -57,6 +57,14 @@ pub const KEYMAPS: KeymapFiles = KeymapFiles {
 pub mod icons {
     use ui::icons::IconName;
 
+    // The query plan.
+    pub const PLAN: IconName = IconName("db/queryPlan");
+    pub const PLAN_TEXT: IconName = IconName("db/planText");
+    pub const PLAN_SELECT: IconName = IconName("db/planSelect");
+    pub const PLAN_JOIN: IconName = IconName("db/planJoin");
+    pub const PLAN_TRANSFORM: IconName = IconName("db/planTransform");
+    pub const PLAN_OPERATION: IconName = IconName("db/planOperation");
+
     pub const TOOL_WINDOW: IconName = IconName("db/database@20x20");
     pub const DATA_SOURCE: IconName = IconName("db/dataSource");
     pub const POSTGRES: IconName = IconName("db/postgres");
@@ -157,6 +165,12 @@ macro_rules! icon {
 }
 
 pub const ICONS: &[IconSvg] = &[
+    icon!("queryPlan", "queryPlan"),
+    icon!("planText", "planText"),
+    icon!("planSelect", "planSelect"),
+    icon!("planJoin", "planJoin"),
+    icon!("planTransform", "planTransform"),
+    icon!("planOperation", "planOperation"),
     icon!("database@20x20", "database@20x20"),
     icon!("dataSource", "dataSource"),
     icon!("postgres", "postgres"),

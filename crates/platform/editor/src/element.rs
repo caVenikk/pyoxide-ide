@@ -2119,6 +2119,12 @@ impl Element for EditorElement {
                 cx.stop_propagation();
                 return;
             }
+            if e.button == MouseButton::Right {
+                if editor.update(cx, |ed, cx| ed.context_menu_press(e.position, window, cx)) {
+                    cx.stop_propagation();
+                }
+                return;
+            }
             if e.button != MouseButton::Left {
                 return;
             }

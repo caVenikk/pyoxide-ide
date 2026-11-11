@@ -7,7 +7,7 @@ use gpui::{Context, Window};
 use ui::notification::{Notification, NotificationKind};
 
 use super::Explorer;
-use crate::console::{self, ConsoleKind, ConsoleTarget};
+use crate::console::{self, ConsoleKind, ConsoleTarget, RunMode};
 use crate::query_settings::Variant;
 use crate::sql::widget::{ChooseDialect, SqlGlobal, is_sql_file};
 
@@ -34,6 +34,7 @@ impl Explorer {
             backend: live.profile.backend,
             database: live.profile.database_name().map(str::to_owned),
             handle: live.handle.clone(),
+            read_only: live.profile.read_only,
         })
     }
 
@@ -71,6 +72,16 @@ impl Explorer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.run_at_caret(RunMode::Execute(variant), window, cx);
+    }
+
+    /// Execute or explain the active SQL editor in its own session.
+    pub(crate) fn run_at_caret(
+        &mut self,
+        mode: RunMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(workbench) = self.workbench.upgrade() else {
             return;
         };
@@ -86,7 +97,7 @@ impl Explorer {
             .clone()
             .filter(|c| c.read(cx).kind == ConsoleKind::Console)
         {
-            console.update(cx, |c, cx| c.execute_with(variant, window, cx));
+            console.update(cx, |c, cx| c.run_mode(mode, window, cx));
             return;
         }
         let hub = cx.global::<SqlGlobal>().0.clone();
@@ -95,14 +106,14 @@ impl Explorer {
             return;
         };
         if let Some(console) = existing.filter(|c| c.read(cx).source == source) {
-            console.update(cx, |c, cx| c.execute_with(variant, window, cx));
+            console.update(cx, |c, cx| c.run_mode(mode, window, cx));
             return;
         }
         let Some(target) = self.console_target(&source, cx) else {
             return;
         };
         let console = console::attach_file(workbench, target, file, window, cx);
-        console.update(cx, |c, cx| c.execute_with(variant, window, cx));
+        console.update(cx, |c, cx| c.run_mode(mode, window, cx));
         cx.notify();
     }
 }

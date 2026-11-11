@@ -100,7 +100,16 @@ pub(super) fn harness<'a>(
     root: &Path,
     server: &FakeSource,
 ) -> (Harness<'a>, tempfile::TempDir, tempfile::TempDir) {
-    let (store, cache) = store_with_model(root, server);
+    harness_with(cx, root, server, pg())
+}
+
+pub(super) fn harness_with<'a>(
+    cx: &'a mut TestAppContext,
+    root: &Path,
+    server: &FakeSource,
+    profile: db_core::Profile,
+) -> (Harness<'a>, tempfile::TempDir, tempfile::TempDir) {
+    let (store, cache) = super::grid::store_with_profile(root, server, profile);
     let consoles = tempfile::tempdir().unwrap();
     store.set_console_folder(consoles.path());
     let h = Harness::new(cx, product(store), cfg!(target_os = "macos"), Some(root));

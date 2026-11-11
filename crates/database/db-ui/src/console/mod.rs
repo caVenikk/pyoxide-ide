@@ -6,11 +6,13 @@
 //! editor.
 
 mod decision;
+pub(crate) mod execution;
 mod files;
 mod model;
 mod params;
 mod params_dialog;
-pub(crate) mod plan;
+mod plan;
+pub(crate) use plan::{ExplainAnalyze, ExplainPlan};
 pub(crate) mod services;
 pub(crate) mod transactions;
 pub(crate) mod tx_ui;
@@ -21,7 +23,7 @@ use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, WeakEntity};
 use serde_json::{Value as Json, json};
 use workbench::Workbench;
 
-pub(crate) use model::{Console, ConsoleEvent, ConsoleKind, ConsoleTarget, Pane};
+pub(crate) use model::{Console, ConsoleEvent, ConsoleKind, ConsoleTarget, Pane, RunMode};
 
 use crate::explorer;
 use crate::query_settings::Variant;
@@ -349,6 +351,7 @@ pub(crate) fn init(cx: &mut App) {
     );
     transactions::init(cx);
     services::init(cx);
+    plan::init(cx);
 }
 
 fn state_json(window: AnyWindowHandle, cx: &App) -> Json {
