@@ -17,6 +17,7 @@ use crate::query_settings;
 pub(crate) struct UnsafeRun {
     pub statements: Vec<Statement>,
     pub message: String,
+    pub explain: Option<bool>,
 }
 
 pub(crate) fn danger_message(danger: Danger) -> &'static str {
@@ -39,6 +40,18 @@ impl Console {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.submit_run(statements, None, window, cx);
+    }
+
+    /// Carries an Explain mode through warning and parameter dialogs without
+    /// marking a plan as running before the user confirms the request.
+    pub(super) fn submit_run(
+        &mut self,
+        statements: Vec<Statement>,
+        explain: Option<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if statements.is_empty() {
             return;
         }
@@ -48,7 +61,8 @@ impl Console {
         }
         let settings = query_settings::get(cx);
         let danger = statements.iter().find_map(|s| s.danger);
-        if settings.warn_unsafe_queries
+        if explain != Some(false)
+            && settings.warn_unsafe_queries
             && let Some(danger) = danger
         {
             let message = danger_message(danger).to_owned();
@@ -56,11 +70,12 @@ impl Console {
             self.unsafe_run = Some(UnsafeRun {
                 statements,
                 message,
+                explain,
             });
             cx.notify();
             return;
         }
-        self.review_parameters(statements, window, cx);
+        self.review_parameters(statements, explain, window, cx);
     }
 
     /// The banner's Execute (and Execute and Suppress, which also turns the
@@ -75,7 +90,7 @@ impl Console {
             query_settings::set(cx, &settings);
         }
         cx.notify();
-        self.review_parameters(run.statements, window, cx);
+        self.review_parameters(run.statements, run.explain, window, cx);
     }
 
     /// The banner's close button: nothing runs.
@@ -94,7 +109,7 @@ impl Console {
             return;
         }
         self.new_tab_run = query_settings::get(cx).execute.new_tab;
-        self.ask_parameters(statements, true, window, cx);
+        self.ask_parameters(statements, None, true, window, cx);
     }
 
     /// Asks for the values the statements need (always when the setting is
@@ -102,15 +117,17 @@ impl Console {
     fn review_parameters(
         &mut self,
         statements: Vec<Statement>,
+        explain: Option<bool>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.ask_parameters(statements, false, window, cx);
+        self.ask_parameters(statements, explain, false, window, cx);
     }
 
     fn ask_parameters(
         &mut self,
         statements: Vec<Statement>,
+        explain: Option<bool>,
         force: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -119,7 +136,7 @@ impl Console {
         let slots = params::slots(&statements, dialect);
         if slots.is_empty() {
             if !force {
-                self.run_with(statements, &HashMap::new(), cx);
+                self.run_with(statements, &HashMap::new(), explain, cx);
             }
             return;
         }
@@ -129,7 +146,7 @@ impl Console {
             .any(|s| !self.param_values.contains_key(&s.key));
         if !review && !missing {
             let values = self.param_values.clone();
-            self.run_with(statements, &values, cx);
+            self.run_with(statements, &values, explain, cx);
             return;
         }
         let this = cx.entity().downgrade();
@@ -143,7 +160,7 @@ impl Console {
             };
             console.update(cx, |c, cx| {
                 c.param_values.extend(values.clone());
-                c.run_with(statements, &values, cx);
+                c.run_with(statements, &values, explain, cx);
             });
         });
     }
@@ -152,15 +169,22 @@ impl Console {
         &mut self,
         statements: Vec<Statement>,
         values: &HashMap<String, String>,
+        explain: Option<bool>,
         cx: &mut Context<Self>,
     ) {
         let dialect = self.dialect();
-        let jobs = statements
+        let jobs: Vec<_> = statements
             .iter()
             .enumerate()
             .map(|(i, s)| params::bind(s, i, dialect, values))
             .collect();
-        self.run_jobs(jobs, cx);
+        if let Some(analyze) = explain {
+            if let Some((statement, job)) = statements.into_iter().zip(jobs).next() {
+                self.start_explain(statement, job, analyze, cx);
+            }
+        } else {
+            self.run_jobs(jobs, cx);
+        }
     }
 
     pub(super) fn safety_json(&self) -> Json {

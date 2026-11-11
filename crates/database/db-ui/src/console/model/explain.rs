@@ -38,14 +38,20 @@ impl Console {
             RunMode::Execute(variant) => self.execute_with(variant, window, cx),
             RunMode::Explain { analyze } => {
                 if let Some(statement) = self.statements_at_caret(cx).into_iter().next() {
-                    self.explain(statement, analyze, cx);
+                    self.explain(statement, analyze, window, cx);
                 }
             }
         }
     }
 
     /// Asks for the plan of `statement`.
-    pub fn explain(&mut self, statement: Statement, analyze: bool, cx: &mut Context<Self>) {
+    pub fn explain(
+        &mut self,
+        statement: Statement,
+        analyze: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.running.is_some() {
             self.print(ContentKind::Error, "A statement is still running", cx);
             return;
@@ -73,14 +79,31 @@ impl Console {
                 return;
             }
         }
+        self.submit_run(vec![statement], Some(analyze), window, cx);
+    }
+
+    /// Wraps the already bound query only after safety and parameter review.
+    pub(super) fn start_explain(
+        &mut self,
+        statement: Statement,
+        bound: JobStatement,
+        analyze: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.running.is_some() {
+            self.print(ContentKind::Error, "A statement is still running", cx);
+            return;
+        }
+        let dialect = self.dialect();
         let texts =
-            sql_syntax::explain_statements(&statement.text, dialect, ExplainOptions { analyze });
+            sql_syntax::explain_statements(&bound.text, dialect, ExplainOptions { analyze });
         if texts.is_empty() {
             return;
         }
         let statements: Vec<JobStatement> = texts
             .into_iter()
-            .map(|text| {
+            .enumerate()
+            .map(|(index, text)| {
                 let class = sql_syntax::classify_text(&text, dialect);
                 JobStatement {
                     text,
@@ -88,7 +111,12 @@ impl Console {
                     kind: class.kind,
                     // The analyzed statement does what it does.
                     writes: class.writes || (analyze && statement.writes),
-                    params: Vec::new(),
+                    // Oracle's second statement only displays the plan.
+                    params: if index == 0 {
+                        bound.params.clone()
+                    } else {
+                        Vec::new()
+                    },
                 }
             })
             .collect();

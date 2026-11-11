@@ -395,3 +395,121 @@ fn execute_variant_keeps_its_result_policy_after_explain(cx: &mut TestAppContext
             .contains(&"select * from demo.customers".to_owned())
     );
 }
+
+fn parameters(h: &mut Harness) -> Value {
+    let started = std::time::Instant::now();
+    loop {
+        let dialog = h.invoke("db.console.state", Value::Null)["parameters"].clone();
+        if !dialog.is_null() {
+            return dialog;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "parameters dialog"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.draw();
+    }
+}
+
+#[gpui::test]
+fn explain_analyze_checks_safety_then_binds_parameters(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke(
+        "editor.type",
+        json!({"text": "update demo.customers set id = :id;"}),
+    );
+    h.invoke("db.console.explain-analyze", Value::Null);
+    assert!(!console_state(&mut h)["safety"]["unsafe"].is_null());
+    assert!(
+        !server
+            .statements(Purpose::Console)
+            .iter()
+            .any(|s| s.starts_with("EXPLAIN"))
+    );
+    h.invoke("db.console.dismiss-unsafe", Value::Null);
+    assert!(console_state(&mut h)["safety"]["unsafe"].is_null());
+    assert!(server.bound().is_empty());
+
+    h.invoke("db.console.explain-analyze", Value::Null);
+    h.invoke("db.console.run-unsafe", json!({"suppress": false}));
+    let dialog = parameters(&mut h);
+    assert_eq!(dialog["rows"][0]["name"], "id");
+    assert!(
+        !server
+            .statements(Purpose::Console)
+            .iter()
+            .any(|s| s.starts_with("EXPLAIN"))
+    );
+    h.invoke("db.params.set", json!({"name": "id", "value": "7"}));
+    h.invoke("db.params.execute", Value::Null);
+    let plan = plan(&mut h);
+    assert_eq!(plan["analyze"], true);
+    let bound = server.bound();
+    assert_eq!(bound.len(), 1, "{bound:?}");
+    assert!(bound[0].0.starts_with("EXPLAIN (ANALYZE"), "{bound:?}");
+    assert!(
+        bound[0].0.ends_with("update demo.customers set id = $1"),
+        "{bound:?}"
+    );
+    assert_eq!(bound[0].1, vec![db_core::Value::Int(7)]);
+}
+
+#[gpui::test]
+fn plain_explain_reviews_parameters_without_warning_and_cancel_leaves_no_plan(
+    cx: &mut TestAppContext,
+) {
+    let (_dir, root) = project();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke(
+        "editor.type",
+        json!({"text": "update demo.customers set id = :id;"}),
+    );
+    h.invoke("db.console.explain", Value::Null);
+    parameters(&mut h);
+    assert!(console_state(&mut h)["safety"]["unsafe"].is_null());
+    h.invoke("db.params.close", Value::Null);
+    assert!(server.bound().is_empty());
+    h.invoke("editor.select-all", Value::Null);
+    h.invoke(
+        "editor.type",
+        json!({"text": "select * from demo.customers;"}),
+    );
+    h.invoke("db.console.execute", Value::Null);
+    let s = wait_console(&mut h, "ordinary result after cancellation", |s| {
+        idle(s) && !s["tabs"][0]["grid"].is_null()
+    });
+    assert!(s["tabs"][0]["plan"].is_null());
+
+    h.invoke("editor.select-all", Value::Null);
+    h.invoke(
+        "editor.type",
+        json!({"text": "select * from demo.customers where id = :id;"}),
+    );
+    h.invoke("db.console.explain", Value::Null);
+    parameters(&mut h);
+    h.invoke("db.params.set", json!({"name": "id", "value": "9"}));
+    h.invoke("db.params.execute", Value::Null);
+    wait_console(&mut h, "bound plan", |s| {
+        idle(s)
+            && s["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| !t["plan"].is_null())
+    });
+    let bound = server.bound();
+    assert_eq!(
+        bound[0].0,
+        "EXPLAIN (FORMAT JSON) select * from demo.customers where id = $1"
+    );
+    assert_eq!(bound[0].1, vec![db_core::Value::Int(9)]);
+    h.invoke("db.console.explain", Value::Null);
+    assert_eq!(parameters(&mut h)["rows"][0]["value"], "9");
+    h.invoke("db.params.close", Value::Null);
+}
