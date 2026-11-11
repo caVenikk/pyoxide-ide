@@ -106,6 +106,32 @@ jobs:
             fi
           done
           sudo apt-get -o APT::Update::Error-Mode=any update
+          echo "::group::APT index diagnostics"
+          dpkg-query -W apt
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              printf '%s\n' "$source"
+              awk 'NR <= 60' "$source"
+            fi
+          done
+          apt-config dump | awk '/^(APT::Update::|DPkg::(Pre|Post)-Invoke|Dir::State::lists|APT::Architecture)/ { if (++n <= 60) print }'
+          apt-get indextargets --format '$(URI) -> $(FILENAME)' 'Identifier: Packages' | awk 'NR <= 40'
+          find /var/lib/apt/lists -maxdepth 1 -type f -printf '%f %s bytes\n' | sort | awk 'NR <= 80'
+          while IFS= read -r index; do
+            printf 'Index: %s\n' "$index"
+            if [ -f "$index" ]; then
+              /usr/lib/apt/apt-helper cat-file "$index" | awk '
+                /^Package:/ { count++ }
+                /^Package: (libxkbcommon-dev|libwayland-dev|libfontconfig-dev)$/ { print }
+                END { print "Package records:", count + 0 }
+              '
+            else
+              echo 'Expected index file is missing'
+            fi
+          done < <(apt-get indextargets --format '$(FILENAME)' 'Identifier: Packages' | awk 'NR <= 40')
+          apt-cache policy libxkbcommon-dev libwayland-dev libfontconfig-dev
+          apt-cache stats
+          echo "::endgroup::"
           sudo apt-get install -y --no-install-recommends \
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
