@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Tab and Shift+Tab move focus between dialog text fields,settings,must,yes,yes,Single-line fields traverse and wrap without inserting tabs; multiline indentation and specific dialog bindings preserved (#405); other controls tracked in #410
