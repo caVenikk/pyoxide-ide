@@ -1916,6 +1916,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "chrono",
+ "code-intel",
  "console",
  "console-ui",
  "db-core",
@@ -1931,6 +1932,7 @@ dependencies = [
  "serde_json",
  "settings",
  "settings-ui",
+ "sql-intel",
  "sql-syntax",
  "syntax",
  "tempfile",

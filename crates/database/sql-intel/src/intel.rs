@@ -414,14 +414,11 @@ impl CodeIntel for SqlCodeIntel {
     fn stop(&self, _server: &ServerId) {}
 
     fn shutdown(&self) -> Intel<()> {
-        let (tx, rx) = oneshot::channel();
-        if self.jobs.send(Job::Shutdown(tx)).is_err() {
-            return ready(Ok(()));
-        }
-        Box::pin(async move {
-            let _ = rx.await;
-            Ok(())
-        })
+        // The worker ends by itself; the application does not wait for it
+        // (a quitting application parks nothing on a thread of ours).
+        let (tx, _rx) = oneshot::channel();
+        let _ = self.jobs.send(Job::Shutdown(tx));
+        ready(Ok(()))
     }
 }
 

@@ -12,6 +12,7 @@ use db_core::{Backend, DataSourceId, Purpose, Value as DbValue};
 use db_model::{Model, ModelCache};
 use db_session::fake::{FakeSource, Reaction};
 use db_ui::fixture::demo_snapshot;
+use db_ui::store::DataSourceStore as _;
 use db_ui::store::fake::FakeStore;
 use gpui::TestAppContext;
 use serde_json::{Value, json};
@@ -69,6 +70,8 @@ pub(crate) fn store_with_model(
     store.set_model_cache(cache_dir.path());
     store.set_connections(Arc::new(server.clone()));
     store.add(root, NAME, pg());
+    // A password at hand: these connect without asking.
+    store.hold_password(root, NAME, db_core::Secret::new("secret"));
     (store, cache_dir)
 }
 

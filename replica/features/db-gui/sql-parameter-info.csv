@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Parameter info of SQL routine and function calls,db-gui,could,yes,partial,"Pro; engine done (sql-intel, #320): overloads, named arguments, built-in functions; the editor shows it when the database module registers the services"
+Parameter info of SQL routine and function calls,db-gui,could,yes,yes,"Pro; overloads, named arguments and built-in functions reach SQL editors through the registered language services (#320)"

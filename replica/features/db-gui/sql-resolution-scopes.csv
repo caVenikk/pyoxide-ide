@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"SQL resolution scope (data source and schema) per file, folder and project",db-gui,should,yes,partial,"Pro; mappings and the editor toolbar chips done (#321); the analysis reads them with the next step, the SQL Resolution Scopes page follows"
+"SQL resolution scope (data source and schema) per file, folder and project",db-gui,should,yes,partial,"Pro; file, folder and project mappings and toolbar chips feed SQL analysis; the SQL Resolution Scopes settings page remains to be implemented (#320, #321)"

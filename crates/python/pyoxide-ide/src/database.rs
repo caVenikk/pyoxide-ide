@@ -21,7 +21,7 @@ use db_core::{
 use db_model::ModelCache;
 use db_service::DbService;
 use db_service::profiles::ProfilesFile;
-use db_service::secrets::{SecretKind, secret_service};
+use db_service::secrets::{SecretKind, password_env, secret_service};
 use db_ui::store::{
     BoxFuture, DataSource, DataSourceStore, Failure, ImportSummary, PasswordChange, SaveRequest,
     ServerInfo,
@@ -463,6 +463,37 @@ impl DataSourceStore for ProjectStore {
             .and_then(|f| f.profiles.get(name).map(|p| p.gui_options().password_save))
             .is_some_and(keeps_in_store);
         forever && matches!(self.store.get(&secret_service(), &account), Ok(Some(_)))
+    }
+
+    fn needs_prompt(&self, project: &Path, source: &DataSource) -> bool {
+        let profile = &source.profile;
+        if !profile.needs_password() {
+            return false;
+        }
+        // The environment is looked up before any store, as when connecting.
+        let in_env = profile
+            .password_env
+            .iter()
+            .map(String::as_str)
+            .chain([password_env().as_str()])
+            .any(|var| (self.env)(var).is_some());
+        !in_env && !self.has_password(project, &source.name)
+    }
+
+    fn hold_password(&self, _: &Path, name: &str, password: Secret) {
+        // A failing memory store is a store that holds nothing: the
+        // connection then asks again.
+        let _ = self.memory.set(
+            &secret_service(),
+            &SecretKind::Password.account(name),
+            &password,
+        );
+    }
+
+    fn release_password(&self, _: &Path, name: &str) {
+        let _ = self
+            .memory
+            .delete(&secret_service(), &SecretKind::Password.account(name));
     }
 
     fn test(
@@ -930,6 +961,109 @@ mod tests {
         };
         let info = futures_block_on(store.test(root, source, None)).unwrap();
         assert_eq!(info.product, "SQLite");
+    }
+
+    /// Code intelligence connects on its own only when no password has to
+    /// be typed: the environment, a kept one or one held for this run is
+    /// enough, and a lookup never reaches the OS store for a data source
+    /// that does not save "Forever".
+    #[test]
+    fn a_prompt_is_needed_only_without_a_password_to_be_had_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let os = Counting::default();
+        let store = ProjectStore::new(Arc::new(os.clone()), Arc::new(|_| None));
+        let save = |name: &str, profile: Profile| {
+            let source = DataSource {
+                name: name.into(),
+                profile,
+            };
+            let mut sources = store.load(root).unwrap();
+            sources.push(source.clone());
+            let request = SaveRequest {
+                sources,
+                passwords: vec![(name.into(), PasswordChange::Keep)],
+                ..SaveRequest::default()
+            };
+            store.save(root, request).unwrap();
+            source
+        };
+
+        let never = save("never", pg(PasswordSave::Never));
+        let until = save("until", pg(PasswordSave::UntilRestart));
+        let forever = save("forever", pg(PasswordSave::Forever));
+        let file = save("file", Profile::new(Backend::Sqlite));
+        assert!(store.needs_prompt(root, &never));
+        assert!(store.needs_prompt(root, &until));
+        assert!(!store.needs_prompt(root, &file));
+        // Nothing is kept for the Forever data source yet.
+        assert!(store.needs_prompt(root, &forever));
+
+        // One held serves the connect it was typed for, for any data source.
+        store.hold_password(root, "never", Secret::new("typed"));
+        store.hold_password(root, "until", Secret::new("typed"));
+        assert!(!store.needs_prompt(root, &never));
+        assert!(!store.needs_prompt(root, &until));
+
+        // "Never" lets it go once that connect is done, so the next asks
+        // again; "Until restart" keeps it for the run.
+        store.release_password(root, "never");
+        assert!(store.needs_prompt(root, &never));
+        assert!(!store.needs_prompt(root, &until));
+
+        // A kept one is, for the Forever data source.
+        os.inner
+            .set(&secret_service(), "forever", &Secret::new("kept"))
+            .unwrap();
+        assert!(!store.needs_prompt(root, &forever));
+
+        // So is the environment, the generic variable or the profile's own.
+        let var = password_env();
+        let env: secrets::EnvLookup =
+            Arc::new(move |name| (name == var).then(|| "from-env".to_owned()));
+        let with_env = ProjectStore::new(Arc::new(Counting::default()), env);
+        assert!(!with_env.needs_prompt(root, &until));
+        let mut own = pg(PasswordSave::Never);
+        own.password_env = Some("MY_OWN_PASSWORD".into());
+        let source = DataSource {
+            name: "own".into(),
+            profile: own,
+        };
+        let env: secrets::EnvLookup =
+            Arc::new(|name| (name == "MY_OWN_PASSWORD").then(|| "x".to_owned()));
+        let with_own = ProjectStore::new(Arc::new(Counting::default()), env);
+        assert!(!with_own.needs_prompt(root, &source));
+        assert!(store.needs_prompt(root, &source));
+    }
+
+    /// A "Never" or "Until restart" data source does not read the OS store
+    /// when asked whether it needs a prompt.
+    #[test]
+    fn asking_for_a_prompt_does_not_touch_the_os_store_of_other_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let os = Counting::default();
+        let store = ProjectStore::new(Arc::new(os.clone()), Arc::new(|_| None));
+        for (name, mode) in [
+            ("never", PasswordSave::Never),
+            ("until", PasswordSave::UntilRestart),
+        ] {
+            let source = DataSource {
+                name: name.into(),
+                profile: pg(mode),
+            };
+            store
+                .save(
+                    root,
+                    SaveRequest {
+                        sources: vec![source.clone()],
+                        ..SaveRequest::default()
+                    },
+                )
+                .unwrap();
+            assert!(store.needs_prompt(root, &source));
+        }
+        assert_eq!(os.calls(), 0);
     }
 
     #[test]

@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Quick documentation of SQL tables columns routines aliases and keywords,db-gui,should,yes,partial,"Pro; engine done (sql-intel, #320): hover and the documentation beside a completion item; the editor shows it when the database module registers the services"
+Quick documentation of SQL tables columns routines aliases and keywords,db-gui,should,yes,yes,Pro; SQL hover and documentation beside completion items use the mapped data source model (#320)

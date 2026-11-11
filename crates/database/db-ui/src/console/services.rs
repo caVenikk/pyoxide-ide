@@ -344,14 +344,23 @@ impl ServicesPanel {
             }
             let is_current = current == Some(console);
             let console_entity = console.clone();
-            let time = c.last_ms.map(|ms| format!("{ms} ms"));
+            let disconnected = c.disconnected;
+            let time = if disconnected {
+                Some("disconnected".to_owned())
+            } else {
+                c.last_ms.map(|ms| format!("{ms} ms"))
+            };
             tree = tree.child(
                 row(format!("services-console-{}", c.path.display()), 2.0)
                     .when(is_current, |d| d.bg(selected_bg))
                     .when(!is_current, |d| d.hover(move |s| s.bg(hover)))
                     .child(arrow(None, false, cx))
                     .child(Icon::new(icons::backend(c.backend)).size(px(ICON)))
-                    .child(c.label())
+                    .child(
+                        div()
+                            .when(disconnected, |d| d.text_color(muted))
+                            .child(c.label()),
+                    )
                     .children(time.map(|t| div().text_color(muted).child(t)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.selected = Some(console_entity.downgrade());
