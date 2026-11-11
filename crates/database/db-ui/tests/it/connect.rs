@@ -35,11 +35,19 @@ fn open<'a>(
     root: &Path,
     save: PasswordSave,
 ) -> (Harness<'a>, Arc<FakeStore>, FakeSource, tempfile::TempDir) {
+    open_profile(cx, root, profile(save))
+}
+
+fn open_profile<'a>(
+    cx: &'a mut TestAppContext,
+    root: &Path,
+    profile: db_core::Profile,
+) -> (Harness<'a>, Arc<FakeStore>, FakeSource, tempfile::TempDir) {
     let server = FakeSource::new(Backend::Postgres);
     server.on("select 1", Reaction::column("a", &["1"]));
     let store = FakeStore::new("secret");
     store.set_connections(Arc::new(server.clone()));
-    store.add(root, SOURCE, profile(save));
+    store.add(root, SOURCE, profile);
     let consoles = tempfile::tempdir().unwrap();
     store.set_console_folder(consoles.path());
     let mut h = Harness::new(
@@ -311,6 +319,30 @@ fn a_refused_password_is_asked_again(cx: &mut TestAppContext) {
     }
 }
 
+/// Invoke Deactivate through the actual tree menu, including its enabled
+/// state while a connection is pending.
+fn deactivate_from_menu(h: &mut Harness) {
+    show_tool_window(h);
+    select(h);
+    h.invoke("db.explorer.context-menu", Value::Null);
+    let menu = state(h)["explorer"]["menu"].clone();
+    let items = menu["levels"][0]["items"].as_array().unwrap();
+    let index = items
+        .iter()
+        .position(|i| i["label"] == "Deactivate")
+        .unwrap();
+    assert_eq!(items[index]["enabled"], true, "{menu}");
+    for _ in 0..=items.len() {
+        let menu = state(h)["explorer"]["menu"].clone();
+        if menu["levels"][0]["selected"] == index {
+            h.invoke("menu.confirm", Value::Null);
+            return;
+        }
+        h.invoke("menu.down", Value::Null);
+    }
+    panic!("Deactivate was not selectable: {menu}");
+}
+
 /// Cancelling a pending disconnect retains a Never password and its
 /// transaction; rolling back disconnects and the next query asks again.
 #[gpui::test]
@@ -339,7 +371,7 @@ fn a_pending_disconnect_keeps_never_credentials_until_confirmed(cx: &mut TestApp
         console(h)["tx"]["pending"] == 1
     });
 
-    h.invoke("db.explorer.disconnect", Value::Null);
+    deactivate_from_menu(&mut h);
     wait(&mut h, "the transaction decision", |h| {
         !h.invoke("db.console.state", Value::Null)["tx_decision"].is_null()
     });
@@ -353,7 +385,7 @@ fn a_pending_disconnect_keeps_never_credentials_until_confirmed(cx: &mut TestApp
             .contains(&"<rollback>".to_owned())
     );
 
-    h.invoke("db.explorer.disconnect", Value::Null);
+    deactivate_from_menu(&mut h);
     wait(&mut h, "the second decision", |h| {
         !h.invoke("db.console.state", Value::Null)["tx_decision"].is_null()
     });
@@ -384,7 +416,14 @@ fn a_pending_disconnect_keeps_never_credentials_until_confirmed(cx: &mut TestApp
 #[gpui::test]
 fn disconnect_cancels_a_connecting_source_without_a_transaction_decision(cx: &mut TestAppContext) {
     let (_dir, root) = project();
-    let (mut h, store, server, _consoles) = open(cx, &root, PasswordSave::Never);
+    let mut profile = profile(PasswordSave::Never);
+    profile
+        .gui
+        .as_mut()
+        .unwrap()
+        .schema_levels
+        .insert("demo".to_owned(), db_core::schema::Level::Full);
+    let (mut h, store, server, _consoles) = open_profile(cx, &root, profile);
     server.set_open(OpenBehavior::Hang);
     select(&mut h);
     h.invoke("db.explorer.refresh", Value::Null);
@@ -392,10 +431,19 @@ fn disconnect_cancels_a_connecting_source_without_a_transaction_decision(cx: &mu
     type_password(&mut h);
     wait(&mut h, "the pending connection", can_disconnect);
     assert!(!connected(&mut h));
-    h.invoke("db.explorer.disconnect", Value::Null);
+    deactivate_from_menu(&mut h);
     wait(&mut h, "the cancelled connection", |h| !can_disconnect(h));
     assert!(h.invoke("db.console.state", Value::Null)["tx_decision"].is_null());
     wait(&mut h, "the forgotten password", |_| {
         store.password(SOURCE).is_none()
     });
+    wait(&mut h, "the cancelled refresh", |h| {
+        state(h)["explorer"]["tree"]["data_sources"][SOURCE]["refreshing"] == false
+    });
+    settle(&mut h);
+    assert!(
+        !asking(&mut h),
+        "queued schemas must not reconnect after cancellation"
+    );
+    assert!(!can_disconnect(&mut h));
 }

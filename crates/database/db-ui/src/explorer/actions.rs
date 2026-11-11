@@ -261,11 +261,12 @@ impl Explorer {
         let sources = self.sources();
         Some(MenuInput {
             target,
-            connected: self
-                .tree
-                .lives
-                .get(source)
-                .is_some_and(|l| l.state == DataSourceState::Connected),
+            connected: self.tree.lives.get(source).is_some_and(|l| {
+                matches!(
+                    l.state,
+                    DataSourceState::Connected | DataSourceState::Connecting
+                )
+            }),
             index: sources.iter().position(|s| s.name == source).unwrap_or(0),
             count: sources.len(),
             color: slot
@@ -731,13 +732,7 @@ impl Explorer {
     // ---- connections and the model ----------------------------------------------
 
     fn deactivate(&mut self, cx: &mut Context<Self>) {
-        let Some(name) = self.selected_source_name() else {
-            return;
-        };
-        if let Some(live) = self.tree.lives.get(&name) {
-            live.handle.disconnect(TxPolicy::Rollback);
-        }
-        cx.notify();
+        self.disconnect_selected(cx);
     }
 
     fn force_refresh(&mut self, cx: &mut Context<Self>) {
@@ -803,7 +798,7 @@ impl Explorer {
         };
         let session = live.handle.open_session(SessionOptions {
             tx_mode: Some(db_core::TxMode::Auto),
-            schema: None,
+            ..SessionOptions::default()
         });
         let job = session.execute(Job::script(statements.join("\n")));
         self.tree.ddl.push(DdlRun {

@@ -464,7 +464,9 @@ impl Explorer {
                 }
                 RefreshEvent::Cancelled => {
                     live.refresh = None;
-                    live.refresh_next();
+                    // Cancellation ends the whole queued refresh, including
+                    // disconnects; Ask/Cancel emits no cancellation event.
+                    live.queued.clear();
                 }
             },
             _ => return,
