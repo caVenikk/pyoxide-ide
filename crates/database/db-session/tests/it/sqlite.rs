@@ -27,6 +27,7 @@ fn manual() -> SessionOptions {
     SessionOptions {
         tx_mode: Some(TxMode::Manual),
         schema: None,
+        isolation: None,
     }
 }
 

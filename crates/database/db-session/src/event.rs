@@ -221,10 +221,12 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Command {
+    Connect,
     Commit,
     Rollback,
     SetSchema,
     SetTxMode,
+    SetIsolation,
     Fetch,
     Close,
 }

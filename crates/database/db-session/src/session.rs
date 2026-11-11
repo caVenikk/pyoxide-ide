@@ -18,7 +18,7 @@ use crate::event::{
 use crate::job::{
     ErrorPolicy, Job, JobSource, JobStatement, TxEffect, may_change_schema, tx_effect,
 };
-use crate::options::{SessionOptions, TxPolicy};
+use crate::options::{Isolation, SessionOptions, TxPolicy};
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -86,8 +86,10 @@ pub(crate) enum Cmd {
     },
     Commit,
     Rollback,
+    Connect,
     SetSchema(String),
     SetTxMode(TxMode, TxPolicy),
+    SetIsolation(Isolation),
     Close(TxPolicy),
     Disconnect {
         commit: bool,
@@ -175,6 +177,7 @@ impl Session {
             conn: None,
             cursor: None,
             schema_wanted: options.schema,
+            isolation_wanted: options.isolation,
         };
         // A panic in the actor (a driver bug) closes the session visibly
         // instead of leaving it silent.
@@ -272,6 +275,13 @@ impl Session {
         }
     }
 
+    /// Open the connection now instead of with the first statement, so the
+    /// current schema is known. [`SessionEvent::CommandFailed`] with
+    /// [`Command::Connect`] when it cannot be opened.
+    pub fn connect(&self) {
+        self.inner.send(Cmd::Connect);
+    }
+
     pub fn commit(&self) {
         self.inner.send(Cmd::Commit);
     }
@@ -290,6 +300,13 @@ impl Session {
     /// asks first under [`TxPolicy::Ask`].
     pub fn set_tx_mode(&self, mode: TxMode, policy: TxPolicy) {
         self.inner.send(Cmd::SetTxMode(mode, policy));
+    }
+
+    /// Set the isolation level of the session's transactions (kept for
+    /// later reconnects): the engine's own statement
+    /// ([`Isolation::supported`]) or a [`SessionEvent::CommandFailed`].
+    pub fn set_isolation(&self, level: Isolation) {
+        self.inner.send(Cmd::SetIsolation(level));
     }
 
     /// Close the session. With pending changes and [`TxPolicy::Ask`] the
@@ -408,6 +425,7 @@ struct Actor {
     cursor: Option<OpenCursor>,
     tx: TxStatus,
     schema_wanted: Option<String>,
+    isolation_wanted: Option<Isolation>,
 }
 
 impl Actor {
@@ -442,10 +460,24 @@ impl Actor {
                     let r = self.end_transaction(false).await;
                     self.report(Command::Rollback, r);
                 }
+                Cmd::Connect => {
+                    self.shared.touch();
+                    let r = self
+                        .ensure_conn(None)
+                        .await
+                        .map(|_| ())
+                        .map_err(|f| f.error);
+                    self.report(Command::Connect, r);
+                }
                 Cmd::SetSchema(schema) => {
                     self.shared.touch();
                     let r = self.set_schema(schema).await;
                     self.report(Command::SetSchema, r);
+                }
+                Cmd::SetIsolation(level) => {
+                    self.shared.touch();
+                    let r = self.set_isolation(level).await;
+                    self.report(Command::SetIsolation, r);
                 }
                 Cmd::SetTxMode(mode, policy) => {
                     self.shared.touch();
@@ -570,6 +602,15 @@ impl Actor {
         {
             self.session_event(SessionEvent::CommandFailed {
                 command: Command::SetSchema,
+                error: f.error,
+            });
+        }
+        if let Some(level) = self.isolation_wanted
+            && let Some(sql) = dialect::set_isolation(dialect, level)
+            && let Err(f) = self.exec_internal(&sql, None).await
+        {
+            self.session_event(SessionEvent::CommandFailed {
+                command: Command::SetIsolation,
                 error: f.error,
             });
         }
@@ -1052,6 +1093,15 @@ impl Actor {
 
     async fn set_schema(&mut self, schema: String) -> Result<(), Error> {
         self.schema_wanted = Some(schema.clone());
+        let fresh = self
+            .conn
+            .as_ref()
+            .is_none_or(|live| live.epoch != self.shared.epoch());
+        // No connection yet: open it now; opening applies the wanted schema.
+        self.ensure_conn(None).await.map_err(|f| f.error)?;
+        if fresh {
+            return Ok(());
+        }
         let Some(live) = &self.conn else {
             return Ok(());
         };
@@ -1061,6 +1111,23 @@ impl Actor {
         self.close_cursor().await;
         self.exec_internal(&sql, None).await.map_err(|f| f.error)?;
         self.read_schema().await;
+        Ok(())
+    }
+
+    async fn set_isolation(&mut self, level: Isolation) -> Result<(), Error> {
+        let Some(live) = &self.conn else {
+            self.isolation_wanted = Some(level);
+            return Ok(());
+        };
+        let Some(sql) = dialect::set_isolation(live.dialect, level) else {
+            return Err(Error::unsupported(format!(
+                "this database cannot run transactions at the level {}",
+                level.title()
+            )));
+        };
+        self.close_cursor().await;
+        self.exec_internal(&sql, None).await.map_err(|f| f.error)?;
+        self.isolation_wanted = Some(level);
         Ok(())
     }
 

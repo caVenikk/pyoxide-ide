@@ -2,6 +2,7 @@
 
 use db_core::Dialect;
 
+use crate::Isolation;
 use crate::job::syntax_dialect;
 
 /// The one savepoint name a console uses (ADR 0021): PostgreSQL and SQLite
@@ -74,6 +75,27 @@ pub(crate) fn set_schema(dialect: Dialect, schema: &str) -> Option<String> {
     }
 }
 
+/// Set the isolation level of the session's next transactions. `None`: the
+/// engine cannot run at this level ([`Isolation::supported`]).
+pub(crate) fn set_isolation(dialect: Dialect, level: Isolation) -> Option<String> {
+    if !level.supported(dialect) {
+        return None;
+    }
+    match dialect {
+        Dialect::Postgres => Some(match level.sql() {
+            None => "RESET default_transaction_isolation".to_owned(),
+            Some(sql) => {
+                format!("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL {sql}")
+            }
+        }),
+        Dialect::Oracle => Some(format!(
+            "ALTER SESSION SET ISOLATION_LEVEL = {}",
+            level.sql().unwrap_or("READ COMMITTED")
+        )),
+        Dialect::Sqlite => None,
+    }
+}
+
 /// A query returning the current schema in its first column.
 pub(crate) fn current_schema(dialect: Dialect) -> &'static str {
     match dialect {
@@ -109,5 +131,25 @@ mod tests {
         );
         assert_eq!(set_schema(Dialect::Sqlite, "main"), None);
         assert!(read_only(Dialect::Oracle).is_none());
+        assert_eq!(
+            set_isolation(Dialect::Postgres, Isolation::Serializable).unwrap(),
+            "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE"
+        );
+        assert_eq!(
+            set_isolation(Dialect::Postgres, Isolation::DatabaseDefault).unwrap(),
+            "RESET default_transaction_isolation"
+        );
+        assert_eq!(
+            set_isolation(Dialect::Oracle, Isolation::Serializable).unwrap(),
+            "ALTER SESSION SET ISOLATION_LEVEL = SERIALIZABLE"
+        );
+        assert_eq!(
+            set_isolation(Dialect::Oracle, Isolation::RepeatableRead),
+            None
+        );
+        assert_eq!(
+            set_isolation(Dialect::Sqlite, Isolation::Serializable),
+            None
+        );
     }
 }

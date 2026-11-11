@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use db_core::{ConnectParams, TxMode};
 use db_oracle_thin::ThinDriver;
 use db_session::{
-    DataSourceOptions, ErrorPolicy, EventKind, Job, JobEvent, JobOutcome, Session, SessionEvent,
-    SessionOptions,
+    Command, DataSourceOptions, ErrorPolicy, EventKind, Isolation, Job, JobEvent, JobOutcome,
+    Session, SessionEvent, SessionOptions,
 };
 
 use crate::support::{Harness, env, failure, harness, int, outcome, password, unique};
@@ -35,6 +35,7 @@ fn manual() -> SessionOptions {
     SessionOptions {
         tx_mode: Some(TxMode::Manual),
         schema: None,
+        isolation: None,
     }
 }
 
@@ -143,4 +144,36 @@ fn an_error_carries_the_ora_code_and_the_statement_position() {
     let error = failure(&events, 1);
     assert_eq!(error.error.code.as_deref(), Some("ORA-00904"));
     assert_eq!(error.position, script.find("select nope").unwrap());
+}
+
+#[test]
+#[ignore = "needs the oracle container"]
+fn the_isolation_level_is_set_where_oracle_has_it_and_refused_otherwise() {
+    let h = oracle();
+    let session = h.handle.open_session(SessionOptions::default());
+    h.run_ok(&session, "select 1 from dual");
+    session.set_isolation(Isolation::Serializable);
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event:
+                SessionEvent::CommandDone {
+                    command: Command::SetIsolation,
+                },
+            ..
+        } => Some(()),
+        _ => None,
+    });
+    h.run_ok(&session, "select 1 from dual");
+    session.set_isolation(Isolation::RepeatableRead);
+    h.wait_for(|k| match k {
+        EventKind::Session {
+            event:
+                SessionEvent::CommandFailed {
+                    command: Command::SetIsolation,
+                    ..
+                },
+            ..
+        } => Some(()),
+        _ => None,
+    });
 }

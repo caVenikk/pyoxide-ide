@@ -300,6 +300,10 @@ pub struct RowExtra {
     /// key of that letter runs the row while its level is the innermost
     /// one (`TextWithMnemonic`, Swing's menu item mnemonics).
     pub mnemonic: Option<usize>,
+    /// A note: its text wraps at the width the other rows give the menu
+    /// instead of widening it (the footer of the console's transaction
+    /// popup), and the row has the height of its lines.
+    pub wrap: bool,
 }
 
 impl RowExtra {
@@ -307,7 +311,7 @@ impl RowExtra {
     /// the list's row height (`PopupUtil.configListRendererFlexibleHeight`
     /// with `JBUI.Borders.empty(8, 0)`): with a comment or a large icon.
     fn flexible(&self) -> bool {
-        self.comment.is_some() || self.icon_size.is_some() || self.avatar.is_some()
+        self.comment.is_some() || self.icon_size.is_some() || self.avatar.is_some() || self.wrap
     }
 }
 
@@ -327,6 +331,7 @@ impl Clone for RowExtra {
             shortcut: self.shortcut.clone(),
             bold: self.bold,
             indent: self.indent,
+            wrap: self.wrap,
         }
     }
 }
@@ -540,6 +545,14 @@ impl MenuItem {
     pub fn secondary(mut self, text: impl Into<SharedString>) -> Self {
         if let Some(extra) = self.extra_mut() {
             extra.secondary = Some(text.into());
+        }
+        self
+    }
+
+    /// The text wraps at the width of the other rows ([`RowExtra::wrap`]).
+    pub fn wrapped(mut self) -> Self {
+        if let Some(extra) = self.extra_mut() {
+            extra.wrap = true;
         }
         self
     }
@@ -1600,6 +1613,51 @@ impl ContextMenu {
 
     // ---- drawing ------------------------------------------------------------
 
+    /// The width of a note row ([`RowExtra::wrap`]): what the widest of
+    /// the other rows of the level asks for (its label, its icon column and
+    /// the paddings), so that the note wraps at the width the menu has
+    /// without it.
+    fn note_width(&self, items: &[MenuItem], shown: &[bool], with_icons: bool, cx: &App) -> f32 {
+        if !items.iter().any(|i| i.extra().is_some_and(|e| e.wrap)) {
+            return 0.0;
+        }
+        let m = self.metrics;
+        let theme = cx.theme();
+        let size = f32::from(theme.ui_size());
+        let font = gpui::font(theme.ui_family());
+        let text_system = cx.text_system();
+        let font_id = text_system.resolve_font(&font);
+        let width = |text: &str, size: f32| -> f32 {
+            text.chars()
+                .filter_map(|c| text_system.advance(font_id, px(size), c).ok())
+                .map(|a| f32::from(a.width))
+                .sum()
+        };
+        let mut widest = 0.0f32;
+        for (item, _) in items.iter().zip(shown).filter(|(_, shown)| **shown) {
+            if item.extra().is_some_and(|e| e.wrap) {
+                continue;
+            }
+            let row = match item {
+                MenuItem::Header(title) => {
+                    width(title, size - 1.0) + 2.0 * (m.separator_x + m.content_x)
+                }
+                MenuItem::Separator => continue,
+                _ => {
+                    let label = item.label().map_or(0.0, |l| width(l, size));
+                    let indent = item.extra().map_or(0, |e| e.indent);
+                    label
+                        + INDENT * f32::from(indent)
+                        + if with_icons { ICON + ICON_GAP } else { 0.0 }
+                        + 2.0 * m.content_x
+                        + 2.0 * m.selection_x
+                }
+            };
+            widest = widest.max(row);
+        }
+        widest
+    }
+
     fn render_level(&self, level: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let m = self.metrics;
@@ -1628,6 +1686,14 @@ impl ContextMenu {
         let item_height = self.item_height(cx);
         let inner_height = item_height - 2.0 * m.selection_y;
         let first_shown = shown.iter().position(|s| *s);
+        let note_width = self
+            .note_width(items, &shown, with_icons, cx)
+            .max(if level == 0 {
+                // The border takes 2 of the least width.
+                (self.min_width.unwrap_or(0.0) - 2.0).max(0.0)
+            } else {
+                0.0
+            });
         let rows: Vec<AnyElement> = items
             .iter()
             .enumerate()
@@ -1718,6 +1784,7 @@ impl ContextMenu {
                     ICON_GAP
                 };
                 let bold = extra.is_some_and(|e| e.bold);
+                let wrap = extra.is_some_and(|e| e.wrap);
                 let indent = extra.map_or(0, |e| e.indent);
                 let more = !self.submenu_on_hover && item.is_final_group();
                 let buttons = extra.map_or(0, |e| e.inline.len()) + usize::from(more);
@@ -1800,8 +1867,8 @@ impl ContextMenu {
                     .overflow_hidden()
                     .child(
                         div()
-                            .flex_none()
-                            .whitespace_nowrap()
+                            .when(!wrap, |d| d.flex_none().whitespace_nowrap())
+                            .when(wrap, |d| d.flex_1().min_w(px(0.0)).text_size(small))
                             .pl(px(INDENT * f32::from(indent)))
                             .when(bold, |d| d.font_weight(FontWeight::BOLD))
                             .child(label),
@@ -1876,6 +1943,8 @@ impl ContextMenu {
                     .id(id)
                     .debug_selector(move || selector.clone())
                     .flex_none()
+                    // A note is as wide as the other rows make the menu.
+                    .when(wrap, |d| d.w(px(note_width)))
                     .when(!flexible, |d| d.h(px(item_height)))
                     .px(px(m.selection_x))
                     .py(px(m.selection_y))
@@ -1913,7 +1982,7 @@ impl ContextMenu {
                                         ),
                                 )
                             })
-                            .when(with_icons, |d| {
+                            .when(with_icons && !wrap, |d| {
                                 d.child(
                                     div()
                                         .flex_none()

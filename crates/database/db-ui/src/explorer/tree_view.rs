@@ -340,7 +340,7 @@ impl Explorer {
         let name = event.data_source.as_str().to_owned();
         if matches!(
             event.kind,
-            EventKind::Session { .. } | EventKind::Job { .. }
+            EventKind::Session { .. } | EventKind::Job { .. } | EventKind::DecisionNeeded { .. }
         ) {
             crate::console::route(event, cx);
             return;
@@ -356,28 +356,6 @@ impl Explorer {
             EventKind::State { state } => {
                 reached = Some(state.clone());
                 live.state = state;
-            }
-            EventKind::DecisionNeeded {
-                reason: db_session::DecisionReason::Disconnect,
-                sessions,
-            } => {
-                self.notify(
-                    Notification::new(
-                        NotificationKind::Warning,
-                        name,
-                        format!(
-                            "{} {} uncommitted changes: commit or roll them back, then disconnect",
-                            sessions.len(),
-                            if sessions.len() == 1 {
-                                "console has"
-                            } else {
-                                "consoles have"
-                            }
-                        ),
-                    ),
-                    cx,
-                );
-                return;
             }
             EventKind::Refresh { job, event } if live.refresh == Some(job) => match event {
                 RefreshEvent::Started => {}

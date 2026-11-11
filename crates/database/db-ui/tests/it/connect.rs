@@ -310,3 +310,92 @@ fn a_refused_password_is_asked_again(cx: &mut TestAppContext) {
         assert!(!connected(&mut h), "round {round}");
     }
 }
+
+/// Cancelling a pending disconnect retains a Never password and its
+/// transaction; rolling back disconnects and the next query asks again.
+#[gpui::test]
+fn a_pending_disconnect_keeps_never_credentials_until_confirmed(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let (mut h, store, server, _consoles) = open(cx, &root, PasswordSave::Never);
+    server.on("insert into", Reaction::Affected(1));
+    server.on(
+        "current_schema",
+        Reaction::column("current_schema", &["public"]),
+    );
+    select(&mut h);
+    h.invoke("db.console.new", json!({"source": SOURCE}));
+    wait(&mut h, "the password prompt", asking);
+    type_password(&mut h);
+    wait(&mut h, "the initial schema", |h| {
+        console(h)["schema"] == "public"
+    });
+    h.invoke("db.console.set-tx-mode", json!({"mode": "manual"}));
+    wait(&mut h, "manual mode", |h| {
+        console(h)["tx"]["mode"] == "manual"
+    });
+    h.invoke("editor.type", json!({"text": "insert into t values (1);"}));
+    h.invoke("db.console.execute", Value::Null);
+    wait(&mut h, "the pending change", |h| {
+        console(h)["tx"]["pending"] == 1
+    });
+
+    h.invoke("db.explorer.disconnect", Value::Null);
+    wait(&mut h, "the transaction decision", |h| {
+        !h.invoke("db.console.state", Value::Null)["tx_decision"].is_null()
+    });
+    h.invoke("db.tx-decision.cancel", Value::Null);
+    assert!(connected(&mut h));
+    assert_eq!(console(&mut h)["tx"]["pending"], 1);
+    assert!(store.password(SOURCE).is_some());
+    assert!(
+        !server
+            .statements(Purpose::Console)
+            .contains(&"<rollback>".to_owned())
+    );
+
+    h.invoke("db.explorer.disconnect", Value::Null);
+    wait(&mut h, "the second decision", |h| {
+        !h.invoke("db.console.state", Value::Null)["tx_decision"].is_null()
+    });
+    h.invoke("db.tx-decision.rollback", Value::Null);
+    wait(&mut h, "the disconnect", |h| {
+        console(h)["disconnected"] == true
+    });
+    wait(&mut h, "the forgotten password", |_| {
+        store.password(SOURCE).is_none()
+    });
+    assert!(
+        server
+            .statements(Purpose::Console)
+            .contains(&"<rollback>".to_owned())
+    );
+    h.invoke("editor.select-all", Value::Null);
+    h.invoke("editor.type", json!({"text": "select 1;"}));
+    h.invoke("db.console.execute", Value::Null);
+    wait(&mut h, "the next password prompt", asking);
+    type_password(&mut h);
+    wait(&mut h, "the reconnected query", |h| {
+        console(h)["running"] == false && console(h)["disconnected"] == false
+    });
+}
+
+/// Disconnect stays available while a connection is pending and cancels
+/// it without asking about a transaction that has not started.
+#[gpui::test]
+fn disconnect_cancels_a_connecting_source_without_a_transaction_decision(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let (mut h, store, server, _consoles) = open(cx, &root, PasswordSave::Never);
+    server.set_open(OpenBehavior::Hang);
+    select(&mut h);
+    h.invoke("db.explorer.refresh", Value::Null);
+    wait(&mut h, "the password prompt", asking);
+    type_password(&mut h);
+    wait(&mut h, "the pending connection", can_disconnect);
+    assert!(!connected(&mut h));
+    h.invoke("db.explorer.disconnect", Value::Null);
+    wait(&mut h, "the cancelled connection", |h| !can_disconnect(h));
+    assert!(h.invoke("db.console.state", Value::Null)["tx_decision"].is_null());
+    wait(&mut h, "the forgotten password", |_| {
+        store.password(SOURCE).is_none()
+    });
+}

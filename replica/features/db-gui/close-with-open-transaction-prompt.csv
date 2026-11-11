@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Prompt to commit or roll back when closing a console or disconnecting,db-gui,should,yes,no,Pro
+Prompt to commit or roll back when closing a console or disconnecting,db-gui,should,yes,partial,Pro; disconnect and switching to auto mode ask Commit/Rollback/Cancel; closing a console tab intentionally does not prompt and retains the session (#305)
