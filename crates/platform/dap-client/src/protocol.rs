@@ -74,6 +74,20 @@ pub struct SetExceptionBreakpointsArguments<'a> {
     pub filters: Vec<&'a str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub filter_options: Vec<ExceptionFilterOptions<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exception_options: Vec<ExceptionOptions<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExceptionOptions<'a> {
+    pub path: Vec<ExceptionPathSegment<'a>>,
+    pub break_mode: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExceptionPathSegment<'a> {
+    pub names: &'a [String],
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +180,7 @@ pub struct Capabilities {
     pub supports_cancel_request: Option<bool>,
     pub supports_exception_info_request: Option<bool>,
     pub supports_exception_filter_options: Option<bool>,
+    pub supports_exception_options: Option<bool>,
     pub supports_delayed_stack_trace_loading: Option<bool>,
     pub supports_clipboard_context: Option<bool>,
     pub supports_step_in_targets_request: Option<bool>,
@@ -197,6 +212,7 @@ impl Capabilities {
             supports_cancel_request => cancel,
             supports_exception_info_request => exception_info,
             supports_exception_filter_options => exception_filter_options,
+            supports_exception_options => exception_options,
             supports_delayed_stack_trace_loading => delayed_stack_trace_loading,
             supports_clipboard_context => clipboard_context,
             supports_step_in_targets_request => step_in_targets,

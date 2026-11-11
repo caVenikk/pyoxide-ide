@@ -22,6 +22,7 @@ pub struct Capabilities {
     pub cancel: bool,
     pub exception_info: bool,
     pub exception_filter_options: bool,
+    pub exception_options: bool,
     pub delayed_stack_trace_loading: bool,
     pub clipboard_context: bool,
     pub step_in_targets: bool,
@@ -57,6 +58,46 @@ impl ExceptionFilterSetting {
             id: id.into(),
             condition: None,
         }
+    }
+}
+
+/// When an exception breakpoint breaks (DAP `ExceptionBreakMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExceptionBreakMode {
+    Never,
+    /// Whenever the exception is raised.
+    Always,
+    /// When the exception is not handled and ends the program.
+    Unhandled,
+    /// When the exception is not handled by user code.
+    UserUnhandled,
+}
+
+impl ExceptionBreakMode {
+    /// The mode's name in the protocol.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Always => "always",
+            Self::Unhandled => "unhandled",
+            Self::UserUnhandled => "userUnhandled",
+        }
+    }
+}
+
+/// An exception breakpoint for one exception, for `setExceptionBreakpoints`
+/// where the adapter supports exception options (DAP `ExceptionOptions`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExceptionOptionSetting {
+    /// The exception's path in the adapter's category tree: the names of each
+    /// segment (an adapter-defined category first, then the class).
+    pub path: Vec<Vec<String>>,
+    pub break_mode: ExceptionBreakMode,
+}
+
+impl ExceptionOptionSetting {
+    pub fn new(path: Vec<Vec<String>>, break_mode: ExceptionBreakMode) -> Self {
+        Self { path, break_mode }
     }
 }
 

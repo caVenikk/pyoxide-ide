@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 use commands::Registry;
 use debugger::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugError, DebugRequest, Debugger,
-    DebuggerEvent, EvaluateContext, ExceptionBreakpoint, ExceptionFilter, ExceptionFilterSetting,
-    HistoryKind, IdeaTypes, LaunchKind, Phase, Session, StepIntoMyCode, SuspendPolicy,
+    DebuggerEvent, EvaluateContext, ExceptionBreakMode, ExceptionBreakpoint, ExceptionFilter,
+    ExceptionFilterSetting, ExceptionOptionSetting, HistoryKind, IdeaTypes, LaunchKind, Phase,
+    Session, StepIntoMyCode, SuspendPolicy,
 };
 use futures::executor::block_on;
 use run_config::{RunConfiguration, Storage};
@@ -31,6 +32,8 @@ struct Provider {
     children: Mutex<Vec<Vec<Value>>>,
     /// How long an evaluation waits for its answer.
     evaluation_timeout: Option<Duration>,
+    /// A breakpoint for one class goes as an exception option.
+    class_options: bool,
 }
 
 impl Provider {
@@ -71,6 +74,27 @@ impl DebugAdapterProvider for Provider {
             .iter()
             .map(|b| ExceptionFilterSetting::new(if b.default { "uncaught" } else { "raised" }))
             .collect()
+    }
+
+    fn exception_options(
+        &self,
+        breakpoints: &[&ExceptionBreakpoint],
+    ) -> Option<Vec<ExceptionOptionSetting>> {
+        let classes: Vec<&&ExceptionBreakpoint> = breakpoints
+            .iter()
+            .filter(|b| b.class != "BaseException")
+            .collect();
+        (self.class_options && !classes.is_empty()).then(|| {
+            classes
+                .iter()
+                .map(|b| {
+                    ExceptionOptionSetting::new(
+                        vec![vec!["Python Exceptions".into()], vec![b.class.clone()]],
+                        ExceptionBreakMode::Always,
+                    )
+                })
+                .collect()
+        })
     }
 
     fn default_exception_breakpoints(&self) -> Vec<ExceptionBreakpoint> {
@@ -322,6 +346,62 @@ fn requests_for_the_same_scopes_and_children_are_sent_once() {
     block_on(session.resume()).unwrap();
     wait_phase(&session, Phase::Ended);
     assert_eq!(session.snapshot().error, None);
+}
+
+/// A breakpoint for one exception class goes as exception options where the
+/// adapter takes them (they replace the filters), else as the filters.
+fn class_breakpoint_script(supports_options: bool, exceptions: Value) -> Vec<Value> {
+    let mut script = start_steps(json!([]), json!([]));
+    if supports_options {
+        script[1]["respond"]["supportsExceptionOptions"] = json!(true);
+    }
+    // No file has a breakpoint: no `setBreakpoints`.
+    script.drain(4..6);
+    script[4] = json!({"expect": "setExceptionBreakpoints", "arguments": exceptions});
+    script.extend([
+        json!({"expect": "terminate"}),
+        json!({"respond": null}),
+        json!({"expect": "disconnect", "arguments": {"terminateDebuggee": true}}),
+        json!({"respond": null}),
+    ]);
+    script
+}
+
+fn run_class_breakpoint(script: Vec<Value>) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let provider = Arc::new(Provider {
+        class_options: true,
+        ..Provider::default()
+    });
+    provider.next(Value::Array(script));
+    let debugger = Debugger::open(root, provider);
+    debugger.add_exception_breakpoint(ExceptionBreakpoint::new("python-exception", "ValueError"));
+    let session = debugger.start(request(root)).unwrap();
+    wait_phase(&session, Phase::Running);
+    session.stop().recv_timeout(WAIT).unwrap();
+    wait_phase(&session, Phase::Ended);
+    assert_eq!(session.snapshot().error, None);
+}
+
+#[test]
+fn a_class_breakpoint_is_sent_as_exception_options() {
+    run_class_breakpoint(class_breakpoint_script(
+        true,
+        json!({"filters": [], "exceptionOptions": [
+            {"path": [{"names": ["Python Exceptions"]}, {"names": ["ValueError"]}],
+             "breakMode": "always"}]}),
+    ));
+}
+
+#[test]
+fn without_exception_options_the_filters_go() {
+    // The test provider's filters: `raised` for a breakpoint that is not the
+    // default (the added one), `uncaught` for the default.
+    run_class_breakpoint(class_breakpoint_script(
+        false,
+        json!({"filters": ["uncaught", "raised"]}),
+    ));
 }
 
 #[test]

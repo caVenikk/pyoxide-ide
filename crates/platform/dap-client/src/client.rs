@@ -34,8 +34,9 @@ use crate::protocol;
 use crate::transport::{Incoming, Inlet, Outlet, Transport};
 use crate::types::{
     Breakpoint, Capabilities, ClientInfo, DapError, EvaluateContext, Evaluated, Event,
-    ExceptionFilterSetting, ExceptionInfo, Output, ReverseRequest, RunInTerminal, Scope,
-    SourceBreakpoint, StackTrace, Stopped, TerminalKind, Thread, Variable, VariablesFilter,
+    ExceptionFilterSetting, ExceptionInfo, ExceptionOptionSetting, Output, ReverseRequest,
+    RunInTerminal, Scope, SourceBreakpoint, StackTrace, Stopped, TerminalKind, Thread, Variable,
+    VariablesFilter,
 };
 
 /// What the adapter sends on its own. Called on the reader thread, in the
@@ -420,8 +421,27 @@ impl Client {
     /// Turns on these exception filters and turns off the others.
     /// Conditions are sent when the adapter supports filter options.
     pub fn set_exception_breakpoints(&self, filters: &[ExceptionFilterSetting]) -> Request<()> {
-        let options = lock(&self.shared.capabilities).exception_filter_options;
-        let with_conditions = options && filters.iter().any(|f| f.condition.is_some());
+        self.set_exceptions(filters, &[])
+    }
+
+    /// Sets the exception breakpoints as exception options: one breakpoint
+    /// per exception and mode, instead of the adapter's filters (an adapter
+    /// that takes options ignores filters then, so `options` holds every
+    /// breakpoint). Without the capability the options are not sent.
+    pub fn set_exception_options(&self, options: &[ExceptionOptionSetting]) -> Request<()> {
+        self.set_exceptions(&[], options)
+    }
+
+    fn set_exceptions(
+        &self,
+        filters: &[ExceptionFilterSetting],
+        options: &[ExceptionOptionSetting],
+    ) -> Request<()> {
+        let capabilities = lock(&self.shared.capabilities);
+        let with_conditions =
+            capabilities.exception_filter_options && filters.iter().any(|f| f.condition.is_some());
+        let with_options = capabilities.exception_options && !options.is_empty();
+        drop(capabilities);
         let arguments = to_value(&protocol::SetExceptionBreakpointsArguments {
             filters: if with_conditions {
                 Vec::new()
@@ -434,6 +454,21 @@ impl Client {
                     .map(|f| protocol::ExceptionFilterOptions {
                         filter_id: &f.id,
                         condition: f.condition.as_deref(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            exception_options: if with_options {
+                options
+                    .iter()
+                    .map(|o| protocol::ExceptionOptions {
+                        path: o
+                            .path
+                            .iter()
+                            .map(|names| protocol::ExceptionPathSegment { names })
+                            .collect(),
+                        break_mode: o.break_mode.as_str(),
                     })
                     .collect()
             } else {
@@ -1247,6 +1282,7 @@ mod tests {
 
     use super::*;
     use crate::transport::MemoryPeer;
+    use crate::types::ExceptionBreakMode;
 
     const WAIT: Duration = Duration::from_secs(10);
 
@@ -1361,6 +1397,41 @@ mod tests {
         assert_eq!(caps.exception_filters[1].id, "uncaught");
         assert!(caps.exception_filters[1].default);
         assert_eq!(client.capabilities(), caps);
+    }
+
+    #[test]
+    fn exception_options_go_as_paths_when_the_adapter_takes_them() {
+        let options = [
+            ExceptionOptionSetting::new(
+                vec![vec!["Python Exceptions".into()], vec!["ValueError".into()]],
+                ExceptionBreakMode::Always,
+            ),
+            ExceptionOptionSetting::new(
+                vec![vec!["Python Exceptions".into()]],
+                ExceptionBreakMode::Unhandled,
+            ),
+        ];
+        // Without the capability nothing but the (empty) filters is sent.
+        let (client, mut peer, _) = connect();
+        client.set_exception_options(&options).detach();
+        let request = peer.next();
+        assert_eq!(request["command"], "setExceptionBreakpoints");
+        assert_eq!(request["arguments"], json!({"filters": []}));
+        // With it, the options are the paths and modes.
+        let (client, mut peer, _) = connect();
+        let caps = client.initialize(&ClientInfo::new("fake"));
+        let initialize = peer.next();
+        peer.respond(&initialize, json!({"supportsExceptionOptions": true}));
+        assert!(block_on(caps).unwrap().exception_options);
+        client.set_exception_options(&options).detach();
+        let request = peer.next();
+        assert_eq!(
+            request["arguments"],
+            json!({"filters": [], "exceptionOptions": [
+                {"path": [{"names": ["Python Exceptions"]}, {"names": ["ValueError"]}],
+                 "breakMode": "always"},
+                {"path": [{"names": ["Python Exceptions"]}], "breakMode": "unhandled"}]})
+        );
     }
 
     #[test]

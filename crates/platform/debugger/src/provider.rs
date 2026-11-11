@@ -20,7 +20,9 @@ use crate::breakpoints::{ExceptionBreakpoint, SuspendPolicy};
 use crate::idea::IdeaTypes;
 use crate::values::ValueNode;
 
-pub use dap_client::{ExceptionFilter, ExceptionFilterSetting};
+pub use dap_client::{
+    ExceptionBreakMode, ExceptionFilter, ExceptionFilterSetting, ExceptionOptionSetting,
+};
 
 /// A debug run: a run configuration of the project.
 #[derive(Clone)]
@@ -138,6 +140,19 @@ pub trait DebugAdapterProvider: Send + Sync + 'static {
             .filter(|f| f.default)
             .map(|f| ExceptionFilterSetting::new(f.id.clone()))
             .collect()
+    }
+
+    /// The exception breakpoints as exception options, for an adapter that
+    /// takes them (`supportsExceptionOptions`) and a project that has a
+    /// breakpoint filters cannot express (one for a single class). They
+    /// replace the filters, so they hold every enabled breakpoint. `None`:
+    /// the filters do.
+    fn exception_options(
+        &self,
+        breakpoints: &[&ExceptionBreakpoint],
+    ) -> Option<Vec<ExceptionOptionSetting>> {
+        let _ = breakpoints;
+        None
     }
 
     /// The exception breakpoints a project has before any is stored ("Any

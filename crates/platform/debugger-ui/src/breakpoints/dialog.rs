@@ -32,6 +32,7 @@ use ui::icons::{Icon, IconName};
 use ui::menu::MenuItem;
 use ui::theme::ThemeExt as _;
 
+use crate::breakpoints::class_chooser::ClassChooser;
 use crate::breakpoints::commands::{
     DialogAdd, DialogAddException, DialogChooseClass, DialogDone, DialogGoToSource, DialogNext,
     DialogPrevious, DialogRemove, DialogSelect, DialogSet, DialogToggleEnabled,
@@ -99,6 +100,8 @@ pub struct BreakpointsDialog {
     preview: Option<(PathBuf, u32, Entity<Editor>)>,
     _loading: Option<Task<()>>,
     menu: Option<MenuPopup>,
+    /// The class chooser of a new exception breakpoint, while open.
+    chooser: Option<WindowHandle<ClassChooser>>,
     activate: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -174,6 +177,7 @@ impl BreakpointsDialog {
             preview: None,
             _loading: None,
             menu: None,
+            chooser: None,
             activate,
             _subscriptions: subscriptions,
         };
@@ -654,8 +658,8 @@ impl BreakpointsDialog {
     }
 
     /// The class chooser of a new exception breakpoint
-    /// (`PyClassTreeChooserDialog` "Select Exception Class"): the classes
-    /// the product offers, with speed search.
+    /// (`PyClassTreeChooserDialog` "Select Exception Class"): a dialog with
+    /// the classes the product offers, filtered by the name typed.
     fn on_choose_class(
         &mut self,
         _: &DialogChooseClass,
@@ -670,15 +674,21 @@ impl BreakpointsDialog {
         let Some(kind) = provider.exception_breakpoint_type() else {
             return;
         };
-        let items = provider
-            .exception_classes()
-            .into_iter()
-            .map(|class| {
-                MenuItem::action(class.clone(), DialogAddException { class })
-                    .icon(IconName::NODE_CLASS)
-            })
-            .collect();
-        self.open_menu(items, Some(kind.chooser_title.into()), window, cx);
+        self.close_menu(cx);
+        if let Some(open) = self.chooser.filter(|c| c.read(cx).is_ok()) {
+            let _ = open.update(cx, |_, window, _| window.activate_window());
+            return;
+        }
+        let owner = cx.entity().downgrade();
+        self.chooser = ClassChooser::open(
+            kind.chooser_title,
+            provider.exception_classes(),
+            owner,
+            self.activate,
+            window,
+            cx,
+        );
+        cx.notify();
     }
 
     fn on_add_exception(
@@ -687,15 +697,26 @@ impl BreakpointsDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.add_exception(&a.class, window, cx);
+    }
+
+    /// Adds an exception breakpoint for `class` and selects it.
+    pub(crate) fn add_exception(
+        &mut self,
+        class: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.close_menu(cx);
         let Some(host) = self.host.upgrade() else {
             return;
         };
-        let id = host.update(cx, |h, cx| h.add_exception_breakpoint(&a.class, cx));
+        let id = host.update(cx, |h, cx| h.add_exception_breakpoint(class, cx));
         if let Some(id) = id {
             self.collapsed.remove(&RowKey::ExceptionGroup);
             self.select(Some(RowKey::Breakpoint(id)), window, cx);
         }
+        window.focus(&self.tree_focus);
     }
 
     fn open_menu(
@@ -830,6 +851,10 @@ impl BreakpointsDialog {
             "detail": detail,
             "empty": detail.is_none().then_some(EMPTY),
             "menu": self.menu.is_some(),
+            "chooser": self
+                .chooser
+                .and_then(|c| c.read(cx).ok())
+                .map(|c| c.state_json(cx)),
         })
     }
 

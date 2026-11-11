@@ -39,8 +39,9 @@ pub use debugger::{Debugger, DebuggerEvent, HistoryKind};
 pub use idea::IdeaTypes;
 pub use provider::{
     Adapter, AdapterLaunch, DebugAdapterProvider, DebugRequest, EvaluationError,
-    ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting, ExceptionOption,
-    ExtraValueAction, LaunchKind, LineBreakpointType, StepIntoMyCode,
+    ExceptionBreakMode, ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting,
+    ExceptionOption, ExceptionOptionSetting, ExtraValueAction, LaunchKind, LineBreakpointType,
+    StepIntoMyCode,
 };
 pub use session::{
     BreakpointStatus, Children, DebugError, FRAME_PAGE, Pending, Phase, STOP_TIMEOUT, Session,

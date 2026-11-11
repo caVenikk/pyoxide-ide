@@ -7,15 +7,18 @@
 //! raise" off; over DAP, "On termination" is debugpy's `uncaught` filter
 //! and "On raise" its `raised` filter.
 //!
-//! A breakpoint for one exception class would need DAP's
-//! `exceptionOptions`, which the client does not send yet: only "Any
-//! exception" breakpoints reach the adapter.
+//! A breakpoint for one exception class goes as DAP's `exceptionOptions`
+//! (see [`options`]): debugpy ignores the filters once it gets options, so
+//! the options then hold the "Any exception" breakpoint too. They carry no
+//! condition and no "Ignore library files" (debugpy's is one setting of
+//! the launch); without exception options a class breakpoint is not sent.
 
 use std::path::Path;
 
 use debugger::{
-    ExceptionBreakpoint, ExceptionBreakpointType, ExceptionFilter, ExceptionFilterSetting,
-    ExceptionOption, LineBreakpointType, SuspendPolicy,
+    ExceptionBreakMode, ExceptionBreakpoint, ExceptionBreakpointType, ExceptionFilter,
+    ExceptionFilterSetting, ExceptionOption, ExceptionOptionSetting, LineBreakpointType,
+    SuspendPolicy,
 };
 
 use crate::lines::StoppableLines;
@@ -52,6 +55,12 @@ pub mod filter {
     pub const UNCAUGHT: &str = "uncaught";
     /// Breaks whenever an exception is raised.
     pub const RAISED: &str = "raised";
+}
+
+/// debugpy's names in an exception option's path.
+pub mod category {
+    /// The category of the Python exceptions, the first path segment.
+    pub const PYTHON: &str = "Python Exceptions";
 }
 
 /// The reference's titles of the two types (`PyBundle`).
@@ -245,6 +254,37 @@ pub fn filters(
     out
 }
 
+/// The enabled exception breakpoints as DAP exception options, when one is
+/// for a single class (filters cannot say that); `None` when the filters
+/// do. "On termination" is the mode `unhandled`, "On raise" `always`; the
+/// path is debugpy's category of Python exceptions, then the class (for
+/// "Any exception" the category alone, which debugpy takes as
+/// `BaseException`).
+pub fn options(breakpoints: &[&ExceptionBreakpoint]) -> Option<Vec<ExceptionOptionSetting>> {
+    let enabled = || breakpoints.iter().filter(|b| b.enabled);
+    if !enabled().any(|b| b.class != ANY_EXCEPTION) {
+        return None;
+    }
+    let mut out: Vec<ExceptionOptionSetting> = Vec::new();
+    for breakpoint in enabled() {
+        let mut path = vec![vec![category::PYTHON.to_owned()]];
+        if breakpoint.class != ANY_EXCEPTION {
+            path.push(vec![breakpoint.class.clone()]);
+        }
+        let wanted = [
+            (property::ON_TERMINATION, ExceptionBreakMode::Unhandled),
+            (property::ON_RAISE, ExceptionBreakMode::Always),
+        ];
+        for (flag, mode) in wanted {
+            let option = ExceptionOptionSetting::new(path.clone(), mode);
+            if breakpoint.flag(flag) && !out.contains(&option) {
+                out.push(option);
+            }
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +385,75 @@ mod tests {
         );
         assert!(BUILTIN_EXCEPTIONS.windows(2).all(|w| w[0] < w[1]));
         assert!(BUILTIN_EXCEPTIONS.contains(&"KeyError"));
+    }
+
+    fn class_breakpoint(class: &str, flags: &[&str]) -> ExceptionBreakpoint {
+        let mut breakpoint = ExceptionBreakpoint::new("python-exception", class);
+        for flag in flags {
+            breakpoint
+                .properties
+                .insert((*flag).to_owned(), "true".to_owned());
+        }
+        breakpoint
+    }
+
+    fn summary(options: &[ExceptionOptionSetting]) -> Vec<(Vec<&str>, &'static str)> {
+        options
+            .iter()
+            .map(|o| {
+                (
+                    o.path.iter().flatten().map(String::as_str).collect(),
+                    o.break_mode.as_str(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn options_only_for_a_class_breakpoint() {
+        // "Any exception" alone is what the filters say.
+        assert_eq!(options(&[&any_exception()]), None);
+        let mut disabled = class_breakpoint("ValueError", &[property::ON_RAISE]);
+        disabled.enabled = false;
+        assert_eq!(options(&[&any_exception(), &disabled]), None);
+        assert_eq!(options(&[]), None);
+    }
+
+    #[test]
+    fn a_class_breakpoint_goes_with_the_any_exception_one() {
+        let value_error = class_breakpoint("ValueError", &[property::ON_RAISE]);
+        let sent = options(&[&any_exception(), &value_error]).unwrap();
+        assert_eq!(
+            summary(&sent),
+            [
+                (vec!["Python Exceptions"], "unhandled"),
+                (vec!["Python Exceptions", "ValueError"], "always"),
+            ]
+        );
+    }
+
+    #[test]
+    fn modes_follow_on_termination_and_on_raise() {
+        let both = class_breakpoint("KeyError", &[property::ON_TERMINATION, property::ON_RAISE]);
+        let none = class_breakpoint("TypeError", &[]);
+        let sent = options(&[&both, &none]).unwrap();
+        assert_eq!(
+            summary(&sent),
+            [
+                (vec!["Python Exceptions", "KeyError"], "unhandled"),
+                (vec!["Python Exceptions", "KeyError"], "always"),
+            ]
+        );
+        // A class breakpoint with neither sends nothing: the adapter then
+        // breaks on nothing.
+        assert!(options(&[&none]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn two_breakpoints_share_an_option_once() {
+        let a = class_breakpoint("ValueError", &[property::ON_RAISE]);
+        let b = class_breakpoint("ValueError", &[property::ON_RAISE]);
+        assert_eq!(options(&[&a, &b]).unwrap().len(), 1);
     }
 
     #[test]

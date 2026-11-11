@@ -637,6 +637,12 @@ impl GiveBack {
     }
 
     fn run(self, cx: &mut App) {
+        // Something opened over the parent since (a popup's row opened a
+        // dialog or the next popup): that one keeps the focus and the
+        // activation; the parent taking them would dismiss a popup.
+        if self.modal && modal_of(self.parent, cx).is_some() {
+            return;
+        }
         let _ = self.parent.update(cx, |_, window, cx| {
             if let Some(focus) = &self.focus
                 && (self.modal || window.focused(cx).is_none())
@@ -1097,6 +1103,56 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         assert!(!cx.update(|cx| cx.windows().contains(&dialog)));
+    }
+
+    /// A popup whose row opens the next popup (a menu row that opens a
+    /// chooser): closing the first one does not give the parent the focus
+    /// and the activation back, which would dismiss the second one.
+    #[gpui::test]
+    fn the_next_popup_keeps_the_activation(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::theme::init(cx, themes::ThemeKind::Dark));
+        let parent = cx.add_window(|_, cx| recorder(cx));
+        let parent_any: AnyWindowHandle = parent.into();
+        parent
+            .update(cx, |r, window, _| {
+                window.activate_window();
+                window.focus(&r.focus);
+            })
+            .unwrap();
+        draw(parent_any, cx);
+        let popup = |window: &mut Window, cx: &mut App| -> AnyWindowHandle {
+            open_popup(
+                window,
+                point(px(20.0), px(30.0)),
+                size(px(400.0), px(300.0)),
+                true,
+                cx,
+                |_, cx| cx.new(|_| KnownSize).into(),
+            )
+            .unwrap()
+            .into()
+        };
+        let first = parent
+            .update(cx, |_, window, cx| popup(window, cx))
+            .unwrap();
+        draw(first, cx);
+        // In one update, as a chosen row does: the first closes, the next opens.
+        let next = parent
+            .update(cx, |_, window, cx| {
+                close(first, cx);
+                popup(window, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(cx.update(|cx| modal_of(parent_any, cx)) == Some(next));
+        assert!(
+            cx.update(|cx| cx.active_window()) == Some(next),
+            "the next popup stays active"
+        );
+        // Closed in turn, it gives the parent the activation back.
+        cx.update(|cx| close(next, cx));
+        cx.run_until_parked();
+        assert!(cx.update(|cx| cx.active_window()) == Some(parent_any));
     }
 
     /// A popup window of a window: input goes to it while it is open, it
