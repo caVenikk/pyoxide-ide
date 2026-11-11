@@ -21,6 +21,8 @@ name = "Editor"
 "alt-enter" = "code.show-intentions"
 "ctrl-b" = "code.go-to-declaration"
 "ctrl-alt-f7" = "code.show-usages"
+"shift-f6" = "code.rename"
+"ctrl-f12" = "code.file-structure"
 "ctrl-alt-l" = "code.reformat"
 "ctrl-alt-o" = "code.optimize-imports"
 

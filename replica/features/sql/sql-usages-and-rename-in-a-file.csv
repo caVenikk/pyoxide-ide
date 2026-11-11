@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-"Highlight usages and rename aliases, CTEs and variables in a SQL file",sql,could,yes,partial,"Pro; engine provides local-symbol highlights and rename edits, excluding database objects; editor interaction and parity validation remain separate (#320)"
+"Highlight usages and rename aliases, CTEs and variables in a SQL file",sql,could,yes,partial,"Pro; editor highlights local-symbol usages and applies provider rename edits through Shift+F6; rename remains a dialog without inline editing, Preview, comment or scope options, and highlights have no scrollbar marks (#320)"

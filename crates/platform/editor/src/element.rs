@@ -1510,6 +1510,47 @@ impl Element for EditorElement {
             }
         }
 
+        // The occurrences of the symbol at the caret, on the visible rows.
+        if !editor.usage_highlights.is_empty() {
+            let read = theme.text_style(TextRole::IdentifierRead).bg.map(color);
+            let write = theme.text_style(TextRole::IdentifierWrite).bg.map(color);
+            let len = editor.buffer.len_chars();
+            let vis_start = editor.buffer.line_start(first);
+            let vis_end = editor.buffer.line_end(last.saturating_sub(1).max(first));
+            for u in &editor.usage_highlights {
+                let r = u.range.start.min(len)..u.range.end.min(len);
+                let Some(bg) = (if u.write { write.or(read) } else { read }) else {
+                    continue;
+                };
+                if r.end < vis_start || r.start > vis_end {
+                    continue;
+                }
+                let ra = editor.caret_row(r.start, false);
+                let rb = editor.caret_row(r.end, r.end > r.start);
+                for l in lines.iter().filter(|l| l.row >= ra && l.row <= rb) {
+                    let x0 = if l.row == ra {
+                        line_x(l, r.start - l.line_start)
+                    } else {
+                        line_x(l, l.seg_start)
+                    };
+                    let x1 = if l.row == rb {
+                        line_x(l, r.end - l.line_start)
+                    } else {
+                        line_x(l, l.end_col)
+                    };
+                    if x1 > x0 {
+                        background_rects.push((
+                            Bounds::from_corners(
+                                point(x0, top_of(l.row)),
+                                point(x1, top_of(l.row) + lh),
+                            ),
+                            bg,
+                        ));
+                    }
+                }
+            }
+        }
+
         // The outlined range, row by row.
         let mut outline_rects = Vec::new();
         if let Some((r, role)) = &editor.range_outline {
