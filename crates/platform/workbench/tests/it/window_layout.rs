@@ -383,8 +383,9 @@ fn a_drag_starts_from_the_size_on_screen(cx: &mut TestAppContext) {
 }
 
 /// In a low window the stripe's groups keep their places at the top and at
-/// the bottom; the top group is drawn over the bottom one, which it covers
-/// pixel by pixel.
+/// the bottom; the top group covers the bottom one pixel by pixel (the
+/// bottom group is cut where the top one ends, and is gone once the top
+/// group fills the stripe).
 #[gpui::test]
 fn the_top_stripe_group_covers_the_bottom_group(cx: &mut TestAppContext) {
     let window = open(cx);
@@ -406,7 +407,9 @@ fn the_top_stripe_group_covers_the_bottom_group(cx: &mut TestAppContext) {
         assert_eq!(top.top(), stripe.top(), "{height}");
         assert_eq!(top.size, top0.size, "{height}");
         assert_eq!(bottom.size, bottom0.size, "{height}");
-        assert!((x(stripe.bottom() - bottom.bottom()) - x(below)).abs() < EPS);
+        if top.bottom() < stripe.bottom() {
+            assert!((x(stripe.bottom() - bottom.bottom()) - x(below)).abs() < EPS);
+        }
         // The covered part grows with every pixel the window loses.
         let covered = (x(top.bottom()) - x(bottom.top())).max(0.0);
         assert!(covered >= covered_before - EPS, "{height}");

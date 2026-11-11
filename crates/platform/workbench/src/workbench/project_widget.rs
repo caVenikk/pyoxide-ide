@@ -102,18 +102,28 @@ const MAX_ROWS: usize = 30;
 const POPUP_LEFT: f32 = 5.0;
 const POPUP_BELOW: f32 = 4.0;
 
-/// The project's colour on the main toolbar (`ProjectWindowCustomizerService`,
-/// on by default: `UISettings.differentiateProjects`): the colour blended
-/// into the toolbar's (`saturation` 0.85) at the centre of the project's
-/// avatar, fading to the toolbar's colour on both sides. New UI themes
-/// (`IslandsGradientPainter`): from the window's left edge to 600 right of
-/// the centre (`RecentProject.MainToolbarGradient.width`), fading downwards
-/// to the toolbar's colour at 300 (`.height`). Other themes
-/// (`ProjectWindowCustomizerService.paint`): 300 on each side
-/// (`ide.colorful.toolbar.gradient.radius`).
+/// The project's colour (`ProjectWindowCustomizerService`, on by default:
+/// `UISettings.differentiateProjects`): the colour blended into the frame's
+/// (`saturation` 0.85) at the centre of the project's avatar, fading to the
+/// frame's colour on both sides.
+///
+/// Islands themes (`IslandsGradientPainter`, the frame's background
+/// painter): the background of the whole frame, under the islands: the
+/// main toolbar, the tool window stripes, the gaps between the islands and
+/// the status bar (`MainWindow.background`, `MainToolbar.background`,
+/// `ToolWindow.Stripe.background`, `StatusBar.background`). It reaches from
+/// the window's left edge to 600 right of the centre
+/// (`RecentProject.MainToolbarGradient.width`) and fades downwards to the
+/// frame's colour at 300 (`.height`), in window coordinates. In an inactive
+/// window the horizontal gradient is drawn at `Island.inactiveAlpha` (0.56
+/// in the Islands themes) over the frame's colour.
+///
+/// Other themes (`ProjectWindowCustomizerService.paint`): on the main
+/// toolbar only, 300 on each side (`ide.colorful.toolbar.gradient.radius`).
 const SATURATION: f32 = 0.85;
 const NEW_UI_WIDTH: f32 = 600.0;
 const NEW_UI_HEIGHT: f32 = 300.0;
+const INACTIVE_ALPHA: f32 = 0.56;
 const CLASSIC_RADIUS: f32 = 300.0;
 /// The centre before the widget was laid out (`DEFAULT_GRADIENT_OFFSET`).
 const DEFAULT_CENTER: f32 = 150.0;
@@ -235,14 +245,12 @@ impl Workbench {
         recent_projects::avatar(project.name(), color)
     }
 
-    /// The project's colour on the main toolbar, `height` high: layers
-    /// drawn before the toolbar's widgets (see [`SATURATION`]).
-    pub(super) fn toolbar_project_color(&self, height: Pixels, cx: &App) -> Vec<AnyElement> {
-        let Some(project) = self.project(cx) else {
-            return Vec::new();
-        };
-        let theme = cx.theme();
-        let main = theme.color(UiRole::Toolbar);
+    /// The project's colour (see [`SATURATION`]): the frame's colour, the
+    /// project's blended into it, and the centre of the gradient (the
+    /// avatar's, in window coordinates).
+    fn project_gradient(&self, cx: &App) -> Option<(Hsla, Hsla, f32)> {
+        let project = self.project(cx)?;
+        let main = cx.theme().color(UiRole::Toolbar);
         let index = recent_projects::color(project.root(), cx)
             .unwrap_or_else(|| fallback_color(project.root()));
         let color = recent_projects::toolbar_color(index, cx);
@@ -253,14 +261,81 @@ impl Workbench {
         } else {
             DEFAULT_CENTER
         };
-        let new_ui = theme.controls() == Controls::New;
-        let (left, right) = if new_ui {
-            (0.0, NEW_UI_WIDTH)
+        Some((main, blended, center))
+    }
+
+    /// The project's colour is the frame's background (the Islands themes,
+    /// with a project).
+    pub(super) fn frame_gradient(&self, cx: &App) -> bool {
+        cx.theme().controls() == Controls::New && self.project(cx).is_some()
+    }
+
+    /// The background of a part of the frame (the main toolbar, a tool
+    /// window stripe, the status bar): none where the frame's gradient
+    /// shows through it.
+    pub(super) fn frame_part_background(&self, role: UiRole, cx: &App) -> Option<Hsla> {
+        (!self.frame_gradient(cx)).then(|| cx.theme().color(role))
+    }
+
+    /// The frame's project colour in the Islands themes: one layer drawn
+    /// first, under the toolbar, the stripes, the islands and the status
+    /// bar, which show it where they have no background of their own.
+    pub(super) fn frame_project_color(&self, window: &Window, cx: &App) -> Option<AnyElement> {
+        if !self.frame_gradient(cx) {
+            return None;
+        }
+        let (main, blended, center) = self.project_gradient(cx)?;
+        // An inactive window: the horizontal gradient at the inactive
+        // alpha over the frame's colour.
+        let blended = if crate::env::drawn_active(window) {
+            blended
         } else {
-            ((center - CLASSIC_RADIUS).max(0.0), CLASSIC_RADIUS)
+            blend(main, blended, INACTIVE_ALPHA)
         };
+        let height = px(NEW_UI_HEIGHT);
         let band = |x: f32, width: f32| div().absolute().top_0().left(px(x)).w(px(width)).h(height);
-        let mut layers = vec![
+        Some(
+            div()
+                .debug_selector(|| "frame-project-color".into())
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(px(center + NEW_UI_WIDTH))
+                .h(height)
+                .child(band(0.0, center).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(main, 0.0),
+                    linear_color_stop(blended, 1.0),
+                )))
+                .child(band(center, NEW_UI_WIDTH).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(blended, 0.0),
+                    linear_color_stop(main, 1.0),
+                )))
+                // Down to the frame's colour at 300.
+                .child(band(0.0, center + NEW_UI_WIDTH).bg(linear_gradient(
+                    180.0,
+                    linear_color_stop(main.opacity(0.0), 0.0),
+                    linear_color_stop(main, 1.0),
+                )))
+                .into_any_element(),
+        )
+    }
+
+    /// The project's colour on the main toolbar, `height` high, in the
+    /// themes without islands: layers drawn before the toolbar's widgets.
+    /// The Islands themes paint it on the frame instead
+    /// ([`Self::frame_project_color`]).
+    pub(super) fn toolbar_project_color(&self, height: Pixels, cx: &App) -> Vec<AnyElement> {
+        if cx.theme().controls() == Controls::New {
+            return Vec::new();
+        }
+        let Some((main, blended, center)) = self.project_gradient(cx) else {
+            return Vec::new();
+        };
+        let left = (center - CLASSIC_RADIUS).max(0.0);
+        let band = |x: f32, width: f32| div().absolute().top_0().left(px(x)).w(px(width)).h(height);
+        vec![
             band(left, center - left)
                 .debug_selector(|| "toolbar-project-color".into())
                 .bg(linear_gradient(
@@ -269,29 +344,14 @@ impl Workbench {
                     linear_color_stop(blended, 1.0),
                 ))
                 .into_any_element(),
-            band(center, right)
+            band(center, CLASSIC_RADIUS)
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(blended, 0.0),
                     linear_color_stop(main, 1.0),
                 ))
                 .into_any_element(),
-        ];
-        if new_ui {
-            // Down to the toolbar's colour at 300: the toolbar shows the
-            // top of it.
-            let bottom = (f32::from(height) / NEW_UI_HEIGHT).min(1.0);
-            layers.push(
-                band(0.0, center + right)
-                    .bg(linear_gradient(
-                        180.0,
-                        linear_color_stop(main.opacity(0.0), 0.0),
-                        linear_color_stop(main.opacity(bottom), 1.0),
-                    ))
-                    .into_any_element(),
-            );
-        }
-        layers
+        ]
     }
 
     /// The projects open in the application's windows: this window's and

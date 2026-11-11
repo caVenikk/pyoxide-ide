@@ -195,6 +195,38 @@ fn the_project_colour_does_not_follow_the_theme(cx: &mut TestAppContext) {
     }
 }
 
+/// In the Islands themes the project's colour is the background of the
+/// whole frame (#285): one layer from the window's top left corner, 600
+/// right of the avatar's centre and 300 high, under the toolbar, the
+/// stripes, the islands and the status bar, which paint no background of
+/// their own. The other themes paint it on the main toolbar.
+#[gpui::test]
+fn the_project_colour_is_the_frame_background_in_the_islands_themes(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    let alpha = h.folder("alpha");
+    h.open(&alpha);
+    let mut vcx = gpui::VisualTestContext::from_window(h.window.into(), h.cx);
+    let frame = vcx
+        .debug_bounds("frame-project-color")
+        .expect("the frame's project colour");
+    assert_eq!(frame.origin, gpui::point(gpui::px(0.0), gpui::px(0.0)));
+    assert_eq!(frame.size.height, gpui::px(300.0));
+    assert!(frame.size.width > gpui::px(600.0), "{frame:?}");
+    assert!(vcx.debug_bounds("toolbar-project-color").is_none());
+
+    let mut classic = themes::builtin::dark();
+    classic.controls = themes::Controls::Classic;
+    h.cx.update(|cx| ui::theme::set(cx, classic));
+    h.draw();
+    // (Debug bounds outlive the frames that drew them: only what is drawn
+    // is checked.)
+    let mut vcx = gpui::VisualTestContext::from_window(h.window.into(), h.cx);
+    let toolbar = vcx
+        .debug_bounds("toolbar-project-color")
+        .expect("the toolbar's project colour");
+    assert_eq!(toolbar.origin.y, gpui::px(0.0));
+}
+
 #[gpui::test]
 fn a_recent_project_opens_in_the_window(cx: &mut TestAppContext) {
     let mut h = open(cx);
