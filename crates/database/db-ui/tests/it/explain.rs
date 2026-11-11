@@ -360,3 +360,38 @@ fn the_explain_row_of_the_editor_menu_explains_the_statement_at_the_caret(cx: &m
     assert!(!rows(&plan).is_empty(), "{plan}");
     assert!(h.state()["editor_menu"].is_null());
 }
+
+/// Explain and Execute share a session without losing the selected
+/// Execute variant's result-tab policy or treating ordinary rows as plans.
+#[gpui::test]
+fn execute_variant_keeps_its_result_policy_after_explain(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let server = server();
+    let (mut h, _cache, _consoles) = harness(cx, &root, &server);
+    open_console(&mut h);
+    h.invoke(
+        "editor.type",
+        json!({"text": "select * from demo.customers;"}),
+    );
+    h.invoke("db.console.explain", Value::Null);
+    let _ = plan(&mut h);
+    h.invoke(
+        "settings.set",
+        json!({
+            "key": "database.query-execution.execute-2.new-tab", "value": true
+        }),
+    );
+    h.invoke("db.console.execute-2", Value::Null);
+    let s = wait_console(&mut h, "the separate result", |s| {
+        idle(s) && s["tabs"].as_array().is_some_and(|tabs| tabs.len() == 2)
+    });
+    assert!(!s["tabs"][0]["plan"].is_null(), "{s}");
+    assert!(s["tabs"][1]["plan"].is_null(), "{s}");
+    assert!(!s["tabs"][1]["grid"].is_null(), "{s}");
+    assert_eq!(s["pane"], 1);
+    assert!(
+        server
+            .statements(Purpose::Console)
+            .contains(&"select * from demo.customers".to_owned())
+    );
+}

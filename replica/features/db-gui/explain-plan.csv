@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Explain plan,db-gui,could,yes,no,Pro
+Explain plan,db-gui,could,yes,yes,"Pro; Explain Plan for PostgreSQL, Oracle and SQLite; PostgreSQL Explain Analyze; Query Plan tree, selected-node properties and raw output; read-only restrictions enforced; plan-tree keyboard navigation and remaining UI parity tracked in #308"
