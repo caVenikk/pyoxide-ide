@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Main window and project closure coordinate owned sessions and dialogs,editor,must,yes,yes,Close Window / Close Project / Quit settle settings and running-process choices; Terminate / Disconnect / Cancel; child dialogs close and terminal sessions and background tasks end (#401)
