@@ -322,14 +322,18 @@ impl ServicesPopup {
         let origin = window.focused(cx);
         let popup = cx.new(|cx: &mut Context<Self>| {
             let focus = cx.focus_handle();
-            let subscriptions = vec![
-                cx.on_blur(&focus, window, |this, window, cx| this.dismiss(window, cx)),
-                cx.observe_window_activation(window, |this, window, cx| {
-                    if !window.is_window_active() {
-                        this.dismiss(window, cx);
-                    }
-                }),
-            ];
+            let subscriptions = if ui::popup_window::enabled() {
+                Vec::new()
+            } else {
+                vec![
+                    cx.on_blur(&focus, window, |this, window, cx| this.dismiss(window, cx)),
+                    cx.observe_window_activation(window, |this, window, cx| {
+                        if !window.is_window_active() {
+                            this.dismiss(window, cx);
+                        }
+                    }),
+                ]
+            };
             let mut popup = Self {
                 owner,
                 focus,
@@ -380,6 +384,16 @@ impl ServicesPopup {
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.dismissed {
             self.dismissed = true;
+            let owner = ui::popup_window::owner(cx.entity_id(), cx);
+            ui::popup_window::close(cx.entity_id(), cx);
+            if let Some(owner) = owner
+                && self.focus.contains_focused(window, cx)
+                && let Some(focus) = self.origin.clone()
+            {
+                cx.defer(move |cx| {
+                    let _ = owner.update(cx, |_, window, _| window.focus(&focus));
+                });
+            }
             if self.focus.contains_focused(window, cx)
                 && let Some(origin) = &self.origin
             {
@@ -510,10 +524,19 @@ impl ServicesPopup {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let native_owner = ui::popup_window::owner(cx.entity_id(), cx);
         self.dismiss(window, cx);
         let item = item.clone();
         if let Some(owner) = self.owner.upgrade() {
-            owner.update(cx, |v, cx| v.run_server_action(&item, action, window, cx));
+            if let Some(native_owner) = native_owner {
+                cx.defer(move |cx| {
+                    let _ = native_owner.update(cx, |_, window, cx| {
+                        owner.update(cx, |v, cx| v.run_server_action(&item, action, window, cx));
+                    });
+                });
+            } else {
+                owner.update(cx, |v, cx| v.run_server_action(&item, action, window, cx));
+            }
         }
     }
 
@@ -722,7 +745,10 @@ pub fn overlay(popup: &Entity<ServicesPopup>, at: Bounds<Pixels>, window: &Windo
                         .position(at.origin)
                         .anchor(Corner::BottomLeft)
                         .snap_to_window_with_margin(px(4.0))
-                        .child(popup.clone()),
+                        .child(ui::popup_window::view_with_dismiss(
+                            popup,
+                            ServicesPopup::dismiss,
+                        )),
                 ),
         ),
     )

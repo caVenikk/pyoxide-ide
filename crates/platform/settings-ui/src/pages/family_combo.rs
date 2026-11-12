@@ -221,6 +221,12 @@ pub struct FamilyCombo {
     owner_focus: FocusHandle,
 }
 
+impl gpui::Focusable for FamilyCombo {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.owner_focus.clone()
+    }
+}
+
 impl FamilyCombo {
     pub fn new(
         spec: ComboSpec,
@@ -306,6 +312,16 @@ impl FamilyCombo {
 
     pub fn close(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
         if self.list.take().is_some() {
+            let owner = ui::popup_window::owner(cx.entity_id(), cx);
+            ui::popup_window::close(cx.entity_id(), cx);
+            if let Some(owner) = owner
+                && window.is_some()
+            {
+                let focus = self.owner_focus.clone();
+                cx.defer(move |cx| {
+                    let _ = owner.update(cx, |_, window, _| window.focus(&focus));
+                });
+            }
             if let Some(window) = window {
                 window.focus(&self.owner_focus);
             }
@@ -440,7 +456,7 @@ impl FamilyCombo {
         }
     }
 
-    fn render_list(&self, list: &OpenList, cx: &mut Context<Self>) -> AnyElement {
+    fn render_list_body(&self, list: &OpenList, cx: &mut Context<Self>) -> AnyElement {
         let spec = self.spec;
         let theme = cx.theme();
         let bounds = self.anchor.get();
@@ -530,10 +546,47 @@ impl FamilyCombo {
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
             .shadow(ui::components::popup_shadow())
             .on_key_down(cx.listener(Self::list_key))
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close(Some(window), cx)))
             .child(body);
+        popup.into_any_element()
+    }
+
+    fn render_native_list(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.list
+            .as_ref()
+            .map(|list| self.render_list_body(list, cx))
+            .unwrap_or_else(|| div().into_any_element())
+    }
+
+    fn dismiss_native_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(Some(window), cx);
+    }
+
+    fn render_list(&self, list: &OpenList, cx: &mut Context<Self>) -> AnyElement {
+        let bounds = self.anchor.get();
+        let popup = if ui::popup_window::enabled() {
+            let height = LIST_ROW * list.rows.len().clamp(1, LIST_ROWS) as f32 + 2.0 * LIST_PAD;
+            div()
+                .id("font-list-native-anchor")
+                .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close(Some(window), cx)))
+                .child(ui::popup_window::surface(
+                    &cx.entity(),
+                    0,
+                    gpui::size(bounds.size.width.max(px(self.spec.list_width)), px(height)),
+                    list.focus.clone(),
+                    Self::render_native_list,
+                    Self::dismiss_native_list,
+                    false,
+                ))
+                .into_any_element()
+        } else {
+            self.render_list_body(list, cx)
+        };
         deferred(
             anchored()
                 .position(bounds.bottom_left() + gpui::point(px(0.0), px(2.0)))
