@@ -23,6 +23,7 @@ struct Surface {
     parent: AnyWindowHandle,
     order: usize,
     keyboard: bool,
+    focus: FocusHandle,
 }
 #[derive(Default)]
 struct Surfaces(HashMap<Key, Surface>, HashSet<EntityId>);
@@ -278,6 +279,7 @@ pub(crate) fn show<T: 'static>(
             parent: parent.window_handle(),
             order,
             keyboard,
+            focus,
         },
     );
     let _ = handle.update(cx, |_, window, _| {
@@ -522,6 +524,11 @@ impl<T: Render + gpui::Focusable> gpui::Element for Portal<T> {
         let focus = self
             .focus
             .clone()
+            .or_else(|| {
+                cx.try_global::<Surfaces>()
+                    .and_then(|surfaces| surfaces.0.get(&Key(self.model.entity_id(), self.level)))
+                    .map(|surface| surface.focus.clone())
+            })
             .or_else(|| window.focused(cx))
             .unwrap_or_else(|| self.model.read(cx).focus_handle(cx));
         window.set_focus_handle(&focus, cx);
@@ -533,7 +540,7 @@ impl<T: Render + gpui::Focusable> gpui::Element for Portal<T> {
         let level = self.level;
         let keyboard = self.keyboard;
         let custom_draw = self.draw.clone();
-        let custom_focus = self.focus.clone();
+        let custom_focus = Some(focus);
         window.defer(cx, move |window, cx| {
             let weak = model.downgrade();
             let draw: Draw = custom_draw.unwrap_or_else(|| {
@@ -807,24 +814,25 @@ mod tests {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             div()
                 .key_context("NativeOwner")
-                .track_focus(&self.focus)
                 .on_action(cx.listener(|this, _: &Ping, _, _| this.commands += 1))
                 .size_full()
-                .child(surface(
-                    &self.model,
-                    0,
-                    size(px(120.0), px(60.0)),
-                    self.model.read(cx).0.clone(),
-                    |model, _, _| {
-                        div()
-                            .track_focus(&model.0)
-                            .w(px(120.0))
-                            .h(px(60.0))
-                            .into_any_element()
-                    },
-                    |_, _, _| {},
-                    true,
-                ))
+                .child(
+                    div()
+                        .key_context("NewTarget")
+                        .track_focus(&self.focus)
+                        .h(px(20.0)),
+                )
+                .child(Portal {
+                    model: self.model.clone(),
+                    extent: Some(size(px(120.0), px(60.0))),
+                    dismiss: Rc::new(|_, _| {}),
+                    watch: None,
+                    persistent: true,
+                    draw: None,
+                    focus: None,
+                    level: 0,
+                    keyboard: true,
+                })
         }
     }
     impl Focusable for Model {
@@ -896,6 +904,7 @@ mod tests {
             cx.bind_keys([
                 gpui::KeyBinding::new("cmd-p", Ping, Some("NativeOwner")),
                 gpui::KeyBinding::new("f9", Ping, Some("NativeOwner")),
+                gpui::KeyBinding::new("cmd-t", Ping, Some("NewTarget")),
             ]);
         });
         let model = cx.update(|cx| cx.new(|cx| Model(cx.focus_handle())));
@@ -940,6 +949,18 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         assert_eq!(parent.read_with(cx, |owner, _| owner.commands).unwrap(), 3);
+        // A pinned popup remains while another owner field takes focus. Its
+        // portal must not steal that new field's dispatch node on the next frame.
+        parent
+            .update(cx, |owner, window, _| window.focus(&owner.focus))
+            .unwrap();
+        cx.update_window(parent.into(), |_, window, cx| {
+            window.draw(cx).clear();
+            window.dispatch_keystroke(gpui::Keystroke::parse("cmd-t").unwrap(), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(parent.read_with(cx, |owner, _| owner.commands).unwrap(), 4);
         cx.update_window(parent.into(), |_, window, cx| {
             crate::dialog_window::open_popup(
                 window,
@@ -968,6 +989,6 @@ mod tests {
             "a real modal must still block owner commands"
         );
         cx.run_until_parked();
-        assert_eq!(parent.read_with(cx, |owner, _| owner.commands).unwrap(), 3);
+        assert_eq!(parent.read_with(cx, |owner, _| owner.commands).unwrap(), 4);
     }
 }
