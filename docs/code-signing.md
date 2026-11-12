@@ -82,7 +82,12 @@ developer, as for any local build.
 
 ### Releases
 
-Release binaries are signed with one Developer ID Application certificate,
+Without a paid Developer ID (the current state), releases are signed ad hoc
+with a fixed identifier and an explicit designated requirement, or with a
+local self-signed identity; see [release.md](release.md) and ADR 0023. The
+rest of this section describes the signing a Developer ID would allow.
+
+Release binaries would be signed with one Developer ID Application certificate,
 all of them (`pyoxide-ide`, `pyoxide-db`, `pyoxide`, and the `.app` bundle
 that holds them), with a fixed identifier each:
 

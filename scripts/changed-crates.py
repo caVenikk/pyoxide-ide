@@ -16,7 +16,7 @@
 # Prints one crate name per line; `*` when a change can affect every crate
 # (Cargo.lock, the root Cargo.toml, .cargo/, .config/, a test fixture, any
 # file it does not know); nothing when only files outside the crates
-# changed (documentation, scripts, notices, workflows). Standard library only.
+# changed (documentation, scripts, packaging, notices, workflows). Standard library only.
 import json
 import re
 import subprocess
@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parent.parent
 
 # Files outside crates/ that no build or test reads.
-NO_CRATE_DIRS = ("docs/", "replica/", "skills/", "notices/", "scripts/", ".github/", "tests/scenarios/")
+NO_CRATE_DIRS = ("docs/", "replica/", "skills/", "notices/", "scripts/", "packaging/", ".github/", "tests/scenarios/")
 NO_CRATE_FILES = ("LICENSE-APACHE", "LICENSE-MIT", "NOTICE", "docker-compose.yml", ".gitignore", ".gitattributes")
 
 

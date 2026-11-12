@@ -1,0 +1,31 @@
+## Install @PRODUCT_NAME@ @VERSION@
+
+These builds are not notarized by Apple and not signed with a Windows
+certificate, so the first start needs the steps below (details in
+[docs/release.md](https://github.com/@REPOSITORY@/blob/@TAG@/docs/release.md)).
+
+**macOS and Linux, one command** (checks the SHA-256 of the download, installs
+into your home folder, no administrator rights):
+
+```sh
+curl -fsSL https://github.com/@REPOSITORY@/releases/download/@TAG@/install.sh | sh
+```
+
+**macOS with Homebrew**:
+
+```sh
+brew install @REPOSITORY_OWNER@/tap/@SLUG@
+```
+
+**Windows**: download `@SLUG@-@VERSION@-windows-x86_64.zip`, unpack it anywhere
+and run `@IDE@.exe`. Windows SmartScreen may say "Windows protected your PC":
+choose "More info", then "Run anyway". On a managed machine the policy may
+block programs in user folders.
+
+**By hand**: download the archive of your system and `SHA256SUMS`, check it
+(`shasum -a 256 -c --ignore-missing SHA256SUMS`), unpack it.
+
+Archives: `@SLUG@-@VERSION@-{macos,linux}-{aarch64,x86_64}.tar.gz`,
+`@SLUG@-@VERSION@-windows-x86_64.zip`. `@SLUG@.rb` is the Homebrew formula for
+this release.
+

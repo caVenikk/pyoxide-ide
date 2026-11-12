@@ -25,7 +25,7 @@ from there:
 | `SLUG` | `pyoxide` | configuration and cache folders, database `application_name`, thread names, temporary files, base theme ids (`pyoxide-dark`, `pyoxide-light`), keychain service prefix, save-file marker |
 | `ENV_PREFIX` | `PYOXIDE` | every environment variable (`PYOXIDE_CONFIG_DIR`, `PYOXIDE_THEME`, `PYOXIDE_DB_PASSWORD`, ...) and the `PYOXIDE <name> <json>` measurement lines |
 | `PROJECT_DIR` | `.oxide` | the product's folder in a project |
-| `BUNDLE_ID` | `dev.pyoxide.ide` | application bundle identifier (no bundle is built yet) |
+| `BUNDLE_ID` | `dev.pyoxide.ide` | application bundle identifier (`Info.plist` of the release bundle, `scripts/package.py`) |
 | `CLI_NAME`, `DB_CLI_NAME`, `IDE_NAME` | `pyoxide`, `pyoxide-db`, `pyoxide-ide` | command-line texts, the keychain service of database passwords (`pyoxide-db`), the programs trusted by keychain items |
 
 ## Changing a value is a migration
@@ -61,8 +61,11 @@ to the `brand` values.
       folder `<slug>`), `scripts/perf/pyoxide_bench.py` (reads the environment
       variables and the `PYOXIDE <name> <json>` lines), `scripts/progress.py`.
 - [ ] `.github/workflows/`: artifact and binary names.
-- [ ] Packaging, once there is any: bundle identifier, `Info.plist`, installer
-      ids, code-signing identity (`docs/code-signing.md`).
+- [ ] Packaging: `packaging/install.sh` (the variables at its top; `python3
+      scripts/package.py check` compares them with `brand`), the release
+      workflow's `-p` package names, installer ids when there are any,
+      code-signing identity (`docs/code-signing.md`, `docs/release.md`). The
+      bundle identifier and `Info.plist` are generated from `brand`.
 - [ ] Development databases: `docker-compose.yml` and the tests use a database
       and user called `pyoxide`; these are fixtures, not the product name.
 - [ ] Documentation: `README.md`, `docs/` (including the file name
