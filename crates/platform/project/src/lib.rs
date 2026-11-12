@@ -30,7 +30,7 @@ pub use filter::{
 };
 pub use roots::{DetectRoots, FolderKind, FolderRules, Roots};
 pub use store::{Exclusions, StoreError, store_dir};
-pub use tree::{Entry, EntryKind, FileTree, Node, NodeId, list_dir};
+pub use tree::{Entry, EntryKind, FileTree, Node, NodeId, list_dir, symlink_cycle};
 
 use std::path::{Path, PathBuf};
 
