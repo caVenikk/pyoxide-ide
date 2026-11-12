@@ -915,9 +915,16 @@ impl ContextMenu {
         let menu = cx.new(|cx: &mut Context<Self>| {
             let focus = cx.focus_handle();
             let subscriptions = vec![
-                cx.on_blur(&focus, window, |this, window, cx| this.dismiss(window, cx)),
+                cx.on_blur(&focus, window, |this, window, cx| {
+                    if !crate::popup_window::contains(cx.entity_id(), cx) {
+                        this.dismiss(window, cx);
+                    }
+                }),
                 cx.observe_window_activation(window, |this, window, cx| {
-                    if !window.is_window_active() {
+                    if !window.is_window_active()
+                        && !crate::popup_window::contains(cx.entity_id(), cx)
+                        && !crate::dialog_window::native::capturing()
+                    {
                         this.dismiss(window, cx);
                     }
                 }),
@@ -972,6 +979,22 @@ impl ContextMenu {
             return;
         }
         self.dismissed = true;
+        let owner = crate::popup_window::owner(cx.entity_id(), cx);
+        let origin = self.origin.clone();
+        let activate = window.is_window_active();
+        crate::popup_window::close_from(cx.entity_id(), 0, cx);
+        if let Some(owner) = owner {
+            cx.defer(move |cx| {
+                let _ = owner.update(cx, |_, window, _| {
+                    if let Some(origin) = origin {
+                        window.focus(&origin);
+                    }
+                    if activate {
+                        window.activate_window();
+                    }
+                });
+            });
+        }
         if self.focus.contains_focused(window, cx)
             && let Some(origin) = &self.origin
         {
@@ -1472,9 +1495,21 @@ impl ContextMenu {
             self.dismiss(window, cx);
             return;
         }
+        let owner = crate::popup_window::owner(cx.entity_id(), cx);
+        let focus = self.origin.clone();
         self.dismiss(window, cx);
-        // The focus is back where it was; the action goes there.
-        window.dispatch_action(action, cx);
+        if let Some(owner) = owner {
+            cx.defer(move |cx| {
+                let _ = owner.update(cx, |_, window, cx| {
+                    if let Some(focus) = focus {
+                        window.focus(&focus);
+                    }
+                    window.dispatch_action(action, cx);
+                });
+            });
+        } else {
+            window.dispatch_action(action, cx);
+        }
     }
 
     /// The rows selected down to the innermost highlighted one.
@@ -1839,6 +1874,7 @@ impl ContextMenu {
                     m.content_x
                 };
                 let submenu = (open && owner).then(|| Beside {
+                    native_menu: crate::popup_window::enabled().then(|| cx.entity()),
                     child: self.render_level(level + 1, cx),
                     anchor: None,
                     above: px(1.0 + m.pad_top),
@@ -2003,8 +2039,9 @@ impl ContextMenu {
                     )
                     .children(submenu)
                     .when(enabled, |d| {
-                        d.on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                            this.hover(level, ix, event.position, cx);
+                        d.on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
+                            let position = if crate::popup_window::enabled() { crate::popup_window::screen_origin(window) + event.position } else { event.position };
+                            this.hover(level, ix, position, cx);
                         }))
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
@@ -2059,9 +2096,10 @@ impl ContextMenu {
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .when(!self.own_window, |d| {
-                d.shadow(crate::components::popup_shadow())
-            })
+            .when(
+                !self.own_window && !crate::popup_window::contains(cx.entity_id(), cx),
+                |d| d.shadow(crate::components::popup_shadow()),
+            )
             .children(title.map(|title| {
                 div()
                     .debug_selector(|| "menu-title".into())
@@ -2222,6 +2260,7 @@ impl ContextMenu {
 /// the window, with its first row level with its parent row. It is laid
 /// out on its own, so opening it neither widens nor moves the menu.
 struct Beside {
+    native_menu: Option<Entity<ContextMenu>>,
     child: AnyElement,
     anchor: Option<Rc<Cell<Bounds<Pixels>>>>,
     /// From the top of the submenu to its first row: the border and the
@@ -2287,6 +2326,28 @@ impl gpui::Element for Beside {
             window,
             cx,
         );
+        if let Some(menu) = &self.native_menu {
+            let menu = menu.clone();
+            let level = self.level;
+            let mut position = point(row.right() + px(1.0), row.top() - self.above);
+            if let Some(display) = window.display(cx) {
+                let origin = crate::popup_window::screen_origin(window);
+                if origin.x + position.x + size.width > display.bounds().right() {
+                    position.x = row.left() - px(1.0) - size.width;
+                }
+            }
+            let screen_bounds = crate::popup_window::fit_bounds(window, position, size, cx);
+            let mut drawn = self.drawn.borrow_mut();
+            if drawn.len() <= level {
+                drawn.resize(level + 1, None);
+            }
+            drawn[level] = Some(screen_bounds);
+            drop(drawn);
+            window.defer(cx, move |window, cx| {
+                show_native_level(&menu, level, position, size, window, cx)
+            });
+            return;
+        }
         let viewport = window.viewport_size();
         let margin = px(WINDOW_MARGIN);
         // The menu's border is 1 outside its rows.
@@ -2323,7 +2384,9 @@ impl gpui::Element for Beside {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.child.paint(window, cx);
+        if self.native_menu.is_none() {
+            self.child.paint(window, cx);
+        }
     }
 }
 
@@ -2413,6 +2476,16 @@ fn highlights(
 
 impl Render for ContextMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_native_level(0, cx)
+    }
+}
+
+impl ContextMenu {
+    fn render_native_level(&mut self, level: usize, cx: &mut Context<Self>) -> AnyElement {
+        crate::popup_window::close_from(cx.entity_id(), self.selected.len(), cx);
+        if self.dismissed || level >= self.selected.len() {
+            return div().into_any_element();
+        }
         let family = cx.theme().ui_family();
         let size = cx.theme().ui_size();
         // The menu; each open submenu is drawn beside its row.
@@ -2431,8 +2504,50 @@ impl Render for ContextMenu {
             .items_start()
             .font_family(family)
             .text_size(size)
-            .child(self.render_level(0, cx))
+            .child(self.render_level(level, cx))
+            .into_any_element()
     }
+}
+
+fn show_native_level(
+    menu: &Entity<ContextMenu>,
+    level: usize,
+    at: Point<Pixels>,
+    size: gpui::Size<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if menu.read(cx).dismissed || level >= menu.read(cx).selected.len() {
+        return;
+    }
+    let weak = menu.downgrade();
+    let draw = Rc::new(move |_: &mut Window, cx: &mut App| {
+        weak.update(cx, |menu, cx| menu.render_native_level(level, cx))
+            .unwrap_or_else(|_| div().into_any_element())
+    });
+    let focus = menu.read(cx).focus.clone();
+    let weak = menu.downgrade();
+    let owner = window.window_handle();
+    let dismiss = Rc::new(move |cx: &mut App| {
+        let _ = owner.update(cx, |_, window, cx| {
+            let _ = weak.update(cx, |menu, cx| menu.dismiss(window, cx));
+        });
+    });
+    crate::popup_window::show(
+        menu,
+        crate::popup_window::SurfaceOptions {
+            key: crate::popup_window::Key(menu.entity_id(), level),
+            at,
+            size,
+            focus,
+            persistent: false,
+            keyboard: true,
+        },
+        draw,
+        dismiss,
+        window,
+        cx,
+    );
 }
 
 /// Draws an open menu at `position` (window coordinates) above everything
@@ -2468,6 +2583,7 @@ pub fn overlay_beside(
                     dismiss_right.update(cx, |m, cx| m.dismiss(window, cx));
                 })
                 .child(Beside {
+                    native_menu: crate::popup_window::enabled().then(|| menu.clone()),
                     child: menu.clone().into_any_element(),
                     anchor: Some(row),
                     above,
@@ -2511,13 +2627,88 @@ pub fn overlay_at(
                     anchored()
                         .position(position)
                         .anchor(corner)
-                        .snap_to_window_with_margin(px(4.0))
-                        .child(menu.clone()),
+                        .when(!crate::popup_window::enabled(), |a| {
+                            a.snap_to_window_with_margin(px(4.0))
+                        })
+                        .child(if crate::popup_window::enabled() {
+                            NativeMenu { menu: menu.clone() }.into_any_element()
+                        } else {
+                            menu.clone().into_any_element()
+                        }),
                 ),
         ),
     )
     .with_priority(1)
     .into_any_element()
+}
+
+struct NativeMenu {
+    menu: Entity<ContextMenu>,
+}
+impl IntoElement for NativeMenu {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+impl gpui::Element for NativeMenu {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = ();
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, AnyElement) {
+        let mut child = self.menu.clone().into_any_element();
+        let size = child.layout_as_root(
+            gpui::size(
+                gpui::AvailableSpace::MaxContent,
+                gpui::AvailableSpace::MaxContent,
+            ),
+            window,
+            cx,
+        );
+        let style = gpui::Style {
+            size: gpui::size(size.width.into(), size.height.into()),
+            ..Default::default()
+        };
+        (window.request_layout(style, None, cx), child)
+    }
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus = self.menu.read(cx).focus.clone();
+        window.set_focus_handle(&focus, cx);
+        let menu = self.menu.clone();
+        window.defer(cx, move |window, cx| {
+            show_native_level(&menu, 0, bounds.origin, bounds.size, window, cx)
+        });
+    }
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut AnyElement,
+        _: &mut (),
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
 }
 
 #[cfg(test)]
@@ -2611,6 +2802,66 @@ mod tests {
     fn redraw(cx: &mut VisualTestContext) {
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear());
+    }
+
+    #[gpui::test]
+    fn native_menu_dispatches_to_owner_and_restores_focus(cx: &mut TestAppContext) {
+        let (origin, menu, cx) = open(cx);
+        let popup = cx.update(|window, cx| {
+            show_native_level(
+                &menu,
+                0,
+                point(px(40.0), px(50.0)),
+                gpui::size(px(220.0), px(160.0)),
+                window,
+                cx,
+            );
+            cx.windows()
+                .into_iter()
+                .find(|w| *w != window.window_handle())
+                .unwrap()
+        });
+        cx.update(|_, cx| {
+            popup
+                .update(cx, |_, window, cx| {
+                    menu.update(cx, |menu, cx| menu.choose(Box::new(Second), window, cx))
+                })
+                .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
+        cx.update(|window, cx| {
+            assert_eq!(cx.windows().len(), 1);
+            assert!(origin.read(cx).focus.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    fn native_submenu_has_its_own_identity_and_closes_with_root(cx: &mut TestAppContext) {
+        let (_, menu, cx) = open(cx);
+        cx.update(|window, cx| {
+            show_native_level(
+                &menu,
+                0,
+                point(px(40.0), px(50.0)),
+                gpui::size(px(220.0), px(160.0)),
+                window,
+                cx,
+            );
+            menu.update(cx, |m, _| m.selected = vec![Some(3), Some(0)]);
+            show_native_level(
+                &menu,
+                1,
+                point(px(260.0), px(100.0)),
+                gpui::size(px(180.0), px(40.0)),
+                window,
+                cx,
+            );
+            assert_eq!(cx.windows().len(), 3);
+            menu.update(cx, |m, cx| m.dismiss(window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| assert_eq!(cx.windows().len(), 1));
     }
 
     #[gpui::test]

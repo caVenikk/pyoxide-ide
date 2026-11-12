@@ -8,7 +8,7 @@
 use editor::Editor;
 use gpui::{
     AnyElement, AnyView, App, Context, Corner, Entity, EntityId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Styled, Window, anchored, div, point, px,
+    ParentElement, Pixels, Render, SharedString, Styled, Window, anchored, canvas, div, point, px,
 };
 use themes::{Metric, UiRole};
 use ui::ThemeExt;
@@ -55,26 +55,48 @@ const MARGIN: f32 = 4.0;
 
 impl PopupHost {
     /// Shows a popup, in place of the one with the same context.
-    pub fn show(&mut self, popup: CaretPopup) {
+    pub fn show(&mut self, popup: CaretPopup, cx: &mut App) {
         match self.popups.iter_mut().find(|p| p.context == popup.context) {
-            Some(shown) => *shown = popup,
+            Some(shown) => {
+                if shown.content.entity_id() != popup.content.entity_id() {
+                    ui::popup_window::close(shown.content.entity_id(), cx);
+                }
+                *shown = popup;
+            }
             None => self.popups.push(popup),
         }
     }
 
     /// Hides the popup of a context; false when none was shown.
-    pub fn hide(&mut self, context: &str) -> bool {
+    pub fn hide(&mut self, context: &str, cx: &mut App) -> bool {
         let before = self.popups.len();
-        self.popups.retain(|p| p.context != context);
+        self.popups.retain(|p| {
+            if p.context == context {
+                ui::popup_window::close(p.content.entity_id(), cx);
+                false
+            } else {
+                true
+            }
+        });
         self.popups.len() != before
     }
 
     /// Hides every popup of an editor.
-    pub fn hide_editor(&mut self, editor: EntityId) {
-        self.popups.retain(|p| p.editor.entity_id() != editor);
+    pub fn hide_editor(&mut self, editor: EntityId, cx: &mut App) {
+        self.popups.retain(|p| {
+            if p.editor.entity_id() == editor {
+                ui::popup_window::close(p.content.entity_id(), cx);
+                false
+            } else {
+                true
+            }
+        });
     }
 
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self, cx: &mut App) {
+        for popup in &self.popups {
+            ui::popup_window::close(popup.content.entity_id(), cx);
+        }
         self.popups.clear();
     }
 
@@ -114,8 +136,20 @@ impl PopupHost {
                 let editor = popup.editor.read(cx);
                 let anchor = popup.anchor.min(editor.buffer().len_chars());
                 let anchor_line = editor.buffer().char_to_line(anchor);
-                if !editor.visible_lines()?.contains(&anchor_line) {
-                    return None;
+                if !editor
+                    .visible_lines()
+                    .is_some_and(|lines| lines.contains(&anchor_line))
+                {
+                    let id = popup.content.entity_id();
+                    return Some(
+                        canvas(
+                            move |_, _, cx| ui::popup_window::close(id, cx),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_0()
+                        .into_any_element(),
+                    );
                 }
                 let line = editor.bounds_for_range(anchor..anchor)?;
                 let x = line.left() - popup.inset;
@@ -131,6 +165,20 @@ impl PopupHost {
                     (point(x, line.top()), Corner::BottomLeft)
                 };
                 let context = popup.context;
+                let interactive_doc = context == crate::doc::CONTEXT
+                    && popup
+                        .content
+                        .clone()
+                        .downcast::<crate::doc::DocPopup>()
+                        .ok()
+                        .and_then(|doc| {
+                            doc.read(cx).content().map(|content| {
+                                content.documentation.is_some()
+                                    || content.fix.is_some()
+                                    || content.more_actions
+                            })
+                        })
+                        .unwrap_or(false);
                 Some(
                     deferred(
                         anchored()
@@ -147,7 +195,39 @@ impl PopupHost {
                                     .flex()
                                     .flex_col()
                                     .max_h(room.max(px(0.0)))
-                                    .child(popup.content.clone()),
+                                    .child(
+                                        if ui::popup_window::enabled()
+                                            && (context == "Completion" || interactive_doc)
+                                        {
+                                            ui::popup_window::attached_view(
+                                                &popup.editor,
+                                                popup.content.clone(),
+                                                room.max(px(1.0)),
+                                            )
+                                        } else if ui::popup_window::enabled()
+                                            && context == "CodeList"
+                                        {
+                                            let list = popup
+                                                .content
+                                                .clone()
+                                                .downcast::<crate::list_popup::ListPopup>()
+                                                .expect("CodeList content");
+                                            let outside = list.clone();
+                                            div()
+                                                .on_mouse_down_out(move |_, window, cx| {
+                                                    outside.update(cx, |list, cx| {
+                                                        list.dismiss_outside(window, cx)
+                                                    });
+                                                })
+                                                .child(ui::popup_window::view_with_dismiss(
+                                                    &list,
+                                                    crate::list_popup::ListPopup::dismiss_outside,
+                                                ))
+                                                .into_any_element()
+                                        } else {
+                                            popup.content.clone().into_any_element()
+                                        },
+                                    ),
                             ),
                     )
                     .with_priority(1)

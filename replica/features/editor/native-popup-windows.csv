@@ -1,0 +1,2 @@
+feature,area,priority,original,clone,notes
+Independent popup windows for macOS window capture,editor,must,yes,partial,"Native menus and submenus, chooser frames, completion, documentation controls and interactive debugger inspectors; owner routing and independent WindowServer capture verified (#424); interactive screenshot-picker acceptance pending"

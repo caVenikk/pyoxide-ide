@@ -133,7 +133,15 @@ pub(crate) fn doc_popup_actions<E: InteractiveElement>(el: E, view: &Entity<Code
         let view = view.clone();
         move |_: &AdjustFontSize, window, cx| {
             let popup = popup(&view, cx);
-            popup.update(cx, |p, cx| p.open_font_size(window, cx));
+            if let Some(native) = ui::popup_window::window_for(popup.entity_id(), cx)
+                && native != window.window_handle()
+            {
+                let _ = native.update(cx, |_, window, cx| {
+                    popup.update(cx, |p, cx| p.open_font_size(window, cx));
+                });
+            } else {
+                popup.update(cx, |p, cx| p.open_font_size(window, cx));
+            }
         }
     })
     .on_action({
@@ -193,7 +201,7 @@ impl CodeIntelView {
         docs.closing = None;
         docs.inside = false;
         let had = docs.shown.take().is_some();
-        if self.popups_mut().hide(doc::CONTEXT) || had {
+        if self.popups_mut().hide(doc::CONTEXT, cx) || had {
             cx.notify();
         }
     }
@@ -552,15 +560,18 @@ impl CodeIntelView {
         });
         self.docs.closing = None;
         let popup = self.docs.popup.clone();
-        self.popups_mut().show(CaretPopup {
-            context: doc::CONTEXT,
-            editor: editor.clone(),
-            anchor: range.start,
-            placement: Placement::Below,
-            inset: gpui::px(0.0),
-            height: Some(height),
-            content: popup.into(),
-        });
+        self.popups_mut().show(
+            CaretPopup {
+                context: doc::CONTEXT,
+                editor: editor.clone(),
+                anchor: range.start,
+                placement: Placement::Below,
+                inset: gpui::px(0.0),
+                height: Some(height),
+                content: popup.into(),
+            },
+            cx,
+        );
         cx.notify();
     }
 

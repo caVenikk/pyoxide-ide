@@ -295,15 +295,18 @@ impl CodeIntelView {
             .update(cx, |p, cx| p.set(lines, link, cx));
         let height = self.signatures.popup.read(cx).height(cx);
         let content = self.signatures.popup.clone().into();
-        self.popups_mut().show(CaretPopup {
-            context: CONTEXT,
-            editor,
-            anchor,
-            placement: Placement::Above,
-            inset: px(0.0),
-            height: Some(height),
-            content,
-        });
+        self.popups_mut().show(
+            CaretPopup {
+                context: CONTEXT,
+                editor,
+                anchor,
+                placement: Placement::Above,
+                inset: px(0.0),
+                height: Some(height),
+                content,
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -312,7 +315,7 @@ impl CodeIntelView {
         self.signatures.all_overloads = false;
         self.signatures.invoked_at = None;
         let had = self.signatures.session.take().is_some();
-        if self.popups_mut().hide(CONTEXT) || had {
+        if self.popups_mut().hide(CONTEXT, cx) || had {
             cx.notify();
         }
     }

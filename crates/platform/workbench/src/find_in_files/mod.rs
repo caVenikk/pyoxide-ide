@@ -863,6 +863,7 @@ impl FindInFiles {
         if !self.open {
             return;
         }
+        ui::popup_window::close(cx.entity_id(), cx);
         self.open = false;
         self.dropdown = None;
         self.frame.cancel_drag();
@@ -1809,6 +1810,17 @@ popup_actions! {
     editor::find::HistoryDown => dropdown_down_action,
     editor::find::HistoryPick => dropdown_pick_action,
     editor::find::HistoryClose => dropdown_close_action,
+}
+
+impl ui::popup_window::Popup for FindInFiles {
+    fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(true, window, cx);
+    }
+    fn dismiss_outside(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.pinned && !self.browsing {
+            self.close(false, window, cx);
+        }
+    }
 }
 
 #[cfg(test)]

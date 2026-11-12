@@ -157,7 +157,7 @@ impl CodeIntelView {
         });
         // Any key closes a hint.
         let keys = cx.observe_keystrokes(|this, _, _, cx| {
-            if this.popups.hide(HINT_CONTEXT) {
+            if this.popups.hide(HINT_CONTEXT, cx) {
                 cx.notify();
             }
         });
@@ -299,7 +299,7 @@ impl CodeIntelView {
         self.reset_navigation(cx);
         self.clear_bulb(cx);
         self.reported.clear();
-        self.popups.clear();
+        self.popups.clear(cx);
         self.documents.clear();
         self.services_popup = None;
         self.server_tasks.clear();
@@ -403,7 +403,7 @@ impl CodeIntelView {
         }
         self.signature_file_closed(path, cx);
         self.reported.forget(path);
-        self.popups.hide_editor(doc.editor.entity_id());
+        self.popups.hide_editor(doc.editor.entity_id(), cx);
         if let Some(services) = &self.services {
             services.did_close(&doc.id);
         }
@@ -445,7 +445,7 @@ impl CodeIntelView {
         self.reset_signature(cx);
         self.reset_navigation(cx);
         self.clear_bulb(cx);
-        self.popups.clear();
+        self.popups.clear(cx);
         self.refresh_services_popup(cx);
         cx.notify();
     }
@@ -475,7 +475,7 @@ impl CodeIntelView {
                 doc.reports = 0;
                 let editor = doc.editor.entity_id();
                 self.update_analysis(path, cx);
-                if self.popups.hide(HINT_CONTEXT) {
+                if self.popups.hide(HINT_CONTEXT, cx) {
                     cx.notify();
                 }
                 // A change before the completed identifier ends the popup.
@@ -502,7 +502,7 @@ impl CodeIntelView {
                 if self.completion.as_ref().is_some_and(|s| s.path == path) {
                     self.close_completion(cx);
                 }
-                self.popups.hide_editor(editor);
+                self.popups.hide_editor(editor, cx);
                 cx.notify();
             }
             EditorEvent::SelectionsChanged
@@ -525,7 +525,7 @@ impl CodeIntelView {
         {
             self.close_completion(cx);
         }
-        self.popups.hide(HINT_CONTEXT);
+        self.popups.hide(HINT_CONTEXT, cx);
     }
 
     fn service_event(&mut self, event: IntelEvent, cx: &mut Context<Self>) {
@@ -608,7 +608,7 @@ impl CodeIntelView {
         if !editor.read(cx).selections().primary().is_empty() {
             return;
         }
-        self.popups.hide(HINT_CONTEXT);
+        self.popups.hide(HINT_CONTEXT, cx);
         let start = identifier_start(editor.read(cx).buffer(), query.offset);
         self.start_completion(editor, query.path, start, true, cx);
         self.request_completion(CompletionTrigger::Invoked, cx);
@@ -825,7 +825,7 @@ impl CodeIntelView {
                 .iter()
                 .all(|s| session.items[s.item].insert.text() == session.prefix);
         if session.shown.is_empty() && pending {
-            self.popups.hide(completion::CONTEXT);
+            self.popups.hide(completion::CONTEXT, cx);
             cx.notify();
             return;
         }
@@ -844,15 +844,18 @@ impl CodeIntelView {
         let rows = session.shown.len();
         self.completion_list
             .update(cx, |list, cx| list.set(session, cx));
-        self.popups.show(CaretPopup {
-            context: completion::CONTEXT,
-            editor,
-            anchor: session.start,
-            placement: Placement::Below,
-            inset: CompletionList::text_inset(),
-            height: Some(CompletionList::height(rows, cx)),
-            content: self.completion_list.clone().into(),
-        });
+        self.popups.show(
+            CaretPopup {
+                context: completion::CONTEXT,
+                editor,
+                anchor: session.start,
+                placement: Placement::Below,
+                inset: CompletionList::text_inset(),
+                height: Some(CompletionList::height(rows, cx)),
+                content: self.completion_list.clone().into(),
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -867,15 +870,18 @@ impl CodeIntelView {
     ) {
         let text = SharedString::from(text.to_owned());
         let content = cx.new(|_| TextHint::new(text));
-        self.popups.show(CaretPopup {
-            context: HINT_CONTEXT,
-            editor: editor.clone(),
-            anchor,
-            placement: Placement::Below,
-            inset: gpui::px(0.0),
-            height: None,
-            content: content.into(),
-        });
+        self.popups.show(
+            CaretPopup {
+                context: HINT_CONTEXT,
+                editor: editor.clone(),
+                anchor,
+                placement: Placement::Below,
+                inset: gpui::px(0.0),
+                height: None,
+                content: content.into(),
+            },
+            cx,
+        );
         cx.emit(CodeIntelEvent::Redraw);
         cx.notify();
     }
@@ -883,7 +889,7 @@ impl CodeIntelView {
     /// Closes the completion popup; the request in flight is cancelled.
     fn close_completion(&mut self, cx: &mut Context<Self>) {
         let had_session = self.completion.take().is_some();
-        let had_popup = self.popups.hide(completion::CONTEXT);
+        let had_popup = self.popups.hide(completion::CONTEXT, cx);
         if had_session || had_popup {
             cx.notify();
         }
@@ -912,7 +918,7 @@ impl CodeIntelView {
         let Some(session) = self.completion.take() else {
             return;
         };
-        self.popups.hide(completion::CONTEXT);
+        self.popups.hide(completion::CONTEXT, cx);
         cx.notify();
         let (Some(index), Some(doc)) = (session.selected_item(), self.documents.get(&session.path))
         else {
@@ -986,7 +992,7 @@ impl CodeIntelView {
         let doc = self.documents.get(path)?;
         let parentheses = self.hook_for(&doc.language).0.parentheses(&doc.language);
         let session = self.completion.take()?;
-        self.popups.hide(completion::CONTEXT);
+        self.popups.hide(completion::CONTEXT, cx);
         cx.notify();
         let (edits, caret, consumed) = completion::insertion_by_char(
             &session.items[index],

@@ -67,6 +67,7 @@ pub struct BreakpointPopup {
     menu: Option<MenuPopup>,
     focus: FocusHandle,
     activate: bool,
+    pointer_left: gpui::Pixels,
 }
 
 impl EventEmitter<PopupEvent> for BreakpointPopup {}
@@ -98,6 +99,7 @@ impl BreakpointPopup {
             menu: None,
             focus: cx.focus_handle(),
             activate,
+            pointer_left: px(0.0),
         }
     }
 
@@ -216,8 +218,8 @@ impl BreakpointPopup {
     }
 }
 
-impl Render for BreakpointPopup {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl BreakpointPopup {
+    fn render_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let b = self.debugger.breakpoints().get(self.id).cloned();
         let enabled = b.as_ref().is_some_and(|b| b.enabled);
@@ -401,6 +403,73 @@ impl Render for BreakpointPopup {
                     .child(div().flex_1())
                     .child(done),
             )
+            .into_any_element()
+    }
+
+    fn render_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.render_body(window, cx);
+        let theme = cx.theme();
+        let fill_color = theme.color(UiRole::SurfaceRaised);
+        let border_color = theme.color(UiRole::PopupBorder);
+        let pointer = canvas(
+            |_, _, _| {},
+            move |bounds, _, window, _| {
+                let (x0, x1) = (bounds.left(), bounds.left() + px(POINTER_W));
+                let mid = bounds.left() + px(POINTER_W / 2.0);
+                let (base, tip) = (bounds.bottom() + px(1.0), bounds.top());
+                let mut fill = PathBuilder::fill();
+                fill.move_to(point(x0, base));
+                fill.line_to(point(mid, tip));
+                fill.line_to(point(x1, base));
+                fill.close();
+                if let Ok(path) = fill.build() {
+                    window.paint_path(path, fill_color);
+                }
+                let mut edge = PathBuilder::stroke(px(1.0));
+                edge.move_to(point(x0, base));
+                edge.line_to(point(mid, tip));
+                edge.line_to(point(x1, base));
+                if let Ok(path) = edge.build() {
+                    window.paint_path(path, border_color);
+                }
+            },
+        )
+        .ml(self.pointer_left)
+        .w(px(POINTER_W))
+        .h(px(POINTER_H));
+        div()
+            .flex()
+            .flex_col()
+            .child(pointer)
+            .child(
+                div()
+                    .w(px(CONTENT_WIDTH + 2.0 * INSET + 2.0))
+                    .p(px(INSET))
+                    .rounded(theme.metric(themes::Metric::CornerRadius) * 2.0)
+                    .border_1()
+                    .border_color(border_color)
+                    .bg(fill_color)
+                    .shadow(ui::components::popup_shadow())
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    fn dismiss_surface(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        ui::popup_window::close(cx.entity_id(), cx);
+        cx.emit(PopupEvent::Done);
+    }
+}
+
+impl gpui::Focusable for BreakpointPopup {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.condition.focus_handle(cx)
+    }
+}
+
+impl Render for BreakpointPopup {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_body(window, cx)
     }
 }
 
@@ -462,6 +531,7 @@ impl DebuggerView {
         let Some(p) = self.popup.take() else {
             return;
         };
+        ui::popup_window::close(p.view.entity_id(), cx);
         if let Some(menu) = p.view.update(cx, |v, _| v.menu.take()) {
             menu.close(cx);
         }
@@ -503,10 +573,13 @@ impl DebuggerView {
     ) -> Option<AnyElement> {
         let p = self.popup.as_ref()?;
         if active != Some(&p.editor) {
+            ui::popup_window::close(p.view.entity_id(), cx);
             return None;
         }
-        let cell = p.editor.read(cx).line_number_bounds(p.line)?;
-        let theme = cx.theme();
+        let Some(cell) = p.editor.read(cx).line_number_bounds(p.line) else {
+            ui::popup_window::close(p.view.entity_id(), cx);
+            return None;
+        };
         let width = px(CONTENT_WIDTH + 2.0 * INSET + 2.0);
         // The icon is at the right of the line numbers' cell (4 px gap,
         // 14 px icon).
@@ -516,34 +589,31 @@ impl DebuggerView {
             .min(viewport.width - width - px(8.0))
             .max(px(8.0));
         let pointer_left = icon_x - left - px(POINTER_W / 2.0);
-        let fill_color = theme.color(UiRole::SurfaceRaised);
-        let border_color = theme.color(UiRole::PopupBorder);
-        let pointer = canvas(
-            |_, _, _| {},
-            move |bounds, _, window, _| {
-                let (x0, x1) = (bounds.left(), bounds.left() + px(POINTER_W));
-                let mid = bounds.left() + px(POINTER_W / 2.0);
-                let (base, tip) = (bounds.bottom() + px(1.0), bounds.top());
-                let mut fill = PathBuilder::fill();
-                fill.move_to(point(x0, base));
-                fill.line_to(point(mid, tip));
-                fill.line_to(point(x1, base));
-                fill.close();
-                if let Ok(path) = fill.build() {
-                    window.paint_path(path, fill_color);
-                }
-                let mut edge = PathBuilder::stroke(px(1.0));
-                edge.move_to(point(x0, base));
-                edge.line_to(point(mid, tip));
-                edge.line_to(point(x1, base));
-                if let Ok(path) = edge.build() {
-                    window.paint_path(path, border_color);
-                }
-            },
-        )
-        .ml(pointer_left)
-        .w(px(POINTER_W))
-        .h(px(POINTER_H));
+        let content = p.view.update(cx, |popup, cx| {
+            popup.pointer_left = pointer_left;
+            let mut body = popup.render_surface(window, cx);
+            if ui::popup_window::enabled() {
+                let extent = body.layout_as_root(
+                    gpui::size(
+                        gpui::AvailableSpace::MaxContent,
+                        gpui::AvailableSpace::MaxContent,
+                    ),
+                    window,
+                    cx,
+                );
+                ui::popup_window::surface(
+                    &cx.entity(),
+                    0,
+                    extent,
+                    popup.focus_handle(cx),
+                    BreakpointPopup::render_surface,
+                    BreakpointPopup::dismiss_surface,
+                    false,
+                )
+            } else {
+                body
+            }
+        });
         let this = cx.entity().downgrade();
         Some(
             deferred(
@@ -558,19 +628,7 @@ impl DebuggerView {
                             .on_mouse_down_out(move |_, window, cx| {
                                 let _ = this.update(cx, |v, cx| v.close_popup(true, window, cx));
                             })
-                            // The pointer joins the box over its border.
-                            .child(pointer)
-                            .child(
-                                div()
-                                    .w(width)
-                                    .p(px(INSET))
-                                    .rounded(theme.metric(themes::Metric::CornerRadius) * 2.0)
-                                    .border_1()
-                                    .border_color(border_color)
-                                    .bg(fill_color)
-                                    .shadow(ui::components::popup_shadow())
-                                    .child(p.view.clone()),
-                            ),
+                            .child(content),
                     ),
             )
             .with_priority(1)

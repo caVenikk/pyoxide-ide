@@ -151,9 +151,13 @@ impl ListPopup {
     ) -> Self {
         let focus = cx.focus_handle();
         let subscriptions = vec![
-            cx.on_blur(&focus, window, |this, window, cx| this.dismiss(window, cx)),
+            cx.on_blur(&focus, window, |this, window, cx| {
+                if !ui::popup_window::enabled() {
+                    this.dismiss(window, cx);
+                }
+            }),
             cx.observe_window_activation(window, |this, window, cx| {
-                if !window.is_window_active() {
+                if !ui::popup_window::enabled() && !window.is_window_active() {
                     this.dismiss(window, cx);
                 }
             }),
@@ -208,12 +212,29 @@ impl ListPopup {
         px(title + rows + PAD_Y + 2.0)
     }
 
+    /// Dismisses after an outside click without stealing its new focus.
+    pub fn dismiss_outside(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.origin = None;
+        self.dismiss(window, cx);
+    }
+
     /// Closes the popup and gives the focus back.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.dismissed {
             return;
         }
         self.dismissed = true;
+        if let Some(owner) = ui::popup_window::owner(cx.entity_id(), cx) {
+            let origin = self.origin.clone();
+            cx.defer(move |cx| {
+                let _ = owner.update(cx, |_, window, _| {
+                    if let Some(origin) = origin {
+                        window.focus(&origin);
+                    }
+                });
+            });
+            ui::popup_window::close(cx.entity_id(), cx);
+        }
         if self.focus.contains_focused(window, cx)
             && let Some(origin) = &self.origin
         {
@@ -221,6 +242,26 @@ impl ListPopup {
         }
         cx.emit(DismissEvent);
         cx.notify();
+    }
+
+    fn render_submenu(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let Some((row, selected)) = self.sub else {
+            return div().into_any_element();
+        };
+        let items = self.children(row).to_vec();
+        let rows = self.render_rows(&items, &vec![true; items.len()], Some(selected), 1, cx);
+        let theme = cx.theme();
+        div()
+            .flex()
+            .flex_col()
+            .rounded(px(RADIUS))
+            .border_1()
+            .border_color(theme.color(UiRole::PopupBorder))
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .py(px(PAD_Y))
+            .children(rows)
+            .pointing_hand()
+            .into_any_element()
     }
 
     fn matches(&self, item: &ListItem) -> bool {
@@ -543,7 +584,10 @@ impl ListPopup {
 }
 
 impl Render for ListPopup {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.sub.is_none() {
+            ui::popup_window::close_level(cx.entity_id(), 1, cx);
+        }
         let height = Self::row_height(cx);
         let shown = self.shown();
         let items = self.items.clone();
@@ -563,14 +607,15 @@ impl Render for ListPopup {
         let muted = theme.color(UiRole::TextMuted);
         let line = theme.color(UiRole::PopupBorder);
         let name = self.options.name;
+        let surface = theme.color(UiRole::SurfaceRaised);
         let frame = || {
             div()
                 .flex()
                 .flex_col()
                 .rounded(px(RADIUS))
                 .border_1()
-                .border_color(theme.color(UiRole::PopupBorder))
-                .bg(theme.color(UiRole::SurfaceRaised))
+                .border_color(line)
+                .bg(surface)
                 .shadow(ui::components::popup_shadow())
         };
         let title = self.options.title.clone().map(|title| {
@@ -634,13 +679,40 @@ impl Render for ListPopup {
             0.0
         };
         let sub = sub_rows.map(|(rows, before)| {
-            div().mt(px(header + height * before as f32)).child(
-                frame()
-                    .debug_selector(move || format!("{name}-sub"))
-                    .py(px(PAD_Y))
-                    .children(rows)
-                    .pointing_hand(),
-            )
+            let content = frame()
+                .debug_selector(move || format!("{name}-sub"))
+                .py(px(PAD_Y))
+                .children(rows)
+                .pointing_hand();
+            if ui::popup_window::enabled() && ui::popup_window::displays(cx.entity_id(), window, cx)
+            {
+                let mut measured = content.into_any_element();
+                let extent = measured.layout_as_root(
+                    gpui::size(
+                        gpui::AvailableSpace::MaxContent,
+                        gpui::AvailableSpace::MaxContent,
+                    ),
+                    window,
+                    cx,
+                );
+                div()
+                    .absolute()
+                    .left(window.viewport_size().width)
+                    .top(px(header + height * before as f32))
+                    .child(ui::popup_window::passive_surface(
+                        &cx.entity(),
+                        1,
+                        extent,
+                        self.focus.clone(),
+                        Self::render_submenu,
+                        Self::dismiss,
+                        true,
+                    ))
+            } else if ui::popup_window::enabled() {
+                div()
+            } else {
+                div().mt(px(header + height * before as f32)).child(content)
+            }
         });
         div()
             .key_context(KEY_CONTEXT)

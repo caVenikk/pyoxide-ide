@@ -131,9 +131,27 @@ impl FindInFiles {
         }
     }
 
+    fn focus_dropdown_owner(
+        &self,
+        focus: gpui::FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if ui::popup_window::displays_level(cx.entity_id(), 1, window, cx)
+            && let Some(parent) = ui::popup_window::parent_of(window.window_handle(), cx)
+        {
+            cx.defer(move |cx| {
+                let _ = parent.update(cx, |_, window, _| window.focus(&focus));
+            });
+        } else {
+            window.focus(&focus);
+        }
+    }
+
     fn close_dropdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(d) = self.dropdown.take() {
-            window.focus(&self.anchor(d.kind).focus_handle(cx));
+            self.focus_dropdown_owner(self.anchor(d.kind).focus_handle(cx), window, cx);
+            ui::popup_window::close_level(cx.entity_id(), 1, cx);
             cx.notify();
         }
     }
@@ -148,7 +166,7 @@ impl FindInFiles {
         match d.kind {
             DropKind::Modules => {
                 self.scope = ScopeKind::Module;
-                window.focus(&self.query.focus_handle(cx));
+                self.focus_dropdown_owner(self.query.focus_handle(cx), window, cx);
             }
             DropKind::Scopes => {
                 if let Some(named) = NamedScope::from_name(&item) {
@@ -156,19 +174,20 @@ impl FindInFiles {
                     self.scope = ScopeKind::Named;
                     super::update_settings(cx, |s| s.search_scope = Some(item.clone()));
                 }
-                window.focus(&self.query.focus_handle(cx));
+                self.focus_dropdown_owner(self.query.focus_handle(cx), window, cx);
                 self.schedule(cx);
             }
             kind => {
                 let field = self.anchor(kind).clone();
                 // The field's own subscription searches again.
                 field.update(cx, |f, cx| f.set_text_selected(&item, cx));
-                window.focus(&field.focus_handle(cx));
+                self.focus_dropdown_owner(field.focus_handle(cx), window, cx);
                 if kind != DropKind::ReplaceHistory {
                     self.schedule(cx);
                 }
             }
         }
+        ui::popup_window::close_level(cx.entity_id(), 1, cx);
         cx.notify();
     }
 
@@ -241,14 +260,24 @@ impl FindInFiles {
         self.close_dropdown(window, cx);
     }
 
-    /// The open list, when it belongs below this field: drawn over the rest
-    /// of the popup.
-    pub(super) fn render_dropdown(
-        &self,
-        kinds: &[DropKind],
+    fn dropdown_height(&self) -> gpui::Pixels {
+        self.dropdown.as_ref().map_or(px(0.0), |d| {
+            px(ROW) * d.items.len().min(d.kind.rows()) as f32 + px(10.0)
+        })
+    }
+
+    fn render_native_dropdown(
+        &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let d = self.dropdown.as_ref().filter(|d| kinds.contains(&d.kind))?;
+    ) -> AnyElement {
+        self.dropdown_body(cx)
+            .map(|body| body.w(window.viewport_size().width).into_any_element())
+            .unwrap_or_else(|| div().into_any_element())
+    }
+
+    fn dropdown_body(&self, cx: &mut Context<Self>) -> Option<gpui::Stateful<gpui::Div>> {
+        let d = self.dropdown.as_ref()?;
         let theme = cx.theme();
         let selected_bg = theme.color(UiRole::Selection);
         let selected_text = theme.color(UiRole::SelectionText);
@@ -280,28 +309,62 @@ impl FindInFiles {
             .collect();
         let height = px(ROW) * d.items.len().min(d.kind.rows()) as f32 + px(10.0);
         Some(
+            div()
+                .id("find-in-files-dropdown")
+                .debug_selector(|| "find-in-files-dropdown".into())
+                .key_context("FindHistory")
+                .track_focus(&self.dropdown_focus)
+                .h(height)
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .p(px(4.0))
+                .rounded(theme.metric(Metric::CornerRadius) * 2.0)
+                .border_1()
+                .border_color(theme.color(UiRole::PopupBorder))
+                .bg(theme.color(UiRole::SurfaceRaised))
+                .on_action(cx.listener(Self::dropdown_up_action))
+                .on_action(cx.listener(Self::dropdown_down_action))
+                .on_action(cx.listener(Self::dropdown_pick_action))
+                .on_action(cx.listener(Self::dropdown_close_action))
+                .children(rows),
+        )
+    }
+
+    /// The list remains anchored to its field; its rows are a separate native surface.
+    pub(super) fn render_dropdown(
+        &self,
+        kinds: &[DropKind],
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.dropdown.as_ref().filter(|d| kinds.contains(&d.kind))?;
+        let content = if ui::popup_window::enabled() {
+            ui::popup_window::surface(
+                &cx.entity(),
+                1,
+                gpui::size(px(0.0), self.dropdown_height()),
+                self.dropdown_focus.clone(),
+                Self::render_native_dropdown,
+                Self::close_dropdown,
+                false,
+            )
+        } else {
+            self.dropdown_body(cx)?
+                .shadow(ui::components::popup_shadow())
+                .into_any_element()
+        };
+        Some(
             deferred(
                 div()
-                    .id("find-in-files-dropdown")
-                    .debug_selector(|| "find-in-files-dropdown".into())
-                    .key_context("FindHistory")
-                    .track_focus(&self.dropdown_focus)
                     .absolute()
                     .top_full()
                     .left_0()
                     .right_0()
                     .mt(px(2.0))
-                    .h(height)
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .p(px(4.0))
-                    .rounded(theme.metric(Metric::CornerRadius) * 2.0)
-                    .border_1()
-                    .border_color(theme.color(UiRole::PopupBorder))
-                    .bg(theme.color(UiRole::SurfaceRaised))
-                    .shadow(ui::components::popup_shadow())
-                    .children(rows),
+                    .on_mouse_down_out(
+                        cx.listener(|this, _, window, cx| this.close_dropdown(window, cx)),
+                    )
+                    .child(content),
             )
             .with_priority(1)
             .into_any_element(),

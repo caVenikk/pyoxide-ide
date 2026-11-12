@@ -1009,14 +1009,16 @@ impl Workbench {
         if let Some(open) = &self.branch_ui.popup {
             out.push(popup_overlay(open.popup.clone(), below, window));
             let popup = open.popup.read(cx);
-            out.extend(popup.branch_menu_overlay(window, cx));
-            if let Some((menu, offset)) = popup.open_menu() {
-                out.push(ui::menu::overlay_at(
-                    &menu,
-                    below + offset,
-                    Corner::TopLeft,
-                    window,
-                ));
+            if !ui::popup_window::enabled() {
+                out.extend(popup.branch_menu_overlay(window, cx));
+                if let Some((menu, offset)) = popup.open_menu() {
+                    out.push(ui::menu::overlay_at(
+                        &menu,
+                        below + offset,
+                        Corner::TopLeft,
+                        window,
+                    ));
+                }
             }
         }
         if let Some((menu, _)) = &self.branch_ui.menu {
@@ -1056,7 +1058,7 @@ fn popup_overlay(
                         .position(position)
                         .anchor(Corner::TopLeft)
                         .snap_to_window_with_margin(px(4.0))
-                        .child(popup),
+                        .child(ui::popup_window::view(&popup)),
                 ),
         ),
     )

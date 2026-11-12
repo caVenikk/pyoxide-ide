@@ -278,6 +278,7 @@ impl NamePopup {
     }
 
     fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        ui::popup_window::close(cx.entity_id(), cx);
         cx.emit(NamePopupEvent::Cancelled);
     }
 
@@ -508,14 +509,49 @@ pub(super) fn dialog_button(
         .child(label)
 }
 
-impl Render for NamePopup {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let size = window.viewport_size();
+impl NamePopup {
+    fn render_native(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let line = editor::field_line_height(window, cx);
         let content = match self.kind {
             NamePopupKind::NewItem => self.render_new_item(line, cx),
             NamePopupKind::Rename => self.render_rename(line, cx),
         };
+        let theme = cx.theme();
+        content
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
+            .into_any_element()
+    }
+
+    fn dismiss_native(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel(&Cancel, window, cx);
+    }
+}
+
+impl Render for NamePopup {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let size = window.viewport_size();
+        let mut content = self.render_native(window, cx);
+        if ui::popup_window::enabled() {
+            let extent = content.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::MaxContent,
+                ),
+                window,
+                cx,
+            );
+            content = ui::popup_window::surface(
+                &cx.entity(),
+                0,
+                extent,
+                self.focus_handle(cx),
+                Self::render_native,
+                Self::dismiss_native,
+                self.kind == NamePopupKind::Rename,
+            );
+        }
         let backdrop = div()
             .id("name-popup-backdrop")
             .occlude()

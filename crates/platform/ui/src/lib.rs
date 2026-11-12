@@ -22,6 +22,7 @@ pub mod markdown;
 pub mod menu;
 pub mod notification;
 pub mod pointer;
+pub mod popup_window;
 pub mod progress_bar;
 pub mod theme;
 pub mod tree_guides;

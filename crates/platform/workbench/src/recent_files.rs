@@ -202,6 +202,7 @@ impl RecentFiles {
         if !self.open {
             return;
         }
+        ui::popup_window::close(cx.entity_id(), cx);
         self.open = false;
         self.frame.cancel_drag();
         let place = self.frame.place();
@@ -560,7 +561,7 @@ impl Render for RecentFiles {
             return div().into_any_element();
         }
         // Centred in the window.
-        let viewport = window.viewport_size();
+        let viewport = self.frame.viewport(window);
         let height = self.frame.place().map_or(px(HEIGHT), |p| px(p.height));
         self.frame
             .set_top(((viewport.height - height) / 2.0).max(px(16.0)));
@@ -588,8 +589,9 @@ impl Render for RecentFiles {
             .px(px(12.0))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.frame.start_move(e.position);
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    let position = this.frame.pointer_position(e.position, window);
+                    this.frame.start_move(position);
                     cx.notify();
                 }),
             )
@@ -766,4 +768,13 @@ fn home_relative(path: &Path) -> String {
 pub fn init(cx: &mut App) {
     ui::command::register(cx, COMMANDS);
     ui::command::register(cx, POPUP_COMMANDS);
+}
+
+impl ui::popup_window::Popup for RecentFiles {
+    fn dismiss_popup(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.close(true, cx);
+    }
+    fn dismiss_outside(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.close(false, cx);
+    }
 }

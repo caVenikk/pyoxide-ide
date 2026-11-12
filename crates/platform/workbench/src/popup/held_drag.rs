@@ -113,6 +113,21 @@ where
     T: 'static,
     S: Copy + 'static,
 {
+    track_held_drag_in(owner, drag, moved, ended, cursor, None)
+}
+
+pub(crate) fn track_held_drag_in<T, S>(
+    owner: Entity<T>,
+    drag: impl Fn(&mut T) -> &mut HeldDrag<S> + 'static,
+    moved: impl Fn(&mut T, Point<Pixels>, &mut Context<T>) + 'static,
+    ended: impl Fn(&mut T, &mut Context<T>) + 'static,
+    cursor: Option<CursorStyle>,
+    origin: Option<Point<Pixels>>,
+) -> AnyElement
+where
+    T: 'static,
+    S: Copy + 'static,
+{
     let drag = Rc::new(drag);
     let handle = {
         let drag = drag.clone();
@@ -156,14 +171,20 @@ where
                 }
             });
             let on_move = send.clone();
-            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture {
-                    on_move(Input::Move(e.position, e.pressed_button), cx);
+                    let position = origin.map_or(e.position, |origin| {
+                        ui::popup_window::screen_origin(window) + e.position - origin
+                    });
+                    on_move(Input::Move(position, e.pressed_button), cx);
                 }
             });
-            window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+            window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture {
-                    send(Input::Release(e.position), cx);
+                    let position = origin.map_or(e.position, |origin| {
+                        ui::popup_window::screen_origin(window) + e.position - origin
+                    });
+                    send(Input::Release(position), cx);
                 }
             });
         },

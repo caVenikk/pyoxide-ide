@@ -369,15 +369,18 @@ impl CodeIntelView {
             _subscriptions: vec![chosen, dismissed],
         });
         let height = popup.read(cx).height(cx);
-        self.popups_mut().show(CaretPopup {
-            context: LIST_CONTEXT,
-            editor: editor.clone(),
-            anchor: offset,
-            placement: Placement::Below,
-            inset: gpui::px(0.0),
-            height: Some(height),
-            content: popup.into(),
-        });
+        self.popups_mut().show(
+            CaretPopup {
+                context: LIST_CONTEXT,
+                editor: editor.clone(),
+                anchor: offset,
+                placement: Placement::Below,
+                inset: gpui::px(0.0),
+                height: Some(height),
+                content: popup.into(),
+            },
+            cx,
+        );
         cx.emit(CodeIntelEvent::Redraw);
         cx.notify();
     }
@@ -391,7 +394,7 @@ impl CodeIntelView {
                     popup.update(cx, |p, cx| p.dismiss(window, cx))
                 });
             }
-            self.popups_mut().hide(LIST_CONTEXT);
+            self.popups_mut().hide(LIST_CONTEXT, cx);
             cx.notify();
         }
     }
@@ -401,7 +404,7 @@ impl CodeIntelView {
         let Some(list) = self.nav.list.take() else {
             return;
         };
-        self.popups_mut().hide(LIST_CONTEXT);
+        self.popups_mut().hide(LIST_CONTEXT, cx);
         cx.notify();
         match list.targets {
             ListTargets::Locations(locations) => {
@@ -435,7 +438,7 @@ impl CodeIntelView {
             .is_some_and(|l| l.popup.entity_id() == popup);
         if ours {
             self.nav.list = None;
-            self.popups_mut().hide(LIST_CONTEXT);
+            self.popups_mut().hide(LIST_CONTEXT, cx);
             cx.notify();
         }
     }

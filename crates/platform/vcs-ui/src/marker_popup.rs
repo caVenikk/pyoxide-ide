@@ -20,6 +20,7 @@
 //! [`CONTEXT`], so Show Diff and Escape reach the popup from both.
 
 use std::ops::Range as Bytes;
+use std::rc::Rc;
 
 use editor::{DiffHighlights, Editor, Highlighter, Span};
 use gpui::prelude::FluentBuilder as _;
@@ -487,6 +488,8 @@ fn widest_line(text: &str, tab_size: usize, window: &Window, cx: &App) -> Pixels
 }
 
 /// The popup of one range.
+type ClosePopup = Rc<dyn Fn(&mut Window, &mut App)>;
+
 pub struct MarkerPopup {
     editor: Entity<Editor>,
     /// The range as it was when the popup opened (its identity).
@@ -502,6 +505,10 @@ pub struct MarkerPopup {
     /// Room from the popup's top to the window's bottom, as last placed:
     /// the old text is cut there (`getPreferredSize`).
     room: std::cell::Cell<Option<Pixels>>,
+    /// Width limit belongs to the editor window, not the native popup.
+    owner_width: Option<Pixels>,
+    close: Option<ClosePopup>,
+    focus: gpui::FocusHandle,
 }
 
 impl EventEmitter<PopupAction> for MarkerPopup {}
@@ -551,6 +558,9 @@ impl MarkerPopup {
             text_width,
             enabled,
             room: std::cell::Cell::new(None),
+            owner_width: None,
+            close: None,
+            focus: cx.focus_handle(),
         }
     }
 
@@ -747,8 +757,8 @@ impl MarkerPopup {
     }
 }
 
-impl Render for MarkerPopup {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl MarkerPopup {
+    fn render_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let line_height = self
             .editor
             .read(cx)
@@ -757,7 +767,7 @@ impl Render for MarkerPopup {
             .unwrap_or(px(20.0));
         let toolbar = self.render_toolbar(self.view.is_some(), window, cx);
         let theme = cx.theme();
-        let max_width = window.viewport_size().width - px(WINDOW_GAP);
+        let max_width = self.owner_width.unwrap_or(window.viewport_size().width) - px(WINDOW_GAP);
         let max_height = self.room.get().map(|room| room - px(TOOLBAR_HEIGHT));
         let text = self.view.as_ref().map(|view| {
             let lines = self.text.spans.len();
@@ -778,6 +788,34 @@ impl Render for MarkerPopup {
             .id("marker-popup")
             .debug_selector(|| "marker-popup".into())
             .key_context(CONTEXT)
+            .when(ui::popup_window::enabled(), |d| {
+                d.track_focus(&self.focus)
+                    .on_action(cx.listener(|this, _: &crate::PreviousChange, _, cx| {
+                        this.invoke(PopupAction::Previous, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &crate::NextChange, _, cx| {
+                        this.invoke(PopupAction::Next, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &crate::RollbackLines, _, cx| {
+                        this.invoke(PopupAction::Rollback, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &crate::ShowDiffLines, _, cx| {
+                        this.invoke(PopupAction::ShowDiff, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &crate::CopyChangeLines, _, cx| {
+                        this.invoke(PopupAction::Copy, cx)
+                    }))
+                    .on_action(
+                        cx.listener(|this, _: &crate::CloseMarkerPopup, window, cx| {
+                            this.dismiss_surface(window, cx)
+                        }),
+                    )
+                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                        if ui::popup_window::enabled() {
+                            window.activate_window();
+                        }
+                    })
+            })
             .flex()
             .flex_col()
             .items_start()
@@ -785,6 +823,43 @@ impl Render for MarkerPopup {
             .text_size(theme.ui_size())
             .child(toolbar)
             .children(text)
+            .into_any_element()
+    }
+
+    fn invoke(&self, action: PopupAction, cx: &mut Context<Self>) {
+        if self.is_enabled(action) {
+            cx.emit(action);
+        }
+    }
+
+    fn dismiss_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let owner = ui::popup_window::owner(cx.entity_id(), cx);
+        ui::popup_window::close(cx.entity_id(), cx);
+        if let Some(close) = self.close.clone() {
+            if let Some(owner) = owner {
+                let focus = self.editor.focus_handle(cx);
+                cx.defer(move |cx| {
+                    let _ = owner.update(cx, |_, window, cx| {
+                        window.focus(&focus);
+                        close(window, cx);
+                    });
+                });
+            } else {
+                close(window, cx);
+            }
+        }
+    }
+}
+
+impl gpui::Focusable for MarkerPopup {
+    fn focus_handle(&self, _: &App) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl Render for MarkerPopup {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_surface(window, cx)
     }
 }
 
@@ -795,26 +870,60 @@ impl Render for MarkerPopup {
 pub fn render_popup(
     popup: &Entity<MarkerPopup>,
     close: impl Fn(&mut Window, &mut App) + 'static,
-    window: &Window,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Option<(AnyElement, Point<Pixels>)> {
-    let p = popup.read(cx);
-    let editor = p.editor.read(cx);
-    let line = p.line.min(editor.buffer().len_lines().saturating_sub(1));
-    if !editor.visible_lines()?.contains(&line) {
+    let placement = (|| {
+        let p = popup.read(cx);
+        let editor = p.editor.read(cx);
+        let line = p.line.min(editor.buffer().len_lines().saturating_sub(1));
+        if !editor.visible_lines()?.contains(&line) {
+            return None;
+        }
+        let end = editor.buffer().line_end(line);
+        let bottom = editor.bounds_for_range(end..end)?.bottom();
+        let (origin, _, _) = editor.text_geometry()?;
+        let area = editor.text_area_bounds()?;
+        if bottom > area.bottom() {
+            return None;
+        }
+        let position = point(origin.x - px(TEXT_OFFSET), bottom);
+        p.room.set(Some(
+            window.viewport_size().height - bottom - px(WINDOW_GAP),
+        ));
+        Some(position)
+    })();
+    let Some(position) = placement else {
+        ui::popup_window::close(popup.entity_id(), cx);
         return None;
-    }
-    let end = editor.buffer().line_end(line);
-    let bottom = editor.bounds_for_range(end..end)?.bottom();
-    let (origin, _, _) = editor.text_geometry()?;
-    let area = editor.text_area_bounds()?;
-    if bottom > area.bottom() {
-        return None;
-    }
-    let position = point(origin.x - px(TEXT_OFFSET), bottom);
-    p.room.set(Some(
-        window.viewport_size().height - bottom - px(WINDOW_GAP),
-    ));
+    };
+    let close: ClosePopup = Rc::new(close);
+    let content = popup.update(cx, |p, cx| {
+        p.close = Some(close.clone());
+        p.owner_width = Some(window.viewport_size().width);
+        if ui::popup_window::enabled() {
+            let mut body = p.render_surface(window, cx);
+            let extent = body.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::MaxContent,
+                ),
+                window,
+                cx,
+            );
+            ui::popup_window::passive_surface(
+                &cx.entity(),
+                0,
+                extent,
+                p.focus.clone(),
+                MarkerPopup::render_surface,
+                MarkerPopup::dismiss_surface,
+                false,
+            )
+        } else {
+            cx.entity().into_any_element()
+        }
+    });
     Some((
         deferred(
             anchored()
@@ -825,7 +934,7 @@ pub fn render_popup(
                         .id("marker-popup-host")
                         .occlude()
                         .on_mouse_down_out(move |_, window, cx| close(window, cx))
-                        .child(popup.clone()),
+                        .child(content),
                 ),
         )
         .with_priority(1)

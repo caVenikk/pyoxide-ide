@@ -439,6 +439,7 @@ impl Workbench {
     ) -> Option<AnyElement> {
         let p = self.version_control.markers.popup.as_ref()?;
         if self.active_editor() != Some(&p.editor) {
+            ui::popup_window::close(p.view.entity_id(), cx);
             return None;
         }
         let serial = p.serial;

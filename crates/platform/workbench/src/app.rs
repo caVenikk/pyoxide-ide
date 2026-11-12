@@ -631,8 +631,8 @@ fn run_first_run_script(
             let Some(target) = target else {
                 break;
             };
+            draw_scripted_windows(cx);
             let result = cx.update_window(target, |_, window, cx| {
-                window.draw(cx).clear();
                 ui::command::invoke(&id, args, window, cx)
             });
             match result {
@@ -694,6 +694,27 @@ fn save_shot(window: &gpui::Window, path: &std::path::Path) {
     }
 }
 
+/// Flush scripted frames separately from dispatch so deferred native portals
+/// exist before a following command or screenshot enumerates their windows.
+fn draw_scripted_windows(cx: &mut gpui::AsyncApp) {
+    let mut drawn = std::collections::HashSet::new();
+    loop {
+        let next = cx
+            .update(|cx| {
+                cx.windows()
+                    .into_iter()
+                    .find(|window| !drawn.contains(&window.window_id()))
+            })
+            .ok()
+            .flatten();
+        let Some(window) = next else {
+            break;
+        };
+        drawn.insert(window.window_id());
+        let _ = cx.update_window(window, |_, window, cx| window.draw(cx).clear());
+    }
+}
+
 /// `PYOXIDE_RUN` and `PYOXIDE_SHOT`: wait until the window is on screen and
 /// its files are open, run the commands, then save the window's image and
 /// quit.
@@ -722,8 +743,8 @@ fn run_commands_and_shot(
                 // A command is available where the last drawn frame has its
                 // handler; a covered window may not have drawn the newest
                 // state yet.
+                draw_scripted_windows(cx);
                 let result = cx.update_window(window.into(), |_, window, cx| {
-                    window.draw(cx).clear();
                     ui::command::invoke(&id, args, window, cx)
                 });
                 match result {
@@ -767,6 +788,7 @@ fn run_commands_and_shot(
         let Some(path) = shot else {
             return;
         };
+        draw_scripted_windows(cx);
         let _ = cx.update_window(window.into(), |_, window, _| {
             crate::shot::request_display(window)
         });
@@ -815,6 +837,17 @@ fn run_commands_and_shot(
                 ));
             });
             parent = child;
+        }
+        let native = cx
+            .update(|cx| ui::popup_window::windows_of(window.into(), cx))
+            .unwrap_or_default();
+        for (index, child) in native.into_iter().enumerate() {
+            let child_path = path.with_file_name(format!("{stem}-native-popup-{index}.png"));
+            let _ = cx.update_window(child, |_, window, _| crate::shot::request_display(window));
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let _ = cx.update_window(child, |_, window, _| save(window, &child_path));
         }
         let _ = cx.update(|cx| cx.quit());
     })

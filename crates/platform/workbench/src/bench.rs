@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use editor::{Editor, FindBar};
-use gpui::{App, AppContext as _, AsyncApp, Entity, Keystroke, WindowHandle};
+use gpui::{App, AppContext as _, AsyncApp, Entity, Focusable as _, Keystroke, WindowHandle};
 use serde_json::json;
 
 use crate::env::{self, Bench};
@@ -964,6 +964,9 @@ async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut Asyn
     let mut key_to_popup = Vec::new();
     let mut answer_to_popup = Vec::new();
     let mut missed = 0;
+    let mut native_answer_to_draw = Vec::new();
+    let mut native_missing = 0;
+    let mut owner_kept_logical_focus = true;
     for _ in 0..COMPLETION_RUNS {
         if !display {
             force_frame(window, cx);
@@ -1002,6 +1005,40 @@ async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut Asyn
             }
             None => missed += 1,
         }
+        if ui::popup_window::enabled() {
+            let popup = cx
+                .update(|cx| {
+                    ui::popup_window::windows_of(window.into(), cx)
+                        .last()
+                        .copied()
+                })
+                .ok()
+                .flatten();
+            if let Some(popup) = popup {
+                // Measure a completed native GPUI draw, not merely the owner
+                // frame that saw the completion model. This is not compositor latency.
+                if cx
+                    .update_window(popup, |_, window, cx| window.draw(cx).clear())
+                    .is_ok()
+                {
+                    if let Some(answered) = code_intel_ui::bench::last_answer() {
+                        native_answer_to_draw.push(ms(Instant::now() - answered));
+                    }
+                } else {
+                    native_missing += 1;
+                }
+            } else {
+                native_missing += 1;
+            }
+        }
+        owner_kept_logical_focus &= cx
+            .update_window(window.into(), |_, window, cx| {
+                editor
+                    .read(cx)
+                    .focus_handle(cx)
+                    .contains_focused(window, cx)
+            })
+            .unwrap_or(false);
         let _ = cx.update_window(window.into(), |_, window, cx| {
             window.dispatch_keystroke(escape.clone(), cx);
             window.dispatch_keystroke(backspace.clone(), cx);
@@ -1025,6 +1062,21 @@ async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut Asyn
             }
         });
     }
+    if let Some(path) = env::shot_path() {
+        let popups = cx
+            .update(|cx| ui::popup_window::windows_of(window.into(), cx))
+            .unwrap_or_default();
+        for (index, popup) in popups.into_iter().enumerate() {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let target = path.with_file_name(format!("{stem}-native-popup-{index}.png"));
+            let _ = cx.update_window(popup, |_, window, cx| {
+                window.draw(cx).clear();
+                if let Err(error) = crate::shot::save(window, &target) {
+                    eprintln!("{} failed: {error}", app_info::env_name("SHOT"));
+                }
+            });
+        }
+    }
     env::marker(&format!(
         "completion {}",
         json!({
@@ -1032,6 +1084,9 @@ async fn completion(window: WindowHandle<Workbench>, latency: u64, cx: &mut Asyn
             "latency_ms": latency,
             "items": COMPLETION_ITEMS,
             "popups_missing": missed,
+            "native_popups_missing": native_missing,
+            "owner_kept_logical_focus": owner_kept_logical_focus,
+            "native_answer_to_draw_ms": stats(native_answer_to_draw),
             "key_to_popup_ms": stats(key_to_popup),
             "answer_to_popup_ms": stats(answer_to_popup),
         })

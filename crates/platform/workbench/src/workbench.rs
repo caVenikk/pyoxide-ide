@@ -390,7 +390,7 @@ impl Workbench {
             _ => None,
         };
         let hooks = match bench_intel {
-            Some(hook) if product.code_intel.is_empty() => vec![hook],
+            Some(hook) => vec![hook],
             _ => product.code_intel.clone(),
         };
         let code_intel = (!hooks.is_empty()).then(|| cx.new(|cx| CodeIntelView::new(hooks, cx)));

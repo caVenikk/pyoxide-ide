@@ -753,7 +753,7 @@ pub struct BranchesPopup {
     scroll: ScrollHandle,
     row_bounds: Vec<Rc<Cell<Bounds<Pixels>>>>,
     /// A branch's actions, open beside its row, and the row.
-    submenu: Option<(usize, Entity<ContextMenu>, Subscription)>,
+    submenu: Option<(usize, Entity<ContextMenu>, Vec<Subscription>)>,
     /// The gear's menu.
     settings: Option<(Entity<ContextMenu>, Subscription)>,
     dismissed: bool,
@@ -959,7 +959,16 @@ impl BranchesPopup {
             current.as_deref(),
         );
         window.focus(&self.focus);
-        let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
+        let native = ui::popup_window::enabled();
+        let menu = ContextMenu::popup(
+            items,
+            PopupOptions {
+                own_window: native,
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
         let subscription =
             cx.subscribe_in(&menu, window, |this, menu, _: &DismissEvent, window, cx| {
                 if this
@@ -974,7 +983,15 @@ impl BranchesPopup {
                     cx.notify();
                 }
             });
-        self.submenu = Some((row, menu, subscription));
+        let mut subscriptions = vec![subscription];
+        if native {
+            subscriptions.push(
+                cx.subscribe(&menu, |this, _, event: &ui::menu::ChosenEvent, cx| {
+                    this.run(event.0.boxed_clone(), cx)
+                }),
+            );
+        }
+        self.submenu = Some((row, menu, subscriptions));
         cx.notify();
     }
 
@@ -1618,6 +1635,19 @@ impl BranchesPopup {
 
 impl Render for BranchesPopup {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let native = ui::popup_window::displays(cx.entity_id(), window, cx);
+        let mut overlays = Vec::new();
+        if native {
+            overlays.extend(self.branch_menu_overlay(window, cx));
+            if let Some((menu, offset)) = self.open_menu() {
+                overlays.push(ui::menu::overlay_at(
+                    &menu,
+                    offset,
+                    gpui::Corner::TopLeft,
+                    window,
+                ));
+            }
+        }
         let height = self.height();
         let header_height = HEADER_TOP + FIELD_HEIGHT + HEADER_BOTTOM;
         let list_height = height - header_height - BOTTOM;
@@ -1663,13 +1693,14 @@ impl Render for BranchesPopup {
             .border_1()
             .border_color(theme.color(UiRole::PopupBorder))
             .bg(theme.color(UiRole::SurfaceRaised))
-            .shadow(ui::components::popup_shadow())
+            .when(!native, |d| d.shadow(ui::components::popup_shadow()))
             .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .text_color(theme.color(UiRole::Text))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(header)
             .child(list)
+            .children(overlays)
     }
 }
 

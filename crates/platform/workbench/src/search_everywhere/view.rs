@@ -104,8 +104,9 @@ impl SearchEverywhere {
             .border_color(theme.color(UiRole::Divider))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.frame.start_move(e.position);
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    let position = this.frame.pointer_position(e.position, window);
+                    this.frame.start_move(position);
                     cx.notify();
                 }),
             )
@@ -742,7 +743,7 @@ impl SearchEverywhere {
 
     /// The list over the popup that is open: under the header's right end
     /// (scope, filter, mask) or under the history button.
-    fn render_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn dropdown_body(&self, cx: &mut Context<Self>) -> Option<(AnyElement, f32, bool)> {
         let kind = self.dropdown.clone()?;
         let theme = cx.theme();
         let selected_bg = theme.color(UiRole::Selection);
@@ -900,12 +901,85 @@ impl SearchEverywhere {
         }
         let under_field = kind == Dropdown::History;
         let height = (rows.len().min(14) as f32) * 24.0 + 12.0;
+        let popup = div()
+            .id("search-everywhere-dropdown")
+            .debug_selector(|| "search-everywhere-dropdown".into())
+            .occlude()
+            .w(px(DROPDOWN_WIDTH))
+            .rounded(theme.metric(Metric::CornerRadius) * 2.0)
+            .border_1()
+            .border_color(theme.color(UiRole::PopupBorder))
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .child(
+                div()
+                    .id("search-everywhere-dropdown-rows")
+                    .max_h(px(height))
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .p(px(4.0))
+                    .children(rows),
+            )
+            .when(
+                matches!(kind, Dropdown::Scope | Dropdown::History | Dropdown::Masks),
+                |d| d.pointing_hand(),
+            )
+            .into_any_element();
+        Some((popup, height, under_field))
+    }
+
+    fn dismiss_native_dropdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let parent = ui::popup_window::parent_of(window.window_handle(), cx);
+        let focus = self.field.focus_handle(cx);
+        self.dropdown = None;
+        ui::popup_window::close_level(cx.entity_id(), 1, cx);
+        if let Some(parent) = parent {
+            cx.defer(move |cx| {
+                let _ = parent.update(cx, |_, window, _| window.focus(&focus));
+            });
+        }
+        cx.notify();
+    }
+
+    fn render_native_dropdown(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some((body, _, _)) = self.dropdown_body(cx) else {
+            return div().into_any_element();
+        };
+        div()
+            .key_context("SearchEverywhere")
+            .track_focus(&self.focus)
+            .on_key_down(|event, window, cx| {
+                if let Some(parent) = ui::popup_window::parent_of(window.window_handle(), cx) {
+                    let key = event.keystroke.clone();
+                    cx.defer(move |cx| {
+                        let _ =
+                            parent.update(cx, |_, window, cx| window.dispatch_keystroke(key, cx));
+                    });
+                    cx.stop_propagation();
+                }
+            })
+            .child(body)
+            .into_any_element()
+    }
+
+    fn render_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (body, height, under_field) = self.dropdown_body(cx)?;
+        let body = if ui::popup_window::enabled() {
+            ui::popup_window::surface(
+                &cx.entity(),
+                1,
+                gpui::size(px(DROPDOWN_WIDTH), px(height)),
+                self.focus.clone(),
+                Self::render_native_dropdown,
+                Self::dismiss_native_dropdown,
+                false,
+            )
+        } else {
+            body
+        };
         Some(
             deferred(
                 div()
-                    .id("search-everywhere-dropdown")
-                    .debug_selector(|| "search-everywhere-dropdown".into())
-                    .occlude()
                     .absolute()
                     .top(px(if under_field {
                         HEADER_HEIGHT + FIELD_HEIGHT
@@ -915,32 +989,10 @@ impl SearchEverywhere {
                     .when(under_field, |d| d.left(px(8.0)))
                     .when(!under_field, |d| d.right(px(8.0)))
                     .w(px(DROPDOWN_WIDTH))
-                    .rounded(theme.metric(Metric::CornerRadius) * 2.0)
-                    .border_1()
-                    .border_color(theme.color(UiRole::PopupBorder))
-                    .bg(theme.color(UiRole::SurfaceRaised))
-                    .shadow(ui::components::popup_shadow())
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        this.dropdown = None;
-                        cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .id("search-everywhere-dropdown-rows")
-                            .max_h(px(height))
-                            .overflow_y_scroll()
-                            .flex()
-                            .flex_col()
-                            .p(px(4.0))
-                            .children(rows),
+                    .on_mouse_down_out(
+                        cx.listener(|this, _, window, cx| this.dismiss_native_dropdown(window, cx)),
                     )
-                    // The hand over the list of a list popup
-                    // (`PopupChooserBuilder`, `ListPopupImpl`); the check
-                    // box lists of the filters keep the arrow.
-                    .when(
-                        matches!(kind, Dropdown::Scope | Dropdown::History | Dropdown::Masks),
-                        |d| d.pointing_hand(),
-                    ),
+                    .child(body),
             )
             .with_priority(1)
             .into_any_element(),
@@ -1058,6 +1110,9 @@ fn highlight(
 
 impl Render for SearchEverywhere {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.dropdown.is_none() {
+            ui::popup_window::close_level(cx.entity_id(), 1, cx);
+        }
         if !self.open {
             return div().into_any_element();
         }
@@ -1065,7 +1120,7 @@ impl Render for SearchEverywhere {
         // A quarter down the window, as the reference opens it.
         let short = px(HEADER_HEIGHT + FIELD_HEIGHT + 2.0);
         self.frame
-            .set_top((window.viewport_size().height / 4.0 - short / 2.0).max(px(16.0)));
+            .set_top((self.frame.viewport(window).height / 4.0 - short / 2.0).max(px(16.0)));
         self.frame.set_collapsed(collapsed.then_some(short));
         let context = if self.tab == Tab::Text {
             "SearchEverywhere SearchEverywhereText"
