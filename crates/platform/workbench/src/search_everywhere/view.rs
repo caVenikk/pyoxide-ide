@@ -104,8 +104,9 @@ impl SearchEverywhere {
             .border_color(theme.color(UiRole::Divider))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.frame.start_move(e.position);
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    let position = this.frame.pointer_position(e.position, window);
+                    this.frame.start_move(position);
                     cx.notify();
                 }),
             )
@@ -1065,7 +1066,7 @@ impl Render for SearchEverywhere {
         // A quarter down the window, as the reference opens it.
         let short = px(HEADER_HEIGHT + FIELD_HEIGHT + 2.0);
         self.frame
-            .set_top((window.viewport_size().height / 4.0 - short / 2.0).max(px(16.0)));
+            .set_top((self.frame.viewport(window).height / 4.0 - short / 2.0).max(px(16.0)));
         self.frame.set_collapsed(collapsed.then_some(short));
         let context = if self.tab == Tab::Text {
             "SearchEverywhere SearchEverywhereText"

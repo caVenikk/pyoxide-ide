@@ -669,6 +669,7 @@ impl SearchEverywhere {
             .and_then(|i| self.rows.get(i))
             .and_then(row_key)
             .map(|key| (self.tab, text.clone(), key));
+        ui::popup_window::close(cx.entity_id(), cx);
         self.open = false;
         self.cancel_search();
         self.debounce = None;
@@ -1489,4 +1490,10 @@ popup_actions! {
     ToggleWords => toggle_words_action,
     ToggleRegex => toggle_regex_action,
     TogglePreview => toggle_preview_action,
+}
+
+impl ui::popup_window::Popup for SearchEverywhere {
+    fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(true, window, cx);
+    }
 }

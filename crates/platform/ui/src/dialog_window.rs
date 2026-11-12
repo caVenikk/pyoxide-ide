@@ -30,7 +30,7 @@
 //!
 //! A popup of a dialog that may reach beyond it (the reference's popups
 //! are windows of their own) opens with [`open_popup`]: a borderless window
-//! fitted to its content, a child of the dialog in the same way.
+//! fitted to its content, ordered above the dialog without a native child relationship.
 //!
 //! Dialog and popup windows work on the test platform too, and open
 //! without taking the focus when [`DialogOptions::activate`] is off
@@ -420,7 +420,7 @@ pub fn open_popup(
     cx: &mut App,
     build: impl FnOnce(&mut Window, &mut App) -> AnyView,
 ) -> Option<WindowHandle<PopupHost>> {
-    open_popup_window(parent, at, max, activate, true, cx, build)
+    open_popup_window(parent, at, max, activate, false, cx, build)
 }
 
 /// Opens a message dialog drawn without a title bar (the reference's
@@ -503,6 +503,7 @@ fn open_popup_window(
     );
     let parent_number = native::window_number(parent);
     let _ = popup.update(cx, |_, window, _| {
+        native::popup_behavior(window, activate);
         if child {
             native::attach(parent, window);
         } else {
@@ -685,7 +686,7 @@ pub fn blocker(window: &Window, cx: &App) -> Option<AnyElement> {
 }
 
 #[cfg(target_os = "macos")]
-mod native {
+pub(crate) mod native {
     use gpui::Window;
     use objc::runtime::Object;
     use objc::{msg_send, sel, sel_impl};
@@ -732,6 +733,87 @@ mod native {
             let _: () = msg_send![ns, setContentSize: content];
             let _: () = msg_send![ns, setFrameTopLeftPoint: top_left];
             let _: () = msg_send![ns, invalidateShadow];
+        }
+    }
+
+    /// Keep capture mode from hiding panels; background runs stay below unrelated apps.
+    #[allow(unexpected_cfgs)]
+    pub fn popup_behavior(window: &Window, foreground: bool) {
+        if !crate::pointer::native() {
+            return;
+        }
+        let Some(ns) = ns_window(window) else {
+            return;
+        };
+        // SAFETY: a live NSPanel on the main thread.
+        unsafe {
+            let _: () = msg_send![ns, setHidesOnDeactivate: false];
+            if !foreground {
+                let _: () = msg_send![ns, setLevel: 0isize];
+            }
+        }
+    }
+
+    /// The system screenshot picker temporarily owns activation while menus stay visible.
+    #[allow(unexpected_cfgs)]
+    pub fn capturing() -> bool {
+        if !crate::pointer::native() {
+            return false;
+        }
+        // SAFETY: AppKit object access on the UI thread; the UTF-8 pointer is borrowed only for this expression.
+        unsafe {
+            let workspace: *mut Object = msg_send![objc::class!(NSWorkspace), sharedWorkspace];
+            let app: *mut Object = msg_send![workspace, frontmostApplication];
+            if app.is_null() {
+                return false;
+            }
+            let identifier: *mut Object = msg_send![app, bundleIdentifier];
+            if identifier.is_null() {
+                return false;
+            }
+            let text: *const std::ffi::c_char = msg_send![identifier, UTF8String];
+            !text.is_null()
+                && matches!(
+                    std::ffi::CStr::from_ptr(text).to_bytes(),
+                    b"com.apple.screencaptureui" | b"com.apple.screenshot.launcher"
+                )
+        }
+    }
+
+    /// Places an independent popup in screen coordinates without activation.
+    #[allow(unexpected_cfgs)]
+    pub fn place(
+        window: &mut Window,
+        origin: gpui::Point<gpui::Pixels>,
+        size: gpui::Size<gpui::Pixels>,
+        reference: Option<&Window>,
+    ) {
+        use cocoa_types::{NSPoint, NSSize};
+        if !crate::pointer::native() {
+            window.resize(size);
+            return;
+        }
+        let Some(ns) = ns_window(window) else { return };
+        let reference = reference.and_then(ns_window).unwrap_or(ns);
+        // GPUI 0.2.2 exposes display-local top-left coordinates. Use the
+        // opening window's current screen, including its global AppKit origin.
+        // SAFETY: live AppKit windows on the main thread; geometry is in points.
+        unsafe {
+            let screen: *mut Object = msg_send![reference, screen];
+            if screen.is_null() {
+                return;
+            }
+            let frame: cocoa_types::NSRect = msg_send![screen, frame];
+            let top = NSPoint {
+                x: frame.origin.x + f64::from(f32::from(origin.x)),
+                y: frame.origin.y + frame.size.height - f64::from(f32::from(origin.y)),
+            };
+            let content = NSSize {
+                width: f64::from(f32::from(size.width)),
+                height: f64::from(f32::from(size.height)),
+            };
+            let _: () = msg_send![ns, setContentSize: content];
+            let _: () = msg_send![ns, setFrameTopLeftPoint: top];
         }
     }
 
@@ -828,7 +910,19 @@ mod native {
 }
 
 #[cfg(not(target_os = "macos"))]
-mod native {
+pub(crate) mod native {
+    pub fn popup_behavior(_: &gpui::Window, _: bool) {}
+    pub fn capturing() -> bool {
+        false
+    }
+    pub fn place(
+        window: &mut gpui::Window,
+        _: gpui::Point<gpui::Pixels>,
+        size: gpui::Size<gpui::Pixels>,
+        _: Option<&gpui::Window>,
+    ) {
+        window.resize(size);
+    }
     pub fn attach(_: &gpui::Window, _: &gpui::Window) {}
 
     pub fn window_number(_: &gpui::Window) -> Option<isize> {

@@ -816,6 +816,17 @@ fn run_commands_and_shot(
             });
             parent = child;
         }
+        let native = cx
+            .update(|cx| ui::popup_window::windows_of(window.into(), cx))
+            .unwrap_or_default();
+        for (index, child) in native.into_iter().enumerate() {
+            let child_path = path.with_file_name(format!("{stem}-native-popup-{index}.png"));
+            let _ = cx.update_window(child, |_, window, _| crate::shot::request_display(window));
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let _ = cx.update_window(child, |_, window, _| save(window, &child_path));
+        }
         let _ = cx.update(|cx| cx.quit());
     })
     .detach();

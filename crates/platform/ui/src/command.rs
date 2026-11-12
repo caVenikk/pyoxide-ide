@@ -118,6 +118,7 @@ pub fn invoke(
     // dialog, or to a popup open over it (queries above still read the
     // window's own state).
     let target = crate::dialog_window::innermost(window.window_handle(), cx);
+    let target = crate::popup_window::innermost(target, cx);
     if target != window.window_handle() {
         return target
             .update(cx, |_, window, cx| {
@@ -141,6 +142,7 @@ pub fn invoke(
     if !window.is_action_available(action.as_ref(), cx) {
         for dialog in crate::dialog_window::non_modal_of(window.window_handle(), cx) {
             let target = crate::dialog_window::innermost(dialog, cx);
+            let target = crate::popup_window::innermost(target, cx);
             let ran = target.update(cx, |_, window, cx| {
                 let available = window.is_action_available(action.as_ref(), cx);
                 if available {

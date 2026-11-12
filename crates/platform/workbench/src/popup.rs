@@ -13,7 +13,7 @@ pub use held_drag::{HeldDrag, track_held_drag};
 use gpui::{
     AnyElement, App, Bounds, Context, CursorStyle, Div, Entity, HitboxBehavior, InteractiveElement,
     IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Size, Styled, Window,
-    canvas, div, point, px, size,
+    canvas, div, point, prelude::*, px, size,
 };
 use serde::{Deserialize, Serialize};
 use themes::{Metric, UiRole};
@@ -75,6 +75,8 @@ pub struct PopupFrame {
     /// Shown with its fixed part only, this high (Search Everywhere with
     /// nothing to list); its height is then not resized.
     collapsed: Option<Pixels>,
+    native_parent: Option<(Point<Pixels>, Size<Pixels>)>,
+    native_window: Option<gpui::WindowId>,
 }
 
 impl PopupFrame {
@@ -88,6 +90,8 @@ impl PopupFrame {
             drag: HeldDrag::default(),
             last: None,
             collapsed: None,
+            native_parent: None,
+            native_window: None,
         }
     }
 
@@ -147,6 +151,24 @@ impl PopupFrame {
             .clamp(px(0.0), (viewport.width - width).max(px(0.0)));
         let y = (self.top + self.offset.y).clamp(px(0.0), (viewport.height - height).max(px(0.0)));
         Bounds::new(point(x, y), size(width, height))
+    }
+
+    /// Uses owner-window coordinates while a frame is hosted in its own window.
+    pub fn pointer_position(&self, position: Point<Pixels>, window: &Window) -> Point<Pixels> {
+        if self.native_window != Some(window.window_handle().window_id()) {
+            return position;
+        }
+        self.native_parent.map_or(position, |(origin, _)| {
+            ui::popup_window::screen_origin(window) + position - origin
+        })
+    }
+
+    pub fn viewport(&self, window: &Window) -> Size<Pixels> {
+        if self.native_window != Some(window.window_handle().window_id()) {
+            return window.viewport_size();
+        }
+        self.native_parent
+            .map_or(window.viewport_size(), |(_, size)| size)
     }
 
     /// Starts moving the popup with the mouse (from its header).
@@ -227,7 +249,7 @@ impl PopupFrame {
     /// Draws the popup: `content` in a raised, rounded frame at its bounds,
     /// with the resize grips along the edges and the window-wide mouse
     /// tracking of its drags. `frame` finds the frame in the owner.
-    pub fn render<T: 'static>(
+    pub fn render<T: ui::popup_window::Popup>(
         &mut self,
         id: &'static str,
         content: impl IntoElement,
@@ -235,25 +257,59 @@ impl PopupFrame {
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Div {
-        let viewport = window.viewport_size();
-        let bounds = self.bounds(viewport);
-        self.last = Some(bounds);
+        let native = ui::popup_window::displays(cx.entity_id(), window, cx);
+        let viewport = if native {
+            self.native_parent
+                .map_or(window.viewport_size(), |(_, size)| size)
+        } else {
+            window.viewport_size()
+        };
+        let owner_bounds = self.bounds(viewport);
+        self.last = Some(owner_bounds);
+        if ui::popup_window::enabled() && !native {
+            self.native_parent = Some((ui::popup_window::screen_origin(window), viewport));
+            return div()
+                .absolute()
+                .left(owner_bounds.origin.x)
+                .top(owner_bounds.origin.y)
+                .w(owner_bounds.size.width)
+                .h(owner_bounds.size.height)
+                .child(ui::popup_window::frame(&cx.entity(), owner_bounds.size));
+        }
+        let bounds = if native {
+            self.native_window = Some(window.window_handle().window_id());
+            if let Some((origin, _)) = self.native_parent {
+                let bounds = Bounds::new(origin + owner_bounds.origin, owner_bounds.size);
+                window.defer(cx, move |window, _| ui::popup_window::place(window, bounds));
+            }
+            Bounds::new(point(px(0.0), px(0.0)), owner_bounds.size)
+        } else {
+            owner_bounds
+        };
         let theme = cx.theme();
         let owner = cx.entity();
         let cursor = match self.drag.get() {
             Some(Drag::Resize { edges, .. }) => Some(edges.cursor()),
             _ => None,
         };
-        let tracking = track_held_drag(
+        let tracking = held_drag::track_held_drag_in(
             owner.clone(),
             move |this: &mut T| &mut frame(this).drag,
             move |this, mouse, _| frame(this).drag_to(mouse, viewport),
             |_, _| {},
             cursor,
+            native
+                .then(|| self.native_parent.map(|(origin, _)| origin))
+                .flatten(),
         );
-        let grips = grips(owner, move |this: &mut T, edges, mouse| {
-            frame(this).start_resize(edges, mouse)
-        });
+        let coordinate_origin = native
+            .then(|| self.native_parent.map(|(origin, _)| origin))
+            .flatten();
+        let grips = grips_in(
+            owner,
+            coordinate_origin,
+            move |this: &mut T, edges, mouse| frame(this).start_resize(edges, mouse),
+        );
         div()
             .absolute()
             .occlude()
@@ -272,7 +328,7 @@ impl PopupFrame {
                     .border_1()
                     .border_color(theme.color(UiRole::PopupBorder))
                     .bg(theme.color(UiRole::SurfaceRaised))
-                    .shadow(ui::components::popup_shadow())
+                    .when(!native, |d| d.shadow(ui::components::popup_shadow()))
                     .child(content),
             )
             .children(grips)
@@ -303,6 +359,14 @@ impl Edges {
 /// on one calls `start` with the edges it moves and the mouse position.
 pub(crate) fn grips<T: 'static>(
     owner: Entity<T>,
+    start: impl Fn(&mut T, Edges, Point<Pixels>) + Clone + 'static,
+) -> Vec<AnyElement> {
+    grips_in(owner, None, start)
+}
+
+fn grips_in<T: 'static>(
+    owner: Entity<T>,
+    origin: Option<Point<Pixels>>,
     start: impl Fn(&mut T, Edges, Point<Pixels>) + Clone + 'static,
 ) -> Vec<AnyElement> {
     let edges = |left, right, top, bottom| Edges {
@@ -343,7 +407,10 @@ pub(crate) fn grips<T: 'static>(
                     window.prevent_default();
                     cx.stop_propagation();
                     owner.update(cx, |this, cx| {
-                        start(this, e, ev.position);
+                        let position = origin.map_or(ev.position, |origin| {
+                            ui::popup_window::screen_origin(window) + ev.position - origin
+                        });
+                        start(this, e, position);
                         cx.notify();
                     });
                 });

@@ -106,8 +106,9 @@ impl FindInFiles {
             .border_color(theme.color(UiRole::Divider))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.frame.start_move(e.position);
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    let position = this.frame.pointer_position(e.position, window);
+                    this.frame.start_move(position);
                     cx.notify();
                 }),
             )

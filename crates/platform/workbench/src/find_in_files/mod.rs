@@ -863,6 +863,7 @@ impl FindInFiles {
         if !self.open {
             return;
         }
+        ui::popup_window::close(cx.entity_id(), cx);
         self.open = false;
         self.dropdown = None;
         self.frame.cancel_drag();
@@ -1831,5 +1832,11 @@ mod tests {
             assert_eq!(NamedScope::from_name(s.name()), Some(s));
         }
         assert_eq!(NamedScope::from_name("All Places"), None);
+    }
+}
+
+impl ui::popup_window::Popup for FindInFiles {
+    fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(true, window, cx);
     }
 }

@@ -17,6 +17,7 @@ use workbench::popup::{PopupFrame, no_move};
 /// A popup with a header that moves it and a tab in the header.
 struct Owner {
     frame: PopupFrame,
+    focus: gpui::FocusHandle,
     tab_clicks: usize,
 }
 
@@ -68,7 +69,8 @@ struct H<'a> {
 impl H<'_> {
     fn new(cx: &mut TestAppContext) -> H<'_> {
         cx.update(|cx| ui::theme::init(cx, themes::ThemeKind::Dark));
-        let window = cx.add_window(|_, _| Owner {
+        let window = cx.add_window(|_, cx| Owner {
+            focus: cx.focus_handle(),
             frame: PopupFrame::new(
                 size(px(600.0), px(400.0)),
                 size(px(300.0), px(200.0)),
@@ -244,4 +246,15 @@ fn the_window_losing_the_focus_ends_a_move(cx: &mut TestAppContext) {
     // The button is still held (released in the other application).
     h.send(vec![drag_to(at + offset(90.0, 70.0))]);
     assert_eq!(h.popup(), start + offset(30.0, 20.0));
+}
+
+impl gpui::Focusable for Owner {
+    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+}
+impl ui::popup_window::Popup for Owner {
+    fn dismiss_popup(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        ui::popup_window::close(cx.entity_id(), cx);
+    }
 }
