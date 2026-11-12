@@ -1009,6 +1009,7 @@ impl Workbench {
         if let Some(open) = &self.branch_ui.popup {
             out.push(popup_overlay(open.popup.clone(), below, window));
             let popup = open.popup.read(cx);
+            out.extend(popup.branch_menu_overlay(window, cx));
             if let Some((menu, offset)) = popup.open_menu() {
                 out.push(ui::menu::overlay_at(
                     &menu,

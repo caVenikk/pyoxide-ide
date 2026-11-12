@@ -37,7 +37,7 @@
 //! closes (`ListPopupImpl` without `showSubmenuOnHover` keeps its child
 //! open; `PopupInlineActionsSupportImpl.performAction`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -1840,6 +1840,7 @@ impl ContextMenu {
                 };
                 let submenu = (open && owner).then(|| Beside {
                     child: self.render_level(level + 1, cx),
+                    anchor: None,
                     above: px(1.0 + m.pad_top),
                     level: level + 1,
                     drawn: self.submenu_bounds.clone(),
@@ -2222,6 +2223,7 @@ impl ContextMenu {
 /// out on its own, so opening it neither widens nor moves the menu.
 struct Beside {
     child: AnyElement,
+    anchor: Option<Rc<Cell<Bounds<Pixels>>>>,
     /// From the top of the submenu to its first row: the border and the
     /// space above the rows.
     above: Pixels,
@@ -2276,6 +2278,7 @@ impl gpui::Element for Beside {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let row = self.anchor.as_ref().map_or(row, |anchor| anchor.get());
         let size = self.child.layout_as_root(
             gpui::size(
                 gpui::AvailableSpace::MaxContent,
@@ -2436,6 +2439,45 @@ impl Render for ContextMenu {
 /// else, with a backdrop over the window that closes it on a click.
 pub fn overlay(menu: &Entity<ContextMenu>, position: Point<Pixels>, window: &Window) -> AnyElement {
     overlay_at(menu, position, Corner::TopLeft, window)
+}
+
+/// Draw a menu beside a live parent row. The anchor is read during prepaint,
+/// after the parent's layout and scrolling have established window coordinates.
+/// All coordinates are logical pixels; the renderer applies the display scale.
+pub fn overlay_beside(
+    menu: &Entity<ContextMenu>,
+    row: Rc<Cell<Bounds<Pixels>>>,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    let size = window.viewport_size();
+    let dismiss = menu.clone();
+    let dismiss_right = menu.clone();
+    let above = px(1.0 + menu.read(cx).metrics.pad_top);
+    deferred(
+        anchored().position(point(px(0.0), px(0.0))).child(
+            div()
+                .id("menu-backdrop")
+                .occlude()
+                .w(size.width)
+                .h(size.height)
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    dismiss.update(cx, |m, cx| m.dismiss(window, cx));
+                })
+                .on_mouse_down(MouseButton::Right, move |_, window, cx| {
+                    dismiss_right.update(cx, |m, cx| m.dismiss(window, cx));
+                })
+                .child(Beside {
+                    child: menu.clone().into_any_element(),
+                    anchor: Some(row),
+                    above,
+                    level: 0,
+                    drawn: Rc::default(),
+                }),
+        ),
+    )
+    .with_priority(2)
+    .into_any_element()
 }
 
 /// Like [`overlay`], with the menu's `corner` at `position`: a popup of a
