@@ -23,7 +23,7 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 - Rust: make sure `cargo` is on `PATH` (the lead says if the machine needs a prefix); `export CARGO_BUILD_JOBS=4` when several agents build at once; own `target/` in the worktree.
 - Reuse what exists (`ui::dialog_window` incl. non-modal, `ui::form`, `editor::field`, `ui::menu`, `ui::tree_guides`, the tool window registry `workbench/src/tool_windows.rs`, theme roles, navigation history, file sync hooks, `run-config`). Do not build a second one.
 - Layering: platform crates know no language (ADR 0005, `python3 scripts/check-layers.py`); Python specifics come through product hooks.
-- Hot shared files (`workbench/src/workbench.rs`, `ui/src/menu.rs`, the editor crate): small hunks, logic in your own modules, rebase on `origin/main` before every push, keep everyone's changes.
+- Hot shared files (`workbench/src/workbench.rs`, `ui/src/menu.rs`, the editor crate): small hunks, logic in your own modules, rebase on the PR target branch before every push, keep everyone's changes.
 - Every user-visible action is a registry command with the reference's bindings in the area's file of `workbench/keymaps/macos/` and `default/` (`<area>.toml`; the order of the files is part of the keymap, see `docs/agent-workflow.md`) and a keystroke check in the same area's module `workbench/tests/it/keymap/<area>.rs`.
 - Never block the UI thread: file I/O and analysis off the UI thread, cancellable, incremental.
 - Windows: items used only under `cfg(unix)` / `cfg(windows)` are gated like their users (no blanket allow); native paths in anything shown.
@@ -37,13 +37,13 @@ You work on one GitHub issue of Pyoxide IDE (repo `caVenikk/pyoxide-ide`, a Rust
 
 ## Commits, checkpoint, PR
 - Conventional commits (`feat(area): ...`), `cargo fmt --all` before each. NEVER a `Co-Authored-By` trailer.
-- Before a push: `scripts/check.sh` (what CI runs: fmt, clippy for the host and for Windows, tests, doctests, progress, layer and notice checks; `--quick` for the changed crates and their dependents while iterating, the full run before the last push). Tests run under cargo-nextest (one process per test; `.config/nextest.toml`): a test must pass in a fresh process on its own, and a flaky test is fixed, not added to the retry list.
+- Before a task push: `scripts/check.sh --quick --base origin/<target-branch>` plus the focused regression/scenario. The target may be an `integration/*` batch branch. Unknown/shared build changes require full scope. Whole-workspace validation runs in CI on the batch PR to main; do not repeat it locally for every push. Run a full local check when integration risk warrants it. Tests run under cargo-nextest in fresh processes; fix flaky synchronization rather than adding blanket retries. See ADR 0024 and `docs/agent-workflow.md`.
 - Checkpoint (if the lead asked for one): after stage 1 commit, do NOT push, report and end; the lead resumes you.
-- Otherwise: push only your branch, open ONE ready PR (`Closes #N`, body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`). Never merge.
+- Otherwise: push only your branch and open ONE ready PR against the lead-specified target. Use `Refs #N` for an integration task and `Closes #N` for a direct main PR. Describe the change and validation without generated-by or co-author footers. Never merge.
 - No secrets or personal data in code, tests, commits, PR text; screenshots of real projects stay local.
 
 ## Pause protocol
-- On "стоп": commit WIP as `wip: paused, not checked` (no checks, no push), report in <= 5 lines, end. On "продолжай": rebase on origin/main if it moved, continue.
+- On "стоп": commit WIP as `wip: paused, not checked` (no checks, no push), report in <= 5 lines, end. On "продолжай": rebase on the actual PR target if it moved, continue.
 
 ## Report format
 - FIRST line: `STATUS: DONE`, `STATUS: PARTIAL` or `STATUS: BLOCKED` + one sentence.

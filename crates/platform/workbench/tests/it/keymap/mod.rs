@@ -213,8 +213,15 @@ impl H<'_> {
         out
     }
 
+    /// The workbench state (a query: no frame is drawn).
     fn state(&mut self) -> Value {
-        self.invoke("workbench.state", json!(null))
+        self.cx.run_until_parked();
+        self.cx
+            .update_window(self.window.into(), |_, window, cx| {
+                ui::command::invoke("workbench.state", json!(null), window, cx)
+            })
+            .unwrap()
+            .unwrap()
     }
 
     fn press(&mut self, keys: &str) {

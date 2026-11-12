@@ -4,7 +4,7 @@ on:
     branches: [main]
   pull_request:
     # ready_for_review: a draft that becomes ready gets its full run.
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
   workflow_dispatch:
 
 # One run per pull request: a new push cancels the run of the one before
@@ -14,33 +14,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Whether the OS matrix and the integration tests run: on main, and for a
-  # pull request that is not a draft and changes more than documentation.
-  # When they do not, their jobs still start and pass without running
-  # anything: the required checks need a result, and a matrix job skipped
-  # by `if` reports under the job's name, not under each OS's.
-  #
-  # scripts/ci-scope.sh decides, and scripts/test-ci-scope.sh tests it. The
-  # draft state is read from the API when the job runs, not taken from the
-  # event, which carries the state of the moment it was queued: a push to a
-  # draft and `gh pr ready` queue two runs, and when the stale one survived,
-  # a ready pull request merged on checks that tested nothing (#335). A job
-  # that skipped because of a draft reads the state once more as its last
-  # step and fails when the pull request became ready in the meantime, so a
-  # skip never stays green next to a ready pull request.
+  # The immutable plan binds every job to the live PR base/head pair.
   scope:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     outputs:
-      full: ${{ steps.scope.outputs.full }}
-      draft: ${{ steps.scope.outputs.draft }}
+      plan: ${{ steps.scope.outputs.plan }}
+      mode: ${{ steps.scope.outputs.mode }}
+      matrix: ${{ steps.scope.outputs.matrix }}
+      integration: ${{ steps.scope.outputs.integration }}
+      run_checks: ${{ steps.scope.outputs.run_checks }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # The merge commit and its parents: HEAD^1 is the base branch.
           fetch-depth: 2
+      - uses: dtolnay/rust-toolchain@stable
       - id: scope
         env:
           EVENT: ${{ github.event_name }}
@@ -49,11 +40,12 @@ jobs:
         run: bash scripts/ci-scope.sh scope
 
   check:
+    name: check (${{ matrix.os }})
     needs: scope
+    if: needs.scope.outputs.run_checks == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -72,27 +64,15 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
-      - name: Skipped
-        if: needs.scope.outputs.full != 'true'
-        run: echo "Draft or documentation only, see job scope."
-      # The last word on a draft skip, see job scope.
       - uses: actions/checkout@v4
-        if: needs.scope.outputs.draft == 'true'
-        with:
-          sparse-checkout: scripts/ci-scope.sh
-          sparse-checkout-cone-mode: false
-      - name: Still a draft
-        if: needs.scope.outputs.draft == 'true'
+      - name: Frozen check plan
         env:
-          GH_TOKEN: ${{ github.token }}
-          PULL_REQUEST: ${{ github.event.pull_request.number }}
-        run: bash scripts/ci-scope.sh recheck
-      - uses: actions/checkout@v4
-        if: needs.scope.outputs.full == 'true'
+          PLAN: ${{ needs.scope.outputs.plan }}
+        run: printf '%s' "$PLAN" > .ci-plan.json
       # GPUI (the UI toolkit, ADR 0006) links X11, Wayland, xkbcommon and
       # fontconfig on Linux; tests use its headless test platform.
       - name: Linux packages for GPUI
-        if: needs.scope.outputs.full == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
           # Provisioning can still rewrite APT sources after the runner starts.
@@ -150,7 +130,6 @@ jobs:
             pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan1
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.scope.outputs.full == 'true'
         with:
           components: rustfmt, clippy
       # Only main saves the cache; a pull request restores main's. Saved
@@ -159,51 +138,61 @@ jobs:
       # build settings starts a new cache instead of restoring one built
       # differently (which would never be saved again).
       - uses: Swatinem/rust-cache@v2
-        if: needs.scope.outputs.full == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Tests run under cargo-nextest (.config/nextest.toml). The action is
       # pinned to a commit and installs a checksummed prebuilt binary.
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
-        if: needs.scope.outputs.full == 'true'
         with:
           tool: cargo-nextest@0.9.148
-      - name: fmt
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh fmt
       - name: clippy
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh clippy
+        run: bash scripts/check.sh --plan .ci-plan.json clippy
       - name: build tests
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh build
+        run: bash scripts/check.sh --plan .ci-plan.json build
       - name: tests
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh test
+        run: bash scripts/check.sh --plan .ci-plan.json test
       # Terminal throughput (ADR 0014): a flood through the PTY (ConPTY on
       # Windows) into the emulator, and the emulator alone; the numbers go
       # to the log. Reuses the test build of the step above.
       - name: terminal throughput
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh throughput
+        run: bash scripts/check.sh --plan .ci-plan.json throughput
       # nextest does not run doctests.
       - name: doctests
-        if: needs.scope.outputs.full == 'true'
-        run: bash scripts/check.sh doc
+        run: bash scripts/check.sh --plan .ci-plan.json doc
       - uses: actions/upload-artifact@v4
-        if: always() && needs.scope.outputs.full == 'true'
+        if: always()
         with:
           name: junit-${{ matrix.os }}
+          overwrite: true
           path: |
             target/nextest/ci/junit.xml
             target/cargo-timings/cargo-timing.html
           retention-days: 14
           if-no-files-found: ignore
 
+      - name: Record completed platform checks
+        if: needs.scope.outputs.mode == 'full'
+        env:
+          CI_OS: ${{ matrix.os }}
+        run: |
+          python3 -c 'import json, os, subprocess; from pathlib import Path; Path("receipt.json").write_text(json.dumps({"os": os.environ["CI_OS"], "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(), "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}))'
+      - uses: actions/upload-artifact@v4
+        if: needs.scope.outputs.mode == 'full'
+        with:
+          name: ci-receipt-${{ matrix.os }}
+          overwrite: true
+          path: receipt.json
+          retention-days: 7
+          if-no-files-found: error
+
   progress:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: bash scripts/check.sh fmt
       # The feature matrix, one file per feature in replica/features/
       # (ADR 0020). The report is not committed: it goes to the job summary
       # here and is published from main by progress.yml.
@@ -215,20 +204,20 @@ jobs:
       # notices/ holds the third-party notices, one file per entry (ADR 0019).
       - run: python3 scripts/notice.py --check
       - run: bash scripts/test-ci-scope.sh
+      - run: python3 scripts/test_ci_plan.py
 
   # Ignored tests against real databases (docs/testing-databases.md). The
   # Oracle Client backend is excluded: it needs Oracle Instant Client.
   integration:
     needs: scope
+    if: needs.scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     services:
-      # An empty image starts no container: drafts and documentation-only
-      # pull requests do not pull the database images.
       postgres:
-        image: ${{ needs.scope.outputs.full == 'true' && 'postgres:18-alpine' || '' }}
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: pyoxide
           POSTGRES_PASSWORD: pyoxide
@@ -238,7 +227,7 @@ jobs:
           --health-cmd "pg_isready -U pyoxide -d pyoxide"
           --health-interval 5s --health-timeout 5s --health-retries 30
       oracle:
-        image: ${{ needs.scope.outputs.full == 'true' && 'gvenzl/oracle-free:23-slim-faststart' || '' }}
+        image: gvenzl/oracle-free:23-slim-faststart
         env:
           ORACLE_PASSWORD: pyoxide
           APP_USER: pyoxide
@@ -250,37 +239,32 @@ jobs:
     env:
       PYOXIDE_DB_PASSWORD: pyoxide
     steps:
-      - name: Skipped
-        if: needs.scope.outputs.full != 'true'
-        run: echo "Draft or documentation only, see job scope."
-      # The last word on a draft skip, see job scope.
       - uses: actions/checkout@v4
-        if: needs.scope.outputs.draft == 'true'
-        with:
-          sparse-checkout: scripts/ci-scope.sh
-          sparse-checkout-cone-mode: false
-      - name: Still a draft
-        if: needs.scope.outputs.draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PULL_REQUEST: ${{ github.event.pull_request.number }}
-        run: bash scripts/ci-scope.sh recheck
-      - uses: actions/checkout@v4
-        if: needs.scope.outputs.full == 'true'
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.scope.outputs.full == 'true'
       - uses: Swatinem/rust-cache@v2
-        if: needs.scope.outputs.full == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - if: needs.scope.outputs.full == 'true'
-        run: >-
+      - run: >-
           cargo test -p db-postgres -p db-sqlite -p db-oracle-thin -p db-service
           --config 'profile.dev.package."*".opt-level=0' -- --ignored --skip bench_
+
+      - name: Record completed database checks
+        if: needs.scope.outputs.mode == 'full'
+        run: |
+          python3 -c 'import json, subprocess; from pathlib import Path; Path("receipt.json").write_text(json.dumps({"os": "integration", "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(), "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}))'
+      - uses: actions/upload-artifact@v4
+        if: needs.scope.outputs.mode == 'full'
+        with:
+          name: ci-receipt-integration
+          overwrite: true
+          path: receipt.json
+          retention-days: 7
+          if-no-files-found: error
 
   # Downloadable pyoxide-db builds (workflow artifacts), e.g. to run
   # `pyoxide-db diagnose` on a machine without a Rust toolchain.
   binaries:
+    name: binaries (${{ matrix.os }})
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
@@ -301,8 +285,58 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p db-cli
+      - name: CLI smoke
+        shell: bash
+        run: |
+          target/release/${{ matrix.file }} --json --backend sqlite --path :memory: query "select 42 as answer" > cli-smoke.json
+          python3 -c 'import json; from pathlib import Path; result = json.loads(Path("cli-smoke.json").read_text()); assert result["result"]["rows"] == [[{"type": "int", "value": 42}]], result'
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
+          overwrite: true
           path: target/release/${{ matrix.file }}
+          if-no-files-found: error
+
+  required:
+    name: CI required
+    if: always()
+    needs: [scope, check, progress, integration, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success' && needs.integration.result == 'success'
+        with:
+          pattern: ci-receipt-*
+          path: .ci-downloads
+      - name: Arrange platform receipts
+        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success' && needs.integration.result == 'success'
+        run: |
+          mkdir -p .ci-receipts
+          for os in ubuntu-latest macos-latest windows-latest integration; do
+            mv ".ci-downloads/ci-receipt-$os" ".ci-receipts/$os"
+          done
+      - name: Validate exact results and live PR identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ needs.scope.outputs.plan }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci-control.py gate
+      - uses: actions/upload-artifact@v4
+        if: needs.scope.outputs.mode == 'full' && github.event_name == 'pull_request'
+        with:
+          name: ci-full-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: proof.json
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: needs.scope.outputs.mode == 'full' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          name: ci-main-cache-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: proof.json
+          retention-days: 7
           if-no-files-found: error
