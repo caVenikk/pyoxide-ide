@@ -157,6 +157,38 @@ pub(crate) struct ValueHints {
     /// The focus of a closed popup's tree and the editor's: the editor
     /// gets the focus back when the tree had it.
     refocus: Option<(FocusHandle, FocusHandle)>,
+    native: Option<Entity<ValuePopup>>,
+}
+
+/// Keeps the interactive tree and its toolbar in one native surface.
+struct ValuePopup {
+    owner: gpui::WeakEntity<DebuggerView>,
+    focus: FocusHandle,
+    viewport: gpui::Size<Pixels>,
+}
+
+impl gpui::Focusable for ValuePopup {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+impl gpui::EventEmitter<gpui::DismissEvent> for ValuePopup {}
+impl ValuePopup {
+    fn dismiss(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let _ = self
+            .owner
+            .update(cx, |owner, cx| owner.close_value_hint_outside(cx));
+        cx.emit(gpui::DismissEvent);
+    }
+}
+impl gpui::Render for ValuePopup {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.owner
+            .update(cx, |owner, cx| {
+                owner.render_native_value_tree(self.viewport, window, cx)
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
 }
 
 impl DebuggerView {
@@ -423,6 +455,9 @@ impl DebuggerView {
     /// Closes the hint or the popup and takes the expression's background
     /// away.
     pub(crate) fn close_value_hint(&mut self, cx: &mut Context<Self>) {
+        if let Some(popup) = self.hints.native.take() {
+            ui::popup_window::close(popup.entity_id(), cx);
+        }
         self.hints.generation += 1;
         self.hints.request = None;
         let Some(shown) = self.hints.shown.take() else {
@@ -435,6 +470,11 @@ impl DebuggerView {
             .editor
             .update(cx, |e, cx| e.set_range_background(None, cx));
         cx.notify();
+    }
+
+    fn close_value_hint_outside(&mut self, cx: &mut Context<Self>) {
+        self.close_value_hint(cx);
+        self.hints.refocus = None;
     }
 
     /// Something happened in an editor that closes its hint: the caret
@@ -637,6 +677,9 @@ impl DebuggerView {
         }
         let shown = self.hints.shown.as_ref()?;
         if active != Some(&shown.editor) {
+            if let Some(popup) = self.hints.native.take() {
+                ui::popup_window::close(popup.entity_id(), cx);
+            }
             return None;
         }
         let origin = self.hint_origin(shown, cx)?;
@@ -650,7 +693,7 @@ impl DebuggerView {
             .border_color(theme.color(UiRole::PopupBorder))
             .rounded(px(RADIUS))
             .shadow_md()
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_value_hint(cx)));
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_value_hint_outside(cx)));
         let content = match &shown.content {
             Content::Evaluating { visible: false } => return None,
             Content::Evaluating { visible: true } => frame
@@ -665,7 +708,38 @@ impl DebuggerView {
             Content::Value(root) => self.render_value_tooltip(frame, root, cx),
             Content::Tree(tree) => {
                 let tree = tree.clone();
-                self.render_tree_popup(frame, &tree, shown.inline, window, cx)
+                if ui::popup_window::enabled() {
+                    let focus = tree.focus_handle(cx);
+                    let viewport = window.viewport_size();
+                    if self.hints.native.is_none() {
+                        window.focus(&focus);
+                    }
+                    let popup = self.hints.native.get_or_insert_with(|| {
+                        let owner = cx.entity().downgrade();
+                        cx.new(|_| ValuePopup {
+                            owner,
+                            focus,
+                            viewport,
+                        })
+                    });
+                    let content = ui::popup_window::view_with_dismiss(popup, ValuePopup::dismiss);
+                    div()
+                        .id("debug-value-popup-anchor")
+                        .on_mouse_down_out(
+                            cx.listener(|this, _, _, cx| this.close_value_hint_outside(cx)),
+                        )
+                        .child(content)
+                        .into_any_element()
+                } else {
+                    self.render_tree_popup(
+                        frame,
+                        &tree,
+                        shown.inline,
+                        window.viewport_size(),
+                        window,
+                        cx,
+                    )
+                }
             }
         };
         Some(
@@ -678,6 +752,33 @@ impl DebuggerView {
             .with_priority(1)
             .into_any_element(),
         )
+    }
+
+    fn render_native_value_tree(
+        &mut self,
+        viewport: gpui::Size<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(shown) = &self.hints.shown else {
+            return div().into_any_element();
+        };
+        let Content::Tree(tree) = &shown.content else {
+            return div().into_any_element();
+        };
+        let tree = tree.clone();
+        let inline = shown.inline;
+        let theme = cx.theme();
+        let frame = div()
+            .id("debug-value-hint")
+            .debug_selector(|| "debug-value-hint".into())
+            .occlude()
+            .bg(theme.color(UiRole::SurfaceRaised))
+            .border_1()
+            .border_color(theme.color(UiRole::PopupBorder))
+            .rounded(px(RADIUS))
+            .on_action(cx.listener(|this, _: &CloseValuePopup, _, cx| this.close_value_hint(cx)));
+        self.render_tree_popup(frame, &tree, inline, viewport, window, cx)
     }
 
     /// Where the hint's top left corner goes: under the char under the
@@ -790,6 +891,7 @@ impl DebuggerView {
         frame: gpui::Stateful<gpui::Div>,
         tree: &Entity<VariablesView>,
         inline: bool,
+        viewport: gpui::Size<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -866,7 +968,6 @@ impl DebuggerView {
             actions
         };
         let toolbar_width: Pixels = px(if inline { 330.0 } else { 120.0 });
-        let viewport = window.viewport_size();
         let width = (tree_width.max(toolbar_width) + px(TREE_MARGIN)).min(viewport.width / 2.0);
         let tree_height =
             px(crate::variables::POPUP_TREE_TOP) + row_h * rows as f32 + px(TREE_MARGIN);

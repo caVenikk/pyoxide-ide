@@ -625,7 +625,9 @@ impl DocPopup {
         self.content = Some(content);
         self.scroll = ScrollHandle::new();
         self.menu = None;
-        self.font_size = None;
+        if let Some((popup, _, _)) = self.font_size.take() {
+            ui::popup_window::close(popup.entity_id(), cx);
+        }
         cx.notify();
     }
 
@@ -775,6 +777,9 @@ impl DocPopup {
     /// (`showFontSizePopup`); a size chosen is stored at once and the
     /// documentation follows.
     pub fn open_font_size(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((popup, _, _)) = self.font_size.take() {
+            popup.update(cx, |popup, cx| popup.dismiss(window, cx));
+        }
         let popup = gpui::AppContext::new(cx, |cx| FontSizePopup::new(window, cx));
         let size = FontSizePopup::size(window, cx);
         let mouse = window.mouse_position();
@@ -1198,9 +1203,22 @@ impl Render for DocPopup {
             .as_ref()
             .map(|(menu, position, _)| ui::menu::overlay(menu, *position, window));
         let font_size = self.font_size.as_ref().map(|(popup, at, _)| {
-            ui::deferred(gpui::anchored().position(*at).child(popup.clone()))
-                .with_priority(2)
-                .into_any_element()
+            let outside = popup.clone();
+            ui::deferred(
+                gpui::anchored().position(*at).child(
+                    div()
+                        .id("doc-font-size-anchor")
+                        .on_mouse_down_out(move |_, window, cx| {
+                            outside.update(cx, |popup, cx| popup.dismiss_outside(window, cx));
+                        })
+                        .child(ui::popup_window::view_with_dismiss(
+                            popup,
+                            FontSizePopup::dismiss_outside,
+                        )),
+                ),
+            )
+            .with_priority(2)
+            .into_any_element()
         });
         let scroll = div()
             .id("documentation-scroll")
