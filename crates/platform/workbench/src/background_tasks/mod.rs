@@ -201,6 +201,10 @@ pub struct BackgroundTasks {
     laid_out: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
     return_focus: Option<FocusHandle>,
+    /// Screen origin and viewport used by the owner-relative move/resize model.
+    native_parent: Option<(Point<Pixels>, Size<Pixels>)>,
+    /// Auto Show presents a passive native window.
+    requested_focus: bool,
     animation_start: Instant,
     animating: bool,
     subscription: progress::Subscription,
@@ -241,6 +245,8 @@ impl BackgroundTasks {
             laid_out: Rc::default(),
             focus: cx.focus_handle(),
             return_focus: None,
+            native_parent: None,
+            requested_focus: false,
             animation_start: Instant::now(),
             animating: false,
             subscription,
@@ -373,6 +379,7 @@ impl BackgroundTasks {
             return;
         }
         self.popup = true;
+        self.requested_focus = focus;
         let running = self.tasks().next().is_some();
         self.close_when_done = running;
         self.finished_while_open = false;
@@ -405,6 +412,8 @@ impl BackgroundTasks {
         if !self.popup {
             return;
         }
+        let owner = ui::popup_window::owner(cx.entity_id(), cx);
+        ui::popup_window::close(cx.entity_id(), cx);
         self.popup = false;
         self.hovered = None;
         self.drag.end();
@@ -413,6 +422,11 @@ impl BackgroundTasks {
             && let Some(focus) = return_focus
         {
             window.focus(&focus);
+            if let Some(owner) = owner {
+                cx.defer(move |cx| {
+                    let _ = owner.update(cx, |_, window, _| window.focus(&focus));
+                });
+            }
         }
         cx.notify();
     }
@@ -600,11 +614,14 @@ impl BackgroundTasks {
     }
 
     /// The Processes popup, while it is open.
-    fn render_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_popup_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let now = Instant::now();
         let theme = cx.theme();
         let status_bar = theme.metric(Metric::StatusBarHeight);
-        let max_height = (window.viewport_size().height - status_bar - px(2.0 * POPUP_ABOVE))
+        let viewport = self
+            .native_parent
+            .map_or(window.viewport_size(), |(_, size)| size);
+        let max_height = (viewport.height - status_bar - px(2.0 * POPUP_ABOVE))
             .max(px(HEADER_HEIGHT + LIST_MIN_HEIGHT));
         let muted = theme.color(UiRole::TextMuted);
         let disabled = theme.color(UiRole::TextDisabled);
@@ -748,8 +765,11 @@ impl BackgroundTasks {
             .font_weight(FontWeight::SEMIBOLD)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, ev: &MouseDownEvent, _, cx| {
-                    this.start_move(ev.position);
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    let mouse = this.native_parent.map_or(ev.position, |(origin, _)| {
+                        ui::popup_window::screen_origin(window) + ev.position - origin
+                    });
+                    this.start_move(mouse);
                     cx.notify();
                 }),
             )
@@ -789,6 +809,7 @@ impl BackgroundTasks {
             .rounded(theme.metric(Metric::CornerRadius) * 2.0)
             .shadow(popup_shadow())
             .text_color(theme.color(UiRole::Text))
+            .font_family(theme.ui_family())
             .text_size(theme.ui_size())
             .map(|d| match self.place.size {
                 Some(_) => d.size_full(),
@@ -800,6 +821,95 @@ impl BackgroundTasks {
             })
             .child(header)
             .child(list.flex_1());
+        if ui::popup_window::displays(cx.entity_id(), window, cx) {
+            on_actions(content, &cx.entity()).into_any_element()
+        } else {
+            content.into_any_element()
+        }
+    }
+
+    fn render_native_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.render_popup_body(window, cx);
+        let Some((origin, viewport)) = self.native_parent else {
+            return body;
+        };
+        let owner = cx.entity();
+        let cursor = match self.drag.get() {
+            Some(Drag::Resize { edges, .. }) => Some(edges.cursor()),
+            _ => None,
+        };
+        div()
+            .relative()
+            .w(window.viewport_size().width)
+            .h(window.viewport_size().height)
+            .child(body)
+            .children(popup::grips_in(
+                owner.clone(),
+                Some(origin),
+                |this: &mut Self, edges, mouse| this.start_resize(edges, mouse),
+            ))
+            .child(popup::track_held_drag_in(
+                owner,
+                |this: &mut Self| &mut this.drag,
+                move |this, mouse, cx| this.drag_to(mouse, viewport, cx),
+                |_, _| {},
+                cursor,
+                Some(origin),
+            ))
+            .into_any_element()
+    }
+
+    fn render_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if ui::popup_window::enabled() {
+            self.native_parent = Some((
+                ui::popup_window::screen_origin(window),
+                window.viewport_size(),
+            ));
+            let mut body = self.render_popup_body(window, cx);
+            let extent = self.place.size.unwrap_or_else(|| {
+                body.layout_as_root(
+                    size(
+                        gpui::AvailableSpace::MaxContent,
+                        gpui::AvailableSpace::MaxContent,
+                    ),
+                    window,
+                    cx,
+                )
+            });
+            let surface = if self.requested_focus {
+                ui::popup_window::surface
+            } else {
+                ui::popup_window::passive_surface
+            };
+            let content = surface(
+                &cx.entity(),
+                0,
+                extent,
+                self.focus.clone(),
+                Self::render_native_popup,
+                Self::hide,
+                true,
+            );
+            let (right, bottom) = self.place.insets(margins(cx));
+            let laid_out = self.laid_out.clone();
+            return div()
+                .absolute()
+                .right(right)
+                .bottom(bottom)
+                .child(content)
+                .child(
+                    canvas(
+                        move |bounds, _, _| laid_out.set(Some(bounds)),
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                )
+                .into_any_element();
+        }
+        let content = self.render_popup_body(window, cx);
         // At the bottom right, or where the user left it.
         let (right, bottom) = self.place.insets(margins(cx));
         let viewport = window.viewport_size();
