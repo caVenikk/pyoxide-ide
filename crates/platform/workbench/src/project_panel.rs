@@ -292,6 +292,7 @@ impl ProjectPanel {
             return;
         };
         let path = tree.node(id).entry.path.clone();
+        let symlink = tree.node(id).entry.symlink;
         let generation = self.generation;
         self.loading += 1;
         // The folder's own kind is looked at again with its content; files
@@ -302,10 +303,11 @@ impl ProjectPanel {
             let entries = list_dir(&path, &filter).inspect(|entries| {
                 types.detect(entries.iter().filter(|e| !e.is_dir()).map(|e| &*e.path));
             });
-            (entries, filter.folder_kind(&path))
+            let cycle = symlink && project::symlink_cycle(&path);
+            (entries, filter.folder_kind(&path), cycle)
         });
         cx.spawn(async move |this, cx| {
-            let (result, kind) = task.await;
+            let (result, kind, cycle) = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading -= 1;
                 if this.generation != generation {
@@ -313,10 +315,19 @@ impl ProjectPanel {
                 }
                 if let Some(tree) = &mut this.tree {
                     tree.set_folder_kind(id, kind);
+                    tree.set_recursive_cycle(id, cycle);
                     match result {
                         Ok(entries) => tree.set_children(id, entries),
                         Err(e) => tree.set_error(id, e.to_string()),
                     }
+                }
+                let listings = this
+                    .tree
+                    .as_mut()
+                    .map(|tree| tree.continue_expansion(id))
+                    .unwrap_or_default();
+                for child in listings {
+                    this.list(child, cx);
                 }
                 this.continue_reveal(cx);
                 cx.notify();
@@ -567,28 +578,16 @@ impl ProjectPanel {
     }
 
     fn expand_all(&mut self, _: &ExpandAll, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(tree) = &self.tree else { return };
+        let Some(tree) = &mut self.tree else { return };
         let start = self
             .selected
             .filter(|&s| tree.node(s).entry.is_dir())
             .unwrap_or(FileTree::ROOT);
-        // Folders that are listed already, below the start; excluded ones
-        // stay closed.
-        let mut stack = vec![start];
-        let mut to_expand = Vec::new();
-        while let Some(id) = stack.pop() {
-            let node = tree.node(id);
-            if !node.entry.is_dir() || (node.entry.excluded && id != start) {
-                continue;
-            }
-            to_expand.push(id);
-            if let Some(children) = &node.children {
-                stack.extend(children.iter().copied());
-            }
+        let listings = tree.expand_all(start);
+        for id in listings {
+            self.list(id, cx);
         }
-        for id in to_expand {
-            self.expand(id, cx);
-        }
+        cx.notify();
     }
 
     fn reveal_action(&mut self, a: &Reveal, _: &mut Window, cx: &mut Context<Self>) {

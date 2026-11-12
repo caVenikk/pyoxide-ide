@@ -60,3 +60,22 @@ IntelliJ Platform Community at `pycharm/2026.2.3` (Apache-2.0):
 `RenderingHelper`; the mechanism is `ui::expandable`, shared with the
 Database tree (`tests/scenarios/db-gui/tree-row-expansion.md`); observed in PyCharm 2026.2.3 with "Show
 indent guides" on.
+
+## Recursive expansion and collapse reset
+
+1. Open a fresh folder containing `parent/one/two/three/four/five/file.py`
+   and an unrelated `sibling/child/file.py`.
+2. Select `parent` and invoke Expand All once. All six nested directories
+   become expanded after their asynchronous listings complete. The sibling
+   keeps its original expansion state. Repeat after manually opening only
+   the first two levels: the remaining cold levels also expand.
+3. Collapse `parent` by its disclosure arrow and reopen it. Only `one` is
+   visible beneath it; deeper cached directories stay collapsed. Repeat
+   using the keyboard Collapse action and Collapse All.
+4. Start Expand All and collapse before its listings finish. Late results
+   must not reopen the subtree. A new Expand All may expand it again.
+   Switching projects during expansion must leave the new tree untouched.
+5. Excluded descendant folders stay closed and hidden entries stay absent.
+   A normal directory symlink can expand recursively; a symlink targeting
+   an ancestor may be browsed manually but recursive expansion stops there,
+   including when the cycle's listing was already cached.

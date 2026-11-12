@@ -715,3 +715,76 @@ fn no_shown_path_has_the_verbatim_prefix(cx: &mut TestAppContext) {
     verbatim_paths(&s, &mut found);
     assert!(found.is_empty(), "verbatim paths are shown: {found:?}");
 }
+
+#[gpui::test]
+fn expand_all_loads_cold_descendants_and_collapse_resets_them(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("parent/one/two/three/four/five")).unwrap();
+    std::fs::create_dir_all(dir.path().join("sibling/child")).unwrap();
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path()}),
+    );
+    invoke(cx, window, "project.tree.reveal", json!({"path": "parent"}));
+    invoke(cx, window, "project.tree.expand-all", json!(null));
+    let expanded = state(cx, window);
+    assert!(rows(&expanded).contains(&"parent/one/two/three/four/five".to_owned()));
+    assert!(!rows(&expanded).contains(&"sibling/child".to_owned()));
+    // Keyboard collapse and the same toggle used by the disclosure arrow.
+    for collapse in [
+        "project.tree.collapse",
+        "project.tree.open",
+        "project.tree.collapse-all",
+    ] {
+        invoke(cx, window, collapse, json!(null));
+        invoke(cx, window, "project.tree.reveal", json!({"path": "parent"}));
+        invoke(cx, window, "project.tree.open", json!(null));
+        let reopened = state(cx, window);
+        assert!(rows(&reopened).contains(&"parent/one".to_owned()));
+        assert!(!rows(&reopened).contains(&"parent/one/two".to_owned()));
+        invoke(cx, window, "project.tree.expand-all", json!(null));
+        assert!(rows(&state(cx, window)).contains(&"parent/one/two/three/four/five".to_owned()));
+    }
+}
+
+#[gpui::test]
+fn collapse_and_project_switch_cancel_pending_expand_all(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("parent/one/two/three/four/five")).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join("other/child")).unwrap();
+    let window = open(cx);
+    invoke(
+        cx,
+        window,
+        "project.open-folder",
+        json!({"path": dir.path()}),
+    );
+    invoke(cx, window, "project.tree.reveal", json!({"path": "parent"}));
+    // Do not let the executor deliver the listing between these commands.
+    cx.update_window(window.into(), |_, window, cx| {
+        ui::command::invoke("project.tree.expand-all", json!(null), window, cx).unwrap();
+        ui::command::invoke("project.tree.collapse", json!(null), window, cx).unwrap();
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(!rows(&state(cx, window)).contains(&"parent/one".to_owned()));
+    invoke(cx, window, "project.tree.open", json!(null));
+    assert!(!rows(&state(cx, window)).contains(&"parent/one/two".to_owned()));
+    cx.update_window(window.into(), |_, window, cx| {
+        ui::command::invoke("project.tree.expand-all", json!(null), window, cx).unwrap();
+        ui::command::invoke(
+            "project.open-folder",
+            json!({"path": other.path()}),
+            window,
+            cx,
+        )
+        .unwrap();
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(rows(&state(cx, window)), ["", "other"]);
+}

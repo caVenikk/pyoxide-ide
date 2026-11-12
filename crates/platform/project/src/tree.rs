@@ -3,6 +3,7 @@
 //! drawing.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::filter::Filter;
@@ -87,6 +88,17 @@ pub fn list_dir(dir: &Path, filter: &Filter) -> std::io::Result<Vec<Entry>> {
     Ok(out)
 }
 
+/// Whether a directory link points back to one of its ancestors (blocking).
+/// Call off-thread before continuing recursive expansion through a link.
+pub fn symlink_cycle(path: &Path) -> bool {
+    let Ok(target) = native_path::canonicalize(path) else {
+        return true;
+    };
+    path.ancestors()
+        .skip(1)
+        .any(|ancestor| native_path::canonicalize(ancestor).is_ok_and(|parent| parent == target))
+}
+
 /// Index of a node in a [`FileTree`].
 pub type NodeId = usize;
 
@@ -100,6 +112,8 @@ pub struct Node {
     pub expanded: bool,
     /// Listing failed (shown as an empty folder).
     pub error: Option<String>,
+    /// A link back to an ancestor: browsable manually, but not recursively.
+    recursive_cycle: bool,
 }
 
 /// The tree of a project folder.
@@ -107,6 +121,8 @@ pub struct Node {
 pub struct FileTree {
     nodes: Vec<Node>,
     rows: Vec<NodeId>,
+    /// Unlisted directories whose descendants should expand when their listing arrives.
+    recursive: HashSet<NodeId>,
 }
 
 impl FileTree {
@@ -131,8 +147,10 @@ impl FileTree {
                 children: None,
                 expanded: true,
                 error: None,
+                recursive_cycle: false,
             }],
             rows: Vec::new(),
+            recursive: HashSet::new(),
         };
         tree.rebuild();
         tree
@@ -219,6 +237,7 @@ impl FileTree {
                     children: None,
                     expanded: false,
                     error: None,
+                    recursive_cycle: false,
                 });
                 ids.push(self.nodes.len() - 1);
             }
@@ -246,8 +265,52 @@ impl FileTree {
     }
 
     pub fn collapse(&mut self, id: NodeId) {
-        self.nodes[id].expanded = false;
+        let mut stack = vec![id];
+        while let Some(id) = stack.pop() {
+            self.recursive.remove(&id);
+            let node = &mut self.nodes[id];
+            node.expanded = false;
+            if let Some(children) = &node.children {
+                stack.extend(children.iter().copied());
+            }
+        }
         self.rebuild();
+    }
+
+    /// Expands the loaded subtree and returns directories to list off-thread.
+    /// Links back to ancestors are left alone to avoid recursive cycles.
+    pub fn expand_all(&mut self, start: NodeId) -> Vec<NodeId> {
+        let mut stack = vec![start];
+        let mut listings = Vec::new();
+        while let Some(id) = stack.pop() {
+            let node = &mut self.nodes[id];
+            if !node.entry.is_dir() || (id != start && node.entry.excluded) || node.recursive_cycle
+            {
+                continue;
+            }
+            node.expanded = true;
+            if let Some(children) = &node.children {
+                stack.extend(children.iter().copied());
+            } else if node.error.is_none() && self.recursive.insert(id) {
+                listings.push(id);
+            }
+        }
+        self.rebuild();
+        listings
+    }
+
+    /// Records an off-thread check before applying a directory listing.
+    pub fn set_recursive_cycle(&mut self, id: NodeId, cycle: bool) {
+        self.nodes[id].recursive_cycle = cycle;
+    }
+
+    /// Continues an Expand All after a listing, unless collapse cancelled it.
+    pub fn continue_expansion(&mut self, id: NodeId) -> Vec<NodeId> {
+        if self.recursive.remove(&id) && self.is_attached(id) {
+            self.expand_all(id)
+        } else {
+            Vec::new()
+        }
     }
 
     /// Marks every listed entry excluded or not by `filter` (after the
@@ -283,6 +346,7 @@ impl FileTree {
             children: None,
             expanded: false,
             error: None,
+            recursive_cycle: false,
         });
         let id = self.nodes.len() - 1;
         self.attach(parent, id);
@@ -369,6 +433,7 @@ impl FileTree {
 
     /// Collapses every directory except the root.
     pub fn collapse_all(&mut self) {
+        self.recursive.clear();
         for n in self.nodes.iter_mut().skip(1) {
             n.expanded = false;
         }
@@ -512,11 +577,12 @@ mod tests {
         tree.collapse(src);
         assert_eq!(tree.rows().len(), 9);
         assert!(!tree.expand(src));
-        assert_eq!(tree.rows().len(), 11);
+        assert_eq!(tree.rows().len(), 10);
+        assert!(!tree.node(pkg).expanded);
         // A new listing keeps the state of known children.
         tree.set_children(FileTree::ROOT, list_dir(dir.path(), &filter).unwrap());
         assert!(tree.node(src).expanded);
-        assert_eq!(tree.rows().len(), 11);
+        assert_eq!(tree.rows().len(), 10);
         tree.collapse_all();
         assert_eq!(tree.rows().len(), 9);
 
@@ -534,6 +600,102 @@ mod tests {
         assert!(!tree.node(FileTree::ROOT).entry.excluded);
         tree.refresh_excluded(&filter);
         assert!(!excluded(&tree, "src") && !excluded(&tree, "src/pkg/mod.py"));
+    }
+
+    #[test]
+    fn recursive_expansion_cold_cached_cancelled_and_restarted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in [
+            "parent/one/two/three/four/five",
+            "sibling/child",
+            "parent/.venv/lib",
+        ] {
+            std::fs::create_dir_all(root.join(path)).unwrap();
+        }
+        let filter = Filter::new(root, Exclusions::default(), PY);
+        let mut tree = FileTree::new(root);
+        tree.set_children(FileTree::ROOT, list_dir(root, &filter).unwrap());
+        let parent = tree.find(&root.join("parent")).unwrap();
+        let sibling = tree.find(&root.join("sibling")).unwrap();
+        tree.expand(sibling);
+        tree.set_children(sibling, list_dir(&root.join("sibling"), &filter).unwrap());
+        let sibling_child = tree.find(&root.join("sibling/child")).unwrap();
+        tree.expand(sibling_child);
+
+        // A late listing after collapse may cache children, but cannot reopen them.
+        assert_eq!(tree.expand_all(parent), [parent]);
+        tree.collapse(parent);
+        tree.set_children(parent, list_dir(&root.join("parent"), &filter).unwrap());
+        assert!(tree.continue_expansion(parent).is_empty());
+        assert!(!tree.node(parent).expanded);
+        let one = tree.find(&root.join("parent/one")).unwrap();
+        assert!(!tree.node(one).expanded);
+
+        // Restart from the partial cache, cancelling another deeper in-flight listing.
+        assert_eq!(tree.expand_all(parent), [one]);
+        tree.collapse_all();
+        tree.set_children(one, list_dir(&root.join("parent/one"), &filter).unwrap());
+        assert!(tree.continue_expansion(one).is_empty());
+        assert!(!tree.node(one).expanded);
+        tree.expand(sibling);
+        tree.expand(sibling_child);
+
+        let mut pending = tree.expand_all(parent);
+        while let Some(id) = pending.pop() {
+            let path = tree.node(id).entry.path.clone();
+            tree.set_children(id, list_dir(&path, &filter).unwrap());
+            pending.extend(tree.continue_expansion(id));
+        }
+        let deepest = tree
+            .find(&root.join("parent/one/two/three/four/five"))
+            .unwrap();
+        assert!(tree.node(deepest).expanded);
+        assert!(tree.row_of(deepest).is_some());
+        let excluded = tree.find(&root.join("parent/.venv")).unwrap();
+        assert!(!tree.node(excluded).expanded);
+        assert!(tree.node(excluded).children.is_none());
+        tree.collapse(parent);
+        tree.expand(parent);
+        assert!(!tree.node(one).expanded);
+        assert!(!tree.node(deepest).expanded);
+        assert!(tree.row_of(deepest).is_none());
+        assert!(tree.node(sibling).expanded);
+        assert!(tree.node(sibling_child).expanded);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_expansion_does_not_follow_symlink_cycles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("child")).unwrap();
+        std::fs::create_dir_all(dir.path().join("target/deep")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("target"), dir.path().join("child/link"))
+            .unwrap();
+        std::os::unix::fs::symlink(dir.path(), dir.path().join("child/loop")).unwrap();
+        let filter = Filter::new(dir.path(), Exclusions::default(), PY);
+        let mut tree = FileTree::new(dir.path());
+        let mut pending = tree.expand_all(FileTree::ROOT);
+        while let Some(id) = pending.pop() {
+            let path = tree.node(id).entry.path.clone();
+            tree.set_recursive_cycle(id, tree.node(id).entry.symlink && symlink_cycle(&path));
+            tree.set_children(id, list_dir(&path, &filter).unwrap());
+            pending.extend(tree.continue_expansion(id));
+        }
+        let link = tree.find(&dir.path().join("child/loop")).unwrap();
+        assert!(tree.node(link).expanded);
+        assert!(
+            tree.node(link)
+                .children
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|&id| !tree.node(id).expanded)
+        );
+        let deep = tree.find(&dir.path().join("child/link/deep")).unwrap();
+        assert!(tree.node(deep).expanded);
+        // Cached cycle listings also stop a subsequent recursive expansion.
+        assert!(tree.expand_all(FileTree::ROOT).is_empty());
     }
 
     #[test]
