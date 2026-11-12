@@ -2,6 +2,9 @@ import copy
 import importlib.util
 import io
 import json
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -11,6 +14,30 @@ import zipfile
 spec = importlib.util.spec_from_file_location('ci_control', Path(__file__).with_name('ci-control.py'))
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
+
+
+class FingerprintTests(unittest.TestCase):
+    def test_nested_manifest_changes_invalidate_warm_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True)
+            (root / 'crates' / 'sample').mkdir(parents=True)
+            (root / 'Cargo.toml').write_text('[workspace]\n')
+            nested = root / 'crates' / 'sample' / 'Cargo.toml'
+            nested.write_text('[package]\nname = "sample"\n')
+            doc = root / 'README.md'
+            doc.write_text('initial docs\n')
+            subprocess.run(['git', '-C', directory, 'add', '.'], check=True)
+            before = Path.cwd()
+            try:
+                os.chdir(root)
+                original = ci.fingerprint()
+                doc.write_text('changed docs\n')
+                self.assertEqual(original, ci.fingerprint())
+                nested.write_text(nested.read_text() + 'version = "0.2.0"\n')
+                self.assertNotEqual(original, ci.fingerprint())
+            finally:
+                os.chdir(before)
 
 
 class GateTests(unittest.TestCase):

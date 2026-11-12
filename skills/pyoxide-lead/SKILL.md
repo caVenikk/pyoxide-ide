@@ -21,14 +21,15 @@ The lead is the session that plans, delegates and reviews; sub-agents implement 
 4. Differences: small ones -> a follow-up issue with exact items; real bugs -> back to the agent as a numbered must-fix list.
 
 ## Merging
+- Follow ADR 0024: task PRs target a protected `integration/*` branch and run scoped checks; combine 2-4 reviewed tasks in a batch PR into main with full three-platform/database CI. Main PRs require the aggregate `CI required` gate against the current base. A task merged into integration is not yet complete in main; close its issue in the batch PR. Keep independent work moving while CI runs.
 - Bookkeeping in the PR branch: the feature's file in `replica/features/<area>/` (`clone` yes / partial; a new feature is a new file `<name>.csv`, header and one row) + `python3 scripts/progress.py --check-data`, commit `docs(progress): ... (#N)`. Nothing generated is committed: the Progress workflow publishes the report to GitHub Pages after the merge (ADR 0020).
 - Third-party notices: a PR that copies or adapts open-source code adds its own file `notices/<area>-<name>.md` (one per entry, checked by `python3 scripts/notice.py --check` in CI); the root `NOTICE` is not edited. A branch that still edits the root `NOTICE` moves its entry into such a file when it rebases.
-- When main moved: rebase (or merge main into a branch others build on); after conflicts run clippy and `cargo nextest run --workspace` (plus `cargo test --doc --workspace`) before pushing. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
+- When the PR target moved: rebase against that target (including an integration branch); after conflicts run affected-crate checks and the relevant integration scenarios before pushing. Expand to a full local run for broad or uncertain changes. Check the exit code of `git rebase` itself; never let a script continue past a failed rebase.
 - Merge through auto-merge after review: `gh pr ready <n>` (if draft), `gh pr merge <n> --auto --squash --subject "<title> (#n)" --body "... Closes #N"`. Do not poll CI; disable auto-merge (`--disable-auto`) before pushing further changes. Squash merge, never a `Co-Authored-By` line. Pull requests from forks are merged only with a maintainer's explicit OK.
 - Clean up after the merge: once the PR is merged and the maintainer has tried the build (see "Builds for the maintainer"), remove the agent's worktree and its branch (`git worktree remove --force <path>`, `git branch -D <branch>`; a squash-merged branch is not seen as merged). Each worktree holds a 10-27 GB `target/`; keep only work in progress.
 
 ## Builds for the maintainer
-- After user-visible merges: update main, `cargo build --release -p pyoxide-ide`, a quick screenshot, then replace the maintainer's copy atomically (`cp` to `<name>.new`, then `mv -f`), so a running copy is not corrupted.
+- After a user-visible batch reaches main: update main, `cargo build --release -p pyoxide-ide`, a quick screenshot, then replace the maintainer's copy atomically (`cp` to `<name>.new`, then `mv -f`), so a running copy is not corrupted.
 - Give the launch command and 2-4 concrete things to try per issue, with the comparison to PyCharm. Keep agent worktrees until the maintainer has tried the build.
 
 ## Usage limits

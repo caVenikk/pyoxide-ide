@@ -622,3 +622,35 @@ cores and other builds ran on it the whole time (load average 6 to 11 before,
 Not measured yet: idle memory of a mid-size project (no indexing exists yet
 to compare with the reference's 812 MB), cold start after purging the file
 caches, Windows.
+
+
+### Scoped batches and keymap state queries (2026-11-12, #429)
+
+The [baseline PR run](https://github.com/caVenikk/pyoxide-ide/actions/runs/43157757907)
+and [baseline main run](https://github.com/caVenikk/pyoxide-ide/actions/runs/43158753173/attempts/1)
+restored exact dependency-cache matches on all three operating systems. Check
+archives were approximately 1370 MiB on Linux, 1001 MiB on macOS and 1097 MiB
+on Windows. Workspace crates were rebuilt: the dependency cache deliberately
+excludes them. Main's longer Windows run was not a cache miss; its test
+execution alone took 339.257 s versus 189.528 s in the PR. Runner variability
+was not isolated in these observations.
+
+`workbench` keymap tests queried state through a helper that also drew windows.
+State queries now drain pending tasks and invoke the read-only command without
+drawing, following the existing read-only run-state query path. Key presses,
+mutation draws, assertions, timeouts and terminal settling are unchanged.
+
+| Workload | Original | Read-only state query | Result |
+|---|---|---|---|
+| All 51 keymap tests | 60.394 s | 48.551 / 48.857 s | all 51 passed; 19.1-19.6% less local execution time |
+| Two terminal keymap tests | 15.898 / 15.761 s | 15.302 / 15.241 s | both passed |
+| Terminal reverse baseline after candidate | 15.834 / 15.870 s | | corroborates the small terminal improvement |
+
+Measurement: Apple M5, 10 CPU cores, 16 GiB RAM; two build jobs and two nextest
+workers, identical workspace dev profile with full debug information. Each
+nextest invocation used fresh test processes. Command:
+`cargo nextest run -p workbench --test it --profile ci -E 'test(/^keymap::/)'`.
+The candidate was checked twice across the complete keymap subset; the terminal
+subset was also measured before and after restoring the original helper.
+These are local subset measurements, not a claim about the complete CI wall
+time. CI uses line-tables-only debug information and different runner hardware.

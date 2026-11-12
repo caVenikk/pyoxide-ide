@@ -29,10 +29,13 @@ Release: `/replica-brand` (sweep for trademarked names), `/replica-launch`,
 3. The editor core and UI toolkit are built sequentially by a single agent until
    interfaces stabilise.
 4. Each sub-agent runs the skill loop for its area and finishes with
-   `scripts/check.sh` (see Checks), measurements and a short report.
-5. The lead reviews the sub-agent's branch, opens a pull request that
-   references the issue, waits for CI on Windows, macOS and Linux, squash-merges
-   it and updates the plan, the feature files and the roadmap.
+   `scripts/check.sh --quick --base origin/<target-branch>`, the focused
+   regression/scenario, measurements where relevant, and a short report.
+5. The lead reviews task PRs into a protected `integration/*` branch. After
+   2-4 tasks, a batch PR into `main` runs the complete three-platform and
+   database checks. Merge through GitHub squash after the required gate passes;
+   close the included issues in that batch PR. Direct PRs to `main` use the
+   same full gate. Keep working on independent tasks while CI runs.
 6. Prototypes built to compare options stay out of `main`: their conclusions and
    numbers go into the ADR, raw data into the issue.
 
@@ -76,60 +79,63 @@ appending to a shared one, and nothing generated is committed:
   number of theme roles) are left out of the docs; the code is the list.
 
 ## Checks
-`scripts/check.sh` is the one definition of the checks: CI's `check` job
-calls it step by step, so a local run uses the same commands and flags as
-CI. On Windows, `scripts/check.ps1` runs it with the bash of Git for Windows.
 
-| command | when | what |
-|---|---|---|
-| `scripts/check.sh --quick` | while iterating | the crates changed against `origin/main` (committed or not) and the crates that depend on them |
-| `scripts/check.sh` | before the last push | every step on the whole workspace |
-| `scripts/check.sh clippy test` | any time | only the named steps (`--help` lists them) |
+`scripts/check.sh` defines the commands used locally and in CI; the PowerShell
+wrapper passes the same arguments to Bash on Windows.
 
-The steps: `fmt`, `clippy`, `clippy-windows` (clippy for
-`x86_64-pc-windows-gnu`, which catches items used only under `cfg(unix)`
-before the Windows job does; needs `rustup target add x86_64-pc-windows-gnu`
-and mingw-w64, skipped with a note without them; with `--quick` only for the
-changed crates that have platform-specific code and their direct dependents,
-see `scripts/changed-crates.py --windows`), `build` and `test`
-(cargo-nextest, profile `ci`), `throughput` (terminal, ADR 0014), `doc`
-(doctests) and `repo` (progress, layer and notice checks).
+| Command | Purpose |
+|---|---|
+| `scripts/check.sh --quick --base origin/<target-branch>` | Check changed crates and all reverse dependencies before a task push |
+| `scripts/check.sh --quick --base origin/<target-branch> clippy test` | Focused iteration on selected stages |
+| `scripts/check.sh` | Explicit whole-workspace validation when required |
 
-A fresh git worktree starts with an empty `target/`, and the first check
-compiles every dependency again (GPUI, tree-sitter, tokio, ... with optimized
-dependencies, ADR 0007): that, not the checks themselves, is what a first
-`scripts/check.sh` in a new worktree waits for. `scripts/seed-target.sh` run
-once in the new worktree, before the first build, clones the compiled
-dependencies into `target/` (APFS clonefile on macOS, reflink on Linux file
-systems that support it; no disk space until files change). It keeps its seed
-in `~/.cache/pyoxide/target-seed`, built with the commands of `check.sh` and
-refreshed when `Cargo.lock` or the toolchain changes (`--refresh` does only
-that). `--from DIR` clones the `target/` of another checkout instead and takes
-cargo's build locks while it copies, so a build running there waits for the
-clone and is never read half-written. Without a copy-on-write file system, or
-with a non-empty `target/`, it does nothing. `scripts/check.sh` prints the
-time of each step at the end.
+The default local base remains `origin/main` for compatibility. Always pass
+an explicit base for a batch branch. Scope includes normal, development and
+build dependencies, both sides of renames and removals. Build configuration,
+lockfile, shared fixtures and unknown changes require conservative full scope.
+Formatting and repository consistency checks remain cheap and unconditional.
+A bug fix also exercises its regression; UI changes exercise the real app
+path. A small code change does not require a fresh unrelated benchmark.
 
-What CI runs, and when (`.github/workflows/ci.yml`):
-- One run per pull request: a new push cancels the run of the push before.
-  Runs on `main` are never cancelled.
-- The OS matrix (`check` on Linux, macOS and Windows) and `integration` run
-  on `main` and for pull requests that are ready for review and change more
-  than documentation (`*.md`, `docs/`, `replica/`, `tests/scenarios/`). For a
-  draft or a documentation-only pull request their jobs pass without running
-  anything, so the required checks report; marking a draft ready for review
-  starts the full run. Push checkpoints as drafts. The draft state is read
-  from the API when the job runs, not from the event, and a job that skipped
-  for a draft reads it once more at its end and fails when the pull request
-  became ready meanwhile, so a skipped run never stays green next to a ready
-  pull request (`scripts/ci-scope.sh`, tested by `scripts/test-ci-scope.sh`,
-  part of the `repo` step).
-- Pull requests restore the build cache of `main` and do not save their own.
-- The checks build with the workspace's dev profile, as a local debug build
-  does (optimized dependencies, ADR 0007), so `scripts/check.sh` reuses what
-  `cargo test` compiled. CI adds only settings that change no result: line
-  tables instead of full debug info, no incremental compilation (measured in
-  `replica/perf.md`, CI).
+CI modes (ADR 0024):
+- **Task:** ready PR into `integration/*`; affected crates, appropriate
+  platforms, and database integration only when relevant. Shared native
+  components or uncertain platform impact expand the checks conservatively.
+- **Full:** ready PR into `main`, an explicit dispatch, or a scope fallback;
+  workspace clippy, tests and doctests on Linux/macOS/Windows, database
+  integration and the existing terminal throughput check.
+- **Draft:** inexpensive checks only; live API checks prevent a stale draft
+  skip from passing after the PR becomes ready.
+- **Verified main:** a push may reuse a successful full PR result only when
+  the merged PR, tested source tree, configuration and toolchain evidence
+  match. A matching full-main cache seed from the preceding six days is also
+  required, so dependency/configuration changes refresh the shared main caches.
+  This is seed eligibility, not a guarantee that GitHub retained every cache.
+  Missing, stale or invalid evidence runs full CI instead. Artifact
+  builds and smoke checks remain on main.
+
+`CI required` is the single required aggregate check. It validates the plan,
+actual jobs and current PR base/head/draft state. Failure, cancellation,
+missing jobs or an unexpected skip cannot count as a completed full check.
+Rulesets require the branch to be up to date, preserve squash-only PR merges,
+prevent deletion/force pushes, and provide no bypass actors. The batch branch
+has its own required gate; a fast result cannot satisfy a main batch's gate.
+
+Task branches start from the named batch branch. Rebase against the actual PR
+target, not unconditionally against main. Keep each batch small and create
+its next branch from the latest main. Publish one try build after the batch,
+while keeping individual regression evidence. If a final combined check fails,
+fix it in the batch before merging to main. Do not postpone all integration
+validation until release.
+
+Each worktree keeps its own target directory. Seed it before the first build
+with `scripts/seed-target.sh` (or `--from <other-target-directory>`); the helper
+copies compiled dependencies with copy-on-write where available and respects
+Cargo's build locks. Do not concurrently build into one shared target.
+`scripts/check.sh` reports per-stage timing. GitHub cache restore is not proof
+of workspace artifact reuse: record the restored key, cache hit and compilation
+work when assessing an optimization. Preserve the assertions and avoid blanket
+retries or timeout inflation.
 
 ## Test repositories
 A test that needs a Git repository makes it with `git::testing::init` (or

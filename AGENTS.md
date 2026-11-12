@@ -33,16 +33,20 @@ Rules for AI agents and human contributors. Read this file, then
   regressions fail CI.
 
 ## Workflow
-- Before every commit: `cargo fmt --all`. Before every push: `scripts/check.sh`
-  (Windows: `scripts/check.ps1`), which runs what CI runs with the same commands and flags
-  (CI calls it): fmt, clippy (also for `x86_64-pc-windows-gnu` when that target and
-  mingw-w64 are installed), the tests, the doctests and the progress, layer and notice
-  checks. `scripts/check.sh --quick` checks only the crates changed against `origin/main`
-  and the crates that depend on them; see [docs/agent-workflow.md](docs/agent-workflow.md).
-  Tests run under [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`;
-  one process per test, timeouts and retries for known flaky tests in `.config/nextest.toml`);
-  nextest does not run doctests, the script runs them separately. A new test must pass on
-  its own in a fresh process.
+- Before every commit: `cargo fmt --all`. Before a task-branch push:
+  `scripts/check.sh --quick --base origin/<target-branch>` (Windows:
+  `scripts/check.ps1` with the same arguments), plus the focused regression or
+  application scenario for the change. The explicit base is the PR's target,
+  including an `integration/*` batch branch. Unknown or shared build changes
+  fall back to the whole workspace. A full local run is available when needed;
+  it is not repeated before every push when CI provides the full gate.
+  CI runs the same check commands: task PRs into `integration/*` use affected
+  crates and their dependents; every ready PR into `main` receives full checks
+  on all three platforms and database integration. The required `CI required`
+  gate validates the actual selected jobs and current PR identity. See
+  [docs/agent-workflow.md](docs/agent-workflow.md) and ADR 0024.
+  Tests run under [cargo-nextest](https://nexte.st) (one process per test);
+  doctests run separately. A new test must pass on its own in a fresh process.
 - Layering: `db-core` has no driver dependencies; UI crates depend on traits only.
   Platform crates (`crates/platform/`) know no specific language and never
   depend on product crates (`crates/python/`, ...); see ADR 0005,
@@ -67,9 +71,13 @@ Rules for AI agents and human contributors. Read this file, then
   commit, files, license, changes; copy the format of the others). Never edit
   the root `NOTICE` or an entry another change added (ADR 0019).
   `python3 scripts/notice.py --check` validates them; CI runs it.
-- Changes land through pull requests: one branch per issue, CI green on all
-  three platforms, squash merge with `Closes #N`. Work-in-progress commits stay
-  in the branch.
+- Changes land through pull requests, one task per branch. Review and squash
+  task PRs into a protected `integration/*` branch in batches of 2-4 tasks;
+  squash the fully checked batch PR into `main`. Direct PRs into `main` also
+  require full CI. The batch PR closes the included issues with `Closes #N`;
+  merging a task into an integration branch is not completion in `main`.
+  No direct or local merges into `main`, no branch-protection bypass, and no
+  `Co-Authored-By` trailer. Work-in-progress commits stay in the task branch.
 - The repository holds sources and the assets the application ships (fonts,
   icons) with their licenses. Not committed: screenshots, raw measurement
   output, generated files, throwaway prototypes and their lock files. Results

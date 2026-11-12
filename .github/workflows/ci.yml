@@ -309,12 +309,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success'
+        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success' && needs.integration.result == 'success'
         with:
           pattern: ci-receipt-*
           path: .ci-downloads
       - name: Arrange platform receipts
-        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success'
+        if: needs.scope.outputs.mode == 'full' && needs.check.result == 'success' && needs.integration.result == 'success'
         run: |
           mkdir -p .ci-receipts
           for os in ubuntu-latest macos-latest windows-latest integration; do

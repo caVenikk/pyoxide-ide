@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The checks of CI (.github/workflows/ci.yml) on this machine. CI calls this
 # script for each of its steps, so the commands and flags are the same in
-# both places. Run it before every push.
+# both places. Before a task push use --quick --base <actual-target>.
 #
 #   scripts/check.sh              every step, the whole workspace
 #   scripts/check.sh --quick      only the crates changed against origin/main
