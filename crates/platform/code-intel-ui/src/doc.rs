@@ -782,7 +782,17 @@ impl DocPopup {
         }
         let popup = gpui::AppContext::new(cx, |cx| FontSizePopup::new(window, cx));
         let size = FontSizePopup::size(window, cx);
-        let mouse = window.mouse_position();
+        let mut mouse = window.mouse_position();
+        if ui::popup_window::displays(cx.entity_id(), window, cx)
+            && !gpui::Bounds::new(gpui::point(px(0.0), px(0.0)), window.viewport_size())
+                .contains(&mouse)
+        {
+            // A keyboard command can arrive while the pointer is elsewhere.
+            mouse = gpui::point(
+                window.viewport_size().width / 2.0,
+                window.viewport_size().height / 2.0,
+            );
+        }
         let at = gpui::point(mouse.x - size.width / 2.0, mouse.y - size.height / 2.0);
         let subscriptions = vec![
             cx.subscribe(&popup, |_, _, e: &SizeChosen, cx| {
@@ -1205,17 +1215,23 @@ impl Render for DocPopup {
         let font_size = self.font_size.as_ref().map(|(popup, at, _)| {
             let outside = popup.clone();
             ui::deferred(
-                gpui::anchored().position(*at).child(
-                    div()
-                        .id("doc-font-size-anchor")
-                        .on_mouse_down_out(move |_, window, cx| {
-                            outside.update(cx, |popup, cx| popup.dismiss_outside(window, cx));
-                        })
-                        .child(ui::popup_window::view_with_dismiss(
-                            popup,
-                            FontSizePopup::dismiss_outside,
-                        )),
-                ),
+                gpui::anchored()
+                    .position(*at)
+                    .when(
+                        ui::popup_window::displays(cx.entity_id(), window, cx),
+                        |anchor| anchor.snap_to_window_with_margin(px(0.0)),
+                    )
+                    .child(
+                        div()
+                            .id("doc-font-size-anchor")
+                            .on_mouse_down_out(move |_, window, cx| {
+                                outside.update(cx, |popup, cx| popup.dismiss_outside(window, cx));
+                            })
+                            .child(ui::popup_window::view_with_dismiss(
+                                popup,
+                                FontSizePopup::dismiss_outside,
+                            )),
+                    ),
             )
             .with_priority(2)
             .into_any_element()

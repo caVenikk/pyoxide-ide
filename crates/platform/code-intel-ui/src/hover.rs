@@ -133,7 +133,15 @@ pub(crate) fn doc_popup_actions<E: InteractiveElement>(el: E, view: &Entity<Code
         let view = view.clone();
         move |_: &AdjustFontSize, window, cx| {
             let popup = popup(&view, cx);
-            popup.update(cx, |p, cx| p.open_font_size(window, cx));
+            if let Some(native) = ui::popup_window::window_for(popup.entity_id(), cx)
+                && native != window.window_handle()
+            {
+                let _ = native.update(cx, |_, window, cx| {
+                    popup.update(cx, |p, cx| p.open_font_size(window, cx));
+                });
+            } else {
+                popup.update(cx, |p, cx| p.open_font_size(window, cx));
+            }
         }
     })
     .on_action({

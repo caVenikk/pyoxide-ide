@@ -47,6 +47,14 @@ pub fn owner(id: EntityId, cx: &App) -> Option<AnyWindowHandle> {
         .map(|(_, s)| s.owner)
 }
 
+/// The root native surface of a model, for commands originating in its owner.
+pub fn window_for(id: EntityId, cx: &App) -> Option<AnyWindowHandle> {
+    cx.try_global::<Surfaces>()?
+        .0
+        .get(&Key(id, 0))
+        .map(|surface| surface.window)
+}
+
 pub(crate) fn close_from(id: EntityId, level: usize, cx: &mut App) {
     if !cx.has_global::<Surfaces>() {
         return;
