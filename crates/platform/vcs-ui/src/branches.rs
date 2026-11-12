@@ -20,15 +20,17 @@
 //! (tested without a window); the workbench reads the data off the UI
 //! thread and handles the `git.*` commands the rows run.
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::{
-    Action, AnyElement, App, ClickEvent, Context, CursorStyle, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, HighlightStyle, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, div, point, prelude::*,
-    px,
+    Action, AnyElement, App, Bounds, ClickEvent, Context, CursorStyle, DismissEvent, Entity,
+    EventEmitter, FocusHandle, Focusable, HighlightStyle, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, canvas, div, point,
+    prelude::*, px,
 };
 use name_match::{Matcher, MatchingMode};
 use serde_json::{Value as Json, json};
@@ -130,7 +132,7 @@ impl Group {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BranchData {
     pub branches: Vec<Branch>,
-    /// Local branches checked out lately, newest first.
+    /// Branch names checked out lately, newest first; local refs take precedence.
     pub recent: Vec<String>,
     pub loaded: bool,
 }
@@ -244,6 +246,11 @@ fn matcher(filter: &str) -> Option<Matcher> {
     (!filter.is_empty()).then(|| Matcher::new(&format!("*{filter}"), MatchingMode::IgnoreCase))
 }
 
+enum LevelEntry {
+    Branch(usize),
+    Folder(usize),
+}
+
 /// A level of a group's tree.
 #[derive(Default)]
 struct Level {
@@ -251,16 +258,22 @@ struct Level {
     refs: Vec<usize>,
     /// Folders by name, in the order met.
     folders: Vec<(String, Level)>,
+    /// Interleave leaves and folders by their first (most recent) member.
+    order: Vec<LevelEntry>,
 }
 
 impl Level {
     fn insert(&mut self, parts: &[&str], index: usize) {
         match parts {
-            [] | [_] => self.refs.push(index),
+            [] | [_] => {
+                self.refs.push(index);
+                self.order.push(LevelEntry::Branch(index));
+            }
             [folder, rest @ ..] => {
                 let at = match self.folders.iter().position(|(n, _)| n == folder) {
                     Some(at) => at,
                     None => {
+                        self.order.push(LevelEntry::Folder(self.folders.len()));
                         self.folders.push(((*folder).to_owned(), Level::default()));
                         self.folders.len() - 1
                     }
@@ -343,6 +356,11 @@ fn tree_rows(
                 data.branches
                     .iter()
                     .position(|b| b.kind == BranchKind::Local && &b.name == name)
+                    .or_else(|| {
+                        data.branches
+                            .iter()
+                            .position(|b| b.kind == BranchKind::Remote && &b.name == name)
+                    })
             })
             .collect()
     } else {
@@ -355,7 +373,7 @@ fn tree_rows(
                 .filter(|&i| data.branches[i].kind == BranchKind::Local && !recent.contains(&i))
                 .collect(),
             Group::Remote => (0..data.branches.len())
-                .filter(|&i| data.branches[i].kind == BranchKind::Remote)
+                .filter(|&i| data.branches[i].kind == BranchKind::Remote && !recent.contains(&i))
                 .collect(),
             Group::Tags if options.show_tags => (0..data.branches.len())
                 .filter(|&i| data.branches[i].kind == BranchKind::Tag)
@@ -384,8 +402,8 @@ fn tree_rows(
         if !open {
             continue;
         }
-        // Recent keeps the order of the checkouts and no folders.
-        if group == Group::Recent || !options.group_by_directory {
+        // Flat Recent retains checkout order.
+        if !options.group_by_directory {
             let mut members = members;
             if group != Group::Recent {
                 sort_refs(&mut members, data);
@@ -429,6 +447,42 @@ fn push_level(
     m: Option<&Matcher>,
     expanded: &HashSet<NodeId>,
 ) {
+    if group == Group::Recent {
+        let label_start = prefix.chars().count() + usize::from(!prefix.is_empty());
+        for entry in &level.order {
+            let folder = match *entry {
+                LevelEntry::Branch(index) => {
+                    push_branch(rows, data, index, group, depth, label_start, m);
+                    continue;
+                }
+                LevelEntry::Folder(index) => index,
+            };
+            let (name, sub) = &level.folders[folder];
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let id = NodeId {
+                group,
+                path: path.clone(),
+            };
+            let open = m.is_some() || expanded.contains(&id);
+            rows.push(Row {
+                kind: RowKind::Node {
+                    id,
+                    label: name.clone(),
+                    expanded: open,
+                },
+                depth,
+                matches: Vec::new(),
+            });
+            if open {
+                push_level(rows, data, group, sub, &path, depth + 1, m, expanded);
+            }
+        }
+        return;
+    }
     let mut refs = level.refs.clone();
     sort_refs(&mut refs, data);
     let (first, rest): (Vec<usize>, Vec<usize>) = refs.into_iter().partition(|&i| {
@@ -512,8 +566,13 @@ pub fn default_expanded(data: &BranchData, options: &Options) -> HashSet<NodeId>
         .find(|b| b.current && b.kind == BranchKind::Local)
     {
         let in_recent = recent && data.recent.contains(&current.name);
-        if !in_recent {
-            open.insert(NodeId::group(Group::Local));
+        {
+            let group = if in_recent {
+                Group::Recent
+            } else {
+                Group::Local
+            };
+            open.insert(NodeId::group(group));
             if options.group_by_directory {
                 let mut path = String::new();
                 let parts: Vec<&str> = current.name.split('/').collect();
@@ -523,7 +582,7 @@ pub fn default_expanded(data: &BranchData, options: &Options) -> HashSet<NodeId>
                     }
                     path.push_str(part);
                     open.insert(NodeId {
-                        group: Group::Local,
+                        group,
                         path: path.clone(),
                     });
                 }
@@ -692,6 +751,7 @@ pub struct BranchesPopup {
     rows: Vec<Row>,
     selected: Option<usize>,
     scroll: ScrollHandle,
+    row_bounds: Vec<Rc<Cell<Bounds<Pixels>>>>,
     /// A branch's actions, open beside its row, and the row.
     submenu: Option<(usize, Entity<ContextMenu>, Subscription)>,
     /// The gear's menu.
@@ -732,6 +792,7 @@ impl BranchesPopup {
             rows: Vec::new(),
             selected: None,
             scroll: ScrollHandle::new(),
+            row_bounds: Vec::new(),
             submenu: None,
             settings: None,
             dismissed: false,
@@ -780,6 +841,7 @@ impl BranchesPopup {
     }
 
     fn rebuild(&mut self, reselect: bool) {
+        self.close_submenu();
         let keep = self
             .selected
             .and_then(|i| self.rows.get(i))
@@ -791,6 +853,7 @@ impl BranchesPopup {
             &self.options,
             &self.expanded,
         );
+        self.row_bounds = self.rows.iter().map(|_| Rc::default()).collect();
         let kept = keep
             .filter(|_| !reselect)
             .and_then(|k| self.rows.iter().position(|r| same_row(&r.kind, &k)));
@@ -1228,6 +1291,7 @@ impl BranchesPopup {
         let indent = CONTENT_X + row.depth as f32 * INDENT;
         if row.kind == RowKind::Separator {
             return div()
+                .flex_none()
                 .h(px(SEPARATOR))
                 .flex()
                 .items_center()
@@ -1385,7 +1449,17 @@ impl BranchesPopup {
         }
         let selection = theme.color(UiRole::Selection);
         let radius = px(4.0);
+        let bounds = self.row_bounds[i].clone();
         let mut el = div()
+            .relative()
+            .flex_none()
+            .child(
+                canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
             .id(("branches-row", i))
             .debug_selector(move || format!("branches-row-{i}"))
             .h(px(ROW))
@@ -1523,33 +1597,22 @@ impl BranchesPopup {
         (header + self.rows_height() + BOTTOM).clamp(MIN_HEIGHT, MAX_HEIGHT)
     }
 
-    /// The open menu (a branch's actions or the gear's options) and where
-    /// its top left goes from the popup's top left; the owner draws it
-    /// over the window (`ui::menu::overlay_at`).
+    /// The gear's options and their offset from the popup's top left.
+    /// Branch actions use their live row anchor in [`Self::branch_menu_overlay`].
     pub fn open_menu(&self) -> Option<(Entity<ContextMenu>, Point<Pixels>)> {
         if let Some((menu, _)) = &self.settings {
             let at = point(px(WIDTH - 40.0), px(HEADER_TOP + FIELD_HEIGHT));
             return Some((menu.clone(), at));
         }
-        self.submenu
-            .as_ref()
-            .map(|(row, menu, _)| (menu.clone(), self.submenu_offset(*row)))
+        None
     }
 
-    /// Where the open submenu is drawn, from the popup's top left.
-    fn submenu_offset(&self, row: usize) -> Point<Pixels> {
-        let header = HEADER_TOP + FIELD_HEIGHT + HEADER_BOTTOM;
-        let above: f32 = self.rows[..row]
-            .iter()
-            .map(|r| {
-                if r.kind == RowKind::Separator {
-                    SEPARATOR
-                } else {
-                    ROW
-                }
-            })
-            .sum();
-        point(px(WIDTH - SELECTION_X), px(header + above - 8.0))
+    /// Branch actions follow the row's current window bounds, including scrolling
+    /// and any displacement of the enclosing popup at the viewport edges.
+    pub fn branch_menu_overlay(&self, window: &Window, cx: &App) -> Option<AnyElement> {
+        self.submenu.as_ref().map(|(row, menu, _)| {
+            ui::menu::overlay_beside(menu, self.row_bounds[*row].clone(), window, cx)
+        })
     }
 }
 
@@ -1761,9 +1824,224 @@ mod tests {
         assert_eq!(
             texts(&rows, &d, &[]),
             vec![
-                "v Recent", "  a", "  main *", "> Local", "> Remote", "> Tags",
+                "v Recent", "  > feat", "  main *", "> Local", "> Remote", "> Tags",
             ]
         );
+    }
+
+    #[test]
+    fn recent_folders_keep_recency_and_full_refs_in_search_and_flat_mode() {
+        let mut d = data();
+        d.branches
+            .push(branch("feature/deep/z", BranchKind::Local, true));
+        d.branches[2].current = false;
+        d.recent = vec![
+            "feature/deep/z".into(),
+            "zeta".into(),
+            "feat/b".into(),
+            "origin/feat/a".into(),
+            "feat/a".into(),
+            "main".into(),
+        ];
+        let o = Options::default();
+        let mut open = default_expanded(&d, &o);
+        assert!(open.contains(&NodeId {
+            group: Group::Recent,
+            path: "feature/deep".into()
+        }));
+        for path in ["feat", "origin", "origin/feat"] {
+            open.insert(NodeId {
+                group: Group::Recent,
+                path: path.into(),
+            });
+        }
+        let names = |rows: Vec<Row>| {
+            rows.into_iter()
+                .filter_map(|r| match r.kind {
+                    RowKind::Branch {
+                        index,
+                        group: Group::Recent,
+                    } => Some(d.branches[index].name.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(build_rows(&d, &[], "", &o, &open)),
+            [
+                "feature/deep/z",
+                "zeta",
+                "feat/b",
+                "feat/a",
+                "origin/feat/a",
+                "main"
+            ]
+        );
+        let flat = Options {
+            group_by_directory: false,
+            ..o
+        };
+        assert_eq!(names(build_rows(&d, &[], "", &flat, &open)), d.recent);
+        let filtered = build_rows(&d, &[], "origin/feat/a", &o, &HashSet::new());
+        assert_eq!(names(filtered.clone()), ["origin/feat/a"]);
+        let chosen = preferred_row(&filtered, &d, &[], true).unwrap();
+        assert!(matches!(
+            filtered[chosen].kind,
+            RowKind::Branch {
+                index: 6,
+                group: Group::Recent
+            }
+        ));
+        assert_eq!(filtered[chosen].matches, vec![0..1]);
+        let items = branch_actions(&d.branches[6], false, false, None);
+        assert_eq!(
+            items[1].label().unwrap().as_ref(),
+            "New Branch from 'origin/feat/a'\u{2026}"
+        );
+    }
+
+    struct PopupHost {
+        popup: Entity<BranchesPopup>,
+        at: Point<Pixels>,
+    }
+
+    impl Render for PopupHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(
+                    ui::deferred(
+                        gpui::anchored()
+                            .position(self.at)
+                            .snap_to_window_with_margin(px(4.0))
+                            .child(self.popup.clone()),
+                    )
+                    .with_priority(1),
+                )
+                .children(self.popup.read(cx).branch_menu_overlay(window, cx))
+        }
+    }
+
+    #[gpui::test]
+    fn branch_submenu_tracks_rendered_rows_after_scrolling_and_snapping(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::AppContext as _;
+        cx.update(|cx| ui::theme::init(cx, themes::ThemeKind::Dark));
+        let (host, cx) = cx.add_window_view(|_, cx| {
+            let popup = cx.new(|cx| {
+                BranchesPopup::new(
+                    PopupSetup {
+                        actions: Vec::new(),
+                        update: None,
+                        push: None,
+                        fetch: None,
+                        options: Options::default(),
+                    },
+                    cx,
+                )
+            });
+            popup.update(cx, |p, cx| {
+                p.set_data(
+                    BranchData {
+                        branches: (0..40)
+                            .map(|i| {
+                                branch(&format!("feature/item{i:02}"), BranchKind::Local, i == 0)
+                            })
+                            .collect(),
+                        recent: Vec::new(),
+                        loaded: true,
+                    },
+                    cx,
+                );
+            });
+            PopupHost {
+                popup,
+                at: point(px(1900.0), px(1060.0)),
+            }
+        });
+        let popup = host.read_with(cx, |h, _| h.popup.clone());
+        let redraw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear());
+        };
+        redraw(cx);
+        // Keyboard selection scrolls a row into view; the popup itself has
+        // already moved up and left to fit the viewport.
+        popup.update(cx, |p, cx| {
+            p.selected = Some(22);
+            p.scroll.scroll_to_item(22);
+            cx.notify();
+        });
+        redraw(cx);
+        assert!(popup.read_with(cx, |p, _| p.scroll.offset().y < px(0.0)));
+        cx.update(|window, cx| popup.update(cx, |p, cx| p.right(&Right, window, cx)));
+        redraw(cx);
+        let row = cx.debug_bounds("branches-row-22").unwrap();
+        let menu = cx.debug_bounds("menu-level-0").unwrap();
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let parent = cx.debug_bounds("branches-popup").unwrap();
+        assert!(parent.right() <= viewport.width - px(4.0));
+        assert!(parent.bottom() <= viewport.height - px(4.0));
+        assert_eq!(row.size.height, px(ROW));
+        assert_eq!(
+            menu.top(),
+            (row.top() - px(9.0))
+                .min(viewport.height - px(4.0) - menu.size.height)
+                .max(px(4.0))
+        );
+        assert!(menu.right() <= viewport.width - px(4.0));
+        assert!(
+            menu.left() < row.left(),
+            "submenu flips to the left: row={row:?} menu={menu:?} viewport={viewport:?}"
+        );
+        // A pointer click on an upper row uses the same live anchor.
+        popup.update(cx, |p, cx| {
+            p.close_submenu();
+            p.scroll.set_offset(point(px(0.0), px(-100.0)));
+            cx.notify();
+        });
+        redraw(cx);
+        let row = cx.debug_bounds("branches-row-8").unwrap();
+        cx.simulate_click(row.center(), gpui::Modifiers::none());
+        redraw(cx);
+        let menu = cx.debug_bounds("menu-level-0").unwrap();
+        assert_eq!(menu.top(), row.top() - px(9.0));
+        assert_eq!(
+            popup.read_with(cx, |p, _| p.selected_branch().unwrap().name.clone()),
+            "feature/item06"
+        );
+        host.update(cx, |h, cx| {
+            h.at = point(px(100.0), px(100.0));
+            cx.notify();
+        });
+        // Rebuild and open before a frame: the overlay must read the new
+        // layout during prepaint, not yesterday's bounds or a zero origin.
+        cx.update(|window, cx| {
+            popup.update(cx, |p, cx| {
+                p.set_filter("item03".into(), cx);
+                assert!(p.submenu.is_none());
+                p.right(&Right, window, cx);
+            })
+        });
+        redraw(cx);
+        let row = cx.debug_bounds("branches-row-2").unwrap();
+        let menu = cx.debug_bounds("menu-level-0").unwrap();
+        assert_eq!(menu.top(), row.top() - px(9.0));
+        assert_eq!(menu.left(), row.right() + px(1.0));
+        popup.update(cx, |p, cx| {
+            p.set_filter(String::new(), cx);
+            p.set_expanded(
+                NodeId {
+                    group: Group::Local,
+                    path: "feature".into(),
+                },
+                false,
+                cx,
+            );
+            assert!(p.submenu.is_none());
+            assert_eq!(p.rows.len(), 2);
+        });
     }
 
     #[test]
