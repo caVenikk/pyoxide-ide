@@ -354,6 +354,31 @@ mod tests {
         dismiss_with_escape(&popup, cx);
     }
 
+    #[gpui::test]
+    fn outside_dismiss_keeps_the_clicked_focus_and_emits_once(cx: &mut TestAppContext) {
+        cx.update(themes_init);
+        let (popup, cx) = cx.add_window_view(FontSizePopup::new);
+        let dismissed = Rc::new(Cell::new(0));
+        let sink = dismissed.clone();
+        cx.update(|window, cx| {
+            cx.subscribe(&popup, move |_, _: &DismissEvent, _| {
+                sink.set(sink.get() + 1);
+            })
+            .detach();
+            let origin = cx.focus_handle();
+            let clicked = cx.focus_handle();
+            popup.update(cx, |popup, _| popup.origin = Some(origin));
+            window.focus(&clicked);
+            popup.update(cx, |popup, cx| {
+                popup.dismiss_outside(window, cx);
+                popup.dismiss(window, cx);
+            });
+            assert!(window.focused(cx).is_some_and(|focus| focus == clicked));
+        });
+        cx.run_until_parked();
+        assert_eq!(dismissed.get(), 1);
+    }
+
     fn dismiss_with_escape(popup: &gpui::Entity<FontSizePopup>, cx: &mut VisualTestContext) {
         let dismissed = Rc::new(Cell::new(false));
         let sink = dismissed.clone();
