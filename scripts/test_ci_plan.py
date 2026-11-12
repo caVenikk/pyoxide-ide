@@ -63,13 +63,54 @@ class PlannerTests(unittest.TestCase):
         self.assertTrue(result['integration'])
         self.assertEqual(len(result['matrix']['include']), 3)
 
-    def test_shared_platform_full_and_db_native_coverage(self):
-        meta = metadata(self.root, {'process': [], 'db-core': [], 'db-service': [('db-core', None)], 'secrets': []})
-        for name in ['process', 'db-core', 'secrets']:
-            p = plan.make_plan([name + '/src/lib.rs'], meta, 'integration/batch', root=self.root)
-            self.assertEqual(len(p['matrix']['include']), 3)
-            self.assertTrue(p['integration'])
-        self.assertEqual(plan.make_plan(['process/src/lib.rs'], meta, 'integration/batch', root=self.root)['mode'], 'full')
+    def test_common_crate_keeps_native_coverage_without_unrelated_packages(self):
+        meta = metadata(self.root, {'process': [], 'consumer': [('process', 'build')],
+                                    'app': [('consumer', 'dev')], 'db-core': []})
+        result = plan.make_plan(['process/src/lib.rs'], meta, 'integration/batch', root=self.root)
+        self.assertEqual(result['mode'], 'fast')
+        self.assertEqual(result['packages'], ['app', 'consumer', 'process'])
+        self.assertEqual(len(result['matrix']['include']), 3)
+        self.assertFalse(result['integration'])
+
+    def test_common_crate_with_db_consumer_runs_database_integration(self):
+        meta = metadata(self.root, {'process': [], 'db-service': [('process', None)]})
+        result = plan.make_plan(['process/src/lib.rs'], meta, 'integration/batch', root=self.root)
+        self.assertEqual(result['mode'], 'fast')
+        self.assertEqual(result['packages'], ['db-service', 'process'])
+        self.assertEqual(len(result['matrix']['include']), 3)
+        self.assertTrue(result['integration'])
+
+    def test_workbench_retains_fixture_and_transitive_application_tests(self):
+        meta = metadata(self.root, {'workbench': [],
+                                    'workbench-fixture-module': [('workbench', 'dev')],
+                                    'db-ui': [('workbench', None)],
+                                    'pyoxide-ide': [('db-ui', None)], 'db-core': []})
+        result = plan.make_plan(['workbench/src/menu.rs'], meta, 'integration/batch', root=self.root)
+        self.assertEqual(result['mode'], 'fast')
+        self.assertEqual(result['packages'], ['db-ui', 'pyoxide-ide', 'workbench', 'workbench-fixture-module'])
+        self.assertEqual(result['libs'], result['packages'])
+        self.assertEqual(len(result['matrix']['include']), 3)
+        self.assertFalse(result['integration'])
+
+    def test_common_crate_does_not_override_full_fallback(self):
+        meta = metadata(self.root, {'process': []})
+        for path in ['unknown-input', 'Cargo.lock', 'process/Cargo.toml', 'process/build.rs',
+                     '.cargo/config.toml', 'process/fixtures/input.txt']:
+            with self.subTest(path=path):
+                result = plan.make_plan(['process/src/lib.rs', path], meta,
+                                        'integration/batch', root=self.root)
+                self.assertEqual(result['mode'], 'full')
+                self.assertTrue(result['integration'])
+        result = plan.make_plan(['process/src/lib.rs'], meta, 'main', root=self.root)
+        self.assertEqual(result['mode'], 'full')
+
+    def test_db_crates_retain_native_and_database_coverage(self):
+        meta = metadata(self.root, {'db-core': [], 'db-service': [('db-core', None)], 'secrets': []})
+        for name in ['db-core', 'secrets']:
+            result = plan.make_plan([name + '/src/lib.rs'], meta, 'integration/batch', root=self.root)
+            self.assertEqual(result['mode'], 'fast')
+            self.assertEqual(len(result['matrix']['include']), 3)
+            self.assertTrue(result['integration'])
 
     def test_missing_git_base_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

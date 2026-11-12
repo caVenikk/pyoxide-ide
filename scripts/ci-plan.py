@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 OS = ['ubuntu-latest', 'macos-latest', 'windows-latest']
-# Changes to common runtime/platform boundaries require workspace validation.
+# Common runtime/platform boundaries require validation on every native OS.
 COMMON = {'ui', 'editor', 'workbench', 'process', 'terminal', 'terminal-ui',
           'native-path', 'file-watcher', 'project', 'settings', 'app-info', 'py-env'}
 DB = {'db-core', 'db-service', 'db-testkit', 'db-postgres', 'db-sqlite',
@@ -92,8 +92,6 @@ def make_plan(files, meta, base_ref, force_full=False, root=ROOT):
             changed.add(max(owners, key=lambda name: len(dirs[name])))
         elif not docs_only(f):
             return full('Unknown or shared input changed: ' + f)
-    if changed & COMMON:
-        return full('Shared platform boundary changed: ' + ', '.join(sorted(changed & COMMON)))
     affected = closure(changed, reverse)
     # Native behavior can be hidden in macros, external libraries or removed
     # code. Only explicitly portable leaf areas may use Linux alone.
