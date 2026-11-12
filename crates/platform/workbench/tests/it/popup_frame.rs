@@ -257,4 +257,7 @@ impl ui::popup_window::Popup for Owner {
     fn dismiss_popup(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         ui::popup_window::close(cx.entity_id(), cx);
     }
+    fn dismiss_outside(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        ui::popup_window::close(cx.entity_id(), cx);
+    }
 }

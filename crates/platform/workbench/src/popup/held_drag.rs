@@ -116,7 +116,7 @@ where
     track_held_drag_in(owner, drag, moved, ended, cursor, None)
 }
 
-pub(super) fn track_held_drag_in<T, S>(
+pub(crate) fn track_held_drag_in<T, S>(
     owner: Entity<T>,
     drag: impl Fn(&mut T) -> &mut HeldDrag<S> + 'static,
     moved: impl Fn(&mut T, Point<Pixels>, &mut Context<T>) + 'static,

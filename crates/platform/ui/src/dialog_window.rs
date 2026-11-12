@@ -392,7 +392,8 @@ impl Render for PopupHost {
                                 let size = bounds.size;
                                 if fitted.get() != Some(size) && size.width > px(0.0) {
                                     fitted.set(Some(size));
-                                    window.defer(cx, move |window, _| native::fit(window, size));
+                                    window
+                                        .defer(cx, move |window, cx| native::fit(window, size, cx));
                                 }
                             },
                             |_, _, _, _| {},
@@ -708,31 +709,77 @@ pub(crate) mod native {
         (!window.is_null()).then_some(window)
     }
 
-    /// Sizes a popup window to `size`, its top left corner where it is.
-    #[allow(unexpected_cfgs)] // objc's msg_send! checks a cfg of its own
-    pub fn fit(window: &mut Window, size: gpui::Size<gpui::Pixels>) {
-        use cocoa_types::{NSPoint, NSRect, NSSize};
+    /// AppKit calls back synchronously while resizing. Run outside both the
+    /// Window and App borrows so GPUI can update its viewport in that callback.
+    #[allow(unexpected_cfgs)]
+    fn queue_geometry(
+        window: &Window,
+        ns: *mut Object,
+        top: cocoa_types::NSPoint,
+        size: gpui::Size<gpui::Pixels>,
+        cx: &mut gpui::App,
+    ) {
+        struct Retained(*mut Object);
+        impl Drop for Retained {
+            fn drop(&mut self) {
+                unsafe {
+                    let _: () = msg_send![self.0, release];
+                }
+            }
+        }
+        // SAFETY: retain a live UI-thread NSWindow until the deferred UI callback.
+        let retained = Retained(unsafe { msg_send![ns, retain] });
+        let handle = window.window_handle();
+        cx.spawn(async move |cx| {
+            if !cx
+                .update(|cx| cx.windows().contains(&handle))
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let ns = retained.0;
+            // SAFETY: the retained live window and native geometry have AppKit layouts.
+            unsafe {
+                let content = cocoa_types::NSSize {
+                    width: f64::from(f32::from(size.width)),
+                    height: f64::from(f32::from(size.height)),
+                };
+                let _: () = msg_send![ns, setContentSize: content];
+                let _: () = msg_send![ns, setFrameTopLeftPoint: top];
+                let _: () = msg_send![ns, invalidateShadow];
+            }
+            drop(retained);
+        })
+        .detach();
+    }
+
+    /// Sizes a popup window while retaining its top-left position.
+    #[allow(unexpected_cfgs)]
+    pub fn fit(window: &mut Window, size: gpui::Size<gpui::Pixels>, cx: &mut gpui::App) {
         if !crate::pointer::native() {
             window.resize(size);
             return;
         }
-        let Some(ns) = ns_window(window) else {
-            return;
+        let Some(ns) = ns_window(window) else { return };
+        // SAFETY: querying geometry of a live NSWindow on the UI thread.
+        let frame: cocoa_types::NSRect = unsafe { msg_send![ns, frame] };
+        let top = cocoa_types::NSPoint {
+            x: frame.origin.x,
+            y: frame.origin.y + frame.size.height,
         };
-        // SAFETY: a live NSWindow, on the main thread.
+        queue_geometry(window, ns, top, size, cx);
+    }
+
+    /// Mouse-only completion/lookup panels leave the editor as the key window.
+    #[allow(unexpected_cfgs)]
+    pub fn keep_owner_focus(window: &Window) {
+        if !crate::pointer::native() {
+            return;
+        }
+        let Some(ns) = ns_window(window) else { return };
+        // SAFETY: this live NSPanel is accessed on its UI thread.
         unsafe {
-            let frame: NSRect = msg_send![ns, frame];
-            let top_left = NSPoint {
-                x: frame.origin.x,
-                y: frame.origin.y + frame.size.height,
-            };
-            let content = NSSize {
-                width: f64::from(f32::from(size.width)),
-                height: f64::from(f32::from(size.height)),
-            };
-            let _: () = msg_send![ns, setContentSize: content];
-            let _: () = msg_send![ns, setFrameTopLeftPoint: top_left];
-            let _: () = msg_send![ns, invalidateShadow];
+            let _: () = msg_send![ns, setBecomesKeyOnlyIfNeeded: true];
         }
     }
 
@@ -787,8 +834,9 @@ pub(crate) mod native {
         origin: gpui::Point<gpui::Pixels>,
         size: gpui::Size<gpui::Pixels>,
         reference: Option<&Window>,
+        cx: &mut gpui::App,
     ) {
-        use cocoa_types::{NSPoint, NSSize};
+        use cocoa_types::NSPoint;
         if !crate::pointer::native() {
             window.resize(size);
             return;
@@ -808,12 +856,7 @@ pub(crate) mod native {
                 x: frame.origin.x + f64::from(f32::from(origin.x)),
                 y: frame.origin.y + frame.size.height - f64::from(f32::from(origin.y)),
             };
-            let content = NSSize {
-                width: f64::from(f32::from(size.width)),
-                height: f64::from(f32::from(size.height)),
-            };
-            let _: () = msg_send![ns, setContentSize: content];
-            let _: () = msg_send![ns, setFrameTopLeftPoint: top];
+            queue_geometry(window, ns, top, size, cx);
         }
     }
 
@@ -911,6 +954,7 @@ pub(crate) mod native {
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) mod native {
+    pub fn keep_owner_focus(_: &gpui::Window) {}
     pub fn popup_behavior(_: &gpui::Window, _: bool) {}
     pub fn capturing() -> bool {
         false
@@ -920,6 +964,7 @@ pub(crate) mod native {
         _: gpui::Point<gpui::Pixels>,
         size: gpui::Size<gpui::Pixels>,
         _: Option<&gpui::Window>,
+        _: &mut gpui::App,
     ) {
         window.resize(size);
     }
@@ -933,7 +978,7 @@ pub(crate) mod native {
 
     /// Sizes a popup window to `size`; the window keeps its top left
     /// corner.
-    pub fn fit(window: &mut gpui::Window, size: gpui::Size<gpui::Pixels>) {
+    pub fn fit(window: &mut gpui::Window, size: gpui::Size<gpui::Pixels>, _: &mut gpui::App) {
         window.resize(size);
     }
 }

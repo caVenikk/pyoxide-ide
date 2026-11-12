@@ -193,7 +193,7 @@ impl CodeIntelView {
         docs.closing = None;
         docs.inside = false;
         let had = docs.shown.take().is_some();
-        if self.popups_mut().hide(doc::CONTEXT) || had {
+        if self.popups_mut().hide(doc::CONTEXT, cx) || had {
             cx.notify();
         }
     }
@@ -552,15 +552,18 @@ impl CodeIntelView {
         });
         self.docs.closing = None;
         let popup = self.docs.popup.clone();
-        self.popups_mut().show(CaretPopup {
-            context: doc::CONTEXT,
-            editor: editor.clone(),
-            anchor: range.start,
-            placement: Placement::Below,
-            inset: gpui::px(0.0),
-            height: Some(height),
-            content: popup.into(),
-        });
+        self.popups_mut().show(
+            CaretPopup {
+                context: doc::CONTEXT,
+                editor: editor.clone(),
+                anchor: range.start,
+                placement: Placement::Below,
+                inset: gpui::px(0.0),
+                height: Some(height),
+                content: popup.into(),
+            },
+            cx,
+        );
         cx.notify();
     }
 

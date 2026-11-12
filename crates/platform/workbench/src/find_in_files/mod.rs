@@ -1812,6 +1812,17 @@ popup_actions! {
     editor::find::HistoryClose => dropdown_close_action,
 }
 
+impl ui::popup_window::Popup for FindInFiles {
+    fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(true, window, cx);
+    }
+    fn dismiss_outside(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.pinned && !self.browsing {
+            self.close(false, window, cx);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1832,11 +1843,5 @@ mod tests {
             assert_eq!(NamedScope::from_name(s.name()), Some(s));
         }
         assert_eq!(NamedScope::from_name("All Places"), None);
-    }
-}
-
-impl ui::popup_window::Popup for FindInFiles {
-    fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close(true, window, cx);
     }
 }

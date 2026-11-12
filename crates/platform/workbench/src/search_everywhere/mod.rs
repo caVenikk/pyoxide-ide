@@ -1496,4 +1496,7 @@ impl ui::popup_window::Popup for SearchEverywhere {
     fn dismiss_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close(true, window, cx);
     }
+    fn dismiss_outside(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close(false, window, cx);
+    }
 }

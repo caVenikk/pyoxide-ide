@@ -117,23 +117,46 @@ pub fn invoke(
     // A window with a dialog open takes no input: the command goes to the
     // dialog, or to a popup open over it (queries above still read the
     // window's own state).
-    let target = crate::dialog_window::innermost(window.window_handle(), cx);
-    let target = crate::popup_window::innermost(target, cx);
+    let modal = crate::dialog_window::innermost(window.window_handle(), cx);
+    let target = crate::popup_window::innermost(modal, cx);
     if target != window.window_handle() {
-        return target
+        let handled = target
             .update(cx, |_, window, cx| {
-                if !window.is_action_available(action.as_ref(), cx)
-                    && !cx.is_action_available(action.as_ref())
+                if window.is_action_available(action.as_ref(), cx)
+                    || cx.is_action_available(action.as_ref())
                 {
-                    return Err(CommandError::new(
-                        "not_available",
-                        format!("{id} is not available in the open dialog"),
-                    ));
+                    window.dispatch_action(action.boxed_clone(), cx);
+                    true
+                } else {
+                    false
                 }
-                window.dispatch_action(action, cx);
-                Ok(Json::Null)
             })
-            .map_err(|e| CommandError::new("not_available", format!("{id}: {e}")))?;
+            .unwrap_or(false);
+        if handled {
+            return Ok(Json::Null);
+        }
+        // Native popups used to share their owner's dispatch tree. Preserve
+        // its ancestor actions, but never bypass a real modal dialog.
+        if modal != window.window_handle() {
+            if target != modal
+                && modal
+                    .update(cx, |_, window, cx| {
+                        if window.is_action_available(action.as_ref(), cx) {
+                            window.dispatch_action(action.boxed_clone(), cx);
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false)
+            {
+                return Ok(Json::Null);
+            }
+            return Err(CommandError::new(
+                "not_available",
+                format!("{id} is not available in the open dialog"),
+            ));
+        }
     }
     // Window handlers on the focus path, then those of a non-modal dialog
     // open from the window (the Settings window; it runs there, or in a
@@ -141,17 +164,22 @@ pub fn invoke(
     // (`App::on_action`, such as quit).
     if !window.is_action_available(action.as_ref(), cx) {
         for dialog in crate::dialog_window::non_modal_of(window.window_handle(), cx) {
-            let target = crate::dialog_window::innermost(dialog, cx);
-            let target = crate::popup_window::innermost(target, cx);
-            let ran = target.update(cx, |_, window, cx| {
-                let available = window.is_action_available(action.as_ref(), cx);
-                if available {
-                    window.dispatch_action(action.boxed_clone(), cx);
+            let modal = crate::dialog_window::innermost(dialog, cx);
+            let native = crate::popup_window::innermost(modal, cx);
+            for target in [Some(native), (native != modal).then_some(modal)]
+                .into_iter()
+                .flatten()
+            {
+                let ran = target.update(cx, |_, window, cx| {
+                    let available = window.is_action_available(action.as_ref(), cx);
+                    if available {
+                        window.dispatch_action(action.boxed_clone(), cx);
+                    }
+                    available
+                });
+                if ran.unwrap_or(false) {
+                    return Ok(Json::Null);
                 }
-                available
-            });
-            if ran.unwrap_or(false) {
-                return Ok(Json::Null);
             }
         }
         if !cx.is_action_available(action.as_ref()) {

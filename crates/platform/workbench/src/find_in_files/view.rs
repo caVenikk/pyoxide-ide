@@ -981,6 +981,9 @@ fn row_text(
 
 impl Render for FindInFiles {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.dropdown.is_none() {
+            ui::popup_window::close_level(cx.entity_id(), 1, cx);
+        }
         if !self.open {
             return div().into_any_element();
         }

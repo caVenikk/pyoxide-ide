@@ -2336,8 +2336,7 @@ impl gpui::Element for Beside {
                     position.x = row.left() - px(1.0) - size.width;
                 }
             }
-            let screen_bounds =
-                Bounds::new(crate::popup_window::screen_origin(window) + position, size);
+            let screen_bounds = crate::popup_window::fit_bounds(window, position, size, cx);
             let mut drawn = self.drawn.borrow_mut();
             if drawn.len() <= level {
                 drawn.resize(level + 1, None);
@@ -2536,13 +2535,16 @@ fn show_native_level(
     });
     crate::popup_window::show(
         menu,
-        crate::popup_window::Key(menu.entity_id(), level),
-        at,
-        size,
-        focus,
+        crate::popup_window::SurfaceOptions {
+            key: crate::popup_window::Key(menu.entity_id(), level),
+            at,
+            size,
+            focus,
+            persistent: false,
+            keyboard: true,
+        },
         draw,
         dismiss,
-        false,
         window,
         cx,
     );
@@ -2638,6 +2640,75 @@ pub fn overlay_at(
     )
     .with_priority(1)
     .into_any_element()
+}
+
+struct NativeMenu {
+    menu: Entity<ContextMenu>,
+}
+impl IntoElement for NativeMenu {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+impl gpui::Element for NativeMenu {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = ();
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, AnyElement) {
+        let mut child = self.menu.clone().into_any_element();
+        let size = child.layout_as_root(
+            gpui::size(
+                gpui::AvailableSpace::MaxContent,
+                gpui::AvailableSpace::MaxContent,
+            ),
+            window,
+            cx,
+        );
+        let style = gpui::Style {
+            size: gpui::size(size.width.into(), size.height.into()),
+            ..Default::default()
+        };
+        (window.request_layout(style, None, cx), child)
+    }
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus = self.menu.read(cx).focus.clone();
+        window.set_focus_handle(&focus, cx);
+        let menu = self.menu.clone();
+        window.defer(cx, move |window, cx| {
+            show_native_level(&menu, 0, bounds.origin, bounds.size, window, cx)
+        });
+    }
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut AnyElement,
+        _: &mut (),
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
 }
 
 #[cfg(test)]
@@ -3509,72 +3580,5 @@ mod tests {
         cx.simulate_click(beta.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert_eq!(origin.read_with(cx, |o, _| o.got.clone()), ["second"]);
-    }
-}
-
-struct NativeMenu {
-    menu: Entity<ContextMenu>,
-}
-impl IntoElement for NativeMenu {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-impl gpui::Element for NativeMenu {
-    type RequestLayoutState = AnyElement;
-    type PrepaintState = ();
-    fn id(&self) -> Option<gpui::ElementId> {
-        None
-    }
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-    fn request_layout(
-        &mut self,
-        _: Option<&gpui::GlobalElementId>,
-        _: Option<&gpui::InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (gpui::LayoutId, AnyElement) {
-        let mut child = self.menu.clone().into_any_element();
-        let size = child.layout_as_root(
-            gpui::size(
-                gpui::AvailableSpace::MaxContent,
-                gpui::AvailableSpace::MaxContent,
-            ),
-            window,
-            cx,
-        );
-        let style = gpui::Style {
-            size: gpui::size(size.width.into(), size.height.into()),
-            ..Default::default()
-        };
-        (window.request_layout(style, None, cx), child)
-    }
-    fn prepaint(
-        &mut self,
-        _: Option<&gpui::GlobalElementId>,
-        _: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _: &mut AnyElement,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let menu = self.menu.clone();
-        window.defer(cx, move |window, cx| {
-            show_native_level(&menu, 0, bounds.origin, bounds.size, window, cx)
-        });
-    }
-    fn paint(
-        &mut self,
-        _: Option<&gpui::GlobalElementId>,
-        _: Option<&gpui::InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut AnyElement,
-        _: &mut (),
-        _: &mut Window,
-        _: &mut App,
-    ) {
     }
 }

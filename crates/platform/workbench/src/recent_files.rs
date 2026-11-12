@@ -774,4 +774,7 @@ impl ui::popup_window::Popup for RecentFiles {
     fn dismiss_popup(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.close(true, cx);
     }
+    fn dismiss_outside(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.close(false, cx);
+    }
 }

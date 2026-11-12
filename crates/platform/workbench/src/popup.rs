@@ -8,6 +8,7 @@
 
 mod held_drag;
 
+pub(crate) use held_drag::track_held_drag_in;
 pub use held_drag::{HeldDrag, track_held_drag};
 
 use gpui::{
@@ -274,13 +275,18 @@ impl PopupFrame {
                 .top(owner_bounds.origin.y)
                 .w(owner_bounds.size.width)
                 .h(owner_bounds.size.height)
+                .on_mouse_down_out(
+                    cx.listener(|this, _, window, cx| this.dismiss_outside(window, cx)),
+                )
                 .child(ui::popup_window::frame(&cx.entity(), owner_bounds.size));
         }
         let bounds = if native {
             self.native_window = Some(window.window_handle().window_id());
             if let Some((origin, _)) = self.native_parent {
                 let bounds = Bounds::new(origin + owner_bounds.origin, owner_bounds.size);
-                window.defer(cx, move |window, _| ui::popup_window::place(window, bounds));
+                window.defer(cx, move |window, cx| {
+                    ui::popup_window::place(window, bounds, cx)
+                });
             }
             Bounds::new(point(px(0.0), px(0.0)), owner_bounds.size)
         } else {
@@ -292,7 +298,7 @@ impl PopupFrame {
             Some(Drag::Resize { edges, .. }) => Some(edges.cursor()),
             _ => None,
         };
-        let tracking = held_drag::track_held_drag_in(
+        let tracking = track_held_drag_in(
             owner.clone(),
             move |this: &mut T| &mut frame(this).drag,
             move |this, mouse, _| frame(this).drag_to(mouse, viewport),
@@ -364,7 +370,7 @@ pub(crate) fn grips<T: 'static>(
     grips_in(owner, None, start)
 }
 
-fn grips_in<T: 'static>(
+pub(crate) fn grips_in<T: 'static>(
     owner: Entity<T>,
     origin: Option<Point<Pixels>>,
     start: impl Fn(&mut T, Edges, Point<Pixels>) + Clone + 'static,
