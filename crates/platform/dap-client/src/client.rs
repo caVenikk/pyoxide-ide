@@ -1484,8 +1484,12 @@ mod tests {
         let mut answered = client.threads();
         let request = peer.next();
         peer.respond(&request, json!({"threads": []}));
-        wait_until(|| client.pending_count() <= 1);
-        assert_eq!((&mut answered).now_or_never(), Some(Ok(vec![])));
+        let mut response = None;
+        wait_until(|| {
+            response = (&mut answered).now_or_never();
+            response.is_some()
+        });
+        assert_eq!(response, Some(Ok(vec![])));
         drop(answered);
         client.close_input();
         assert!(peer.inner.written.recv_timeout(WAIT).is_err());
