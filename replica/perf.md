@@ -654,3 +654,52 @@ The candidate was checked twice across the complete keymap subset; the terminal
 subset was also measured before and after restoring the original helper.
 These are local subset measurements, not a claim about the complete CI wall
 time. CI uses line-tables-only debug information and different runner hardware.
+
+### Scoped builds versus workspace builds with filtered tests
+
+Issue #433, 2026-11-13: a controlled comparison on the #369 change
+`8514d4473a7d278bd1e5ced74bf8fbc08eb056dd`, relative to
+`aee759174e69ead51b97fad4ae560e22297263cb`. The affected closure contained
+20 packages. Two three-core macOS arm64 runners each ran both variants,
+in opposite orders. Before each variant, `target/` was reset to an identical
+APFS clone of the restored main cache; snapshot and reset time is excluded.
+
+A used the production selected-package Clippy, nextest build and test commands.
+B used `--workspace` for Clippy and the nextest build, then
+`--workspace -E 'package(=...) or ...'` to run the same affected tests.
+Both used the same selected-library doctests and throughput selection.
+
+| Order | Variant | Clippy | Build | Tests | Doctests | Total |
+|---|---|---:|---:|---:|---:|---:|
+| AB | A: selected packages | 45.0 s | 136.0 s | 191.3 s | 157.5 s | 530.0 s |
+| AB | B: workspace build, filtered tests | 51.1 s | 191.2 s | 196.3 s | 137.8 s | 576.5 s |
+| BA | B: workspace build, filtered tests | 66.4 s | 219.5 s | 203.8 s | 146.5 s | 636.3 s |
+| BA | A: selected packages | 43.9 s | 121.6 s | 167.0 s | 127.7 s | 460.4 s |
+
+The total includes the throughput selector's 0.1-0.3 s; no terminal throughput
+test was selected by this change. Both variants ran exactly the same 1,746
+tests from 33 test binaries. The workspace build produced 90 test binaries;
+the filter excluded the other binaries from execution. In all four trials,
+the test step compiled no crates and changed no Cargo fingerprint JSON after
+the preceding build, confirming that filtering execution retained its graph.
+
+Both jobs restored the same full-match cache key,
+`v0-rust-check-Darwin-arm64-b3d57be6-139a5321`, using Rust 1.99.1 and nextest
+0.9.148. For this affected closure, Tokio's build features already matched the
+workspace, including `signal` and `test-util`; neither build recompiled Tokio.
+Both doctest variants did recompile it. The raw logs contain ANSI colors, so
+compile counts were checked after stripping those codes rather than using the
+prototype's unnormalized counters.
+
+B was 8.8% and 38.2% slower within the respective paired jobs. Keep the current
+selected-package strategy: this experiment does not justify a production
+switch. The size of the difference varies with runner/order effects, and this
+closure does not reproduce the narrower Tokio feature mismatch observed in
+#419. No general conclusion for every affected closure or other OS is implied.
+
+The temporary experiment pinned Rust 1.99.1 to match the existing cache.
+Production remained on `stable`, which had advanced to Rust 1.100.0 and thus
+needed a new cache. These measurements do not describe production 1.100
+performance. The prototype workflow is not part of the production gate.
+Raw logs, fingerprints, plans and matching selected/executed inventories are
+attached to [run 43381878961](https://github.com/caVenikk/pyoxide-ide/actions/runs/43381878961).
