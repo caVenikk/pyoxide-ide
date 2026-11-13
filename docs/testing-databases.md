@@ -9,8 +9,8 @@ run (in memory or in a temporary file). Tests that need a server are
 docker compose up -d postgres oracle      # wait until both are healthy
 docker compose ps                         # STATUS shows (healthy)
 cargo test -p db-postgres -- --ignored
-cargo test -p db-oracle-thin -- --ignored
-cargo test -p db-oracle-odpi -- --ignored # needs an Oracle Client installed
+cargo test -p db-oracle-thin -- --ignored --test-threads=1
+cargo test -p db-oracle-odpi -- --ignored --test-threads=1 # needs an Oracle Client installed
 cargo test -p db-service -- --ignored
 cargo test -p db-session -- --ignored     # sessions: cancel, savepoints, read-only
 ```
@@ -24,6 +24,21 @@ The default password only protects throw-away local containers. Override any
 value with `PYOXIDE_TEST_PG_HOST`, `PYOXIDE_TEST_PG_PORT`,
 `PYOXIDE_TEST_ORACLE_HOST`, `PYOXIDE_TEST_ORACLE_PORT`,
 `PYOXIDE_TEST_ORACLE_SERVICE`.
+
+Oracle introspection tokens cover the whole fixture schema. Unique object
+prefixes prevent name collisions, but concurrent DDL still invalidates those
+tokens and changes statement counts. Run Oracle tests serially, including the
+non-conformance cases that create objects. CI uses a separate `cargo test`
+invocation with `--test-threads=1`; PostgreSQL, SQLite and service tests retain
+their usual parallelism. Do not run separate Oracle invocations concurrently
+against the same schema.
+
+Nextest assigns both Oracle drivers' integration tests to one shared serial
+group, including when using the `ci` profile:
+
+```bash
+cargo nextest run -p db-oracle-thin --run-ignored only -E 'not test(bench_)'
+```
 
 ## Conformance suite
 `crates/platform/db-testkit` holds one suite of contract cases that every driver
@@ -43,13 +58,15 @@ SQLite runs it in every `cargo test`; the server backends run it with the ignore
 
 ```bash
 cargo test -p db-postgres --test it conformance:: -- --ignored
-cargo test -p db-oracle-thin --test it conformance:: -- --ignored
+cargo test -p db-oracle-thin --test it conformance:: -- --ignored --test-threads=1
 ```
 
 ## Rules for integration tests
 - Create what the test needs in the test (tables with a unique prefix per
   test) and drop it at the end; never depend on leftovers.
-- A test must pass when run alone and in parallel with the others.
+- A test must pass alone and alongside the others under the configured runner
+  isolation. Oracle tests share one serial group because their assertions
+  observe schema-wide metadata.
 - Never print connection passwords; use `ConnectParams` and `Secret`.
 - `Introspector::load` needs PostgreSQL 12 or later (`pg_attribute.attgenerated`); the
   per-object reads work on older servers. Oracle 19c is the oldest supported release

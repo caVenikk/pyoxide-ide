@@ -245,8 +245,15 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: >-
-          cargo test -p db-postgres -p db-sqlite -p db-oracle-thin -p db-service
+          cargo test -p db-postgres -p db-sqlite -p db-service
           --config 'profile.dev.package."*".opt-level=0' -- --ignored --skip bench_
+      # Oracle change tokens cover the whole shared schema, including DDL
+      # from tests with distinct object prefixes. Keep that schema quiet.
+      - name: Oracle integration tests
+        run: >-
+          cargo test -p db-oracle-thin
+          --config 'profile.dev.package."*".opt-level=0'
+          -- --ignored --skip bench_ --test-threads=1
 
       - name: Record completed database checks
         if: needs.scope.outputs.mode == 'full'
