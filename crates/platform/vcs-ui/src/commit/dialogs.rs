@@ -335,6 +335,7 @@ impl Render for RollbackDialog {
             cx,
         )
         .debug_selector(|| "rollback-delete-added".into())
+        .tab_stop(has_added)
         .when(!has_added, |d| d.opacity(ui::components::DISABLED_ALPHA))
         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
             this.toggle_delete(&ToggleDeleteAdded, window, cx)
@@ -556,5 +557,39 @@ impl Render for UserNameDialog {
             .children(error)
             .child(buttons);
         frame("user-name-dialog-backdrop", dialog, window)
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    #[gpui::test]
+    fn rollback_skips_disabled_delete_checkbox_and_button(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| ui::init(cx, themes::ThemeKind::Dark));
+        let (dialog, cx) = cx.add_window_view(|_, cx| {
+            RollbackDialog::new(
+                Path::new("."),
+                Vec::new(),
+                &[],
+                false,
+                Rc::new(|_| IconName::FILE_TEXT),
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+            window.focus(&dialog.read(cx).focus_handle(cx));
+            window.focus_next();
+            window.draw(cx).clear();
+        });
+        let cancel = cx.update(|window, cx| window.focused(cx).unwrap());
+        assert_ne!(cancel, cx.read(|cx| dialog.read(cx).focus_handle(cx)));
+        // No included files: Delete Local Copies and Rollback are disabled.
+        // Cancel is the only tab stop and wraps to itself both ways.
+        for keys in ["tab", "shift-tab"] {
+            cx.simulate_keystrokes(keys);
+            assert!(cx.update(|window, _| cancel.is_focused(window)));
+        }
     }
 }

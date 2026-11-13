@@ -132,7 +132,7 @@ pub struct DebuggerPage {
     /// "python", drawn disabled.
     attach_filter: Entity<Editor>,
     /// The open list of the PyQt backends.
-    list: Option<(Entity<ContextMenu>, Subscription)>,
+    list: Option<(Entity<ContextMenu>, Subscription, FocusHandle)>,
     /// Where the PyQt combo box is drawn.
     anchor: Rc<Cell<Bounds<Pixels>>>,
     error: Option<String>,
@@ -294,8 +294,9 @@ impl DebuggerPage {
                 .enabled(backend.debugpy_supports())
             })
             .collect();
-        // The chosen row runs where the focus is: on the page.
-        window.focus(&self.focus);
+        // The combo remains on the page's action path and receives focus
+        // again when the popup closes.
+        let return_focus = window.focused(cx).unwrap_or_else(|| self.focus.clone());
         let menu = ContextMenu::popup(
             items,
             PopupOptions {
@@ -308,11 +309,11 @@ impl DebuggerPage {
             window,
             cx,
         );
-        let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
-            this.list = None;
-            cx.notify();
-        });
-        self.list = Some((menu, subscription));
+        let subscription =
+            cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+                this.close_list_in(window, cx);
+            });
+        self.list = Some((menu, subscription, return_focus));
         cx.notify();
     }
 
@@ -322,12 +323,11 @@ impl DebuggerPage {
         }
     }
 
-    /// Closes the list and gives the focus back to the page (the list had
-    /// it).
+    /// Closes the list and restores the control that opened it.
     fn close_list_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.list.is_some() {
-            self.close_list(cx);
-            window.focus(&self.focus);
+        if let Some((_, _, return_focus)) = self.list.take() {
+            window.focus(&return_focus);
+            cx.notify();
         }
     }
 
@@ -469,6 +469,7 @@ impl DebuggerPage {
         .debug_selector(|| "debugger:qt-backend".into())
         .w(px(COMBO_WIDTH))
         .h(px(FIELD_ROW))
+        .tab_stop(enabled)
         .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
         .when(enabled, |d| {
             d.pointing_hand()
@@ -660,7 +661,7 @@ impl SettingsPage for DebuggerPage {
                 "enabled": [false, true],
                 "description": DEBUGPY_DESCRIPTION,
             },
-            "list": self.list.as_ref().map(|(m, _)| m.read(cx).state_json()),
+            "list": self.list.as_ref().map(|(m, _, _)| m.read(cx).state_json()),
             "error": self.error.clone(),
         })
     }
@@ -820,7 +821,7 @@ impl Render for DebuggerPage {
         let overlay = self
             .list
             .as_ref()
-            .map(|(menu, _)| ui::menu::overlay(menu, self.anchor.get().bottom_left(), window));
+            .map(|(menu, _, _)| ui::menu::overlay(menu, self.anchor.get().bottom_left(), window));
         page.gap(px(BLOCK_GAP))
             .pt(px(PAGE_TOP))
             .child(checks)

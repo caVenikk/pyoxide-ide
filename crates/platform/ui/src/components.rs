@@ -175,7 +175,10 @@ pub fn text_button(
         .border_color(theme.color(UiRole::BorderInput))
         .whitespace_nowrap()
         .when(enabled, |d| {
-            d.hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed))
+            crate::form::tab_control(d)
+                .focus(|s| s.border_color(theme.color(UiRole::Focus)))
+                .hover(move |s| s.bg(hover))
+                .active(move |s| s.bg(pressed))
         })
         .when(!enabled, |d| {
             d.opacity(DISABLED_ALPHA)

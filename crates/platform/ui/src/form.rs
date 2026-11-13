@@ -119,6 +119,36 @@ pub fn group_header(title: impl Into<SharedString>, cx: &App) -> Div {
         )
 }
 
+/// Adds keyboard traversal to a form control. Key bindings are dispatched
+/// before this fallback, so a dialog's own Tab action keeps precedence.
+pub(crate) fn tab_control(control: Stateful<Div>) -> Stateful<Div> {
+    control
+        .focusable()
+        .tab_stop(true)
+        .capture_key_up(|event, window, _| {
+            // Enter belongs to the dialog's default action (or confirms
+            // a popup on key-down). GPUI otherwise clicks whichever
+            // control received focus before key-up, reopening that popup.
+            // Space remains the focused control's activation key.
+            if event.keystroke.key == "enter" && !event.keystroke.modifiers.modified() {
+                window.prevent_default();
+            }
+        })
+        .on_key_down(|event, window, cx| {
+            let modifiers = &event.keystroke.modifiers;
+            if event.keystroke.key == "tab"
+                && !(modifiers.control || modifiers.alt || modifiers.platform || modifiers.function)
+            {
+                if modifiers.shift {
+                    window.focus_prev();
+                } else {
+                    window.focus_next();
+                }
+                cx.stop_propagation();
+            }
+        })
+}
+
 /// A combo box, closed (`ComboBox` in the New UI's dialogs): filled, the
 /// content on one line, the arrow at its end. The caller opens the list on
 /// click ([`MenuPopup`]).
@@ -126,6 +156,7 @@ pub fn combo(id: impl Into<ElementId>, content: Vec<AnyElement>, cx: &App) -> St
     let theme = cx.theme();
     div()
         .id(id)
+        .map(tab_control)
         .relative()
         .flex()
         .flex_row()
@@ -136,6 +167,7 @@ pub fn combo(id: impl Into<ElementId>, content: Vec<AnyElement>, cx: &App) -> St
         .rounded(field_radius(cx))
         .border_1()
         .border_color(theme.color(UiRole::BorderInput))
+        .focus(|s| s.border_color(theme.color(UiRole::Focus)))
         .bg(theme.color(UiRole::SurfaceRaised))
         .child(
             div()
@@ -172,6 +204,7 @@ pub fn field_button(
         .child(Icon::new(icon))
         .tooltip(Tooltip::text(tooltip, None))
         .when_some(action, |d, action| {
+            let d = tab_control(d);
             // The icons inside a text field are extensions with an action:
             // `TextFieldWithPopupHandlerUI` gives them the hand.
             d.pointing_hand()
@@ -194,8 +227,18 @@ pub fn check_row(
     label: impl IntoElement,
     cx: &App,
 ) -> Stateful<Div> {
+    let focus = cx.theme().color(UiRole::Focus);
     div()
         .id(id)
+        .map(tab_control)
+        .focus(move |s| {
+            s.shadow(vec![BoxShadow {
+                color: focus,
+                offset: point(px(0.0), px(0.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(1.0),
+            }])
+        })
         .flex()
         .flex_row()
         .items_center()
@@ -452,6 +495,7 @@ pub fn help_button(
         .child(Icon::new(IconName::HELP))
         .tooltip(Tooltip::text("Help", None))
         .when_some(action, |d, action| {
+            let d = tab_control(d);
             d.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
         })
         .into_any_element()
@@ -578,7 +622,7 @@ impl BarButton {
                 // ring around it (`Component.focusColor`,
                 // `Component.focusWidth` wide), its outline in the focused
                 // colour; Space presses it, Enter stays the dialog's.
-                d.focusable()
+                tab_control(d)
                     .focus(move |s| {
                         s.bg(focused_background)
                             .border_color(focused_border)
@@ -598,7 +642,14 @@ impl BarButton {
                             window.dispatch_action(space_action.boxed_clone(), cx);
                         }
                     })
-                    .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+                    .on_click(move |event, window, cx| {
+                        // Space is handled on key-down above. GPUI also
+                        // synthesizes a click on key-up; do not dispatch
+                        // twice, or turn Enter into a second dialog action.
+                        if !matches!(event, gpui::ClickEvent::Keyboard(_)) {
+                            window.dispatch_action(action.boxed_clone(), cx);
+                        }
+                    })
             })
             .into_any_element()
     }
@@ -901,6 +952,72 @@ mod tests {
     use super::*;
 
     gpui::actions!(form_test, [Accept, Reject, Store]);
+
+    struct TraversalForm {
+        overrides: usize,
+    }
+
+    impl gpui::Render for TraversalForm {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context("FormTraversalTest")
+                .on_action(cx.listener(|this, _: &Accept, _, cx| {
+                    this.overrides += 1;
+                    cx.notify();
+                }))
+                .child(combo("choice", vec!["Choice".into_any_element()], cx))
+                .child(check_row("flag", "check", false, "Flag", cx))
+                .child(bar(ButtonOrder::AsGiven).render(cx))
+        }
+    }
+
+    #[gpui::test]
+    fn custom_tab_bindings_win_on_shared_controls(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx, themes::ThemeKind::Dark);
+            cx.bind_keys([
+                gpui::KeyBinding::new("tab", Accept, Some("FormTraversalTest")),
+                gpui::KeyBinding::new("shift-tab", Accept, Some("FormTraversalTest")),
+                gpui::KeyBinding::new("enter", Accept, Some("FormTraversalTest")),
+            ]);
+        });
+        let (form, cx) = cx.add_window_view(|_, _| TraversalForm { overrides: 0 });
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+            window.focus_next();
+        });
+        for i in 0..3 {
+            let before = cx.update(|window, cx| window.focused(cx).unwrap());
+            cx.simulate_keystrokes("tab shift-tab enter");
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse("enter").unwrap(),
+            });
+            assert_eq!(cx.read(|cx| form.read(cx).overrides), (i + 1) * 3);
+            assert!(cx.update(|window, _| before.is_focused(window)));
+            cx.update(|window, cx| {
+                window.focus_next();
+                window.draw(cx).clear();
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn focused_button_space_activates_once(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| crate::init(cx, themes::ThemeKind::Dark));
+        let (form, cx) = cx.add_window_view(|_, _| TraversalForm { overrides: 0 });
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+            window.focus_next();
+            window.focus_next();
+            window.focus_next();
+            window.draw(cx).clear();
+        });
+        cx.simulate_keystrokes("space");
+        cx.simulate_event(gpui::KeyUpEvent {
+            keystroke: gpui::Keystroke::parse("space").unwrap(),
+        });
+        assert_eq!(cx.read(|cx| form.read(cx).overrides), 1);
+    }
 
     fn bar(order: ButtonOrder) -> BottomBar {
         BottomBar::new()

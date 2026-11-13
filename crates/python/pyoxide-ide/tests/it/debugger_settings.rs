@@ -412,3 +412,49 @@ fn the_search_finds_the_page_by_its_labels(cx: &mut TestAppContext) {
     assert!(h.bounds("settings-spotlight").is_some());
     h.close_settings();
 }
+
+#[gpui::test]
+fn backend_popup_escape_restores_combo_focus(cx: &mut TestAppContext) {
+    let (_dir, root) = project();
+    let mut h = open(cx, &root);
+    open_page(&mut h);
+    h.edit("pyqt", json!(true));
+    let at = h.bounds("debugger:qt-backend").unwrap().center();
+    let settings = h.settings();
+    let opener = {
+        let vcx = &mut VisualTestContext::from_window(settings.into(), h.cx);
+        vcx.simulate_mouse_move(at, None, Modifiers::none());
+        vcx.simulate_mouse_down(at, gpui::MouseButton::Left, Modifiers::none());
+        let opener = vcx.update(|window, cx| window.focused(cx).unwrap());
+        vcx.simulate_mouse_up(at, gpui::MouseButton::Left, Modifiers::none());
+        vcx.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        opener
+    };
+    h.cx.run_until_parked();
+    h.cx.simulate_keystrokes(settings.into(), "escape");
+    h.cx.run_until_parked();
+    assert!(
+        h.cx.update_window(settings.into(), |_, window, _| opener.is_focused(window))
+            .unwrap()
+    );
+    assert_eq!(h.page()["list"], Value::Null);
+    h.click("debugger:qt-backend");
+    h.cx.simulate_keystrokes(settings.into(), "down enter");
+    h.cx.run_until_parked();
+    h.cx.update_window(settings.into(), |_, window, cx| {
+        window.draw(cx).clear();
+    })
+    .unwrap();
+    assert_eq!(h.page()["list"], Value::Null);
+    VisualTestContext::from_window(settings.into(), h.cx).simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
+    assert_eq!(
+        h.page()["list"],
+        Value::Null,
+        "selection key-up must not reopen the list"
+    );
+    h.close_settings();
+}
