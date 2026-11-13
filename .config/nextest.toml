@@ -15,6 +15,11 @@
 
 nextest-version = "0.9.100"
 
+# Both Oracle drivers use the same fixture schema. Whole-schema change
+# tokens and query-count assertions require all its tests to run serially.
+[test-groups.oracle-schema]
+max-threads = 1
+
 [profile.default]
 # A test running longer than one period is reported as slow; after five
 # periods it is hung (a PTY, a window, a language server or a debug adapter
@@ -23,6 +28,10 @@ slow-timeout = { period = "60s", terminate-after = 5, grace-period = "5s" }
 status-level = "retry"
 final-status-level = "flaky"
 failure-output = "immediate-final"
+
+[[profile.default.overrides]]
+filter = '(package(db-oracle-thin) or package(db-oracle-odpi)) and binary(it)'
+test-group = "oracle-schema"
 
 # Known flaky tests: retried twice with a pause, and only these.
 #
