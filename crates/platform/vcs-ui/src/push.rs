@@ -888,6 +888,7 @@ impl PushDialog {
         )
         .debug_selector(|| "push-tag-mode".into())
         .w(px(150.0))
+        .tab_stop(self.push_tags)
         .when(!self.push_tags, |d| d.text_color(disabled).opacity(0.6))
         .when(self.push_tags, |d| {
             d.on_mouse_down(

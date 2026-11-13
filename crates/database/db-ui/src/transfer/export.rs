@@ -433,6 +433,7 @@ impl ExportDialog {
         )
         .debug_selector(move || format!("export-{id}"))
         .h(px(form::FIELD_HEIGHT))
+        .tab_stop(enabled)
         .when(!enabled, |d| d.opacity(ui::components::DISABLED_ALPHA))
         .when(enabled, |d| {
             d.on_click(cx.listener(move |this, _, _, cx| this.set_option(id, !on, cx)))
