@@ -26,8 +26,18 @@ require full scope. Preserve direct PRs into main with the full gate.
 An aggregate required check validates the planned work, executed jobs and live
 PR identity. It fails on missing, failed, cancelled or unexpectedly skipped
 work. Live draft checks retain the protection against a ready PR inheriting a
-stale draft skip. Protected main and integration branches require an up-to-date
-base and squash PR merges without bypass actors.
+stale draft skip. Both protected branch classes require successful checks and
+squash PR merges without bypass actors. Main additionally requires an up-to-date
+base; integration accepts the checked task heads from the batch's common base.
+
+Freeze the integration base while the batch's task PRs run CI in parallel.
+Wait until every included task has passed its required checks and review before
+merging the first task; do not enable early per-task auto-merge. Then squash the
+checked heads into integration without rebasing each one after its predecessor.
+The full main PR validates their combined behavior. If a merge conflicts or the
+source changes, resolve it in the affected task branch and run the relevant
+checks again. Unplanned base movement while task CI is running invalidates its
+recorded base identity and requires a fresh run.
 
 After merging, full checks may be reused only from a successful full PR run
 whose immutable evidence identifies the same merged PR, source tree, CI
