@@ -1115,12 +1115,13 @@ fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppC
     assert_eq!(hint["range"], json!([b, b + 1]), "{hint}");
     let marked = h.cx.update(|cx| editor.read(cx).range_background());
     assert_eq!(marked, Some(b..b + 1));
-    // A click: the tree, its root expanded.
+    // A click: the tree, its root expanded. Wait for the child: the
+    // loading placeholder also makes the tree contain two rows.
     h.invoke("debug.value-hint.expand", json!(null));
     let s = h.wait("the tree of b", |s| {
         s["value_hint"]["tree"]["rows"]
             .as_array()
-            .is_some_and(|r| r.len() == 2)
+            .is_some_and(|r| r.len() == 2 && r.iter().any(|r| r["path"] == json!(["b", "0"])))
     });
     let rows: Vec<Value> = s["value_hint"]["tree"]["rows"]
         .as_array()
@@ -1157,7 +1158,7 @@ fn values_under_the_mouse_and_after_the_lines_open_their_trees(cx: &mut TestAppC
     let s = h.wait("the tree of the value after line 2", |s| {
         s["value_hint"]["tree"]["rows"]
             .as_array()
-            .is_some_and(|r| r.len() == 2)
+            .is_some_and(|r| r.len() == 2 && r.iter().any(|r| r["path"] == json!(["b", "0"])))
     });
     assert_eq!(s["value_hint"]["inline"], json!(true));
     let line_end = MAIN.find("    return").unwrap() - 1;
