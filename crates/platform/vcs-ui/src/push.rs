@@ -1102,11 +1102,11 @@ mod tests {
     fn tag_mode_combo_accepts_keyboard_clicks(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             ui::init(cx, themes::ThemeKind::Dark);
-            cx.bind_keys([gpui::KeyBinding::new(
-                "escape",
-                ui::menu::Cancel,
-                Some(ui::menu::KEY_CONTEXT),
-            )]);
+            cx.bind_keys([
+                gpui::KeyBinding::new("escape", ui::menu::Cancel, Some(ui::menu::KEY_CONTEXT)),
+                gpui::KeyBinding::new("enter", ui::menu::Confirm, Some(ui::menu::KEY_CONTEXT)),
+                gpui::KeyBinding::new("down", ui::menu::SelectNext, Some(ui::menu::KEY_CONTEXT)),
+            ]);
         });
         let (dialog, cx) = cx.add_window_view(|_, cx| {
             PushDialog::new(
@@ -1121,7 +1121,7 @@ mod tests {
                 cx,
             )
         });
-        for key in ["space", "enter"] {
+        for close_key in ["escape", "enter"] {
             cx.update(|window, cx| {
                 dialog.update(cx, |dialog, cx| {
                     dialog.close_menu(cx);
@@ -1133,22 +1133,33 @@ mod tests {
                 window.draw(cx).clear();
             });
             let opener = cx.update(|window, cx| window.focused(cx).unwrap());
-            cx.simulate_keystrokes(key);
+            cx.simulate_keystrokes("space");
             cx.simulate_event(gpui::KeyUpEvent {
-                keystroke: gpui::Keystroke::parse(key).unwrap(),
+                keystroke: gpui::Keystroke::parse("space").unwrap(),
             });
             assert!(
                 cx.read(|cx| dialog.read(cx).menu.is_some()),
-                "{key} opens tag modes"
+                "Space opens tag modes"
             );
             cx.update(|window, cx| {
                 window.draw(cx).clear();
             });
             cx.run_until_parked();
-            cx.simulate_keystrokes("escape");
+            cx.simulate_keystrokes("down");
+            cx.simulate_keystrokes(close_key);
             cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.draw(cx).clear();
+            });
             assert!(cx.read(|cx| dialog.read(cx).menu.is_none()));
             assert!(cx.update(|window, _| opener.is_focused(window)));
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse(close_key).unwrap(),
+            });
+            assert!(
+                cx.read(|cx| dialog.read(cx).menu.is_none()),
+                "selection key-up must not reopen the list"
+            );
         }
     }
 

@@ -440,5 +440,21 @@ fn backend_popup_escape_restores_combo_focus(cx: &mut TestAppContext) {
             .unwrap()
     );
     assert_eq!(h.page()["list"], Value::Null);
+    h.click("debugger:qt-backend");
+    h.cx.simulate_keystrokes(settings.into(), "down enter");
+    h.cx.run_until_parked();
+    h.cx.update_window(settings.into(), |_, window, cx| {
+        window.draw(cx).clear();
+    })
+    .unwrap();
+    assert_eq!(h.page()["list"], Value::Null);
+    VisualTestContext::from_window(settings.into(), h.cx).simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
+    assert_eq!(
+        h.page()["list"],
+        Value::Null,
+        "selection key-up must not reopen the list"
+    );
     h.close_settings();
 }

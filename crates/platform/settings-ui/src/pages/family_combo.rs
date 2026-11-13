@@ -686,6 +686,13 @@ mod tests {
                 assert!(opener.is_focused(window), "{key} restores the combo");
                 assert_eq!(cx.windows().len(), 1);
             });
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse(key).unwrap(),
+            });
+            assert!(
+                !cx.read(|cx| combo.read(cx).is_open()),
+                "{key} key-up must not reopen the list"
+            );
         }
     }
 

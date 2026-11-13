@@ -125,6 +125,15 @@ pub(crate) fn tab_control(control: Stateful<Div>) -> Stateful<Div> {
     control
         .focusable()
         .tab_stop(true)
+        .capture_key_up(|event, window, _| {
+            // Enter belongs to the dialog's default action (or confirms
+            // a popup on key-down). GPUI otherwise clicks whichever
+            // control received focus before key-up, reopening that popup.
+            // Space remains the focused control's activation key.
+            if event.keystroke.key == "enter" && !event.keystroke.modifiers.modified() {
+                window.prevent_default();
+            }
+        })
         .on_key_down(|event, window, cx| {
             let modifiers = &event.keystroke.modifiers;
             if event.keystroke.key == "tab"
@@ -969,6 +978,7 @@ mod tests {
             cx.bind_keys([
                 gpui::KeyBinding::new("tab", Accept, Some("FormTraversalTest")),
                 gpui::KeyBinding::new("shift-tab", Accept, Some("FormTraversalTest")),
+                gpui::KeyBinding::new("enter", Accept, Some("FormTraversalTest")),
             ]);
         });
         let (form, cx) = cx.add_window_view(|_, _| TraversalForm { overrides: 0 });
@@ -978,8 +988,11 @@ mod tests {
         });
         for i in 0..3 {
             let before = cx.update(|window, cx| window.focused(cx).unwrap());
-            cx.simulate_keystrokes("tab shift-tab");
-            assert_eq!(cx.read(|cx| form.read(cx).overrides), (i + 1) * 2);
+            cx.simulate_keystrokes("tab shift-tab enter");
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse("enter").unwrap(),
+            });
+            assert_eq!(cx.read(|cx| form.read(cx).overrides), (i + 1) * 3);
             assert!(cx.update(|window, _| before.is_focused(window)));
             cx.update(|window, cx| {
                 window.focus_next();
