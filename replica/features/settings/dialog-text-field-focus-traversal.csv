@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Tab and Shift+Tab move focus between dialog text fields,settings,must,yes,yes,Single-line fields traverse and wrap without inserting tabs; multiline indentation and specific dialog bindings preserved (#405); other controls tracked in #410
+Tab and Shift+Tab traverse mixed dialog controls,settings,must,yes,yes,Enabled single-line fields buttons checkboxes and combos traverse and wrap in both directions; disabled and hidden controls skipped; custom dialog bindings and multiline indentation preserved; focused buttons activate once and combo popups restore opener focus (#405 #410)

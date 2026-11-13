@@ -538,6 +538,7 @@ impl InterpreterPage {
             .flex_1()
             .min_w(px(0.0))
             .when(open, |d| d.border_color(focus))
+            .tab_stop(enabled)
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
             .when(self.configuring, |d| {
                 d.tooltip(Tooltip::text(BUSY_TOOLTIP, None))
