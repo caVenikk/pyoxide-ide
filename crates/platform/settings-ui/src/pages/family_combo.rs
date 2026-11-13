@@ -207,6 +207,7 @@ struct OpenList {
     highlighted: Option<usize>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    return_focus: FocusHandle,
 }
 
 /// A combo box of font families: the chosen family (`None`: the none row),
@@ -299,6 +300,9 @@ impl FamilyCombo {
         if let Some(ix) = highlighted {
             scroll.scroll_to_item(ix, ScrollStrategy::Center);
         }
+        let return_focus = window
+            .focused(cx)
+            .unwrap_or_else(|| self.owner_focus.clone());
         let focus = cx.focus_handle();
         window.focus(&focus);
         self.list = Some(OpenList {
@@ -306,24 +310,25 @@ impl FamilyCombo {
             highlighted,
             scroll,
             focus,
+            return_focus,
         });
         cx.notify();
     }
 
     pub fn close(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        if self.list.take().is_some() {
+        if let Some(list) = self.list.take() {
             let owner = ui::popup_window::owner(cx.entity_id(), cx);
             ui::popup_window::close(cx.entity_id(), cx);
             if let Some(owner) = owner
                 && window.is_some()
             {
-                let focus = self.owner_focus.clone();
+                let focus = list.return_focus.clone();
                 cx.defer(move |cx| {
                     let _ = owner.update(cx, |_, window, _| window.focus(&focus));
                 });
             }
             if let Some(window) = window {
-                window.focus(&self.owner_focus);
+                window.focus(&list.return_focus);
             }
             cx.notify();
         }
@@ -635,6 +640,61 @@ impl Render for FamilyCombo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn list_restores_the_combo_focus(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| ui::init(cx, themes::ThemeKind::Dark));
+        let (combo, cx) = cx.add_window_view(|_, cx| {
+            let owner = cx.focus_handle();
+            FamilyCombo::new(
+                ComboSpec {
+                    prefix: "test-font",
+                    name: "family",
+                    width: 200.0,
+                    list_width: 200.0,
+                    monospaced_only: false,
+                    groups: false,
+                    names_only: false,
+                    none: Some("None"),
+                    warn_missing: false,
+                },
+                None,
+                owner,
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+            window.focus_next();
+            window.draw(cx).clear();
+        });
+        let opener = cx.update(|window, cx| window.focused(cx).unwrap());
+        assert_ne!(opener, cx.read(|cx| combo.read(cx).owner_focus.clone()));
+        for key in ["escape", "enter"] {
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse("space").unwrap(),
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear();
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.draw(cx).clear();
+                assert!(!combo.read(cx).is_open());
+                assert!(opener.is_focused(window), "{key} restores the combo");
+                assert_eq!(cx.windows().len(), 1);
+            });
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse(key).unwrap(),
+            });
+            assert!(
+                !cx.read(|cx| combo.read(cx).is_open()),
+                "{key} key-up must not reopen the list"
+            );
+        }
+    }
 
     #[test]
     fn monospaced_families_come_first() {

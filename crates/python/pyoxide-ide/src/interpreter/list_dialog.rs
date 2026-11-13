@@ -1624,6 +1624,7 @@ impl InterpretersDialog {
                 cx,
             )
             .debug_selector(|| "interpreters:associate".into())
+            .tab_stop(enabled)
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
             .when(enabled, |d| {
                 d.on_click(move |_, window, cx| {

@@ -1250,14 +1250,14 @@ impl BreakpointsDialog {
             })
             .child(div().child("Disable until hitting the following breakpoint:"))
             .child(
-                div()
-                    .pl(px(14.0))
-                    .opacity(DISABLED_ALPHA)
-                    .child(ui::form::combo(
+                div().pl(px(14.0)).opacity(DISABLED_ALPHA).child(
+                    ui::form::combo(
                         "breakpoints-master",
                         vec![div().child("<None>").into_any_element()],
                         cx,
-                    )),
+                    )
+                    .tab_stop(false),
+                ),
             )
             .child(
                 div()

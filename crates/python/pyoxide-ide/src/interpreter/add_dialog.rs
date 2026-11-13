@@ -2016,6 +2016,7 @@ impl AddDialog {
         .w(px(VERSION_WIDTH))
         .h(px(FIELD))
         .when(open, |d| d.border_color(focus))
+        .tab_stop(!loading)
         .when(loading, |d| d.opacity(DISABLED_ALPHA))
         .when(!loading, |d| {
             d.on_click(cx.listener(|this, _: &ClickEvent, window, cx| {

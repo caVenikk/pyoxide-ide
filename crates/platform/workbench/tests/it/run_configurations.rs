@@ -1034,3 +1034,113 @@ fn the_dialog_without_a_selection_shows_the_tip(cx: &mut TestAppContext) {
     h.draw();
     assert!(!dialog(&mut h)["menu"].is_null(), "the types are offered");
 }
+
+/// The production Shell Script dialog mixes text, a checkbox, a combo,
+/// path buttons and the bottom bar in one native window.
+#[gpui::test]
+fn mixed_dialog_tab_order_wraps_and_activates_controls(cx: &mut TestAppContext) {
+    use run_config::shell::key;
+    let (_dir, root) = project();
+    let mut h = setup(cx, &root);
+    h.loaded();
+    h.invoke("run.configurations.edit", json!(null));
+    h.invoke(
+        "run.configurations.dialog.add",
+        json!({"type": "shell-script"}),
+    );
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": key::EXECUTE_SCRIPT_FILE, "value": "false"}),
+    );
+    h.invoke(
+        "run.configurations.dialog.set",
+        json!({"field": key::SCRIPT_TEXT, "value": "echo test"}),
+    );
+    h.invoke("run.configurations.dialog.apply", json!(null));
+    assert_eq!(dialog(&mut h)["modified"], json!(false));
+    let main = h.window.into();
+    let win =
+        h.cx.update(|cx| ui::dialog_window::modal_of(main, cx))
+            .unwrap();
+    let entity = h.cx.update(|cx| {
+        h.window
+            .read(cx)
+            .unwrap()
+            .run_window()
+            .read(cx)
+            .edit_dialog()
+            .unwrap()
+            .clone()
+    });
+    let name =
+        h.cx.update(|cx| entity.read(cx).field_focus("name", cx).unwrap());
+    h.cx.update_window(win, |_, window, _| window.focus(&name))
+        .unwrap();
+    h.draw();
+    let mut order = vec![name.clone()];
+    for _ in 0..30 {
+        h.cx.simulate_keystrokes(win, "tab");
+        h.draw();
+        let focus =
+            h.cx.update_window(win, |_, window, cx| window.focused(cx).unwrap())
+                .unwrap();
+        if focus == name {
+            break;
+        }
+        assert!(!order.contains(&focus), "must wrap only at the first field");
+        order.push(focus);
+    }
+    // Name, Store, Execute combo, script text, working directory, Browse,
+    // environment, Execute in terminal, Cancel/OK. Apply and the hidden
+    // script-file/interpreter fields must not enter the cycle.
+    assert_eq!(order.len(), 10);
+    for expected in order.iter().rev() {
+        h.cx.simulate_keystrokes(win, "shift-tab");
+        h.draw();
+        assert!(
+            h.cx.update_window(win, |_, window, _| expected.is_focused(window))
+                .unwrap()
+        );
+    }
+    h.cx.simulate_keystrokes(win, "tab tab");
+    h.draw();
+    assert!(
+        h.cx.update_window(win, |_, window, _| order[2].is_focused(window))
+            .unwrap()
+    );
+    gpui::VisualTestContext::from_window(win, h.cx).simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
+    h.draw();
+    assert!(
+        !dialog(&mut h)["menu"].is_null(),
+        "focused combo opens its native popup"
+    );
+    let popup =
+        h.cx.update(|cx| cx.windows().into_iter().find(|w| *w != main && *w != win))
+            .unwrap();
+    h.cx.simulate_keystrokes(popup, "escape");
+    h.draw();
+    assert!(
+        h.cx.update_window(win, |_, window, _| order[2].is_focused(window))
+            .unwrap(),
+        "dismissing the native popup restores the combo focus"
+    );
+    h.cx.update_window(win, |_, window, _| window.focus(&order[1]))
+        .unwrap();
+    h.draw();
+    gpui::VisualTestContext::from_window(win, h.cx).simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
+    h.draw();
+    assert_eq!(dialog(&mut h)["store_as_project_file"], json!(true));
+    // Focus Cancel using the recorded native button order; Space invokes
+    // that button rather than the dialog's default OK action.
+    let cancel = if MAC { 8 } else { 9 };
+    h.cx.update_window(win, |_, window, _| window.focus(&order[cancel]))
+        .unwrap();
+    h.draw();
+    h.cx.simulate_keystrokes(win, "space");
+    h.draw();
+    assert!(dialog(&mut h).is_null());
+}

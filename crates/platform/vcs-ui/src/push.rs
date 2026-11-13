@@ -515,13 +515,17 @@ impl PushDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let return_focus = window.focused(cx).unwrap_or_else(|| self.focus.clone());
         let menu = ContextMenu::popup(items, PopupOptions::default(), window, cx);
-        let subscription =
-            cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+        let subscription = cx.subscribe_in(
+            &menu,
+            window,
+            move |this, _, _: &DismissEvent, window, cx| {
                 this.menu = None;
-                window.focus(&this.focus);
+                window.focus(&return_focus);
                 cx.notify();
-            });
+            },
+        );
         self.menu = Some((menu, at, subscription));
         cx.notify();
     }
@@ -888,6 +892,7 @@ impl PushDialog {
         )
         .debug_selector(|| "push-tag-mode".into())
         .w(px(150.0))
+        .tab_stop(self.push_tags)
         .when(!self.push_tags, |d| d.text_color(disabled).opacity(0.6))
         .when(self.push_tags, |d| {
             d.on_mouse_down(
@@ -898,6 +903,11 @@ impl PushDialog {
                     this.open_tag_modes(at, window, cx);
                 }),
             )
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                if let ClickEvent::Keyboard(event) = event {
+                    this.open_tag_modes(event.bounds.bottom_left(), window, cx);
+                }
+            }))
         });
         div()
             .flex()
@@ -1073,6 +1083,85 @@ impl Render for PushDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NoRemote;
+
+    impl PushData for NoRemote {
+        fn target(&self, _: &str, _: &str) -> Result<PushTarget, VcsError> {
+            unreachable!("this dialog has no remote")
+        }
+        fn outgoing(&self, _: &str, _: &PushTarget) -> Result<Vec<OutgoingCommit>, VcsError> {
+            unreachable!("this dialog has no remote")
+        }
+        fn files(&self, _: &[String]) -> Result<Vec<CommitFile>, VcsError> {
+            unreachable!("this dialog has no commits")
+        }
+    }
+
+    #[gpui::test]
+    fn tag_mode_combo_accepts_keyboard_clicks(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            ui::init(cx, themes::ThemeKind::Dark);
+            cx.bind_keys([
+                gpui::KeyBinding::new("escape", ui::menu::Cancel, Some(ui::menu::KEY_CONTEXT)),
+                gpui::KeyBinding::new("enter", ui::menu::Confirm, Some(ui::menu::KEY_CONTEXT)),
+                gpui::KeyBinding::new("down", ui::menu::SelectNext, Some(ui::menu::KEY_CONTEXT)),
+            ]);
+        });
+        let (dialog, cx) = cx.add_window_view(|_, cx| {
+            PushDialog::new(
+                PushSetup {
+                    repository: "project".into(),
+                    source: "main".into(),
+                    remotes: Vec::new(),
+                    target: None,
+                    upstream: None,
+                    data: Arc::new(NoRemote),
+                },
+                cx,
+            )
+        });
+        for close_key in ["escape", "enter"] {
+            cx.update(|window, cx| {
+                dialog.update(cx, |dialog, cx| {
+                    dialog.close_menu(cx);
+                    dialog.push_tags = true;
+                    window.focus(&dialog.focus);
+                });
+                window.draw(cx).clear();
+                window.focus_next();
+                window.draw(cx).clear();
+            });
+            let opener = cx.update(|window, cx| window.focused(cx).unwrap());
+            cx.simulate_keystrokes("space");
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse("space").unwrap(),
+            });
+            assert!(
+                cx.read(|cx| dialog.read(cx).menu.is_some()),
+                "Space opens tag modes"
+            );
+            cx.update(|window, cx| {
+                window.draw(cx).clear();
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes("down");
+            cx.simulate_keystrokes(close_key);
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.draw(cx).clear();
+            });
+            assert!(cx.read(|cx| dialog.read(cx).menu.is_none()));
+            assert!(cx.update(|window, _| opener.is_focused(window)));
+            cx.simulate_event(gpui::KeyUpEvent {
+                keystroke: gpui::Keystroke::parse(close_key).unwrap(),
+            });
+            assert!(
+                cx.read(|cx| dialog.read(cx).menu.is_none()),
+                "selection key-up must not reopen the list"
+            );
+        }
+    }
 
     #[test]
     fn labels_of_the_target() {

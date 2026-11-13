@@ -73,8 +73,12 @@ Rules for AI agents and human contributors. Read this file, then
   `python3 scripts/notice.py --check` validates them; CI runs it.
 - Changes land through pull requests, one task per branch. Review and squash
   task PRs into a protected `integration/*` branch in batches of 2-4 tasks;
-  squash the fully checked batch PR into `main`. Direct PRs into `main` also
-  require full CI. The batch PR closes the included issues with `Closes #N`;
+  run task CI in parallel on a frozen common integration base and wait for all
+  included tasks to pass before merging any of them. Merge checked heads
+  without a rebase after each preceding task; recheck conflicts or source
+  changes. Integration requires successful checks; main additionally requires
+  an up-to-date base. Squash the fully checked batch PR into `main`. Direct PRs
+  into `main` also require full CI. The batch PR closes the included issues with `Closes #N`;
   merging a task into an integration branch is not completion in `main`.
   No direct or local merges into `main`, no branch-protection bypass, and no
   `Co-Authored-By` trailer. Work-in-progress commits stay in the task branch.

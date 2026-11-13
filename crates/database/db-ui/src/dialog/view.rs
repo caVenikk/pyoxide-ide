@@ -651,6 +651,7 @@ impl DataSourcesDialog {
                 .left_0()
                 .size_full(),
             )
+            .tab_stop(enabled)
             .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
             .when(enabled, |d| {
                 d.on_click(cx.listener(move |this, _, window, cx| this.open_list(list, window, cx)))
@@ -716,6 +717,7 @@ impl DataSourcesDialog {
         )
         .debug_selector(move || selector.clone())
         .h(px(FIELD_HEIGHT))
+        .tab_stop(enabled)
         .when(!enabled, |d| d.opacity(DISABLED_ALPHA))
         .when(enabled, |d| {
             d.on_click(cx.listener(move |this, _, _, cx| {

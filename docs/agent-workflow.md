@@ -101,6 +101,12 @@ CI modes (ADR 0024):
 - **Task:** ready PR into `integration/*`; affected crates, appropriate
   platforms, and database integration only when relevant. Shared native
   components or uncertain platform impact expand the checks conservatively.
+  Task PRs in a batch run in parallel against one frozen integration base.
+  Wait for every included task's required checks and review, then squash their
+  checked heads into integration. Do not rebase and repeat CI merely because a
+  preceding task from the same verified batch merged. Conflicts or source
+  changes require relevant checks again. Integration requires checked heads;
+  only main requires the branch to be up to date before merging.
 - **Full:** ready PR into `main`, an explicit dispatch, or a scope fallback;
   workspace clippy, tests and doctests on Linux/macOS/Windows, database
   integration and the existing terminal throughput check.
