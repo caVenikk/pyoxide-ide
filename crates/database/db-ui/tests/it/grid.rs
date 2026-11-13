@@ -230,7 +230,15 @@ fn the_grid_pages_counts_sorts_and_keeps_rows_on_errors(cx: &mut TestAppContext)
 
     // Stop ends a read that hangs, within a second; the rows stay.
     h.invoke("db.grid.set-filter", json!({"text": "hang_me = 1"}));
-    wait_grid(&mut h, "the hanging read", |s| s["loading"] == true);
+    // Loading starts before the connection is acquired. Wait until the
+    // server sees this query so Stop exercises server-side cancellation.
+    wait_grid(&mut h, "the hanging read on the server", |s| {
+        s["loading"] == true
+            && server
+                .statements(Purpose::Data)
+                .iter()
+                .any(|sql| sql.contains("hang_me = 1"))
+    });
     let asked = Instant::now();
     h.invoke("db.grid.stop", Value::Null);
     let s = grid_state(&mut h);
