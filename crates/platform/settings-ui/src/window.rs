@@ -392,6 +392,12 @@ impl SettingsWindow {
         }
     }
 
+    /// A native popup changed the selected page while this window was inactive.
+    pub(crate) fn popup_edited_draft(&mut self) {
+        let id = self.pages[self.selected].id;
+        self.leave_state.remove(id);
+    }
+
     fn activation_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let i = self.selected;
         if i >= self.pages.len() {

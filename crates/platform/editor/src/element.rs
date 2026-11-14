@@ -1019,6 +1019,11 @@ impl Element for EditorElement {
             .floor()
             .max(1.0) as usize;
 
+        // A fully shaped one-line field uses the actual glyph positions below.
+        // Very long lines still need the column estimate to choose a slice to shape.
+        let shaped_field = single_line && self.editor.read(cx).buffer.line_len(0) <= LONG_LINE;
+        let reveal_field_caret = shaped_field && self.editor.read(cx).autoscroll;
+
         // Keep the caret in view after edits and caret moves.
         self.editor.update(cx, |e, cx| {
             if !single_line {
@@ -1065,15 +1070,14 @@ impl Element for EditorElement {
                 } else if y + lh > e.scroll.y + bounds.size.height {
                     e.scroll.y = y + lh - bounds.size.height;
                 }
-                let x = m.char_width * col as f32;
-                // Four columns of context, but never more than a quarter
-                // of the view: a narrow field (a number of three digits)
-                // must not scroll its text away.
-                let margin = (m.char_width * 4.0).min(text_width / 4.0);
-                if x < e.scroll.x {
-                    e.scroll.x = (x - margin).max(px(0.0));
-                } else if x + margin > e.scroll.x + text_width {
-                    e.scroll.x = x + margin - text_width;
+                if !shaped_field {
+                    let x = m.char_width * col as f32;
+                    let margin = (m.char_width * 4.0).min(text_width / 4.0);
+                    if x < e.scroll.x {
+                        e.scroll.x = (x - margin).max(px(0.0));
+                    } else if x + margin > e.scroll.x + text_width {
+                        e.scroll.x = x + margin - text_width;
+                    }
                 }
             }
             if e.center_caret {
@@ -1083,11 +1087,11 @@ impl Element for EditorElement {
                 e.scroll.y = lh * row as f32 - (bounds.size.height - lh) / 2.0;
             }
             e.scroll.y = e.scroll.y.clamp(px(0.0), max_y);
-            e.scroll.x = if e.soft_wraps() || e.scroll.x <= px(0.0) {
-                px(0.0)
-            } else {
-                e.scroll.x.min(e.max_scroll_x_for(text_width, m.char_width))
-            };
+            if e.soft_wraps() || e.scroll.x < px(0.0) {
+                e.scroll.x = px(0.0);
+            } else if !shaped_field && e.scroll.x > px(0.0) {
+                e.scroll.x = e.scroll.x.min(e.max_scroll_x_for(text_width, m.char_width));
+            }
             if moves && e.scroll != before {
                 cx.emit(EditorEvent::Scrolled);
             }
@@ -1103,7 +1107,7 @@ impl Element for EditorElement {
 
         let editor = self.editor.read(cx);
         let theme = cx.theme();
-        let scroll = editor.scroll;
+        let mut scroll = editor.scroll;
         let wrapping = editor.wrapping();
         let total_rows = editor.display_rows();
         let first_row = ((scroll.y / lh).floor() as usize).min(total_rows - 1);
@@ -1258,6 +1262,15 @@ impl Element for EditorElement {
             }
             skip = 0;
             line += 1;
+        }
+        if shaped_field && let Some(line) = lines.first() {
+            let available = (text_width - caret_width).max(px(0.0));
+            let max_scroll = (line.shaped.width - available).max(px(0.0));
+            if reveal_field_caret {
+                let x = line.x_for_col(editor.selections.primary().head);
+                scroll.x = scroll.x.clamp(x - available, x);
+            }
+            scroll.x = scroll.x.clamp(px(0.0), max_scroll);
         }
         let last = lines.last().map_or(first + 1, |l| l.line + 1);
         let visible = first..last;
@@ -1944,7 +1957,13 @@ impl Element for EditorElement {
             decorations: decoration_geometry,
         };
         let stored = layout.clone();
-        self.editor.update(cx, |e, _| e.layout = Some(stored));
+        self.editor.update(cx, |e, cx| {
+            e.layout = Some(stored);
+            if e.scroll != scroll {
+                e.scroll = scroll;
+                cx.emit(EditorEvent::Scrolled);
+            }
+        });
         Prepaint {
             hitbox,
             text_hitbox,
