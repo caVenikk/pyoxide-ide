@@ -520,7 +520,6 @@ impl Session {
             return Err(SpawnError::WorkingDirectory(options.working_directory));
         }
         let size = options.size.clamped();
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let (program, args) = crate::start::pty_program(&options.command, &options.env);
         let tty_options = tty::Options {
             shell: Some(tty::Shell::new(program, args)),
@@ -539,6 +538,21 @@ impl Session {
                 ))
             })?
             .map_err(SpawnError::Io)?;
+        Self::from_pty(
+            pty,
+            size,
+            options.scrollback_lines,
+            &options.command.program,
+        )
+    }
+
+    fn from_pty(
+        pty: tty::Pty,
+        size: TerminalSize,
+        scrollback_lines: usize,
+        program: &str,
+    ) -> Result<(Session, flume::Receiver<SessionEvent>), SpawnError> {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let pid = io_loop::child_pid(&pty);
         #[cfg(windows)]
         crate::ending::join_job(io_loop::child_handle(&pty));
@@ -554,7 +568,7 @@ impl Session {
             loop_tx: loop_tx.clone(),
             exited: Arc::new(AtomicBool::new(false)),
         });
-        let scrollback = match options.scrollback_lines {
+        let scrollback = match scrollback_lines {
             0 => DEFAULT_SCROLLBACK,
             n => n,
         };
@@ -583,7 +597,7 @@ impl Session {
                 loop_tx,
                 pid,
                 id,
-                probe: CommandProbe::new(pid, &options.command.program, notifier_exited),
+                probe: CommandProbe::new(pid, program, notifier_exited),
             },
             events_rx,
         ))
@@ -974,6 +988,51 @@ fn visible_matches<T>(term: &Term<T>, regex: &mut RegexSearch, out: &mut Vec<Spa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn exit_queued_before_io_loop_registration_is_reported() {
+        use std::time::{Duration, Instant};
+
+        use polling::{Event as PollEvent, Events, Poller};
+        use windows_sys::Win32::System::Threading::TerminateProcess;
+
+        let timeout = Duration::from_secs(30);
+        let size = TerminalSize::default();
+        let options = tty::Options {
+            shell: Some(tty::Shell::new(
+                "cmd.exe".into(),
+                vec!["/d".into(), "/q".into()],
+            )),
+            ..Default::default()
+        };
+        // Arm a separate poller while the child is still waiting for input.
+        // Its completion packet proves the callback has queued the status
+        // and sent its only notification before the session registers.
+        let pty = tty::new(&options, size.window_size(), 0).unwrap();
+        let probe = Arc::new(Poller::new().unwrap());
+        pty.child_watcher().register(&probe, PollEvent::readable(1));
+        // SAFETY: the PTY owns this live process handle throughout the call.
+        let ended = unsafe { TerminateProcess(io_loop::child_handle(&pty), 7) };
+        assert_ne!(ended, 0, "{}", std::io::Error::last_os_error());
+        let mut events = Events::new();
+        probe.wait(&mut events, Some(timeout)).unwrap();
+        assert!(
+            events.iter().any(|event| event.key == 1),
+            "no child exit callback"
+        );
+        pty.child_watcher().deregister();
+
+        let (session, rx) = Session::from_pty(pty, size, 0, "cmd.exe").unwrap();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let SessionEvent::Exited(status) = rx.recv_deadline(deadline).expect("queued exit") {
+                assert_eq!(status.code, Some(7));
+                assert_eq!(session.exit_status(), Some(status));
+                break;
+            }
+        }
+    }
 
     #[test]
     fn search_patterns() {
