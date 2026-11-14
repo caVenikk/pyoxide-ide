@@ -107,6 +107,8 @@ impl Default for StartRequest {
 #[derive(Clone, Debug)]
 pub struct StartPlan {
     pub options: SessionOptions,
+    /// Requested shell, before integration injects startup arguments.
+    pub shell: ShellCommand,
     pub kind: ShellKind,
     /// The scripts the customizers asked to source.
     pub sources: Vec<SourceScript>,
@@ -185,6 +187,7 @@ pub fn plan_session(request: &StartRequest, customizers: &[&dyn ShellCustomizer]
         };
         integration::inject(os, dir, &command, &sources, &session_var, home.as_deref())
     });
+    let shell = command.clone();
     let shell_integration = injected.is_some();
     if let Some(injected) = injected {
         command = injected.command;
@@ -194,6 +197,7 @@ pub fn plan_session(request: &StartRequest, customizers: &[&dyn ShellCustomizer]
         }
     }
     StartPlan {
+        shell,
         options: SessionOptions {
             command,
             working_directory: cwd,

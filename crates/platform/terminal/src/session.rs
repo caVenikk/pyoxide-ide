@@ -842,6 +842,17 @@ impl Session {
         self.shared.state.lock().term.selection.is_some()
     }
 
+    /// Whether Copy is enabled, without materializing the scrollback.
+    pub fn has_selected_text(&self) -> bool {
+        self.shared
+            .state
+            .lock()
+            .term
+            .selection
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+    }
+
     /// The selected text, if anything is selected.
     pub fn selection_text(&self) -> Option<String> {
         self.shared

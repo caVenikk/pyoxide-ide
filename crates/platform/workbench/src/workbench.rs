@@ -401,6 +401,7 @@ impl Workbench {
             cx.observe(&run_window, |_, _, cx| cx.notify()),
             // Processes do not outlive the application.
             cx.on_app_quit(|this, cx| this.kill_runs(cx)),
+            cx.on_app_quit(|this, _| this.finish_terminal_save()),
             cx.subscribe_in(&find_in_files, window, |this, _, event, window, cx| {
                 match event {
                     FindInFilesEvent::OpenAt {
@@ -985,6 +986,7 @@ impl Workbench {
         if let Some(view) = &self.code_intel {
             view.update(cx, |v, cx| v.project_opened(&path, cx));
         }
+        self.terminal_project_opened(&path, window, cx);
         self.run_project_opened(&path, cx);
         self.debug_project_opened(&path, window, cx);
         crate::recent_projects::opened(cx, &path, Project::new(path.clone()).name());

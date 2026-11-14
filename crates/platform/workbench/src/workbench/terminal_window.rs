@@ -4,7 +4,11 @@
 //! a running command closes, and its commands (`workbench.toggle-terminal`,
 //! `terminal.open`, `terminal.type`, `terminal.state`).
 
-use std::path::PathBuf;
+use futures::{FutureExt as _, future::Shared};
+use gpui::Task;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use terminal::{ShellCommand, StartPlan};
 
 use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
 use terminal_ui::commands::{Find, FindNext, FindPrevious, OpenLink};
@@ -53,9 +57,16 @@ pub(super) struct TerminalUi {
     /// Terminal settings' one.
     shell: Option<String>,
     /// A new tab's session is being planned.
-    starting: bool,
+    starting: usize,
+    generation: u64,
+    loading: bool,
+    show_after_load: bool,
+    input_after_load: String,
+    deferred: Vec<Launch>,
+    write: Option<Shared<Task<()>>>,
     /// The tabs (by id) whose closing is being checked or confirmed.
     closing: Vec<u64>,
+    waiting_to_close: std::collections::VecDeque<u64>,
     _subscription: Subscription,
 }
 
@@ -85,8 +96,15 @@ impl TerminalUi {
         Self {
             view,
             shell: None,
-            starting: false,
+            starting: 0,
+            generation: 0,
+            loading: false,
+            show_after_load: false,
+            input_after_load: String::new(),
+            deferred: Vec::new(),
+            write: None,
             closing: Vec::new(),
+            waiting_to_close: Default::default(),
             _subscription: subscription,
         }
     }
@@ -143,7 +161,26 @@ impl Workbench {
             // The echo of a key is drawn at once, as typed text in the
             // editor is (`app.rs`, `observe_keystrokes`).
             TerminalToolWindowEvent::Redraw => crate::shot::draw_now(window),
-            TerminalToolWindowEvent::NewTab => self.new_terminal_tab(None, window, cx),
+            TerminalToolWindowEvent::NewTab(action) => self.launch_terminal(
+                Launch {
+                    shell: action.shell.clone(),
+                    args: action.args.clone(),
+                    name: action.name.clone(),
+                    ..Default::default()
+                },
+                window,
+                cx,
+            ),
+            TerminalToolWindowEvent::ChooseShell => {
+                let settings: crate::terminal::TerminalSettings = settings_ui::store::get(cx);
+                self.terminal_ui.view.update(cx, |v, cx| {
+                    v.show_shells(settings.shell().map(str::to_owned), window, cx)
+                });
+            }
+            TerminalToolWindowEvent::TabsChanged => self.persist_terminal_tabs(cx),
+            TerminalToolWindowEvent::OpenDropped(path) => {
+                self.new_terminal_tab_in(None, Some(path.clone()), window, cx);
+            }
             TerminalToolWindowEvent::OpenLink(target) => {
                 self.open_terminal_link(target, window, cx)
             }
@@ -195,37 +232,229 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.launch_terminal(
+            Launch {
+                input,
+                directory,
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn launch_terminal(&mut self, launch: Launch, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_ui.loading {
+            self.terminal_ui.deferred.push(launch);
+            return;
+        }
         let mut request = crate::terminal::request(self.project_root(cx), cx);
-        request.requested_directory = directory;
-        if let Some(shell) = &self.terminal_ui.shell {
+        request.requested_directory = launch.directory;
+        if let Some(shell) = &launch.shell {
+            request.shell_path = Some(shell.clone());
+            request.command = launch.args.map(|args| ShellCommand {
+                program: shell.clone(),
+                args,
+            });
+        } else if let Some(shell) = &self.terminal_ui.shell {
             request.shell_path = Some(shell.clone());
         }
-        let settings: crate::terminal::TerminalSettings = settings_ui::store::get(cx);
         let plan = crate::terminal::plan(request, cx);
-        let view = self.terminal_ui.view.clone();
-        self.terminal_ui.starting = true;
+        let generation = self.terminal_ui.generation;
+        self.terminal_ui.starting += 1;
         cx.spawn_in(window, async move |this, cx| {
             let plan = plan.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.terminal_ui.starting = false;
-                let filters = crate::terminal::link_filters(cx);
-                let session = cx.new(|cx| {
-                    let mut session = SessionView::new(plan.options, window, cx);
-                    session.set_link_filters(filters, cx);
-                    let options = terminal_ui::TerminalOptions {
-                        option_as_meta: settings.option_as_meta,
-                        ..session.options().clone()
-                    };
-                    session.set_options(options, cx);
-                    session
-                });
-                if let Some(input) = &input {
-                    session.update(cx, |s, cx| s.type_text(input, cx));
+                if this.terminal_ui.generation != generation {
+                    return;
                 }
-                view.update(cx, |v, cx| {
-                    v.set_close_on_exit(settings.close_session_on_exit);
-                    v.add_tab(session, None, window, cx)
+                this.terminal_ui.starting -= 1;
+                let name = launch.name.or_else(|| {
+                    launch
+                        .shell
+                        .map(|_| terminal_ui::tool_window::shell_name(&plan.shell.program))
                 });
+                this.add_terminal_session(plan, name, launch.input, window, cx);
+                this.persist_terminal_tabs(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn add_terminal_session(
+        &mut self,
+        plan: StartPlan,
+        name: Option<String>,
+        input: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let settings: crate::terminal::TerminalSettings = settings_ui::store::get(cx);
+        let filters = crate::terminal::link_filters(cx);
+        let session = cx.new(|cx| {
+            let mut session = SessionView::new(plan.options, window, cx);
+            session.set_link_filters(filters, cx);
+            session.set_options(
+                terminal_ui::TerminalOptions {
+                    option_as_meta: settings.option_as_meta,
+                    ..session.options().clone()
+                },
+                cx,
+            );
+            session
+        });
+        if let Some(input) = input {
+            session.update(cx, |s, cx| s.type_text(&input, cx));
+        }
+        self.terminal_ui.view.update(cx, |v, cx| {
+            v.set_close_on_exit(settings.close_session_on_exit);
+            v.add_tab(session, name, plan.shell, window, cx)
+        })
+    }
+
+    fn persist_terminal_tabs(&mut self, cx: &mut Context<Self>) {
+        if self.terminal_ui.loading {
+            return;
+        }
+        let Some(root) = self.project_root(cx) else {
+            return;
+        };
+        let tabs: Vec<_> = self
+            .terminal_ui
+            .view
+            .read(cx)
+            .tabs()
+            .iter()
+            .map(|tab| SavedTab {
+                name: tab.user_title().unwrap_or(tab.name()).to_owned(),
+                user_defined: tab.user_title().is_some(),
+                shell: tab.shell.program.clone(),
+                args: tab.shell.args.clone(),
+                cwd: tab.session().read(cx).working_directory().cloned(),
+            })
+            .collect();
+        let previous = self.terminal_ui.write.take();
+        let write = cx
+            .background_spawn(async move {
+                if let Some(previous) = previous {
+                    previous.await;
+                }
+                if let Err(error) = save_tabs(&root, &tabs) {
+                    eprintln!("terminal: cannot save tabs: {error}");
+                }
+            })
+            .shared();
+        cx.background_spawn(write.clone()).detach();
+        self.terminal_ui.write = Some(write);
+    }
+
+    pub(super) fn finish_terminal_save(&self) -> impl Future<Output = ()> + use<> {
+        let write = self.terminal_ui.write.clone();
+        async move {
+            if let Some(write) = write {
+                write.await;
+            }
+        }
+    }
+
+    pub(super) fn terminal_project_opened(
+        &mut self,
+        root: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_ui.generation += 1;
+        let generation = self.terminal_ui.generation;
+        self.terminal_ui.loading = true;
+        self.terminal_ui.show_after_load = false;
+        self.terminal_ui.input_after_load.clear();
+        self.terminal_ui.starting = 0;
+        self.terminal_ui.deferred.clear();
+        self.terminal_ui.closing.clear();
+        self.terminal_ui.waiting_to_close.clear();
+        self.terminal_ui.shell = None;
+        self.terminal_ui
+            .view
+            .update(cx, |v, cx| v.reset_sessions(cx));
+        let root = root.to_owned();
+        let write = self.terminal_ui.write.clone();
+        let settings: crate::terminal::TerminalSettings = settings_ui::store::get(cx);
+        let load = cx.background_spawn(async move {
+            if let Some(write) = write {
+                write.await;
+            }
+            let tabs = load_tabs(&root)?;
+            let mut trusted = Vec::new();
+            if !tabs.is_empty() {
+                trusted = terminal::detect_shells()
+                    .into_iter()
+                    .map(|shell| shell.command)
+                    .collect();
+                trusted.push(terminal::start::shell_command(
+                    &terminal::start::default_shell_path(),
+                ));
+                if let Some(shell) = settings.shell() {
+                    trusted.push(terminal::start::shell_command(shell));
+                }
+            }
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((tabs, trusted))
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let (saved, trusted) = match load.await {
+                Ok(tabs) => tabs,
+                Err(error) => {
+                    eprintln!("terminal: cannot read tabs: {error}");
+                    (Vec::new(), Vec::new())
+                }
+            };
+            let Ok(plans) = this.update(cx, |this, cx| {
+                if this.terminal_ui.generation != generation {
+                    return Vec::new();
+                }
+                saved
+                    .into_iter()
+                    .map(|tab| {
+                        let mut request = crate::terminal::request(this.project_root(cx), cx);
+                        request.command = tab.trusted_command(&trusted);
+                        request.requested_directory = tab.cwd.clone();
+                        (tab, crate::terminal::plan(request, cx))
+                    })
+                    .collect()
+            }) else {
+                return;
+            };
+            let mut restored = Vec::new();
+            for (tab, plan) in plans {
+                restored.push((tab, plan.await));
+            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.terminal_ui.generation != generation {
+                    return;
+                }
+                for (tab, plan) in restored {
+                    let index =
+                        this.add_terminal_session(plan, Some(tab.name.clone()), None, window, cx);
+                    if tab.user_defined {
+                        this.terminal_ui
+                            .view
+                            .update(cx, |v, _| v.restore_user_title(index));
+                    }
+                }
+                this.terminal_ui
+                    .view
+                    .update(cx, |v, cx| v.select(0, window, cx));
+                this.terminal_ui.loading = false;
+                for launch in std::mem::take(&mut this.terminal_ui.deferred) {
+                    this.launch_terminal(launch, window, cx);
+                }
+                if this.terminal_ui.show_after_load && this.is_visible(TERMINAL) {
+                    let input = std::mem::take(&mut this.terminal_ui.input_after_load);
+                    if let Some(session) = this.terminal_session(cx) {
+                        session.update(cx, |s, cx| s.type_text(&input, cx));
+                    } else if this.terminal_ui.starting == 0 {
+                        this.new_terminal_tab(Some(input), window, cx);
+                    }
+                }
             });
         })
         .detach();
@@ -242,6 +471,12 @@ impl Workbench {
             return;
         };
         if self.terminal_ui.closing.contains(&id) {
+            return;
+        }
+        if !self.terminal_ui.closing.is_empty() {
+            if !self.terminal_ui.waiting_to_close.contains(&id) {
+                self.terminal_ui.waiting_to_close.push_back(id);
+            }
             return;
         }
         // Terminate, and Disconnect (a terminal has none), close without
@@ -277,14 +512,16 @@ impl Workbench {
         let tab = view.read(cx).title_of(id, cx).map(|t| t.to_string());
         self.terminal_ui.closing.retain(|c| *c != id);
         let Some(name) = tab else {
+            self.next_terminal_close(window, cx);
             return;
         };
         if !running {
             view.update(cx, |v, cx| v.close_tab_by_id(id, window, cx));
+            self.next_terminal_close(window, cx);
             return;
         }
-        // Another dialog is open: the request is dropped, as a Cancel.
         if self.dialog.is_some() {
+            self.terminal_ui.waiting_to_close.clear();
             return;
         }
         self.terminal_ui.closing.push(id);
@@ -324,6 +561,7 @@ impl Workbench {
     ) {
         self.terminal_ui.closing.retain(|c| *c != id);
         if button != Some("terminate") {
+            self.terminal_ui.waiting_to_close.clear();
             return;
         }
         if remember {
@@ -331,6 +569,15 @@ impl Workbench {
         }
         let view = self.terminal_ui.view.clone();
         view.update(cx, |v, cx| v.close_tab_by_id(id, window, cx));
+        self.next_terminal_close(window, cx);
+    }
+
+    fn next_terminal_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        while self.terminal_ui.closing.is_empty()
+            && let Some(id) = self.terminal_ui.waiting_to_close.pop_front()
+        {
+            self.terminal_close_requested(id, window, cx);
+        }
     }
 
     /// The reference's Terminal activation: hidden when it has the focus,
@@ -351,7 +598,11 @@ impl Workbench {
     /// The Terminal tool window was activated (its key, its stripe button,
     /// `workbench.activate-tool-window`): a new tab when it has none.
     pub(super) fn terminal_activated(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.terminal_session(cx).is_none() && !self.terminal_ui.starting {
+        if self.terminal_ui.loading {
+            self.terminal_ui.show_after_load = true;
+            return;
+        }
+        if self.terminal_session(cx).is_none() && self.terminal_ui.starting == 0 {
             self.new_terminal_tab(None, window, cx);
         }
     }
@@ -364,13 +615,20 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.terminal_ui.loading
+            && let Some(text) = &input
+        {
+            self.terminal_ui.input_after_load.push_str(text);
+        }
         match self.terminal_session(cx) {
             Some(session) => {
                 if let Some(input) = &input {
                     session.update(cx, |s, cx| s.type_text(input, cx));
                 }
             }
-            None if !self.terminal_ui.starting => self.new_terminal_tab(input, window, cx),
+            None if self.terminal_ui.starting == 0 && !self.terminal_ui.loading => {
+                self.new_terminal_tab(input, window, cx)
+            }
             None => {}
         }
         self.activate_tool_window(TERMINAL, window, cx);
@@ -479,6 +737,100 @@ impl Workbench {
     fn type_into_terminal(&mut self, action: &TypeText, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.terminal_session(cx) {
             session.update(cx, |s, cx| s.type_text(&action.text, cx));
+        }
+    }
+}
+
+#[derive(Default)]
+struct Launch {
+    input: Option<String>,
+    directory: Option<PathBuf>,
+    shell: Option<String>,
+    args: Option<Vec<String>>,
+    name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+struct SavedTab {
+    name: String,
+    #[serde(default)]
+    user_defined: bool,
+    shell: String,
+    #[serde(default)]
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+}
+
+impl SavedTab {
+    // A project file cannot authorize a new executable or new shell arguments.
+    fn trusted_command(&self, trusted: &[ShellCommand]) -> Option<ShellCommand> {
+        trusted
+            .iter()
+            .find(|command| command.program == self.shell && command.args == self.args)
+            .cloned()
+    }
+}
+
+fn load_tabs(root: &Path) -> Result<Vec<SavedTab>, Box<dyn std::error::Error + Send + Sync>> {
+    match project::workspace::load_table(root, "terminal")?.and_then(|mut t| t.remove("tabs")) {
+        Some(tabs) => Ok(tabs.try_into()?),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn save_tabs(
+    root: &Path,
+    tabs: &[SavedTab],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let value = if tabs.is_empty() {
+        None
+    } else {
+        Some(serde::Serialize::serialize(
+            &tabs,
+            toml_edit::ser::ValueSerializer::new(),
+        )?)
+    };
+    project::workspace::save_toml_values(root, "terminal", vec![("tabs", value)])?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restored_commands_require_an_exact_local_match() {
+        let command = |program: &str, args: &[&str]| ShellCommand {
+            program: program.into(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
+        };
+        let trusted = [
+            command("/bin/bash", &["-i"]),
+            command("wsl.exe", &["-d", "Ubuntu"]),
+            command("cmd.exe", &[]),
+            command("/opt/custom shell", &["--interactive"]),
+        ];
+        let restore = |command: ShellCommand| {
+            SavedTab {
+                name: "Build".into(),
+                user_defined: true,
+                shell: command.program,
+                args: command.args,
+                cwd: None,
+            }
+            .trusted_command(&trusted)
+        };
+        for shell in &trusted {
+            assert_eq!(restore(shell.clone()).as_ref(), Some(shell));
+        }
+        for shell in [
+            command("/project/bash", &["-i"]),
+            command("/bin/bash", &["-c", "untrusted"]),
+            command("wsl.exe", &["-d", "Ubuntu", "--exec", "untrusted"]),
+            command("cmd.exe", &["/c", "untrusted"]),
+        ] {
+            assert_eq!(restore(shell), None);
         }
     }
 }

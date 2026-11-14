@@ -306,12 +306,8 @@ impl Workbench {
                 None => return,
             },
         };
-        let dir = if path.is_dir() {
-            path
-        } else {
-            path.parent().map(Path::to_owned).unwrap_or(path)
-        };
-        self.open_terminal_in(dir, window, cx);
+        // The session planner resolves directories and containing folders off the UI thread.
+        self.open_terminal_in(path, window, cx);
     }
 
     // ---- the menu ---------------------------------------------------------------

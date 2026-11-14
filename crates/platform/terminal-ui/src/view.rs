@@ -306,6 +306,7 @@ impl SessionView {
     /// the UI thread).
     pub fn new(options: SessionOptions, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::empty(window, cx);
+        view.working_directory = Some(options.working_directory.clone());
         view.pending = Some(options);
         view
     }
@@ -465,8 +466,10 @@ impl SessionView {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
             }
             SessionEvent::WorkingDirectory(dir) => {
-                self.working_directory = Some(dir.clone());
-                cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
+                if self.working_directory.as_ref() != Some(&dir) {
+                    self.working_directory = Some(dir.clone());
+                    cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
+                }
             }
             SessionEvent::Mark(mark) => {
                 // The full-screen programs' screen has no history to follow.
@@ -698,6 +701,12 @@ impl SessionView {
 
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    pub fn has_selected_text(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(Session::has_selected_text)
     }
 
     pub fn working_directory(&self) -> Option<&PathBuf> {

@@ -873,3 +873,120 @@ fn paths_in_the_output_open_in_the_editor_and_the_project_view(cx: &mut TestAppC
     assert_eq!(state["tree"]["selected"], json!("src"), "{state:#}");
     assert_eq!(state["tool_windows"]["project"]["visible"], json!(true));
 }
+
+/// Preserve the requested shell (before integration), the actual directory and
+/// a user name across a project switch, without moving focus to the terminal.
+#[gpui::test]
+fn project_sessions_restore_unfocused(cx: &mut TestAppContext) {
+    let (mut h, dir) = setup(cx, keymap::MACOS);
+    h.cx.update(|cx| {
+        settings_ui::store::set_key(cx, "terminal.shell-path", json!(TEST_SHELL)).unwrap()
+    });
+    h.open_terminal(None);
+    h.invoke("terminal.open-in", json!({"path":"src/m.py"}));
+    let state = h.wait_terminal("open in containing folder", |s| {
+        s["tabs"].as_array().is_some_and(|t| t.len() == 2)
+    });
+    let cwd = h.root.join("src");
+    assert_eq!(state["tabs"][1]["working_directory"], json!(cwd));
+    // Ask the shell itself, so a UI-only cwd does not pass.
+    let pwd = if cfg!(windows) {
+        "@for %i in (.) do @echo cwd=%~nxi\r"
+    } else {
+        "echo cwd=${PWD##*/}\r"
+    };
+    h.invoke("terminal.type", json!({"text":pwd}));
+    let expected = "cwd=src";
+    h.wait_terminal("shell in selected file's folder", |s| {
+        s["lines"].as_array().is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|line| line.as_str().is_some_and(|line| line.trim() == expected))
+        })
+    });
+    h.invoke("terminal.rename-tab", json!({"name":"server"}));
+    h.invoke("terminal.new-tab", json!({"shell":TEST_SHELL}));
+    h.wait_terminal("predefined shell tab", |s| {
+        s["tabs"].as_array().is_some_and(|t| t.len() == 3)
+    });
+    h.invoke("terminal.new-session-popup", json!(null));
+    let menu = h.wait_terminal("shell menu", |s| {
+        s["options_menu"]["levels"][0]["items"].is_array()
+    });
+    assert!(
+        menu["options_menu"]["levels"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["label"] == "Settings")
+    );
+    h.invoke("menu.cancel", json!(null));
+    for (element, labels) in [
+        (
+            "terminal-tab-1",
+            vec!["Rename Session", "Close Tab", "Close Other Tabs"],
+        ),
+        (
+            "terminal-session",
+            vec!["Copy", "Paste", "Select All", "Clear", "Find", "New Tab"],
+        ),
+    ] {
+        let mut visual = gpui::VisualTestContext::from_window(h.window.into(), h.cx);
+        let at = visual.debug_bounds(element).unwrap().center();
+        visual.simulate_mouse_move(at, None, gpui::Modifiers::none());
+        visual.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+        visual.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::none());
+        h.draw();
+        let state = h.terminal();
+        let rows = state["options_menu"]["levels"][0]["items"]
+            .as_array()
+            .expect("context menu");
+        let actual: Vec<_> = rows
+            .iter()
+            .filter_map(|row| row["label"].as_str())
+            .collect();
+        assert_eq!(actual, labels);
+        h.invoke("menu.cancel", json!(null));
+    }
+    let other = dir.path().join("another");
+    std::fs::create_dir_all(&other).unwrap();
+    let root = h.root.clone();
+    h.invoke("project.open-folder", json!({"path":other}));
+    h.wait_terminal("other project has no sessions", |s| s["tabs"] == json!([]));
+    // A project may supply its own workspace file. Preserve the title and
+    // directory but never trust a new executable or arguments from it.
+    let workspace = ::project::workspace::workspace_file(&root);
+    let mut document: toml::Table = std::fs::read_to_string(&workspace)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let tabs = document
+        .get_mut("terminal")
+        .unwrap()
+        .get_mut("tabs")
+        .unwrap()
+        .as_array_mut()
+        .unwrap();
+    tabs[1]["shell"] =
+        toml::Value::String(root.join("untrusted-shell").to_string_lossy().into_owned());
+    tabs[1]["args"] = toml::Value::Array(vec![toml::Value::String("-c".into())]);
+    std::fs::write(&workspace, toml::to_string(&document).unwrap()).unwrap();
+    h.invoke("project.open-folder", json!({"path":root}));
+    let restored = h.wait_terminal("restored tabs", |s| {
+        s["tabs"].as_array().is_some_and(|t| t.len() == 3)
+    });
+    assert_eq!(restored["selected"], 0);
+    assert_eq!(restored["active"], false);
+    assert_eq!(restored["tabs"][1]["name"], "server");
+    assert_eq!(restored["tabs"][1]["user_defined"], true);
+    assert_eq!(restored["tabs"][1]["shell"], TEST_SHELL);
+    assert!(
+        !restored["tabs"][1]["args"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("-c"))
+    );
+    assert_eq!(restored["tabs"][1]["working_directory"], json!(cwd));
+    assert_eq!(restored["tabs"][2]["shell"], TEST_SHELL);
+    assert_eq!(restored["tabs"][2]["user_defined"], false);
+}

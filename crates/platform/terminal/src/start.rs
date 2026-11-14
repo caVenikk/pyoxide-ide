@@ -75,6 +75,22 @@ impl ShellKind {
     }
 }
 
+/// Quote a dropped path as one argument at the shell prompt.
+pub fn path_argument(path: &str, kind: ShellKind) -> String {
+    let plain = path
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"/._-".contains(&byte));
+    if plain && !path.is_empty() {
+        return path.to_owned();
+    }
+    match kind {
+        ShellKind::Cmd => format!("\"{path}\""),
+        ShellKind::PowerShell => format!("'{}'", path.replace('\'', "''")),
+        ShellKind::Fish => crate::integration::fish_quote(path),
+        _ => format!("'{}'", path.replace('\'', "'\\''")),
+    }
+}
+
 /// The last component of a path written with `/` or `\`.
 fn file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)

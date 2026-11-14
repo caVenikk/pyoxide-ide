@@ -41,3 +41,9 @@ pub fn init(cx: &mut gpui::App, kind: themes::ThemeKind) {
     icons::init(cx);
     theme::init(cx, kind);
 }
+
+/// Paths dragged from rows in the project tree.
+#[derive(Debug, Clone)]
+pub struct DraggedFiles {
+    pub paths: Vec<std::path::PathBuf>,
+}

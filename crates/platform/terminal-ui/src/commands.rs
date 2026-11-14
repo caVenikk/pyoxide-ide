@@ -31,8 +31,14 @@ ui::ui_commands! {
 ui::ui_commands! {
     TAB_COMMANDS, scope = "Terminal";
     /// Open a new tab.
-    NewTab => "terminal.new-tab", "New Tab",
+    NewTab { shell: Option<String>, args: Option<Vec<String>>, name: Option<String> } => "terminal.new-tab", "New Tab",
         "Starts a new terminal session in a new tab of the Terminal tool window and selects it.";
+    /// Choose a shell for a new tab.
+    NewSessionPopup => "terminal.new-session-popup", "New Predefined Session",
+        "Lists detected shells and the configured custom shell.";
+    /// Close tabs other than the selected tab.
+    CloseOtherTabs => "terminal.close-other-tabs", "Close Other Tabs",
+        "Closes the other tabs with the normal running-process confirmation.";
     /// Close the selected tab.
     CloseTab => "terminal.close-tab", "Close Tab",
         "Closes the selected tab of the Terminal tool window and ends its session, after a confirmation when a command runs in the shell; the last tab closed hides the tool window.";
