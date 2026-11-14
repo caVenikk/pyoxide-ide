@@ -26,6 +26,8 @@ pub mod popup_window;
 pub mod progress_bar;
 pub mod theme;
 pub mod tree_guides;
+#[cfg(target_os = "macos")]
+pub mod window_activation;
 pub mod window_close;
 
 pub use deferred::{Deferred, deferred};
