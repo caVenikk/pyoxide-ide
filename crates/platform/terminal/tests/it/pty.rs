@@ -77,8 +77,11 @@ impl Harness {
     /// Takes snapshots on every event until `done` holds.
     fn wait(&mut self, what: &str, done: impl Fn(&Snapshot, &[SessionEvent]) -> bool) -> Snapshot {
         self.wait_for(TIMEOUT, done).unwrap_or_else(|| {
+            let pid = self.session().pid();
             panic!(
-                "waiting for {what}; screen:\n{}\nevents: {:?}",
+                "waiting for {what}; pid={pid}, alive={}, session exit={:?}; screen:\n{}\nevents: {:?}",
+                process::is_alive(pid),
+                self.session().exit_status(),
                 self.session().snapshot().text(),
                 self.events
             )
