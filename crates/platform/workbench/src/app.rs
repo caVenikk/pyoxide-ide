@@ -452,6 +452,8 @@ pub fn run(product: Product, paths: Vec<std::path::PathBuf>) {
     env::mark_main();
     let product = Rc::new(product);
     Application::new().run(move |cx| {
+        #[cfg(target_os = "macos")]
+        ui::window_activation::install();
         init(cx, &product);
         // Settings that last across sessions (tests keep the defaults).
         let file = ::settings::settings_file();
