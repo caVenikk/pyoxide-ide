@@ -134,6 +134,22 @@ fn reference(root: &Path) {
 </component></application>"#,
     );
     write(
+        &o.join("terminal.xml"),
+        r#"<application><component name="TerminalOptionsProvider">
+        <option name="myShellPath" value="/bin/legacy"/>
+        <option name="myShellIntegration" value="false"/>
+        <option name="myCloseSessionOnLogout" value="false"/>
+        <option name="myOverrideIdeShortcuts" value="false"/>
+        <option name="useOptionAsMetaKey" value="true"/>
+    </component></application>"#,
+    );
+    write(
+        &o.join("terminal-local.xml"),
+        r#"<application><component name="TerminalLocalOptions">
+        <option name="shellPath" value="/bin/custom -l"/>
+    </component></application>"#,
+    );
+    write(
         &o.join("terminal-font.xml"),
         r#"<application><component name="TerminalFontOptions">
   <option name="FONT_SIZE_2D" value="12.5" />
@@ -277,6 +293,11 @@ fn the_import_brings_the_reference_settings_and_closes_the_window(cx: &mut TestA
         h.get("terminal.font.family"),
         json!("JetBrainsMono Nerd Font")
     );
+    assert_eq!(h.get("terminal.shell-path"), json!("/bin/custom -l"));
+    assert_eq!(h.get("terminal.shell-integration"), json!(false));
+    assert_eq!(h.get("terminal.close-session-on-exit"), json!(false));
+    assert_eq!(h.get("terminal.override-ide-shortcuts"), json!(false));
+    assert_eq!(h.get("terminal.option-as-meta"), json!(true));
     assert_eq!(h.get("terminal.font.size"), json!(12.5));
     assert_eq!(h.get("editor.soft-wraps.enabled"), json!(true));
     assert_eq!(h.get("system.files.save-on-idle"), json!(true));
@@ -440,6 +461,23 @@ fn later_importer(source: &first_run::Source) -> first_run::Applied {
         LATER_APPLIED.fetch_add(1, Ordering::SeqCst);
         first_run::Outcome::imported("the later setting")
     })
+}
+
+#[gpui::test]
+fn terminal_snapshot_replay_preserves_the_existing_shell_choice(cx: &mut TestAppContext) {
+    let mut h = open(cx, true);
+    h.invoke("first-run.import", json!({}));
+    h.cx.update(|cx| {
+        use settings_ui::store;
+        store::set_key(cx, "terminal.shell-path", json!("my-shell")).unwrap();
+        let mut record = store::get::<settings::ImportSettings>(cx);
+        record.applied.remove("terminal-options");
+        store::set(cx, &record);
+        first_run::pick_up(cx);
+    });
+    h.settle();
+    assert_eq!(h.get("terminal.shell-path"), "my-shell");
+    assert_eq!(h.get("import.applied.terminal-options"), true);
 }
 
 #[gpui::test]

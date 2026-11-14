@@ -213,3 +213,45 @@ fn the_font_and_the_fallback_are_chosen_from_lists(cx: &mut TestAppContext) {
         json!("JetBrainsMono Nerd Font")
     );
 }
+
+#[gpui::test]
+fn project_and_application_options_apply_together_and_cancel_discards_edits(
+    cx: &mut TestAppContext,
+) {
+    let mut h = setup(cx, "[terminal.font]\nsize = 15.0\n");
+    let root = h._dir.path().join("demo");
+    std::fs::create_dir_all(root.join(".idea")).unwrap();
+    std::fs::create_dir(root.join("src")).unwrap();
+    let reference = root.join(".idea/workspace.xml");
+    let xml = r#"<project><component name="TerminalProjectNonSharedOptionsProvider">
+        <option name="startingDirectory" value="$PROJECT_DIR$/src" />
+        <envs><env key="ONE" value="a;b" /></envs>
+    </component></project>"#;
+    std::fs::write(&reference, xml).unwrap();
+    h.invoke("project.open-folder", json!({"path": root}));
+    h.invoke("settings.open", json!({"page": "terminal"}));
+    assert_eq!(h.page()["start-directory"], "$PROJECT_DIR$/src");
+    assert_eq!(h.page()["environment"], r"ONE=a\;b");
+    h.edit("shell-path", json!("sh"));
+    h.edit("shell-integration", json!(false));
+    h.edit("close-session-on-exit", json!(false));
+    h.edit("override-ide-shortcuts", json!(false));
+    h.edit("start-directory", json!("src"));
+    h.edit("environment", json!("ONE=applied"));
+    assert_eq!(h.get("terminal.shell-integration"), true);
+    h.invoke("settings.apply", json!(null));
+    assert_eq!(h.get("terminal.shell-integration"), false);
+    assert_eq!(h.get("terminal.close-session-on-exit"), false);
+    assert_eq!(h.get("terminal.override-ide-shortcuts"), false);
+    assert_eq!(h.get("terminal.font.size"), 15.0);
+    assert_eq!(h.modified(), json!([]));
+    assert_eq!(std::fs::read_to_string(&reference).unwrap(), xml);
+    h.edit("shell-path", json!("cancelled"));
+    h.edit("environment", json!("ONE=cancelled"));
+    h.invoke("settings.cancel", json!(null));
+    h.invoke("settings.open", json!({"page": "terminal"}));
+    assert_eq!(h.page()["environment"], "ONE=applied");
+    assert_eq!(h.page()["shell-path"], "sh");
+    assert_eq!(h.page()["start-directory"], "src");
+    assert!(h.file_text().contains("shell-path = \"sh\""));
+}

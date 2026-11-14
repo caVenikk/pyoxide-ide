@@ -2,6 +2,8 @@
 //! the plan of a new session from the Terminal settings, made off the UI
 //! thread. The Terminal tool window starts its tabs with [`plan`].
 
+pub(crate) mod project_options;
+
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -11,6 +13,16 @@ use terminal::{ShellCustomizer, StartPlan, StartRequest, plan_session};
 
 pub use ::settings::{TerminalFontSettings, TerminalSettings};
 
+/// A product-specific project preference used by its terminal customizer.
+/// Its disk access runs on the same background queue as the other project options.
+#[derive(Clone, Copy)]
+pub struct ProjectToggle {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub load: fn(&Path) -> bool,
+    pub save: fn(&Path, bool) -> Result<(), String>,
+}
+
 /// What a product adds to terminal sessions (the Python product activates
 /// the project's virtual environment).
 pub trait TerminalProvider {
@@ -19,6 +31,10 @@ pub trait TerminalProvider {
     /// the product knows there (an interpreter chosen in this session);
     /// they run off it, in [`terminal::plan_session`].
     fn customizers(&self, project_root: Option<&Path>, cx: &App) -> Vec<Arc<dyn ShellCustomizer>>;
+
+    fn project_toggle(&self) -> Option<ProjectToggle> {
+        None
+    }
 
     /// What the product links in the output of a session: the filters for a
     /// shell working in a folder (the Python product links the files of
@@ -55,6 +71,20 @@ pub(crate) fn init(cx: &mut App, hook: Option<TerminalHook>) {
     settings_ui::store::register::<TerminalSettings>(cx);
     settings_ui::store::register::<TerminalFontSettings>(cx);
     settings_ui::store::register::<::settings::EditorFontSettings>(cx);
+    project_options::init(cx);
+    fn follow_behavior(cx: &mut App) {
+        let settings: TerminalSettings = settings_ui::store::get(cx);
+        cx.set_global(terminal_ui::Behavior {
+            close_on_exit: settings.close_session_on_exit,
+            option_as_meta: settings.option_as_meta,
+        });
+    }
+    follow_behavior(cx);
+    settings_ui::store::observe(
+        cx,
+        <TerminalSettings as ::settings::Section>::KEY,
+        follow_behavior,
+    );
     follow_font(cx);
     cx.set_global(Hook(hook));
     route_keys(cx);
@@ -119,6 +149,10 @@ pub fn customizers(project_root: Option<&Path>, cx: &App) -> Vec<Arc<dyn ShellCu
     }
 }
 
+pub(crate) fn project_toggle(cx: &App) -> Option<ProjectToggle> {
+    cx.try_global::<Hook>()?.0.as_ref()?.0.project_toggle()
+}
+
 /// The product's link filters for the sessions of this application.
 pub fn link_filters(cx: &App) -> Option<terminal_ui::LinkFilters> {
     cx.try_global::<Hook>()
@@ -141,9 +175,19 @@ pub fn request(project_root: Option<PathBuf>, cx: &App) -> StartRequest {
 /// The plan of a session for `request` with the product's customizers,
 /// made on the background executor ([`terminal::plan_session`] reads
 /// folders, writes the integration scripts and runs the customizers).
-pub fn plan(request: StartRequest, cx: &App) -> Task<StartPlan> {
+pub fn plan(mut request: StartRequest, cx: &App) -> Task<StartPlan> {
     let customizers = customizers(request.project_root.as_deref(), cx);
+    let project = request.project_root.clone().map(|root| {
+        let load = project_options::read(&root, cx);
+        (root, load)
+    });
     cx.background_spawn(async move {
+        if let Some((root, load)) = project {
+            match load.await {
+                Ok(options) => options.apply_to(&mut request, &root),
+                Err(error) => eprintln!("terminal settings: {error}"),
+            }
+        }
         let customizers: Vec<&dyn ShellCustomizer> = customizers.iter().map(|c| &**c).collect();
         plan_session(&request, &customizers)
     })

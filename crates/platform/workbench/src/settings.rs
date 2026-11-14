@@ -122,7 +122,7 @@ fn pages() -> Vec<PageSpec> {
             parent: Some(TOOLS),
             title: terminal::TITLE,
             weight: 0,
-            scope: Scope::Application,
+            scope: Scope::ProjectPersonal,
             search_terms: terminal::SEARCH_TERMS,
             description: None,
             create: Some(settings_ui::page::create(terminal::TerminalPage::new)),

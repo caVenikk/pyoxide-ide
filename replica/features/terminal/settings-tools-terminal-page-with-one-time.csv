@@ -1,2 +1,2 @@
 feature,area,priority,original,clone,notes
-Settings > Tools > Terminal page with one-time import from .idea,terminal,should,yes,partial,Font Settings group and legacy-profile font adoption implemented (#404); Project/Application options and project settings import remain (#411)
+Settings > Tools > Terminal page with one-time import from .idea,terminal,should,yes,partial,Project start directory and variables plus Python virtualenv; application shell and supported toggles; font inheritance and live Apply; one-time workspace and application import. Parent environment isolation (#449) and dedicated Console Colors (#450) remain.
