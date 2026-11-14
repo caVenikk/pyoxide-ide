@@ -45,9 +45,20 @@ use stream_framing as framing;
 const WAIT: Duration = Duration::from_secs(60);
 
 fn main() {
+    // A test can inspect the child's progress even if its LSP reader stalls.
+    let mut trace = std::env::var_os("LSP_FAKE_TRACE").map(|path| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("open process trace")
+    });
     let script = load();
     let mut fake = Fake::new();
     for step in &script {
+        if let Some(trace) = &mut trace {
+            writeln!(trace, "pid {}: {step}", std::process::id()).expect("write process trace");
+        }
         fake.step(step);
     }
     fake.idle(None);
