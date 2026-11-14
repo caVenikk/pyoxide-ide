@@ -337,7 +337,7 @@ fn expand_home(path: &str, home: Option<&Path>) -> String {
 }
 
 /// A word in single quotes for fish (`\` and `'` escaped).
-fn fish_quote(text: &str) -> String {
+pub(crate) fn fish_quote(text: &str) -> String {
     format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 

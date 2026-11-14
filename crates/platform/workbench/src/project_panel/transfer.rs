@@ -104,11 +104,7 @@ struct TransferRequest {
 /// `MAX_PATH_LENGTH` is 70 in a wider dialog).
 const LABEL_PATH: usize = 60;
 
-/// Rows being dragged.
-#[derive(Debug, Clone)]
-pub struct DraggedFiles {
-    pub paths: Vec<PathBuf>,
-}
+pub use ui::DraggedFiles;
 
 /// What follows the pointer while rows are dragged: the dragged row's icon
 /// and name as the row draws them, on the tree's background at 70 %
