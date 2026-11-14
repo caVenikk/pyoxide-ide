@@ -674,8 +674,11 @@ impl Element for TerminalElement {
             if !phase.bubble() || !hitbox.is_hovered(window) {
                 return;
             }
-            view.update(cx, |v, cx| v.mouse_down(e, window, cx));
-            cx.stop_propagation();
+            // Right-click belongs to the tool window's context menu.
+            if e.button != gpui::MouseButton::Right {
+                view.update(cx, |v, cx| v.mouse_down(e, window, cx));
+                cx.stop_propagation();
+            }
         });
         let view = self.view.clone();
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {

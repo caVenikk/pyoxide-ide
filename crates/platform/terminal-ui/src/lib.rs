@@ -47,6 +47,14 @@ pub use view::{
     ScrollbarGeometry, SessionView, SessionViewEvent, TerminalOptions,
 };
 
+/// The application preferences read when the session handles a key or exits.
+pub struct Behavior {
+    pub close_on_exit: bool,
+    pub option_as_meta: bool,
+}
+
+impl gpui::Global for Behavior {}
+
 /// Registers the Terminal commands.
 pub fn init(cx: &mut gpui::App) {
     ui::command::register(cx, commands::COMMANDS);

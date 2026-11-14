@@ -26,11 +26,11 @@ use std::rc::Rc;
 
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement as _, PathBuilder, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, anchored, canvas, div,
-    point, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Bounds, ClickEvent, Context, Corner, DismissEvent, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement as _, IntoElement,
+    MouseButton, MouseDownEvent, ParentElement as _, PathBuilder, Pixels, Point, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, anchored,
+    canvas, div, point, prelude::FluentBuilder as _, px,
 };
 use serde_json::{Value, json};
 use themes::UiRole;
@@ -95,7 +95,10 @@ const GROUP: &str = "terminal-tool-window";
 #[derive(Clone, Debug, PartialEq)]
 pub enum TerminalToolWindowEvent {
     /// Start a new session in a new tab ("+", New Tab).
-    NewTab,
+    NewTab(NewTab),
+    ChooseShell,
+    TabsChanged,
+    OpenDropped(std::path::PathBuf),
     /// The user asked to close the tab with this id ([`TerminalTab::id`],
     /// the × of the tab, Close Tab, Close All): the owner may ask first
     /// when a command runs in its shell
@@ -123,6 +126,7 @@ pub struct TerminalTab {
     name: SharedString,
     /// The name the user gave the tab (Rename Session).
     user_title: Option<SharedString>,
+    pub shell: terminal::ShellCommand,
     session: Entity<SessionView>,
     _subscription: Subscription,
 }
@@ -173,6 +177,10 @@ impl TerminalTab {
             .unwrap_or_else(|| self.name.clone())
     }
 
+    pub fn user_title(&self) -> Option<&str> {
+        self.user_title.as_ref().map(AsRef::as_ref)
+    }
+
     pub fn session(&self) -> &Entity<SessionView> {
         &self.session
     }
@@ -204,6 +212,10 @@ pub struct TerminalToolWindow {
     /// Where the selected tab's pill (or the grouped tabs' label) was
     /// drawn: the list of tabs opens below it, the rename balloon above.
     selected_bounds: Rc<Cell<Bounds<Pixels>>>,
+
+    session_bounds: Rc<Cell<Bounds<Pixels>>>,
+    shell_menu_request: u64,
+    context_target: Option<u64>,
     /// Where the ⋮ button was drawn: its menu opens there from a command.
     options_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// The open list of tabs.
@@ -259,6 +271,10 @@ pub fn unique_name<'a>(base: &str, taken: impl IntoIterator<Item = &'a str> + Cl
         .expect("an unused name")
 }
 
+pub fn shell_name(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
+}
+
 impl TerminalToolWindow {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
@@ -269,12 +285,33 @@ impl TerminalToolWindow {
             close_on_exit: true,
             selected_bounds: Rc::default(),
             options_bounds: Rc::default(),
+            session_bounds: Rc::default(),
+            shell_menu_request: 0,
+            context_target: None,
+
             tab_list: None,
             options_menu: None,
             rename: None,
             grouped: false,
             had_several: false,
         }
+    }
+
+    /// Drop the old project sessions without generating tab edits for the new project.
+    pub fn reset_sessions(&mut self, cx: &mut Context<Self>) {
+        self.shell_menu_request += 1;
+        for menu in [&self.tab_list, &self.options_menu].into_iter().flatten() {
+            ui::popup_window::close(menu.menu.entity_id(), cx);
+        }
+        ui::popup_window::close(cx.entity_id(), cx);
+        self.context_target = None;
+        self.tabs.clear();
+        self.selected = None;
+        self.rename = None;
+        self.tab_list = None;
+        self.options_menu = None;
+        self.had_several = false;
+        cx.notify();
     }
 
     pub fn tabs(&self) -> &[TerminalTab] {
@@ -317,6 +354,7 @@ impl TerminalToolWindow {
         &mut self,
         session: Entity<SessionView>,
         name: Option<String>,
+        shell: terminal::ShellCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> usize {
@@ -332,9 +370,16 @@ impl TerminalToolWindow {
                     SessionViewEvent::OpenLink(target) => {
                         cx.emit(TerminalToolWindowEvent::OpenLink(target.clone()))
                     }
+                    SessionViewEvent::WorkingDirectoryChanged(_) => {
+                        cx.emit(TerminalToolWindowEvent::TabsChanged)
+                    }
                     SessionViewEvent::TitleChanged(_)
                     | SessionViewEvent::CommandRunningChanged(_) => cx.notify(),
-                    SessionViewEvent::Exited(_) if this.close_on_exit => {
+                    SessionViewEvent::Exited(_)
+                        if cx
+                            .try_global::<crate::Behavior>()
+                            .map_or(this.close_on_exit, |s| s.close_on_exit) =>
+                    {
                         if let Some(index) = this.tabs.iter().position(|t| t.id == id) {
                             this.close(index, window, cx);
                         }
@@ -347,6 +392,7 @@ impl TerminalToolWindow {
             index,
             TerminalTab {
                 id,
+                shell,
                 name,
                 user_title: None,
                 session: session.clone(),
@@ -361,6 +407,12 @@ impl TerminalToolWindow {
         }
         cx.notify();
         index
+    }
+
+    /// Restore the explicit title without reporting a new user edit.
+    pub fn restore_user_title(&mut self, index: usize) {
+        let tab = &mut self.tabs[index];
+        tab.user_title = Some(tab.name.clone());
     }
 
     /// The position of the tab with this id.
@@ -395,6 +447,12 @@ impl TerminalToolWindow {
         }
         let had_focus = self.focus.contains_focused(window, cx);
         let tab = self.tabs.remove(index);
+        if self.context_target == Some(tab.id)
+            && let Some(popup) = self.options_menu.take()
+        {
+            self.context_target = None;
+            popup.menu.update(cx, |menu, cx| menu.dismiss(window, cx));
+        }
         if self.rename.as_ref().is_some_and(|r| r.tab == tab.id) {
             self.rename = None;
         }
@@ -407,6 +465,7 @@ impl TerminalToolWindow {
         if had_focus {
             window.focus(&self.content_focus(cx));
         }
+        cx.emit(TerminalToolWindowEvent::TabsChanged);
         if self.tabs.is_empty() {
             cx.emit(TerminalToolWindowEvent::Emptied);
         }
@@ -444,6 +503,7 @@ impl TerminalToolWindow {
         match self.tabs.get_mut(index) {
             Some(tab) if !name.is_empty() => {
                 tab.user_title = Some(name.to_owned().into());
+                cx.emit(TerminalToolWindowEvent::TabsChanged);
                 cx.notify();
                 true
             }
@@ -476,6 +536,9 @@ impl TerminalToolWindow {
                 json!({
                     "name": t.title(cx).as_ref(),
                     "full_title": t.full_title(cx).as_ref(),
+                    "user_defined": t.user_title.is_some(),
+                    "shell": t.shell.program,
+                    "args": t.shell.args,
                     "default_name": t.name.as_ref(),
                     "title": s.title(),
                     "command_running": s.command_running(),
@@ -509,8 +572,115 @@ impl TerminalToolWindow {
 
     // ---- commands -------------------------------------------------------
 
-    fn new_tab(&mut self, _: &NewTab, _: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(TerminalToolWindowEvent::NewTab);
+    fn new_tab(&mut self, action: &NewTab, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(TerminalToolWindowEvent::NewTab(action.clone()));
+    }
+
+    fn new_session_popup(
+        &mut self,
+        _: &crate::commands::NewSessionPopup,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(TerminalToolWindowEvent::ChooseShell);
+    }
+
+    pub fn show_shells(
+        &mut self,
+        custom: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.shell_menu_request += 1;
+        let request = self.shell_menu_request;
+        let focus = self.content_focus(cx);
+        window.focus(&focus);
+        let detect = cx.background_spawn(async move {
+            let mut shells = terminal::detect_shells();
+            if let Some(path) = custom {
+                let command = terminal::start::shell_command(&path);
+                if !shells.iter().any(|s| s.command == command) {
+                    let name = shell_name(&command.program);
+                    shells.push(terminal::DetectedShell {
+                        name,
+                        command,
+                        environment: terminal::ShellEnvironment::Local,
+                    });
+                }
+            }
+            shells
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let shells = detect.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.shell_menu_request != request || !focus.is_focused(window) {
+                    return;
+                }
+                let grouped = shells
+                    .iter()
+                    .any(|s| s.environment == terminal::ShellEnvironment::Local)
+                    && shells
+                        .iter()
+                        .any(|s| s.environment == terminal::ShellEnvironment::Wsl);
+                let names = terminal::shells::display_names(&shells);
+                let mut items = Vec::new();
+                for (env, title) in [
+                    (terminal::ShellEnvironment::Local, "Local"),
+                    (terminal::ShellEnvironment::Wsl, "WSL"),
+                ] {
+                    if grouped {
+                        items.push(MenuItem::header(title));
+                    }
+                    for (shell, label) in shells
+                        .iter()
+                        .zip(&names)
+                        .filter(|(s, _)| s.environment == env)
+                    {
+                        items.push(MenuItem::action(
+                            label.clone(),
+                            NewTab {
+                                shell: Some(shell.command.program.clone()),
+                                args: Some(shell.command.args.clone()),
+                                name: Some(shell.name.clone()),
+                            },
+                        ));
+                    }
+                }
+                if !items.is_empty() {
+                    items.push(MenuItem::separator());
+                }
+                items.push(MenuItem::action("Settings", ShowSettings));
+                let bounds = this.session_bounds.get();
+                this.open_actions(items, point(bounds.left(), bounds.bottom()), window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn open_actions(
+        &mut self,
+        items: Vec<MenuItem>,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.content_focus(cx));
+        let menu = ContextMenu::build(items, window, cx);
+        self.options_menu = Some(self.open_popup(menu, position, cx));
+        cx.notify();
+    }
+
+    fn close_others(
+        &mut self,
+        _: &crate::commands::CloseOtherTabs,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for (index, tab) in self.tabs.iter().enumerate() {
+            if self.selected != Some(index) {
+                cx.emit(TerminalToolWindowEvent::CloseRequested(tab.id));
+            }
+        }
     }
 
     fn close_tab(&mut self, _: &CloseTab, _: &mut Window, cx: &mut Context<Self>) {
@@ -585,12 +755,15 @@ impl TerminalToolWindow {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) -> OpenPopup {
+        self.context_target = None;
+        self.shell_menu_request += 1;
         let subscription = cx.subscribe(&menu, |this, menu, _: &DismissEvent, cx| {
             if this.tab_list.as_ref().is_some_and(|o| o.menu == menu) {
                 this.tab_list = None;
             }
             if this.options_menu.as_ref().is_some_and(|o| o.menu == menu) {
                 this.options_menu = None;
+                this.context_target = None;
             }
             cx.notify();
         });
@@ -778,7 +951,15 @@ impl TerminalToolWindow {
     /// The balloon closes; the focus goes to the selected session.
     fn close_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.rename.take().is_some() {
-            window.focus(&self.content_focus(cx));
+            let focus = self.content_focus(cx);
+            let id = cx.entity().entity_id();
+            let owner = ui::popup_window::owner(id, cx);
+            ui::popup_window::close(id, cx);
+            if let Some(owner) = owner.filter(|owner| *owner != window.window_handle()) {
+                let _ = owner.update(cx, |_, window, _| window.focus(&focus));
+            } else {
+                window.focus(&focus);
+            }
             cx.notify();
         }
     }
@@ -849,6 +1030,26 @@ impl TerminalToolWindow {
             .when(!self.popup_open(), |d| {
                 d.tooltip(Tooltip::text(tab.full_title(cx), None))
             })
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    this.select(index, window, cx);
+                    this.open_actions(
+                        vec![
+                            MenuItem::action("Rename Session", RenameTab { name: None }),
+                            MenuItem::action("Close Tab", CloseTab),
+                            MenuItem::action("Close Other Tabs", crate::commands::CloseOtherTabs)
+                                .enabled(this.tabs.len() > 1),
+                        ],
+                        e.position,
+                        window,
+                        cx,
+                    );
+                    this.context_target = this.tabs.get(index).map(|tab| tab.id);
+                }),
+            )
             .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
                 this.select(index, window, cx);
                 if let Some(session) = this.selected_session() {
@@ -917,6 +1118,12 @@ impl TerminalToolWindow {
             .flex_row()
             .flex_none()
             .items_center()
+            .on_drop(cx.listener(|_, dragged: &ui::DraggedFiles, _, cx| {
+                if let Some(path) = dragged.paths.first() {
+                    cx.stop_propagation();
+                    cx.emit(TerminalToolWindowEvent::OpenDropped(path.clone()));
+                }
+            }))
             .h(px(HEADER_HEIGHT + 1.0))
             .border_b_1()
             .border_color(theme.color(UiRole::Border))
@@ -955,7 +1162,13 @@ impl TerminalToolWindow {
                         .debug_selector(|| "terminal-new-tab".into())
                         .tooltip(Tooltip::text("New Tab", None))
                         .on_click(cx.listener(
-                            |_, _: &ClickEvent, _, cx| cx.emit(TerminalToolWindowEvent::NewTab),
+                            |_, _: &ClickEvent, _, cx| {
+                                cx.emit(TerminalToolWindowEvent::NewTab(NewTab {
+                                    shell: None,
+                                    args: None,
+                                    name: None,
+                                }))
+                            },
                         )),
                     )
                     .child(
@@ -967,7 +1180,13 @@ impl TerminalToolWindow {
                             false,
                             cx,
                         )
-                        .tooltip(Tooltip::text("New Predefined Session", None)),
+                        .relative()
+                        .debug_selector(|| "terminal-new-session".into())
+                        .child(Self::bounds_probe(&self.session_bounds))
+                        .tooltip(Tooltip::text("New Predefined Session", None))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.new_session_popup(&crate::commands::NewSessionPopup, window, cx)
+                        })),
                     ),
             )
             .child(div().flex_1())
@@ -1023,14 +1242,55 @@ impl TerminalToolWindow {
         if pill.size.width <= px(0.0) {
             return None;
         }
-        let theme = cx.theme();
-        let fill = theme.color(UiRole::SurfaceRaised);
-        let border = theme.color(UiRole::PopupBorder);
-        let (pointer_w, pointer_h) = (px(BALLOON_POINTER.0), px(BALLOON_POINTER.1));
         let tip = point(
             pill.center().x,
             pill.top() - px((HEADER_HEIGHT - HEADER_TAB_HEIGHT) / 2.0),
         );
+        let content = if ui::popup_window::enabled() {
+            ui::popup_window::surface(
+                &cx.entity(),
+                0,
+                gpui::size(
+                    px(BALLOON_WIDTH),
+                    px(BALLOON_PADDING * 2.0
+                        + 5.0
+                        + BALLOON_LABEL_LINE
+                        + ui::form::FIELD_HEIGHT
+                        + BALLOON_POINTER.1),
+                ),
+                rename.field.focus_handle(cx),
+                Self::render_native_rename,
+                Self::close_rename,
+                false,
+            )
+        } else {
+            self.rename_body(window, cx)
+        };
+        Some(
+            deferred(
+                anchored()
+                    .position(point(tip.x - px(BALLOON_WIDTH / 2.0), tip.y))
+                    .anchor(Corner::BottomLeft)
+                    .snap_to_window_with_margin(px(4.0))
+                    .child(content),
+            )
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    fn render_native_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.rename_body(window, cx)
+    }
+
+    fn rename_body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(rename) = &self.rename else {
+            return div().into_any_element();
+        };
+        let theme = cx.theme();
+        let fill = theme.color(UiRole::SurfaceRaised);
+        let border = theme.color(UiRole::PopupBorder);
+        let (pointer_w, pointer_h) = (px(BALLOON_POINTER.0), px(BALLOON_POINTER.1));
         let field = editor::field::frame(&rename.field, true, rename.error, window, cx)
             .bg(theme.color(UiRole::Input));
         let content = div()
@@ -1087,17 +1347,15 @@ impl TerminalToolWindow {
         .ml(px(BALLOON_WIDTH / 2.0) - pointer_w / 2.0)
         .w(pointer_w)
         .h(pointer_h);
-        Some(
-            deferred(
-                anchored()
-                    .position(point(tip.x - px(BALLOON_WIDTH / 2.0), tip.y))
-                    .anchor(Corner::BottomLeft)
-                    .snap_to_window_with_margin(px(4.0))
-                    .child(div().flex().flex_col().child(content).child(pointer)),
-            )
-            .with_priority(2)
-            .into_any_element(),
-        )
+        div()
+            .flex()
+            .flex_col()
+            .font_family(theme.ui_family())
+            .text_size(theme.ui_size())
+            .text_color(theme.color(UiRole::Text))
+            .child(content)
+            .child(pointer)
+            .into_any_element()
     }
 }
 
@@ -1118,6 +1376,8 @@ impl Render for TerminalToolWindow {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::new_tab))
             .on_action(cx.listener(Self::close_tab))
+            .on_action(cx.listener(Self::close_others))
+            .on_action(cx.listener(Self::new_session_popup))
             .on_action(cx.listener(Self::close_all_tabs))
             .on_action(cx.listener(Self::rename_tab))
             .on_action(cx.listener(Self::next_tab))
@@ -1139,6 +1399,57 @@ impl Render for TerminalToolWindow {
                     .debug_selector(|| "terminal-session".into())
                     .flex_1()
                     .min_h(px(0.0))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            window.prevent_default();
+                            use crate::commands::{Clear, Copy, Find, Paste, SelectAll};
+                            let has_selection = this
+                                .selected_session()
+                                .is_some_and(|s| s.read(cx).has_selected_text());
+                            this.open_actions(
+                                vec![
+                                    MenuItem::action("Copy", Copy).enabled(has_selection),
+                                    MenuItem::action("Paste", Paste),
+                                    MenuItem::action("Select All", SelectAll),
+                                    MenuItem::separator(),
+                                    MenuItem::action("Clear", Clear),
+                                    MenuItem::action("Find", Find { text: None }),
+                                    MenuItem::separator(),
+                                    MenuItem::action(
+                                        "New Tab",
+                                        NewTab {
+                                            shell: None,
+                                            args: None,
+                                            name: None,
+                                        },
+                                    ),
+                                ],
+                                e.position,
+                                window,
+                                cx,
+                            );
+                            this.context_target = this.selected.map(|i| this.tabs[i].id);
+                        }),
+                    )
+                    .on_drop(cx.listener(|this, dragged: &ui::DraggedFiles, _, cx| {
+                        if let Some(tab) = this.selected.and_then(|i| this.tabs.get(i)) {
+                            cx.stop_propagation();
+                            let text = dragged
+                                .paths
+                                .iter()
+                                .map(|p| {
+                                    terminal::start::path_argument(
+                                        &p.to_string_lossy(),
+                                        tab.shell.kind(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            tab.session.update(cx, |s, cx| s.paste_text(&text, cx));
+                        }
+                    }))
                     .children(body),
             )
             .children(popups)

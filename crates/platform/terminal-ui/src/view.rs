@@ -306,6 +306,7 @@ impl SessionView {
     /// the UI thread).
     pub fn new(options: SessionOptions, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::empty(window, cx);
+        view.working_directory = Some(options.working_directory.clone());
         view.pending = Some(options);
         view
     }
@@ -465,8 +466,10 @@ impl SessionView {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
             }
             SessionEvent::WorkingDirectory(dir) => {
-                self.working_directory = Some(dir.clone());
-                cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
+                if self.working_directory.as_ref() != Some(&dir) {
+                    self.working_directory = Some(dir.clone());
+                    cx.emit(SessionViewEvent::WorkingDirectoryChanged(dir));
+                }
             }
             SessionEvent::Mark(mark) => {
                 // The full-screen programs' screen has no history to follow.
@@ -700,6 +703,12 @@ impl SessionView {
         self.title.as_deref()
     }
 
+    pub fn has_selected_text(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(Session::has_selected_text)
+    }
+
     pub fn working_directory(&self) -> Option<&PathBuf> {
         self.working_directory.as_ref()
     }
@@ -842,7 +851,10 @@ impl SessionView {
         let Some(session) = &self.session else {
             return false;
         };
-        let Some((key, mods)) = keys::session_key(keystroke, self.options.option_as_meta) else {
+        let meta = cx
+            .try_global::<crate::Behavior>()
+            .map_or(self.options.option_as_meta, |s| s.option_as_meta);
+        let Some((key, mods)) = keys::session_key(keystroke, meta) else {
             return false;
         };
         let sent = session.send_key(key, mods);

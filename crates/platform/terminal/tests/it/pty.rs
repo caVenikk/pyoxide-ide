@@ -30,6 +30,7 @@ fn options(args: &[&str], size: TerminalSize) -> SessionOptions {
         working_directory: std::env::temp_dir(),
         env: environment(Os::current(), &[], &[]),
         size,
+        requires_isolated_env: false,
         scrollback_lines: 0,
     }
 }

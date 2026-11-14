@@ -61,6 +61,8 @@ pub trait ShellCustomizer: Send + Sync {
 /// What a new session is asked for.
 #[derive(Clone, Debug)]
 pub struct StartRequest {
+    /// The project forbids inheriting environment variables from the IDE.
+    pub requires_isolated_env: bool,
     /// The "Shell path" setting; empty or `None`: the default shell.
     pub shell_path: Option<String>,
     /// A shell command chosen explicitly (New Predefined Session); wins
@@ -89,6 +91,7 @@ pub struct StartRequest {
 impl Default for StartRequest {
     fn default() -> Self {
         Self {
+            requires_isolated_env: false,
             shell_path: None,
             command: None,
             requested_directory: None,
@@ -107,6 +110,8 @@ impl Default for StartRequest {
 #[derive(Clone, Debug)]
 pub struct StartPlan {
     pub options: SessionOptions,
+    /// Requested shell, before integration injects startup arguments.
+    pub shell: ShellCommand,
     pub kind: ShellKind,
     /// The scripts the customizers asked to source.
     pub sources: Vec<SourceScript>,
@@ -185,6 +190,7 @@ pub fn plan_session(request: &StartRequest, customizers: &[&dyn ShellCustomizer]
         };
         integration::inject(os, dir, &command, &sources, &session_var, home.as_deref())
     });
+    let shell = command.clone();
     let shell_integration = injected.is_some();
     if let Some(injected) = injected {
         command = injected.command;
@@ -194,11 +200,13 @@ pub fn plan_session(request: &StartRequest, customizers: &[&dyn ShellCustomizer]
         }
     }
     StartPlan {
+        shell,
         options: SessionOptions {
             command,
             working_directory: cwd,
             env,
             size: request.size,
+            requires_isolated_env: request.requires_isolated_env,
             scrollback_lines: request.scrollback_lines,
         },
         kind,

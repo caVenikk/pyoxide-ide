@@ -98,6 +98,8 @@ impl Dimensions for TerminalSize {
 /// How to start a session: see [`crate::plan_session`] for the start rules.
 #[derive(Clone, Debug)]
 pub struct SessionOptions {
+    /// An isolated environment is required. Refuse to spawn until the PTY supports it.
+    pub requires_isolated_env: bool,
     pub command: ShellCommand,
     pub working_directory: PathBuf,
     /// Variables set over the inherited environment.
@@ -110,8 +112,11 @@ pub struct SessionOptions {
 /// Why a session did not start.
 #[derive(Debug)]
 pub enum SpawnError {
+    IsolatedEnvironment,
     /// Windows older than 10 1809 (build 17763): no ConPTY.
-    NoPseudoConsole { build: u32 },
+    NoPseudoConsole {
+        build: u32,
+    },
     /// The working directory is not a folder.
     WorkingDirectory(PathBuf),
     /// The pseudo-terminal or the process could not be created.
@@ -124,6 +129,9 @@ impl fmt::Display for SpawnError {
             SpawnError::NoPseudoConsole { build } => write!(
                 f,
                 "The terminal needs Windows 10 version 1809 or later (this is build {build})"
+            ),
+            SpawnError::IsolatedEnvironment => f.write_str(
+                "This project disables parent environment variables. Local terminal sessions currently require them."
             ),
             SpawnError::WorkingDirectory(path) => {
                 write!(f, "The folder {} does not exist", path.display())
@@ -513,6 +521,9 @@ impl Session {
     pub fn spawn(
         options: SessionOptions,
     ) -> Result<(Session, flume::Receiver<SessionEvent>), SpawnError> {
+        if options.requires_isolated_env {
+            return Err(SpawnError::IsolatedEnvironment);
+        }
         if let Some(build) = crate::conpty::unsupported_windows_build() {
             return Err(SpawnError::NoPseudoConsole { build });
         }
@@ -840,6 +851,17 @@ impl Session {
     /// anchor that Shift+click extends.
     pub fn has_selection(&self) -> bool {
         self.shared.state.lock().term.selection.is_some()
+    }
+
+    /// Whether Copy is enabled, without materializing the scrollback.
+    pub fn has_selected_text(&self) -> bool {
+        self.shared
+            .state
+            .lock()
+            .term
+            .selection
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
     }
 
     /// The selected text, if anything is selected.

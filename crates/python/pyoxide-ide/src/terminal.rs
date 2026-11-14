@@ -60,6 +60,19 @@ impl TerminalProvider for Provider {
         vec![Arc::new(VirtualEnvCustomizer { choice })]
     }
 
+    fn project_toggle(&self) -> Option<workbench::terminal::ProjectToggle> {
+        Some(workbench::terminal::ProjectToggle {
+            key: ACTIVATE_KEY,
+            label: "Activate virtualenv",
+            load: activate_virtualenv,
+            save: |root, value| {
+                set_activate_virtualenv(root, value)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            },
+        })
+    }
+
     fn link_filters(&self) -> Option<LinkFilters> {
         Some(Arc::new(|working_dir| {
             vec![Arc::new(py_run::TracebackFilter::new(working_dir)) as Arc<dyn LinkFilter>]
@@ -321,6 +334,16 @@ mod tests {
 
     const CFG: &str = "home = /opt/py/bin\nversion_info = 3.13.1\n";
     const SCRIPTS: [&str; 4] = ["activate", "activate.fish", "activate.ps1", "activate.bat"];
+
+    #[test]
+    fn terminal_page_toggle_uses_the_activation_setting_of_the_customizer() {
+        let dir = tempfile::tempdir().unwrap();
+        let toggle = Provider.project_toggle().unwrap();
+        assert!((toggle.load)(dir.path()));
+        (toggle.save)(dir.path(), false).unwrap();
+        assert!(!activate_virtualenv(dir.path()));
+        assert!(!(toggle.load)(dir.path()));
+    }
 
     #[test]
     fn shells_with_integration_source_the_script() {

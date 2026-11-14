@@ -30,6 +30,7 @@ pub(crate) fn options(program: &str, args: &[&str]) -> SessionOptions {
         working_directory: std::env::temp_dir(),
         env: environment(Os::current(), &[], &[]),
         size: TerminalSize::default(),
+        requires_isolated_env: false,
         scrollback_lines: 0,
     }
 }
