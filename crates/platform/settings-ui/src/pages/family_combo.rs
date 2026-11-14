@@ -68,6 +68,11 @@ struct Families {
 
 impl Global for Families {}
 
+#[cfg(test)]
+struct TestNativeList;
+#[cfg(test)]
+impl Global for TestNativeList {}
+
 /// Lists and probes the families of the text system (blocking: every
 /// family is loaded; run it off the UI thread).
 fn probe_families(ts: &TextSystem) -> Vec<Family> {
@@ -574,7 +579,10 @@ impl FamilyCombo {
 
     fn render_list(&self, list: &OpenList, cx: &mut Context<Self>) -> AnyElement {
         let bounds = self.anchor.get();
-        let popup = if ui::popup_window::enabled() {
+        let native = ui::popup_window::enabled();
+        #[cfg(test)]
+        let native = native || cx.has_global::<TestNativeList>();
+        let popup = if native {
             let height = LIST_ROW * list.rows.len().clamp(1, LIST_ROWS) as f32 + 2.0 * LIST_PAD;
             div()
                 .id("font-list-native-anchor")
@@ -693,6 +701,84 @@ mod tests {
                 !cx.read(|cx| combo.read(cx).is_open()),
                 "{key} key-up must not reopen the list"
             );
+        }
+    }
+
+    #[gpui::test]
+    fn choosing_a_family_in_an_owned_popup_preserves_the_draft(cx: &mut gpui::TestAppContext) {
+        use crate::pages::font::{self, FontPage};
+        use crate::{OpenRequest, PageSpec, SettingsWindow};
+        use settings::EditorFontSettings;
+
+        cx.update(|cx| {
+            ui::init(cx, themes::ThemeKind::Dark);
+            font::init(cx);
+            cx.set_global(TestNativeList);
+            cx.set_global(Families {
+                loaded: true,
+                list: Arc::new(
+                    ["JetBrains Mono", "Menlo"]
+                        .map(|name| Family {
+                            name: name.into(),
+                            monospaced: true,
+                            shows_name: true,
+                        })
+                        .into(),
+                ),
+                task: None,
+            });
+            crate::page::register(
+                cx,
+                [PageSpec {
+                    create: Some(crate::page::create(FontPage::new)),
+                    ..PageSpec::group(font::ID, None, "Font")
+                }],
+            );
+        });
+        let owner =
+            cx.add_window(|window, cx| SettingsWindow::new(OpenRequest::default(), window, cx));
+        let mut settings = gpui::VisualTestContext::from_window(owner.into(), cx);
+        for keyboard in [false, true] {
+            settings.update(|window, _| window.activate_window());
+            cx.run_until_parked();
+            let combo = settings.debug_bounds("font:family").unwrap();
+            settings.simulate_click(combo.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            let handle = cx.update(|cx| ui::popup_window::innermost(owner.into(), cx));
+            assert!(handle != owner.into());
+            let mut popup = gpui::VisualTestContext::from_window(handle, cx);
+            assert!(popup.update(|window, _| window.is_window_active()));
+            assert!(!settings.update(|window, _| window.is_window_active()));
+            if keyboard {
+                popup.simulate_keystrokes("down enter");
+            } else {
+                let row = popup.debug_bounds("font-row:Menlo").unwrap();
+                popup.simulate_click(row.center(), gpui::Modifiers::none());
+            }
+            cx.run_until_parked();
+            settings.update(|window, _| window.activate_window());
+            cx.run_until_parked();
+            owner
+                .update(cx, |view, window, cx| {
+                    let state = view.state(window, cx);
+                    assert_eq!(state["fields"]["family"], "Menlo");
+                    assert_eq!(state["fields"]["preview"]["family"], "Menlo");
+                    assert!(view.any_modified(cx));
+                    assert!(crate::store::get::<EditorFontSettings>(cx).family.is_none());
+                    if keyboard {
+                        assert!(view.apply(window, cx));
+                        assert_eq!(
+                            crate::store::get::<EditorFontSettings>(cx)
+                                .family
+                                .as_deref(),
+                            Some("Menlo")
+                        );
+                    } else {
+                        window.dispatch_action(Box::new(crate::commands::Revert), cx);
+                    }
+                })
+                .unwrap();
+            cx.run_until_parked();
         }
     }
 

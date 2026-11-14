@@ -627,7 +627,7 @@ impl FontPage {
                 editor::field::frame(field, true, error, window, cx)
                     .h(px(ROW))
                     .pl(px(6.0))
-                    .pr(px(4.0)),
+                    .pr(px(1.0)),
             )
             .into_any_element()
     }
@@ -1012,6 +1012,32 @@ mod tests {
         let edit = buffer.replace_untracked(0..0, "Hi ");
         h.edited(&buffer, &[edit]);
         assert_eq!(h.lines[0], [(0..13, false), (13..24, true)]);
+    }
+
+    #[gpui::test]
+    fn applying_a_font_size_keeps_the_whole_value_visible(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| ui::init(cx, themes::ThemeKind::Dark));
+        let (page, cx) =
+            cx.add_window_view(|window, cx| FontPage::new(&PageContext::default(), window, cx));
+        cx.update(|window, cx| {
+            page.update(cx, |page, cx| {
+                page.edit(field::SIZE, &json!("1234567890"), window, cx)
+                    .unwrap();
+            });
+            window.draw(cx).clear();
+            assert!(page.read(cx).size.read(cx).scroll_left() > px(0.0));
+        });
+        for value in ["14.0", "13.5", "40.0"] {
+            cx.update(|window, cx| {
+                page.update(cx, |page, cx| {
+                    page.edit(field::SIZE, &json!(value), window, cx).unwrap();
+                    page.apply(window, cx).unwrap();
+                });
+                window.draw(cx).clear();
+                let size = page.read(cx).size.read(cx);
+                assert_eq!(size.scroll_left(), px(0.0), "{value}");
+            });
+        }
     }
 
     #[test]
