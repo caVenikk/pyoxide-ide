@@ -94,8 +94,7 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
         json!({"expect": "exit"}),
         json!({"exit": 0}),
     ]]);
-    // A rendezvous lets the test observe ready before accepting the callback.
-    let (initialized, callbacks) = flume::bounded(0);
+    let (initialized, callbacks) = flume::unbounded();
     let mut spec = spec("fake", &root, script).with_customizer(Arc::new(Recording(initialized)));
     spec.initialization_options = Some(json!({"settings": {"lineLength": 100}}));
     let timeouts = Timeouts {
@@ -137,10 +136,6 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     let started = Instant::now();
     assert_eq!(block_on(intel.shutdown()), Ok(()));
     events.log("shutdown received");
-    assert!(
-        callbacks.try_recv().is_err(),
-        "unexpected second initialized callback"
-    );
     // It answered and exited: no waiting for the timeouts.
     assert!(started.elapsed() < PATIENT.exit, "{:?}", started.elapsed());
     let stopped = &intel.status()[0];
@@ -150,6 +145,13 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     // After shutdown nothing starts again.
     open(intel.as_ref(), &root);
     assert_eq!(intel.status()[0].state, ServerState::Stopped);
+    drop(intel);
+    // Every owner of the customizer is gone once the channel closes.
+    // A second callback, including one still in flight, would arrive first.
+    assert_eq!(
+        callbacks.recv_timeout(WAIT),
+        Err(flume::RecvTimeoutError::Disconnected)
+    );
 }
 
 #[test]
