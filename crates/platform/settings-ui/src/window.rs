@@ -392,6 +392,12 @@ impl SettingsWindow {
         }
     }
 
+    /// A native popup changed the selected page while this window was inactive.
+    pub(crate) fn popup_edited_draft(&mut self) {
+        let id = self.pages[self.selected].id;
+        self.leave_state.remove(id);
+    }
+
     fn activation_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let i = self.selected;
         if i >= self.pages.len() {
@@ -399,11 +405,10 @@ impl SettingsWindow {
         }
         if window.is_window_active() {
             self.reload_if_changed(i, window, cx);
-        } else if ui::dialog_window::modal_of(window.window_handle(), cx).is_some()
-            || ui::popup_window::innermost(window.window_handle(), cx) != window.window_handle()
-        {
-            // A page-owned dialog or keyboard popup edits the current draft.
-            // Returning to Settings must keep the choice made in that window.
+        } else if ui::dialog_window::modal_of(window.window_handle(), cx).is_some() {
+            // A dialog of the page took the focus (`NonModalWindowWrapper`:
+            // an owned child): what it changes is meant, nothing is reset
+            // when it closes.
         } else if let Some(view) = self.view(i) {
             let modified = view.is_modified(cx);
             self.leave_state.insert(self.pages[i].id, modified);

@@ -357,7 +357,18 @@ impl FamilyCombo {
         else {
             return;
         };
-        self.value = value.map(|v| v.to_string());
+        let value = value.map(|v| v.to_string());
+        if self.value != value
+            && let Some(owner) = ui::popup_window::owner(cx.entity_id(), cx)
+                .and_then(|window| window.downcast::<crate::SettingsWindow>())
+        {
+            // Only a choice edits the draft. Dismissing the list, including
+            // by switching applications, leaves external reloads enabled.
+            cx.defer(move |cx| {
+                let _ = owner.update(cx, |settings, _, _| settings.popup_edited_draft());
+            });
+        }
+        self.value = value;
         self.close(Some(window), cx);
         cx.emit(ComboEvent::Chosen);
     }
@@ -780,6 +791,38 @@ mod tests {
                 .unwrap();
             cx.run_until_parked();
         }
+
+        // Leaving an untouched popup for another window still reloads an
+        // external settings change when the owner becomes active again.
+        let combo = settings.debug_bounds("font:family").unwrap();
+        settings.simulate_click(combo.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        let handle = cx.update(|cx| ui::popup_window::innermost(owner.into(), cx));
+        assert!(handle != owner.into());
+        let external = cx.add_window(|_, _| gpui::Empty);
+        external
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(35));
+        cx.run_until_parked();
+        cx.update(|cx| crate::store::set_key(cx, "editor.font.family", json!("Courier")).unwrap());
+        settings.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        owner
+            .update(cx, |view, window, cx| {
+                assert_eq!(view.state(window, cx)["fields"]["family"], "Courier");
+                assert!(!view.any_modified(cx));
+                assert!(view.apply(window, cx));
+                assert_eq!(
+                    crate::store::get::<EditorFontSettings>(cx)
+                        .family
+                        .as_deref(),
+                    Some("Courier")
+                );
+            })
+            .unwrap();
     }
 
     #[test]
