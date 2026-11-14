@@ -842,7 +842,10 @@ impl SessionView {
         let Some(session) = &self.session else {
             return false;
         };
-        let Some((key, mods)) = keys::session_key(keystroke, self.options.option_as_meta) else {
+        let meta = cx
+            .try_global::<crate::Behavior>()
+            .map_or(self.options.option_as_meta, |s| s.option_as_meta);
+        let Some((key, mods)) = keys::session_key(keystroke, meta) else {
             return false;
         };
         let sent = session.send_key(key, mods);

@@ -126,3 +126,82 @@ fn a_product_without_a_hook_adds_nothing(cx: &mut TestAppContext) {
     let customizers = cx.update(|cx| workbench::terminal::customizers(Some(Path::new("/p")), cx));
     assert!(customizers.is_empty());
 }
+
+#[gpui::test]
+fn imported_project_options_reach_a_real_shell(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join(".idea")).unwrap();
+    std::fs::create_dir(root.join("child")).unwrap();
+    std::fs::write(
+        root.join(".idea/workspace.xml"),
+        r#"<project>
+        <component name="TerminalProjectNonSharedOptionsProvider">
+          <option name="startingDirectory" value="$PROJECT_DIR$/child" />
+          <envs><env key="TERMINAL_PROJECT_VALUE" value="from-project"/></envs>
+        </component>
+    </project>"#,
+    )
+    .unwrap();
+    cx.update(|cx| workbench::init(cx, &Product::default()));
+    let options = |root: &Path, cx: &mut TestAppContext| {
+        let out = Rc::new(RefCell::new(None));
+        cx.update(|cx| {
+            let mut request = workbench::terminal::request(Some(root.to_owned()), cx);
+            request.shell_integration = false;
+            request.command = Some(if cfg!(windows) {
+                terminal::ShellCommand {
+                    program: "cmd.exe".into(),
+                    args: vec![
+                        "/D".into(),
+                        "/C".into(),
+                        "echo".into(),
+                        "%TERMINAL_PROJECT_VALUE%>probe.txt".into(),
+                    ],
+                }
+            } else {
+                terminal::ShellCommand {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        r#"printf %s "$TERMINAL_PROJECT_VALUE" > probe.txt"#.into(),
+                    ],
+                }
+            });
+            let task = workbench::terminal::plan(request, cx);
+            let out = out.clone();
+            cx.spawn(async move |_| *out.borrow_mut() = Some(task.await))
+                .detach();
+        });
+        cx.run_until_parked();
+        out.take().unwrap().options
+    };
+    let (session, events) = terminal::Session::spawn(options(root, cx)).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let event = events.recv_deadline(deadline).expect("shell exits");
+        if matches!(event, terminal::SessionEvent::Exited(_)) {
+            break;
+        }
+    }
+    drop(session);
+    let probe = std::fs::read_to_string(root.join("child/probe.txt")).unwrap();
+    assert_eq!(probe.trim_end(), "from-project");
+
+    // A different project that forbids inheriting the parent environment
+    // never starts the command, including when a tab is restored.
+    let isolated = tempfile::tempdir().unwrap();
+    let root = isolated.path();
+    std::fs::create_dir(root.join(".idea")).unwrap();
+    std::fs::write(
+        root.join(".idea/workspace.xml"),
+        r#"<project><component name="TerminalProjectNonSharedOptionsProvider">
+        <option name="isPassParentEnvs" value="false" /></component></project>"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        terminal::Session::spawn(options(root, cx)),
+        Err(terminal::SpawnError::IsolatedEnvironment)
+    ));
+    assert!(!root.join("probe.txt").exists());
+}

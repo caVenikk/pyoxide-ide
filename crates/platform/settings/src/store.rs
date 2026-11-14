@@ -259,7 +259,7 @@ impl Store {
     }
 
     /// The stored value of a key (or table), without defaults.
-    fn stored(&self, key: &str) -> Option<Json> {
+    pub fn stored(&self, key: &str) -> Option<Json> {
         let mut table: &dyn toml_edit::TableLike = self.doc.as_table();
         let mut parts = key.split('.').peekable();
         while let Some(part) = parts.next() {

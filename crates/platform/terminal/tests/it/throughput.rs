@@ -52,6 +52,7 @@ fn bench_flood_through_the_pty() {
         working_directory: std::env::temp_dir(),
         env: environment(Os::current(), &[], &[]),
         size: TerminalSize::new(120, 40),
+        requires_isolated_env: false,
         scrollback_lines: 0,
     };
     let start = Instant::now();

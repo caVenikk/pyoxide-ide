@@ -85,6 +85,12 @@ pub fn get_key(cx: &App, key: &str) -> Option<Json> {
     cx.try_global::<AppSettings>()?.store.get(key)
 }
 
+/// Does the file contain this key, including an explicitly stored default?
+pub fn contains_key(cx: &App, key: &str) -> bool {
+    cx.try_global::<AppSettings>()
+        .is_some_and(|g| g.store.stored(key).is_some())
+}
+
 /// Changes one setting by dotted key (`settings.set`).
 pub fn set_key(cx: &mut App, key: &str, value: Json) -> Result<(), SettingsError> {
     let changed = cx.default_global::<AppSettings>().store.set(key, value)?;

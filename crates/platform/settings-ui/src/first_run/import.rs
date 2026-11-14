@@ -39,6 +39,8 @@ pub struct Source {
     /// importer that honours this sets only what the settings do not hold
     /// yet.
     pub fill_only: bool,
+    /// A newly introduced importer replaying an existing snapshot.
+    pub(crate) replay: bool,
 }
 
 /// What an import brings, said in the balloon: parts of a sentence ("the
@@ -101,6 +103,10 @@ pub(super) fn platform_importers() -> Vec<Importer> {
         Importer {
             id: "terminal-font",
             work: terminal_font,
+        },
+        Importer {
+            id: "terminal-options",
+            work: terminal_options,
         },
         Importer {
             id: "soft-wraps",
@@ -404,6 +410,51 @@ fn terminal_font(source: &Source) -> Applied {
     })
 }
 
+fn terminal_options(source: &Source) -> Applied {
+    let options = source.options.terminal.clone();
+    let fill = source.fill_only || source.replay;
+    if options == options::TerminalOptions::default() {
+        return nothing();
+    }
+    Box::new(move |cx| {
+        use serde_json::Value;
+        let fields = [
+            ("terminal.shell-path", options.shell_path.map(Value::from)),
+            (
+                "terminal.shell-integration",
+                options.shell_integration.map(Value::from),
+            ),
+            (
+                "terminal.close-session-on-exit",
+                options.close_session_on_exit.map(Value::from),
+            ),
+            (
+                "terminal.override-ide-shortcuts",
+                options.override_ide_shortcuts.map(Value::from),
+            ),
+            (
+                "terminal.option-as-meta",
+                options.option_as_meta.map(Value::from),
+            ),
+        ];
+        let mut imported = false;
+        for (key, value) in fields {
+            if let Some(value) = value
+                && (!fill || !store::contains_key(cx, key))
+            {
+                if let Err(error) = store::set_key(cx, key, value) {
+                    return Outcome::problem(error.to_string());
+                }
+                imported = true;
+            }
+        }
+        if !imported {
+            return Outcome::default();
+        }
+        Outcome::imported("terminal options")
+    })
+}
+
 /// `14`, `14.5`.
 fn format_number(n: f32) -> String {
     if n.fract() == 0.0 {
@@ -579,6 +630,7 @@ pub(super) fn prepare(folder: ConfigFolder, config_dir: Option<PathBuf>) -> Prep
             options,
             config_dir,
             fill_only: false,
+            replay: false,
         },
         snapshot: kept,
         problem,
@@ -638,6 +690,7 @@ pub(super) fn recorded_source(
         options,
         config_dir: Some(config_dir),
         fill_only: false,
+        replay: true,
     }
 }
 

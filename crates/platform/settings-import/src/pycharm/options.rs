@@ -338,6 +338,46 @@ pub struct FileTypeMapping {
     pub file_type: String,
 }
 
+/// Application options supported by the local terminal. Missing keys are left alone.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TerminalOptions {
+    pub shell_path: Option<String>,
+    pub shell_integration: Option<bool>,
+    pub close_session_on_exit: Option<bool>,
+    pub override_ide_shortcuts: Option<bool>,
+    pub option_as_meta: Option<bool>,
+}
+
+/// Local project options from workspace.xml. Shell paths for remote
+/// environments belong to a different execution context.
+pub struct ProjectTerminalOptions {
+    pub requires_isolated_env: bool,
+    pub directory: String,
+    pub env: Vec<(String, String)>,
+}
+
+pub fn project_terminal(text: &str) -> Result<Option<ProjectTerminalOptions>, String> {
+    let root = xml::parse(text)?;
+    let Some(c) = component(&root, "TerminalProjectNonSharedOptionsProvider") else {
+        return Ok(None);
+    };
+    let requires_isolated_env = option(c, "isPassParentEnvs") == Some("false");
+    let directory = option(c, "startingDirectory")
+        .unwrap_or_default()
+        .to_owned();
+    let env = c
+        .child("envs")
+        .into_iter()
+        .flat_map(|e| e.children_named("env"))
+        .filter_map(|e| Some((e.attr("key")?.to_owned(), e.attr("value")?.to_owned())))
+        .collect();
+    Ok(Some(ProjectTerminalOptions {
+        directory,
+        env,
+        requires_isolated_env,
+    }))
+}
+
 /// What the reference's option files say, for the parts Pyoxide imports.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReferenceOptions {
@@ -351,6 +391,7 @@ pub struct ReferenceOptions {
     pub font: FontOptions,
     /// `terminal-font.xml`; empty without the file.
     pub terminal_font: TerminalFontOptions,
+    pub terminal: TerminalOptions,
     /// `None` when `editor.xml` has no soft-wrap options.
     pub soft_wraps: Option<SoftWrapOptions>,
     pub general: GeneralOptions,
@@ -400,6 +441,8 @@ pub fn read_options(dir: &Path) -> ReferenceOptions {
     let scheme = read("colors.scheme.xml");
     let keymap = read(&format!("{}/keymap.xml", os_folder())).or_else(|| read("keymap.xml"));
     let font = read("editor-font.xml");
+    let terminal = read("terminal.xml");
+    let terminal_local = read("terminal-local.xml");
     let terminal_font = read("terminal-font.xml");
     let editor = read("editor.xml");
     let ui = read("ui.lnf.xml");
@@ -426,6 +469,25 @@ pub fn read_options(dir: &Path) -> ReferenceOptions {
         && let Some(c) = component(&root, "DefaultFont")
     {
         out.font = font_options(c);
+    }
+    if let Some(c) = terminal
+        .as_ref()
+        .and_then(|r| component(r, "TerminalOptionsProvider"))
+    {
+        out.terminal = TerminalOptions {
+            shell_path: option(c, "myShellPath").map(str::to_owned),
+            shell_integration: option(c, "myShellIntegration").and_then(boolean),
+            close_session_on_exit: option(c, "myCloseSessionOnLogout").and_then(boolean),
+            override_ide_shortcuts: option(c, "myOverrideIdeShortcuts").and_then(boolean),
+            option_as_meta: option(c, "useOptionAsMetaKey").and_then(boolean),
+        };
+    }
+    if let Some(c) = terminal_local
+        .as_ref()
+        .and_then(|r| component(r, "TerminalLocalOptions"))
+        && let Some(shell) = raw_option(c, "shellPath")
+    {
+        out.terminal.shell_path = Some(shell.to_owned());
     }
     if let Some(root) = terminal_font
         && let Some(c) = component(&root, "TerminalFontOptions")
@@ -737,6 +799,20 @@ mod tests {
         assert_eq!(found.main[0].label(), "Reference IDE 2026.2");
         assert_eq!(found.other[2].product, "PyCharmCE");
         assert_eq!(found.other[2].label(), "Reference IDE 2025.1 Community");
+    }
+
+    #[test]
+    fn project_terminal_options_requiring_an_isolated_environment_are_reported() {
+        let xml = r#"<project><component name="TerminalProjectNonSharedOptionsProvider">
+            <option name="isPassParentEnvs" value="false" />
+            <envs><env key="TOKEN" value="private"/></envs>
+        </component></project>"#;
+        assert!(
+            project_terminal(xml)
+                .unwrap()
+                .unwrap()
+                .requires_isolated_env
+        );
     }
 
     #[test]

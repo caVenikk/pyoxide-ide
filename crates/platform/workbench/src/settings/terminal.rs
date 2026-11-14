@@ -1,14 +1,7 @@
-//! Tools > Terminal > Font Settings (`TerminalOptionsConfigurable`, the
-//! group `settings.terminal.font.settings`): the terminal's font
-//! (`[terminal.font]`, the reference's `terminal-font.xml`): the font and
-//! its fallback, Size, Line height and Column width. Like the reference's
-//! panel the page opens with the font the terminal has now: until a font is
-//! chosen that is the editor font, and a field the person leaves alone stays
-//! inherited when the page is applied; the terminals follow Apply at once.
-//!
-//! The panel's other groups (Project Settings, Application Settings) and
-//! the Configure colors link are not drawn: the options of the first have
-//! no page yet and there is no Console Colors page to open.
+//! Tools > Terminal. Project options and the application shell preferences
+//! are applied with the font draft. Unchanged font fields stay inherited.
+
+use std::path::PathBuf;
 
 use editor::{Editor, EditorEvent};
 use gpui::{
@@ -16,13 +9,25 @@ use gpui::{
     Subscription, Window, div, prelude::*, px,
 };
 use serde_json::{Value as Json, json};
-use settings::TerminalFontSettings;
+use settings::{TerminalFontSettings, TerminalSettings};
 use settings_ui::pages::family_combo::{ComboEvent, ComboSpec, FamilyCombo};
 use settings_ui::{PageContext, SettingsPage};
+
+use crate::terminal::project_options::{self, Options as ProjectOptions};
 
 pub const ID: &str = "terminal";
 pub const TITLE: &str = "Terminal";
 pub const SEARCH_TERMS: &[&str] = &[
+    PROJECT_SETTINGS,
+    START_DIRECTORY,
+    ENVIRONMENT,
+    APPLICATION_SETTINGS,
+    SHELL_PATH,
+    CLOSE,
+    OVERRIDE,
+    INTEGRATION,
+    META,
+    COLORS,
     FONT_SETTINGS,
     FONT,
     FALLBACK,
@@ -32,6 +37,16 @@ pub const SEARCH_TERMS: &[&str] = &[
 ];
 
 /// The reference's labels (`TerminalBundle`).
+const PROJECT_SETTINGS: &str = "Project Settings";
+const APPLICATION_SETTINGS: &str = "Application Settings";
+const START_DIRECTORY: &str = "Start directory:";
+const ENVIRONMENT: &str = "Environment variables:";
+const SHELL_PATH: &str = "Shell path:";
+const CLOSE: &str = "Close session when it ends";
+const OVERRIDE: &str = "Override IDE shortcuts";
+const INTEGRATION: &str = "Shell integration";
+const META: &str = "Use Option as Meta key";
+const COLORS: &str = "Configure colors…";
 const FONT_SETTINGS: &str = "Font Settings";
 const FONT: &str = "Font:";
 const FALLBACK: &str = "Fallback:";
@@ -170,6 +185,16 @@ impl Shown {
 /// The page: the combo boxes and the number fields as typed.
 pub struct TerminalPage {
     inherited: Inherited,
+    root: Option<PathBuf>,
+    project: Option<ProjectOptions>,
+    toggle: Option<bool>,
+    product_toggle: Option<crate::terminal::ProjectToggle>,
+    error: Option<String>,
+    revision: u64,
+    app: TerminalSettings,
+    shell: Entity<Editor>,
+    directory: Entity<Editor>,
+    environment: Entity<Editor>,
     family: Entity<FamilyCombo>,
     fallback: Entity<FamilyCombo>,
     size: Entity<Editor>,
@@ -180,7 +205,7 @@ pub struct TerminalPage {
 }
 
 impl TerminalPage {
-    pub fn new(_: &PageContext, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(context: &PageContext, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let inherited = Inherited::of(window, cx);
         let shown = Shown::of(&settings_ui::store::get(cx), &inherited);
         let focus = cx.focus_handle();
@@ -213,7 +238,47 @@ impl TerminalPage {
                       _: Entity<FamilyCombo>,
                       _: &ComboEvent,
                       cx: &mut Context<Self>| { cx.notify() };
+        let app: TerminalSettings = settings_ui::store::get(cx);
+        let shell = editor::field::new(
+            &app.shell_path,
+            Some("System default shell".into()),
+            true,
+            window,
+            cx,
+        );
+        let directory = editor::field::new(
+            "",
+            context
+                .project
+                .as_ref()
+                .map(|root| root.display().to_string().into()),
+            true,
+            window,
+            cx,
+        );
+        let environment =
+            editor::field::new("", Some("NAME=value;NAME2=value".into()), true, window, cx);
+        if let Some(root) = &context.project {
+            let task = project_options::read(root, cx);
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    match result {
+                        Ok(options) if options.requires_isolated_env => {
+                            this.error = Some(terminal::SpawnError::IsolatedEnvironment.to_string())
+                        }
+                        Ok(options) => this.show_project(options, cx),
+                        Err(e) => this.error = Some(e),
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         let subscriptions = vec![
+            cx.subscribe(&shell, edited),
+            cx.subscribe(&directory, edited),
+            cx.subscribe(&environment, edited),
             cx.subscribe(&size, edited),
             cx.subscribe(&line_spacing, edited),
             cx.subscribe(&column_spacing, edited),
@@ -221,6 +286,16 @@ impl TerminalPage {
             cx.subscribe(&fallback, chosen),
         ];
         Self {
+            root: context.project.clone(),
+            project: None,
+            toggle: None,
+            product_toggle: crate::terminal::project_toggle(cx),
+            error: None,
+            revision: 0,
+            shell,
+            directory,
+            environment,
+            app,
             inherited,
             family,
             fallback,
@@ -281,6 +356,89 @@ impl TerminalPage {
         cx.notify();
     }
 
+    fn show_project(&mut self, options: ProjectOptions, cx: &mut Context<Self>) {
+        self.directory
+            .update(cx, |e, cx| e.set_text_selected(&options.directory, cx));
+        self.environment.update(cx, |e, cx| {
+            e.set_text_selected(&run_config::form::env_text(&options.env), cx)
+        });
+        self.toggle = options.toggle;
+        self.project = Some(options);
+    }
+
+    fn project_draft(&self, cx: &App) -> Option<ProjectOptions> {
+        let stored = self.project.as_ref()?;
+        let text = self.environment.read(cx).text();
+        let env = if text == run_config::form::env_text(&stored.env) {
+            stored.env.clone()
+        } else {
+            run_config::form::parse_env(&text, &[])
+        };
+        Some(ProjectOptions {
+            requires_isolated_env: false,
+            toggle: self.toggle,
+            directory: Self::text(&self.directory, cx),
+            env,
+        })
+    }
+
+    fn app_draft(&self, cx: &App) -> TerminalSettings {
+        TerminalSettings {
+            shell_path: self.shell.read(cx).text(),
+            ..self.app.clone()
+        }
+    }
+
+    fn option(&mut self, key: &str) -> Option<&mut bool> {
+        match key {
+            "shell-integration" => Some(&mut self.app.shell_integration),
+            "close-session-on-exit" => Some(&mut self.app.close_session_on_exit),
+            "override-ide-shortcuts" => Some(&mut self.app.override_ide_shortcuts),
+            "option-as-meta" if cfg!(target_os = "macos") => Some(&mut self.app.option_as_meta),
+            _ if self.product_toggle.is_some_and(|t| t.key == key) => self.toggle.as_mut(),
+            _ => None,
+        }
+    }
+
+    fn check(
+        &self,
+        key: &'static str,
+        label: &'static str,
+        checked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        ui::form::check_row(
+            gpui::ElementId::Name(format!("terminal-row:{key}").into()),
+            gpui::ElementId::Name(format!("terminal-checkbox:{key}").into()),
+            checked,
+            settings_ui::search::label(label, cx),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if let Some(value) = this.option(key) {
+                *value = !*value;
+                cx.notify();
+            }
+        }))
+        .into_any_element()
+    }
+
+    fn input(label: &'static str, field: &Entity<Editor>, window: &Window, cx: &App) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(LABEL_GAP))
+            .child(settings_ui::search::label(label, cx))
+            .child(
+                div().w(px(320.)).child(
+                    editor::field::frame(field, true, false, window, cx)
+                        .h(px(ROW_HEIGHT))
+                        .px(px(6.)),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn number_field(&self, name: &'static str, window: &Window, cx: &App) -> AnyElement {
         let field = match name {
             field::SIZE => &self.size,
@@ -305,11 +463,54 @@ impl TerminalPage {
 impl SettingsPage for TerminalPage {
     fn is_modified(&self, cx: &App) -> bool {
         let stored = self.stored(cx);
-        self.draft(cx).settings(&stored, &self.inherited) != stored
+        self.app_draft(cx) != settings_ui::store::get::<TerminalSettings>(cx)
+            || self.project_draft(cx) != self.project
+            || self.draft(cx).settings(&stored, &self.inherited) != stored
     }
 
     fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let stored = self.stored(cx);
+        if let (Some(root), Some(stored), Some(options)) = (
+            self.root.clone(),
+            self.project.clone(),
+            self.project_draft(cx),
+        ) && stored != options
+        {
+            if options.env.iter().any(|v| v.value.is_none()) {
+                return Err(
+                    "Enter environment variables as NAME=value separated by semicolons.".to_owned(),
+                );
+            }
+            let before = self.project.replace(options.clone());
+            let write = project_options::save(root, stored, options, cx);
+            self.revision += 1;
+            let revision = self.revision;
+            cx.spawn(async move |this, cx| {
+                if let Err(error) = write.await {
+                    let _ = cx.update(|cx| {
+                        super::notify_main_window(
+                            ui::notification::Notification::new(
+                                ui::notification::NotificationKind::Error,
+                                "Could not save terminal settings",
+                                error.clone(),
+                            ),
+                            cx,
+                        )
+                    });
+                    let _ = this.update(cx, |this, cx| {
+                        if this.revision == revision {
+                            this.project = before;
+                            this.error = Some(error);
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+            self.error = None;
+        }
+        let app = self.app_draft(cx);
+        settings_ui::store::set(cx, &app);
         let settings = self.draft(cx).settings(&stored, &self.inherited);
         settings_ui::store::set(cx, &settings);
         // The fields show the numbers kept in range.
@@ -319,6 +520,12 @@ impl SettingsPage for TerminalPage {
     }
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.app = settings_ui::store::get(cx);
+        self.shell
+            .update(cx, |e, cx| e.set_text_selected(&self.app.shell_path, cx));
+        if let Some(project) = self.project.clone() {
+            self.show_project(project, cx);
+        }
         self.inherited = Inherited::of(window, cx);
         let shown = Shown::of(&self.stored(cx), &self.inherited);
         self.show(&shown, Some(window), cx);
@@ -337,7 +544,15 @@ impl SettingsPage for TerminalPage {
         .into_iter()
         .find(|(_, c)| c.read(cx).is_open())
         .map(|(name, c)| (name, c.read(cx).state()));
-        json!({
+        let mut state = json!({
+            "shell-path": self.shell.read(cx).text(),
+            "shell-integration": self.app.shell_integration,
+            "close-session-on-exit": self.app.close_session_on_exit,
+            "override-ide-shortcuts": self.app.override_ide_shortcuts,
+            "option-as-meta": self.app.option_as_meta,
+            "start-directory": self.project.as_ref().map(|_| Self::text(&self.directory,cx)),
+            "environment": self.project.as_ref().map(|_| Self::text(&self.environment,cx)),
+            "error": self.error,
             "family": shown.family,
             "fallback": shown.fallback.clone().unwrap_or_else(|| MONOSPACED.to_owned()),
             "size": Self::text(&self.size, cx),
@@ -347,7 +562,11 @@ impl SettingsPage for TerminalPage {
             "list": open.as_ref().map(|(name, _)| name),
             "rows": open.as_ref().map(|(_, state)| state["rows"].clone()),
             "highlighted": open.as_ref().map(|(_, state)| state["highlighted"].clone()),
-        })
+        });
+        if let Some(t) = self.product_toggle {
+            state[t.key] = json!(self.toggle);
+        }
+        state
     }
 
     fn edit(
@@ -362,7 +581,22 @@ impl SettingsPage for TerminalPage {
             Json::Number(n) => Ok(n.to_string()),
             _ => Err(format!("`{name}` takes a string or a number")),
         };
+        if let Some(option) = self.option(name) {
+            *option = value.as_bool().ok_or("Expected a boolean")?;
+            cx.notify();
+            return Ok(());
+        }
         match name {
+            "shell-path" | "start-directory" | "environment" => {
+                let field = match name {
+                    "shell-path" => &self.shell,
+                    _ if self.project.is_none() => return Err("No project settings loaded".into()),
+                    "start-directory" => &self.directory,
+                    _ => &self.environment,
+                };
+                let value = value.as_str().ok_or("Expected text")?;
+                field.update(cx, |e, cx| e.set_text_selected(value, cx));
+            }
             field::FAMILY => {
                 let family = value
                     .as_str()
@@ -455,6 +689,26 @@ impl Render for TerminalPage {
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))
+            .child(ui::form::group_header(PROJECT_SETTINGS, cx))
+            .child(
+                div()
+                    .pl(px(GROUP_INDENT))
+                    .flex()
+                    .flex_col()
+                    .gap(px(ROW_GAP))
+                    .when(self.project.is_some(), |group| {
+                        group
+                            .child(Self::input(START_DIRECTORY, &self.directory, window, cx))
+                            .child(Self::input(ENVIRONMENT, &self.environment, window, cx))
+                    })
+                    .when_some(self.product_toggle.zip(self.toggle), |group, (t, value)| {
+                        group.child(self.check(t.key, t.label, value, cx))
+                    })
+                    .when(self.root.is_none(), |group| {
+                        group.child("Open a project to configure its terminal.")
+                    })
+                    .when_some(self.error.clone(), |group, error| group.child(error)),
+            )
             .child(ui::form::group_header(FONT_SETTINGS, cx))
             .child(
                 div()
@@ -463,7 +717,49 @@ impl Render for TerminalPage {
                     .flex_col()
                     .gap(px(ROW_GAP))
                     .child(font_row)
-                    .child(numbers_row),
+                    .child(numbers_row)
+                    .child(
+                        ui::link::link("terminal-configure-colors", COLORS, cx).on_click(
+                            |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(settings_ui::commands::SelectPage {
+                                        page: settings_ui::pages::appearance::ID.into(),
+                                    }),
+                                    cx,
+                                )
+                            },
+                        ),
+                    ),
+            )
+            .child(ui::form::group_header(APPLICATION_SETTINGS, cx))
+            .child(
+                div()
+                    .pl(px(GROUP_INDENT))
+                    .flex()
+                    .flex_col()
+                    .gap(px(ROW_GAP))
+                    .child(Self::input(SHELL_PATH, &self.shell, window, cx))
+                    .child(self.check(
+                        "close-session-on-exit",
+                        CLOSE,
+                        self.app.close_session_on_exit,
+                        cx,
+                    ))
+                    .child(self.check(
+                        "override-ide-shortcuts",
+                        OVERRIDE,
+                        self.app.override_ide_shortcuts,
+                        cx,
+                    ))
+                    .child(self.check(
+                        "shell-integration",
+                        INTEGRATION,
+                        self.app.shell_integration,
+                        cx,
+                    ))
+                    .when(cfg!(target_os = "macos"), |group| {
+                        group.child(self.check("option-as-meta", META, self.app.option_as_meta, cx))
+                    }),
             )
     }
 }

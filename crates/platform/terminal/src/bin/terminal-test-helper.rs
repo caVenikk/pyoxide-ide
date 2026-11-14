@@ -206,6 +206,7 @@ fn quit_host(mode: &str) {
         working_directory: std::env::temp_dir(),
         env: environment(Os::current(), &[], &[]),
         size: TerminalSize::new(120, 24),
+        requires_isolated_env: false,
         scrollback_lines: 0,
     };
     let (session, _events) = Session::spawn(options).expect("start the session");

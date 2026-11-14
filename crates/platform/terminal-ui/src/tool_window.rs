@@ -334,7 +334,11 @@ impl TerminalToolWindow {
                     }
                     SessionViewEvent::TitleChanged(_)
                     | SessionViewEvent::CommandRunningChanged(_) => cx.notify(),
-                    SessionViewEvent::Exited(_) if this.close_on_exit => {
+                    SessionViewEvent::Exited(_)
+                        if cx
+                            .try_global::<crate::Behavior>()
+                            .map_or(this.close_on_exit, |s| s.close_on_exit) =>
+                    {
                         if let Some(index) = this.tabs.iter().position(|t| t.id == id) {
                             this.close(index, window, cx);
                         }
