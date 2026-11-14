@@ -3,7 +3,7 @@
 //! through the public API.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use code_intel::{
@@ -22,12 +22,9 @@ fn open(intel: &dyn CodeIntel, root: &Path) {
     intel.did_open(&doc, "python", 1, &Rope::from_str("import os\n"));
 }
 
-#[derive(Default)]
-struct Recording {
-    initialized: Mutex<Vec<ServerStatus>>,
-}
+struct Configuration;
 
-impl ServerCustomizer for Recording {
+impl ServerCustomizer for Configuration {
     fn configuration(
         &self,
         section: Option<&str>,
@@ -41,9 +38,13 @@ impl ServerCustomizer for Recording {
             _ => lsp_client::lookup_section(settings, section),
         }
     }
+}
 
+struct Recording(flume::Sender<ServerStatus>);
+
+impl ServerCustomizer for Recording {
     fn initialized(&self, status: &ServerStatus) {
-        self.initialized.lock().unwrap().push(status.clone());
+        let _ = self.0.send(status.clone());
     }
 }
 
@@ -93,8 +94,9 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
         json!({"expect": "exit"}),
         json!({"exit": 0}),
     ]]);
-    let recording = Arc::new(Recording::default());
-    let mut spec = spec("fake", &root, script).with_customizer(recording.clone());
+    // A rendezvous lets the test observe ready before accepting the callback.
+    let (initialized, callbacks) = flume::bounded(0);
+    let mut spec = spec("fake", &root, script).with_customizer(Arc::new(Recording(initialized)));
     spec.initialization_options = Some(json!({"settings": {"lineLength": 100}}));
     let timeouts = Timeouts {
         shutdown: Duration::from_secs(10),
@@ -122,10 +124,11 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     assert_eq!(running.label(), "fake 1.2.3");
     assert_eq!(running.roots, [root.to_path_buf()]);
     events.log("ready");
-    assert_eq!(recording.initialized.lock().unwrap().len(), 1);
+    // The server can log from its reader thread before the startup thread
+    // calls the customizer. Wait for the callback itself.
     assert_eq!(
-        recording.initialized.lock().unwrap()[0].version.as_deref(),
-        Some("1.2.3")
+        callbacks.recv_timeout(WAIT).expect("initialized callback"),
+        running
     );
     assert_eq!(intel.status()[0].state, ServerState::Running);
 
@@ -134,6 +137,10 @@ fn a_server_starts_with_the_first_document_and_shuts_down() {
     let started = Instant::now();
     assert_eq!(block_on(intel.shutdown()), Ok(()));
     events.log("shutdown received");
+    assert!(
+        callbacks.try_recv().is_err(),
+        "unexpected second initialized callback"
+    );
     // It answered and exited: no waiting for the timeouts.
     assert!(started.elapsed() < PATIENT.exit, "{:?}", started.elapsed());
     let stopped = &intel.status()[0];
@@ -194,7 +201,7 @@ fn the_server_asks_and_the_client_answers() {
     ]);
     let spec = spec("fake", &root, script)
         .with_settings(json!({"fake": {"analysis": {"mode": "strict"}}}))
-        .with_customizer(Arc::new(Recording::default()));
+        .with_customizer(Arc::new(Configuration));
     let intel = LspCodeIntel::with_timeouts(vec![spec], PATIENT);
     let events = Events::of(intel.as_ref());
     open(intel.as_ref(), &root);
@@ -495,14 +502,40 @@ fn malformed_output_of_a_real_process_is_survived() {
     );
 }
 
+/// A separate subscription retains events already consumed by successful waits.
+/// Each child also records the script step it reached independently of the LSP reader.
+struct ReplacementTrace<'a> {
+    root: &'a Path,
+    events: flume::Receiver<IntelEvent>,
+}
+
+impl Drop for ReplacementTrace<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            for event in self.events.try_iter() {
+                eprintln!("replacement event: {event:?}");
+            }
+            for id in ["a", "b"] {
+                match std::fs::read_to_string(self.root.join(id)) {
+                    Ok(trace) => eprintln!("{id} process trace:\n{trace}"),
+                    Err(error) => eprintln!("{id} process trace unavailable: {error}"),
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn specs_are_replaced_while_documents_are_open() {
     let root = root("set-specs");
-    let script = || {
-        steps([
+    let server = |id: &str| {
+        let script = steps([
             handshake(json!({"capabilities": {}})),
             vec![json!({"log": "up"})],
-        ])
+        ]);
+        let mut server = spec(id, &root, script);
+        server.command = server.command.with_env("LSP_FAKE_TRACE", root.join(id));
+        server
     };
     let intel = LspCodeIntel::with_timeouts(Vec::new(), PATIENT);
     let events = Events::of(intel.as_ref());
@@ -512,13 +545,13 @@ fn specs_are_replaced_while_documents_are_open() {
     open(intel.as_ref(), &root);
 
     // The product found its servers: they start for the open document.
-    intel.set_specs(vec![spec("a", &root, script())]);
+    intel.set_specs(vec![server("a")]);
     events.status("a", |s| *s == ServerState::Initializing);
     events.running("a");
     events.log("up");
 
     // Only the name and the features changed: it keeps running.
-    let mut renamed = spec("a", &root, script()).with_features(Features::NONE);
+    let mut renamed = server("a").with_features(Features::NONE);
     renamed.name = "renamed".into();
     intel.set_specs(vec![renamed]);
     let status = events.status_where("a", |s| s.name == "renamed");
@@ -527,23 +560,27 @@ fn specs_are_replaced_while_documents_are_open() {
     assert_eq!(intel.specs()[0].name, "renamed");
 
     // New settings restart it; a new server starts next to it.
-    let resettled = spec("a", &root, script()).with_settings(json!({"x": 1}));
-    intel.set_specs(vec![resettled, spec("b", &root, script())]);
+    let resettled = server("a").with_settings(json!({"x": 1}));
+    let trace = ReplacementTrace {
+        root: &root,
+        events: intel.events(),
+    };
+    intel.set_specs(vec![resettled, server("b")]);
     events.status("a", |s| *s == ServerState::Stopped);
-    // The two start on threads of their own: either may run first.
     events.running_all(&["a", "b"]);
+    drop(trace);
     let ids: Vec<String> = intel.status().iter().map(|s| s.id.to_string()).collect();
     assert_eq!(ids, ["a", "b"]);
 
     // Gone from the specs: stopped and no longer listed.
-    intel.set_specs(vec![spec("b", &root, script())]);
+    intel.set_specs(vec![server("b")]);
     events.status("a", |s| *s == ServerState::Stopped);
     assert_eq!(intel.status().len(), 1);
     assert_eq!(intel.status()[0].state, ServerState::Running);
 
     // With the document closed a new server does not start.
     intel.did_close(&DocumentId::new(root.join("main.py")));
-    intel.set_specs(vec![spec("c", &root, script())]);
+    intel.set_specs(vec![server("c")]);
     events.status("b", |s| *s == ServerState::Stopped);
     assert_eq!(intel.status()[0].id, ServerId::new("c"));
     assert_eq!(intel.status()[0].state, ServerState::Stopped);
