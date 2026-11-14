@@ -135,7 +135,7 @@ struct IoLoop {
 impl IoLoop {
     fn run(&mut self) {
         let mut buf = vec![0u8; READ_BUFFER_SIZE];
-        let mut interest = PollEvent::readable(0);
+        let interest = PollEvent::readable(0);
         let mode = PollMode::Level;
         // SAFETY: the PTY outlives its registration: it is deregistered
         // below before it is dropped with `self`.
@@ -143,8 +143,29 @@ impl IoLoop {
             self.finish(None);
             return;
         }
+        let status = self.wait_for_exit(&mut buf, interest, mode);
+        if status.is_some() {
+            // Output written just before the exit.
+            while matches!(self.read(&mut buf), Ok(false)) {}
+        }
+        let _ = self.pty.deregister(&self.poller);
+        self.finish(status.and_then(|ChildEvent::Exited(code)| code));
+    }
+
+    fn wait_for_exit(
+        &mut self,
+        buf: &mut [u8],
+        mut interest: PollEvent,
+        mode: PollMode,
+    ) -> Option<ChildEvent> {
+        // On Windows the watcher queues an exit even before registration,
+        // but only posts a poller event if it already has a poller.
+        #[cfg(windows)]
+        if let Some(exit) = self.pty.next_child_event() {
+            return Some(exit);
+        }
         let mut events = Events::with_capacity(NonZeroUsize::new(64).unwrap_or(NonZeroUsize::MIN));
-        let status = 'run: loop {
+        'run: loop {
             let sync = self.parser.sync_timeout().sync_timeout();
             let timeout = if self.read_again {
                 Some(Duration::ZERO)
@@ -195,10 +216,8 @@ impl IoLoop {
             let mut read_due = std::mem::take(&mut self.read_again);
             for event in events.iter() {
                 if event.key == CHILD_EVENT_KEY {
-                    if let Some(ChildEvent::Exited(status)) = self.pty.next_child_event() {
-                        // Output written just before the exit.
-                        while matches!(self.read(&mut buf), Ok(false)) {}
-                        break 'run Some(status);
+                    if let Some(exit) = self.pty.next_child_event() {
+                        break 'run Some(exit);
                     }
                     continue;
                 }
@@ -208,7 +227,7 @@ impl IoLoop {
                 }
             }
             if read_due {
-                match self.read(&mut buf) {
+                match self.read(buf) {
                     Ok(drained) => self.read_again = !drained,
                     // Linux reports EIO once the shell's side is closed;
                     // the exit event follows.
@@ -224,9 +243,7 @@ impl IoLoop {
                     break 'run None;
                 }
             }
-        };
-        let _ = self.pty.deregister(&self.poller);
-        self.finish(status.flatten());
+        }
     }
 
     /// Reports the exit (`None`: the status is unknown).
